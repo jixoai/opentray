@@ -4,10 +4,19 @@
   "type": "module",
   "packageManager": "pnpm@10.22.0",
   "scripts": {
+    "changeset": "changeset",
     "openspec:vision": "bun run scripts/openspec/vision-driven.ts",
     "test:openspec:vision": "bun test scripts/openspec/vision-driven.test.ts",
     "packages:list": "pnpm -r list --depth -1",
-    "verify": "bun test scripts/openspec/vision-driven.test.ts && openspec schema validate vision-driven && pnpm -r list --depth -1"
+    "release": "changeset publish",
+    "trusted-publish:check": "bun run scripts/npm/configure-trusted-publish.ts --check",
+    "trusted-publish:configure": "bun run scripts/npm/configure-trusted-publish.ts",
+    "trusted-publish:dry-run": "bun run scripts/npm/configure-trusted-publish.ts --dry-run",
+    "verify": "bun test scripts/openspec/vision-driven.test.ts && openspec schema validate vision-driven && pnpm -r list --depth -1",
+    "version-packages": "changeset version"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.0"
   },
   "engines": {
     "node": ">=20.19.0",

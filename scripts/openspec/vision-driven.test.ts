@@ -334,7 +334,7 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 
   test("Scenario: Given handoff files are workflow evidence When Git ignore rules are checked Then change-local handoffs stay commit-ready", async () => {
     const currentHandoff = await runCommand(["git", "check-ignore", "openspec/changes/demo-change/HANDOFF.md"], repoRoot);

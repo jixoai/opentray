@@ -890,6 +890,37 @@ try {
 } catch {}
 ```
 
+### 8.5 Release Automation
+
+The npm release path is changesets + GitHub Actions trusted publishing. The workflow file is `.github/workflows/release.yml`; npm trusted publisher configuration MUST use:
+
+| Field | Value |
+|-------|-------|
+| Publisher | GitHub Actions |
+| Repository | `jixoai/opentray` |
+| Workflow filename | `release.yml` |
+| Environment name | `npm-release` |
+| Allowed actions | `npm publish`, `npm stage publish` |
+
+Repository scripts:
+
+```bash
+pnpm run changeset
+pnpm run version-packages
+pnpm run release
+pnpm run trusted-publish:dry-run
+pnpm run trusted-publish:check
+pnpm run trusted-publish:configure
+```
+
+**Trusted publishing law:**
+
+1. The release workflow MUST grant `id-token: write`.
+2. The release job MUST use `environment: npm-release` so its OIDC claim matches npm package trust configuration.
+3. The workflow MUST NOT require a long-lived `NPM_TOKEN` for normal publishing.
+4. `scripts/npm/configure-trusted-publish.ts` is the canonical batch configuration/check script.
+5. The npm CLI command uses `--file release.yml`, not `--workflow release.yml`.
+
 ---
 
 ## 9. Dependency Inventory

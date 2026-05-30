@@ -42,3 +42,31 @@ Run baseline checks:
 ```bash
 pnpm run verify
 ```
+
+## Release
+
+OpenTray publishes through npm Trusted Publishing from GitHub Actions. The trusted publisher claims are:
+
+- Publisher: GitHub Actions
+- Repository: `jixoai/opentray`
+- Workflow file: `release.yml`
+- Environment: `npm-release`
+- Allowed actions: `npm publish` and `npm stage publish`
+
+Configure or inspect npm trusted publishing:
+
+```bash
+pnpm run trusted-publish:dry-run
+pnpm run trusted-publish:check
+pnpm run trusted-publish:configure
+```
+
+The current npm CLI syntax uses `--file release.yml`; `--workflow` is kept only as an alias in the local helper script.
+
+Create a changeset before merging release-worthy changes:
+
+```bash
+pnpm run changeset
+```
+
+When changes land on `main`, `.github/workflows/release.yml` uses changesets to create a version PR or publish changed packages through OIDC trusted publishing.

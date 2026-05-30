@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>configure-trusted-release-pipeline self review</title>
+    <style>
+      body {
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        margin: 2rem;
+        line-height: 1.5;
+        color: #17202a;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #ccd4dd;
+        padding: 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #eef3f7;
+      }
+      code {
+        background: #eef3f7;
+        padding: 0.1rem 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>configure-trusted-release-pipeline self review</h1>
+    <p>
+      Trusted publishing and changesets release automation are now encoded in repository scripts and
+      GitHub Actions. External npm mutation is blocked until npm browser/OTP auth is completed.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Evidence</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Trusted publisher command shape</td>
+          <td><code>pnpm run trusted-publish:dry-run</code> prints <code>npm trust github ... --file release.yml --env npm-release --allow-publish --allow-stage-publish --yes</code> for every package.</td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>OIDC workflow claims</td>
+          <td><code>.github/workflows/release.yml</code> has <code>id-token: write</code> and <code>environment: npm-release</code>.</td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>No long-lived npm token</td>
+          <td>Release workflow has no <code>NPM_TOKEN</code> secret dependency.</td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>External npm state</td>
+          <td><code>npm trust list opentray --json</code> returned <code>EOTP</code>, requiring browser/OTP authentication.</td>
+          <td>Blocked externally</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>

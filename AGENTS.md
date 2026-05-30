@@ -63,6 +63,36 @@ pnpm -r list --depth -1
 
 Before claiming completion, run the narrowest command set that proves the current change.
 
+## Release Operations
+
+OpenTray uses changesets plus npm Trusted Publishing.
+
+Trusted publisher configuration:
+
+```bash
+pnpm run trusted-publish:dry-run
+pnpm run trusted-publish:check
+pnpm run trusted-publish:configure
+```
+
+Canonical trusted publisher claims:
+
+- GitHub repository: `jixoai/opentray`
+- Workflow file: `release.yml`
+- Environment: `npm-release`
+- Allowed npm actions: `npm publish`, `npm stage publish`
+
+The npm CLI command uses `--file release.yml`, not `--workflow release.yml`.
+
+Release flow:
+
+```bash
+pnpm run changeset
+git push
+```
+
+After merge to `main`, `.github/workflows/release.yml` creates a version PR or publishes via OIDC. Do not add long-lived `NPM_TOKEN` secrets for normal release publishing.
+
 ## Commit Discipline
 
 - Keep OpenSpec artifacts, implementation, and archive work conceptually separable.
