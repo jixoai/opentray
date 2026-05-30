@@ -1,0 +1,144 @@
+name: vision-driven
+version: 1
+description: OpenTray workflow - intent SSOT and product reasoning drive specs, BDD tasks, implementation, and review loops
+artifacts:
+  - id: research-plan
+    generates: plans/plan.md
+    description: Intent Document SSOT that captures research, user Q&A, visual target reasoning, and the intent-driven plan
+    template: research-plan.md
+    instruction: |
+      Create or update the Intent Document SSOT for this change.
+
+      Persona: Max. Use the user's language system first. Think from final visible effect and operator mind model, then reverse-infer interfaces, data, and architecture. Do not start from code terminology unless the user already used it.
+
+      Canonical workflow commands for this schema:
+      - Create a change with `bun run openspec:vision -- new <change>`.
+      - Check artifact status with `bun run openspec:vision -- status <change>`.
+      - Fetch artifact instructions with `bun run openspec:vision -- instructions <artifact> <change>`.
+      - Check commit evidence before phase transitions with `bun run openspec:vision -- commit-check <change> --phase <phase>`.
+      - Rename a change after intent realignment with `bun run openspec:vision -- rename <old-change> <new-change>`.
+      - Write abnormal-exit handoff with `bun run openspec:vision -- handoff <change>`.
+
+      Mandatory content:
+      - Investigate the relevant code before locking the plan.
+      - Investigate the relevant existing OpenSpec changes/specs before locking the plan.
+      - Preserve the user's original requirement and every requirement-bearing Q&A as objective records.
+      - Make the user's language system visible: capture the phrases, metaphors, and product vocabulary the user actually uses.
+      - Surface the real questions you need to ask the user, plus your current inference before the user answers.
+      - Separate facts, inferences, decisions, open questions, and rejected paths.
+      - Explain whether this change is a regular atom under current platform laws or a law-breaking entity that needs a paradigm shift.
+      - Describe the final visible effect, even for backend-only work, as what the operator will see, trust, or stop worrying about.
+      - When useful, create change-local demo/spike code under `demos/` to collapse vague requirements before hardening specs.
+      - Prefer breaking changes by default, but record where user confirmation is required for destructive migration, cleanup, or state reset.
+      - Include an intent-driven plan that later specs and tasks can trace back to.
+
+      Revision law:
+      - The current SSOT is always `plans/plan.md`.
+      - Before materially changing an existing `plans/plan.md`, run `bun run openspec:vision -- backup-plan <change>` so the previous current plan becomes `plans/plan-vN.md`.
+      - Never fork competing current intent documents.
+
+      Git evidence law:
+      - Once `research-plan`, `specs`, and `tasks` are ready for apply, run `bun run openspec:vision -- commit-check <change> --phase research-plan` and commit the OpenSpec artifacts before product-code work starts.
+      - If self-review or renewed user discussion changes OpenSpec artifacts, commit those artifact updates before applying more implementation work.
+
+      Use direct, product-architect language. This artifact is for the user and future agents, not just implementers.
+    requires: []
+
+  - id: specs
+    generates: specs/**/*.md
+    description: OpenSpec-compatible capability specs derived from the intent document
+    template: spec.md
+    instruction: |
+      Create specification files that define WHAT the system must do.
+
+      Persona: Linus. Be direct. Data structures and contracts matter more than decorative wording. If the Intent Document contains technically naive shape, flatten it into a cleaner contract without losing the user's intent.
+
+      Required workflow:
+      - Read `plans/plan.md` first and keep every requirement traceable to intent.
+      - Create one spec file per durable capability under `specs/<capability>/spec.md`.
+      - Make architecture design and data-structure design explicit instead of burying them in vague prose.
+      - Follow OpenSpec delta format exactly:
+        - `## ADDED Requirements`
+        - `## MODIFIED Requirements`
+        - `## REMOVED Requirements`
+        - `## RENAMED Requirements`
+      - Every requirement uses `### Requirement: <name>`.
+      - Every scenario uses exactly `#### Scenario: <name>`.
+      - Use SHALL/MUST for normative contract.
+      - Include architecture and data-structure constraints in requirement prose when they are durable contract, not transient implementation notes.
+
+      Modified requirement discipline:
+      - Copy the full existing requirement block before editing it.
+      - Do not partially patch requirements.
+
+      Specs are not a mood board. They are the contract the implementation must obey.
+    requires:
+      - research-plan
+
+  - id: tasks
+    generates: tasks.md
+    description: Atomic execution checklist with BDD gates mapped to the intent and specs
+    template: tasks.md
+    instruction: |
+      Create the task list that turns intent and specs into executable work.
+
+      Persona: John Carmack. Be mechanical, precise, and edge-case obsessed. Each task must have a visible completion condition.
+
+      Mandatory content:
+      - Start with alignment / investigation tasks when the intent still needs confirmation or repo truth still needs to be read.
+      - Include BDD tasks before implementation tasks.
+      - BDD scenarios must trace back to `plans/plan.md` and the relevant spec requirement.
+      - Cover boundary conditions, migration/cleanup paths, destructive-update confirmation points, and regression checks.
+      - Add explicit tasks for user confirmation when breaking cleanup, migration, or state reset cannot be assumed safely.
+      - Include controller checkpoints for plan backup, self-review loop state, and verification through `bun run openspec:vision -- ...`.
+      - When adding OpenSpec validation tasks for a change, prefer `bun run openspec:vision -- validate <change>`, which runs `openspec validate <change> --type change --strict` without schema ambiguity.
+      - Include Git evidence checkpoints: OpenSpec artifact commit before apply, task-progress commits during apply, OpenSpec commits after self-review updates, and archive commit after normal archive.
+      - State that an agent may only check off tasks it completed and verified in the current working context.
+      - Add implementation tasks for concise intent comments at critical effect points derived from `plans/plan.md`.
+      - Use checkbox format exactly: `- [ ] X.Y Task description`.
+
+      Keep tasks atomic. If a task cannot be verified, split it.
+    requires:
+      - specs
+
+  - id: self-review
+    generates: review/self-review.md
+    description: Markdown self-review reasoning record plus a separate HTML evidence report
+    template: self-review.md
+    instruction: |
+      Create a self-review record after task execution.
+
+      Persona: Donald Knuth. Be rigorous, proof-oriented, and respectful of the user as a higher-dimensional reviewer.
+
+      Mandatory content:
+      - Write the macro-level review thinking to `review/self-review.md`; this Markdown file is the conceptual review record.
+      - Also produce `review/self-review.html`; this separate HTML file is the structured presentation layer for screenshots, interaction evidence, and complex review information.
+      - Compare implementation output against `plans/plan.md`, specs, and tasks.
+      - Produce two explicit lists:
+        1. Deviations from intent.
+        2. New questions requiring user confirmation.
+      - Include screenshot/evidence references when the work has visible surface; for backend-only work include command/log/evidence paths.
+      - Include Git evidence: relevant commits, uncommitted paths if any, and whether task checkboxes were updated only for current-context work.
+      - Record iteration count, unresolved issue recurrence count, proposed next loop action, and exit-condition judgment.
+      - If model capability or permission limits block full review, also prepare `review/review-intent-and-tasks.md` for the user-as-subagent path.
+      - Keep the Markdown review useful as thinking, and keep the HTML report structured and easy to scan; do not reduce either file to a rigid form just to satisfy the checker.
+
+      Loop law:
+      - Default maximum review iterations is 5.
+      - If the review enters a real loop, use `bun run openspec:vision -- review-state <change> [--issue <id>]` to persist iteration and recurrence state.
+      - If the review cannot exit normally because maximum iterations are exhausted or a repeated issue is unresolved, run `bun run openspec:vision -- handoff <change>` and commit the handoff/OpenSpec evidence before returning to user discussion.
+      - If the handoff needs exact operator-authored content, provide it with shell Here Document stdin: `bun run openspec:vision -- handoff <change> <<'END' ... END`.
+      - If the same issue survives 2 consecutive review rounds, mark it as a spec/design failure and route the next step back to `research-plan`.
+      - If the initial intent implies a different exit condition, state why iteration count should be raised, reduced, or bypassed.
+      - If review exits normally, archive with `openspec archive <change>` and commit the archive result as the final archive evidence.
+
+      The Markdown file is the review mind; the HTML file is the review presentation. Neither is a victory note.
+    requires:
+      - tasks
+
+apply:
+  requires:
+    - tasks
+  tracks: tasks.md
+  instruction: |
+    Implement pending tasks with BDD-first discipline. Keep `plans/plan.md` as the SSOT. Before product-code work starts, run `bun run openspec:vision -- commit-check <change> --phase apply` and make sure OpenSpec artifacts have been committed. Update only task checkboxes completed and verified in the current working context, include concise intent comments at critical effect points derived from `plans/plan.md`, commit task updates with matching implementation/BDD evidence, use `bun run openspec:vision -- validate <change>` when the task list calls for OpenSpec validation, and run `bun run openspec:vision -- check <change>` before claiming the workflow is complete.

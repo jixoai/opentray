@@ -1,0 +1,22 @@
+{
+  "name": "@opentray/ext-badge",
+  "version": "0.0.0",
+  "description": "Official OpenTray platform badge, progress, and overlay API extension.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "platforms", "README.md"],
+  "sideEffects": false,
+  "peerDependencies": {
+    "opentray": ">=0.0.0"
+  },
+  "devDependencies": {
+    "opentray": "workspace:*"
+  }
+}

@@ -1,0 +1,18 @@
+# opentray
+
+Developer-facing OpenTray package.
+
+This is the package users install directly:
+
+```bash
+pnpm add opentray
+```
+
+## Role
+
+- Resolve or auto-start the OpenTray broker.
+- Expose `createSurface()`, `defaultSurface`, and `createTray()`.
+- Route extension packages through public OpenTray contracts.
+- Resolve per-platform optional binary packages.
+
+`packages/cli` is the only unscoped npm package in this monorepo.

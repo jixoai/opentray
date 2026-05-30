@@ -1,0 +1,9 @@
+{
+  "name": "@opentray/linux-x64",
+  "version": "0.0.0",
+  "description": "OpenTray broker binary package for Linux x64.",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin", "README.md"]
+}

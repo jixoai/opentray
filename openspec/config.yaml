@@ -1,0 +1,19 @@
+schema: vision-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+context: |
+  Project: OpenTray.
+  Product law: Surface-first Desktop Status Platform for Node/Deno/Bun CLI and AI-skill ecosystems.
+  Architecture stance: broker-owned Surface entries, Tray contributions, lease-scoped isolation, and extension-driven native capabilities.
+  Working style: use vision-driven OpenSpec before implementation; keep plans/plan.md as the current Intent Document SSOT.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours

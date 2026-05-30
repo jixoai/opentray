@@ -1,0 +1,9 @@
+{
+  "name": "@opentray/windows-x64",
+  "version": "0.0.0",
+  "description": "OpenTray broker binary package for Windows x64.",
+  "license": "MIT",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin", "README.md"]
+}

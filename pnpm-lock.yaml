@@ -1,0 +1,66 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .: {}
+
+  packages/cli:
+    dependencies:
+      '@opentray/spec':
+        specifier: workspace:*
+        version: link:../spec
+    optionalDependencies:
+      '@opentray/darwin-arm64':
+        specifier: workspace:*
+        version: link:../darwin-arm64
+      '@opentray/darwin-x64':
+        specifier: workspace:*
+        version: link:../darwin-x64
+      '@opentray/linux-arm64':
+        specifier: workspace:*
+        version: link:../linux-arm64
+      '@opentray/linux-x64':
+        specifier: workspace:*
+        version: link:../linux-x64
+      '@opentray/windows-arm64':
+        specifier: workspace:*
+        version: link:../windows-arm64
+      '@opentray/windows-x64':
+        specifier: workspace:*
+        version: link:../windows-x64
+
+  packages/darwin-arm64: {}
+
+  packages/darwin-x64: {}
+
+  packages/ext-badge:
+    devDependencies:
+      opentray:
+        specifier: workspace:*
+        version: link:../cli
+
+  packages/ext-island:
+    devDependencies:
+      opentray:
+        specifier: workspace:*
+        version: link:../cli
+
+  packages/ext-webview:
+    devDependencies:
+      opentray:
+        specifier: workspace:*
+        version: link:../cli
+
+  packages/linux-arm64: {}
+
+  packages/linux-x64: {}
+
+  packages/spec: {}
+
+  packages/windows-arm64: {}
+
+  packages/windows-x64: {}

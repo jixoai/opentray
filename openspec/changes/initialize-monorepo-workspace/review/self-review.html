@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>initialize-monorepo-workspace self review</title>
+    <style>
+      body {
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        margin: 2rem;
+        line-height: 1.5;
+        color: #17202a;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #ccd4dd;
+        padding: 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #eef3f7;
+      }
+      code {
+        background: #eef3f7;
+        padding: 0.1rem 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>initialize-monorepo-workspace self review</h1>
+    <p>
+      The workspace initialization matches the package naming law: <code>packages/cli</code>
+      publishes <code>opentray</code>, and every other package under <code>packages/*</code>
+      publishes under <code>@opentray/*</code>.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Evidence</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Workspace package discovery</td>
+          <td><code>pnpm -r list --depth -1</code> lists 12 workspace projects including root.</td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>OpenSpec workflow</td>
+          <td><code>bun test scripts/openspec/vision-driven.test.ts</code> passes 15 tests.</td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Schema validation</td>
+          <td><code>openspec schema validate vision-driven</code> passes.</td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Package lock</td>
+          <td><code>pnpm install --lockfile-only</code> succeeds after official extensions use workspace dev dependencies for local peer resolution.</td>
+          <td>Pass</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "name": "opentray",
+  "version": "0.0.0",
+  "description": "Developer-facing OpenTray SDK and CLI package.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "opentray": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "sideEffects": false,
+  "dependencies": {
+    "@opentray/spec": "workspace:*"
+  },
+  "optionalDependencies": {
+    "@opentray/darwin-arm64": "workspace:*",
+    "@opentray/darwin-x64": "workspace:*",
+    "@opentray/linux-arm64": "workspace:*",
+    "@opentray/linux-x64": "workspace:*",
+    "@opentray/windows-arm64": "workspace:*",
+    "@opentray/windows-x64": "workspace:*"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@opentray/ext-island",
+  "version": "0.0.0",
+  "description": "Roadmap OpenTray dynamic island and live activity extension.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "platforms", "README.md"],
+  "sideEffects": false,
+  "peerDependencies": {
+    "opentray": ">=0.0.0"
+  },
+  "devDependencies": {
+    "opentray": "workspace:*"
+  }
+}
