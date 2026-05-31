@@ -1,6 +1,6 @@
 {
   "name": "opentray",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Developer-facing OpenTray SDK and CLI package.",
   "type": "module",
   "license": "MIT",
@@ -11,7 +11,10 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",
