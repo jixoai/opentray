@@ -1,0 +1,12 @@
+[package]
+name = "opentray-spec"
+description = "OpenTray protocol and ABI contract types."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

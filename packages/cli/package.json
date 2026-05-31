@@ -6,15 +6,25 @@
   "license": "MIT",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./package.json": "./package.json"
   },
   "files": ["dist", "README.md"],
   "sideEffects": false,
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@opentray/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   },
   "optionalDependencies": {
     "@opentray/darwin-arm64": "workspace:*",

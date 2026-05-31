@@ -3,6 +3,13 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@opentray/spec": ["packages/spec/src/index.ts"],
+      "opentray": ["packages/cli/src/index.ts"],
+      "@opentray/ext-webview": ["packages/ext-webview/src/index.ts"]
+    },
+    "ignoreDeprecations": "6.0",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,

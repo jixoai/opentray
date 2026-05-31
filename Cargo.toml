@@ -1,0 +1,21 @@
+[workspace]
+members = [
+  "crates/opentray-bin",
+  "crates/opentray-core",
+  "crates/opentray-spec",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/jixoai/opentray"
+rust-version = "1.80"
+version = "0.0.0"
+
+[workspace.dependencies]
+opentray-core = { path = "crates/opentray-core", version = "0.0.0" }
+opentray-spec = { path = "crates/opentray-spec", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

@@ -6,17 +6,26 @@
   "license": "MIT",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./package.json": "./package.json"
   },
   "files": ["dist", "platforms", "README.md"],
   "sideEffects": false,
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
   "peerDependencies": {
     "opentray": ">=0.0.0"
   },
   "devDependencies": {
-    "opentray": "workspace:*"
+    "@opentray/spec": "workspace:*",
+    "opentray": "workspace:*",
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

@@ -1,0 +1,17 @@
+[package]
+name = "opentray-bin"
+description = "OpenTray broker CLI composition layer."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "opentray"
+path = "src/main.rs"
+
+[dependencies]
+opentray-core.workspace = true
+opentray-spec.workspace = true
+serde_json.workspace = true
