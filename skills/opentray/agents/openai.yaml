@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenTray"
+  short_description: "OpenTray architecture and release guide"
+  default_prompt: "Use $opentray to extend OpenTray while preserving kernel, backend, extension, release, and visual-acceptance laws."

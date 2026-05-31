@@ -3,10 +3,10 @@
 ## Review State
 
 - Change: configure-trusted-release-pipeline
-- Iteration: 1
+- Iteration: 2
 - Recurring issue counts: none
-- Exit-condition judgment: Repository release law is implemented; npm-side mutation is blocked by npm trust authentication policy.
-- Next loop action: recreate `.env` `NPM_TOKEN` without bypass-2FA via `pnpm run setup:env -- --force` or complete npm browser/OTP login, then rerun `pnpm run trusted-publish:configure`.
+- Exit-condition judgment: Repository release law is implemented and first-stage release readiness is now hardened with a build gate, a changeset, and `skills/opentray` codified through `$skill-creator`. npm-side mutation is still blocked by npm trust authentication policy, which is external operator auth state rather than repository code.
+- Next loop action: archive this change after final commit; external npm trusted publisher mutation can be retried later by recreating `.env` `NPM_TOKEN` without bypass-2FA via `pnpm run setup:env -- --force` or completing npm browser/OTP login, then rerunning `pnpm run trusted-publish:configure`.
 
 ## Intent Alignment
 
@@ -18,6 +18,9 @@
 | Configure changesets                            | `.changeset/config.json`, package scripts, and `@changesets/cli` dev dependency            | Met     |
 | CI/CD release workflow                          | `.github/workflows/release.yml` with OIDC `id-token: write` and `environment: npm-release` | Met     |
 | Avoid long-lived npm token                      | Workflow has no `NPM_TOKEN` dependency                                                     | Met     |
+| Build publish artifacts before publish          | `.github/workflows/release.yml` runs `pnpm run build` before changesets/action             | Met     |
+| First-stage package release note                | `.changeset/first-stage-kernel-webview.md` covers `opentray`, `@opentray/spec`, and `@opentray/ext-webview` | Met |
+| Codify OpenTray agent skill                     | `skills/opentray/SKILL.md` plus per-extension reference articles                           | Met     |
 
 ## Deviations From Intent
 
@@ -38,12 +41,17 @@
   - `pnpm run trusted-publish:configure` fail-closed before mutation after the same `E403` state-read failure.
   - `bun run scripts/npm/configure-trusted-publish.ts --auth ambient --package opentray --check` returned `EOTP`.
   - `.env` token diagnostics: `npm whoami` returned `kezhaofeng`; `npm access list packages @opentray --json` returned `read-write` for all `@opentray/*` packages.
+  - `python3 /Users/kzf/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/opentray`
+  - `pnpm run build`
   - `pnpm install --frozen-lockfile`
   - `npm pack --dry-run --json` for `opentray`, `@opentray/spec`, and `@opentray/ext-webview`
+  - `pnpm run verify`
+  - `openspec validate --all --strict`
   - `bun run openspec:vision -- validate configure-trusted-release-pipeline`
+  - `bun run openspec:vision -- check configure-trusted-release-pipeline`
   - `git diff --check`
-- Git commits reviewed: `da674ad chore: initialize opentray monorepo`
-- Uncommitted paths, if any: current release-pipeline change before commit
+- Git commits reviewed: `da674ad chore: initialize opentray monorepo`, `a71df52 docs(spec): archive kernel webview foundation`
+- Uncommitted paths, if any: current release-readiness and skill codification batch before commit
 - Task checkboxes updated by this working context: yes
 
 ## HTML Review Report
@@ -52,7 +60,7 @@ Create `review/self-review.html` as a separate presentation artifact for screens
 
 ## Exit Handling
 
-- Normal exit: commit release pipeline setup.
+- Normal exit: commit release pipeline hardening and skill codification, then archive the completed release pipeline change.
 - Abnormal exit: not needed.
 - Operator-authored handoff: not needed.
 - Intent realignment: not needed.

@@ -45,6 +45,9 @@ jobs:
       - name: Verify
         run: pnpm run verify
 
+      - name: Build publish artifacts
+        run: pnpm run build
+
       - name: Create release PR or publish
         uses: changesets/action@v1
         with:

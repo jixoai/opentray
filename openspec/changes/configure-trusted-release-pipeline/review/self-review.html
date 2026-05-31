@@ -34,9 +34,11 @@
     <h1>configure-trusted-release-pipeline self review</h1>
     <p>
       Trusted publishing and changesets release automation are now encoded in
-      repository scripts and GitHub Actions. External npm mutation is blocked by
-      npm trust authentication policy: the local token authenticates but cannot
-      read/write trust configuration, while ambient login requires OTP.
+      repository scripts and GitHub Actions. First-stage release readiness also
+      includes a build-before-publish gate, a changeset, and an OpenTray agent
+      skill with separate extension articles. External npm mutation is blocked
+      by npm trust authentication policy: the local token authenticates but
+      cannot read/write trust configuration, while ambient login requires OTP.
     </p>
     <table>
       <thead>
@@ -72,6 +74,33 @@
           <td>No long-lived npm token</td>
           <td>
             Release workflow has no <code>NPM_TOKEN</code> secret dependency.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Build-before-publish gate</td>
+          <td>
+            <code>.github/workflows/release.yml</code> now runs
+            <code>pnpm run build</code> before
+            <code>changesets/action</code>.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>First-stage changeset</td>
+          <td>
+            <code>.changeset/first-stage-kernel-webview.md</code> bumps
+            <code>opentray</code>, <code>@opentray/spec</code>, and
+            <code>@opentray/ext-webview</code>.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>OpenTray skill</td>
+          <td>
+            <code>skills/opentray/SKILL.md</code> is a concise router, with
+            independent articles for <code>ext-webview</code>,
+            <code>ext-badge</code>, and <code>ext-island</code>.
           </td>
           <td>Pass</td>
         </tr>

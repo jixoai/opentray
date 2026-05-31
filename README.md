@@ -94,6 +94,7 @@ pnpm --filter @opentray/spec example:parse
 Use these commands to validate the change set end to end:
 
 ```bash
+pnpm run build
 pnpm run verify
 bun run openspec:vision -- validate implement-kernel-webview-foundation
 bun run openspec:vision -- check implement-kernel-webview-foundation
@@ -143,4 +144,14 @@ Create a changeset before merging release-worthy changes:
 pnpm run changeset
 ```
 
-When changes land on `main`, `.github/workflows/release.yml` uses changesets to create a version PR or publish changed packages through OIDC trusted publishing.
+Release-worthy TypeScript package changes must build before publishing because `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The GitHub workflow runs `pnpm run verify` and then `pnpm run build` before changesets creates a version PR or publishes through OIDC trusted publishing.
+
+## Agent Skill
+
+The repository includes an OpenTray-specific skill for future agent work:
+
+```text
+skills/opentray/
+```
+
+Use it when changing the kernel, backend atoms, extension host, official extension packages, release workflow, or human-visible examples. `SKILL.md` is only the navigation entry; extension-specific details live in separate reference articles.
