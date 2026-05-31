@@ -4,6 +4,10 @@
   "description": "Shared TypeScript protocol and contract types for OpenTray.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",

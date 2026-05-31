@@ -4,6 +4,10 @@
   "description": "Official OpenTray rich popup extension backed by platform WebView engines.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",

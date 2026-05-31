@@ -41,6 +41,10 @@ Changesets must only bump peer dependents when their peer dependency range is ou
 
 `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The release workflow must run `pnpm run build` before `changeset publish`.
 
+## Provenance Metadata Rule
+
+Every public package manifest must include repository metadata with `url: "https://github.com/jixoai/opentray"`. npm trusted publishing rejects signed provenance when package metadata omits or mismatches the GitHub repository URL.
+
 ## Version Commit Rule
 
 The GitHub organization does not allow Actions to create pull requests. The release workflow must not depend on changesets/action release-PR creation. When pending `.changeset/*.md` files exist, the workflow versions packages, commits the generated changes directly to `main`, and continues to publish in the same run because `GITHUB_TOKEN` pushes do not recursively trigger a follow-up workflow run.

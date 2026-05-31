@@ -4,6 +4,10 @@
   "description": "Roadmap OpenTray dynamic island and live activity extension.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

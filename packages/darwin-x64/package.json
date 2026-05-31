@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "description": "OpenTray broker binary package for macOS Intel.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
   "os": ["darwin"],
   "cpu": ["x64"],
   "files": ["bin", "README.md"]

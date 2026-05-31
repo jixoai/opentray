@@ -82,6 +82,16 @@ The release workflow SHALL NOT require `NPM_TOKEN` for publishing. Publishing SH
 - **WHEN** environment variables and secrets are reviewed
 - **THEN** no `NPM_TOKEN` secret is required for publish.
 
+### Requirement: Public packages SHALL declare provenance-compatible repository metadata
+
+Every public npm package manifest SHALL declare repository metadata matching the GitHub repository used by npm trusted publishing provenance.
+
+#### Scenario: Package repository matches GitHub provenance
+
+- **GIVEN** npm trusted publishing signs provenance for repository `https://github.com/jixoai/opentray`
+- **WHEN** a public workspace package is published
+- **THEN** its `package.json` repository URL matches `https://github.com/jixoai/opentray`.
+
 ### Requirement: Changesets SHALL avoid accidental peer-dependent placeholder releases
 
 The release pipeline SHALL configure changesets so peer dependents are bumped only when their peer dependency range no longer accepts the new dependency version. Roadmap placeholder packages SHALL NOT be released just because a first-stage runtime package they peer-depend on is being released.
