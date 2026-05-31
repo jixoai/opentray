@@ -43,7 +43,7 @@ Changesets must only bump peer dependents when their peer dependency range is ou
 
 ## Version Commit Rule
 
-The GitHub organization does not allow Actions to create pull requests. The release workflow must not depend on changesets/action release-PR creation. When pending `.changeset/*.md` files exist, the workflow versions packages, commits the generated changes directly to `main`, and exits before publish. The follow-up `main` run publishes when no pending changeset files remain.
+The GitHub organization does not allow Actions to create pull requests. The release workflow must not depend on changesets/action release-PR creation. When pending `.changeset/*.md` files exist, the workflow versions packages, commits the generated changes directly to `main`, and continues to publish in the same run because `GITHUB_TOKEN` pushes do not recursively trigger a follow-up workflow run.
 
 ## Verification Before Claiming Release Ready
 

@@ -83,9 +83,7 @@ jobs:
           git push
 
       - name: Publish packages
-        if: steps.pending-changesets.outputs.has_changesets == 'false'
         run: pnpm run release
 
       - name: Push release tags
-        if: steps.pending-changesets.outputs.has_changesets == 'false'
         run: git push --follow-tags
