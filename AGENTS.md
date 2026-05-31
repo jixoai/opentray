@@ -83,6 +83,7 @@ Canonical trusted publisher claims:
 - Allowed npm actions: `npm publish`, `npm stage publish`
 
 The npm CLI command uses `--file release.yml`, not `--workflow release.yml`.
+The helper uses `.env` `NPM_TOKEN` by default and writes it only into a temporary npm userconfig. npm trust rejects bypass-2FA granular tokens; use `pnpm run setup:env -- --force` to recreate a trusted-publish-compatible token, or pass `--auth ambient` after completing browser/OTP npm login.
 
 Release flow:
 

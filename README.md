@@ -13,19 +13,19 @@ It is not just a tray icon wrapper. The platform model is:
 
 This repository uses `pnpm` workspaces and Lerna metadata.
 
-| Directory | npm package | Purpose |
-| --- | --- | --- |
-| `packages/cli` | `opentray` | Developer-facing SDK and CLI package. |
-| `packages/spec` | `@opentray/spec` | TypeScript protocol and shared contract package. |
-| `packages/ext-webview` | `@opentray/ext-webview` | Rich popup extension backed by platform WebView engines. |
-| `packages/ext-badge` | `@opentray/ext-badge` | Platform badge/progress/overlay API extension. |
-| `packages/ext-island` | `@opentray/ext-island` | Roadmap dynamic island / live activity extension. |
-| `packages/darwin-arm64` | `@opentray/darwin-arm64` | macOS Apple Silicon broker binary package. |
-| `packages/darwin-x64` | `@opentray/darwin-x64` | macOS Intel broker binary package. |
-| `packages/windows-arm64` | `@opentray/windows-arm64` | Windows ARM64 broker binary package. |
-| `packages/windows-x64` | `@opentray/windows-x64` | Windows x64 broker binary package. |
-| `packages/linux-arm64` | `@opentray/linux-arm64` | Linux ARM64 broker binary package. |
-| `packages/linux-x64` | `@opentray/linux-x64` | Linux x64 broker binary package. |
+| Directory                | npm package               | Purpose                                                  |
+| ------------------------ | ------------------------- | -------------------------------------------------------- |
+| `packages/cli`           | `opentray`                | Developer-facing SDK and CLI package.                    |
+| `packages/spec`          | `@opentray/spec`          | TypeScript protocol and shared contract package.         |
+| `packages/ext-webview`   | `@opentray/ext-webview`   | Rich popup extension backed by platform WebView engines. |
+| `packages/ext-badge`     | `@opentray/ext-badge`     | Platform badge/progress/overlay API extension.           |
+| `packages/ext-island`    | `@opentray/ext-island`    | Roadmap dynamic island / live activity extension.        |
+| `packages/darwin-arm64`  | `@opentray/darwin-arm64`  | macOS Apple Silicon broker binary package.               |
+| `packages/darwin-x64`    | `@opentray/darwin-x64`    | macOS Intel broker binary package.                       |
+| `packages/windows-arm64` | `@opentray/windows-arm64` | Windows ARM64 broker binary package.                     |
+| `packages/windows-x64`   | `@opentray/windows-x64`   | Windows x64 broker binary package.                       |
+| `packages/linux-arm64`   | `@opentray/linux-arm64`   | Linux ARM64 broker binary package.                       |
+| `packages/linux-x64`     | `@opentray/linux-x64`     | Linux x64 broker binary package.                         |
 
 ## Workflow
 
@@ -61,7 +61,9 @@ pnpm run trusted-publish:check
 pnpm run trusted-publish:configure
 ```
 
-The current npm CLI syntax uses `--file release.yml`; `--workflow` is kept only as an alias in the local helper script.
+The helper reads `NPM_TOKEN` from `.env` by default and injects it through a temporary npm userconfig. npm currently rejects trusted-publisher management for tokens created with `--bypass-2fa`; if npm returns `E403`, recreate the local token with `pnpm run setup:env -- --force` or use an interactive npm login with `bun run scripts/npm/configure-trusted-publish.ts --auth ambient`.
+
+The current npm CLI syntax uses `--file release.yml`; `--workflow` is kept only as an alias in the local helper script. Some npm 11 builds do not expose the trusted-publisher action flags yet; the helper falls back to `npx -y npm@latest` when needed.
 
 Create a changeset before merging release-worthy changes:
 

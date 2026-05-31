@@ -20,7 +20,7 @@
 ## 4. Verification
 
 - [x] 4.1 Run trusted publish script in dry-run mode.
-- [x] 4.2 Run OpenSpec validation and workflow check.
+- [x] 4.2 Run trusted publish check/configure against npm and record external auth result.
 - [x] 4.3 Run workspace verification.
 - [x] 4.4 Run `git diff --check`.
 

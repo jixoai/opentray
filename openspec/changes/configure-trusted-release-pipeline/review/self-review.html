@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -33,8 +33,10 @@
   <body>
     <h1>configure-trusted-release-pipeline self review</h1>
     <p>
-      Trusted publishing and changesets release automation are now encoded in repository scripts and
-      GitHub Actions. External npm mutation is blocked until npm browser/OTP auth is completed.
+      Trusted publishing and changesets release automation are now encoded in
+      repository scripts and GitHub Actions. External npm mutation is blocked by
+      npm trust authentication policy: the local token authenticates but cannot
+      read/write trust configuration, while ambient login requires OTP.
     </p>
     <table>
       <thead>
@@ -47,22 +49,39 @@
       <tbody>
         <tr>
           <td>Trusted publisher command shape</td>
-          <td><code>pnpm run trusted-publish:dry-run</code> prints <code>npm trust github ... --file release.yml --env npm-release --allow-publish --allow-stage-publish --yes</code> for every package.</td>
+          <td>
+            <code>pnpm run trusted-publish:dry-run</code> prints
+            <code
+              >npm trust github ... --file release.yml --env npm-release
+              --allow-publish --allow-stage-publish --yes</code
+            >
+            for every package.
+          </td>
           <td>Pass</td>
         </tr>
         <tr>
           <td>OIDC workflow claims</td>
-          <td><code>.github/workflows/release.yml</code> has <code>id-token: write</code> and <code>environment: npm-release</code>.</td>
+          <td>
+            <code>.github/workflows/release.yml</code> has
+            <code>id-token: write</code> and
+            <code>environment: npm-release</code>.
+          </td>
           <td>Pass</td>
         </tr>
         <tr>
           <td>No long-lived npm token</td>
-          <td>Release workflow has no <code>NPM_TOKEN</code> secret dependency.</td>
+          <td>
+            Release workflow has no <code>NPM_TOKEN</code> secret dependency.
+          </td>
           <td>Pass</td>
         </tr>
         <tr>
           <td>External npm state</td>
-          <td><code>npm trust list opentray --json</code> returned <code>EOTP</code>, requiring browser/OTP authentication.</td>
+          <td>
+            <code>pnpm run trusted-publish:check</code> returned
+            <code>E403</code> for the `.env` token.
+            <code>--auth ambient</code> returned <code>EOTP</code>.
+          </td>
           <td>Blocked externally</td>
         </tr>
       </tbody>

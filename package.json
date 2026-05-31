@@ -9,6 +9,7 @@
     "test:openspec:vision": "bun test scripts/openspec/vision-driven.test.ts",
     "packages:list": "pnpm -r list --depth -1",
     "release": "changeset publish",
+    "setup:env": "bun run scripts/npm/setup-env.ts",
     "trusted-publish:check": "bun run scripts/npm/configure-trusted-publish.ts --check",
     "trusted-publish:configure": "bun run scripts/npm/configure-trusted-publish.ts",
     "trusted-publish:dry-run": "bun run scripts/npm/configure-trusted-publish.ts --dry-run",
