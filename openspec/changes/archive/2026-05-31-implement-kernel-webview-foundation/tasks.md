@@ -63,7 +63,7 @@
 - [x] 9.2 Generate `review/self-review.html` as structured evidence.
 - [x] 9.3 Run `bun run openspec:vision -- check implement-kernel-webview-foundation`.
 - [x] 9.4 If review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
-- [ ] 9.5 Do not archive until the user accepts the first-stage kernel/webview foundation.
+- [x] 9.5 Do not archive until the user accepts the first-stage kernel/webview foundation.
 
 ## 10. TrayIcon Adapter Native Projection
 
