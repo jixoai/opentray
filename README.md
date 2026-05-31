@@ -27,6 +27,32 @@ This repository uses `pnpm` workspaces and Lerna metadata.
 | `packages/linux-arm64`   | `@opentray/linux-arm64`   | Linux ARM64 broker binary package.                       |
 | `packages/linux-x64`     | `@opentray/linux-x64`     | Linux x64 broker binary package.                         |
 
+## Examples
+
+### TrayIcon runtime boundary
+
+The tray-icon backend now has two focused examples you can run directly:
+
+```bash
+cargo test -p opentray-backend-tray-icon sync_applies_compiled_projection_through_runtime
+cargo test -p opentray-backend-tray-icon default_runtime_is_explicitly_unbound
+```
+
+These cover the two key laws:
+
+- `sync_surface` compiles `SurfaceProjection` into a backend projection and applies it through an injected runtime.
+- The default runtime stays explicitly unbound until a native main-thread/event-loop implementation is added.
+
+### Verification commands
+
+Use these commands to validate the change set end to end:
+
+```bash
+pnpm run verify
+bun run openspec:vision -- validate implement-kernel-webview-foundation
+bun run openspec:vision -- check implement-kernel-webview-foundation
+```
+
 ## Workflow
 
 Use the project-local vision-driven OpenSpec workflow before implementation:
