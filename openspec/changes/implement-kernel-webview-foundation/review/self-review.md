@@ -3,7 +3,7 @@
 ## Review State
 
 - Change: implement-kernel-webview-foundation
-- Iteration: 3
+- Iteration: 4
 - Recurring issue counts: none
 - Exit-condition judgment: The first-stage kernel, TypeScript contracts, webview extension facade, backend adapter boundaries, tray-icon projection routing, runtime apply boundary, human-visible native tray example, reusable native tray runtime atom, native menu event ingress, broker-free TypeScript/WebView human examples, and a human-visible WebView smoke example are implemented and verified. Native WebView runtime behavior remains the next implementation layer, not completed work.
 - Next loop action: Ask for user acceptance of this first-stage foundation, then either archive or continue with native WebView/runtime transport work before archive.
@@ -46,9 +46,11 @@
   - `da94e2b feat: route native tray menu events`
   - `eacc3c1 feat: add typescript webview examples`
   - `a3829c5 feat: add visual webview example`
+  - `6d74b34 fix: stabilize visual webview example`
 - Command evidence:
   - `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1000 cargo run --example native_tray`
   - `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1000 cargo run --example visual_webview`
+  - `cargo run --example visual_webview` was manually observed by the user as a visible window, then stopped without panic after the tao event-loop fix.
   - `cargo run --example runtime_boundary`
   - `cargo run --example default_unbound`
   - `pnpm --filter opentray example:basic`
