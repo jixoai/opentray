@@ -41,6 +41,10 @@ Changesets must only bump peer dependents when their peer dependency range is ou
 
 `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The release workflow must run `pnpm run build` before `changeset publish`.
 
+## Version Commit Rule
+
+The GitHub organization does not allow Actions to create pull requests. The release workflow must not depend on changesets/action release-PR creation. When pending `.changeset/*.md` files exist, the workflow versions packages, commits the generated changes directly to `main`, and exits before publish. The follow-up `main` run publishes when no pending changeset files remain.
+
 ## Verification Before Claiming Release Ready
 
 ```bash
