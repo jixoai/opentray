@@ -3,6 +3,75 @@ export type SurfaceId = string;
 export type TrayId = string;
 export type MenuItemId = number;
 
+export const PROTOCOL_VERSION = 1;
+
+export interface BrokerEndpointIdentity {
+  packageVersion: string;
+  protocolVersion: number;
+}
+
+export interface BrokerEndpointIdentityOptions {
+  packageVersion: string;
+  protocolVersion?: number;
+}
+
+export const createBrokerEndpointIdentity = ({
+  packageVersion,
+  protocolVersion = PROTOCOL_VERSION,
+}: BrokerEndpointIdentityOptions): BrokerEndpointIdentity => {
+  assertEndpointComponent(packageVersion, "packageVersion");
+  if (!Number.isInteger(protocolVersion) || protocolVersion <= 0) {
+    throw new Error(`protocolVersion must be a positive integer: ${protocolVersion}`);
+  }
+
+  return {
+    packageVersion,
+    protocolVersion,
+  };
+};
+
+export const isSupportedProtocolVersion = (protocolVersion: number): boolean =>
+  protocolVersion === PROTOCOL_VERSION;
+
+export const formatBrokerEndpointName = (identity: BrokerEndpointIdentity): string => {
+  assertEndpointIdentity(identity);
+  return `opentray-${identity.packageVersion}-p${identity.protocolVersion}`;
+};
+
+export const formatBrokerStateRoot = (homeDir: string, identity: BrokerEndpointIdentity): string => {
+  assertEndpointIdentity(identity);
+  if (homeDir.length === 0) {
+    throw new Error("homeDir must not be empty");
+  }
+
+  const normalizedHome = homeDir.replace(/[\\/]+$/u, "");
+  return `${normalizedHome}/.opentray/${identity.packageVersion}`;
+};
+
+export const formatUnixSocketPath = (homeDir: string, identity: BrokerEndpointIdentity): string =>
+  `${formatBrokerStateRoot(homeDir, identity)}/opentray-p${identity.protocolVersion}.sock`;
+
+export const formatWindowsPipeName = (identity: BrokerEndpointIdentity): string =>
+  `\\\\.\\pipe\\${formatBrokerEndpointName(identity)}`;
+
+const endpointComponentPattern = /^[0-9A-Za-z._+-]+$/u;
+
+const assertEndpointIdentity = (identity: BrokerEndpointIdentity): void => {
+  assertEndpointComponent(identity.packageVersion, "packageVersion");
+  if (!Number.isInteger(identity.protocolVersion) || identity.protocolVersion <= 0) {
+    throw new Error(`protocolVersion must be a positive integer: ${identity.protocolVersion}`);
+  }
+};
+
+const assertEndpointComponent = (value: string, name: string): void => {
+  if (value.length === 0) {
+    throw new Error(`${name} must not be empty`);
+  }
+  if (!endpointComponentPattern.test(value)) {
+    throw new Error(`${name} contains invalid endpoint characters: ${value}`);
+  }
+};
+
 export interface SurfaceOptions {
   appId: string;
   title?: string;
@@ -98,7 +167,7 @@ export interface ExtensionEnvelope<TData = unknown> {
 }
 
 export type ClientFrame =
-  | { type: "init"; version: number }
+  | { type: "init"; protocolVersion: number; clientVersion: string }
   | ({ type: "create-surface" } & SurfaceOptions)
   | { type: "resolve-default-surface" }
   | { type: "create-tray"; surface: SurfaceRef; tray: TrayOptions }
@@ -112,7 +181,7 @@ export type ClientFrame =
   | { type: "exit" };
 
 export type ServerFrame =
-  | { type: "ready"; version: number }
+  | { type: "ready"; protocolVersion: number; brokerVersion: string }
   | { type: "surface-created"; surface: SurfaceRef }
   | { type: "default-surface"; surface: SurfaceRef }
   | { type: "tray-created"; surfaceId: SurfaceId; trayId: TrayId }
@@ -144,5 +213,31 @@ export const parseServerFrame = (line: string): ParseResult<ServerFrame> => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const isServerFrame = (value: unknown): value is ServerFrame =>
-  isRecord(value) && typeof value.type === "string";
+export const isServerFrame = (value: unknown): value is ServerFrame => {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    return false;
+  }
+
+  switch (value.type) {
+    case "ready":
+      return typeof value.protocolVersion === "number" && typeof value.brokerVersion === "string";
+    case "surface-created":
+      return isRecord(value.surface);
+    case "default-surface":
+      return isRecord(value.surface);
+    case "tray-created":
+      return typeof value.surfaceId === "string" && typeof value.trayId === "string";
+    case "event":
+      return isRecord(value.event);
+    case "ext-event":
+      return (
+        typeof value.surfaceId === "string" &&
+        typeof value.trayId === "string" &&
+        typeof value.ext === "string"
+      );
+    case "error":
+      return typeof value.message === "string";
+    default:
+      return false;
+  }
+};

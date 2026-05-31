@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createTrayHandle, type OpenTrayTransport } from "./index";
+import {
+  createBrokerEndpointIdentity,
+  createInitFrame,
+  createTrayHandle,
+  formatBrokerEndpointName,
+  PROTOCOL_VERSION,
+  type OpenTrayTransport,
+} from "./index";
 
 describe("opentray client", () => {
   it("routes extension commands through public protocol", async () => {
@@ -23,5 +30,19 @@ describe("opentray client", () => {
         data: { type: "show", width: 320, height: 240 },
       },
     ]);
+  });
+
+  it("creates explicit protocol handshake frames", () => {
+    expect(createInitFrame("0.1.0")).toEqual({
+      type: "init",
+      protocolVersion: PROTOCOL_VERSION,
+      clientVersion: "0.1.0",
+    });
+  });
+
+  it("exposes versioned broker endpoint identity helpers", () => {
+    const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
+
+    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1");
   });
 });

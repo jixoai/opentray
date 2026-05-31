@@ -1,4 +1,16 @@
-import type { ClientFrame, SurfaceOptions, SurfaceRef, TrayId, TrayOptions } from "@opentray/spec";
+import { PROTOCOL_VERSION, type ClientFrame, type SurfaceOptions, type SurfaceRef, type TrayId, type TrayOptions } from "@opentray/spec";
+
+export {
+  createBrokerEndpointIdentity,
+  formatBrokerEndpointName,
+  formatBrokerStateRoot,
+  formatUnixSocketPath,
+  formatWindowsPipeName,
+  isSupportedProtocolVersion,
+  PROTOCOL_VERSION,
+  type BrokerEndpointIdentity,
+  type BrokerEndpointIdentityOptions,
+} from "@opentray/spec";
 
 export interface OpenTrayTransport {
   send(frame: ClientFrame): Promise<void>;
@@ -15,6 +27,12 @@ export interface TrayHandle {
   commandExtension(ext: string, data: unknown): Promise<void>;
   destroy(): Promise<void>;
 }
+
+export const createInitFrame = (clientVersion: string): ClientFrame => ({
+  type: "init",
+  protocolVersion: PROTOCOL_VERSION,
+  clientVersion,
+});
 
 export const createClient = (transport: OpenTrayTransport) => ({
   async createSurface(options: SurfaceOptions): Promise<SurfaceHandle> {

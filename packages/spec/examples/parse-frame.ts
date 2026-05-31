@@ -1,8 +1,9 @@
-import { parseServerFrame, type ServerFrame } from "../src/index";
+import { parseServerFrame, PROTOCOL_VERSION, type ServerFrame } from "../src/index";
 
 const readyFrame = JSON.stringify({
   type: "ready",
-  version: 1,
+  protocolVersion: PROTOCOL_VERSION,
+  brokerVersion: "0.1.0",
 } satisfies ServerFrame);
 
 const parsedReady = parseServerFrame(readyFrame);

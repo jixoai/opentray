@@ -1,6 +1,6 @@
 import type { ClientFrame } from "@opentray/spec";
 
-import { createClient, type OpenTrayTransport } from "../src/index";
+import { createClient, createInitFrame, type OpenTrayTransport } from "../src/index";
 
 class RecordingTransport implements OpenTrayTransport {
   readonly frames: ClientFrame[] = [];
@@ -12,6 +12,8 @@ class RecordingTransport implements OpenTrayTransport {
 }
 
 const transport = new RecordingTransport();
+await transport.send(createInitFrame("0.1.0"));
+
 const client = createClient(transport);
 
 const surface = await client.createSurface({

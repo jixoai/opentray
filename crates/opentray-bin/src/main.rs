@@ -3,7 +3,8 @@ use opentray_spec::{ServerFrame, PROTOCOL_VERSION};
 fn main() {
     let _backend = default_backend_name();
     let ready = ServerFrame::Ready {
-        version: PROTOCOL_VERSION,
+        protocol_version: PROTOCOL_VERSION,
+        broker_version: env!("CARGO_PKG_VERSION").to_string(),
     };
     println!("{}", serde_json::to_string(&ready).expect("ready frame"));
 }
