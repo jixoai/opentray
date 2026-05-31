@@ -109,3 +109,10 @@
 - [x] 14.4 Add GUI-free tests for backend menu-event delegation.
 - [x] 14.5 Run runnable examples, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
 - [x] 14.6 Commit the native menu event ingress batch with matching task checkbox updates.
+
+## 15. Post-Native Runtime Self-Review Refresh
+
+- [ ] 15.1 Refresh Markdown self-review to include tray projection routing, runtime boundary, native tray example, reusable native runtime, and native menu ingress.
+- [ ] 15.2 Refresh HTML self-review evidence so it no longer reports completed native tray event ingress as missing.
+- [ ] 15.3 Run OpenSpec validate/check and whitespace checks for the refreshed review artifacts.
+- [ ] 15.4 Commit refreshed self-review artifacts with matching task checkbox updates.
