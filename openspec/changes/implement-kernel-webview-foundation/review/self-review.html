@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>implement-kernel-webview-foundation self review</title>
+    <style>
+      body {
+        color: #17202a;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.5;
+        margin: 2rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #ccd4dd;
+        padding: 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #eef3f7;
+      }
+      code {
+        background: #eef3f7;
+        padding: 0.1rem 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>implement-kernel-webview-foundation self review</h1>
+    <p>
+      The first-stage OpenTray foundation now has a Rust kernel, TypeScript
+      protocol/client contracts, a platform-neutral webview facade, and separate
+      backend adapter atoms for macOS/Windows tray-icon and Linux ksni.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Review axis</th>
+          <th>Evidence</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Kernel law</td>
+          <td>
+            <code>opentray-core</code> owns surface, tray, lease, projection,
+            backend contract, and extension registry behavior.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Extension orthogonality</td>
+          <td>
+            Webview commands flow as normal <code>ext-command</code> frames.
+            Core has no webview-specific handler branch.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Backend atom boundary</td>
+          <td>
+            <code>opentray-backend-tray-icon</code> and
+            <code>opentray-backend-ksni</code> implement the same
+            <code>SurfaceBackend</code> contract outside core.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Linux dependency law</td>
+          <td>
+            <code>backend_composition.rs</code> verifies Linux depends on
+            <code>opentray-backend-ksni</code> and not on the tray-icon backend.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Verification</td>
+          <td>
+            <code>pnpm run verify</code> passed after the backend boundary
+            commit, including OpenSpec workflow tests, Rust tests, TypeScript
+            typecheck/tests, and workspace package listing.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Known remaining work</td>
+          <td>
+            Real native tray event translation and native webview runtime
+            behavior are not implemented in this batch.
+          </td>
+          <td>Intentional next layer</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>
