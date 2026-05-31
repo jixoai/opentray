@@ -27,6 +27,6 @@
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md`.
-- [ ] 5.2 Generate `review/self-review.html`.
+- [x] 5.1 Generate `review/self-review.md`.
+- [x] 5.2 Generate `review/self-review.html`.
 - [ ] 5.3 Archive the completed change after verification.

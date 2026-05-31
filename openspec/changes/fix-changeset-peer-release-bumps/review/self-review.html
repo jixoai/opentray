@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>fix-changeset-peer-release-bumps self review</title>
+    <style>
+      body {
+        color: #17202a;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.5;
+        margin: 2rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #ccd4dd;
+        padding: 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #eef3f7;
+      }
+      code {
+        background: #eef3f7;
+        padding: 0.1rem 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>fix-changeset-peer-release-bumps self review</h1>
+    <p>
+      The first-stage release plan now contains only packages with real runtime
+      or API value. Roadmap placeholder extensions are no longer accidentally
+      pulled into a stable release by peer-dependent bump behavior.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Evidence</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Changesets release set</td>
+          <td>
+            <code>pnpm exec changeset status --verbose</code> lists
+            <code>opentray</code>, <code>@opentray/spec</code>, and
+            <code>@opentray/ext-webview</code> only.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Placeholder extension containment</td>
+          <td>
+            <code>@opentray/ext-badge</code> and
+            <code>@opentray/ext-island</code> are excluded because their
+            <code>opentray</code> peer range still accepts the planned version.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Publish artifacts</td>
+          <td>
+            <code>pnpm run build</code> and
+            <code>npm pack --dry-run --json ./packages/cli ./packages/spec ./packages/ext-webview</code>
+            passed.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Known external auth boundary</td>
+          <td>
+            Local npm trust inspection still fails with <code>E403</code> for
+            token auth and <code>EOTP</code> for ambient auth.
+          </td>
+          <td>External</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>
