@@ -76,9 +76,9 @@
 
 ## 11. TrayIcon Runtime Apply Boundary
 
-- [ ] 11.1 Introduce a `TrayIconRuntime` trait that applies compiled `TrayIconProjection` values without leaking GUI handles into core.
-- [ ] 11.2 Wire `TrayIconBackend` through an injected runtime atom instead of directly storing projection state as backend behavior.
-- [ ] 11.3 Add a recording runtime test proving `sync_surface` compiles and applies projection through the runtime boundary.
-- [ ] 11.4 Keep the default runtime explicitly non-native until a main-thread/event-loop implementation is added.
-- [ ] 11.5 Run `cargo test`, `pnpm run verify`, `bun run openspec:vision -- validate implement-kernel-webview-foundation`, and `git diff --check`.
-- [ ] 11.6 Commit the runtime boundary batch with matching task checkbox updates.
+- [x] 11.1 Introduce a `TrayIconRuntime` trait that applies compiled `TrayIconProjection` values without leaking GUI handles into core.
+- [x] 11.2 Wire `TrayIconBackend` through an injected runtime atom instead of directly storing projection state as backend behavior.
+- [x] 11.3 Add a recording runtime test proving `sync_surface` compiles and applies projection through the runtime boundary.
+- [x] 11.4 Keep the default runtime explicitly non-native until a main-thread/event-loop implementation is added.
+- [x] 11.5 Run `cargo test`, `pnpm run verify`, `bun run openspec:vision -- validate implement-kernel-webview-foundation`, and `git diff --check`.
+- [x] 11.6 Commit the runtime boundary batch with matching task checkbox updates.

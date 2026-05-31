@@ -1,15 +1,15 @@
 mod projection;
+mod runtime;
 
 pub use projection::*;
-
-use std::cell::RefCell;
+pub use runtime::*;
 
 use opentray_core::{BackendCapabilities, BackendError, SurfaceBackend, SurfaceProjection};
 use opentray_spec::{Rect, SurfaceId, TrayEvent};
 
 #[derive(Debug, Default)]
-pub struct TrayIconBackend {
-    projections: RefCell<Vec<TrayIconProjection>>,
+pub struct TrayIconBackend<R = UnboundTrayIconRuntime> {
+    runtime: R,
     _marker: std::marker::PhantomData<tray_icon::TrayIcon>,
 }
 
@@ -17,13 +17,18 @@ impl TrayIconBackend {
     pub fn new() -> Self {
         Self::default()
     }
+}
 
-    pub fn projections(&self) -> Vec<TrayIconProjection> {
-        self.projections.borrow().clone()
+impl<R: TrayIconRuntime> TrayIconBackend<R> {
+    pub fn with_runtime(runtime: R) -> Self {
+        Self {
+            runtime,
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
-impl SurfaceBackend for TrayIconBackend {
+impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
             rect: cfg!(not(target_os = "linux")),
@@ -32,30 +37,31 @@ impl SurfaceBackend for TrayIconBackend {
     }
 
     fn sync_surface(&self, projection: SurfaceProjection) -> Result<(), BackendError> {
-        self.projections
-            .borrow_mut()
-            .push(TrayIconProjection::from_surface_projection(&projection));
-        Ok(())
+        self.runtime
+            .apply_projection(TrayIconProjection::from_surface_projection(&projection))
     }
 
-    fn rect(&self, _surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
+    fn rect(&self, surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
         if !self.capabilities().rect {
             return Ok(None);
         }
-        Err(BackendError::Unsupported("tray_icon_rect_unbound"))
+        self.runtime.rect(surface_id)
     }
 
-    fn show_menu(&self, _surface_id: &SurfaceId) -> Result<(), BackendError> {
-        Err(BackendError::Unsupported("tray_icon_show_menu_unbound"))
+    fn show_menu(&self, surface_id: &SurfaceId) -> Result<(), BackendError> {
+        self.runtime.show_menu(surface_id)
     }
 
-    fn emit_event(&self, _event: TrayEvent) -> Result<(), BackendError> {
-        Ok(())
+    fn emit_event(&self, event: TrayEvent) -> Result<(), BackendError> {
+        self.runtime.emit_event(event)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use opentray_core::TrayProjection;
     use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef};
 
@@ -69,44 +75,81 @@ mod tests {
     }
 
     #[test]
-    fn sync_compiles_surface_projection_without_gui_loop() {
-        let backend = TrayIconBackend::new();
+    fn sync_applies_compiled_projection_through_runtime() {
+        let runtime = RecordingRuntime::default();
+        let calls = runtime.calls();
+        let backend = TrayIconBackend::with_runtime(runtime);
         backend
-            .sync_surface(SurfaceProjection {
-                surface: SurfaceRef {
-                    surface_id: "surface-1".to_string(),
-                    app_id: "host".to_string(),
-                },
-                title: Some("Host".to_string()),
-                tooltip: None,
-                icon: None,
-                trays: vec![TrayProjection {
-                    tray_id: "tray-1".to_string(),
-                    title: "Tray".to_string(),
-                    tooltip: None,
-                    icon: Icon::Rgba {
-                        data: vec![0, 0, 0, 0],
-                        width: 1,
-                        height: 1,
-                    },
-                    menu: Some(Menu {
-                        items: vec![MenuItem::Item {
-                            id: 7,
-                            title: "Open".to_string(),
-                            enabled: true,
-                            shortcut: None,
-                        }],
-                    }),
-                }],
-            })
-            .expect("projection compile");
+            .sync_surface(surface_projection())
+            .expect("projection apply");
 
-        let projection = backend.projections().pop().expect("projection");
+        let projection = calls.borrow().last().expect("projection").clone();
         assert_eq!(projection.surface_id, "surface-1");
         assert_eq!(projection.trays[0].menu.entries.len(), 1);
         assert!(projection
             .routes
             .menu_event("opentray:surface-1:tray-1:7")
             .is_some());
+    }
+
+    #[test]
+    fn default_runtime_is_explicitly_unbound() {
+        let backend = TrayIconBackend::new();
+        let error = backend
+            .sync_surface(surface_projection())
+            .expect_err("default runtime is not native");
+
+        assert!(matches!(
+            error,
+            BackendError::Unsupported("tray_icon_runtime_unbound")
+        ));
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingRuntime {
+        calls: Rc<RefCell<Vec<TrayIconProjection>>>,
+    }
+
+    impl RecordingRuntime {
+        fn calls(&self) -> Rc<RefCell<Vec<TrayIconProjection>>> {
+            self.calls.clone()
+        }
+    }
+
+    impl TrayIconRuntime for RecordingRuntime {
+        fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
+            self.calls.borrow_mut().push(projection);
+            Ok(())
+        }
+    }
+
+    fn surface_projection() -> SurfaceProjection {
+        SurfaceProjection {
+            surface: SurfaceRef {
+                surface_id: "surface-1".to_string(),
+                app_id: "host".to_string(),
+            },
+            title: Some("Host".to_string()),
+            tooltip: None,
+            icon: None,
+            trays: vec![TrayProjection {
+                tray_id: "tray-1".to_string(),
+                title: "Tray".to_string(),
+                tooltip: None,
+                icon: Icon::Rgba {
+                    data: vec![0, 0, 0, 0],
+                    width: 1,
+                    height: 1,
+                },
+                menu: Some(Menu {
+                    items: vec![MenuItem::Item {
+                        id: 7,
+                        title: "Open".to_string(),
+                        enabled: true,
+                        shortcut: None,
+                    }],
+                }),
+            }],
+        }
     }
 }
