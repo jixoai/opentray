@@ -2,8 +2,8 @@
 
 ## Current Round
 
-- Round: 1
-- Status: Ready for apply
+- Round: 2
+- Status: Ready for first-stage release hardening and skill codification
 - Previous plan backup: none
 
 ## Workflow Command Surface
@@ -25,6 +25,11 @@
 > 完成配置后，就可以配置 changesets ，然后 CI/CD 就可以实现 自动发布 release、自动发布 npm 包
 > > 我记得可以用 命令 `npm trust github $pkg --repo <your-repo-name> --workflow <your-workflow.yml> --yes` 我没记错吧
 
+## Round 2 User Input
+
+> 基本同意，完成第一阶段的所有开发工作。
+> skill请使用 $skill-creator 来编写，这里不是一个SKILL.md就够，每一个ext都有一篇独立的文章
+
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -36,6 +41,9 @@
 | 1 | User | 使用图片配置：GitHub Actions, org `jixoai`, repo `opentray`, workflow `release.yml`, environment `npm-release`, allow `npm publish` and `npm stage publish`. | Script defaults and CI workflow must match these exact claims. |
 | 1 | User | 配置 changesets，使 CI/CD 自动发布 release、自动发布 npm 包。 | Add changesets config, root scripts, and GitHub Actions release workflow. |
 | 1 | User | Asked whether `npm trust github $pkg --repo <repo> --workflow <workflow.yml> --yes` is remembered correctly. | Correct the syntax to current npm CLI: `--file`, not `--workflow`, plus allowed action flags. |
+| 2 | User | 基本同意，完成第一阶段的所有开发工作。 | Close the local first-stage release-readiness gaps instead of stopping at archived kernel/WebView code. |
+| 2 | User | `skill` must be written with `$skill-creator`. | Use the skill-creator initializer and validation workflow. |
+| 2 | User | 不是一个 `SKILL.md` 就够，每一个 `ext` 都有一篇独立的文章。 | Keep `SKILL.md` as navigation and split extension-specific knowledge into separate reference articles. |
 
 ### Evidence Read
 
@@ -108,6 +116,9 @@ The script discovers workspace package manifests, not a hard-coded package list.
 - [ ] 3. Implement trusted publish batch script.
 - [ ] 4. Configure changesets and release workflow.
 - [ ] 5. Verify scripts, OpenSpec change, and workflow syntax.
+- [ ] 6. Add release build gate before changesets publish so package `dist` files exist in CI.
+- [ ] 7. Add a first-stage changeset for the packages that gained publishable runtime/API code.
+- [ ] 8. Create `skills/opentray` with `$skill-creator`, keeping every extension in an independent reference article.
 
 ## Open Questions
 

@@ -39,6 +39,27 @@ The repository SHALL include changesets configuration and root scripts for creat
 - **THEN** it creates or updates a Version Packages PR if changesets exist
 - **AND** it runs the repository publish command when package versions are ready to publish.
 
+### Requirement: Release workflow SHALL build publishable artifacts before publish
+
+The release workflow SHALL run the repository build command before invoking changesets publish. Packages that publish `dist` files SHALL NOT rely on locally checked-in artifacts or stale package output.
+
+#### Scenario: TypeScript packages have dist before changesets publish
+
+- **GIVEN** `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish files from `dist`
+- **WHEN** the GitHub Actions release workflow reaches changesets publish
+- **THEN** `pnpm run build` has already completed successfully in that workflow run.
+
+### Requirement: Release-worthy development SHALL carry a changeset
+
+Release-worthy package API or runtime work SHALL include a changeset file before the work is considered ready for the release workflow.
+
+#### Scenario: First-stage package work has release notes
+
+- **GIVEN** the first-stage kernel/WebView foundation adds publishable TypeScript SDK and extension APIs
+- **WHEN** maintainers inspect `.changeset`
+- **THEN** a changeset exists for the affected npm packages
+- **AND** its summary explains the first-stage foundation at package level.
+
 ### Requirement: Release pipeline SHALL avoid long-lived npm write tokens
 
 The release workflow SHALL NOT require `NPM_TOKEN` for publishing. Publishing SHALL rely on npm trusted publishing and GitHub OIDC.

@@ -29,3 +29,26 @@
 - [x] 5.1 Generate `review/self-review.md`.
 - [x] 5.2 Generate `review/self-review.html`.
 - [x] 5.3 Run `bun run openspec:vision -- check configure-trusted-release-pipeline`.
+
+## 6. First-Stage Release Hardening
+
+- [ ] 6.1 Add a build gate before changesets publish in `.github/workflows/release.yml`.
+- [ ] 6.2 Add a first-stage changeset for `opentray`, `@opentray/spec`, and `@opentray/ext-webview`.
+- [ ] 6.3 Update README release instructions so local release validation includes build output.
+
+## 7. OpenTray Skill Codification
+
+- [ ] 7.1 Initialize `skills/opentray` with `$skill-creator`.
+- [ ] 7.2 Replace generated skill TODOs with concise navigation and laws.
+- [ ] 7.3 Add independent extension articles for `ext-webview`, `ext-badge`, and `ext-island`.
+- [ ] 7.4 Add supporting articles for kernel runtime, backend adapters, extension host, visual acceptance, and release operations.
+- [ ] 7.5 Run the skill validator.
+
+## 8. Final Verification
+
+- [ ] 8.1 Run `pnpm run build`.
+- [ ] 8.2 Run `pnpm run verify`.
+- [ ] 8.3 Run `openspec validate --all --strict`.
+- [ ] 8.4 Run `bun run openspec:vision -- validate configure-trusted-release-pipeline`.
+- [ ] 8.5 Run `bun run openspec:vision -- check configure-trusted-release-pipeline`.
+- [ ] 8.6 Run `git diff --check`.
