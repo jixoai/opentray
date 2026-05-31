@@ -25,6 +25,8 @@ The kernel SHALL define newline-delimited JSON protocol frames in `opentray-spec
 - **THEN** it rejects the connection with a structured protocol error
 - **AND** it does not create a lease for that connection.
 
+## ADDED Requirements
+
 ### Requirement: Broker endpoint identity SHALL include package and protocol versions
 
 The system SHALL derive local broker endpoint names from both the current package or binary version and the protocol version. Current-stage broker state SHALL be stored under `~/.opentray/<packageVersion>/`, and pipe or socket names SHALL carry the protocol version. Windows named pipes SHALL include both package version and protocol version in the named pipe string because named pipes do not live under the filesystem state root.
