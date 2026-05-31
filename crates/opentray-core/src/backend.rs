@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use opentray_spec::{Menu, Rect, SurfaceId, SurfaceRef, Tooltip, TrayEvent, TrayId};
+use opentray_spec::{Icon, Menu, Rect, SurfaceId, SurfaceRef, Tooltip, TrayEvent, TrayId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendCapabilities {
@@ -28,6 +28,8 @@ impl BackendCapabilities {
 pub struct TrayProjection {
     pub tray_id: TrayId,
     pub title: String,
+    pub tooltip: Option<Tooltip>,
+    pub icon: Icon,
     pub menu: Option<Menu>,
 }
 
@@ -36,6 +38,7 @@ pub struct SurfaceProjection {
     pub surface: SurfaceRef,
     pub title: Option<String>,
     pub tooltip: Option<Tooltip>,
+    pub icon: Option<Icon>,
     pub trays: Vec<TrayProjection>,
 }
 

@@ -1,0 +1,377 @@
+use std::collections::HashMap;
+
+use opentray_core::{SurfaceProjection, TrayProjection};
+use opentray_spec::{Icon, Menu, MenuItem, MenuItemId, SurfaceId, Tooltip, TrayEvent, TrayId};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayIconProjection {
+    pub surface_id: SurfaceId,
+    pub title: Option<String>,
+    pub tooltip: Option<Tooltip>,
+    pub icon: Option<TrayIconAsset>,
+    pub trays: Vec<TrayIconTrayProjection>,
+    pub routes: TrayIconRouteTable,
+}
+
+impl TrayIconProjection {
+    pub fn from_surface_projection(projection: &SurfaceProjection) -> Self {
+        let mut routes = TrayIconRouteTable::default();
+        let trays = projection
+            .trays
+            .iter()
+            .map(|tray| {
+                TrayIconTrayProjection::from_tray_projection(
+                    &projection.surface.surface_id,
+                    tray,
+                    &mut routes,
+                )
+            })
+            .collect();
+
+        Self {
+            surface_id: projection.surface.surface_id.clone(),
+            title: projection.title.clone(),
+            tooltip: projection.tooltip.clone(),
+            icon: projection.icon.as_ref().map(TrayIconAsset::from_icon),
+            trays,
+            routes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayIconTrayProjection {
+    pub tray_id: TrayId,
+    pub title: String,
+    pub tooltip: Option<Tooltip>,
+    pub icon: TrayIconAsset,
+    pub menu: TrayIconMenuProjection,
+}
+
+impl TrayIconTrayProjection {
+    fn from_tray_projection(
+        surface_id: &str,
+        tray: &TrayProjection,
+        routes: &mut TrayIconRouteTable,
+    ) -> Self {
+        Self {
+            tray_id: tray.tray_id.clone(),
+            title: tray.title.clone(),
+            tooltip: tray.tooltip.clone(),
+            icon: TrayIconAsset::from_icon(&tray.icon),
+            menu: TrayIconMenuProjection::from_menu(
+                surface_id,
+                &tray.tray_id,
+                tray.menu.as_ref(),
+                routes,
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayIconAsset {
+    Rgba {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    Encoded {
+        data: Vec<u8>,
+    },
+    File {
+        path: String,
+    },
+}
+
+impl TrayIconAsset {
+    fn from_icon(icon: &Icon) -> Self {
+        match icon {
+            Icon::Rgba {
+                data,
+                width,
+                height,
+            } => Self::Rgba {
+                data: data.clone(),
+                width: *width,
+                height: *height,
+            },
+            Icon::Encoded { data } => Self::Encoded { data: data.clone() },
+            Icon::File { path } => Self::File { path: path.clone() },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrayIconMenuProjection {
+    pub entries: Vec<TrayIconMenuEntry>,
+}
+
+impl TrayIconMenuProjection {
+    fn from_menu(
+        surface_id: &str,
+        tray_id: &str,
+        menu: Option<&Menu>,
+        routes: &mut TrayIconRouteTable,
+    ) -> Self {
+        Self {
+            entries: menu
+                .map(|menu| {
+                    menu.items
+                        .iter()
+                        .map(|item| menu_entry(surface_id, tray_id, item, routes))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayIconMenuEntry {
+    Item {
+        menu_id: String,
+        title: String,
+        enabled: bool,
+        shortcut: Option<String>,
+    },
+    Check {
+        menu_id: String,
+        title: String,
+        enabled: bool,
+        checked: bool,
+    },
+    Radio {
+        menu_id: String,
+        title: String,
+        enabled: bool,
+        checked: bool,
+        group: u32,
+    },
+    Separator,
+    Submenu {
+        title: String,
+        enabled: bool,
+        entries: Vec<TrayIconMenuEntry>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayIconMenuRoute {
+    pub surface_id: SurfaceId,
+    pub tray_id: TrayId,
+    pub item_id: MenuItemId,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrayIconRouteTable {
+    routes: HashMap<String, TrayIconMenuRoute>,
+}
+
+impl TrayIconRouteTable {
+    pub fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
+        self.routes.get(menu_id).map(|route| TrayEvent::MenuClick {
+            surface_id: route.surface_id.clone(),
+            tray_id: route.tray_id.clone(),
+            item_id: route.item_id,
+        })
+    }
+
+    fn insert(&mut self, surface_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
+        let menu_id = stable_menu_id(surface_id, tray_id, item_id);
+        self.routes.insert(
+            menu_id.clone(),
+            TrayIconMenuRoute {
+                surface_id: surface_id.to_string(),
+                tray_id: tray_id.to_string(),
+                item_id,
+            },
+        );
+        menu_id
+    }
+}
+
+fn menu_entry(
+    surface_id: &str,
+    tray_id: &str,
+    item: &MenuItem,
+    routes: &mut TrayIconRouteTable,
+) -> TrayIconMenuEntry {
+    match item {
+        MenuItem::Item {
+            id,
+            title,
+            enabled,
+            shortcut,
+        } => TrayIconMenuEntry::Item {
+            menu_id: routes.insert(surface_id, tray_id, *id),
+            title: title.clone(),
+            enabled: *enabled,
+            shortcut: shortcut.clone(),
+        },
+        MenuItem::Check {
+            id,
+            title,
+            enabled,
+            checked,
+        } => TrayIconMenuEntry::Check {
+            menu_id: routes.insert(surface_id, tray_id, *id),
+            title: title.clone(),
+            enabled: *enabled,
+            checked: *checked,
+        },
+        MenuItem::Radio {
+            id,
+            title,
+            enabled,
+            checked,
+            group,
+        } => TrayIconMenuEntry::Radio {
+            menu_id: routes.insert(surface_id, tray_id, *id),
+            title: title.clone(),
+            enabled: *enabled,
+            checked: *checked,
+            group: *group,
+        },
+        MenuItem::Separator => TrayIconMenuEntry::Separator,
+        MenuItem::Submenu {
+            title,
+            enabled,
+            items,
+        } => TrayIconMenuEntry::Submenu {
+            title: title.clone(),
+            enabled: *enabled,
+            entries: items
+                .iter()
+                .map(|item| menu_entry(surface_id, tray_id, item, routes))
+                .collect(),
+        },
+    }
+}
+
+fn stable_menu_id(surface_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
+    format!(
+        "opentray:{}:{}:{}",
+        encode_component(surface_id),
+        encode_component(tray_id),
+        item_id
+    )
+}
+
+fn encode_component(input: &str) -> String {
+    input
+        .replace('%', "%25")
+        .replace(':', "%3A")
+        .replace('/', "%2F")
+}
+
+#[cfg(test)]
+mod tests {
+    use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef};
+
+    use super::*;
+
+    fn icon() -> Icon {
+        Icon::Rgba {
+            data: vec![0, 0, 0, 0],
+            width: 1,
+            height: 1,
+        }
+    }
+
+    #[test]
+    fn menu_ids_preserve_full_route_context() {
+        let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
+            surface: SurfaceRef {
+                surface_id: "surface:1".to_string(),
+                app_id: "host".to_string(),
+            },
+            title: Some("Host".to_string()),
+            tooltip: None,
+            icon: None,
+            trays: vec![
+                TrayProjection {
+                    tray_id: "tray/a".to_string(),
+                    title: "A".to_string(),
+                    tooltip: None,
+                    icon: icon(),
+                    menu: Some(menu(1)),
+                },
+                TrayProjection {
+                    tray_id: "tray/b".to_string(),
+                    title: "B".to_string(),
+                    tooltip: None,
+                    icon: icon(),
+                    menu: Some(menu(1)),
+                },
+            ],
+        });
+
+        let left = first_menu_id(&projection.trays[0]);
+        let right = first_menu_id(&projection.trays[1]);
+
+        assert_ne!(left, right);
+        assert_eq!(
+            projection.routes.menu_event(&left),
+            Some(TrayEvent::MenuClick {
+                surface_id: "surface:1".to_string(),
+                tray_id: "tray/a".to_string(),
+                item_id: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn submenu_routes_nested_items() {
+        let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
+            surface: SurfaceRef {
+                surface_id: "surface-1".to_string(),
+                app_id: "host".to_string(),
+            },
+            title: None,
+            tooltip: None,
+            icon: None,
+            trays: vec![TrayProjection {
+                tray_id: "tray-1".to_string(),
+                title: "Tray".to_string(),
+                tooltip: None,
+                icon: icon(),
+                menu: Some(Menu {
+                    items: vec![MenuItem::Submenu {
+                        title: "More".to_string(),
+                        enabled: true,
+                        items: vec![MenuItem::Check {
+                            id: 9,
+                            title: "Enabled".to_string(),
+                            enabled: true,
+                            checked: true,
+                        }],
+                    }],
+                }),
+            }],
+        });
+
+        assert!(projection
+            .routes
+            .menu_event("opentray:surface-1:tray-1:9")
+            .is_some());
+    }
+
+    fn menu(id: MenuItemId) -> Menu {
+        Menu {
+            items: vec![MenuItem::Item {
+                id,
+                title: "Open".to_string(),
+                enabled: true,
+                shortcut: None,
+            }],
+        }
+    }
+
+    fn first_menu_id(tray: &TrayIconTrayProjection) -> String {
+        match &tray.menu.entries[0] {
+            TrayIconMenuEntry::Item { menu_id, .. } => menu_id.clone(),
+            entry => panic!("unexpected menu entry: {entry:?}"),
+        }
+    }
+}

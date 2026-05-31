@@ -215,6 +215,8 @@ impl<B: SurfaceBackend> Kernel<B> {
                     .clone()
                     .or_else(|| tray.options.app_id.clone())
                     .unwrap_or_else(|| tray.tray_id.clone()),
+                tooltip: tray.options.tooltip.clone(),
+                icon: tray.options.icon.clone(),
                 menu: tray.options.menu.clone(),
             })
             .collect();
@@ -223,6 +225,7 @@ impl<B: SurfaceBackend> Kernel<B> {
             surface: surface.surface.clone(),
             title: surface.options.title.clone(),
             tooltip: None,
+            icon: surface.options.icon.clone(),
             trays,
         })
     }

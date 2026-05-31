@@ -67,9 +67,9 @@
 
 ## 10. TrayIcon Adapter Native Projection
 
-- [ ] 10.1 Add a pure tray-icon projection model derived from `SurfaceProjection` without starting an OS GUI event loop.
-- [ ] 10.2 Map OpenTray menu items into stable tray-icon menu ids that preserve `(surfaceId, trayId, itemId)` routing context.
-- [ ] 10.3 Translate tray-icon/menu-originated ids back into OpenTray `TrayEvent` values through a tested routing table.
-- [ ] 10.4 Keep adapter tests GUI-free and avoid importing `tray-icon` into `opentray-core`.
-- [ ] 10.5 Run `cargo test`, `pnpm run verify`, `bun run openspec:vision -- validate implement-kernel-webview-foundation`, and `git diff --check`.
-- [ ] 10.6 Commit the tray-icon adapter projection batch with matching task checkbox updates.
+- [x] 10.1 Add a pure tray-icon projection model derived from `SurfaceProjection` without starting an OS GUI event loop.
+- [x] 10.2 Map OpenTray menu items into stable tray-icon menu ids that preserve `(surfaceId, trayId, itemId)` routing context.
+- [x] 10.3 Translate tray-icon/menu-originated ids back into OpenTray `TrayEvent` values through a tested routing table.
+- [x] 10.4 Keep adapter tests GUI-free and avoid importing `tray-icon` into `opentray-core`.
+- [x] 10.5 Run `cargo test`, `pnpm run verify`, `bun run openspec:vision -- validate implement-kernel-webview-foundation`, and `git diff --check`.
+- [x] 10.6 Commit the tray-icon adapter projection batch with matching task checkbox updates.
