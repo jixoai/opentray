@@ -6,11 +6,10 @@ mod visual {
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
     use opentray_core::SurfaceBackend;
-    use winit::application::ApplicationHandler;
-    use winit::dpi::LogicalSize;
-    use winit::event::WindowEvent;
-    use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-    use winit::window::{Window, WindowId};
+    use tao::dpi::LogicalSize;
+    use tao::event::{Event, StartCause, WindowEvent};
+    use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopWindowTarget};
+    use tao::window::{Window, WindowBuilder};
     use wry::{WebView, WebViewBuilder};
 
     use crate::common;
@@ -25,8 +24,7 @@ mod visual {
     }
 
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-        let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
-        event_loop.set_control_flow(ControlFlow::Wait);
+        let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
 
         let proxy = event_loop.create_proxy();
         tray_icon::menu::MenuEvent::set_event_handler(Some(move |event| {
@@ -47,9 +45,44 @@ mod visual {
             window: None,
             created: false,
         };
-        event_loop.run_app(&mut app)?;
 
-        Ok(())
+        event_loop.run(move |event, target, control_flow| {
+            *control_flow = ControlFlow::Wait;
+
+            match event {
+                Event::NewEvents(StartCause::Init) if !app.created => {
+                    if let Err(error) = app.create_visual_surface(target) {
+                        eprintln!("failed to create visual webview example: {error}");
+                        *control_flow = ControlFlow::Exit;
+                    }
+                }
+                Event::UserEvent(UserEvent::Menu(event)) => {
+                    let menu_id = event.id.0;
+                    println!("menu event: {menu_id}");
+                    if let Some(event) = app.backend.menu_event(&menu_id) {
+                        println!("opentray event: {event:?}");
+                    }
+
+                    match menu_id.as_str() {
+                        OPEN_MENU_ID => app.focus_window(),
+                        QUIT_MENU_ID => *control_flow = ControlFlow::Exit,
+                        _ => {}
+                    }
+                }
+                Event::UserEvent(UserEvent::Exit) => {
+                    println!("auto exit requested");
+                    *control_flow = ControlFlow::Exit;
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => {
+                    println!("visual webview window close requested");
+                    *control_flow = ControlFlow::Exit;
+                }
+                _ => {}
+            }
+        });
     }
 
     struct VisualWebviewApp {
@@ -62,16 +95,15 @@ mod visual {
     impl VisualWebviewApp {
         fn create_visual_surface(
             &mut self,
-            event_loop: &ActiveEventLoop,
+            target: &EventLoopWindowTarget<UserEvent>,
         ) -> Result<(), Box<dyn std::error::Error>> {
             self.backend.sync_surface(common::surface_projection())?;
 
-            let window = event_loop.create_window(
-                Window::default_attributes()
-                    .with_title("OpenTray Visual WebView Example")
-                    .with_inner_size(LogicalSize::new(520.0, 380.0))
-                    .with_visible(true),
-            )?;
+            let window = WindowBuilder::new()
+                .with_title("OpenTray Visual WebView Example")
+                .with_inner_size(LogicalSize::new(520.0, 380.0))
+                .with_visible(true)
+                .build(target)?;
             let webview = WebViewBuilder::new()
                 .with_html(visual_html())
                 .build(&window)?;
@@ -82,66 +114,15 @@ mod visual {
 
             println!("visual webview created");
             println!("you should see a native window with OpenTray WebView content");
-            println!(
-                "use the tray menu \"Open Panel\" to show it again, or \"Quit Example\" to exit"
-            );
+            println!("use the tray menu \"Open Panel\" to focus it, or \"Quit Example\" to exit");
             Ok(())
         }
 
-        fn show_window(&self) {
+        fn focus_window(&self) {
             if let Some(window) = &self.window {
                 window.set_visible(true);
-                window.focus_window();
-                println!("visual webview window shown");
-            }
-        }
-    }
-
-    impl ApplicationHandler<UserEvent> for VisualWebviewApp {
-        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-            if self.created {
-                return;
-            }
-
-            if let Err(error) = self.create_visual_surface(event_loop) {
-                eprintln!("failed to create visual webview example: {error}");
-                event_loop.exit();
-            }
-        }
-
-        fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-            match event {
-                UserEvent::Menu(event) => {
-                    let menu_id = event.id.0;
-                    println!("menu event: {menu_id}");
-                    if let Some(event) = self.backend.menu_event(&menu_id) {
-                        println!("opentray event: {event:?}");
-                    }
-
-                    match menu_id.as_str() {
-                        OPEN_MENU_ID => self.show_window(),
-                        QUIT_MENU_ID => event_loop.exit(),
-                        _ => {}
-                    }
-                }
-                UserEvent::Exit => {
-                    println!("auto exit requested");
-                    event_loop.exit();
-                }
-            }
-        }
-
-        fn window_event(
-            &mut self,
-            _event_loop: &ActiveEventLoop,
-            _window_id: WindowId,
-            event: WindowEvent,
-        ) {
-            if matches!(event, WindowEvent::CloseRequested) {
-                if let Some(window) = &self.window {
-                    window.set_visible(false);
-                    println!("visual webview window hidden; use tray menu to show it again");
-                }
+                window.set_focus();
+                println!("visual webview window focused");
             }
         }
     }

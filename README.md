@@ -49,7 +49,7 @@ Run the visual WebView example when you want to see a real native window rendere
 cargo run --example visual_webview
 ```
 
-Use the tray menu `Open Panel` to show the window again, and `Quit Example` to exit. The same auto-exit smoke mode is available:
+Use the tray menu `Open Panel` to focus the window, and `Quit Example` or the window close button to exit. The same auto-exit smoke mode is available:
 
 ```bash
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 cargo run --example visual_webview
