@@ -10,7 +10,7 @@
 - [x] 2.2 Scenario: Given two trays share a menu item id When an event arrives Then routing uses `(leaseId, surfaceId, trayId, itemId)`.
 - [x] 2.3 Scenario: Given a non-owner tray mounts to a surface When projection is rebuilt Then it remains isolated by default.
 - [x] 2.4 Scenario: Given a fake backend is injected When surfaces/trays change Then kernel tests observe backend projections without OS GUI dependencies.
-- [ ] 2.5 Scenario: Given the Linux backend target is inspected When dependency metadata is checked Then GTK/libappindicator `tray-icon` features are not required by default.
+- [x] 2.5 Scenario: Given the Linux backend target is inspected When dependency metadata is checked Then GTK/libappindicator `tray-icon` features are not required by default.
 - [x] 2.6 Scenario: Given a webview command is sent When extension dispatch runs Then core routes through the extension registry without `ext == "webview"` special cases.
 - [x] 2.7 Scenario: Given rect capability is unavailable When webview show is requested Then fallback positioning is explicit.
 - [x] 2.8 Confirm each task checkbox will be updated only by the agent that completed and verified that task in the current working context.
@@ -31,10 +31,10 @@
 
 ## 5. Backend Adapter Foundation
 
-- [ ] 5.1 Add macOS/Windows `tray-icon` backend crate or module boundary behind `SurfaceBackend`.
-- [ ] 5.2 Add Linux `ksni` backend crate or module boundary behind `SurfaceBackend`.
+- [x] 5.1 Add macOS/Windows `tray-icon` backend crate or module boundary behind `SurfaceBackend`.
+- [x] 5.2 Add Linux `ksni` backend crate or module boundary behind `SurfaceBackend`.
 - [x] 5.3 Ensure default workspace checks do not require running a GUI event loop.
-- [ ] 5.4 Add dependency or metadata checks proving Linux default backend does not depend on `tray-icon` GTK/libappindicator features.
+- [x] 5.4 Add dependency or metadata checks proving Linux default backend does not depend on `tray-icon` GTK/libappindicator features.
 
 ## 6. TypeScript Client And Spec Foundation
 

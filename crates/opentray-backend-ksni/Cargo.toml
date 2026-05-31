@@ -1,0 +1,13 @@
+[package]
+name = "opentray-backend-ksni"
+description = "OpenTray Linux backend atom over freedesktop StatusNotifierItem."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+ksni.workspace = true
+opentray-core.workspace = true
+opentray-spec.workspace = true

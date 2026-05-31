@@ -1,0 +1,13 @@
+[package]
+name = "opentray-backend-tray-icon"
+description = "OpenTray macOS and Windows backend atom over tauri-apps tray-icon."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+opentray-core.workspace = true
+opentray-spec.workspace = true
+tray-icon.workspace = true

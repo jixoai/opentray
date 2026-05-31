@@ -39,7 +39,7 @@ pub struct SurfaceProjection {
     pub trays: Vec<TrayProjection>,
 }
 
-pub trait SurfaceBackend: Send + Sync {
+pub trait SurfaceBackend {
     fn capabilities(&self) -> BackendCapabilities;
     fn sync_surface(&self, projection: SurfaceProjection) -> Result<(), BackendError>;
     fn rect(&self, surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError>;
