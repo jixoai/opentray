@@ -116,3 +116,13 @@
 - [x] 15.2 Refresh HTML self-review evidence so it no longer reports completed native tray event ingress as missing.
 - [x] 15.3 Run OpenSpec validate/check and whitespace checks for the refreshed review artifacts.
 - [x] 15.4 Commit refreshed self-review artifacts with matching task checkbox updates.
+
+## 16. TypeScript And WebView Human Examples
+
+- [ ] 16.1 Add a runnable TypeScript client example that creates a surface, creates a tray, and prints the emitted protocol frames without requiring a native broker.
+- [ ] 16.2 Add a runnable WebView extension example that sends show/navigate/message/hide commands through the normal extension command path.
+- [ ] 16.3 Add a runnable protocol parsing example that demonstrates valid server frame parsing and malformed frame failure behavior.
+- [ ] 16.4 Update package and root README files so human verification uses package example commands, not test commands.
+- [ ] 16.5 Ensure TypeScript examples are included in typechecking or an equivalent verification gate.
+- [ ] 16.6 Run the package example commands, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
+- [ ] 16.7 Commit the TypeScript/WebView examples batch with matching task checkbox updates.
