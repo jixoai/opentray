@@ -34,8 +34,9 @@
     <h1>implement-kernel-webview-foundation self review</h1>
     <p>
       The first-stage OpenTray foundation now has a Rust kernel, TypeScript
-      protocol/client contracts, a platform-neutral webview facade, and separate
-      backend adapter atoms for macOS/Windows tray-icon and Linux ksni.
+      protocol/client contracts, a platform-neutral webview facade, backend
+      adapter atoms, a visible tray example, a reusable tray-icon native runtime
+      atom, and native menu event ingress back to OpenTray events.
     </p>
     <table>
       <thead>
@@ -50,7 +51,7 @@
           <td>Kernel law</td>
           <td>
             <code>opentray-core</code> owns surface, tray, lease, projection,
-            backend contract, and extension registry behavior.
+            backend contract, event routing, and extension registry behavior.
           </td>
           <td>Pass</td>
         </tr>
@@ -72,27 +73,36 @@
           <td>Pass</td>
         </tr>
         <tr>
-          <td>Linux dependency law</td>
+          <td>Tray native runtime law</td>
           <td>
-            <code>backend_composition.rs</code> verifies Linux depends on
-            <code>opentray-backend-ksni</code> and not on the tray-icon backend.
+            <code>NativeTrayIconRuntime</code> owns native tray handles and
+            route tables, while event-loop ownership stays outside the backend.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Human examples</td>
+          <td>
+            <code>cargo run --example native_tray</code> creates a visible tray
+            icon; <code>runtime_boundary</code> and
+            <code>default_unbound</code> remain GUI-free examples.
           </td>
           <td>Pass</td>
         </tr>
         <tr>
           <td>Verification</td>
           <td>
-            <code>pnpm run verify</code> passed after the backend boundary
-            commit, including OpenSpec workflow tests, Rust tests, TypeScript
-            typecheck/tests, and workspace package listing.
+            <code>pnpm run verify</code>, OpenSpec validate/check, Rust tests,
+            TypeScript tests, and runnable examples passed after native menu
+            ingress was added.
           </td>
           <td>Pass</td>
         </tr>
         <tr>
           <td>Known remaining work</td>
           <td>
-            Real native tray event translation and native webview runtime
-            behavior are not implemented in this batch.
+            Native WebView runtime behavior and event-loop queue orchestration
+            are not implemented in this batch.
           </td>
           <td>Intentional next layer</td>
         </tr>
