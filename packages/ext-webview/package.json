@@ -15,6 +15,7 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",
+    "example:webview": "bun run examples/webview-command.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

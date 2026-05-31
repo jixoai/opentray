@@ -15,6 +15,7 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",
+    "example:basic": "bun run examples/basic-surface.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

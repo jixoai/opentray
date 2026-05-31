@@ -56,6 +56,26 @@ These cover the two key laws:
 - `runtime_boundary` compiles `SurfaceProjection` into a backend projection and applies it through an injected runtime.
 - The default runtime stays explicitly unbound until a native main-thread/event-loop implementation is added.
 
+### TypeScript client and extension examples
+
+Run the protocol-only TypeScript client example when you want to inspect the SDK frames without starting a broker:
+
+```bash
+pnpm --filter opentray example:basic
+```
+
+Run the WebView extension facade example to confirm WebView is emitted as normal extension traffic:
+
+```bash
+pnpm --filter @opentray/ext-webview example:webview
+```
+
+Run the protocol parser example to inspect valid frame parsing and malformed frame rejection:
+
+```bash
+pnpm --filter @opentray/spec example:parse
+```
+
 ### Verification commands
 
 Use these commands to validate the change set end to end:

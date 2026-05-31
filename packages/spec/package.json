@@ -15,6 +15,7 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",
+    "example:parse": "bun run examples/parse-frame.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

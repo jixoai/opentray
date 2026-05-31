@@ -119,10 +119,10 @@
 
 ## 16. TypeScript And WebView Human Examples
 
-- [ ] 16.1 Add a runnable TypeScript client example that creates a surface, creates a tray, and prints the emitted protocol frames without requiring a native broker.
-- [ ] 16.2 Add a runnable WebView extension example that sends show/navigate/message/hide commands through the normal extension command path.
-- [ ] 16.3 Add a runnable protocol parsing example that demonstrates valid server frame parsing and malformed frame failure behavior.
-- [ ] 16.4 Update package and root README files so human verification uses package example commands, not test commands.
-- [ ] 16.5 Ensure TypeScript examples are included in typechecking or an equivalent verification gate.
-- [ ] 16.6 Run the package example commands, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
-- [ ] 16.7 Commit the TypeScript/WebView examples batch with matching task checkbox updates.
+- [x] 16.1 Add a runnable TypeScript client example that creates a surface, creates a tray, and prints the emitted protocol frames without requiring a native broker.
+- [x] 16.2 Add a runnable WebView extension example that sends show/navigate/message/hide commands through the normal extension command path.
+- [x] 16.3 Add a runnable protocol parsing example that demonstrates valid server frame parsing and malformed frame failure behavior.
+- [x] 16.4 Update package and root README files so human verification uses package example commands, not test commands.
+- [x] 16.5 Ensure TypeScript examples are included in typechecking or an equivalent verification gate.
+- [x] 16.6 Run the package example commands, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
+- [x] 16.7 Commit the TypeScript/WebView examples batch with matching task checkbox updates.

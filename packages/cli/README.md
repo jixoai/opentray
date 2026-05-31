@@ -16,3 +16,11 @@ pnpm add opentray
 - Resolve per-platform optional binary packages.
 
 `packages/cli` is the only unscoped npm package in this monorepo.
+
+## Example
+
+Run a protocol-only example that creates a surface, creates a tray, dispatches an extension command, and prints each client frame:
+
+```bash
+pnpm --filter opentray example:basic
+```
