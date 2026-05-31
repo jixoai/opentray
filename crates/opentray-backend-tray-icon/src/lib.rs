@@ -1,7 +1,9 @@
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod native;
 mod projection;
 mod runtime;
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use native::*;
 pub use projection::*;
 pub use runtime::*;
@@ -12,7 +14,6 @@ use opentray_spec::{Rect, SurfaceId, TrayEvent};
 #[derive(Debug, Default)]
 pub struct TrayIconBackend<R = UnboundTrayIconRuntime> {
     runtime: R,
-    _marker: std::marker::PhantomData<tray_icon::TrayIcon>,
 }
 
 impl TrayIconBackend {
@@ -23,10 +24,7 @@ impl TrayIconBackend {
 
 impl<R: TrayIconRuntime> TrayIconBackend<R> {
     pub fn with_runtime(runtime: R) -> Self {
-        Self {
-            runtime,
-            _marker: std::marker::PhantomData,
-        }
+        Self { runtime }
     }
 
     pub fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {

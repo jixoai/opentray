@@ -1,3 +1,4 @@
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod common;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
