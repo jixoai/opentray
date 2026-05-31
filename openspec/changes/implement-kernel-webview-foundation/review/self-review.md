@@ -5,7 +5,7 @@
 - Change: implement-kernel-webview-foundation
 - Iteration: 3
 - Recurring issue counts: none
-- Exit-condition judgment: The first-stage kernel, TypeScript contracts, webview extension facade, backend adapter boundaries, tray-icon projection routing, runtime apply boundary, human-visible native tray example, reusable native tray runtime atom, native menu event ingress, and broker-free TypeScript/WebView human examples are implemented and verified. Native WebView runtime behavior remains the next implementation layer, not completed work.
+- Exit-condition judgment: The first-stage kernel, TypeScript contracts, webview extension facade, backend adapter boundaries, tray-icon projection routing, runtime apply boundary, human-visible native tray example, reusable native tray runtime atom, native menu event ingress, broker-free TypeScript/WebView human examples, and a human-visible WebView smoke example are implemented and verified. Native WebView runtime behavior remains the next implementation layer, not completed work.
 - Next loop action: Ask for user acceptance of this first-stage foundation, then either archive or continue with native WebView/runtime transport work before archive.
 
 ## Intent Alignment
@@ -17,8 +17,8 @@
 | Keep Linux default off `tray-icon` GTK/libappindicator path | `opentray-bin` target dependency metadata uses `opentray-backend-ksni` for Linux and `opentray-backend-tray-icon` only for macOS/Windows. | Met |
 | Make webview an extension atom | `@opentray/ext-webview` depends only on `opentray` and `@opentray/spec`; Rust core dispatches arbitrary extension names through `ExtensionRegistry`. | Met |
 | Preserve extensibility architecture | Core owns identity, lease, routing, projection, and extension registry; backends, runtime atoms, and extensions are trait/contract atoms. | Met |
-| Provide human-verifiable examples | `cargo run --example native_tray` creates a real system tray icon; `runtime_boundary` and `default_unbound` remain GUI-free examples; package examples show TypeScript client frames, WebView extension frames, and protocol parse behavior. | Met |
-| Keep verification deterministic | `FakeBackend`, backend contract tests, manifest composition tests, GUI-free runtime ingress tests, and TypeScript example typechecks run through `pnpm run verify`; native example has `OPENTRAY_EXAMPLE_EXIT_AFTER_MS` for smoke checks. | Met |
+| Provide human-verifiable examples | `cargo run --example native_tray` creates a real system tray icon; `cargo run --example visual_webview` opens a real WebView window; `runtime_boundary` and `default_unbound` remain GUI-free examples; package examples show TypeScript client frames, WebView extension frames, and protocol parse behavior. | Met |
+| Keep verification deterministic | `FakeBackend`, backend contract tests, manifest composition tests, GUI-free runtime ingress tests, TypeScript example typechecks, and the visual WebView smoke run through `pnpm run verify`; native examples have `OPENTRAY_EXAMPLE_EXIT_AFTER_MS` for smoke checks. | Met |
 
 ## Deviations From Intent
 
@@ -45,8 +45,10 @@
   - `5d71b34 feat: add native tray runtime atom`
   - `da94e2b feat: route native tray menu events`
   - `eacc3c1 feat: add typescript webview examples`
+  - `a3829c5 feat: add visual webview example`
 - Command evidence:
   - `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1000 cargo run --example native_tray`
+  - `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1000 cargo run --example visual_webview`
   - `cargo run --example runtime_boundary`
   - `cargo run --example default_unbound`
   - `pnpm --filter opentray example:basic`
