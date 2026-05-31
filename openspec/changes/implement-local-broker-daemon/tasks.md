@@ -29,6 +29,6 @@
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md` comparing implementation against `plans/plan.md` and specs.
-- [ ] 5.2 Generate `review/self-review.html` as structured evidence.
-- [ ] 5.3 Run `bun run openspec:vision -- check implement-local-broker-daemon`.
+- [x] 5.1 Generate `review/self-review.md` comparing implementation against `plans/plan.md` and specs.
+- [x] 5.2 Generate `review/self-review.html` as structured evidence.
+- [x] 5.3 Run `bun run openspec:vision -- check implement-local-broker-daemon`.

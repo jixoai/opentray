@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenTray Local Broker Daemon Review</title>
+    <style>
+      body {
+        background: #eef3ed;
+        color: #172018;
+        font: 16px/1.5 ui-serif, Georgia, serif;
+        margin: 0;
+        padding: 48px;
+      }
+      main {
+        background: #fbfff8;
+        border: 1px solid #c6d5c0;
+        box-shadow: 0 24px 72px rgba(31, 54, 35, 0.14);
+        margin: 0 auto;
+        max-width: 960px;
+        padding: 40px;
+      }
+      code {
+        background: #dfead9;
+        border-radius: 4px;
+        padding: 2px 6px;
+      }
+      .grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      }
+      .card {
+        background: #f3f9ef;
+        border-left: 4px solid #527d3f;
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Local Broker Daemon</h1>
+      <p>
+        The OpenTray package now exposes an explicit daemon lifecycle command
+        surface with version-scoped runtime state.
+      </p>
+      <div class="grid">
+        <section class="card">
+          <h2>Command</h2>
+          <p><code>opentray daemon start|stop|restart</code></p>
+          <p>The corrected spelling is canonical.</p>
+        </section>
+        <section class="card">
+          <h2>Runtime</h2>
+          <p><code>~/.opentray/&lt;version&gt;/runtime/</code></p>
+          <p>Pid, lock, and ready metadata stay inside the current version.</p>
+        </section>
+        <section class="card">
+          <h2>Endpoint</h2>
+          <p><code>opentray-p1.sock</code></p>
+          <p>The bound endpoint reuses package/protocol version identity.</p>
+        </section>
+      </div>
+      <h2>Verification</h2>
+      <p>
+        Typecheck, tests, build, full verify, OpenSpec validation, changeset
+        status, whitespace checks, and real dist CLI smoke passed.
+      </p>
+    </main>
+  </body>
+</html>
