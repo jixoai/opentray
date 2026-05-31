@@ -1,15 +1,15 @@
 mod common;
-mod native_runtime;
 
 use std::time::Duration;
 
-use native_runtime::{NativeTrayRuntime, QUIT_MENU_ID};
-use opentray_backend_tray_icon::TrayIconBackend;
+use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
 use opentray_core::SurfaceBackend;
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::WindowId;
+
+const QUIT_MENU_ID: &str = "opentray:human-check:status:99";
 
 #[derive(Debug, Clone)]
 enum UserEvent {
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut app = NativeTrayApp {
-        backend: TrayIconBackend::with_runtime(NativeTrayRuntime::default()),
+        backend: TrayIconBackend::with_runtime(NativeTrayIconRuntime::default()),
         created: false,
     };
     event_loop.run_app(&mut app)?;
@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 struct NativeTrayApp {
-    backend: TrayIconBackend<NativeTrayRuntime>,
+    backend: TrayIconBackend<NativeTrayIconRuntime>,
     created: bool,
 }
 

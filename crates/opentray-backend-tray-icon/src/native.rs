@@ -1,22 +1,39 @@
 use std::cell::RefCell;
 
-use opentray_backend_tray_icon::{
-    TrayIconAsset, TrayIconMenuEntry, TrayIconMenuProjection, TrayIconProjection, TrayIconRuntime,
-};
 use opentray_core::BackendError;
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };
 use tray_icon::{Icon as NativeIcon, TrayIcon, TrayIconBuilder};
 
-pub const QUIT_MENU_ID: &str = "opentray:human-check:status:99";
+use crate::{
+    TrayIconAsset, TrayIconMenuEntry, TrayIconMenuProjection, TrayIconProjection, TrayIconRuntime,
+};
 
+/// Native `tray-icon` runtime atom for macOS and Windows tray surfaces.
+///
+/// This runtime only owns native tray handles and applies already-compiled
+/// `TrayIconProjection` values. It intentionally does not create or run the OS
+/// event loop: callers must invoke it on the thread that owns an active native
+/// event loop. On macOS, that means the main thread after event-loop startup.
 #[derive(Default)]
-pub struct NativeTrayRuntime {
+pub struct NativeTrayIconRuntime {
     icons: RefCell<Vec<TrayIcon>>,
 }
 
-impl TrayIconRuntime for NativeTrayRuntime {
+impl NativeTrayIconRuntime {
+    /// Creates an empty native tray runtime.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns how many native tray handles are currently owned by the runtime.
+    pub fn icon_count(&self) -> usize {
+        self.icons.borrow().len()
+    }
+}
+
+impl TrayIconRuntime for NativeTrayIconRuntime {
     fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
         let mut icons = Vec::with_capacity(projection.trays.len());
 
@@ -55,10 +72,10 @@ fn native_icon(asset: &TrayIconAsset) -> Result<NativeIcon, BackendError> {
         } => NativeIcon::from_rgba(data.clone(), *width, *height)
             .map_err(|error| BackendError::Failure(error.to_string())),
         TrayIconAsset::Encoded { .. } => Err(BackendError::Unsupported(
-            "native_example_encoded_icon_unimplemented",
+            "tray_icon_encoded_icon_unimplemented",
         )),
         TrayIconAsset::File { .. } => Err(BackendError::Unsupported(
-            "native_example_file_icon_unimplemented",
+            "tray_icon_file_icon_unimplemented",
         )),
     }
 }
