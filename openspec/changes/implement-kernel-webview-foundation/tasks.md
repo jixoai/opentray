@@ -126,3 +126,12 @@
 - [x] 16.5 Ensure TypeScript examples are included in typechecking or an equivalent verification gate.
 - [x] 16.6 Run the package example commands, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
 - [x] 16.7 Commit the TypeScript/WebView examples batch with matching task checkbox updates.
+
+## 17. Human-Visible WebView Acceptance Example
+
+- [ ] 17.1 Add a native visual example that opens a real WebView window/panel a human can see while keeping WebView/window dependencies outside `opentray-core`.
+- [ ] 17.2 Keep the example behind backend/example runtime boundaries so `wry` or window event-loop code does not become a core law.
+- [ ] 17.3 Provide an automated smoke mode with `OPENTRAY_EXAMPLE_EXIT_AFTER_MS` for CI/local verification.
+- [ ] 17.4 Update README so visual acceptance uses `cargo run --example <example_name>`.
+- [ ] 17.5 Run the visual smoke command, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
+- [ ] 17.6 Commit the visual WebView example batch with matching task checkbox updates.
