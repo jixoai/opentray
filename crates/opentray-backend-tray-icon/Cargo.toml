@@ -14,3 +14,6 @@ tray-icon.workspace = true
 
 [dev-dependencies]
 winit = "0.30"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dev-dependencies]
+wry = { version = "0.55.1", default-features = false, features = ["os-webview"] }

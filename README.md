@@ -43,6 +43,18 @@ Open the tray item and choose `Quit Example` to exit. For automated smoke checks
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 cargo run --example native_tray
 ```
 
+Run the visual WebView example when you want to see a real native window rendered through a WebView next to the tray runtime:
+
+```bash
+cargo run --example visual_webview
+```
+
+Use the tray menu `Open Panel` to show the window again, and `Quit Example` to exit. The same auto-exit smoke mode is available:
+
+```bash
+OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 cargo run --example visual_webview
+```
+
 The tray-icon backend also has two GUI-free examples for inspecting the runtime boundary:
 
 ```bash
@@ -53,6 +65,7 @@ cargo run --example default_unbound
 These cover the two key laws:
 
 - `native_tray` creates a visible OS tray icon through a native event loop and an injected runtime atom.
+- `visual_webview` creates a visible native WebView window from an example/runtime atom without importing WebView dependencies into `opentray-core`.
 - `runtime_boundary` compiles `SurfaceProjection` into a backend projection and applies it through an injected runtime.
 - The default runtime stays explicitly unbound until a native main-thread/event-loop implementation is added.
 

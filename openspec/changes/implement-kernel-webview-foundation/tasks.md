@@ -129,9 +129,9 @@
 
 ## 17. Human-Visible WebView Acceptance Example
 
-- [ ] 17.1 Add a native visual example that opens a real WebView window/panel a human can see while keeping WebView/window dependencies outside `opentray-core`.
-- [ ] 17.2 Keep the example behind backend/example runtime boundaries so `wry` or window event-loop code does not become a core law.
-- [ ] 17.3 Provide an automated smoke mode with `OPENTRAY_EXAMPLE_EXIT_AFTER_MS` for CI/local verification.
-- [ ] 17.4 Update README so visual acceptance uses `cargo run --example <example_name>`.
-- [ ] 17.5 Run the visual smoke command, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
-- [ ] 17.6 Commit the visual WebView example batch with matching task checkbox updates.
+- [x] 17.1 Add a native visual example that opens a real WebView window/panel a human can see while keeping WebView/window dependencies outside `opentray-core`.
+- [x] 17.2 Keep the example behind backend/example runtime boundaries so `wry` or window event-loop code does not become a core law.
+- [x] 17.3 Provide an automated smoke mode with `OPENTRAY_EXAMPLE_EXIT_AFTER_MS` for CI/local verification.
+- [x] 17.4 Update README so visual acceptance uses `cargo run --example <example_name>`.
+- [x] 17.5 Run the visual smoke command, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
+- [x] 17.6 Commit the visual WebView example batch with matching task checkbox updates.
