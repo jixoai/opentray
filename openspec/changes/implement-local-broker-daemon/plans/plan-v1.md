@@ -3,8 +3,8 @@
 ## Current Round
 
 - Round: 1
-- Status: Updated after spelling correction and ready for implementation
-- Previous plan backup: `plans/plan-v1.md`
+- Status: Drafted for local broker daemon implementation
+- Previous plan backup: none
 
 ## Workflow Command Surface
 
@@ -23,8 +23,6 @@
 
 > 基本同意，不过命令应用`opentray deamon start|stop|restart`
 
-> 我刚才拼写错了，你可以开始了
-
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -35,8 +33,6 @@
 | 1 | User | 询问是否有需要讨论的话题。 | Surface only real decision gates; use defaults for implementation details. |
 | 2 | User | 基本同意 broker daemon plan。 | Proceed with local broker daemon as next module. |
 | 2 | User | 命令应用 `opentray deamon start\|stop\|restart`。 | CLI lifecycle command shape must be captured; spelling is treated as alias unless user insists it is canonical. |
-| 3 | User | 刚才拼写错了。 | `deamon` is not a requirement; canonical command spelling is `daemon`. |
-| 3 | User | 可以开始了。 | Proceed from OpenSpec artifacts into implementation. |
 
 ### Evidence Read
 
@@ -71,7 +67,7 @@
 | ----------- | --------------- | -------------------------------------- |
 | `守护进程` | Long-running local broker process. | The broker that owns surfaces and client leases. |
 | `管道` | Local IPC endpoint. | Unix socket or Windows named pipe. |
-| `opentray deamon start\|stop\|restart` | User typo while naming daemon lifecycle commands. | Correct to `opentray daemon start\|stop\|restart`. |
+| `opentray deamon start\|stop\|restart` | Desired lifecycle command shape. | Use daemon lifecycle subcommands; keep typo alias if useful. |
 | `视觉能验收` | Human-visible tray/WebView proof matters. | Broker acceptance must include a visible tray path later in the change. |
 
 ### Demo / Spike Code
@@ -84,13 +80,14 @@
 
 | Question | Why this is the real question | Current inference before user answers |
 | -------- | ----------------------------- | ------------------------------------- |
+| Should `deamon` be canonical or alias? | Canonical misspelling would become a permanent public CLI wart. | Use `daemon` as canonical and `deamon` as typo-tolerant alias. |
 | Should SDK auto-spawn the daemon in this same change? | Auto-spawn adds process supervision and binary resolution complexity. | This change should provide explicit lifecycle first; SDK auto-spawn can follow after the daemon is trustworthy. |
 
 ## Intent
 
 ### Surface Intent
 
-Continue with OpenSpec vision and implement the local broker daemon lifecycle. The command surface should expose `opentray daemon start`, `stop`, and `restart`.
+Continue with OpenSpec vision and implement the local broker daemon lifecycle. The command surface should expose `opentray daemon start`, `stop`, and `restart`, with `deamon` tolerated as an alias if the user typed it that way.
 
 ### Underlying Drive
 
@@ -106,7 +103,7 @@ An operator can run `opentray daemon start`, see a same-version broker process b
 - Does this fit as a regular atom: Partly. The CLI command is an atom, but daemon lifecycle is a platform runtime law.
 - Does this require law upgrade: Yes. Broker process ownership, pid/lock files, endpoint binding, and lifecycle commands must become explicit.
 - Breaking update stance: Safe in `0.x`; prefer a clean command surface now.
-- User confirmations still required: None before implementation; the user corrected the spelling and approved starting.
+- User confirmations still required: Only if the user insists `deamon` must be canonical instead of an alias.
 
 ## Reverse-Inferred Design
 
@@ -125,6 +122,7 @@ An operator can run `opentray daemon start`, see a same-version broker process b
   - `opentray daemon start`
   - `opentray daemon stop`
   - `opentray daemon restart`
+  - `opentray deamon ...` as alias unless rejected.
 - Internal lifecycle API:
   - resolve endpoint identity,
   - check health,
@@ -160,6 +158,7 @@ Forbidden couplings:
 
 | Gate | Why confirmation is required | Default until user answers |
 | ---- | ---------------------------- | -------------------------- |
+| Canonical spelling | Public CLI names are durable. | Canonical `daemon`; alias `deamon`. |
 | Auto-spawn | Hidden lifecycle could obscure debugging. | Explicit CLI first, auto-spawn later. |
 
 ## Intent-Driven Plan
@@ -180,7 +179,7 @@ Forbidden couplings:
 
 | Path | Why rejected |
 | ---- | ------------ |
-| `opentray deamon` command path | User confirmed it was a typo; do not implement it as a requirement. |
+| Canonical `opentray deamon` only | It bakes a typo into the public CLI and reduces polish. |
 | SDK auto-spawn before explicit commands | It hides process lifecycle before the daemon is trustworthy. |
 | Shared daemon across versions | It violates the current version-isolation law. |
 

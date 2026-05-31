@@ -2,7 +2,7 @@
 
 ### Requirement: CLI SHALL expose broker daemon lifecycle commands
 
-The `opentray` package SHALL expose explicit lifecycle commands for the local broker daemon. The canonical command group SHALL be `opentray daemon`, with `start`, `stop`, and `restart` subcommands. The implementation MAY accept `opentray deamon` as a typo-tolerant alias, but documentation SHALL present `daemon` as canonical unless the user explicitly reverses that decision.
+The `opentray` package SHALL expose explicit lifecycle commands for the local broker daemon. The canonical command group SHALL be `opentray daemon`, with `start`, `stop`, and `restart` subcommands.
 
 #### Scenario: Start command uses canonical daemon group
 
@@ -10,13 +10,6 @@ The `opentray` package SHALL expose explicit lifecycle commands for the local br
 - **WHEN** no healthy same-version broker is running
 - **THEN** the CLI starts a broker for the current package version
 - **AND** it binds only the endpoint derived from the current package version and protocol version.
-
-#### Scenario: Alias command maps to the same lifecycle action
-
-- **GIVEN** the operator runs `opentray deamon start`
-- **WHEN** typo alias support is enabled
-- **THEN** the CLI executes the same action as `opentray daemon start`
-- **AND** the canonical help text still shows `daemon`.
 
 ### Requirement: Broker daemon SHALL be version-scoped
 
