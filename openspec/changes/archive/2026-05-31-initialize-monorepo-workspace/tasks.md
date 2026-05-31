@@ -28,7 +28,7 @@
 - [x] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
 - [x] 5.2 Generate separate `review/self-review.html` as the screenshot / interaction / structured evidence presentation.
 - [x] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
-- [ ] 5.4 If the review is entering a real loop, run `bun run openspec:vision -- review-state <change>` to persist iteration / recurrence state.
-- [ ] 5.5 If review cannot exit normally, run `bun run openspec:vision -- handoff <change>` and commit the handoff evidence before returning to user discussion.
-- [ ] 5.6 If review exits normally, run `openspec archive <change>` and commit the archive result.
+- [x] 5.4 Confirm review did not enter a real loop; no `review-state` file was required.
+- [x] 5.5 Confirm review exited normally; no abnormal handoff was required.
+- [x] 5.6 Run `openspec archive <change>` and commit the archive result.
 - [x] 5.7 Run `bun run openspec:vision -- check <change>` and decide whether to exit or return to `research-plan` with a backed-up plan revision.

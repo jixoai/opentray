@@ -6,7 +6,7 @@
 - Iteration: 2
 - Recurring issue counts: none
 - Exit-condition judgment: Repository release law is implemented and first-stage release readiness is now hardened with a build gate, a changeset, and `skills/opentray` codified through `$skill-creator`. npm-side mutation is still blocked by npm trust authentication policy, which is external operator auth state rather than repository code.
-- Next loop action: archive this change after final commit; external npm trusted publisher mutation can be retried later by recreating `.env` `NPM_TOKEN` without bypass-2FA via `pnpm run setup:env -- --force` or completing npm browser/OTP login, then rerunning `pnpm run trusted-publish:configure`.
+- Next loop action: none for repository code; external npm trusted publisher mutation can be retried later by recreating `.env` `NPM_TOKEN` without bypass-2FA via `pnpm run setup:env -- --force` or completing npm browser/OTP login, then rerunning `pnpm run trusted-publish:configure`.
 
 ## Intent Alignment
 
@@ -60,7 +60,7 @@ Create `review/self-review.html` as a separate presentation artifact for screens
 
 ## Exit Handling
 
-- Normal exit: commit release pipeline hardening and skill codification, then archive the completed release pipeline change.
+- Normal exit: archive the completed release pipeline change.
 - Abnormal exit: not needed.
 - Operator-authored handoff: not needed.
 - Intent realignment: not needed.

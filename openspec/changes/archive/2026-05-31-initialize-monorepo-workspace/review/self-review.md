@@ -5,7 +5,7 @@
 - Change: initialize-monorepo-workspace
 - Iteration: 1
 - Recurring issue counts: none
-- Exit-condition judgment: Normal exit after initial commit is created.
+- Exit-condition judgment: Normal exit; initial commit exists and the completed initialization change has been archived.
 - Next loop action: none
 
 ## Intent Alignment
@@ -16,7 +16,7 @@
 | Other packages map to `@opentray/*` | 10 scoped package manifests under `packages/*` | Met |
 | Each initial package has `package.json` and `README.md` | `find packages -maxdepth 2 -type f` shows both files for every package | Met |
 | AGENTS.md explains management and vision | `AGENTS.md` contains vision, laws, workflow, verification, and commit discipline | Met |
-| Initial commit requested | Pending until final verification completes | Pending |
+| Initial commit requested | `da674ad chore: initialize opentray monorepo` | Met |
 
 ## Deviations From Intent
 
@@ -31,8 +31,8 @@
 
 - HTML report: `review/self-review.html`
 - Screenshot / command / log path: terminal verification output
-- Git commits reviewed: none; repository has no commits yet
-- Uncommitted paths, if any: all initialized files before the requested initial commit
+- Git commits reviewed: `da674ad chore: initialize opentray monorepo`
+- Uncommitted paths, if any: none before archive
 - Task checkboxes updated by this working context: yes
 
 ## HTML Review Report
@@ -41,7 +41,7 @@ Create `review/self-review.html` as a separate presentation artifact for screens
 
 ## Exit Handling
 
-- Normal exit: create the requested initial commit.
+- Normal exit: archive the completed initialization change.
 - Abnormal exit: not needed.
 - Operator-authored handoff: not needed.
 - Intent realignment: not needed.
