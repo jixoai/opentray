@@ -29,4 +29,4 @@
 
 - [x] 5.1 Generate `review/self-review.md`.
 - [x] 5.2 Generate `review/self-review.html`.
-- [ ] 5.3 Archive the completed change after verification.
+- [x] 5.3 Archive the completed change after verification.
