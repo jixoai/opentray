@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenTray Versioned Broker Endpoint Review</title>
+    <style>
+      body {
+        background: #f7f2e8;
+        color: #1c1a17;
+        font: 16px/1.5 Georgia, "Times New Roman", serif;
+        margin: 0;
+        padding: 48px;
+      }
+      main {
+        background: #fffaf0;
+        border: 1px solid #d8c9aa;
+        box-shadow: 0 20px 60px rgba(74, 52, 28, 0.15);
+        margin: 0 auto;
+        max-width: 920px;
+        padding: 40px;
+      }
+      code {
+        background: #eee2ca;
+        border-radius: 4px;
+        padding: 2px 5px;
+      }
+      .grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .card {
+        border-left: 4px solid #8f5d2a;
+        background: #fbf4e6;
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Versioned Broker Endpoint</h1>
+      <p>
+        The broker endpoint identity now exposes both package/binary version and
+        protocol version before future daemon transport work begins.
+      </p>
+      <div class="grid">
+        <section class="card">
+          <h2>Endpoint</h2>
+          <p><code>opentray-0.1.0-p1</code></p>
+          <p>Different package versions produce different endpoint names.</p>
+        </section>
+        <section class="card">
+          <h2>State Root</h2>
+          <p><code>~/.opentray/0.1.0/</code></p>
+          <p>Current-stage daemon state remains package-version isolated.</p>
+        </section>
+        <section class="card">
+          <h2>Handshake</h2>
+          <p><code>init { protocolVersion, clientVersion }</code></p>
+          <p>Lease authority starts only after protocol compatibility is known.</p>
+        </section>
+      </div>
+      <h2>Verification</h2>
+      <p>
+        Rust tests, TypeScript tests, examples, build, full verify, OpenSpec
+        validation, changeset status, and whitespace checks passed.
+      </p>
+    </main>
+  </body>
+</html>
