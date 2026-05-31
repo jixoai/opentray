@@ -11,7 +11,11 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "platforms", "README.md"],
+  "files": [
+    "dist",
+    "platforms",
+    "README.md"
+  ],
   "sideEffects": false,
   "peerDependencies": {
     "opentray": ">=0.0.0"
