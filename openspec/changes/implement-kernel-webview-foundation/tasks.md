@@ -82,3 +82,12 @@
 - [x] 11.4 Keep the default runtime explicitly non-native until a main-thread/event-loop implementation is added.
 - [x] 11.5 Run `cargo test`, `pnpm run verify`, `bun run openspec:vision -- validate implement-kernel-webview-foundation`, and `git diff --check`.
 - [x] 11.6 Commit the runtime boundary batch with matching task checkbox updates.
+
+## 12. Human-Visible TrayIcon Example
+
+- [ ] 12.1 Add a `native_tray` Cargo example that creates a visible system tray icon through a `TrayIconRuntime` atom.
+- [ ] 12.2 Keep the native event loop isolated to the example/runtime atom without importing native packages into `opentray-core`.
+- [ ] 12.3 Keep GUI-free examples available for runtime-boundary inspection.
+- [ ] 12.4 Update README examples so human verification uses `cargo run --example native_tray`.
+- [ ] 12.5 Run the runnable examples, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
+- [ ] 12.6 Commit the native tray example batch with matching task checkbox updates.
