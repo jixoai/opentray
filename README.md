@@ -31,16 +31,28 @@ This repository uses `pnpm` workspaces and Lerna metadata.
 
 ### TrayIcon runtime boundary
 
-The tray-icon backend has two focused examples you can run directly:
+Run the native example when you want to see a real system tray icon:
 
 ```bash
-cd crates/opentray-backend-tray-icon
+cargo run --example native_tray
+```
+
+Open the tray item and choose `Quit Example` to exit. For automated smoke checks, set `OPENTRAY_EXAMPLE_EXIT_AFTER_MS`:
+
+```bash
+OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 cargo run --example native_tray
+```
+
+The tray-icon backend also has two GUI-free examples for inspecting the runtime boundary:
+
+```bash
 cargo run --example runtime_boundary
 cargo run --example default_unbound
 ```
 
 These cover the two key laws:
 
+- `native_tray` creates a visible OS tray icon through a native event loop and an injected runtime atom.
 - `runtime_boundary` compiles `SurfaceProjection` into a backend projection and applies it through an injected runtime.
 - The default runtime stays explicitly unbound until a native main-thread/event-loop implementation is added.
 

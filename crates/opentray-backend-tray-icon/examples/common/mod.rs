@@ -21,9 +21,9 @@ pub fn surface_projection() -> SurfaceProjection {
                 description: "Applied by the example runtime atom".to_string(),
             }),
             icon: Icon::Rgba {
-                data: vec![0, 0, 0, 255],
-                width: 1,
-                height: 1,
+                data: visible_icon_rgba(),
+                width: 32,
+                height: 32,
             },
             menu: Some(Menu {
                 items: vec![
@@ -40,8 +40,36 @@ pub fn surface_projection() -> SurfaceProjection {
                         enabled: true,
                         checked: true,
                     },
+                    MenuItem::Item {
+                        id: 99,
+                        title: "Quit Example".to_string(),
+                        enabled: true,
+                        shortcut: Some("CmdOrCtrl+Q".to_string()),
+                    },
                 ],
             }),
         }],
     }
+}
+
+pub fn visible_icon_rgba() -> Vec<u8> {
+    let width = 32;
+    let height = 32;
+    let mut data = Vec::with_capacity(width * height * 4);
+
+    for y in 0..height {
+        for x in 0..width {
+            let in_core = (10..22).contains(&x) && (10..22).contains(&y);
+            let in_cross = (x >= 14 && x <= 17) || (y >= 14 && y <= 17);
+            let (r, g, b, a) = if in_core || in_cross {
+                (36, 170, 255, 255)
+            } else {
+                (12, 12, 12, 0)
+            };
+
+            data.extend([r, g, b, a]);
+        }
+    }
+
+    data
 }

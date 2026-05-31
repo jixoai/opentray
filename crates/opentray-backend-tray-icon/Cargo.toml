@@ -11,3 +11,6 @@ version.workspace = true
 opentray-core.workspace = true
 opentray-spec.workspace = true
 tray-icon.workspace = true
+
+[dev-dependencies]
+winit = "0.30"

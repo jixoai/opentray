@@ -85,9 +85,9 @@
 
 ## 12. Human-Visible TrayIcon Example
 
-- [ ] 12.1 Add a `native_tray` Cargo example that creates a visible system tray icon through a `TrayIconRuntime` atom.
-- [ ] 12.2 Keep the native event loop isolated to the example/runtime atom without importing native packages into `opentray-core`.
-- [ ] 12.3 Keep GUI-free examples available for runtime-boundary inspection.
-- [ ] 12.4 Update README examples so human verification uses `cargo run --example native_tray`.
-- [ ] 12.5 Run the runnable examples, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
-- [ ] 12.6 Commit the native tray example batch with matching task checkbox updates.
+- [x] 12.1 Add a `native_tray` Cargo example that creates a visible system tray icon through a `TrayIconRuntime` atom.
+- [x] 12.2 Keep the native event loop isolated to the example/runtime atom without importing native packages into `opentray-core`.
+- [x] 12.3 Keep GUI-free examples available for runtime-boundary inspection.
+- [x] 12.4 Update README examples so human verification uses `cargo run --example native_tray`.
+- [x] 12.5 Run the runnable examples, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
+- [x] 12.6 Commit the native tray example batch with matching task checkbox updates.

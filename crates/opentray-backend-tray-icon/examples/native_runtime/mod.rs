@@ -1,0 +1,182 @@
+use std::cell::RefCell;
+
+use opentray_backend_tray_icon::{
+    TrayIconAsset, TrayIconMenuEntry, TrayIconMenuProjection, TrayIconProjection, TrayIconRuntime,
+};
+use opentray_core::BackendError;
+use tray_icon::menu::{
+    CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
+};
+use tray_icon::{Icon as NativeIcon, TrayIcon, TrayIconBuilder};
+
+pub const QUIT_MENU_ID: &str = "opentray:human-check:status:99";
+
+#[derive(Default)]
+pub struct NativeTrayRuntime {
+    icons: RefCell<Vec<TrayIcon>>,
+}
+
+impl TrayIconRuntime for NativeTrayRuntime {
+    fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
+        let mut icons = Vec::with_capacity(projection.trays.len());
+
+        for tray in projection.trays {
+            let icon = native_icon(&tray.icon)?;
+            let menu = native_menu(&tray.menu)?;
+            let tooltip = tray
+                .tooltip
+                .as_ref()
+                .map(|tooltip| format!("{}: {}", tooltip.title, tooltip.description))
+                .unwrap_or_else(|| tray.title.clone());
+
+            let native = TrayIconBuilder::new()
+                .with_tooltip(tooltip)
+                .with_title(tray.title)
+                .with_icon(icon)
+                .with_icon_as_template(true)
+                .with_menu(Box::new(menu))
+                .build()
+                .map_err(|error| BackendError::Failure(error.to_string()))?;
+
+            icons.push(native);
+        }
+
+        *self.icons.borrow_mut() = icons;
+        Ok(())
+    }
+}
+
+fn native_icon(asset: &TrayIconAsset) -> Result<NativeIcon, BackendError> {
+    match asset {
+        TrayIconAsset::Rgba {
+            data,
+            width,
+            height,
+        } => NativeIcon::from_rgba(data.clone(), *width, *height)
+            .map_err(|error| BackendError::Failure(error.to_string())),
+        TrayIconAsset::Encoded { .. } => Err(BackendError::Unsupported(
+            "native_example_encoded_icon_unimplemented",
+        )),
+        TrayIconAsset::File { .. } => Err(BackendError::Unsupported(
+            "native_example_file_icon_unimplemented",
+        )),
+    }
+}
+
+fn native_menu(projection: &TrayIconMenuProjection) -> Result<NativeMenu, BackendError> {
+    let menu = NativeMenu::new();
+
+    for entry in &projection.entries {
+        append_menu_entry(&menu, entry)?;
+    }
+
+    Ok(menu)
+}
+
+fn append_menu_entry(menu: &NativeMenu, entry: &TrayIconMenuEntry) -> Result<(), BackendError> {
+    match entry {
+        TrayIconMenuEntry::Item {
+            menu_id,
+            title,
+            enabled,
+            ..
+        } => menu.append(&NativeMenuItem::with_id(
+            menu_id.clone(),
+            title,
+            *enabled,
+            None,
+        )),
+        TrayIconMenuEntry::Check {
+            menu_id,
+            title,
+            enabled,
+            checked,
+        } => menu.append(&CheckMenuItem::with_id(
+            menu_id.clone(),
+            title,
+            *enabled,
+            *checked,
+            None,
+        )),
+        TrayIconMenuEntry::Radio {
+            menu_id,
+            title,
+            enabled,
+            checked,
+            ..
+        } => menu.append(&CheckMenuItem::with_id(
+            menu_id.clone(),
+            title,
+            *enabled,
+            *checked,
+            None,
+        )),
+        TrayIconMenuEntry::Separator => menu.append(&PredefinedMenuItem::separator()),
+        TrayIconMenuEntry::Submenu {
+            title,
+            enabled,
+            entries,
+        } => {
+            let submenu = Submenu::new(title, *enabled);
+            for entry in entries {
+                append_submenu_entry(&submenu, entry)?;
+            }
+            menu.append(&submenu)
+        }
+    }
+    .map_err(|error| BackendError::Failure(error.to_string()))
+}
+
+fn append_submenu_entry(submenu: &Submenu, entry: &TrayIconMenuEntry) -> Result<(), BackendError> {
+    match entry {
+        TrayIconMenuEntry::Item {
+            menu_id,
+            title,
+            enabled,
+            ..
+        } => submenu.append(&NativeMenuItem::with_id(
+            menu_id.clone(),
+            title,
+            *enabled,
+            None,
+        )),
+        TrayIconMenuEntry::Check {
+            menu_id,
+            title,
+            enabled,
+            checked,
+        } => submenu.append(&CheckMenuItem::with_id(
+            menu_id.clone(),
+            title,
+            *enabled,
+            *checked,
+            None,
+        )),
+        TrayIconMenuEntry::Radio {
+            menu_id,
+            title,
+            enabled,
+            checked,
+            ..
+        } => submenu.append(&CheckMenuItem::with_id(
+            menu_id.clone(),
+            title,
+            *enabled,
+            *checked,
+            None,
+        )),
+        TrayIconMenuEntry::Separator => submenu.append(&PredefinedMenuItem::separator()),
+        TrayIconMenuEntry::Submenu {
+            title,
+            enabled,
+            entries,
+        } => {
+            let child = Submenu::new(title, *enabled);
+            for entry in entries {
+                append_submenu_entry(&child, entry)?;
+            }
+            submenu.append(&child)
+        }
+    }
+    .map_err(|error| BackendError::Failure(error.to_string()))
+}
