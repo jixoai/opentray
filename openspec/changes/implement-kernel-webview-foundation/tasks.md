@@ -91,3 +91,12 @@
 - [x] 12.4 Update README examples so human verification uses `cargo run --example native_tray`.
 - [x] 12.5 Run the runnable examples, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
 - [x] 12.6 Commit the native tray example batch with matching task checkbox updates.
+
+## 13. Reusable Native TrayIcon Runtime Atom
+
+- [ ] 13.1 Promote the working native tray runtime from example-local code into the tray-icon backend crate.
+- [ ] 13.2 Document the native runtime event-loop precondition instead of hiding event-loop ownership inside the backend.
+- [ ] 13.3 Update `native_tray` to consume the exported runtime atom and keep example-only exit/menu ids in example code.
+- [ ] 13.4 Keep `opentray-core` isolated from `tray-icon`, `winit`, and platform GUI packages.
+- [ ] 13.5 Run runnable examples, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
+- [ ] 13.6 Commit the reusable native runtime atom batch with matching task checkbox updates.
