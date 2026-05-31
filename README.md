@@ -146,6 +146,8 @@ pnpm run changeset
 
 Release-worthy TypeScript package changes must build before publishing because `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The GitHub workflow runs `pnpm run verify` and then `pnpm run build` before changesets creates a version PR or publishes through OIDC trusted publishing.
 
+Changesets is configured to bump peer dependents only when their peer dependency range is out of range. This prevents roadmap placeholder extensions, such as `@opentray/ext-badge` and `@opentray/ext-island`, from being released just because `opentray` is released.
+
 ## Agent Skill
 
 The repository includes an OpenTray-specific skill for future agent work:

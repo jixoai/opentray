@@ -11,19 +11,19 @@
 
 ## 3. Implementation
 
-- [ ] 3.1 Configure changesets to update peer dependents only when peer ranges are out of range.
-- [ ] 3.2 Update release docs/skill reference to record the peer-dependent release law.
+- [x] 3.1 Configure changesets to update peer dependents only when peer ranges are out of range.
+- [x] 3.2 Update release docs/skill reference to record the peer-dependent release law.
 
 ## 4. Verification
 
-- [ ] 4.1 Run `pnpm exec changeset status --verbose`.
-- [ ] 4.2 Run `pnpm run build`.
-- [ ] 4.3 Run `npm pack --dry-run --json ./packages/cli ./packages/spec ./packages/ext-webview` after build.
-- [ ] 4.4 Run `pnpm run verify`.
-- [ ] 4.5 Run `openspec validate --all --strict`.
-- [ ] 4.6 Run `bun run openspec:vision -- validate fix-changeset-peer-release-bumps`.
-- [ ] 4.7 Run `bun run openspec:vision -- check fix-changeset-peer-release-bumps`.
-- [ ] 4.8 Run `git diff --check`.
+- [x] 4.1 Run `pnpm exec changeset status --verbose`.
+- [x] 4.2 Run `pnpm run build`.
+- [x] 4.3 Run `npm pack --dry-run --json ./packages/cli ./packages/spec ./packages/ext-webview` after build.
+- [x] 4.4 Run `pnpm run verify`.
+- [x] 4.5 Run `openspec validate --all --strict`.
+- [x] 4.6 Run `bun run openspec:vision -- validate fix-changeset-peer-release-bumps`.
+- [x] 4.7 Run `bun run openspec:vision -- check fix-changeset-peer-release-bumps`.
+- [x] 4.8 Run `git diff --check`.
 
 ## 5. Self-Review Loop
 

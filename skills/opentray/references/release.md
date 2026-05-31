@@ -35,6 +35,8 @@ Tokens created with bypass-2FA may authenticate package access but fail trusted-
 
 Release-worthy package API/runtime changes must include a `.changeset/*.md` note for affected npm packages. Do not bump placeholder packages just because docs mention them.
 
+Changesets must only bump peer dependents when their peer dependency range is out of range. Keep `___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH.onlyUpdatePeerDependentsWhenOutOfRange` enabled so roadmap extension placeholders do not get stable releases from an `opentray` peer bump alone.
+
 ## Publish Artifact Rule
 
 `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The release workflow must run `pnpm run build` before `changeset publish`.
