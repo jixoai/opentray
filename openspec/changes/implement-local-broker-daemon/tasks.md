@@ -5,27 +5,27 @@
 
 ## 2. BDD Contract
 
-- [ ] 2.1 Scenario: Given `opentray daemon start` When no same-version broker is healthy Then a current-version broker is started.
-- [ ] 2.2 Scenario: Given two package versions When start/stop commands run Then each command affects only its own version directory and endpoint.
-- [ ] 2.3 Scenario: Given concurrent same-version starts When runtime locking runs Then at most one broker owns the endpoint.
-- [ ] 2.4 Confirm each task checkbox will be updated only by the agent that completed and verified that task in the current working context.
+- [x] 2.1 Scenario: Given `opentray daemon start` When no same-version broker is healthy Then a current-version broker is started.
+- [x] 2.2 Scenario: Given two package versions When start/stop commands run Then each command affects only its own version directory and endpoint.
+- [x] 2.3 Scenario: Given concurrent same-version starts When runtime locking runs Then at most one broker owns the endpoint.
+- [x] 2.4 Confirm each task checkbox will be updated only by the agent that completed and verified that task in the current working context.
 
 ## 3. Implementation
 
-- [ ] 3.1 Run `bun run openspec:vision -- commit-check implement-local-broker-daemon --phase apply` before product-code work starts and commit ready OpenSpec artifacts.
-- [ ] 3.2 Add `opentray` package bin entry and CLI command parser for `daemon start|stop|restart`.
-- [ ] 3.3 Add version-scoped runtime directory, pid, and lock helpers.
-- [ ] 3.4 Add a minimal broker process lifecycle that binds the current version endpoint and emits ready metadata.
-- [ ] 3.5 Keep process supervision and OS IPC outside `opentray-core`.
+- [x] 3.1 Run `bun run openspec:vision -- commit-check implement-local-broker-daemon --phase apply` before product-code work starts and commit ready OpenSpec artifacts.
+- [x] 3.2 Add `opentray` package bin entry and CLI command parser for `daemon start|stop|restart`.
+- [x] 3.3 Add version-scoped runtime directory, pid, and lock helpers.
+- [x] 3.4 Add a minimal broker process lifecycle that binds the current version endpoint and emits ready metadata.
+- [x] 3.5 Keep process supervision and OS IPC outside `opentray-core`.
 
 ## 4. Verification
 
-- [ ] 4.1 Run targeted CLI lifecycle tests.
-- [ ] 4.2 Run Rust broker lifecycle tests.
-- [ ] 4.3 Run `pnpm run build`.
-- [ ] 4.4 Run `pnpm run verify`.
-- [ ] 4.5 Run `bun run openspec:vision -- validate implement-local-broker-daemon`.
-- [ ] 4.6 Run `git diff --check`.
+- [x] 4.1 Run targeted CLI lifecycle tests.
+- [x] 4.2 Run Rust regression tests to confirm broker CLI work does not pollute core/backend crates.
+- [x] 4.3 Run `pnpm run build`.
+- [x] 4.4 Run `pnpm run verify`.
+- [x] 4.5 Run `bun run openspec:vision -- validate implement-local-broker-daemon`.
+- [x] 4.6 Run `git diff --check`.
 
 ## 5. Self-Review Loop
 

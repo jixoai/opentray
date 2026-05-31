@@ -15,13 +15,17 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "opentray": "./dist/cli.mjs"
+  },
   "files": [
     "dist",
     "README.md"
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsdown src/index.ts --format esm --dts",
+    "build": "tsdown src/index.ts src/cli.ts --format esm --dts",
+    "cli": "bun run src/cli.ts",
     "example:basic": "bun run examples/basic-surface.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
