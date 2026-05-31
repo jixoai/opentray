@@ -35,8 +35,9 @@
     <p>
       The first-stage OpenTray foundation now has a Rust kernel, TypeScript
       protocol/client contracts, a platform-neutral webview facade, backend
-      adapter atoms, a visible tray example, a reusable tray-icon native runtime
-      atom, and native menu event ingress back to OpenTray events.
+      adapter atoms, a visible tray example, broker-free TypeScript/WebView
+      human examples, a reusable tray-icon native runtime atom, and native menu
+      event ingress back to OpenTray events.
     </p>
     <table>
       <thead>
@@ -85,7 +86,9 @@
           <td>
             <code>cargo run --example native_tray</code> creates a visible tray
             icon; <code>runtime_boundary</code> and
-            <code>default_unbound</code> remain GUI-free examples.
+            <code>default_unbound</code> remain GUI-free examples. Package
+            examples cover TypeScript client frames, WebView extension frames,
+            and protocol parser behavior.
           </td>
           <td>Pass</td>
         </tr>
@@ -93,8 +96,8 @@
           <td>Verification</td>
           <td>
             <code>pnpm run verify</code>, OpenSpec validate/check, Rust tests,
-            TypeScript tests, and runnable examples passed after native menu
-            ingress was added.
+            TypeScript tests/typechecks, and runnable Rust/TypeScript examples
+            passed after native menu ingress and package examples were added.
           </td>
           <td>Pass</td>
         </tr>
