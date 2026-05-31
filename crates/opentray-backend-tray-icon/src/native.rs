@@ -1,13 +1,15 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
 use opentray_core::BackendError;
+use opentray_spec::{SurfaceId, TrayEvent};
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };
 use tray_icon::{Icon as NativeIcon, TrayIcon, TrayIconBuilder};
 
 use crate::{
-    TrayIconAsset, TrayIconMenuEntry, TrayIconMenuProjection, TrayIconProjection, TrayIconRuntime,
+    TrayIconAsset, TrayIconMenuEntry, TrayIconMenuProjection, TrayIconProjection,
+    TrayIconRouteTable, TrayIconRuntime,
 };
 
 /// Native `tray-icon` runtime atom for macOS and Windows tray surfaces.
@@ -18,7 +20,7 @@ use crate::{
 /// event loop. On macOS, that means the main thread after event-loop startup.
 #[derive(Default)]
 pub struct NativeTrayIconRuntime {
-    icons: RefCell<Vec<TrayIcon>>,
+    surfaces: RefCell<HashMap<SurfaceId, NativeSurfaceState>>,
 }
 
 impl NativeTrayIconRuntime {
@@ -29,15 +31,25 @@ impl NativeTrayIconRuntime {
 
     /// Returns how many native tray handles are currently owned by the runtime.
     pub fn icon_count(&self) -> usize {
-        self.icons.borrow().len()
+        self.surfaces
+            .borrow()
+            .values()
+            .map(|surface| surface.icons.len())
+            .sum()
     }
 }
 
 impl TrayIconRuntime for NativeTrayIconRuntime {
     fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
-        let mut icons = Vec::with_capacity(projection.trays.len());
+        let TrayIconProjection {
+            surface_id,
+            trays,
+            routes,
+            ..
+        } = projection;
+        let mut icons = Vec::with_capacity(trays.len());
 
-        for tray in projection.trays {
+        for tray in trays {
             let icon = native_icon(&tray.icon)?;
             let menu = native_menu(&tray.menu)?;
             let tooltip = tray
@@ -58,9 +70,26 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
             icons.push(native);
         }
 
-        *self.icons.borrow_mut() = icons;
+        let mut surfaces = self.surfaces.borrow_mut();
+        if icons.is_empty() {
+            surfaces.remove(&surface_id);
+        } else {
+            surfaces.insert(surface_id, NativeSurfaceState { icons, routes });
+        }
         Ok(())
     }
+
+    fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
+        self.surfaces
+            .borrow()
+            .values()
+            .find_map(|surface| surface.routes.menu_event(menu_id))
+    }
+}
+
+struct NativeSurfaceState {
+    icons: Vec<TrayIcon>,
+    routes: TrayIconRouteTable,
 }
 
 fn native_icon(asset: &TrayIconAsset) -> Result<NativeIcon, BackendError> {

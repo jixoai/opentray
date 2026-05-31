@@ -103,9 +103,9 @@
 
 ## 14. Native Menu Event Ingress
 
-- [ ] 14.1 Add a tray-icon backend/runtime ingress contract that translates native menu ids into OpenTray `TrayEvent` values.
-- [ ] 14.2 Store the latest native runtime route tables when applying projections without exposing GUI handles.
-- [ ] 14.3 Update `native_tray` so clicking menu items prints the routed OpenTray event.
-- [ ] 14.4 Add GUI-free tests for backend menu-event delegation.
-- [ ] 14.5 Run runnable examples, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
-- [ ] 14.6 Commit the native menu event ingress batch with matching task checkbox updates.
+- [x] 14.1 Add a tray-icon backend/runtime ingress contract that translates native menu ids into OpenTray `TrayEvent` values.
+- [x] 14.2 Store the latest native runtime route tables when applying projections without exposing GUI handles.
+- [x] 14.3 Update `native_tray` so clicking menu items prints the routed OpenTray event.
+- [x] 14.4 Add GUI-free tests for backend menu-event delegation.
+- [x] 14.5 Run runnable examples, `cargo fmt --all -- --check`, `pnpm run verify`, OpenSpec validate/check, and whitespace checks.
+- [x] 14.6 Commit the native menu event ingress batch with matching task checkbox updates.

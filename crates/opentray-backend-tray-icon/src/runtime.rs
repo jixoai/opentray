@@ -6,6 +6,10 @@ use crate::TrayIconProjection;
 pub trait TrayIconRuntime {
     fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError>;
 
+    fn menu_event(&self, _menu_id: &str) -> Option<TrayEvent> {
+        None
+    }
+
     fn rect(&self, _surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
         Err(BackendError::Unsupported("tray_icon_rect_unbound"))
     }

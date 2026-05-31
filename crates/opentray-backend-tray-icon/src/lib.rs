@@ -28,6 +28,10 @@ impl<R: TrayIconRuntime> TrayIconBackend<R> {
             _marker: std::marker::PhantomData,
         }
     }
+
+    pub fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
+        self.runtime.menu_event(menu_id)
+    }
 }
 
 impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
@@ -65,7 +69,7 @@ mod tests {
     use std::rc::Rc;
 
     use opentray_core::TrayProjection;
-    use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef};
+    use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef, TrayEvent};
 
     use super::*;
 
@@ -107,6 +111,21 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn menu_event_delegates_to_runtime_ingress() {
+        let backend = TrayIconBackend::with_runtime(RoutingRuntime);
+
+        assert_eq!(
+            backend.menu_event("native-menu-id"),
+            Some(TrayEvent::MenuClick {
+                surface_id: "surface-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                item_id: 7,
+            })
+        );
+        assert_eq!(backend.menu_event("missing"), None);
+    }
+
     #[derive(Clone, Default)]
     struct RecordingRuntime {
         calls: Rc<RefCell<Vec<TrayIconProjection>>>,
@@ -122,6 +141,22 @@ mod tests {
         fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
             self.calls.borrow_mut().push(projection);
             Ok(())
+        }
+    }
+
+    struct RoutingRuntime;
+
+    impl TrayIconRuntime for RoutingRuntime {
+        fn apply_projection(&self, _projection: TrayIconProjection) -> Result<(), BackendError> {
+            Ok(())
+        }
+
+        fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
+            (menu_id == "native-menu-id").then(|| TrayEvent::MenuClick {
+                surface_id: "surface-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                item_id: 7,
+            })
         }
     }
 

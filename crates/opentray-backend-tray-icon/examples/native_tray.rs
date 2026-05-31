@@ -72,6 +72,9 @@ impl ApplicationHandler<UserEvent> for NativeTrayApp {
             UserEvent::Menu(event) => {
                 let menu_id = event.id.0;
                 println!("menu event: {menu_id}");
+                if let Some(event) = self.backend.menu_event(&menu_id) {
+                    println!("opentray event: {event:?}");
+                }
 
                 if menu_id == QUIT_MENU_ID {
                     event_loop.exit();
