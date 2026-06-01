@@ -69,13 +69,32 @@ PY
   git -C "${tools_shared_dir}" checkout --detach "${tools_shared_ref}" 2>&1 | tee "${logs_dir}/tools-shared-checkout.log"
 }
 
-rewrite_url_if_present() {
+patch_build_resources_pnpm_path() {
+  local build_resources_py="${lynx_dir}/explorer/darwin/macos/lynx_explorer/build_resources.py"
+
+  python3 - "${build_resources_py}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "    subprocess.check_call(['bash', '-c', 'pnpm install --no-frozen-lockfile && pnpm run build'], cwd=homepage_dir)\n"
+new = """    homepage_env = os.environ.copy()\n    homepage_env[\"PATH\"] = os.path.join(root_dir, 'buildtools', 'node', 'bin') + os.pathsep + homepage_env.get(\"PATH\", \"\")\n    subprocess.check_call(['bash', '-c', 'pnpm install --no-frozen-lockfile && pnpm run build'], cwd=homepage_dir, env=homepage_env)\n"""
+if old not in text:
+    raise SystemExit("expected build_resources.py homepage pnpm invocation not found")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+
+rewrite_resolved_dep_url_if_present() {
   local file="$1"
   local old_url="$2"
   local new_url="$3"
 
   python3 - "$file" "$old_url" "$new_url" <<'PY'
 from pathlib import Path
+import platform
+import re
 import sys
 
 path = Path(sys.argv[1])
@@ -83,10 +102,59 @@ old = sys.argv[2]
 new = sys.argv[3]
 if not path.exists():
     raise SystemExit(0)
+
 text = path.read_text()
-if old not in text:
+if old in text:
+    path.write_text(text.replace(old, new))
     raise SystemExit(0)
-path.write_text(text.replace(old, new))
+
+system = platform.system().lower()
+machine = platform.machine().lower()
+machine = "x86_64" if machine == "amd64" else machine
+ns = {
+    "os": __import__("os"),
+    "platform": platform,
+    "root_dir": "/tmp",
+    "system": system,
+    "machine": machine,
+    "__builtins__": __builtins__,
+}
+exec(text, ns)
+
+matches = []
+for dep_key, spec in ns.get("deps", {}).items():
+    if not isinstance(spec, dict) or spec.get("type") != "http":
+        continue
+    dep_url = spec.get("url")
+    if isinstance(dep_url, str) and dep_url == old:
+        matches.append(dep_key)
+
+if not matches:
+    raise SystemExit(0)
+
+lines = text.splitlines(keepends=True)
+for dep_key in matches:
+    key_re = re.compile(rf'^\s*[\'"]{re.escape(dep_key)}[\'"]\s*:\s*\{{\s*$')
+    url_re = re.compile(r'^(?P<prefix>\s*[\'"]url[\'"]\s*:\s*)(?P<value>.+?)(?P<suffix>,\s*)$')
+    in_block = False
+    depth = 0
+    for index, line in enumerate(lines):
+        if not in_block:
+            if key_re.match(line):
+                in_block = True
+                depth = line.count("{") - line.count("}")
+            continue
+        depth += line.count("{") - line.count("}")
+        match = url_re.match(line)
+        if match:
+            lines[index] = f'{match.group("prefix")}"{new}"{match.group("suffix")}'
+            break
+        if depth <= 0:
+            break
+
+patched = "".join(lines)
+if patched != text:
+    path.write_text(patched)
 PY
 }
 
@@ -118,7 +186,7 @@ prefetch_and_rewrite_urls() {
 
     local_url="http://127.0.0.1:${mirror_port}/${basename}"
     for deps_file in "${deps_files[@]}"; do
-      rewrite_url_if_present "${deps_file}" "${url}" "${local_url}"
+      rewrite_resolved_dep_url_if_present "${deps_file}" "${url}" "${local_url}"
     done
   done < "${mirror_urls_file}"
 }
@@ -141,6 +209,7 @@ cd "${lynx_dir}"
 git checkout --detach "${lynx_ref}" 2>&1 | tee "${logs_dir}/git-checkout.log"
 git rev-parse HEAD | tee "${logs_dir}/lynx-ref.txt"
 clone_tools_shared
+patch_build_resources_pnpm_path
 
 unset all_proxy http_proxy https_proxy ALL_PROXY HTTP_PROXY HTTPS_PROXY
 export XDG_CONFIG_HOME="${lynx_dir}/.xdg-config"
