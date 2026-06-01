@@ -68,3 +68,14 @@ The daemon SHALL receive native backend events, route them through the kernel, a
 - **WHEN** the daemon routes it through the kernel
 - **THEN** no client receives a forged event
 - **AND** the broker process remains alive.
+
+### Requirement: Broker daemon SHALL stay background-only on macOS
+
+On macOS, a daemon started through `opentray daemon start` or local SDK auto-start SHALL NOT present itself as a Dock-visible regular application or create a windowless Dock tile. The broker composition MAY own the native event loop required by the tray backend, but it SHALL use background/accessory activation behavior appropriate for a status-item daemon.
+
+#### Scenario: macOS daemon does not create a Dock tile
+
+- **GIVEN** the operator runs `pnpm --filter opentray cli -- daemon start` on macOS
+- **WHEN** the Rust broker creates the native event loop for tray support
+- **THEN** the broker runs with accessory/background activation behavior
+- **AND** no windowless daemon application appears in the Dock.

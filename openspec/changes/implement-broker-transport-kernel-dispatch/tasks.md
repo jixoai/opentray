@@ -64,3 +64,16 @@
 - [ ] 6.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-broker-transport-kernel-dispatch` and commit the handoff evidence.
 - [ ] 6.6 Do not archive until the user accepts the human-visible daemon tray behavior.
 - [x] 6.7 Run `bun run openspec:vision -- check implement-broker-transport-kernel-dispatch` before claiming workflow completion.
+
+## 7. Visual Feedback Apply
+
+- [ ] 7.1 Scenario: Given macOS starts the daemon When the broker owns the native event loop Then it uses accessory/background activation and does not create a Dock-visible windowless process.
+- [ ] 7.2 Scenario: Given no same-version daemon is running When `pnpm --filter opentray example:daemon-tray` runs Then the local broker client auto-starts the daemon before connecting.
+- [ ] 7.3 Scenario: Given an explicit endpoint and `autoStart: false` When the local broker client connects Then it does not start the derived local daemon.
+- [ ] 7.4 Scenario: Given the daemon tray example renders When a human opens the tray menu Then the icon is visibly nonblank and the menu covers item, disabled item, check, radio, separator, submenu, and quit actions.
+- [ ] 7.5 Document that manual `opentray daemon start|stop|restart` is for operator/debug use and examples/SDK local clients auto-start by default.
+- [ ] 7.6 Document current native icon support: `rgba` is implemented; `encoded` and `file` are typed protocol shapes but currently return unsupported in the native `tray-icon` backend.
+- [ ] 7.7 Run targeted TypeScript tests for local broker auto-start behavior.
+- [ ] 7.8 Run targeted Rust verification for the broker binary and backend icon capability behavior.
+- [ ] 7.9 Smoke `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray` without manually starting the daemon first.
+- [ ] 7.10 Ask the user to visually confirm macOS Dock absence and the nonblank tray/menu behavior before archive.

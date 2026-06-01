@@ -43,12 +43,6 @@
 
 > 下一步，回到我们的主线任务
 
-> 在macOS上，执行 `pnpm --filter opentray cli -- daemon start`，会导致dock托盘出现一个无窗口的进程。
-
-> `pnpm --filter opentray example:daemon-tray` 直接运行，应该要能自动启动daemon。还是说你在做demo，估计隔开来？最终给用户使用的时候，肯定不能让开发者手动去启动daemon，你要记得
-
-> 这个图标就是一片空白吗？是故意的，还是意外？目前支持哪些图标？还有，你的这个example最好能全面地展示各种能力
-
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -65,9 +59,6 @@
 | 6 | User | Correct daemon command spelling after typo. | The canonical lifecycle command is `opentray daemon start\|stop\|restart`. |
 | 7 | User | Wants a complete task list and final acceptance method. | Tasks must include explicit human-visible acceptance commands and nonvisual verification gates. |
 | 8 | User | Return to the mainline task. | Resume broker transport -> kernel dispatch -> visible tray path, not npm bootstrap side quests. |
-| 9 | User | macOS `pnpm --filter opentray cli -- daemon start` shows a Dock-visible windowless process. | The daemon must run as a background/accessory broker process on macOS, not as a regular Dock application. |
-| 10 | User | `pnpm --filter opentray example:daemon-tray` should directly auto-start the daemon for developer UX. | Local broker clients/examples must auto-start or reuse the same-version daemon by default; manual lifecycle commands are operator/debug controls. |
-| 11 | User | The current tray icon looks blank and the example should show supported capabilities more comprehensively. | The example needs a deliberate visible icon, richer menu coverage, and docs must state current icon capability boundaries. |
 
 ### Evidence Read
 
@@ -83,8 +74,6 @@
 | `crates/opentray-backend-tray-icon/src/native.rs` | Native tray runtime applies compiled projections but must run under a caller-owned OS event loop on macOS/Windows. | `opentray-bin` must own the native event loop if the daemon is responsible for visible tray state. |
 | `crates/opentray-bin/src/main.rs` | The binary only prints one `ready` frame and instantiates the target backend name. | The binary must become the broker composition layer for transport, kernel, backend, and native event ingress. |
 | `skills/opentray/references/visual-acceptance.md` | Human-visible work requires real tray or window commands, not only tests. | Acceptance must include a command that creates a visible tray through the daemon path. |
-| `winit` macOS platform API | `EventLoopBuilderExtMacOS` can set `ActivationPolicy::Accessory`, disable the default menu, and avoid activation. | The daemon can own a native event loop without becoming a Dock-visible regular app. |
-| `crates/opentray-backend-tray-icon/src/native.rs` | Native `tray-icon` backend supports `rgba` icon assets and currently returns unsupported for `encoded` and `file`. | Docs and examples must not imply encoded/file icons are implemented yet. |
 
 ### Git Evidence
 
@@ -148,10 +137,11 @@ The user is pushing OpenTray from package skeleton and examples into a desktop s
 The operator can run:
 
 ```bash
+opentray daemon start
 pnpm --filter opentray example:daemon-tray
 ```
 
-Expected visible result: the example starts or reuses the same-version daemon, a real system tray item appears through the daemon path, and no Dock-visible windowless daemon app appears on macOS. Opening the menu and clicking an item prints an event in the TS client output. Stopping the daemon remains available through `opentray daemon stop` for operator cleanup and removes daemon-owned tray state for the current version only.
+Expected visible result: a real system tray item appears through the daemon path. Opening the menu and clicking an item prints an event in the TS client output. Stopping the daemon removes the daemon-owned tray state for the current version only.
 
 Automated smoke can use:
 
@@ -161,28 +151,26 @@ OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray
 
 ## Platform Diagnosis
 
-- Current platform laws: `Surface` is broker-owned physical desktop entry; `Tray` is client-owned contribution; `Lease` is client authority; `SurfaceProjection` is the only backend input; endpoint identity includes package version and protocol version; extension commands go through a registry rather than feature branches; local SDK entrypoints auto-start the same-version broker when using the derived endpoint.
+- Current platform laws: `Surface` is broker-owned physical desktop entry; `Tray` is client-owned contribution; `Lease` is client authority; `SurfaceProjection` is the only backend input; endpoint identity includes package version and protocol version; extension commands go through a registry rather than feature branches.
 - Does this fit as a regular atom: No. The visual example is an atom, but transport/session/request correlation/broker composition are platform laws.
 - Does this require law upgrade: Yes. The placeholder protocol needs real session semantics: init-before-lease, request correlation, structured errors, disconnect cleanup, backend event egress to the owning lease.
 - Breaking update stance: Prefer breaking the placeholder TS transport shape now. `pending:*` identities and send-only transports are not acceptable platform laws.
-- Visual acceptance update: macOS daemon behavior, auto-start, and icon/menu capability visibility are not demo polish. They are acceptance laws for a community SDK because developers must see a real tray by running one example command.
 - User confirmations still required: None before implementation. Windows named-pipe completeness may become a scoped follow-up if it blocks macOS visible acceptance.
 
 ## Reverse-Inferred Design
 
 ### Interaction / Visual Story
 
-1. Developer runs `pnpm --filter opentray example:daemon-tray`.
-2. The local broker client resolves the versioned endpoint under `~/.opentray/<packageVersion>/` and starts or reuses the Rust broker binary if needed.
-3. On macOS, the broker event loop uses accessory/background app behavior so the daemon does not create a Dock-visible windowless process.
-4. TS example connects to that endpoint and sends `init { protocolVersion, clientVersion }`.
-5. Broker rejects incompatible protocol before creating a lease; compatible clients get a broker lease.
-6. TS example requests a surface and a tray with title, tooltip, a deliberate visible RGBA icon, and a menu covering item, disabled item, check, radio, separator, submenu, and quit actions.
-7. Rust broker dispatches requests into `opentray-core::Kernel`.
-8. Kernel derives `SurfaceProjection`; `opentray-bin` applies it through the selected backend.
-9. Human sees a real tray item.
-10. Human clicks a menu item; native backend maps it to `TrayEvent`.
-11. Kernel routes the event by `(leaseId, surfaceId, trayId, itemId)` and the broker writes it only to the owning client.
+1. Operator starts the daemon for the current `opentray` package version.
+2. CLI resolves the versioned endpoint under `~/.opentray/<packageVersion>/` and starts the Rust broker binary if needed.
+3. TS example connects to that endpoint and sends `init { protocolVersion, clientVersion }`.
+4. Broker rejects incompatible protocol before creating a lease; compatible clients get a broker lease.
+5. TS example requests a surface and a tray with title, icon, tooltip, and menu.
+6. Rust broker dispatches requests into `opentray-core::Kernel`.
+7. Kernel derives `SurfaceProjection`; `opentray-bin` applies it through the selected backend.
+8. Human sees a real tray item.
+9. Human clicks a menu item; native backend maps it to `TrayEvent`.
+10. Kernel routes the event by `(leaseId, surfaceId, trayId, itemId)` and the broker writes it only to the owning client.
 
 ### Interface Shape
 
@@ -192,7 +180,6 @@ OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray
   - `opentray daemon restart`
 - Public TS SDK gains a real local broker client:
   - Connects to the versioned endpoint.
-  - Starts or reuses the same-version daemon by default when using local broker resolution.
   - Sends `init` before command frames.
   - Awaits correlated command responses instead of returning `pending:*`.
   - Surfaces async broker events to the application.
@@ -223,8 +210,6 @@ Platform laws:
 - Client disconnect closes only its lease-owned trays and extension state.
 - Backend event ingress returns to kernel first, then egresses only to the owning client.
 - Node CLI lifecycle may supervise the broker, but Rust `opentray-bin` owns kernel/backend composition.
-- macOS broker composition must use background/accessory activation behavior; a daemon is not a user-facing regular app.
-- Native `tray-icon` icon support is currently RGBA only. Encoded and file icon assets remain typed protocol shapes but must return unsupported until decoding/file policy is implemented.
 
 Forbidden couplings:
 
@@ -249,9 +234,8 @@ Forbidden couplings:
 - [ ] 4. Commit OpenSpec artifacts before product code.
 - [ ] 5. Implement Rust broker transport, kernel dispatch, backend projection, and event egress.
 - [ ] 6. Implement TS local broker client and daemon tray example.
-- [ ] 7. Apply visual-feedback corrections: macOS accessory daemon, SDK auto-start, visible RGBA example icon, richer menu, and icon support docs.
-- [ ] 8. Run automated verification and human-visible smoke commands.
-- [ ] 9. Self-review against intent and decide whether to loop.
+- [ ] 7. Run automated verification and human-visible smoke commands.
+- [ ] 8. Self-review against intent and decide whether to loop.
 
 ## Open Questions
 

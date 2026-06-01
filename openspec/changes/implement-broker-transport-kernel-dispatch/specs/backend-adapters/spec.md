@@ -19,6 +19,24 @@ The broker composition layer SHALL own backend selection and SHALL apply `Surfac
 - **THEN** `opentray-core` has no dependency on concrete backend crates
 - **AND** kernel tests can still use `FakeBackend`.
 
+### Requirement: Native tray-icon backend SHALL expose honest icon capability boundaries
+
+The native `tray-icon` backend SHALL support `rgba` icon assets for visible tray items. Encoded and file icon asset shapes MAY remain in the shared protocol for future portability, but this backend SHALL return typed unsupported errors for those shapes until decoding and file policy are implemented. Human-visible examples SHALL use a deliberate nonblank RGBA icon rather than a transparent or one-pixel placeholder.
+
+#### Scenario: RGBA icon creates visible tray item
+
+- **GIVEN** a tray projection contains an `rgba` icon asset
+- **WHEN** the native `tray-icon` backend applies the projection
+- **THEN** it converts the RGBA bytes into the native tray icon type
+- **AND** the example icon is visually nonblank.
+
+#### Scenario: Encoded or file icon is not faked
+
+- **GIVEN** a tray projection contains an `encoded` or `file` icon asset
+- **WHEN** the native `tray-icon` backend applies the projection
+- **THEN** it returns a typed unsupported backend error
+- **AND** it does not silently substitute a blank icon.
+
 ## MODIFIED Requirements
 
 ### Requirement: Backend selection SHALL be owned by the binary composition layer
