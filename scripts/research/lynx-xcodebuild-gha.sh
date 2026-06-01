@@ -3,6 +3,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cache_dir="${root_dir}/research/lynx/cache"
 logs_dir="${root_dir}/research/lynx/logs"
 upstream_dir="${root_dir}/research/lynx/upstream"
 lynx_dir="${upstream_dir}/lynx"
@@ -11,9 +12,28 @@ derived_data_dir="${root_dir}/research/lynx/DerivedData"
 gn_args_file="${root_dir}/scripts/research/lynx-macos.args.gn"
 lynx_repo="${LYNX_REPO:-https://github.com/lynx-family/lynx.git}"
 lynx_ref="${LYNX_REF:-3a936299ec1669cfd1f3da71e41240296bc226b3}"
+gradle_url="https://services.gradle.org/distributions/gradle-6.7.1-all.zip"
+gradle_zip="${cache_dir}/gradle-6.7.1-all.zip"
 
-rm -rf "${logs_dir}" "${lynx_dir}" "${derived_data_dir}"
-mkdir -p "${logs_dir}" "${upstream_dir}" "${derived_data_dir}"
+download_with_retry() {
+  local url="$1"
+  local target="$2"
+
+  mkdir -p "$(dirname "${target}")"
+  curl \
+    --fail \
+    --location \
+    --retry 5 \
+    --retry-all-errors \
+    --retry-delay 2 \
+    --connect-timeout 30 \
+    --max-time 1200 \
+    --output "${target}" \
+    "${url}"
+}
+
+rm -rf "${cache_dir}" "${logs_dir}" "${lynx_dir}" "${derived_data_dir}"
+mkdir -p "${cache_dir}" "${logs_dir}" "${upstream_dir}" "${derived_data_dir}"
 
 echo "Cloning Lynx from ${lynx_repo} at ${lynx_ref}"
 git clone "${lynx_repo}" "${lynx_dir}" 2>&1 | tee "${logs_dir}/git-clone.log"
@@ -25,6 +45,10 @@ git rev-parse HEAD | tee "${logs_dir}/lynx-ref.txt"
 unset all_proxy http_proxy https_proxy ALL_PROXY HTTP_PROXY HTTPS_PROXY
 export XDG_CONFIG_HOME="${lynx_dir}/.xdg-config"
 mkdir -p "${XDG_CONFIG_HOME}"
+
+download_with_retry "${gradle_url}" "${gradle_zip}" 2>&1 | tee "${logs_dir}/prefetch-gradle.log"
+cp "${gradle_zip}" "${lynx_dir}/platform/android/gradle/wrapper/gradle-6.7.1-all.zip"
+cp "${gradle_zip}" "${lynx_dir}/explorer/android/gradle/wrapper/gradle-6.7.1-all.zip"
 
 # Lynx ships its own build environment setup.
 set +u
