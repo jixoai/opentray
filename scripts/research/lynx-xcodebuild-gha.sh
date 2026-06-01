@@ -27,7 +27,9 @@ export XDG_CONFIG_HOME="${lynx_dir}/.xdg-config"
 mkdir -p "${XDG_CONFIG_HOME}"
 
 # Lynx ships its own build environment setup.
+set +u
 source tools/envsetup.sh
+set -u
 
 tools/hab sync . --target clay 2>&1 | tee "${logs_dir}/hab-sync.log"
 
