@@ -3,8 +3,8 @@
 ## Current Round
 
 - Round: 1
-- Status: Native package publish recovered; remaining gate is registry-installed daemon/WebView smoke and human visual confirmation
-- Previous plan backup: `plans/plan-v1.md`
+- Status: Host UI capability boundary implemented; dynamic WebView smoke now reaches visible commands through the dynamic library path
+- Previous plan backup: none
 
 ## Current Implementation Finding
 
@@ -12,7 +12,7 @@ The dynamic extension ABI now includes a per-command host capability context. `o
 
 The dynamic extension discovery law now searches both daemon-adjacent platform packages and the requested npm facade package's dependency roots. This matters for real registry installs because package managers such as pnpm may place `@opentray/ext-webview-<os>-<arch>` beside `@opentray/ext-webview`, not beside `@opentray/<os>-<arch>`.
 
-This resolves the prior architecture blocker without passing Rust `ActiveEventLoop`, `Window`, `WebView`, backend, or kernel registry types across the ABI. CI cross-platform artifacts have run, npm package publish has been recovered, and trusted publishing is configured for the WebView platform packages. The remaining first-stage blockers are remote release tag publication, fresh npm-registry install smoke, and human visual confirmation from installed packages.
+This resolves the prior architecture blocker without passing Rust `ActiveEventLoop`, `Window`, `WebView`, backend, or kernel registry types across the ABI. The remaining first-stage blockers are release-operation gates: trusted-publish checks for the new packages, CI cross-platform artifact execution, real npm publish, fresh npm-registry install smoke, and human visual confirmation from installed packages.
 
 ## Workflow Command Surface
 
@@ -192,9 +192,9 @@ Forbidden couplings:
 - [x] 7. Move WebView registration behind platform dynamic libraries and expose daemon UI authority through host capability.
 - [x] 8. Implement CI matrix artifact build and publish staging.
 - [x] 9. Add changesets and package version grouping.
-- [x] 10. Publish through npm trusted publishing.
+- [ ] 10. Publish through npm trusted publishing.
 - [ ] 11. Run fresh npm registry install smoke and human visual verification.
-- [x] 12. Self-review against intent and decide whether to loop.
+- [ ] 12. Self-review against intent and decide whether to loop.
 
 ## Open Questions
 

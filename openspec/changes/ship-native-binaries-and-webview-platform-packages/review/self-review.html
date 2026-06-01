@@ -64,9 +64,10 @@
         Dynamic WebView now goes through a platform dynamic library and daemon
         host capability. Discovery now also follows the requested npm facade
         package roots, so pnpm-style layouts do not have to place WebView
-        platform libraries beside the daemon binary package. Release completion
-        remains blocked on npm trust state, CI native artifacts, registry
-        publish, and fresh npm visual acceptance.
+        platform libraries beside the daemon binary package. Post-review release
+        recovery published and trust-configured the WebView platform packages;
+        remaining gates are release tags, registry-installed smoke, and human
+        visual acceptance.
       </p>
       <section class="grid">
         <article class="card">
@@ -103,11 +104,12 @@
           </p>
         </article>
         <article class="card">
-          <span class="status blocked">Blocked</span>
+          <span class="status blocked">Partial</span>
           <h2>Release Operation</h2>
           <p>
-            <code>pnpm run trusted-publish:check</code> failed with npm E403 for
-            trust inspection using the current <code>NPM_TOKEN</code>.
+            Missing WebView platform packages are now published with trusted
+            publishing configured; fresh npm smoke and visual confirmation are
+            still pending.
           </p>
         </article>
       </section>

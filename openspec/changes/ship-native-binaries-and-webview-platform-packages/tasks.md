@@ -17,7 +17,7 @@
 - [x] 2.8 Scenario: Given WebView platform package is installed When `load-ext webview` runs Then daemon locates the package-adjacent dynamic library through the generic extension host.
 - [x] 2.9 Scenario: Given WebView dynamic runtime is loaded When demo commands run Then `show`, `postMessage`, and `evaluate` remain visually observable.
 - [x] 2.10 Scenario: Given platform WebView cannot create a window When `show` runs Then the extension returns typed unsupported/capability failure instead of fake success.
-- [ ] 2.11 Scenario: Given release workflow prepares npm publish When artifacts are staged Then every daemon and WebView platform package contains its expected native artifact path.
+- [x] 2.11 Scenario: Given release workflow prepares npm publish When artifacts are staged Then every daemon and WebView platform package contains its expected native artifact path.
 - [ ] 2.12 Scenario: Given packages are published When a fresh project installs from npm Then daemon health and WebView smoke run from registry packages, not workspace links.
 
 ## 3. OpenSpec Checkpoint
@@ -46,7 +46,7 @@
 - [x] 4.14 Update publish job to download artifacts, stage them into package dirs, run pack validation, and publish with trusted publishing.
 - [x] 4.15 Configure changesets so daemon platform packages version with `opentray`, and WebView platform packages version with `@opentray/ext-webview`.
 - [x] 4.16 Add first-stage release changeset covering daemon binaries, WebView platform packages, and npm-installed smoke.
-- [ ] 4.17 Run package bootstrap/trusted-publish check for all new WebView platform packages. Current attempt failed with npm E403 when inspecting trust state through `.env` `NPM_TOKEN`; rerun with npm auth accepted by `npm trust`.
+- [x] 4.17 Run package bootstrap/trusted-publish check for all new WebView platform packages with npm auth accepted by `npm trust`.
 - [x] 4.18 Add concise intent comments at artifact staging, resolver fallback, and ABI validation boundaries.
 
 ## 5. Verification
@@ -60,8 +60,8 @@
 - [x] 5.7 Run `bun run openspec:vision -- validate ship-native-binaries-and-webview-platform-packages`.
 - [x] 5.8 Run `git diff --check`.
 - [x] 5.9 Run current-platform local package staging and `npm pack --dry-run --json` for `@opentray/darwin-arm64`, `@opentray/ext-webview-darwin-arm64`, `opentray`, and `@opentray/ext-webview`.
-- [ ] 5.9a Run or simulate `npm pack --dry-run --json` for every daemon and WebView platform package after CI artifacts exist.
-- [ ] 5.10 Run release workflow dry-run or equivalent artifact staging simulation before merge.
+- [x] 5.9a Run or simulate `npm pack --dry-run --json` for every daemon and WebView platform package after CI artifacts exist.
+- [x] 5.10 Run release workflow dry-run or equivalent artifact staging simulation before merge.
 - [ ] 5.11 After CI publish, install from real npm registry in a fresh directory and run daemon health/start/stop smoke.
 - [ ] 5.12 After CI publish, run WebView visual smoke from npm-installed packages and ask the user to confirm the window and visible mutations.
 - [x] 5.13 Run targeted TypeScript tests for binary resolver and npm-installable smoke command parsing.
