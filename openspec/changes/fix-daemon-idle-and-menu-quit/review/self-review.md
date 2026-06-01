@@ -2,9 +2,9 @@
 
 ## Verdict
 
-The automated part of the follow-up intent is satisfied. The daemon now owns idle shutdown, Rust event frames serialize nested tray event fields as camelCase, TypeScript rejects snake_case tray event payloads, and the daemon tray example includes a `WebView Commands` submenu that exercises `@opentray/ext-webview` through broker extension traffic.
+The automated part of the follow-up intent is satisfied. The daemon now owns idle shutdown, Rust event frames serialize nested tray event fields as camelCase, TypeScript rejects snake_case tray event payloads, and the daemon tray example includes a `WebView Commands` submenu that exercises `@opentray/ext-webview` through a real macOS native WebView runtime.
 
-Do not archive yet. The remaining gate is human-visible: run the example without auto-exit, click `Quit Demo`, and confirm the native menu event reaches the TS client and exits the demo.
+Do not archive yet. The remaining gate is human-visible: run the example without auto-exit, click `WebView Commands -> Show HTML`, confirm a native window appears, then click `Quit Demo` and confirm the native menu event reaches the TS client and exits the demo.
 
 ## Trace
 
@@ -16,8 +16,9 @@ Do not archive yet. The remaining gate is human-visible: run the example without
 | Snake-case rejection | `parseServerFrame` now validates concrete `TrayEvent` shapes instead of accepting arbitrary event records. | Pass |
 | Demo quit clarity | Menu label is `Quit Demo`; routed item id `99` prints `quit item routed; closing demo connection`. | Pass by protocol/test; native click still needs human confirmation. |
 | WebView command coverage | The daemon demo imports the ext-webview facade and exposes show, navigate, postMessage, evaluate, and hide commands. | Pass |
-| No fake dynamic loading | Default `BrokerKernel::new` rejects dynamic paths; daemon composition explicitly enables the `opentray://recording-extension` preview recorder. | Pass |
-| Real WebView boundary | README and demo logs point users to `cargo run --example visual_webview` for a real native window. | Pass |
+| Native WebView runtime | macOS daemon composition loads `@opentray/ext-webview` through `NativeWebviewLoader` and sends runtime commands through `EventLoopProxy`. | Pass |
+| Core boundary | `wry` is only added to `opentray-bin`; `opentray-core` still depends only on contracts and trait objects. | Pass |
+| Runtime event feedback | The daemon sends actual WebView runtime events such as `shown`, `navigated`, `message`, `evaluated`, and `hidden` back to the client. | Pass |
 
 ## Verification Evidence
 
@@ -27,7 +28,8 @@ Do not archive yet. The remaining gate is human-visible: run the example without
 - `pnpm --filter opentray test` passed.
 - `pnpm --filter @opentray/ext-webview test` passed.
 - `pnpm --filter @opentray/ext-webview example:webview` passed.
-- `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=500 pnpm --filter opentray example:daemon-tray` passed and printed recorded WebView extension events.
+- `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1200 pnpm --filter opentray example:daemon-tray` passed and printed `{"type":"shown"}`.
+- `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1200 pnpm --filter opentray example:daemon-tray` passed and printed `shown`, `navigated`, `message`, `evaluated`, and `hidden` events.
 - After waiting 1 second, `pnpm --filter opentray cli -- daemon stop` reported `opentray daemon not running`, confirming idle self-release.
 - `cargo fmt --check` passed.
 - `git diff --check` passed.
@@ -39,7 +41,7 @@ Do not archive yet. The remaining gate is human-visible: run the example without
 ## Residual Risks
 
 - Automated tests cannot click the macOS status menu. User confirmation is still required for the `Quit Demo` click path.
-- The daemon demo's WebView submenu verifies extension command traffic, not real native WebView rendering. Real rendering remains covered by `cargo run --example visual_webview`.
+- Automated smoke can prove the native WebView command completed, but a human still needs to visually confirm the window appears on screen.
 - The 30s default is a product default, not a protocol compatibility law. It can be tuned before release if it feels too aggressive or too slow.
 
 ## Human Acceptance
@@ -62,5 +64,6 @@ Expected:
 Optional WebView command check:
 
 - Open the `WebView Commands` submenu.
-- Click `Show HTML`, `Navigate`, `Post Message`, `Evaluate JS`, and `Hide`.
-- Terminal prints `webview command: ...` and `broker -> client {"type":"ext-event",...}` for each command.
+- Click `Show HTML` and confirm a native window appears.
+- Click `Navigate`, `Post Message`, `Evaluate JS`, and `Hide`.
+- Terminal prints `webview command: ...` and `broker -> client {"type":"ext-event",...}` with `shown`, `navigated`, `message`, `evaluated`, and `hidden` events.
