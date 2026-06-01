@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Idle Stop / Quit Fix Review</title>
+    <style>
+      body {
+        margin: 0;
+        background: #eef3ee;
+        color: #17211b;
+        font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      }
+      main {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 44px 28px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 40px;
+        letter-spacing: -0.04em;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+        margin: 24px 0;
+      }
+      .card {
+        border: 1px solid #b8c9b9;
+        border-radius: 16px;
+        background: #fbfff9;
+        padding: 18px;
+      }
+      code,
+      pre {
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+      pre {
+        overflow: auto;
+        border-radius: 14px;
+        background: #17211b;
+        color: #d9ffd8;
+        padding: 16px;
+      }
+      .pass {
+        color: #246b3a;
+        font-weight: 700;
+      }
+      .warn {
+        color: #805200;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Idle Stop / Quit Fix Review</h1>
+      <p>Status: <span class="pass">automated gates passed</span>. Archive remains blocked on one native click check.</p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Lifecycle Law</h2>
+          <p>Daemon idle shutdown is broker-owned and defaults to 30 seconds with no connected sessions.</p>
+        </div>
+        <div class="card">
+          <h2>Debug Control</h2>
+          <p><code>OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0</code> disables idle shutdown for operator/debug sessions.</p>
+        </div>
+        <div class="card">
+          <h2>Visual Gate</h2>
+          <p><code>Quit Demo</code> should print the routed menu click and close the example.</p>
+        </div>
+      </section>
+
+      <h2>Verified Commands</h2>
+      <pre><code>cargo test -p opentray-bin -p opentray-backend-tray-icon -p opentray-core
+pnpm --filter opentray test
+pnpm --filter opentray typecheck
+pnpm run build
+pnpm run verify
+OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=500 pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray cli -- daemon stop</code></pre>
+
+      <p class="warn">
+        Manual gate: run <code>pnpm --filter opentray example:daemon-tray</code>,
+        click <code>Quit Demo</code>, and confirm the terminal prints the routed click and exits.
+      </p>
+    </main>
+  </body>
+</html>

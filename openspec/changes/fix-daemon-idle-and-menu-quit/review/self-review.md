@@ -1,0 +1,53 @@
+# Self Review
+
+## Verdict
+
+The implementation satisfies the automated part of the follow-up intent: the daemon now has a broker-owned idle shutdown law, the default idle timeout is 30 seconds, `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` disables it, and the daemon tray example uses a clearer `Quit Demo` item that prints a routed event message before closing the client connection.
+
+Do not archive yet. The remaining gate is human-visible: run the example without auto-exit and click `Quit Demo` to confirm the native menu event reaches the TS client and exits the demo.
+
+## Trace
+
+| Intent / spec point | Implementation evidence | Verdict |
+| ------------------- | ----------------------- | ------- |
+| Idle-stop is broker-owned | `BrokerOptions` resolves `idle_timeout`; macOS and Unix broker loops own the timer behavior. | Pass |
+| No core/process coupling | `opentray-core` was not modified for process timers; TS client still closes only its connection. | Pass |
+| Default and override | `parse_daemon_idle_timeout` covers default 30s, custom ms, and `0` disabled. | Pass |
+| macOS idle cancellation | `NativeBrokerApp` uses an `idle_generation` token to ignore stale idle timers after a new connection. | Pass |
+| Unix blocking idle | `run_blocking_broker` uses `recv_timeout` while there are no sessions. | Pass by compile path; macOS visual path remains primary. |
+| Demo quit clarity | Menu label is now `Quit Demo`; routed item id `99` prints `quit item routed; closing demo connection`. | Pass by code; native click still needs human confirmation. |
+
+## Verification Evidence
+
+- `cargo test -p opentray-bin -p opentray-backend-tray-icon -p opentray-core` passed.
+- `pnpm --filter opentray test` passed.
+- `pnpm --filter opentray typecheck` passed.
+- `pnpm run build` passed.
+- `pnpm run verify` passed on rerun. The first run hit a 5s timeout in an unrelated OpenSpec controller test and the same gate passed immediately on rerun.
+- `bun run openspec:vision -- validate fix-daemon-idle-and-menu-quit` passed.
+- `cargo fmt --check` passed after formatting.
+- `git diff --check` passed.
+- `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=500 pnpm --filter opentray example:daemon-tray` passed.
+- After waiting 1 second, `pnpm --filter opentray cli -- daemon stop` reported `opentray daemon not running`, confirming idle self-release.
+
+## Residual Risks
+
+- Automated tests cannot click the macOS status menu. User confirmation is still required for the `Quit Demo` click path.
+- The 30s default is a product default, not a protocol compatibility law. It can be tuned before release if it feels too aggressive or too slow.
+
+## Human Acceptance
+
+Run:
+
+```bash
+pnpm --filter opentray example:daemon-tray
+```
+
+Click `Quit Demo`.
+
+Expected:
+
+- Terminal prints `menu click: Quit Demo`.
+- Terminal prints `quit item routed; closing demo connection`.
+- The example process exits.
+- After roughly 30 seconds with no connected clients, the daemon exits automatically.
