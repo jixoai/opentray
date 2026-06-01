@@ -138,6 +138,41 @@ raise SystemExit('lynx_explorer build phase not found in generated project')
 PY
 }
 
+smoke_launch_external_bundle() {
+  local app_bundle_path="$1"
+  local smoke_dir="${artifacts_dir}/runtime-smoke"
+  local source_bundle="${app_bundle_path}/Contents/Resources/Resource/homepage/main.lynx.bundle"
+  local external_bundle="${smoke_dir}/homepage.main.lynx.bundle"
+  local app_executable="${app_bundle_path}/Contents/MacOS/LynxExplorer"
+  local launch_log="${logs_dir}/lynx-runtime-smoke.log"
+  local smoke_pid=""
+
+  mkdir -p "${smoke_dir}"
+  cp "${source_bundle}" "${external_bundle}"
+  printf 'file://%s\n' "${external_bundle}" > "${artifacts_dir}/LynxExplorer.runtime-smoke-url.txt"
+
+  "${app_executable}" "--url=file://${external_bundle}" \
+    > "${launch_log}" 2>&1 &
+  smoke_pid=$!
+
+  sleep 10
+
+  if ! kill -0 "${smoke_pid}" >/dev/null 2>&1; then
+    echo "LynxExplorer runtime smoke exited before stability window" >&2
+    if [[ -f "${launch_log}" ]]; then
+      cat "${launch_log}" >&2
+    fi
+    wait "${smoke_pid}" || true
+    exit 1
+  fi
+
+  ps -p "${smoke_pid}" -o pid=,etime=,command= \
+    > "${artifacts_dir}/LynxExplorer.runtime-smoke-process.txt"
+
+  kill "${smoke_pid}" >/dev/null 2>&1 || true
+  wait "${smoke_pid}" || true
+}
+
 rewrite_resolved_dep_url_if_present() {
   local file="$1"
   local old_url="$2"
@@ -323,3 +358,5 @@ plutil -p "${app_bundle_path}/Contents/Info.plist" > "${artifacts_dir}/LynxExplo
 ditto -c -k --sequesterRsrc --keepParent \
   "${app_bundle_path}" \
   "${artifacts_dir}/LynxExplorer.app.zip"
+
+smoke_launch_external_bundle "${app_bundle_path}"
