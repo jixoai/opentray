@@ -21,7 +21,7 @@
 
 - [x] 3.1 Run `bun run openspec:vision -- validate implement-broker-transport-kernel-dispatch`.
 - [x] 3.2 Run `bun run openspec:vision -- commit-check implement-broker-transport-kernel-dispatch --phase research-plan`.
-- [ ] 3.3 Commit `plans/plan.md`, `specs/**/spec.md`, and `tasks.md` before product-code work starts.
+- [x] 3.3 Commit `plans/plan.md`, `specs/**/spec.md`, and `tasks.md` before product-code work starts.
 
 ## 4. Implementation
 
