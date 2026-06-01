@@ -86,6 +86,57 @@ path.write_text(text.replace(old, new, 1))
 PY
 }
 
+patch_generated_lynx_explorer_outputs() {
+  local project_file="${lynx_dir}/${out_dir}/all.xcodeproj/project.pbxproj"
+
+  python3 - "${project_file}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text().splitlines(keepends=True)
+phase_name = 'name = "Action \\"Compile and copy lynx_explorer via ninja\\"";'
+outputs = (
+    '"$(PROJECT_DIR)/LynxExplorer.app/Contents/Info.plist"',
+    '"$(PROJECT_DIR)/LynxExplorer.app/Contents/PkgInfo"',
+    '"$(PROJECT_DIR)/LynxExplorer.app/Contents/MacOS/LynxExplorer"',
+)
+
+for index, line in enumerate(lines):
+    if phase_name not in line:
+        continue
+
+    output_start = None
+    output_end = None
+    for candidate in range(index + 1, len(lines)):
+        if "outputPaths = (" in lines[candidate]:
+            output_start = candidate
+            for tail in range(candidate + 1, len(lines)):
+                if lines[tail].strip() == ");":
+                    output_end = tail
+                    break
+            break
+
+    if output_start is None or output_end is None:
+        raise SystemExit("lynx_explorer outputPaths block not found")
+
+    current_block = "".join(lines[output_start : output_end + 1])
+    if outputs[0] in current_block:
+        raise SystemExit(0)
+
+    indent = lines[output_start].split("outputPaths = (", 1)[0]
+    lines[output_start : output_end + 1] = [
+        f"{indent}outputPaths = (\n",
+        *[f"{indent}\t{output},\n" for output in outputs],
+        f"{indent});\n",
+    ]
+    path.write_text("".join(lines))
+    raise SystemExit(0)
+
+raise SystemExit('lynx_explorer build phase not found in generated project')
+PY
+}
+
 rewrite_resolved_dep_url_if_present() {
   local file="$1"
   local old_url="$2"
@@ -234,6 +285,8 @@ buildtools/gn/gn gen "${out_dir}" \
   --args="$(<"${gn_args_file}")" \
   --ide=xcode \
   2>&1 | tee "${logs_dir}/gn-gen.log"
+
+patch_generated_lynx_explorer_outputs
 
 xcodebuild \
   -project "${out_dir}/all.xcodeproj" \
