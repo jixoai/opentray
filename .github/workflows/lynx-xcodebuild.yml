@@ -111,3 +111,13 @@ jobs:
             research/lynx/logs/**
             research/lynx/upstream/lynx/out/Default/args.gn
             research/lynx/upstream/lynx/out/Default/all.xcodeproj/project.pbxproj
+
+      - name: Upload Lynx runtime artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lynx-xcodebuild-runtime-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            research/lynx/artifacts/**

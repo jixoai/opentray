@@ -5,6 +5,7 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cache_dir="${root_dir}/research/lynx/cache"
 logs_dir="${root_dir}/research/lynx/logs"
+artifacts_dir="${root_dir}/research/lynx/artifacts"
 upstream_dir="${root_dir}/research/lynx/upstream"
 lynx_dir="${upstream_dir}/lynx"
 out_dir="${LYNX_OUT_DIR:-out/Default}"
@@ -250,8 +251,8 @@ cleanup() {
 
 trap cleanup EXIT
 
-rm -rf "${logs_dir}" "${lynx_dir}" "${derived_data_dir}"
-mkdir -p "${cache_dir}" "${logs_dir}" "${upstream_dir}" "${derived_data_dir}"
+rm -rf "${logs_dir}" "${artifacts_dir}" "${lynx_dir}" "${derived_data_dir}"
+mkdir -p "${cache_dir}" "${logs_dir}" "${artifacts_dir}" "${upstream_dir}" "${derived_data_dir}"
 
 echo "Cloning Lynx from ${lynx_repo} at ${lynx_ref}"
 git clone "${lynx_repo}" "${lynx_dir}" 2>&1 | tee "${logs_dir}/git-clone.log"
@@ -306,5 +307,19 @@ xcodebuild \
   build \
   2>&1 | tee "${logs_dir}/xcodebuild-build.log"
 
-find "${lynx_dir}/${out_dir}" -maxdepth 2 -name 'LynxExplorer.app' -print \
-  | tee "${logs_dir}/app-paths.txt"
+app_bundle_path="${lynx_dir}/${out_dir}/LynxExplorer.app"
+
+if [[ ! -d "${app_bundle_path}" ]]; then
+  echo "Expected app bundle not found: ${app_bundle_path}" >&2
+  exit 1
+fi
+
+printf '%s\n' "${app_bundle_path}" | tee "${logs_dir}/app-paths.txt"
+
+find "${app_bundle_path}" -print | sort > "${artifacts_dir}/LynxExplorer.bundle-tree.txt"
+du -sh "${app_bundle_path}" | tee "${artifacts_dir}/LynxExplorer.bundle-size.txt"
+plutil -p "${app_bundle_path}/Contents/Info.plist" > "${artifacts_dir}/LynxExplorer.info-plist.txt"
+
+ditto -c -k --sequesterRsrc --keepParent \
+  "${app_bundle_path}" \
+  "${artifacts_dir}/LynxExplorer.app.zip"
