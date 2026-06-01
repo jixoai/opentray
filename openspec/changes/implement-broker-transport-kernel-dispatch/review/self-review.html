@@ -77,8 +77,8 @@
         <div class="card">
           <h2>Visual Path</h2>
           <p>
-            <code>opentray daemon start</code> now supervises the Rust broker,
-            and <code>example:daemon-tray</code> creates a real tray through the daemon endpoint.
+            <code>example:daemon-tray</code> now auto-starts the same-version Rust broker
+            and creates a real tray through the daemon endpoint.
           </p>
         </div>
         <div class="card">
@@ -98,14 +98,15 @@ pnpm run typecheck
 pnpm run verify
 bun run openspec:vision -- validate implement-broker-transport-kernel-dispatch
 git diff --check
-pnpm --filter opentray cli -- daemon start
+pnpm --filter opentray cli -- daemon stop
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray
 pnpm --filter opentray cli -- daemon stop</code></pre>
 
       <h2>Manual Gate</h2>
       <p class="warn">
-        Run the example without auto-exit, confirm the tray is visible, click
-        <code>Daemon Tray Event</code>, and verify the event frame prints in the client output.
+        Run the example without auto-exit, confirm no Dock-visible daemon app appears on macOS,
+        confirm the tray icon is nonblank, open the richer menu, click an enabled item,
+        and verify the event frame prints in the client output.
       </p>
     </main>
   </body>

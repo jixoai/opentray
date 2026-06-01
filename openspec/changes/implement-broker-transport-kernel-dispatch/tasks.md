@@ -52,14 +52,14 @@
 - [x] 5.9 Run `bun run openspec:vision -- validate implement-broker-transport-kernel-dispatch`.
 - [x] 5.10 Run `git diff --check`.
 - [x] 5.11 Smoke the daemon-path visual example with `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray`.
-- [x] 5.12 Provide the human acceptance command `opentray daemon start` plus `pnpm --filter opentray example:daemon-tray` and explain the expected visible tray/menu event output.
+- [x] 5.12 Provide the human acceptance command `pnpm --filter opentray example:daemon-tray`, explain that it auto-starts the daemon, and provide `pnpm --filter opentray cli -- daemon stop` for cleanup.
 - [x] 5.13 Run `bun run openspec:vision -- commit-check implement-broker-transport-kernel-dispatch --phase self-review` before writing final review evidence.
 
 ## 6. Self-Review Loop
 
 - [x] 6.1 Generate `review/self-review.md` comparing implementation against `plans/plan.md`, specs, tasks, and visual acceptance evidence.
 - [x] 6.2 Generate `review/self-review.html` as structured visual/interaction evidence for the daemon tray path.
-- [ ] 6.3 If self-review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before applying more implementation work.
+- [x] 6.3 If self-review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before applying more implementation work.
 - [ ] 6.4 If review enters a real loop, run `bun run openspec:vision -- review-state implement-broker-transport-kernel-dispatch`.
 - [ ] 6.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-broker-transport-kernel-dispatch` and commit the handoff evidence.
 - [ ] 6.6 Do not archive until the user accepts the human-visible daemon tray behavior.
@@ -68,12 +68,12 @@
 ## 7. Visual Feedback Apply
 
 - [ ] 7.1 Scenario: Given macOS starts the daemon When the broker owns the native event loop Then it uses accessory/background activation and does not create a Dock-visible windowless process.
-- [ ] 7.2 Scenario: Given no same-version daemon is running When `pnpm --filter opentray example:daemon-tray` runs Then the local broker client auto-starts the daemon before connecting.
-- [ ] 7.3 Scenario: Given an explicit endpoint and `autoStart: false` When the local broker client connects Then it does not start the derived local daemon.
+- [x] 7.2 Scenario: Given no same-version daemon is running When `pnpm --filter opentray example:daemon-tray` runs Then the local broker client auto-starts the daemon before connecting.
+- [x] 7.3 Scenario: Given an explicit endpoint and `autoStart: false` When the local broker client connects Then it does not start the derived local daemon.
 - [ ] 7.4 Scenario: Given the daemon tray example renders When a human opens the tray menu Then the icon is visibly nonblank and the menu covers item, disabled item, check, radio, separator, submenu, and quit actions.
-- [ ] 7.5 Document that manual `opentray daemon start|stop|restart` is for operator/debug use and examples/SDK local clients auto-start by default.
-- [ ] 7.6 Document current native icon support: `rgba` is implemented; `encoded` and `file` are typed protocol shapes but currently return unsupported in the native `tray-icon` backend.
-- [ ] 7.7 Run targeted TypeScript tests for local broker auto-start behavior.
-- [ ] 7.8 Run targeted Rust verification for the broker binary and backend icon capability behavior.
-- [ ] 7.9 Smoke `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray` without manually starting the daemon first.
+- [x] 7.5 Document that manual `opentray daemon start|stop|restart` is for operator/debug use and examples/SDK local clients auto-start by default.
+- [x] 7.6 Document current native icon support: `rgba` is implemented; `encoded` and `file` are typed protocol shapes but currently return unsupported in the native `tray-icon` backend.
+- [x] 7.7 Run targeted TypeScript tests for local broker auto-start behavior.
+- [x] 7.8 Run targeted Rust verification for the broker binary and backend icon capability behavior.
+- [x] 7.9 Smoke `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray` without manually starting the daemon first.
 - [ ] 7.10 Ask the user to visually confirm macOS Dock absence and the nonblank tray/menu behavior before archive.
