@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, chmod } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
@@ -125,6 +125,10 @@ export const resolveInstalledBrokerBinary = async ({
         binaryPath: binary,
       },
     );
+  }
+
+  if (platform !== "win32") {
+    await chmod(binary, 0o755);
   }
 
   return binary;

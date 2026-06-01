@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -49,8 +49,10 @@ describe("broker command resolver", () => {
       },
     });
 
-    expect(command.command).toBe(join(packageJson, "..", "bin", "opentray"));
+    const binary = join(packageJson, "..", "bin", "opentray");
+    expect(command.command).toBe(binary);
     expect(command.cwd).toBeUndefined();
+    expect((await stat(binary)).mode & 0o777).toBe(0o755);
   });
 
   it("falls back to the workspace broker build when no installed package exists", async () => {
