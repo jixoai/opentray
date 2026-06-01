@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Broker Transport Self Review</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f5f1e8;
+        color: #1e2a24;
+        font-family:
+          ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 48px 28px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 42px;
+        letter-spacing: -0.04em;
+      }
+      h2 {
+        margin-top: 32px;
+        font-size: 22px;
+      }
+      .card {
+        border: 1px solid #c9bfa9;
+        border-radius: 18px;
+        background: #fffaf0;
+        padding: 20px;
+        box-shadow: 0 18px 45px rgba(43, 35, 20, 0.1);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+      }
+      code,
+      pre {
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+      pre {
+        overflow: auto;
+        border-radius: 14px;
+        background: #1e2a24;
+        color: #d7f8d0;
+        padding: 16px;
+      }
+      .pass {
+        color: #1d6b41;
+        font-weight: 700;
+      }
+      .warn {
+        color: #8a4b00;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Broker Transport / Kernel Dispatch Review</h1>
+      <p>
+        Status: <span class="pass">apply implementation passed automated gates</span>.
+        Archive remains blocked on human visual acceptance.
+      </p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Platform Law</h2>
+          <p>
+            Init creates lease authority, request ids correlate command responses,
+            and all mutations dispatch through Rust <code>Kernel</code>.
+          </p>
+        </div>
+        <div class="card">
+          <h2>Visual Path</h2>
+          <p>
+            <code>opentray daemon start</code> now supervises the Rust broker,
+            and <code>example:daemon-tray</code> creates a real tray through the daemon endpoint.
+          </p>
+        </div>
+        <div class="card">
+          <h2>Boundary</h2>
+          <p>
+            Node-only connection code is exported from <code>opentray/node</code>;
+            the root package remains safe for extension type consumers.
+          </p>
+        </div>
+      </section>
+
+      <h2>Verified Commands</h2>
+      <pre><code>cargo test
+pnpm run build
+pnpm run test
+pnpm run typecheck
+pnpm run verify
+bun run openspec:vision -- validate implement-broker-transport-kernel-dispatch
+git diff --check
+pnpm --filter opentray cli -- daemon start
+OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray cli -- daemon stop</code></pre>
+
+      <h2>Manual Gate</h2>
+      <p class="warn">
+        Run the example without auto-exit, confirm the tray is visible, click
+        <code>Daemon Tray Event</code>, and verify the event frame prints in the client output.
+      </p>
+    </main>
+  </body>
+</html>

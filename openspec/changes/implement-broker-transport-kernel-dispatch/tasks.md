@@ -37,7 +37,7 @@
 - [x] 4.10 Remove or migrate public client placeholder identity behavior such as `pending:*`.
 - [x] 4.11 Add `pnpm --filter opentray example:daemon-tray` as the human-visible daemon-path example.
 - [x] 4.12 Add concise intent comments only at critical effect points: init-before-lease, request/event separation, lease cleanup, and native event routing.
-- [ ] 4.13 Update only current-context completed task checkboxes and commit them with matching implementation / BDD evidence.
+- [x] 4.13 Update only current-context completed task checkboxes and commit them with matching implementation / BDD evidence.
 
 ## 5. Verification
 
@@ -53,14 +53,14 @@
 - [x] 5.10 Run `git diff --check`.
 - [x] 5.11 Smoke the daemon-path visual example with `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray`.
 - [x] 5.12 Provide the human acceptance command `opentray daemon start` plus `pnpm --filter opentray example:daemon-tray` and explain the expected visible tray/menu event output.
-- [ ] 5.13 Run `bun run openspec:vision -- commit-check implement-broker-transport-kernel-dispatch --phase self-review` before writing final review evidence.
+- [x] 5.13 Run `bun run openspec:vision -- commit-check implement-broker-transport-kernel-dispatch --phase self-review` before writing final review evidence.
 
 ## 6. Self-Review Loop
 
-- [ ] 6.1 Generate `review/self-review.md` comparing implementation against `plans/plan.md`, specs, tasks, and visual acceptance evidence.
-- [ ] 6.2 Generate `review/self-review.html` as structured visual/interaction evidence for the daemon tray path.
+- [x] 6.1 Generate `review/self-review.md` comparing implementation against `plans/plan.md`, specs, tasks, and visual acceptance evidence.
+- [x] 6.2 Generate `review/self-review.html` as structured visual/interaction evidence for the daemon tray path.
 - [ ] 6.3 If self-review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before applying more implementation work.
 - [ ] 6.4 If review enters a real loop, run `bun run openspec:vision -- review-state implement-broker-transport-kernel-dispatch`.
 - [ ] 6.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-broker-transport-kernel-dispatch` and commit the handoff evidence.
 - [ ] 6.6 Do not archive until the user accepts the human-visible daemon tray behavior.
-- [ ] 6.7 Run `bun run openspec:vision -- check implement-broker-transport-kernel-dispatch` before claiming workflow completion.
+- [x] 6.7 Run `bun run openspec:vision -- check implement-broker-transport-kernel-dispatch` before claiming workflow completion.
