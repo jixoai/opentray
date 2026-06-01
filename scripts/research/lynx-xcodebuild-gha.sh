@@ -45,6 +45,8 @@ import sys
 path = Path(sys.argv[1])
 old = sys.argv[2]
 new = sys.argv[3]
+if not path.exists():
+    raise SystemExit(0)
 text = path.read_text()
 if old not in text:
     raise SystemExit(0)
