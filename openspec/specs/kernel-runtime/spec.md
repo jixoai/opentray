@@ -35,7 +35,7 @@ The kernel SHALL keep physical surface state separate from client tray declarati
 
 ### Requirement: Kernel SHALL expose typed protocol frames
 
-The kernel SHALL define newline-delimited JSON protocol frames in `opentray-spec` and SHALL share equivalent TypeScript types through `@opentray/spec`. Protocol models SHALL include surface creation, default surface resolution, tray creation/destruction, dynamic tray updates, backend-originated events, extension loading, extension commands, extension events, structured errors, protocol handshake, and protocol version metadata. Handshake frames SHALL use `protocolVersion` rather than ambiguous `version` naming.
+The kernel SHALL define newline-delimited JSON protocol frames in `opentray-spec` and SHALL share equivalent TypeScript types through `@opentray/spec`. Protocol models SHALL include surface creation, default surface resolution, tray creation/destruction, dynamic tray updates, backend-originated events, extension loading, extension commands, extension events, structured errors, protocol handshake, protocol version metadata, accepted lease metadata, and request-correlated command responses. Handshake frames SHALL use `protocolVersion` rather than ambiguous `version` naming.
 
 #### Scenario: Protocol parse failure does not crash mixed output
 
@@ -57,6 +57,12 @@ The kernel SHALL define newline-delimited JSON protocol frames in `opentray-spec
 - **WHEN** the broker evaluates the handshake
 - **THEN** it rejects the connection with a structured protocol error
 - **AND** it does not create a lease for that connection.
+
+#### Scenario: Command response carries request identity
+
+- **GIVEN** a client sends a command frame with `requestId`
+- **WHEN** the broker completes or rejects that command
+- **THEN** the returned success frame or error frame includes the same `requestId`.
 
 ### Requirement: Kernel SHALL stay independent from concrete backends and extensions
 
@@ -95,4 +101,62 @@ The system SHALL derive local broker endpoint names from both the current packag
 - **WHEN** each SDK resolves its broker endpoint
 - **THEN** they produce different endpoint names
 - **AND** neither SDK scans or reuses the other package version's broker state.
+
+### Requirement: Broker sessions SHALL create leases only after compatible init
+
+The broker runtime SHALL treat `init { protocolVersion, clientVersion }` as the session gate. A connection SHALL NOT receive a lease and SHALL NOT mutate kernel state until the broker has accepted a supported protocol version. The accepted session SHALL carry a broker-issued `leaseId` that is used for every command dispatched into the kernel.
+
+#### Scenario: Compatible init creates lease
+
+- **GIVEN** a client connects to the versioned broker endpoint
+- **WHEN** it sends `init` with the supported `protocolVersion`
+- **THEN** the broker accepts the session
+- **AND** it returns the broker `protocolVersion`, broker package version, and a `leaseId`.
+
+#### Scenario: Incompatible init has no lease side effect
+
+- **GIVEN** a client connects to the versioned broker endpoint
+- **WHEN** it sends `init` with an unsupported `protocolVersion`
+- **THEN** the broker returns a structured protocol error
+- **AND** it does not create a lease
+- **AND** no kernel surface or tray state is mutated for that connection.
+
+### Requirement: Broker sessions SHALL dispatch client commands through Kernel authority
+
+The broker runtime SHALL translate accepted client command frames into `opentray-core::Kernel` operations. Surface creation, tray creation, tray mutation, tray destruction, lease cleanup, extension commands, and backend-originated events SHALL use kernel ownership checks rather than reimplementing policy in the transport layer.
+
+#### Scenario: Create tray dispatches through kernel and backend projection
+
+- **GIVEN** a client session has an accepted lease
+- **AND** the session has created a surface
+- **WHEN** the client sends `create-tray`
+- **THEN** the broker calls the kernel with the session `leaseId`
+- **AND** the kernel derives a `SurfaceProjection`
+- **AND** the selected backend receives that projection.
+
+#### Scenario: Command before init is rejected
+
+- **GIVEN** a client connection has not completed compatible `init`
+- **WHEN** it sends `create-surface`, `create-tray`, `set-tray-menu`, or `ext-command`
+- **THEN** the broker returns a structured protocol error
+- **AND** the kernel is not mutated.
+
+### Requirement: Protocol responses SHALL be request-correlated
+
+Client command frames that expect a broker response SHALL carry a `requestId`. The matching success response or structured error SHALL include the same `requestId`. Broker-originated event frames SHALL remain event frames and SHALL NOT be confused with command acknowledgements.
+
+#### Scenario: Surface creation returns correlated broker identity
+
+- **GIVEN** an accepted client session sends `create-surface` with `requestId` `req-1`
+- **WHEN** the kernel creates the surface
+- **THEN** the broker returns `surface-created` with `requestId` `req-1`
+- **AND** the frame includes the broker-issued `SurfaceRef`.
+
+#### Scenario: Native event does not consume a pending request
+
+- **GIVEN** a client has a pending command request
+- **WHEN** a native tray menu event arrives for a tray owned by the same lease
+- **THEN** the broker sends an `event` frame
+- **AND** it does not use the pending command `requestId`
+- **AND** the pending command remains correlated only to its command response or error.
 

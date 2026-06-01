@@ -60,8 +60,8 @@
 - [x] 6.1 Generate `review/self-review.md` comparing implementation against `plans/plan.md`, specs, tasks, and visual acceptance evidence.
 - [x] 6.2 Generate `review/self-review.html` as structured visual/interaction evidence for the daemon tray path.
 - [x] 6.3 If self-review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before applying more implementation work.
-- [ ] 6.4 If review enters a real loop, run `bun run openspec:vision -- review-state implement-broker-transport-kernel-dispatch`.
-- [ ] 6.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-broker-transport-kernel-dispatch` and commit the handoff evidence.
+- [x] 6.4 If review enters a real loop, run `bun run openspec:vision -- review-state implement-broker-transport-kernel-dispatch`. Not needed: review exited normally after user visual acceptance.
+- [x] 6.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-broker-transport-kernel-dispatch` and commit the handoff evidence. Not needed: normal archive path completed.
 - [x] 6.6 Do not archive until the user accepts the human-visible daemon tray behavior.
 - [x] 6.7 Run `bun run openspec:vision -- check implement-broker-transport-kernel-dispatch` before claiming workflow completion.
 
