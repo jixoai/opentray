@@ -33,3 +33,14 @@ The default idle timeout SHALL be 30 seconds. `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS` 
 - **GIVEN** `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0`
 - **WHEN** no client sessions are connected
 - **THEN** the broker remains running until stopped by operator control or process termination.
+
+### Requirement: Broker daemon SHALL emit camelCase nested event fields
+
+Broker-originated `event` frames SHALL serialize nested tray event payload fields with the same camelCase contract as TypeScript protocol types. Menu click events SHALL use `surfaceId`, `trayId`, and `itemId` on the wire. The daemon SHALL NOT emit snake_case fields such as `surface_id`, `tray_id`, or `item_id`.
+
+#### Scenario: Menu click frame matches TypeScript event shape
+
+- **GIVEN** a native menu click is routed through the broker
+- **WHEN** the daemon serializes the `event` frame
+- **THEN** the JSON event payload includes `surfaceId`, `trayId`, and `itemId`
+- **AND** the payload does not include `surface_id`, `tray_id`, or `item_id`.

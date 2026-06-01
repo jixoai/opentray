@@ -2,7 +2,7 @@
 
 ### Requirement: Human-visible daemon tray example SHALL validate the mainline path
 
-The workspace SHALL provide a human-facing example runnable as `pnpm --filter opentray example:daemon-tray`. The example SHALL auto-start or reuse the same-version daemon, connect through the daemon endpoint, create a surface and tray through the public TypeScript SDK, print broker-created identities, and print routed tray/menu events. The example SHALL make its quit action unambiguous and SHALL exit when its quit menu item is routed back as a `menuClick` event.
+The workspace SHALL provide a human-facing example runnable as `pnpm --filter opentray example:daemon-tray`. The example SHALL auto-start or reuse the same-version daemon, connect through the daemon endpoint, create a surface and tray through the public TypeScript SDK, print broker-created identities, and print routed tray/menu events. The example SHALL make its quit action unambiguous and SHALL exit when its quit menu item is routed back as a `menuClick` event. The example SHALL also cover the first-stage `@opentray/ext-webview` package command surface by invoking WebView facade actions through the public tray handle and printing broker extension traffic through an explicitly named preview recorder. The example SHALL NOT imply that the daemon path has loaded a real native WebView runtime.
 
 #### Scenario: Human can visually accept daemon tray
 
@@ -33,3 +33,12 @@ The workspace SHALL provide a human-facing example runnable as `pnpm --filter op
 - **THEN** the example prints the routed menu click
 - **AND** the example closes its broker connection
 - **AND** the example process exits without requiring a manual daemon stop.
+
+#### Scenario: Example includes ext-webview command surface
+
+- **GIVEN** the daemon tray example has created a tray handle
+- **WHEN** the user selects WebView menu actions
+- **THEN** the example calls `@opentray/ext-webview` facade methods such as `show`, `navigate`, `postMessage`, and `hide`
+- **AND** the extension commands travel through the public `TrayHandle.commandExtension` path
+- **AND** the example prints the broker response or extension event output
+- **AND** the example tells the user to run `cargo run --example visual_webview` for a real native WebView window.
