@@ -159,6 +159,19 @@ impl<B: SurfaceBackend> Kernel<B> {
         Ok(())
     }
 
+    pub fn destroy_tray(
+        &mut self,
+        lease_id: &str,
+        surface_id: &str,
+        tray_id: &str,
+    ) -> Result<(), KernelError> {
+        self.require_owned_tray_mut(lease_id, surface_id, tray_id)?;
+        self.trays
+            .remove(&(surface_id.to_string(), tray_id.to_string()));
+        self.sync_surface(surface_id)?;
+        Ok(())
+    }
+
     pub fn close_lease(&mut self, lease_id: &str) -> Result<Vec<ExtensionEnvelope>, KernelError> {
         let affected: Vec<_> = self
             .trays
@@ -477,5 +490,40 @@ mod tests {
             y: 0,
         });
         assert!(routed.is_none());
+    }
+
+    #[test]
+    fn destroy_tray_requires_owning_lease() {
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend);
+        let surface = kernel
+            .create_surface(SurfaceOptions {
+                app_id: "host".to_string(),
+                title: None,
+                icon: None,
+                default: false,
+            })
+            .expect("surface");
+        kernel
+            .create_tray(
+                "lease-a".to_string(),
+                &surface,
+                tray_options("tray", "Tray"),
+            )
+            .expect("tray");
+
+        let error = kernel
+            .destroy_tray("lease-b", &surface.surface_id, "tray")
+            .expect_err("wrong lease rejected");
+
+        assert!(matches!(error, KernelError::LeaseMismatch { .. }));
+        assert_eq!(
+            kernel
+                .projection(&surface.surface_id)
+                .expect("projection")
+                .trays
+                .len(),
+            1
+        );
     }
 }

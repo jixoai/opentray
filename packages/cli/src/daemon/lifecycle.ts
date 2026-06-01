@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { mkdir, open, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
+import { resolveBrokerCommand } from "./broker-command";
 import type { DaemonPaths } from "./paths";
 
 export type DaemonStartResult =
@@ -34,12 +35,15 @@ export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => (
     return isProcessAlive(pid);
   },
   async spawnBroker(paths) {
-    const child = spawn(process.execPath, [cliEntrypoint, "__broker-run"], {
+    const broker = await resolveBrokerCommand(paths);
+    const child = spawn(broker.command, broker.args, {
+      cwd: broker.cwd,
       detached: true,
       env: {
         ...process.env,
         OPENTRAY_DAEMON_HOME: paths.homeDir,
         OPENTRAY_DAEMON_PACKAGE_VERSION: paths.packageVersion,
+        OPENTRAY_DAEMON_CLI_ENTRYPOINT: cliEntrypoint,
       },
       stdio: "ignore",
     });

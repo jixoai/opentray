@@ -2,7 +2,6 @@
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-import { runBrokerUntilSignal } from "./daemon/broker-runner";
 import { createNodeDaemonDriver, restartDaemon, startDaemon, stopDaemon } from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
@@ -10,15 +9,11 @@ import { resolveDaemonPaths } from "./daemon/paths";
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 
 type CliCommand =
-  | { type: "broker-run" }
   | { type: "daemon"; action: "start" | "stop" | "restart" }
   | { type: "help" };
 
 export const parseCliCommand = (argv: string[]): CliCommand => {
   const [group, action] = argv;
-  if (group === "__broker-run") {
-    return { type: "broker-run" };
-  }
   if (group !== "daemon") {
     return { type: "help" };
   }
@@ -36,11 +31,6 @@ export const runCli = async (argv: string[]): Promise<number> => {
     homeDir: process.env.OPENTRAY_HOME ?? homedir(),
     packageVersion,
   });
-
-  if (command.type === "broker-run") {
-    await runBrokerUntilSignal(paths);
-    return 0;
-  }
 
   if (command.type === "help") {
     printHelp();

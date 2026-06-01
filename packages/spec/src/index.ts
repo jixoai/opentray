@@ -1,4 +1,5 @@
 export type LeaseId = string;
+export type RequestId = string;
 export type SurfaceId = string;
 export type TrayId = string;
 export type MenuItemId = number;
@@ -168,26 +169,30 @@ export interface ExtensionEnvelope<TData = unknown> {
 
 export type ClientFrame =
   | { type: "init"; protocolVersion: number; clientVersion: string }
-  | ({ type: "create-surface" } & SurfaceOptions)
-  | { type: "resolve-default-surface" }
-  | { type: "create-tray"; surface: SurfaceRef; tray: TrayOptions }
-  | { type: "destroy-tray"; surfaceId: SurfaceId; trayId: TrayId }
-  | { type: "set-tray-menu"; surfaceId: SurfaceId; trayId: TrayId; menu: Menu }
-  | { type: "set-tray-icon"; surfaceId: SurfaceId; trayId: TrayId; icon: Icon }
-  | { type: "set-tray-tooltip"; surfaceId: SurfaceId; trayId: TrayId; tooltip: Tooltip }
-  | { type: "load-ext"; surfaceId: SurfaceId; name: string; path: string }
-  | { type: "ext-command"; surfaceId: SurfaceId; trayId: TrayId; ext: string; data: unknown }
-  | { type: "unload-ext"; surfaceId: SurfaceId; name: string }
+  | ClientRequestFrame
   | { type: "exit" };
 
+export type ClientRequestFrame =
+  | ({ type: "create-surface"; requestId: RequestId } & SurfaceOptions)
+  | { type: "resolve-default-surface"; requestId: RequestId }
+  | { type: "create-tray"; requestId: RequestId; surface: SurfaceRef; tray: TrayOptions }
+  | { type: "destroy-tray"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId }
+  | { type: "set-tray-menu"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId; menu: Menu }
+  | { type: "set-tray-icon"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId; icon: Icon }
+  | { type: "set-tray-tooltip"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId; tooltip: Tooltip }
+  | { type: "load-ext"; requestId: RequestId; surfaceId: SurfaceId; name: string; path: string }
+  | { type: "ext-command"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId; ext: string; data: unknown }
+  | { type: "unload-ext"; requestId: RequestId; surfaceId: SurfaceId; name: string };
+
 export type ServerFrame =
-  | { type: "ready"; protocolVersion: number; brokerVersion: string }
-  | { type: "surface-created"; surface: SurfaceRef }
-  | { type: "default-surface"; surface: SurfaceRef }
-  | { type: "tray-created"; surfaceId: SurfaceId; trayId: TrayId }
+  | { type: "ready"; protocolVersion: number; brokerVersion: string; leaseId: LeaseId }
+  | { type: "surface-created"; requestId: RequestId; surface: SurfaceRef }
+  | { type: "default-surface"; requestId: RequestId; surface: SurfaceRef }
+  | { type: "tray-created"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId }
+  | { type: "ack"; requestId: RequestId }
   | { type: "event"; event: TrayEvent }
   | { type: "ext-event"; surfaceId: SurfaceId; trayId: TrayId; ext: string; data: unknown }
-  | { type: "error"; message: string };
+  | { type: "error"; requestId?: RequestId; code: string; message: string };
 
 export interface ParseResult<T> {
   ok: boolean;
@@ -220,13 +225,23 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
 
   switch (value.type) {
     case "ready":
-      return typeof value.protocolVersion === "number" && typeof value.brokerVersion === "string";
+      return (
+        typeof value.protocolVersion === "number" &&
+        typeof value.brokerVersion === "string" &&
+        typeof value.leaseId === "string"
+      );
     case "surface-created":
-      return isRecord(value.surface);
+      return typeof value.requestId === "string" && isRecord(value.surface);
     case "default-surface":
-      return isRecord(value.surface);
+      return typeof value.requestId === "string" && isRecord(value.surface);
     case "tray-created":
-      return typeof value.surfaceId === "string" && typeof value.trayId === "string";
+      return (
+        typeof value.requestId === "string" &&
+        typeof value.surfaceId === "string" &&
+        typeof value.trayId === "string"
+      );
+    case "ack":
+      return typeof value.requestId === "string";
     case "event":
       return isRecord(value.event);
     case "ext-event":
@@ -236,7 +251,11 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
         typeof value.ext === "string"
       );
     case "error":
-      return typeof value.message === "string";
+      return (
+        (value.requestId === undefined || typeof value.requestId === "string") &&
+        typeof value.code === "string" &&
+        typeof value.message === "string"
+      );
     default:
       return false;
   }

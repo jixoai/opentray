@@ -25,34 +25,34 @@
 
 ## 4. Implementation
 
-- [ ] 4.1 Update Rust and TypeScript protocol models with accepted lease metadata, request-correlated responses, and structured request-correlated errors.
-- [ ] 4.2 Add Rust protocol parsing / serialization tests for compatible init, incompatible init, request ids, and event frames.
-- [ ] 4.3 Implement a Rust broker session dispatcher that gates commands on `init` and maps client frames to `opentray-core::Kernel`.
-- [ ] 4.4 Implement lease cleanup on transport disconnect and verify only owned trays are removed.
-- [ ] 4.5 Move daemon process supervision so `opentray daemon start` starts the Rust broker binary or an equivalent composition entrypoint, not the placeholder Node frame server.
-- [ ] 4.6 Implement versioned local transport binding for the current platform endpoint without scanning other package versions.
-- [ ] 4.7 Compose the selected backend in `opentray-bin` and apply kernel projections through `SurfaceBackend`.
-- [ ] 4.8 Wire backend-originated tray/menu events into kernel routing and session-specific event egress.
-- [ ] 4.9 Implement the TypeScript local broker client with handshake, request id management, response promises, event subscription, and explicit close.
-- [ ] 4.10 Remove or migrate public client placeholder identity behavior such as `pending:*`.
-- [ ] 4.11 Add `pnpm --filter opentray example:daemon-tray` as the human-visible daemon-path example.
-- [ ] 4.12 Add concise intent comments only at critical effect points: init-before-lease, request/event separation, lease cleanup, and native event routing.
+- [x] 4.1 Update Rust and TypeScript protocol models with accepted lease metadata, request-correlated responses, and structured request-correlated errors.
+- [x] 4.2 Add Rust protocol parsing / serialization tests for compatible init, incompatible init, request ids, and event frames.
+- [x] 4.3 Implement a Rust broker session dispatcher that gates commands on `init` and maps client frames to `opentray-core::Kernel`.
+- [x] 4.4 Implement lease cleanup on transport disconnect and verify only owned trays are removed.
+- [x] 4.5 Move daemon process supervision so `opentray daemon start` starts the Rust broker binary or an equivalent composition entrypoint, not the placeholder Node frame server.
+- [x] 4.6 Implement versioned local transport binding for the current platform endpoint without scanning other package versions.
+- [x] 4.7 Compose the selected backend in `opentray-bin` and apply kernel projections through `SurfaceBackend`.
+- [x] 4.8 Wire backend-originated tray/menu events into kernel routing and session-specific event egress.
+- [x] 4.9 Implement the TypeScript local broker client with handshake, request id management, response promises, event subscription, and explicit close.
+- [x] 4.10 Remove or migrate public client placeholder identity behavior such as `pending:*`.
+- [x] 4.11 Add `pnpm --filter opentray example:daemon-tray` as the human-visible daemon-path example.
+- [x] 4.12 Add concise intent comments only at critical effect points: init-before-lease, request/event separation, lease cleanup, and native event routing.
 - [ ] 4.13 Update only current-context completed task checkboxes and commit them with matching implementation / BDD evidence.
 
 ## 5. Verification
 
-- [ ] 5.1 Run targeted Rust tests for protocol and broker dispatch.
-- [ ] 5.2 Run targeted TypeScript tests for local broker client request/event separation.
-- [ ] 5.3 Run targeted daemon lifecycle tests after replacing the placeholder broker runner.
-- [ ] 5.4 Run `cargo test`.
-- [ ] 5.5 Run `pnpm --filter @opentray/spec test`.
-- [ ] 5.6 Run `pnpm --filter opentray test`.
-- [ ] 5.7 Run `pnpm run build`.
-- [ ] 5.8 Run `pnpm run verify`.
-- [ ] 5.9 Run `bun run openspec:vision -- validate implement-broker-transport-kernel-dispatch`.
-- [ ] 5.10 Run `git diff --check`.
-- [ ] 5.11 Smoke the daemon-path visual example with `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray`.
-- [ ] 5.12 Provide the human acceptance command `opentray daemon start` plus `pnpm --filter opentray example:daemon-tray` and explain the expected visible tray/menu event output.
+- [x] 5.1 Run targeted Rust tests for protocol and broker dispatch.
+- [x] 5.2 Run targeted TypeScript tests for local broker client request/event separation.
+- [x] 5.3 Run targeted daemon lifecycle tests after replacing the placeholder broker runner.
+- [x] 5.4 Run `cargo test`.
+- [x] 5.5 Run `pnpm --filter @opentray/spec test`.
+- [x] 5.6 Run `pnpm --filter opentray test`.
+- [x] 5.7 Run `pnpm run build`.
+- [x] 5.8 Run `pnpm run verify`.
+- [x] 5.9 Run `bun run openspec:vision -- validate implement-broker-transport-kernel-dispatch`.
+- [x] 5.10 Run `git diff --check`.
+- [x] 5.11 Smoke the daemon-path visual example with `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray`.
+- [x] 5.12 Provide the human acceptance command `opentray daemon start` plus `pnpm --filter opentray example:daemon-tray` and explain the expected visible tray/menu event output.
 - [ ] 5.13 Run `bun run openspec:vision -- commit-check implement-broker-transport-kernel-dispatch --phase self-review` before writing final review evidence.
 
 ## 6. Self-Review Loop

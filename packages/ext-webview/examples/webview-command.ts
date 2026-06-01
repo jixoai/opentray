@@ -1,14 +1,15 @@
-import type { ClientFrame } from "@opentray/spec";
+import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 import { createTrayHandle, type OpenTrayTransport } from "../../cli/src/index";
 
 import { attachWebview } from "../src/index";
 
 class RecordingTransport implements OpenTrayTransport {
-  readonly frames: ClientFrame[] = [];
+  readonly frames: ClientRequestFrame[] = [];
 
-  async send(frame: ClientFrame): Promise<void> {
+  async request(frame: ClientRequestFrame): Promise<ServerFrame> {
     this.frames.push(frame);
     console.log(`webview -> extension host ${JSON.stringify(frame)}`);
+    return { type: "ack", requestId: frame.requestId };
   }
 }
 

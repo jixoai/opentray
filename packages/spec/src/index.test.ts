@@ -23,6 +23,7 @@ describe("@opentray/spec", () => {
   it("keeps extension commands as typed protocol frames", () => {
     const frame: ClientFrame = {
       type: "ext-command",
+      requestId: "req-1",
       surfaceId: "surface-1",
       trayId: "tray-1",
       ext: "webview",
@@ -49,6 +50,14 @@ describe("@opentray/spec", () => {
     expect(parsed.ok).toBe(false);
   });
 
+  it("requires lease metadata in ready frames", () => {
+    const parsed = parseServerFrame(
+      JSON.stringify({ type: "ready", protocolVersion: PROTOCOL_VERSION, brokerVersion: "0.1.0" }),
+    );
+
+    expect(parsed.ok).toBe(false);
+  });
+
   it("checks protocol compatibility before lease authority exists", () => {
     const init: ClientFrame = {
       type: "init",
@@ -57,5 +66,35 @@ describe("@opentray/spec", () => {
     };
 
     expect(isSupportedProtocolVersion(init.protocolVersion)).toBe(false);
+  });
+
+  it("parses request-correlated responses", () => {
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "surface-created",
+        requestId: "req-1",
+        surface: { surfaceId: "surface-1", appId: "app" },
+      }),
+    );
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.frame).toEqual({
+      type: "surface-created",
+      requestId: "req-1",
+      surface: { surfaceId: "surface-1", appId: "app" },
+    });
+  });
+
+  it("parses structured request errors", () => {
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "error",
+        requestId: "req-1",
+        code: "not-initialized",
+        message: "init required",
+      }),
+    );
+
+    expect(parsed.ok).toBe(true);
   });
 });

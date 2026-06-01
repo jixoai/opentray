@@ -1,0 +1,223 @@
+import { createConnection, type Socket } from "node:net";
+import { homedir } from "node:os";
+
+import {
+  PROTOCOL_VERSION,
+  parseServerFrame,
+  type BrokerEndpointIdentityOptions,
+  type ClientRequestFrame,
+  type RequestId,
+  type ServerFrame,
+} from "@opentray/spec";
+
+import type { OpenTrayTransport } from "./client";
+import { readPackageVersion } from "./daemon/package-version";
+import { resolveDaemonPaths } from "./daemon/paths";
+
+const packageJsonUrl = new URL("../package.json", import.meta.url);
+
+export type BrokerEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
+
+export interface LocalBrokerClient extends OpenTrayTransport {
+  readonly endpoint: string;
+  readonly leaseId: string;
+  onEvent(listener: (frame: BrokerEventFrame) => void): () => void;
+  close(): Promise<void>;
+}
+
+export interface ConnectLocalBrokerOptions extends Partial<BrokerEndpointIdentityOptions> {
+  endpoint?: string;
+  homeDir?: string;
+  clientVersion?: string;
+}
+
+interface PendingRequest {
+  resolve(frame: ServerFrame): void;
+  reject(error: Error): void;
+}
+
+export const connectLocalBroker = async (
+  options: ConnectLocalBrokerOptions = {},
+): Promise<LocalBrokerClient> => {
+  const packageVersion = options.packageVersion ?? (await readPackageVersion(packageJsonUrl));
+  const clientVersion = options.clientVersion ?? packageVersion;
+  const paths = resolveDaemonPaths({
+    homeDir: options.homeDir ?? process.env.OPENTRAY_HOME ?? homedir(),
+    packageVersion,
+  });
+  const endpoint = options.endpoint ?? paths.endpoint;
+  const socket = await connectSocket(endpoint);
+  const connection = new LocalBrokerConnection(socket, endpoint);
+
+  await connection.init(clientVersion, options.protocolVersion ?? PROTOCOL_VERSION);
+  return connection;
+};
+
+class LocalBrokerConnection implements LocalBrokerClient {
+  readonly endpoint: string;
+  leaseId = "";
+
+  private buffer = "";
+  private readonly listeners = new Set<(frame: BrokerEventFrame) => void>();
+  private readonly pending = new Map<RequestId, PendingRequest>();
+  private ready:
+    | {
+        resolve(frame: Extract<ServerFrame, { type: "ready" }>): void;
+        reject(error: Error): void;
+      }
+    | undefined;
+
+  constructor(
+    private readonly socket: Socket,
+    endpoint: string,
+  ) {
+    this.endpoint = endpoint;
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk: Buffer | string) => {
+      this.consume(String(chunk));
+    });
+    socket.on("error", (error) => {
+      this.rejectAll(error);
+    });
+    socket.on("close", () => {
+      this.rejectAll(new Error("broker connection closed"));
+    });
+  }
+
+  async init(clientVersion: string, protocolVersion: number): Promise<void> {
+    const ready = new Promise<Extract<ServerFrame, { type: "ready" }>>((resolve, reject) => {
+      this.ready = { resolve, reject };
+    });
+    this.write({
+      type: "init",
+      protocolVersion,
+      clientVersion,
+    });
+    const frame = await ready;
+    this.leaseId = frame.leaseId;
+  }
+
+  async request(frame: ClientRequestFrame): Promise<ServerFrame> {
+    if (this.pending.has(frame.requestId)) {
+      throw new Error(`duplicate requestId: ${frame.requestId}`);
+    }
+
+    const response = new Promise<ServerFrame>((resolve, reject) => {
+      this.pending.set(frame.requestId, { resolve, reject });
+    });
+    this.write(frame);
+    return response;
+  }
+
+  onEvent(listener: (frame: BrokerEventFrame) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  async close(): Promise<void> {
+    this.write({ type: "exit" });
+    await new Promise<void>((resolve) => {
+      this.socket.end(resolve);
+    });
+  }
+
+  private consume(chunk: string): void {
+    this.buffer += chunk;
+    while (true) {
+      const newline = this.buffer.indexOf("\n");
+      if (newline < 0) {
+        return;
+      }
+
+      const line = this.buffer.slice(0, newline).trim();
+      this.buffer = this.buffer.slice(newline + 1);
+      if (line.length > 0) {
+        this.dispatchLine(line);
+      }
+    }
+  }
+
+  private dispatchLine(line: string): void {
+    const parsed = parseServerFrame(line);
+    if (!parsed.ok || parsed.frame === undefined) {
+      this.rejectAll(new Error(parsed.error ?? "invalid server frame"));
+      return;
+    }
+
+    this.dispatchFrame(parsed.frame);
+  }
+
+  private dispatchFrame(frame: ServerFrame): void {
+    if (frame.type === "ready") {
+      this.ready?.resolve(frame);
+      this.ready = undefined;
+      return;
+    }
+
+    if (frame.type === "error") {
+      const error = new Error(`${frame.code}: ${frame.message}`);
+      if (frame.requestId !== undefined) {
+        this.pending.get(frame.requestId)?.reject(error);
+        this.pending.delete(frame.requestId);
+        return;
+      }
+      this.ready?.reject(error);
+      this.ready = undefined;
+      return;
+    }
+
+    const requestId = responseRequestId(frame);
+    if (requestId !== undefined) {
+      // Request responses and broker events are separate streams even on one socket.
+      this.pending.get(requestId)?.resolve(frame);
+      this.pending.delete(requestId);
+      return;
+    }
+
+    if (frame.type === "event" || frame.type === "ext-event") {
+      for (const listener of this.listeners) {
+        listener(frame);
+      }
+    }
+  }
+
+  private write(frame: unknown): void {
+    this.socket.write(`${JSON.stringify(frame)}\n`);
+  }
+
+  private rejectAll(error: Error): void {
+    this.ready?.reject(error);
+    this.ready = undefined;
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
+    }
+    this.pending.clear();
+  }
+}
+
+const connectSocket = (endpoint: string): Promise<Socket> =>
+  new Promise((resolve, reject) => {
+    const socket = createConnection(endpoint);
+    socket.once("connect", () => {
+      socket.off("error", reject);
+      resolve(socket);
+    });
+    socket.once("error", reject);
+  });
+
+const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
+  switch (frame.type) {
+    case "surface-created":
+    case "default-surface":
+    case "tray-created":
+    case "ack":
+      return frame.requestId;
+    case "ready":
+    case "event":
+    case "ext-event":
+    case "error":
+      return undefined;
+  }
+};

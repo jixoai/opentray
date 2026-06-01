@@ -4,6 +4,7 @@ const readyFrame = JSON.stringify({
   type: "ready",
   protocolVersion: PROTOCOL_VERSION,
   brokerVersion: "0.1.0",
+  leaseId: "lease-1",
 } satisfies ServerFrame);
 
 const parsedReady = parseServerFrame(readyFrame);
