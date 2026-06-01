@@ -1,5 +1,11 @@
 # opentray
 
+## 0.2.2
+
+### Patch Changes
+
+- 5a1c644: Ensure installed broker binaries are executable before spawning the daemon.
+
 ## 0.2.1
 
 ### Patch Changes
