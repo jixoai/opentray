@@ -1,5 +1,11 @@
 # opentray
 
+## 0.2.3
+
+### Patch Changes
+
+- 27e9db0: Avoid macOS daemon crashes when WebView smoke hides a native WebView window.
+
 ## 0.2.2
 
 ### Patch Changes
