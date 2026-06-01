@@ -4,7 +4,10 @@ use opentray_spec::{
 };
 
 use super::*;
-use crate::{BackendCapabilities, BackendOperation, FakeBackend};
+use crate::{
+    BackendCapabilities, BackendOperation, ExtensionLoader, FakeBackend, RecordingExtensionLoader,
+    RECORDING_EXTENSION_PATH,
+};
 
 fn icon() -> Icon {
     Icon::Rgba {
@@ -247,8 +250,94 @@ fn backend_event_routes_to_owning_lease() {
     assert_eq!(routed.lease_id, "lease-1");
 }
 
-fn create_surface(
-    broker: &mut BrokerKernel<FakeBackend>,
+#[test]
+fn load_ext_rejects_dynamic_paths_without_a_loader() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::new(backend);
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_surface(&mut broker, &mut session);
+
+    let frames = broker.handle_frame(
+        &mut session,
+        ClientFrame::LoadExt {
+            request_id: "req-load".to_string(),
+            surface_id: surface.surface_id,
+            name: "webview".to_string(),
+            path: "@opentray/ext-webview".to_string(),
+        },
+        "0.1.0",
+    );
+
+    assert!(matches!(
+        &frames[0],
+        ServerFrame::Error {
+            request_id: Some(request_id),
+            code,
+            ..
+        } if request_id == "req-load" && code == "kernel-error"
+    ));
+}
+
+#[test]
+fn explicit_recording_loader_registers_preview_extension_for_command_path() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::with_extension_loader(backend, RecordingExtensionLoader);
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_surface(&mut broker, &mut session);
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::CreateTray {
+            request_id: "req-tray".to_string(),
+            surface: surface.clone(),
+            tray: tray_options("status"),
+        },
+        "0.1.0",
+    );
+
+    let load_frames = broker.handle_frame(
+        &mut session,
+        ClientFrame::LoadExt {
+            request_id: "req-load".to_string(),
+            surface_id: surface.surface_id.clone(),
+            name: "webview".to_string(),
+            path: RECORDING_EXTENSION_PATH.to_string(),
+        },
+        "0.1.0",
+    );
+    let command_frames = broker.handle_frame(
+        &mut session,
+        ClientFrame::ExtCommand {
+            request_id: "req-ext".to_string(),
+            surface_id: surface.surface_id,
+            tray_id: "status".to_string(),
+            ext: "webview".to_string(),
+            data: serde_json::json!({ "type": "show" }),
+        },
+        "0.1.0",
+    );
+
+    assert!(matches!(
+        &load_frames[0],
+        ServerFrame::Ack { request_id } if request_id == "req-load"
+    ));
+    assert!(matches!(
+        &command_frames[0],
+        ServerFrame::Ack { request_id } if request_id == "req-ext"
+    ));
+    assert!(matches!(
+        &command_frames[1],
+        ServerFrame::ExtEvent {
+            ext,
+            data,
+            ..
+        } if ext == "webview" && data["type"] == "recorded" && data["command"]["type"] == "show"
+    ));
+}
+
+fn create_surface<L: ExtensionLoader>(
+    broker: &mut BrokerKernel<FakeBackend, L>,
     session: &mut BrokerSession,
 ) -> opentray_spec::SurfaceRef {
     match broker.handle_frame(

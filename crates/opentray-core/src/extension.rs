@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use opentray_spec::{ExtensionEnvelope, ExtensionScope, SurfaceId, TrayId};
 use serde_json::Value;
 
+pub const RECORDING_EXTENSION_PATH: &str = "opentray://recording-extension";
+
 pub trait ExtensionInstance: Send {
     fn name(&self) -> &str;
     fn command(
@@ -18,6 +20,56 @@ pub enum ExtensionError {
     NotFound(String),
     #[error("extension rejected command: {0}")]
     Rejected(String),
+    #[error("extension loading is unsupported: {0}")]
+    Unsupported(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionLoadRequest {
+    pub surface_id: SurfaceId,
+    pub name: String,
+    pub path: String,
+}
+
+pub trait ExtensionLoader: Send {
+    fn load(
+        &self,
+        request: &ExtensionLoadRequest,
+    ) -> Result<Box<dyn ExtensionInstance>, ExtensionError>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UnsupportedExtensionLoader;
+
+impl ExtensionLoader for UnsupportedExtensionLoader {
+    fn load(
+        &self,
+        request: &ExtensionLoadRequest,
+    ) -> Result<Box<dyn ExtensionInstance>, ExtensionError> {
+        Err(ExtensionError::Unsupported(format!(
+            "dynamic loading is not implemented for {} at {}",
+            request.name, request.path
+        )))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RecordingExtensionLoader;
+
+impl ExtensionLoader for RecordingExtensionLoader {
+    fn load(
+        &self,
+        request: &ExtensionLoadRequest,
+    ) -> Result<Box<dyn ExtensionInstance>, ExtensionError> {
+        if request.path != RECORDING_EXTENSION_PATH {
+            return Err(ExtensionError::Unsupported(format!(
+                "dynamic loading is not implemented for {} at {}",
+                request.name, request.path
+            )));
+        }
+
+        Ok(Box::new(RecordingExtension::new(request.name.clone())))
+    }
 }
 
 #[derive(Default)]
@@ -91,7 +143,7 @@ impl ExtensionInstance for RecordingExtension {
         self.commands.push(envelope.clone());
         Ok(vec![ExtensionEnvelope {
             scope: envelope.scope,
-            data: serde_json::json!({ "type": "recorded" }),
+            data: serde_json::json!({ "type": "recorded", "command": envelope.data }),
         }])
     }
 

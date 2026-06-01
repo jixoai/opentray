@@ -3,7 +3,10 @@ use opentray_spec::{
     SurfaceOptions, SurfaceRef, TrayEvent, PROTOCOL_VERSION,
 };
 
-use crate::{Kernel, KernelError, RoutedEvent, SurfaceBackend};
+use crate::{
+    ExtensionLoadRequest, ExtensionLoader, Kernel, KernelError, RoutedEvent, SurfaceBackend,
+    UnsupportedExtensionLoader,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct BrokerSession {
@@ -25,16 +28,24 @@ impl BrokerSession {
 }
 
 /// Request/session dispatch law between local transports and the kernel.
-pub struct BrokerKernel<B: SurfaceBackend> {
+pub struct BrokerKernel<B: SurfaceBackend, L: ExtensionLoader = UnsupportedExtensionLoader> {
     kernel: Kernel<B>,
+    extension_loader: L,
     next_lease: u64,
     default_surface: Option<SurfaceRef>,
 }
 
-impl<B: SurfaceBackend> BrokerKernel<B> {
+impl<B: SurfaceBackend> BrokerKernel<B, UnsupportedExtensionLoader> {
     pub fn new(backend: B) -> Self {
+        Self::with_extension_loader(backend, UnsupportedExtensionLoader)
+    }
+}
+
+impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
+    pub fn with_extension_loader(backend: B, extension_loader: L) -> Self {
         Self {
             kernel: Kernel::new(backend),
+            extension_loader,
             next_lease: 1,
             default_surface: None,
         }
@@ -219,13 +230,32 @@ impl<B: SurfaceBackend> BrokerKernel<B> {
                 }
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
-            ClientFrame::LoadExt { request_id, .. } | ClientFrame::UnloadExt { request_id, .. } => {
-                vec![protocol_error(
-                    Some(request_id),
-                    "unsupported",
-                    "dynamic extension loading is not implemented in this broker stage",
-                )]
+            ClientFrame::LoadExt {
+                request_id,
+                surface_id,
+                name,
+                path,
+            } => {
+                let request = ExtensionLoadRequest {
+                    surface_id: surface_id.clone(),
+                    name,
+                    path,
+                };
+                match self
+                    .extension_loader
+                    .load(&request)
+                    .map_err(KernelError::from)
+                    .and_then(|instance| self.kernel.register_extension(surface_id, instance))
+                {
+                    Ok(()) => vec![ServerFrame::Ack { request_id }],
+                    Err(error) => vec![kernel_error(Some(request_id), error)],
+                }
             }
+            ClientFrame::UnloadExt { request_id, .. } => vec![protocol_error(
+                Some(request_id),
+                "unsupported",
+                "dynamic extension unload is not implemented in this broker stage",
+            )],
             ClientFrame::Init { .. } | ClientFrame::Exit => Vec::new(),
         }
     }

@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use opentray_core::BrokerSession;
 #[cfg(not(target_os = "macos"))]
-use opentray_core::{BrokerKernel, SurfaceBackend};
+use opentray_core::{BrokerKernel, RecordingExtensionLoader, SurfaceBackend};
 use opentray_spec::{ClientFrame, ServerFrame};
 use serde_json::json;
 
@@ -128,7 +128,7 @@ where
     let listener = spawn_listener(options.clone(), move |event| {
         let _ = sender.send(event);
     })?;
-    let mut broker = BrokerKernel::new(backend);
+    let mut broker = BrokerKernel::with_extension_loader(backend, RecordingExtensionLoader);
     let mut sessions = std::collections::HashMap::<u64, TransportSession>::new();
     let mut idle_since = Some(Instant::now());
 

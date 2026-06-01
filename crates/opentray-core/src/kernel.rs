@@ -6,7 +6,10 @@ use opentray_spec::{
 };
 use serde_json::Value;
 
-use crate::{ExtensionError, ExtensionRegistry, SurfaceBackend, SurfaceProjection, TrayProjection};
+use crate::{
+    ExtensionError, ExtensionInstance, ExtensionRegistry, SurfaceBackend, SurfaceProjection,
+    TrayProjection,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum KernelError {
@@ -77,6 +80,16 @@ impl<B: SurfaceBackend> Kernel<B> {
 
     pub fn extensions_mut(&mut self) -> &mut ExtensionRegistry {
         &mut self.extensions
+    }
+
+    pub fn register_extension(
+        &mut self,
+        surface_id: SurfaceId,
+        instance: Box<dyn ExtensionInstance>,
+    ) -> Result<(), KernelError> {
+        self.require_surface(&surface_id)?;
+        self.extensions.register(surface_id, instance);
+        Ok(())
     }
 
     pub fn create_surface(&mut self, options: SurfaceOptions) -> Result<SurfaceRef, KernelError> {

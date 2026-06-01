@@ -12,6 +12,8 @@
 - [x] 2.4 Scenario: Given `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` When no clients are connected Then idle shutdown is disabled.
 - [x] 2.5 Scenario: Given the daemon tray example is running When the user selects the quit item Then the example prints the routed click and exits.
 - [x] 2.6 Scenario: Given the demo exits and the daemon becomes idle When the idle timeout expires Then a later demo run auto-starts a fresh daemon.
+- [x] 2.7 Scenario: Given the broker emits a menu click event When TS parses it Then event fields are camelCase and `event.itemId` is defined.
+- [x] 2.8 Scenario: Given the daemon tray example exposes WebView actions When they are clicked Then `@opentray/ext-webview` facade commands travel through `TrayHandle.commandExtension` and the explicit preview recorder path.
 
 ## 3. OpenSpec Checkpoint
 
@@ -27,6 +29,10 @@
 - [x] 4.4 Keep idle shutdown out of `opentray-core` and out of TypeScript client direct process-kill behavior.
 - [x] 4.5 Make the daemon tray example quit item label unambiguous and ensure routed quit clicks close the client connection and process.
 - [x] 4.6 Add concise comments at the idle-generation cancellation point and the demo quit event boundary.
+- [x] 4.7 Fix Rust `TrayEvent` serialization so nested event fields are camelCase.
+- [x] 4.8 Tighten TypeScript server-frame parsing so snake_case tray event fields are not accepted as valid protocol events.
+- [x] 4.9 Extend the daemon tray example with `@opentray/ext-webview` facade actions for show, navigate, postMessage, and hide.
+- [x] 4.10 Ensure broker extension loading/command handling can acknowledge the demo WebView preview path without hardcoding WebView behavior or pretending arbitrary dynamic loading works in `opentray-core`.
 
 ## 5. Verification
 
@@ -41,6 +47,9 @@
 - [x] 5.9 Run `bun run openspec:vision -- validate fix-daemon-idle-and-menu-quit`.
 - [x] 5.10 Run `git diff --check`.
 - [ ] 5.11 Ask the user to run the example without auto-exit and click the quit item before archive.
+- [x] 5.12 Run Rust protocol tests proving menu click events serialize as `itemId`.
+- [x] 5.13 Run TypeScript spec tests proving snake_case event frames are rejected and camelCase frames are accepted.
+- [x] 5.14 Run the daemon demo and confirm WebView menu actions produce broker command/event output through the preview recorder.
 
 ## 6. Self-Review Loop
 

@@ -243,7 +243,7 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
     case "ack":
       return typeof value.requestId === "string";
     case "event":
-      return isRecord(value.event);
+      return isTrayEvent(value.event);
     case "ext-event":
       return (
         typeof value.surfaceId === "string" &&
@@ -260,3 +260,33 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return false;
   }
 };
+
+const isTrayEvent = (value: unknown): value is TrayEvent => {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    return false;
+  }
+
+  switch (value.type) {
+    case "ready":
+      return typeof value.surfaceId === "string";
+    case "menuClick":
+      return (
+        typeof value.surfaceId === "string" &&
+        typeof value.trayId === "string" &&
+        typeof value.itemId === "number"
+      );
+    case "trayClick":
+    case "trayDoubleClick":
+      return (
+        typeof value.surfaceId === "string" &&
+        isMouseButton(value.button) &&
+        typeof value.x === "number" &&
+        typeof value.y === "number"
+      );
+    default:
+      return false;
+  }
+};
+
+const isMouseButton = (value: unknown): value is MouseButton =>
+  value === "left" || value === "right" || value === "middle";

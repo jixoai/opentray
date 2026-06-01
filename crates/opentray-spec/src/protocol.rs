@@ -375,4 +375,28 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn event_frames_use_camel_case_tray_event_fields() {
+        let frame = ServerFrame::Event {
+            event: TrayEvent::MenuClick {
+                surface_id: "surface-1".to_string(),
+                tray_id: "daemon-status".to_string(),
+                item_id: 99,
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(frame).unwrap(),
+            serde_json::json!({
+                "type": "event",
+                "event": {
+                    "type": "menuClick",
+                    "surfaceId": "surface-1",
+                    "trayId": "daemon-status",
+                    "itemId": 99
+                }
+            })
+        );
+    }
 }

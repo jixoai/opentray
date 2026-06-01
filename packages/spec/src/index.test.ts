@@ -97,4 +97,45 @@ describe("@opentray/spec", () => {
 
     expect(parsed.ok).toBe(true);
   });
+
+  it("parses camelCase tray event frames", () => {
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "event",
+        event: {
+          type: "menuClick",
+          surfaceId: "surface-1",
+          trayId: "daemon-status",
+          itemId: 99,
+        },
+      }),
+    );
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.frame).toEqual({
+      type: "event",
+      event: {
+        type: "menuClick",
+        surfaceId: "surface-1",
+        trayId: "daemon-status",
+        itemId: 99,
+      },
+    });
+  });
+
+  it("rejects snake_case tray event frames", () => {
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "event",
+        event: {
+          type: "menuClick",
+          surface_id: "surface-1",
+          tray_id: "daemon-status",
+          item_id: 99,
+        },
+      }),
+    );
+
+    expect(parsed.ok).toBe(false);
+  });
 });

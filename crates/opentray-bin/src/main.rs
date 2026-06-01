@@ -107,7 +107,7 @@ mod native_broker {
     use std::{collections::HashMap, error::Error, time::Duration};
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
-    use opentray_core::{BrokerKernel, BrokerSession};
+    use opentray_core::{BrokerKernel, BrokerSession, RecordingExtensionLoader};
     use opentray_spec::ServerFrame;
     use winit::application::ApplicationHandler;
     use winit::event::{StartCause, WindowEvent};
@@ -144,7 +144,10 @@ mod native_broker {
         }));
 
         let mut app = NativeBrokerApp {
-            broker: BrokerKernel::new(TrayIconBackend::with_runtime(NativeTrayIconRuntime::new())),
+            broker: BrokerKernel::with_extension_loader(
+                TrayIconBackend::with_runtime(NativeTrayIconRuntime::new()),
+                RecordingExtensionLoader,
+            ),
             sessions: HashMap::new(),
             broker_version: options.package_version,
             idle_timeout: options.idle_timeout,
@@ -157,7 +160,7 @@ mod native_broker {
     }
 
     struct NativeBrokerApp {
-        broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>>,
+        broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>, RecordingExtensionLoader>,
         sessions: HashMap<u64, unix_transport::TransportSession>,
         broker_version: String,
         idle_timeout: Option<Duration>,
