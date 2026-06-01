@@ -21,6 +21,9 @@ download_with_retry() {
   local target="$2"
 
   mkdir -p "$(dirname "${target}")"
+  if [[ -s "${target}" ]]; then
+    return 0
+  fi
   curl \
     --fail \
     --location \
@@ -31,6 +34,39 @@ download_with_retry() {
     --max-time 1200 \
     --output "${target}" \
     "${url}"
+}
+
+clone_tools_shared() {
+  local tools_shared_dir="${lynx_dir}/tools_shared"
+  local tools_shared_url=""
+  local tools_shared_ref=""
+
+  IFS=$'\t' read -r tools_shared_url tools_shared_ref < <(
+    python3 - "${lynx_dir}/dependencies/DEPS" <<'PY'
+from pathlib import Path
+import platform
+import sys
+
+root_dir = "/tmp"
+system = platform.system().lower()
+machine = platform.machine().lower()
+machine = "x86_64" if machine == "amd64" else machine
+ns = {
+    "os": __import__("os"),
+    "platform": platform,
+    "root_dir": root_dir,
+    "system": system,
+    "machine": machine,
+    "__builtins__": __builtins__,
+}
+exec(Path(sys.argv[1]).read_text(), ns)
+spec = ns["deps"]["./tools_shared"]
+print(f'{spec["url"]}\t{spec["commit"]}')
+PY
+  )
+
+  git clone "${tools_shared_url}" "${tools_shared_dir}" 2>&1 | tee "${logs_dir}/tools-shared-clone.log"
+  git -C "${tools_shared_dir}" checkout --detach "${tools_shared_ref}" 2>&1 | tee "${logs_dir}/tools-shared-checkout.log"
 }
 
 rewrite_url_if_present() {
@@ -95,7 +131,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-rm -rf "${cache_dir}" "${logs_dir}" "${lynx_dir}" "${derived_data_dir}"
+rm -rf "${logs_dir}" "${lynx_dir}" "${derived_data_dir}"
 mkdir -p "${cache_dir}" "${logs_dir}" "${upstream_dir}" "${derived_data_dir}"
 
 echo "Cloning Lynx from ${lynx_repo} at ${lynx_ref}"
@@ -104,6 +140,7 @@ git clone "${lynx_repo}" "${lynx_dir}" 2>&1 | tee "${logs_dir}/git-clone.log"
 cd "${lynx_dir}"
 git checkout --detach "${lynx_ref}" 2>&1 | tee "${logs_dir}/git-checkout.log"
 git rev-parse HEAD | tee "${logs_dir}/lynx-ref.txt"
+clone_tools_shared
 
 unset all_proxy http_proxy https_proxy ALL_PROXY HTTP_PROXY HTTPS_PROXY
 export XDG_CONFIG_HOME="${lynx_dir}/.xdg-config"

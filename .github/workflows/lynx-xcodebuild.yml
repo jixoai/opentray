@@ -19,6 +19,11 @@ on:
         options:
           - macos-15
           - macos-15-intel
+      xcode_version:
+        description: Xcode version selected via setup-xcode
+        required: true
+        type: string
+        default: "16.4"
       lynx_ref:
         description: Pinned Lynx commit to build
         required: true
@@ -37,6 +42,10 @@ jobs:
     name: Build Lynx Explorer with xcodebuild
     runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner_label || 'macos-15' }}
     timeout-minutes: 90
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      LYNX_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.lynx_ref || '3a936299ec1669cfd1f3da71e41240296bc226b3' }}
+      LYNX_XCODE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.xcode_version || '16.4' }}
     steps:
       - name: Checkout OpenTray
         uses: actions/checkout@v5
@@ -47,6 +56,23 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.LYNX_XCODE_VERSION }}
+
+      - name: Restore Lynx caches
+        id: lynx-cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.habitat_cache
+            research/lynx/cache
+          key: lynx-probe-${{ runner.os }}-${{ github.event_name == 'workflow_dispatch' && inputs.runner_label || 'macos-15' }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-${{ hashFiles('.github/workflows/lynx-xcodebuild.yml', 'scripts/research/lynx-macos.args.gn', 'scripts/research/lynx-mirrored-urls.txt', 'scripts/research/lynx-xcodebuild-gha.sh') }}
+          restore-keys: |
+            lynx-probe-${{ runner.os }}-${{ github.event_name == 'workflow_dispatch' && inputs.runner_label || 'macos-15' }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-
+            lynx-probe-${{ runner.os }}-${{ github.event_name == 'workflow_dispatch' && inputs.runner_label || 'macos-15' }}-xcode-${{ env.LYNX_XCODE_VERSION }}-
 
       - name: Show host toolchain
         shell: bash
@@ -63,9 +89,16 @@ jobs:
 
       - name: Run Lynx xcodebuild probe
         shell: bash
-        env:
-          LYNX_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.lynx_ref || '3a936299ec1669cfd1f3da71e41240296bc226b3' }}
         run: scripts/research/lynx-xcodebuild-gha.sh
+
+      - name: Save Lynx caches
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.habitat_cache
+            research/lynx/cache
+          key: ${{ steps.lynx-cache-restore.outputs.cache-primary-key }}
 
       - name: Upload probe logs
         if: always()
