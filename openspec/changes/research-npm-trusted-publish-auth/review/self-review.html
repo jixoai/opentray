@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>npm package bootstrap self review</title>
+    <style>
+      body {
+        color: #1f2933;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        line-height: 1.5;
+        margin: 2rem;
+      }
+      table {
+        border-collapse: collapse;
+        margin: 1rem 0;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #cbd5e1;
+        padding: 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #eef2f7;
+      }
+      code {
+        background: #f1f5f9;
+        border-radius: 0.25rem;
+        padding: 0.1rem 0.25rem;
+      }
+      .pass {
+        color: #166534;
+        font-weight: 700;
+      }
+      .warn {
+        color: #92400e;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>npm package bootstrap self review</h1>
+    <p>
+      The implementation turns the live <code>@opentray/example</code> npm proof
+      into a reusable dry-run-first package bootstrap script.
+    </p>
+
+    <h2>Evidence Matrix</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Claim</th>
+          <th>Evidence</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Initial npm publish can be automated with local token auth.</td>
+          <td><code>@opentray/example@0.0.0</code> exists and has <code>latest: 0.0.0</code>.</td>
+          <td class="pass">Met</td>
+        </tr>
+        <tr>
+          <td>Trusted publishing can be configured with password + generated OTP.</td>
+          <td>
+            <code>npm trust github @opentray/example</code> succeeded with
+            <code>jixoai/opentray</code>, <code>release.yml</code>, and
+            <code>npm-release</code>.
+          </td>
+          <td class="pass">Met</td>
+        </tr>
+        <tr>
+          <td>Future platform packages can be previewed safely.</td>
+          <td>
+            Dry-run for <code>@opentray/ext-webview-darwin-arm64</code> reports
+            workspace creation, initial publish, and trust configuration without mutation.
+          </td>
+          <td class="pass">Met</td>
+        </tr>
+        <tr>
+          <td>Destructive trust replacement is guarded.</td>
+          <td>Mismatch path stops unless a future explicit replacement implementation is added.</td>
+          <td class="pass">Met</td>
+        </tr>
+        <tr>
+          <td>Cross-platform auth automation is fully solved.</td>
+          <td><code>legacy-env</code> currently depends on local <code>expect</code>.</td>
+          <td class="warn">Needs user decision</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Verification Commands</h2>
+    <ul>
+      <li><code>pnpm run test:npm</code>: passed</li>
+      <li><code>pnpm run verify</code>: passed</li>
+      <li><code>bun run openspec:vision -- validate research-npm-trusted-publish-auth</code>: passed</li>
+      <li><code>git diff --check</code>: passed</li>
+    </ul>
+  </body>
+</html>
