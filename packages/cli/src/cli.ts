@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import type { DaemonHealth } from "@opentray/spec";
 
@@ -11,6 +12,7 @@ import { connectLocalBroker } from "./local-broker";
 import { runDaemonTraySmoke } from "./smoke/daemon-tray";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
+const cliModulePath = fileURLToPath(import.meta.url);
 
 type CliCommand =
   | { type: "daemon"; action: "start" | "stop" | "restart" | "health" }
@@ -50,7 +52,7 @@ export const runCli = async (argv: string[]): Promise<number> => {
     return 0;
   }
 
-  const driver = createNodeDaemonDriver(fileURLToPath(import.meta.url));
+  const driver = createNodeDaemonDriver(cliModulePath);
 
   if (command.action === "start") {
     const result = await startDaemon({ paths, driver });
@@ -130,7 +132,16 @@ export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
   return lines.join("\n");
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+export const isCliEntrypoint = (argvEntryPath: string | undefined, modulePath: string): boolean => {
+  if (argvEntryPath === undefined) return false;
+  try {
+    return realpathSync(argvEntryPath) === realpathSync(modulePath);
+  } catch {
+    return argvEntryPath === modulePath;
+  }
+};
+
+if (isCliEntrypoint(process.argv[1], cliModulePath)) {
   runCli(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   });

@@ -1,6 +1,10 @@
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { formatDaemonHealthOutput, parseCliCommand } from "./cli";
+import { formatDaemonHealthOutput, isCliEntrypoint, parseCliCommand } from "./cli";
 
 describe("opentray CLI", () => {
   it("parses daemon lifecycle commands", () => {
@@ -16,6 +20,20 @@ describe("opentray CLI", () => {
 
   it("does not treat the deamon typo as canonical", () => {
     expect(parseCliCommand(["deamon", "start"])).toEqual({ type: "help" });
+  });
+
+  it("recognizes the npm .bin symlink as the CLI entrypoint", () => {
+    const dir = mkdtempSync(join(tmpdir(), "opentray-cli-entry-"));
+    try {
+      const target = join(dir, "cli.mjs");
+      const symlink = join(dir, "opentray");
+      writeFileSync(target, "");
+      symlinkSync(target, symlink);
+
+      expect(isCliEntrypoint(symlink, target)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("formats daemon health output for human inspection", () => {
