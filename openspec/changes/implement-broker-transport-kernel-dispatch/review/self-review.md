@@ -4,7 +4,7 @@
 
 The apply implementation satisfies the current change intent for the macOS daemon path: a TypeScript client auto-starts or reuses the same-version daemon, connects to the versioned daemon endpoint, completes a protocol-version handshake, receives broker-created surface/tray identities, dispatches frames through Rust `BrokerKernel` into `opentray-core::Kernel`, applies projections through `opentray-bin` backend composition, and runs the daemon tray example through the real endpoint.
 
-Do not archive yet. The remaining acceptance gate is user-visible manual confirmation: run the daemon tray example without auto-exit, confirm no Dock-visible windowless daemon app appears on macOS, confirm the tray icon is nonblank, click a menu item, and observe the routed event output.
+User visual acceptance is complete. The user confirmed the macOS Dock behavior, nonblank tray icon, richer menu, and routed event behavior are acceptable, so this change is ready to archive.
 
 ## Plan / Spec Trace
 
@@ -16,11 +16,11 @@ Do not archive yet. The remaining acceptance gate is user-visible manual confirm
 | Kernel dispatch | `BrokerKernel` maps create/mutate/destroy/ext frames to `Kernel` methods and preserves lease authority. | Pass |
 | Lease cleanup | Transport disconnect / exit calls `close_session`, which delegates cleanup to kernel lease cleanup. | Pass |
 | Backend projection path | `opentray-bin` composes `TrayIconBackend<NativeTrayIconRuntime>` on macOS and applies kernel projections through the backend. | Pass |
-| macOS daemon activation | `opentray-bin` builds its winit event loop with `ActivationPolicy::Accessory`, disables the default menu, and avoids app activation. | Pass by code; human Dock check pending. |
-| Native event routing | macOS broker receives `tray-icon` menu events, maps route ids through backend, routes via kernel, and emits only to the owning session. | Pass by code + unit route test; manual click still pending. |
+| macOS daemon activation | `opentray-bin` builds its winit event loop with `ActivationPolicy::Accessory`, disables the default menu, and avoids app activation. | Pass by code + user visual acceptance. |
+| Native event routing | macOS broker receives `tray-icon` menu events, maps route ids through backend, routes via kernel, and emits only to the owning session. | Pass by code + unit route test + user visual acceptance. |
 | Root package boundary | Node-only local broker client moved to `opentray/node`; root `opentray` remains safe for extension type consumers. | Pass |
 | Local broker auto-start | `connectLocalBroker()` starts or reuses the same-version daemon for the derived endpoint before opening the socket; explicit endpoint + `autoStart: false` does not start the derived daemon. | Pass by TS socket test and auto smoke. |
-| Human example | `pnpm --filter opentray example:daemon-tray` creates surface/tray through daemon endpoint, prints identities/events, uses a visible 32x32 RGBA icon, and shows item/check/radio/submenu/separator menu atoms. | Pass by auto smoke; manual visual check pending. |
+| Human example | `pnpm --filter opentray example:daemon-tray` creates surface/tray through daemon endpoint, prints identities/events, uses a visible 32x32 RGBA icon, and shows item/check/radio/submenu/separator menu atoms. | Pass by auto smoke + user visual acceptance. |
 
 ## Verification Evidence
 
@@ -39,7 +39,7 @@ Do not archive yet. The remaining acceptance gate is user-visible manual confirm
 
 - Windows named-pipe broker transport is still not implemented. This is consistent with the plan default: do not let Windows parity block first macOS visual daemon proof.
 - Linux `ksni` backend remains a stub-level atom for this flow; it compiles and preserves backend boundaries but is not a visual acceptance path in this change.
-- Automated smoke cannot click the native tray menu. Human validation must run the example without auto-exit and click the tray menu.
+- Automated smoke cannot click the native tray menu. This is covered by the user's manual visual acceptance for this archive.
 - Source-mode `opentray daemon start` builds `opentray-bin` before spawning it. Packaged binary resolution through platform packages remains a follow-up release-packaging task.
 
 ## Human Acceptance

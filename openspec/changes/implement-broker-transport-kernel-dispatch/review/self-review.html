@@ -62,8 +62,8 @@
     <main>
       <h1>Broker Transport / Kernel Dispatch Review</h1>
       <p>
-        Status: <span class="pass">apply implementation passed automated gates</span>.
-        Archive remains blocked on human visual acceptance.
+        Status: <span class="pass">apply implementation passed automated gates and user visual acceptance</span>.
+        Archive is now allowed.
       </p>
 
       <section class="grid">
@@ -103,10 +103,9 @@ OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray
 pnpm --filter opentray cli -- daemon stop</code></pre>
 
       <h2>Manual Gate</h2>
-      <p class="warn">
-        Run the example without auto-exit, confirm no Dock-visible daemon app appears on macOS,
-        confirm the tray icon is nonblank, open the richer menu, click an enabled item,
-        and verify the event frame prints in the client output.
+      <p class="pass">
+        The user accepted the macOS Dock behavior, nonblank tray icon, richer menu,
+        and routed menu event behavior after running the human-visible example.
       </p>
     </main>
   </body>
