@@ -1,0 +1,72 @@
+name: Lynx Xcodebuild Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: GitHub-hosted macOS runner label
+        required: true
+        type: choice
+        default: macos-15
+        options:
+          - macos-15
+          - macos-15-intel
+      lynx_ref:
+        description: Pinned Lynx commit to build
+        required: true
+        type: string
+        default: "3a936299ec1669cfd1f3da71e41240296bc226b3"
+
+concurrency:
+  group: lynx-xcodebuild-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  xcodebuild:
+    name: Build Lynx Explorer with xcodebuild
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout OpenTray
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Show host toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sw_vers
+          uname -a
+          xcode-select -p
+          xcodebuild -version
+          python3 --version
+          ruby --version
+          node --version
+          git --version
+
+      - name: Run Lynx xcodebuild probe
+        shell: bash
+        env:
+          LYNX_REF: ${{ inputs.lynx_ref }}
+        run: scripts/research/lynx-xcodebuild-gha.sh
+
+      - name: Upload probe logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lynx-xcodebuild-logs-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            research/lynx/logs/**
+            research/lynx/upstream/lynx/out/Default/args.gn
+            research/lynx/upstream/lynx/out/Default/all.xcodeproj/project.pbxproj
