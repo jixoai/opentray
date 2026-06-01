@@ -1,13 +1,20 @@
 {
   "name": "@opentray/windows-arm64",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "OpenTray broker binary package for Windows ARM64.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/jixoai/opentray"
   },
-  "os": ["win32"],
-  "cpu": ["arm64"],
-  "files": ["bin", "README.md"]
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin",
+    "README.md"
+  ]
 }

@@ -1,5 +1,11 @@
 # @opentray/spec
 
+## 0.2.0
+
+### Minor Changes
+
+- eeffa6f: Add protocol-versioned broker endpoint identity helpers and rename handshake metadata to explicit `protocolVersion` fields.
+
 ## 0.1.0
 
 ### Minor Changes
