@@ -3,8 +3,8 @@
 ## Current Round
 
 - Round: 1
-- Status: Registry package publish and first-stage real-environment smoke passed; final OpenSpec closure checks in progress
-- Previous plan backup: `plans/plan-v2.md`
+- Status: Native package publish recovered; remaining gate is registry-installed daemon/WebView smoke and human visual confirmation
+- Previous plan backup: `plans/plan-v1.md`
 
 ## Current Implementation Finding
 
@@ -12,9 +12,7 @@ The dynamic extension ABI now includes a per-command host capability context. `o
 
 The dynamic extension discovery law now searches both daemon-adjacent platform packages and the requested npm facade package's dependency roots. This matters for real registry installs because package managers such as pnpm may place `@opentray/ext-webview-<os>-<arch>` beside `@opentray/ext-webview`, not beside `@opentray/<os>-<arch>`.
 
-This resolves the prior architecture blocker without passing Rust `ActiveEventLoop`, `Window`, `WebView`, backend, or kernel registry types across the ABI. CI cross-platform artifacts have run, npm package publish has been recovered, trusted publishing is configured for the WebView platform packages, and `opentray@0.2.4` now points at refreshed daemon platform packages (`@opentray/<platform>@0.1.1`). Fresh npm-registry install smoke passed for daemon health/start/stop, WebView show/postMessage/evaluate/navigate/hide, idle release, and human visual confirmation from installed packages.
-
-The release closure exposed one durable law update: daemon platform packages must be versioned with `opentray`, and WebView platform packages must be versioned with `@opentray/ext-webview`. `.changeset/config.json` now uses fixed groups for those package atoms so future releases do not leave published facades pointing at stale native artifacts.
+This resolves the prior architecture blocker without passing Rust `ActiveEventLoop`, `Window`, `WebView`, backend, or kernel registry types across the ABI. CI cross-platform artifacts have run, npm package publish has been recovered, and trusted publishing is configured for the WebView platform packages. The remaining first-stage blockers are remote release tag publication, fresh npm-registry install smoke, and human visual confirmation from installed packages.
 
 ## Workflow Command Surface
 

@@ -2,7 +2,26 @@
   "$schema": "https://unpkg.com/@changesets/config@latest/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [],
+  "fixed": [
+    [
+      "opentray",
+      "@opentray/darwin-arm64",
+      "@opentray/darwin-x64",
+      "@opentray/linux-arm64",
+      "@opentray/linux-x64",
+      "@opentray/windows-arm64",
+      "@opentray/windows-x64"
+    ],
+    [
+      "@opentray/ext-webview",
+      "@opentray/ext-webview-darwin-arm64",
+      "@opentray/ext-webview-darwin-x64",
+      "@opentray/ext-webview-linux-arm64",
+      "@opentray/ext-webview-linux-x64",
+      "@opentray/ext-webview-windows-arm64",
+      "@opentray/ext-webview-windows-x64"
+    ]
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

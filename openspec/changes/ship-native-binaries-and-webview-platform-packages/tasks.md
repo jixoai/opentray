@@ -9,16 +9,16 @@
 
 - [x] 2.1 Scenario: Given the workspace is inspected When first-stage packages are validated Then all six `@opentray/ext-webview-<os>-<arch>` package atoms exist with correct `os` and `cpu` metadata.
 - [x] 2.2 Scenario: Given native artifacts are built locally When git status is inspected Then generated daemon binaries and WebView dynamic libraries are not tracked.
-- [ ] 2.3 Scenario: Given `opentray` is installed from npm When the daemon starts Then it resolves the executable from the current platform optional package.
-- [ ] 2.4 Scenario: Given no matching daemon platform package is installed When daemon start is attempted Then the CLI fails with a typed missing-platform-binary message.
-- [ ] 2.5 Scenario: Given a fresh npm install When the public smoke command is run Then it does not require workspace source files or `pnpm --filter`.
+- [x] 2.3 Scenario: Given `opentray` is installed from npm When the daemon starts Then it resolves the executable from the current platform optional package.
+- [x] 2.4 Scenario: Given no matching daemon platform package is installed When daemon start is attempted Then the CLI fails with a typed missing-platform-binary message.
+- [x] 2.5 Scenario: Given a fresh npm install When the public smoke command is run Then it does not require workspace source files or `pnpm --filter`.
 - [x] 2.6 Scenario: Given a dynamic extension library is resolved When the daemon validates it Then missing ABI version/init/command/deinit symbols produce structured load errors.
 - [x] 2.7 Scenario: Given a dynamic extension command is dispatched When it crosses the ABI Then Rust kernel types do not cross the dynamic library boundary.
 - [x] 2.8 Scenario: Given WebView platform package is installed When `load-ext webview` runs Then daemon locates the package-adjacent dynamic library through the generic extension host.
 - [x] 2.9 Scenario: Given WebView dynamic runtime is loaded When demo commands run Then `show`, `postMessage`, and `evaluate` remain visually observable.
 - [x] 2.10 Scenario: Given platform WebView cannot create a window When `show` runs Then the extension returns typed unsupported/capability failure instead of fake success.
 - [x] 2.11 Scenario: Given release workflow prepares npm publish When artifacts are staged Then every daemon and WebView platform package contains its expected native artifact path.
-- [ ] 2.12 Scenario: Given packages are published When a fresh project installs from npm Then daemon health and WebView smoke run from registry packages, not workspace links.
+- [x] 2.12 Scenario: Given packages are published When a fresh project installs from npm Then daemon health and WebView smoke run from registry packages, not workspace links.
 
 ## 3. OpenSpec Checkpoint
 
@@ -62,8 +62,8 @@
 - [x] 5.9 Run current-platform local package staging and `npm pack --dry-run --json` for `@opentray/darwin-arm64`, `@opentray/ext-webview-darwin-arm64`, `opentray`, and `@opentray/ext-webview`.
 - [x] 5.9a Run or simulate `npm pack --dry-run --json` for every daemon and WebView platform package after CI artifacts exist.
 - [x] 5.10 Run release workflow dry-run or equivalent artifact staging simulation before merge.
-- [ ] 5.11 After CI publish, install from real npm registry in a fresh directory and run daemon health/start/stop smoke.
-- [ ] 5.12 After CI publish, run WebView visual smoke from npm-installed packages and ask the user to confirm the window and visible mutations.
+- [x] 5.11 After CI publish, install from real npm registry in a fresh directory and run daemon health/start/stop smoke.
+- [x] 5.12 After CI publish, run WebView visual smoke from npm-installed packages and ask the user to confirm the window and visible mutations.
 - [x] 5.13 Run targeted TypeScript tests for binary resolver and npm-installable smoke command parsing.
 - [x] 5.14 Run targeted Rust tests for dynamic extension request-package discovery.
 
@@ -72,8 +72,8 @@
 - [x] 6.1 Generate `review/self-review.md` comparing implementation against `plans/plan.md`, specs, and tasks.
 - [x] 6.2 Generate `review/self-review.html` as structured interaction evidence.
 - [x] 6.3 Run `bun run openspec:vision -- commit-check ship-native-binaries-and-webview-platform-packages --phase self-review`.
-- [ ] 6.4 If review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
-- [ ] 6.5 If review enters a real loop, run `bun run openspec:vision -- review-state ship-native-binaries-and-webview-platform-packages`.
-- [ ] 6.6 If review cannot exit normally, run `bun run openspec:vision -- handoff ship-native-binaries-and-webview-platform-packages` and commit the handoff evidence.
-- [ ] 6.7 Do not archive until real npm registry smoke and human visual WebView confirmation pass.
-- [ ] 6.8 Run `bun run openspec:vision -- check ship-native-binaries-and-webview-platform-packages` before claiming workflow completion.
+- [x] 6.4 If review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
+- [x] 6.5 Confirm no real review loop was entered, so `review-state` was not required.
+- [x] 6.6 Confirm no abnormal handoff was required.
+- [x] 6.7 Do not archive until real npm registry smoke and human visual WebView confirmation pass.
+- [x] 6.8 Run `bun run openspec:vision -- check ship-native-binaries-and-webview-platform-packages` before claiming workflow completion.
