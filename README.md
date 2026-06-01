@@ -83,9 +83,9 @@ Run the daemon-path tray example when you want to see the public TypeScript SDK 
 pnpm --filter opentray example:daemon-tray
 ```
 
-The daemon tray menu includes standard item/check/radio/submenu entries, a `Quit Demo` item, and a `WebView Commands` submenu. The WebView entries exercise the `@opentray/ext-webview` TypeScript facade through broker extension traffic and print the resulting extension event; they intentionally use a preview recorder, not a real WebView runtime.
+The daemon tray menu includes standard item/check/radio/submenu entries, a `Quit Demo` item, and a `WebView Commands` submenu. On macOS, `Show HTML` opens a real native WebView window through the daemon runtime, while the other WebView entries exercise navigate, postMessage, evaluate, and hide through the `@opentray/ext-webview` facade.
 
-For a real native WebView window, use the Rust visual example:
+The standalone WebView visual smoke remains available:
 
 ```bash
 cargo run --example visual_webview

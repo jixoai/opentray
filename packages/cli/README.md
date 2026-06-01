@@ -39,7 +39,7 @@ pnpm --filter opentray cli -- daemon stop
 pnpm --filter opentray cli -- daemon restart
 ```
 
-The menu includes `WebView Commands` entries that call the `@opentray/ext-webview` facade and print broker extension traffic through a preview recorder. Use `cargo run --example visual_webview` when you need to visually inspect a real native WebView window.
+The menu includes `WebView Commands` entries that call the `@opentray/ext-webview` facade. On macOS, `Show HTML` opens a real native WebView window through the daemon runtime; `Navigate`, `Post Message`, `Evaluate JS`, and `Hide` operate on that window.
 
 The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to keep it alive during debugging, or provide another millisecond value for a custom idle release window.
 

@@ -2,8 +2,6 @@ import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
 import { attachWebview } from "../../ext-webview/src/index";
 
-const recordingExtensionPath = "opentray://recording-extension";
-
 const connection = await connectLocalBroker();
 const client = createClient(connection, { requestIdPrefix: "daemon-example" });
 console.log(`connected: endpoint=${connection.endpoint} lease=${connection.leaseId}`);
@@ -85,13 +83,10 @@ await connection.request({
   requestId: "daemon-example-load-webview",
   surfaceId: surface.surface.surfaceId,
   name: "webview",
-  path: recordingExtensionPath,
+  path: "@opentray/ext-webview",
 });
 webview = attachWebview(tray);
-console.log(
-  "webview facade attached to the daemon preview recorder; WebView Commands print extension traffic",
-);
-console.log("for a real native WebView window, run: cargo run --example visual_webview");
+console.log("webview facade attached to the daemon native WebView extension");
 console.log("open the system tray item and choose any enabled menu item to see routed events");
 
 const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
@@ -105,7 +100,10 @@ if (exitAfter !== undefined && exitAfter.length > 0) {
   }
 }
 
-if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE === "1") {
+const webviewSmoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
+if (webviewSmoke === "show") {
+  await handleMenuClick(8);
+} else if (webviewSmoke === "1") {
   for (const itemId of [8, 9, 10, 11, 12]) {
     await handleMenuClick(itemId);
   }

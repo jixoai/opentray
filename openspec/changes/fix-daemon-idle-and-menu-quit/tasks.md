@@ -13,8 +13,8 @@
 - [x] 2.5 Scenario: Given the daemon tray example is running When the user selects the quit item Then the example prints the routed click and exits.
 - [x] 2.6 Scenario: Given the demo exits and the daemon becomes idle When the idle timeout expires Then a later demo run auto-starts a fresh daemon.
 - [x] 2.7 Scenario: Given the broker emits a menu click event When TS parses it Then event fields are camelCase and `event.itemId` is defined.
-- [ ] 2.8 Scenario: Given the daemon tray example exposes WebView actions When they are clicked Then `@opentray/ext-webview` facade commands travel through `TrayHandle.commandExtension` and the daemon native WebView extension path.
-- [ ] 2.9 Scenario: Given the daemon tray example is running on macOS When the user clicks WebView Show HTML Then a real native WebView window appears.
+- [x] 2.8 Scenario: Given the daemon tray example exposes WebView actions When they are clicked Then `@opentray/ext-webview` facade commands travel through `TrayHandle.commandExtension` and the daemon native WebView extension path.
+- [x] 2.9 Scenario: Given the daemon tray example is running on macOS When the user clicks WebView Show HTML Then a real native WebView window appears.
 
 ## 3. OpenSpec Checkpoint
 
@@ -33,9 +33,9 @@
 - [x] 4.7 Fix Rust `TrayEvent` serialization so nested event fields are camelCase.
 - [x] 4.8 Tighten TypeScript server-frame parsing so snake_case tray event fields are not accepted as valid protocol events.
 - [x] 4.9 Extend the daemon tray example with `@opentray/ext-webview` facade actions for show, navigate, postMessage, and hide.
-- [ ] 4.10 Ensure broker extension loading/command handling can acknowledge the demo WebView native path without hardcoding WebView behavior or pretending arbitrary dynamic loading works in `opentray-core`.
-- [ ] 4.11 Replace the daemon preview recorder path with a macOS native WebView extension loader that sends runtime commands into the daemon event loop without importing `wry` into `opentray-core`.
-- [ ] 4.12 Ensure `show`, `navigate`, `postMessage`, `evaluate`, and `hide` operate on the daemon-owned native WebView window.
+- [x] 4.10 Ensure broker extension loading/command handling can acknowledge the demo WebView native path without hardcoding WebView behavior or pretending arbitrary dynamic loading works in `opentray-core`.
+- [x] 4.11 Replace the daemon preview recorder path with a macOS native WebView extension loader that sends runtime commands into the daemon event loop without importing `wry` into `opentray-core`.
+- [x] 4.12 Ensure `show`, `navigate`, `postMessage`, `evaluate`, and `hide` operate on the daemon-owned native WebView window.
 
 ## 5. Verification
 
@@ -52,8 +52,8 @@
 - [ ] 5.11 Ask the user to run the example without auto-exit and click the quit item before archive.
 - [x] 5.12 Run Rust protocol tests proving menu click events serialize as `itemId`.
 - [x] 5.13 Run TypeScript spec tests proving snake_case event frames are rejected and camelCase frames are accepted.
-- [ ] 5.14 Run the daemon demo and confirm WebView menu actions produce broker command/event output through the native WebView extension path.
-- [ ] 5.15 Run targeted Rust tests or compile gates proving the native WebView loader remains outside `opentray-core`.
+- [x] 5.14 Run the daemon demo and confirm WebView menu actions produce broker command/event output through the native WebView extension path.
+- [x] 5.15 Run targeted Rust tests or compile gates proving the native WebView loader remains outside `opentray-core`.
 - [ ] 5.16 Run the daemon demo and ask the user to confirm `WebView Commands -> Show HTML` opens a real native WebView window.
 
 ## 6. Self-Review Loop
