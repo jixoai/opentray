@@ -39,4 +39,6 @@ pnpm --filter opentray cli -- daemon stop
 pnpm --filter opentray cli -- daemon restart
 ```
 
+The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to keep it alive during debugging, or provide another millisecond value for a custom idle release window.
+
 Current native icon support is `rgba`. `encoded` and `file` are typed protocol shapes, but the native `tray-icon` backend reports them as unsupported until decoding and file loading policy are implemented.

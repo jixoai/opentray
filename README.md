@@ -91,6 +91,8 @@ pnpm --filter opentray cli -- daemon stop
 pnpm --filter opentray cli -- daemon restart
 ```
 
+The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to disable idle shutdown while debugging, or set it to another millisecond value to shorten or lengthen the release window.
+
 The current native `tray-icon` backend supports `rgba` icon assets. `encoded` and `file` icon shapes are part of the typed protocol, but they currently return unsupported in the native backend until decoder and file policy work lands.
 
 Run the WebView extension facade example to confirm WebView is emitted as normal extension traffic:

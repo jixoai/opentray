@@ -1,7 +1,7 @@
 #[cfg(unix)]
 mod unix_transport;
 
-use std::{env, error::Error, path::PathBuf};
+use std::{env, error::Error, path::PathBuf, time::Duration};
 
 use opentray_spec::PROTOCOL_VERSION;
 
@@ -11,7 +11,11 @@ pub struct BrokerOptions {
     ready_file: PathBuf,
     package_version: String,
     protocol_version: u32,
+    idle_timeout: Option<Duration>,
 }
+
+const DEFAULT_DAEMON_IDLE_TIMEOUT_MS: u64 = 30_000;
+const DAEMON_IDLE_TIMEOUT_ENV: &str = "OPENTRAY_DAEMON_IDLE_TIMEOUT_MS";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
@@ -76,19 +80,38 @@ fn parse_broker_options(
         ready_file: ready_file.ok_or("missing --ready-file")?,
         package_version: package_version.ok_or("missing --package-version")?,
         protocol_version,
+        idle_timeout: daemon_idle_timeout()?,
     })
+}
+
+fn daemon_idle_timeout() -> Result<Option<Duration>, Box<dyn Error>> {
+    parse_daemon_idle_timeout(env::var(DAEMON_IDLE_TIMEOUT_ENV).ok().as_deref())
+        .map_err(|error| error.into())
+}
+
+fn parse_daemon_idle_timeout(value: Option<&str>) -> Result<Option<Duration>, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(Some(Duration::from_millis(DEFAULT_DAEMON_IDLE_TIMEOUT_MS)));
+    };
+    let timeout_ms = value
+        .parse::<u64>()
+        .map_err(|_| format!("invalid {DAEMON_IDLE_TIMEOUT_ENV}: {value}"))?;
+    if timeout_ms == 0 {
+        return Ok(None);
+    }
+    Ok(Some(Duration::from_millis(timeout_ms)))
 }
 
 #[cfg(target_os = "macos")]
 mod native_broker {
-    use std::{collections::HashMap, error::Error};
+    use std::{collections::HashMap, error::Error, time::Duration};
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
     use opentray_core::{BrokerKernel, BrokerSession};
     use opentray_spec::ServerFrame;
     use winit::application::ApplicationHandler;
     use winit::event::{StartCause, WindowEvent};
-    use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+    use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
     use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
     use winit::window::WindowId;
 
@@ -98,6 +121,7 @@ mod native_broker {
     enum UserEvent {
         Transport(unix_transport::TransportEvent),
         Menu(tray_icon::menu::MenuEvent),
+        IdleExpired(u64),
     }
 
     pub fn run(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
@@ -123,6 +147,9 @@ mod native_broker {
             broker: BrokerKernel::new(TrayIconBackend::with_runtime(NativeTrayIconRuntime::new())),
             sessions: HashMap::new(),
             broker_version: options.package_version,
+            idle_timeout: options.idle_timeout,
+            idle_generation: 0,
+            proxy: event_loop.create_proxy(),
             listener: Some(listener),
         };
         event_loop.run_app(&mut app)?;
@@ -133,6 +160,9 @@ mod native_broker {
         broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>>,
         sessions: HashMap<u64, unix_transport::TransportSession>,
         broker_version: String,
+        idle_timeout: Option<Duration>,
+        idle_generation: u64,
+        proxy: EventLoopProxy<UserEvent>,
         listener: Option<unix_transport::ListenerHandle>,
     }
 
@@ -140,15 +170,21 @@ mod native_broker {
         fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
             if matches!(cause, StartCause::Init) {
                 println!("opentray broker ready");
+                self.schedule_idle_if_empty();
             }
         }
 
         fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
 
-        fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
             match event {
                 UserEvent::Transport(event) => self.handle_transport(event),
                 UserEvent::Menu(event) => self.handle_menu(event),
+                UserEvent::IdleExpired(generation) => {
+                    if self.sessions.is_empty() && generation == self.idle_generation {
+                        event_loop.exit();
+                    }
+                }
             }
         }
 
@@ -171,6 +207,7 @@ mod native_broker {
         fn handle_transport(&mut self, event: unix_transport::TransportEvent) {
             match event {
                 unix_transport::TransportEvent::Connected { id, writer } => {
+                    self.bump_idle_generation();
                     self.sessions.insert(
                         id,
                         unix_transport::TransportSession {
@@ -192,6 +229,8 @@ mod native_broker {
                     if let Some(mut session) = self.sessions.remove(&id) {
                         let _ = self.broker.close_session(&mut session.broker);
                     }
+                    self.bump_idle_generation();
+                    self.schedule_idle_if_empty();
                 }
             }
         }
@@ -212,5 +251,53 @@ mod native_broker {
                 }
             }
         }
+
+        fn bump_idle_generation(&mut self) {
+            self.idle_generation = self.idle_generation.wrapping_add(1);
+        }
+
+        fn schedule_idle_if_empty(&mut self) {
+            if !self.sessions.is_empty() {
+                return;
+            }
+            let Some(timeout) = self.idle_timeout else {
+                return;
+            };
+            // Generation tokens cancel stale idle timers when a new session connects.
+            let generation = self.idle_generation;
+            let proxy = self.proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(timeout);
+                let _ = proxy.send_event(UserEvent::IdleExpired(generation));
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{parse_daemon_idle_timeout, DEFAULT_DAEMON_IDLE_TIMEOUT_MS};
+
+    #[test]
+    fn daemon_idle_timeout_defaults_to_short_release_window() {
+        assert_eq!(
+            parse_daemon_idle_timeout(None).unwrap(),
+            Some(Duration::from_millis(DEFAULT_DAEMON_IDLE_TIMEOUT_MS))
+        );
+    }
+
+    #[test]
+    fn daemon_idle_timeout_can_be_disabled() {
+        assert_eq!(parse_daemon_idle_timeout(Some("0")).unwrap(), None);
+    }
+
+    #[test]
+    fn daemon_idle_timeout_accepts_milliseconds() {
+        assert_eq!(
+            parse_daemon_idle_timeout(Some("500")).unwrap(),
+            Some(Duration::from_millis(500))
+        );
     }
 }

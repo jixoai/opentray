@@ -12,7 +12,7 @@ const menuLabels = new Map<number, string>([
   [5, "Radio: Passive"],
   [6, "Nested Action"],
   [7, "Nested Check"],
-  [99, "Quit Example"],
+  [99, "Quit Demo"],
 ]);
 
 connection.onEvent((frame) => {
@@ -20,6 +20,7 @@ connection.onEvent((frame) => {
   if (frame.type === "event" && frame.event.type === "menuClick") {
     console.log(`menu click: ${menuLabels.get(frame.event.itemId) ?? frame.event.itemId}`);
     if (frame.event.itemId === 99) {
+      console.log("quit item routed; closing demo connection");
       void shutdown();
     }
   }
@@ -57,7 +58,7 @@ const tray = await surface.createTray({
         ],
       },
       { type: "separator" },
-      { type: "item", id: 99, title: "Quit Example" },
+      { type: "item", id: 99, title: "Quit Demo" },
     ],
   },
 });

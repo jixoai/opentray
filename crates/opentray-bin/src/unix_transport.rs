@@ -2,11 +2,15 @@ use std::fs::{create_dir_all, remove_file, File};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+#[cfg(not(target_os = "macos"))]
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
+#[cfg(not(target_os = "macos"))]
+use std::time::Instant;
 
 use opentray_core::BrokerSession;
 #[cfg(not(target_os = "macos"))]
@@ -126,8 +130,9 @@ where
     })?;
     let mut broker = BrokerKernel::new(backend);
     let mut sessions = std::collections::HashMap::<u64, TransportSession>::new();
+    let mut idle_since = Some(Instant::now());
 
-    for event in receiver {
+    while let Some(event) = receive_next_event(&receiver, options.idle_timeout, idle_since) {
         match event {
             TransportEvent::Connected { id, writer } => {
                 sessions.insert(
@@ -137,6 +142,7 @@ where
                         broker: BrokerSession::new(),
                     },
                 );
+                idle_since = None;
             }
             TransportEvent::Frame { id, frame } => {
                 let Some(session) = sessions.get_mut(&id) else {
@@ -150,12 +156,37 @@ where
                 if let Some(mut session) = sessions.remove(&id) {
                     let _ = broker.close_session(&mut session.broker);
                 }
+                if sessions.is_empty() {
+                    idle_since = Some(Instant::now());
+                }
             }
         }
     }
 
     listener.shutdown();
     Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn receive_next_event(
+    receiver: &std::sync::mpsc::Receiver<TransportEvent>,
+    idle_timeout: Option<std::time::Duration>,
+    idle_since: Option<Instant>,
+) -> Option<TransportEvent> {
+    let Some(idle_timeout) = idle_timeout else {
+        return receiver.recv().ok();
+    };
+    let Some(idle_since) = idle_since else {
+        return receiver.recv().ok();
+    };
+    let elapsed = idle_since.elapsed();
+    if elapsed >= idle_timeout {
+        return None;
+    }
+    match receiver.recv_timeout(idle_timeout - elapsed) {
+        Ok(event) => Some(event),
+        Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
+    }
 }
 
 fn spawn_reader(id: u64, stream: UnixStream, writer: Writer, send: EventSender) {
