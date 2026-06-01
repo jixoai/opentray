@@ -111,6 +111,23 @@ const createAmbientAuth = async (): Promise<AuthContext> => ({
   secrets: [],
 });
 
+export const createPublicRegistryAuth = async (): Promise<AuthContext> => {
+  const dir = await mkdtemp(join(tmpdir(), "opentray-bootstrap-public-"));
+  const userconfig = join(dir, ".npmrc");
+  await writeFile(userconfig, "registry=https://registry.npmjs.org/\n", { mode: 0o600 });
+  return {
+    cleanup: async () => {
+      await rm(dir, { recursive: true, force: true });
+    },
+    env: {
+      ...sanitizedEnv(),
+      NPM_CONFIG_USERCONFIG: userconfig,
+      npm_config_userconfig: userconfig,
+    },
+    secrets: [],
+  };
+};
+
 const createLegacyEnvAuth = async (): Promise<AuthContext> => {
   const dotEnv = await readDotEnv();
   const username = dotEnv.NPM_WHOAMI;

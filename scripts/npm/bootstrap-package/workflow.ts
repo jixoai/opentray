@@ -1,7 +1,7 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { authFor, authWithOtp, sanitizedEnv } from "./env";
+import { authFor, authWithOtp, createPublicRegistryAuth, sanitizedEnv } from "./env";
 import { createPackageManifest, readManifest, validateManifest } from "./manifest";
 import { configureTrust, registryState, resolveNpmRuntime, run, trustState } from "./npm";
 import type { AuthContext, Options, PackageJson, RegistryState, Report } from "./types";
@@ -83,6 +83,7 @@ export const bootstrapPackage = async (options: Options): Promise<Report> => {
 
   const hasWorkspace = await ensureWorkspacePackage(options, report);
   const publishAuth = await authFor(options.publishAuth);
+  const registryAuth = await createPublicRegistryAuth();
   try {
     if (hasWorkspace) {
       const manifest = await readManifest(resolve(options.dir));
@@ -90,7 +91,7 @@ export const bootstrapPackage = async (options: Options): Promise<Report> => {
       await runPackageValidation(options, manifest, publishAuth, report);
     }
 
-    const initialRegistry = await registryState(options.packageName, publishAuth.env, publishAuth.secrets);
+    const initialRegistry = await registryState(options.packageName, registryAuth.env, registryAuth.secrets);
     report.registry = initialRegistry;
     if (initialRegistry.type === "error") throw new Error(`npm view failed:\n${initialRegistry.message}`);
 
@@ -105,7 +106,7 @@ export const bootstrapPackage = async (options: Options): Promise<Report> => {
         if (publish.exitCode !== 0) throw new Error(`npm publish failed:\n${publish.stderr || publish.stdout}`);
         report.published = true;
         report.stages.push("initial publish succeeded");
-        report.registry = await waitForRegistryVisibility(options, publishAuth, report);
+        report.registry = await waitForRegistryVisibility(options, registryAuth, report);
         if (report.registry.type !== "exists") throw new Error("Package was published but did not become visible before timeout.");
       }
     } else {
@@ -143,6 +144,7 @@ export const bootstrapPackage = async (options: Options): Promise<Report> => {
       }
     }
   } finally {
+    await registryAuth.cleanup();
     await publishAuth.cleanup();
   }
 

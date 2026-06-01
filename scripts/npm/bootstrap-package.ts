@@ -2,6 +2,7 @@
 
 export {
   classifyRegistryResult,
+  classifyDistTagResult,
   createPackageManifest,
   defaultPackageDir,
   parseArgs,

@@ -30,11 +30,28 @@ export const classifyRegistryResult = (result: CommandResult): RegistryState => 
   return { type: "error", message };
 };
 
+export const classifyDistTagResult = (result: CommandResult): RegistryState => {
+  if (result.exitCode !== 0) return classifyRegistryResult(result);
+  const latest = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("latest:"));
+  if (latest === undefined) return { type: "missing" };
+  const version = latest.slice("latest:".length).trim();
+  return version.length > 0 ? { type: "exists", version } : { type: "missing" };
+};
+
 export const registryState = async (
   packageName: string,
   env: Record<string, string>,
   secrets: string[],
-): Promise<RegistryState> => classifyRegistryResult(await run(["npm", "view", packageName, "version", "--json"], env, secrets));
+): Promise<RegistryState> => {
+  const state = classifyRegistryResult(await run(["npm", "view", packageName, "version", "--json"], env, secrets));
+  if (state.type !== "missing") return state;
+  const tagState = classifyDistTagResult(await run(["npm", "dist-tag", "ls", packageName], env, secrets));
+  if (tagState.type === "error" && tagState.message.includes("E401")) return { type: "missing" };
+  return tagState;
+};
 
 const supportsTrustedPublishActions = (help: string): boolean =>
   help.includes("--allow-publish") && help.includes("--allow-stage-publish");

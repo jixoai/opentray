@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  classifyDistTagResult,
   classifyRegistryResult,
   createPackageManifest,
   defaultPackageDir,
@@ -55,6 +56,14 @@ describe("Feature: npm package bootstrap release law", () => {
       type: "error",
       message: "npm error code E403",
     });
+  });
+
+  test("Scenario: Given npm dist-tags output When latest exists Then publication can continue before packument cache settles", () => {
+    expect(classifyDistTagResult({ exitCode: 0, stdout: "latest: 0.1.0", stderr: "" })).toEqual({
+      type: "exists",
+      version: "0.1.0",
+    });
+    expect(classifyDistTagResult({ exitCode: 0, stdout: "", stderr: "" })).toEqual({ type: "missing" });
   });
 
   test("Scenario: Given a trusted publisher response When claims match Then trust can be skipped", () => {
