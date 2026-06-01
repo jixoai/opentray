@@ -1,5 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import {
   PROTOCOL_VERSION,
@@ -11,6 +12,7 @@ import {
 } from "@opentray/spec";
 
 import type { OpenTrayTransport } from "./client";
+import { createNodeDaemonDriver, startDaemon, type DaemonDriver } from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
 
@@ -29,11 +31,26 @@ export interface ConnectLocalBrokerOptions extends Partial<BrokerEndpointIdentit
   endpoint?: string;
   homeDir?: string;
   clientVersion?: string;
+  autoStart?: boolean;
+  daemonDriver?: DaemonDriver;
+  cliEntrypoint?: string;
 }
 
 interface PendingRequest {
   resolve(frame: ServerFrame): void;
   reject(error: Error): void;
+}
+
+interface BrokerSocket {
+  setEncoding(encoding: BufferEncoding): void;
+  on(event: "data", listener: (chunk: Buffer | string) => void): void;
+  on(event: "error", listener: (error: Error) => void): void;
+  on(event: "close", listener: () => void): void;
+  once(event: "connect", listener: () => void): void;
+  once(event: "error", listener: (error: Error) => void): void;
+  off(event: "error", listener: (error: Error) => void): void;
+  write(data: string): void;
+  end(callback: () => void): void;
 }
 
 export const connectLocalBroker = async (
@@ -46,6 +63,15 @@ export const connectLocalBroker = async (
     packageVersion,
   });
   const endpoint = options.endpoint ?? paths.endpoint;
+  const autoStart = options.autoStart ?? endpoint === paths.endpoint;
+  if (autoStart && endpoint !== paths.endpoint) {
+    throw new Error("local broker autoStart requires the derived same-version endpoint");
+  }
+  if (autoStart) {
+    const cliEntrypoint = options.cliEntrypoint ?? resolveCliEntrypoint();
+    const driver = options.daemonDriver ?? createNodeDaemonDriver(cliEntrypoint);
+    await startDaemon({ paths, driver });
+  }
   const socket = await connectSocket(endpoint);
   const connection = new LocalBrokerConnection(socket, endpoint);
 
@@ -68,7 +94,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
     | undefined;
 
   constructor(
-    private readonly socket: Socket,
+    private readonly socket: BrokerSocket,
     endpoint: string,
   ) {
     this.endpoint = endpoint;
@@ -197,7 +223,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
   }
 }
 
-const connectSocket = (endpoint: string): Promise<Socket> =>
+const connectSocket = (endpoint: string): Promise<BrokerSocket> =>
   new Promise((resolve, reject) => {
     const socket = createConnection(endpoint);
     socket.once("connect", () => {
@@ -220,4 +246,9 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
     case "error":
       return undefined;
   }
+};
+
+const resolveCliEntrypoint = (): string => {
+  const suffix = fileURLToPath(import.meta.url).endsWith(".ts") ? "cli.ts" : "cli.mjs";
+  return fileURLToPath(new URL(`./${suffix}`, import.meta.url));
 };

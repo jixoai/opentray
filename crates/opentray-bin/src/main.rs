@@ -89,6 +89,7 @@ mod native_broker {
     use winit::application::ApplicationHandler;
     use winit::event::{StartCause, WindowEvent};
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+    use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
     use winit::window::WindowId;
 
     use super::{unix_transport, BrokerOptions};
@@ -100,7 +101,12 @@ mod native_broker {
     }
 
     pub fn run(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
-        let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+        let mut builder = EventLoop::<UserEvent>::with_user_event();
+        builder
+            .with_activation_policy(ActivationPolicy::Accessory)
+            .with_default_menu(false)
+            .with_activate_ignoring_other_apps(false);
+        let event_loop = builder.build()?;
         event_loop.set_control_flow(ControlFlow::Wait);
 
         let proxy = event_loop.create_proxy();

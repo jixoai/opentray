@@ -62,7 +62,6 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
                 .with_tooltip(tooltip)
                 .with_title(tray.title)
                 .with_icon(icon)
-                .with_icon_as_template(true)
                 .with_menu(Box::new(menu))
                 .build()
                 .map_err(|error| BackendError::Failure(error.to_string()))?;

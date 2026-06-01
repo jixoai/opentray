@@ -24,3 +24,19 @@ Run a protocol-only example that creates a surface, creates a tray, dispatches a
 ```bash
 pnpm --filter opentray example:basic
 ```
+
+Run the human-visible daemon tray example:
+
+```bash
+pnpm --filter opentray example:daemon-tray
+```
+
+This example starts or reuses the same-version daemon automatically, creates a real tray through the public SDK, and prints broker-routed menu events. Use manual lifecycle commands only for operator/debug control:
+
+```bash
+pnpm --filter opentray cli -- daemon start
+pnpm --filter opentray cli -- daemon stop
+pnpm --filter opentray cli -- daemon restart
+```
+
+Current native icon support is `rgba`. `encoded` and `file` are typed protocol shapes, but the native `tray-icon` backend reports them as unsupported until decoding and file loading policy are implemented.

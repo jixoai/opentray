@@ -77,6 +77,22 @@ Run the protocol-only TypeScript client example when you want to inspect the SDK
 pnpm --filter opentray example:basic
 ```
 
+Run the daemon-path tray example when you want to see the public TypeScript SDK create a real system tray through the local broker:
+
+```bash
+pnpm --filter opentray example:daemon-tray
+```
+
+The example auto-starts or reuses the same-version daemon before connecting. Manual lifecycle commands remain available for operator/debug cleanup:
+
+```bash
+pnpm --filter opentray cli -- daemon start
+pnpm --filter opentray cli -- daemon stop
+pnpm --filter opentray cli -- daemon restart
+```
+
+The current native `tray-icon` backend supports `rgba` icon assets. `encoded` and `file` icon shapes are part of the typed protocol, but they currently return unsupported in the native backend until decoder and file policy work lands.
+
 Run the WebView extension facade example to confirm WebView is emitted as normal extension traffic:
 
 ```bash
