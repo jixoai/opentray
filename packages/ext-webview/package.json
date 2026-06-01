@@ -30,6 +30,14 @@
   "peerDependencies": {
     "opentray": ">=0.0.0"
   },
+  "optionalDependencies": {
+    "@opentray/ext-webview-darwin-arm64": "workspace:*",
+    "@opentray/ext-webview-darwin-x64": "workspace:*",
+    "@opentray/ext-webview-linux-arm64": "workspace:*",
+    "@opentray/ext-webview-linux-x64": "workspace:*",
+    "@opentray/ext-webview-windows-arm64": "workspace:*",
+    "@opentray/ext-webview-windows-x64": "workspace:*"
+  },
   "devDependencies": {
     "@opentray/spec": "workspace:*",
     "opentray": "workspace:*",

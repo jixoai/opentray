@@ -1,0 +1,23 @@
+{
+  "name": "@opentray/ext-webview-linux-arm64",
+  "version": "0.0.0",
+  "description": "OpenTray WebView native extension for Linux arm64.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
+  "files": [
+    "lib",
+    "README.md"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "peerDependencies": {
+    "opentray": ">=0.1.0"
+  }
+}

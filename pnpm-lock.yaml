@@ -95,6 +95,61 @@ importers:
       vitest:
         specifier: ^4.1.7
         version: 4.1.7(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(yaml@2.9.0))
+    optionalDependencies:
+      '@opentray/ext-webview-darwin-arm64':
+        specifier: workspace:*
+        version: link:../ext-webview-darwin-arm64
+      '@opentray/ext-webview-darwin-x64':
+        specifier: workspace:*
+        version: link:../ext-webview-darwin-x64
+      '@opentray/ext-webview-linux-arm64':
+        specifier: workspace:*
+        version: link:../ext-webview-linux-arm64
+      '@opentray/ext-webview-linux-x64':
+        specifier: workspace:*
+        version: link:../ext-webview-linux-x64
+      '@opentray/ext-webview-windows-arm64':
+        specifier: workspace:*
+        version: link:../ext-webview-windows-arm64
+      '@opentray/ext-webview-windows-x64':
+        specifier: workspace:*
+        version: link:../ext-webview-windows-x64
+
+  packages/ext-webview-darwin-arm64:
+    dependencies:
+      opentray:
+        specifier: '>=0.1.0'
+        version: 0.1.0
+
+  packages/ext-webview-darwin-x64:
+    dependencies:
+      opentray:
+        specifier: '>=0.1.0'
+        version: 0.1.0
+
+  packages/ext-webview-linux-arm64:
+    dependencies:
+      opentray:
+        specifier: '>=0.1.0'
+        version: 0.1.0
+
+  packages/ext-webview-linux-x64:
+    dependencies:
+      opentray:
+        specifier: '>=0.1.0'
+        version: 0.1.0
+
+  packages/ext-webview-windows-arm64:
+    dependencies:
+      opentray:
+        specifier: '>=0.1.0'
+        version: 0.1.0
+
+  packages/ext-webview-windows-x64:
+    dependencies:
+      opentray:
+        specifier: '>=0.1.0'
+        version: 0.1.0
 
   packages/linux-arm64: {}
 
@@ -382,6 +437,39 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@opentray/darwin-arm64@0.0.0':
+    resolution: {integrity: sha512-JLIKEPVmec8RQEYj7p9I8g6jxwKyLEBga+Rj+hLALApVdf76sX+IpdZwhXzjejBpepG4p4Q52Cjk704x/UkDjQ==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@opentray/darwin-x64@0.0.0':
+    resolution: {integrity: sha512-ZNzAVLBIcTMKWM5ro0F4pC7A6yADT2sLyG5AsGFQQJSzuJr8IiJoCmlwNEj8fLsHiGTKDTQEGPXCp9W8LsmsZw==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@opentray/linux-arm64@0.0.0':
+    resolution: {integrity: sha512-REeFD4KzD39dwUYswsEWxP48PtmGhyjncEQiBiiIQYnQc1duPvQ1WVC5IK7FEgwU2wnHb6ciU0HTPKKh1tFtCQ==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@opentray/linux-x64@0.0.0':
+    resolution: {integrity: sha512-FsEncJZ7wiY7BRG+uamK5iTRbskXgB/PdFtXzBScU8bM3HzqnHxzboyZxjjlvB4X/3xUp/GUIp3wrwd1SqaJ9A==}
+    cpu: [x64]
+    os: [linux]
+
+  '@opentray/spec@0.1.0':
+    resolution: {integrity: sha512-PLkBjgn+5pKOoPvLHvzy9zq5nnWGMWZB7l9GesSR7mH+9kGem1vwoLyyrUsUWfM7dNhfZ82Rxqe062vmHk6sjg==}
+
+  '@opentray/windows-arm64@0.0.0':
+    resolution: {integrity: sha512-+mVKJdHMdrEA160YyQ8KLgrO4V2KkCNq4aLAa39ZuL1jXr4Er6iD12JdZFUCg+9Sm6JyBeC+ikJyu3yrNNJ6DA==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@opentray/windows-x64@0.0.0':
+    resolution: {integrity: sha512-bXhM5rAvG1hFb/JZLYnDEZOsp+Kt9bFQcPq3TqkncPB3YMqsWXjwCSTd2huslTTCGXAX/S3tDHGfqcMg93AM1g==}
+    cpu: [x64]
+    os: [win32]
 
   '@oxc-project/types@0.132.0':
     resolution: {integrity: sha512-FESMOxil5Se014ui/Eq8fT5uHJo6nIRwH0PfJrZJXs6Gek3ZVFOrpUv3YIZT20m+extU98Hg1Ym72U58rlsxUQ==}
@@ -1027,6 +1115,9 @@ packages:
   onetime@7.0.0:
     resolution: {integrity: sha512-VXJjc87FScF88uafS3JllDgvAm+c/Slfz06lorj2uAY34rlUu0Nt+v8wreiImcrgAjjIHp1rXpTDlLOGw29WwQ==}
     engines: {node: '>=18'}
+
+  opentray@0.1.0:
+    resolution: {integrity: sha512-5DdR40ta1Ly070MKUnNiLjLH5jxaglFgWRWAS2kwxyGtWsWpTCWFNzJk9XyR35Db7e0kQTiMBZBnXaLcwq2WNw==}
 
   ora@8.2.0:
     resolution: {integrity: sha512-weP+BZ8MVNnlCm8c0Qdc1WSWq4Qn7I+9CJGm7Qali6g44e/PUzbjNqJX5NJ9ljlNMosfJvg1fKEGILklK9cwnw==}
@@ -1796,6 +1887,26 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
+  '@opentray/darwin-arm64@0.0.0':
+    optional: true
+
+  '@opentray/darwin-x64@0.0.0':
+    optional: true
+
+  '@opentray/linux-arm64@0.0.0':
+    optional: true
+
+  '@opentray/linux-x64@0.0.0':
+    optional: true
+
+  '@opentray/spec@0.1.0': {}
+
+  '@opentray/windows-arm64@0.0.0':
+    optional: true
+
+  '@opentray/windows-x64@0.0.0':
+    optional: true
+
   '@oxc-project/types@0.132.0': {}
 
   '@oxc-project/types@0.133.0': {}
@@ -2276,6 +2387,17 @@ snapshots:
   onetime@7.0.0:
     dependencies:
       mimic-function: 5.0.1
+
+  opentray@0.1.0:
+    dependencies:
+      '@opentray/spec': 0.1.0
+    optionalDependencies:
+      '@opentray/darwin-arm64': 0.0.0
+      '@opentray/darwin-x64': 0.0.0
+      '@opentray/linux-arm64': 0.0.0
+      '@opentray/linux-x64': 0.0.0
+      '@opentray/windows-arm64': 0.0.0
+      '@opentray/windows-x64': 0.0.0
 
   ora@8.2.0:
     dependencies:

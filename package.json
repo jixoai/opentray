@@ -18,7 +18,7 @@
     "trusted-publish:check": "bun run scripts/npm/configure-trusted-publish.ts --check",
     "trusted-publish:configure": "bun run scripts/npm/configure-trusted-publish.ts",
     "trusted-publish:dry-run": "bun run scripts/npm/configure-trusted-publish.ts --dry-run",
-    "verify": "bun test scripts/openspec/vision-driven.test.ts scripts/npm/*.test.ts && openspec schema validate vision-driven && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
+    "verify": "bun test scripts/openspec/vision-driven.test.ts scripts/npm/*.test.ts scripts/binaries/*.test.ts && openspec schema validate vision-driven && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
     "version-packages": "changeset version"
   },
   "devDependencies": {

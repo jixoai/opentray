@@ -7,8 +7,8 @@
 
 ## 2. BDD Contract
 
-- [ ] 2.1 Scenario: Given the workspace is inspected When first-stage packages are validated Then all six `@opentray/ext-webview-<os>-<arch>` package atoms exist with correct `os` and `cpu` metadata.
-- [ ] 2.2 Scenario: Given native artifacts are built locally When git status is inspected Then generated daemon binaries and WebView dynamic libraries are not tracked.
+- [x] 2.1 Scenario: Given the workspace is inspected When first-stage packages are validated Then all six `@opentray/ext-webview-<os>-<arch>` package atoms exist with correct `os` and `cpu` metadata.
+- [x] 2.2 Scenario: Given native artifacts are built locally When git status is inspected Then generated daemon binaries and WebView dynamic libraries are not tracked.
 - [ ] 2.3 Scenario: Given `opentray` is installed from npm When the daemon starts Then it resolves the executable from the current platform optional package.
 - [ ] 2.4 Scenario: Given no matching daemon platform package is installed When daemon start is attempted Then the CLI fails with a typed missing-platform-binary message.
 - [ ] 2.5 Scenario: Given a fresh npm install When the public smoke command is run Then it does not require workspace source files or `pnpm --filter`.
@@ -28,11 +28,11 @@
 
 ## 4. Implementation
 
-- [ ] 4.1 Add six `packages/ext-webview-<os>-<arch>` workspace package atoms with platform metadata, README, and binary artifact ignore placeholders.
-- [ ] 4.2 Update `.gitignore` so generated platform `bin/` and `lib/` artifacts are ignored while package metadata remains tracked.
-- [ ] 4.3 Add a TypeScript binary artifact staging script that can stage the current local daemon binary into the matching daemon platform package.
-- [ ] 4.4 Extend artifact staging to WebView dynamic library package paths without hardcoding product branches beyond generic package kind metadata.
-- [ ] 4.5 Add tests for package target mapping, artifact path mapping, and no-commit generated artifact rules.
+- [x] 4.1 Add six `packages/ext-webview-<os>-<arch>` workspace package atoms with platform metadata, README, and binary artifact ignore placeholders.
+- [x] 4.2 Update `.gitignore` so generated platform `bin/` and `lib/` artifacts are ignored while package metadata remains tracked.
+- [x] 4.3 Add a TypeScript binary artifact staging script that can stage the current local daemon binary into the matching daemon platform package.
+- [x] 4.4 Extend artifact staging to WebView dynamic library package paths without hardcoding product branches beyond generic package kind metadata.
+- [x] 4.5 Add tests for package target mapping, artifact path mapping, and no-commit generated artifact rules.
 - [ ] 4.6 Update `opentray` daemon binary resolver to prefer installed platform packages before workspace dev fallback.
 - [ ] 4.7 Add resolver tests for explicit env override, installed package resolution, workspace fallback, and missing platform package error.
 - [ ] 4.8 Add public npm-installable smoke command path for daemon tray/WebView verification.
@@ -49,18 +49,19 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run targeted TypeScript tests for package mapping, artifact staging, binary resolver, and smoke command parsing.
+- [x] 5.1 Run targeted TypeScript tests for package mapping and artifact staging.
 - [ ] 5.2 Run targeted Rust tests for dynamic ABI validation and extension load errors.
 - [ ] 5.3 Run `cargo fmt --check`.
 - [ ] 5.4 Run `cargo test`.
 - [ ] 5.5 Run `pnpm run build`.
 - [ ] 5.6 Run `pnpm run verify`.
-- [ ] 5.7 Run `bun run openspec:vision -- validate ship-native-binaries-and-webview-platform-packages`.
+- [x] 5.7 Run `bun run openspec:vision -- validate ship-native-binaries-and-webview-platform-packages`.
 - [ ] 5.8 Run `git diff --check`.
 - [ ] 5.9 Run local package staging and `npm pack --dry-run --json` for daemon and WebView platform packages.
 - [ ] 5.10 Run release workflow dry-run or equivalent artifact staging simulation before merge.
 - [ ] 5.11 After CI publish, install from real npm registry in a fresh directory and run daemon health/start/stop smoke.
 - [ ] 5.12 After CI publish, run WebView visual smoke from npm-installed packages and ask the user to confirm the window and visible mutations.
+- [ ] 5.13 Run targeted TypeScript tests for binary resolver and npm-installable smoke command parsing.
 
 ## 6. Self-Review Loop
 
