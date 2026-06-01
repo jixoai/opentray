@@ -499,11 +499,13 @@ mod native_broker {
             Ok(json!({ "type": "navigated", "url": url }))
         }
 
-        fn hide(&self) {
-            if let Some(window) = &self.window {
-                window.set_visible(false);
-                println!("native webview hidden");
-            }
+        fn hide(&mut self) {
+            // On macOS, hiding a live wry/winit child window via set_visible(false)
+            // can crash while AppKit emits resign-key notifications. Dropping the
+            // scoped WebView window keeps the extension contract stable: hidden now,
+            // recreated on the next show/navigate/evaluate/postMessage command.
+            self.close();
+            println!("native webview hidden");
         }
 
         fn close(&mut self) {
