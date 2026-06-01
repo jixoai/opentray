@@ -2,16 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>OpenTray Idle Stop / Quit Fix Review</title>
+    <title>OpenTray Daemon Demo Protocol Fix Review</title>
     <style>
       body {
         margin: 0;
-        background: #eef3ee;
+        background:
+          radial-gradient(circle at 18% 12%, rgba(64, 112, 82, 0.18), transparent 32%),
+          linear-gradient(135deg, #f4f0e6 0%, #e7efe5 54%, #d9e7e1 100%);
         color: #17211b;
         font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
       }
       main {
-        max-width: 920px;
+        max-width: 980px;
         margin: 0 auto;
         padding: 44px 28px;
       }
@@ -29,7 +31,7 @@
       .card {
         border: 1px solid #b8c9b9;
         border-radius: 16px;
-        background: #fbfff9;
+        background: rgba(251, 255, 249, 0.86);
         padding: 18px;
       }
       code,
@@ -55,7 +57,7 @@
   </head>
   <body>
     <main>
-      <h1>Idle Stop / Quit Fix Review</h1>
+      <h1>Daemon Demo Protocol Fix Review</h1>
       <p>Status: <span class="pass">automated gates passed</span>. Archive remains blocked on one native click check.</p>
 
       <section class="grid">
@@ -64,8 +66,12 @@
           <p>Daemon idle shutdown is broker-owned and defaults to 30 seconds with no connected sessions.</p>
         </div>
         <div class="card">
-          <h2>Debug Control</h2>
-          <p><code>OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0</code> disables idle shutdown for operator/debug sessions.</p>
+          <h2>Protocol Law</h2>
+          <p>Menu click events now serialize <code>surfaceId</code>, <code>trayId</code>, and <code>itemId</code>.</p>
+        </div>
+        <div class="card">
+          <h2>Extension Boundary</h2>
+          <p>WebView commands use the official facade and an explicit preview recorder, not fake dynamic loading.</p>
         </div>
         <div class="card">
           <h2>Visual Gate</h2>
@@ -74,13 +80,20 @@
       </section>
 
       <h2>Verified Commands</h2>
-      <pre><code>cargo test -p opentray-bin -p opentray-backend-tray-icon -p opentray-core
-pnpm --filter opentray test
+      <pre><code>cargo test -p opentray-spec -p opentray-core -p opentray-bin
+pnpm --filter @opentray/spec test
 pnpm --filter opentray typecheck
+pnpm --filter opentray test
+pnpm --filter @opentray/ext-webview test
+pnpm --filter @opentray/ext-webview example:webview
+OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=500 pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray cli -- daemon stop
+cargo fmt --check
+git diff --check
+bun run openspec:vision -- validate fix-daemon-idle-and-menu-quit
+bun run openspec:vision -- check fix-daemon-idle-and-menu-quit
 pnpm run build
-pnpm run verify
-OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=500 pnpm --filter opentray example:daemon-tray
-pnpm --filter opentray cli -- daemon stop</code></pre>
+pnpm run verify</code></pre>
 
       <p class="warn">
         Manual gate: run <code>pnpm --filter opentray example:daemon-tray</code>,
