@@ -1,5 +1,11 @@
 # opentray
 
+## 0.2.1
+
+### Patch Changes
+
+- 8e15a22: Fix the published npm CLI entrypoint so `node_modules/.bin/opentray` runs through package-manager symlinks.
+
 ## 0.2.0
 
 ### Minor Changes
