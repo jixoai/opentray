@@ -44,3 +44,26 @@ Broker-originated `event` frames SHALL serialize nested tray event payload field
 - **WHEN** the daemon serializes the `event` frame
 - **THEN** the JSON event payload includes `surfaceId`, `trayId`, and `itemId`
 - **AND** the payload does not include `surface_id`, `tray_id`, or `item_id`.
+
+### Requirement: Broker daemon SHALL report health through the local protocol
+
+The broker daemon SHALL accept a request-correlated `health` client frame without changing the protocol version. The daemon composition layer SHALL answer with a `daemon-health` server frame containing daemon process metadata and active transport session metadata. The response SHALL include at least `pid`, `packageVersion`, `protocolVersion`, `endpoint`, `sessionCount`, and `sessions`.
+
+`opentray-core` SHALL NOT own daemon process health state. Health state SHALL be assembled by the runtime composition layer that owns the endpoint, pid, and session map.
+
+#### Scenario: Running daemon reports process and session health
+
+- **GIVEN** a same-version daemon is running
+- **AND** a client sends a `health` request frame
+- **WHEN** the daemon answers
+- **THEN** the response type is `daemon-health`
+- **AND** it includes the daemon pid
+- **AND** it includes package/protocol metadata and endpoint
+- **AND** it includes the current session count and session records where available.
+
+#### Scenario: Health does not require a protocol version bump
+
+- **GIVEN** protocol version `1`
+- **WHEN** a client sends a `health` request frame
+- **THEN** the daemon accepts the frame as an additive command
+- **AND** the endpoint naming and protocol version remain unchanged.

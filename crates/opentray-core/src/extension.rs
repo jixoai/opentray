@@ -5,13 +5,46 @@ use serde_json::Value;
 
 pub const RECORDING_EXTENSION_PATH: &str = "opentray://recording-extension";
 
+/// Broker-runtime authority exposed to extensions without leaking backend or UI types.
+pub trait ExtensionHostContext {
+    fn invoke_host(
+        &mut self,
+        capability: &str,
+        request_json: &[u8],
+    ) -> Result<Vec<u8>, ExtensionError>;
+
+    fn send_event(&mut self, _event_json: &[u8]) -> Result<(), ExtensionError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct UnsupportedExtensionHostContext;
+
+impl ExtensionHostContext for UnsupportedExtensionHostContext {
+    fn invoke_host(
+        &mut self,
+        capability: &str,
+        _request_json: &[u8],
+    ) -> Result<Vec<u8>, ExtensionError> {
+        Err(ExtensionError::Unsupported(format!(
+            "host capability is unavailable: {capability}"
+        )))
+    }
+}
+
 pub trait ExtensionInstance: Send {
     fn name(&self) -> &str;
     fn command(
         &mut self,
         envelope: ExtensionEnvelope,
+        host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError>;
-    fn lease_closed(&mut self, lease_id: &str) -> Result<Vec<ExtensionEnvelope>, ExtensionError>;
+    fn lease_closed(
+        &mut self,
+        lease_id: &str,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<ExtensionEnvelope>, ExtensionError>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -89,28 +122,33 @@ impl ExtensionRegistry {
         tray_id: TrayId,
         ext: String,
         data: Value,
+        host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
         let instance = self
             .instances
             .get_mut(&(surface_id.clone(), ext.clone()))
             .ok_or_else(|| ExtensionError::NotFound(ext.clone()))?;
-        instance.command(ExtensionEnvelope {
-            scope: ExtensionScope {
-                surface_id,
-                tray_id: Some(tray_id),
-                ext,
+        instance.command(
+            ExtensionEnvelope {
+                scope: ExtensionScope {
+                    surface_id,
+                    tray_id: Some(tray_id),
+                    ext,
+                },
+                data,
             },
-            data,
-        })
+            host,
+        )
     }
 
     pub fn lease_closed(
         &mut self,
         lease_id: &str,
+        host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
         let mut events = Vec::new();
         for instance in self.instances.values_mut() {
-            events.extend(instance.lease_closed(lease_id)?);
+            events.extend(instance.lease_closed(lease_id, host)?);
         }
         Ok(events)
     }
@@ -139,6 +177,7 @@ impl ExtensionInstance for RecordingExtension {
     fn command(
         &mut self,
         envelope: ExtensionEnvelope,
+        _host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
         self.commands.push(envelope.clone());
         Ok(vec![ExtensionEnvelope {
@@ -147,7 +186,11 @@ impl ExtensionInstance for RecordingExtension {
         }])
     }
 
-    fn lease_closed(&mut self, lease_id: &str) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
+    fn lease_closed(
+        &mut self,
+        lease_id: &str,
+        _host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
         Ok(vec![ExtensionEnvelope {
             scope: ExtensionScope {
                 surface_id: "lease-cleanup".to_string(),

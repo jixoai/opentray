@@ -239,6 +239,7 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
     case "default-surface":
     case "tray-created":
     case "ack":
+    case "daemon-health":
       return frame.requestId;
     case "ready":
     case "event":

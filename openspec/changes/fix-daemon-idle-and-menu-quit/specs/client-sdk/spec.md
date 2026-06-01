@@ -49,3 +49,30 @@ The workspace SHALL provide a human-facing example runnable as `pnpm --filter op
 - **THEN** a real native WebView window appears with the demo HTML
 - **AND** the terminal prints the routed menu click and accepted WebView command
 - **AND** the implementation keeps `wry` out of `opentray-core`.
+
+#### Scenario: WebView message and evaluate actions visibly update the window
+
+- **GIVEN** the daemon tray example has opened its WebView demo window
+- **WHEN** the user selects `WebView Commands -> Post Message`
+- **THEN** the WebView document visibly displays the posted payload
+- **WHEN** the user selects `WebView Commands -> Evaluate JS`
+- **THEN** the WebView document visibly displays the evaluated status
+- **AND** these actions still travel through the `@opentray/ext-webview` facade.
+
+### Requirement: CLI daemon health SHALL inspect without starting the daemon
+
+The public CLI SHALL support `opentray daemon health`. The command SHALL inspect the same-version daemon state. If the daemon is not running, the command SHALL report that state without starting a new daemon. If the daemon is running, the command SHALL connect to the local endpoint, request daemon health, and print the daemon pid, endpoint, package/protocol metadata, session count, and session metadata returned by the daemon.
+
+#### Scenario: Health reports not running without auto-start
+
+- **GIVEN** no same-version daemon is running
+- **WHEN** the developer runs `opentray daemon health`
+- **THEN** the command reports `opentray daemon not running`
+- **AND** it does not start a new daemon process.
+
+#### Scenario: Health reports running daemon metadata
+
+- **GIVEN** a same-version daemon is running
+- **WHEN** the developer runs `opentray daemon health`
+- **THEN** the command prints pid, endpoint, package version, protocol version, and session count
+- **AND** it prints session lease metadata where the daemon has it.

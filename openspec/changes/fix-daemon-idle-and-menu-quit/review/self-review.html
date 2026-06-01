@@ -58,7 +58,7 @@
   <body>
     <main>
       <h1>Daemon Demo Protocol Fix Review</h1>
-      <p>Status: <span class="pass">automated gates passed</span>. Archive remains blocked on native WebView and quit click checks.</p>
+      <p>Status: <span class="pass">automated gates passed</span>. Archive remains blocked on native WebView visual mutation and quit click checks.</p>
 
       <section class="grid">
         <div class="card">
@@ -75,7 +75,11 @@
         </div>
         <div class="card">
           <h2>Visual Gate</h2>
-          <p><code>Show HTML</code> should open a native WebView window; <code>Quit Demo</code> should close the example.</p>
+          <p><code>Show HTML</code> should open a native WebView window; <code>Post Message</code> and <code>Evaluate JS</code> should mutate the visible page.</p>
+        </div>
+        <div class="card">
+          <h2>Daemon Health</h2>
+          <p><code>daemon health</code> reports pid, endpoint, protocol/package metadata, and sessions without auto-starting.</p>
         </div>
       </section>
 
@@ -87,7 +91,10 @@ pnpm --filter opentray test
 pnpm --filter @opentray/ext-webview test
 pnpm --filter @opentray/ext-webview example:webview
 OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1200 pnpm --filter opentray example:daemon-tray
-OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1200 pnpm --filter opentray example:daemon-tray
+OPENTRAY_HOME=/tmp/opentray-health-smoke.KeSG1m pnpm --filter opentray cli -- daemon health
+OPENTRAY_HOME=/tmp/opentray-health-smoke.KeSG1m OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0 pnpm --filter opentray cli -- daemon start
+OPENTRAY_HOME=/tmp/opentray-health-smoke.KeSG1m pnpm --filter opentray cli -- daemon health
+OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1800 pnpm --filter opentray example:daemon-tray
 pnpm --filter opentray cli -- daemon stop
 cargo fmt --check
 git diff --check
@@ -99,6 +106,7 @@ pnpm run verify</code></pre>
       <p class="warn">
         Manual gate: run <code>pnpm --filter opentray example:daemon-tray</code>,
         click <code>WebView Commands -&gt; Show HTML</code>, confirm a native window appears,
+        click <code>Post Message</code> and <code>Evaluate JS</code>, confirm the WebView content changes,
         then click <code>Quit Demo</code> and confirm the terminal prints the routed click and exits.
       </p>
     </main>

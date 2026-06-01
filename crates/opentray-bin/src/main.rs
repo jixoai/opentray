@@ -1,3 +1,4 @@
+mod dynamic_extension;
 #[cfg(unix)]
 mod unix_transport;
 
@@ -107,11 +108,8 @@ mod native_broker {
     use std::{collections::HashMap, error::Error, time::Duration};
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
-    use opentray_core::{
-        BrokerKernel, BrokerSession, ExtensionError, ExtensionInstance, ExtensionLoadRequest,
-        ExtensionLoader,
-    };
-    use opentray_spec::{ExtensionEnvelope, ExtensionScope, ServerFrame};
+    use opentray_core::{BrokerKernel, BrokerSession, ExtensionError, ExtensionHostContext};
+    use opentray_spec::{ClientFrame, ServerFrame, EXT_HOST_CAPABILITY_WEBVIEW};
     use serde_json::{json, Value};
     use winit::application::ApplicationHandler;
     use winit::dpi::LogicalSize;
@@ -121,13 +119,12 @@ mod native_broker {
     use winit::window::{Window, WindowId};
     use wry::{WebView, WebViewBuilder};
 
-    use super::{unix_transport, BrokerOptions};
+    use super::{dynamic_extension::DynamicExtensionLoader, unix_transport, BrokerOptions};
 
     #[derive(Debug)]
     enum UserEvent {
         Transport(unix_transport::TransportEvent),
         Menu(tray_icon::menu::MenuEvent),
-        Webview(WebviewRuntimeMessage),
         IdleExpired(u64),
     }
 
@@ -150,26 +147,26 @@ mod native_broker {
             let _ = proxy.send_event(UserEvent::Menu(event));
         }));
 
-        let proxy = event_loop.create_proxy();
         let mut app = NativeBrokerApp {
             broker: BrokerKernel::with_extension_loader(
                 TrayIconBackend::with_runtime(NativeTrayIconRuntime::new()),
-                NativeWebviewLoader { proxy },
+                DynamicExtensionLoader::from_env()?,
             ),
             sessions: HashMap::new(),
-            broker_version: options.package_version,
+            broker_version: options.package_version.clone(),
             idle_timeout: options.idle_timeout,
             idle_generation: 0,
             webview: NativeWebviewRuntime::default(),
             proxy: event_loop.create_proxy(),
             listener: Some(listener),
+            options,
         };
         event_loop.run_app(&mut app)?;
         Ok(())
     }
 
     struct NativeBrokerApp {
-        broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>, NativeWebviewLoader>,
+        broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>, DynamicExtensionLoader>,
         sessions: HashMap<u64, unix_transport::TransportSession>,
         broker_version: String,
         idle_timeout: Option<Duration>,
@@ -177,6 +174,7 @@ mod native_broker {
         webview: NativeWebviewRuntime,
         proxy: EventLoopProxy<UserEvent>,
         listener: Option<unix_transport::ListenerHandle>,
+        options: BrokerOptions,
     }
 
     impl ApplicationHandler<UserEvent> for NativeBrokerApp {
@@ -191,20 +189,8 @@ mod native_broker {
 
         fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
             match event {
-                UserEvent::Transport(event) => self.handle_transport(event),
+                UserEvent::Transport(event) => self.handle_transport(event_loop, event),
                 UserEvent::Menu(event) => self.handle_menu(event),
-                UserEvent::Webview(message) => {
-                    match self.webview.handle(event_loop, message.command) {
-                        Ok(data) => self.write_ext_event(&message.scope, data),
-                        Err(error) => {
-                            let error_message = error.to_string();
-                            self.write_ext_event(
-                                &message.scope,
-                                json!({ "type": "error", "message": error_message }),
-                            );
-                        }
-                    }
-                }
                 UserEvent::IdleExpired(generation) => {
                     if self.sessions.is_empty() && generation == self.idle_generation {
                         event_loop.exit();
@@ -234,7 +220,11 @@ mod native_broker {
     }
 
     impl NativeBrokerApp {
-        fn handle_transport(&mut self, event: unix_transport::TransportEvent) {
+        fn handle_transport(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            event: unix_transport::TransportEvent,
+        ) {
             match event {
                 unix_transport::TransportEvent::Connected { id, writer } => {
                     self.bump_idle_generation();
@@ -247,17 +237,39 @@ mod native_broker {
                     );
                 }
                 unix_transport::TransportEvent::Frame { id, frame } => {
+                    if let ClientFrame::Health { request_id } = frame {
+                        let health =
+                            unix_transport::build_daemon_health(&self.options, &self.sessions);
+                        if let Some(session) = self.sessions.get_mut(&id) {
+                            session.write_frame(ServerFrame::DaemonHealth { request_id, health });
+                        }
+                        return;
+                    }
                     let Some(session) = self.sessions.get_mut(&id) else {
                         return;
                     };
-                    let frames =
-                        self.broker
-                            .handle_frame(&mut session.broker, frame, &self.broker_version);
+                    let mut extension_host = NativeExtensionHost {
+                        event_loop,
+                        webview: &mut self.webview,
+                    };
+                    let frames = self.broker.handle_frame_with_extension_host(
+                        &mut session.broker,
+                        frame,
+                        &self.broker_version,
+                        &mut extension_host,
+                    );
                     session.write_frames(frames);
                 }
                 unix_transport::TransportEvent::Disconnected { id } => {
                     if let Some(mut session) = self.sessions.remove(&id) {
-                        let _ = self.broker.close_session(&mut session.broker);
+                        let mut extension_host = NativeExtensionHost {
+                            event_loop,
+                            webview: &mut self.webview,
+                        };
+                        let _ = self.broker.close_session_with_extension_host(
+                            &mut session.broker,
+                            &mut extension_host,
+                        );
                     }
                     self.bump_idle_generation();
                     self.schedule_idle_if_empty();
@@ -282,21 +294,6 @@ mod native_broker {
             }
         }
 
-        fn write_ext_event(&mut self, scope: &ExtensionScope, data: Value) {
-            let Some(tray_id) = &scope.tray_id else {
-                return;
-            };
-
-            for session in self.sessions.values_mut() {
-                session.write_frame(ServerFrame::ExtEvent {
-                    surface_id: scope.surface_id.clone(),
-                    tray_id: tray_id.clone(),
-                    ext: scope.ext.clone(),
-                    data: data.clone(),
-                });
-            }
-        }
-
         fn bump_idle_generation(&mut self) {
             self.idle_generation = self.idle_generation.wrapping_add(1);
         }
@@ -318,78 +315,50 @@ mod native_broker {
         }
     }
 
-    #[derive(Clone)]
-    struct NativeWebviewLoader {
-        proxy: EventLoopProxy<UserEvent>,
+    struct NativeExtensionHost<'a> {
+        event_loop: &'a ActiveEventLoop,
+        webview: &'a mut NativeWebviewRuntime,
     }
 
-    impl ExtensionLoader for NativeWebviewLoader {
-        fn load(
-            &self,
-            request: &ExtensionLoadRequest,
-        ) -> Result<Box<dyn ExtensionInstance>, ExtensionError> {
-            if request.name != "webview" || request.path != "@opentray/ext-webview" {
+    impl ExtensionHostContext for NativeExtensionHost<'_> {
+        fn invoke_host(
+            &mut self,
+            capability: &str,
+            request_json: &[u8],
+        ) -> Result<Vec<u8>, ExtensionError> {
+            // WebView needs the main native event loop, so the daemon exposes it
+            // as a host capability instead of passing winit/wry types over ABI.
+            if capability != EXT_HOST_CAPABILITY_WEBVIEW {
                 return Err(ExtensionError::Unsupported(format!(
-                    "native webview loader only supports webview at @opentray/ext-webview, got {} at {}",
-                    request.name, request.path
+                    "host capability is unavailable: {capability}"
                 )));
             }
 
-            Ok(Box::new(NativeWebviewExtension {
-                proxy: self.proxy.clone(),
-            }))
+            let request = serde_json::from_slice::<Value>(request_json).map_err(|error| {
+                ExtensionError::Rejected(format!("invalid host capability request: {error}"))
+            })?;
+            let command_data = request
+                .get("command")
+                .ok_or_else(|| {
+                    ExtensionError::Rejected("webview host request requires command".into())
+                })?
+                .clone();
+            if command_data.get("type").and_then(Value::as_str) == Some("leaseClosed") {
+                self.webview.close();
+                return serde_json::to_vec(&json!({ "type": "leaseClosed" })).map_err(|error| {
+                    ExtensionError::Rejected(format!("webview host response failed: {error}"))
+                });
+            }
+
+            let command = WebviewRuntimeCommand::from_data(&command_data)?;
+            let data = self
+                .webview
+                .handle(self.event_loop, command)
+                .map_err(|error| ExtensionError::Rejected(error.to_string()))?;
+            serde_json::to_vec(&data).map_err(|error| {
+                ExtensionError::Rejected(format!("webview host response failed: {error}"))
+            })
         }
-    }
-
-    struct NativeWebviewExtension {
-        proxy: EventLoopProxy<UserEvent>,
-    }
-
-    impl ExtensionInstance for NativeWebviewExtension {
-        fn name(&self) -> &str {
-            "webview"
-        }
-
-        fn command(
-            &mut self,
-            envelope: ExtensionEnvelope,
-        ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
-            let command = WebviewRuntimeCommand::from_data(&envelope.data)?;
-            self.proxy
-                .send_event(UserEvent::Webview(WebviewRuntimeMessage {
-                    scope: envelope.scope,
-                    command,
-                }))
-                .map_err(|_| {
-                    ExtensionError::Rejected("native webview event loop is closed".into())
-                })?;
-            Ok(Vec::new())
-        }
-
-        fn lease_closed(
-            &mut self,
-            _lease_id: &str,
-        ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
-            self.proxy
-                .send_event(UserEvent::Webview(WebviewRuntimeMessage {
-                    scope: ExtensionScope {
-                        surface_id: "lease-cleanup".into(),
-                        tray_id: None,
-                        ext: "webview".into(),
-                    },
-                    command: WebviewRuntimeCommand::Hide,
-                }))
-                .map_err(|_| {
-                    ExtensionError::Rejected("native webview event loop is closed".into())
-                })?;
-            Ok(Vec::new())
-        }
-    }
-
-    #[derive(Debug)]
-    struct WebviewRuntimeMessage {
-        scope: ExtensionScope,
-        command: WebviewRuntimeCommand,
     }
 
     #[derive(Debug)]
@@ -608,8 +577,61 @@ mod native_broker {
     fn default_webview_html() -> String {
         r#"<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8" /><title>OpenTray WebView</title></head>
-  <body><main><h1>OpenTray WebView</h1><p>Native daemon runtime.</p></main></body>
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray WebView</title>
+    <style>
+      body {
+        margin: 0;
+        color: #18220f;
+        background: linear-gradient(135deg, #fff8e7 0%, #e9f0d8 100%);
+        font: 15px ui-rounded, "SF Pro Rounded", "Avenir Next", sans-serif;
+      }
+      main {
+        padding: 22px;
+      }
+      .card {
+        margin-top: 12px;
+        border: 1px solid rgba(24, 34, 15, 0.16);
+        border-radius: 14px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+      .label {
+        margin-bottom: 5px;
+        color: #7b5b1d;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      code {
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OpenTray WebView</h1>
+      <p>Native daemon runtime.</p>
+      <div class="card">
+        <div class="label">postMessage</div>
+        <code id="message-status">Waiting for a message.</code>
+      </div>
+      <div class="card">
+        <div class="label">evaluate JS</div>
+        <code id="eval-status">Waiting for evaluation.</code>
+      </div>
+    </main>
+    <script>
+      window.addEventListener("message", (event) => {
+        const target = document.getElementById("message-status");
+        if (target) {
+          target.textContent = JSON.stringify(event.data, null, 2);
+        }
+      });
+    </script>
+  </body>
 </html>"#
             .to_string()
     }

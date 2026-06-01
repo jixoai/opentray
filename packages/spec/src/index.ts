@@ -167,6 +167,21 @@ export interface ExtensionEnvelope<TData = unknown> {
   data: TData;
 }
 
+export interface DaemonSessionHealth {
+  sessionId: number;
+  leaseId?: LeaseId;
+  initialized: boolean;
+}
+
+export interface DaemonHealth {
+  pid: number;
+  packageVersion: string;
+  protocolVersion: number;
+  endpoint: string;
+  sessionCount: number;
+  sessions: DaemonSessionHealth[];
+}
+
 export type ClientFrame =
   | { type: "init"; protocolVersion: number; clientVersion: string }
   | ClientRequestFrame
@@ -182,7 +197,8 @@ export type ClientRequestFrame =
   | { type: "set-tray-tooltip"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId; tooltip: Tooltip }
   | { type: "load-ext"; requestId: RequestId; surfaceId: SurfaceId; name: string; path: string }
   | { type: "ext-command"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId; ext: string; data: unknown }
-  | { type: "unload-ext"; requestId: RequestId; surfaceId: SurfaceId; name: string };
+  | { type: "unload-ext"; requestId: RequestId; surfaceId: SurfaceId; name: string }
+  | { type: "health"; requestId: RequestId };
 
 export type ServerFrame =
   | { type: "ready"; protocolVersion: number; brokerVersion: string; leaseId: LeaseId }
@@ -190,6 +206,7 @@ export type ServerFrame =
   | { type: "default-surface"; requestId: RequestId; surface: SurfaceRef }
   | { type: "tray-created"; requestId: RequestId; surfaceId: SurfaceId; trayId: TrayId }
   | { type: "ack"; requestId: RequestId }
+  | { type: "daemon-health"; requestId: RequestId; health: DaemonHealth }
   | { type: "event"; event: TrayEvent }
   | { type: "ext-event"; surfaceId: SurfaceId; trayId: TrayId; ext: string; data: unknown }
   | { type: "error"; requestId?: RequestId; code: string; message: string };
@@ -242,6 +259,8 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       );
     case "ack":
       return typeof value.requestId === "string";
+    case "daemon-health":
+      return typeof value.requestId === "string" && isDaemonHealth(value.health);
     case "event":
       return isTrayEvent(value.event);
     case "ext-event":
@@ -260,6 +279,28 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return false;
   }
 };
+
+const isDaemonHealth = (value: unknown): value is DaemonHealth => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.pid === "number" &&
+    typeof value.packageVersion === "string" &&
+    typeof value.protocolVersion === "number" &&
+    typeof value.endpoint === "string" &&
+    typeof value.sessionCount === "number" &&
+    Array.isArray(value.sessions) &&
+    value.sessions.every(isDaemonSessionHealth)
+  );
+};
+
+const isDaemonSessionHealth = (value: unknown): value is DaemonSessionHealth =>
+  isRecord(value) &&
+  typeof value.sessionId === "number" &&
+  (value.leaseId === undefined || typeof value.leaseId === "string") &&
+  typeof value.initialized === "boolean";
 
 const isTrayEvent = (value: unknown): value is TrayEvent => {
   if (!isRecord(value) || typeof value.type !== "string") {

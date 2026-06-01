@@ -3,8 +3,16 @@
 ## Current Round
 
 - Round: 1
-- Status: Align first-stage release blockers: daemon binaries and ext-webview platform dynamic libraries must ship before npm release acceptance
+- Status: Host UI capability boundary implemented; dynamic WebView smoke now reaches visible commands through the dynamic library path
 - Previous plan backup: none
+
+## Current Implementation Finding
+
+The dynamic extension ABI now includes a per-command host capability context. `opentray-core` passes only the generic `ExtensionHostContext` law, while `opentray-bin` implements the daemon-owned WebView UI capability in the macOS composition layer. The WebView dynamic library is required for registration, invokes the `webview` host capability through C-compatible callbacks and JSON bytes, and returns scoped extension events for `show`, `postMessage`, `evaluate`, `navigate`, and `hide`.
+
+The dynamic extension discovery law now searches both daemon-adjacent platform packages and the requested npm facade package's dependency roots. This matters for real registry installs because package managers such as pnpm may place `@opentray/ext-webview-<os>-<arch>` beside `@opentray/ext-webview`, not beside `@opentray/<os>-<arch>`.
+
+This resolves the prior architecture blocker without passing Rust `ActiveEventLoop`, `Window`, `WebView`, backend, or kernel registry types across the ABI. The remaining first-stage blockers are release-operation gates: trusted-publish checks for the new packages, CI cross-platform artifact execution, real npm publish, fresh npm-registry install smoke, and human visual confirmation from installed packages.
 
 ## Workflow Command Surface
 
@@ -47,7 +55,7 @@
 | `openspec/specs/extension-host/spec.md` | Dynamic extension ABI must use `extern "C"` functions and C-compatible structures; Rust types must not cross the boundary; JSON payloads may cross ABI. | This settles the extension host target law for first-stage implementation. |
 | `openspec/specs/extension-host/spec.md` | Internal adapter may bootstrap P0 only if it exercises the same host contract as dynamic libraries. | Current daemon WebView adapter is acceptable only as transitional evidence, not final first-stage release state. |
 | `openspec/specs/extension-host/spec.md` | Extension discovery must use package-adjacent artifacts, user config directories, and `OPENTRAY_EXT_PATH` with deterministic auditing. | Native WebView packages need explicit path resolution and error reporting. |
-| `openspec/specs/webview-extension/spec.md` | WebView is an extension atom outside the kernel and must route through extension host commands/events. | WebView native runtime belongs in extension platform atoms, not `opentray-core`. |
+| `openspec/specs/webview-extension/spec.md` | WebView is an extension atom outside the kernel and must route through extension host commands/events. | WebView provider registration belongs in extension platform atoms; daemon-owned UI authority must be exposed only as host capability. |
 | `openspec/specs/webview-extension/spec.md` | The TypeScript facade must stay platform-neutral and must not import platform binary packages. | `@opentray/ext-webview` must depend on public contracts; platform packages are optional native artifacts. |
 | `packages/cli/src/daemon/broker-command.ts` | Dev resolver builds `opentray-bin` from workspace and has no installed platform package lookup. | Real npm install cannot start daemon without a platform package resolver. |
 | `packages/cli/package.json` | `opentray` already declares six daemon platform packages as optional dependencies. | Package topology is ready, but binary staging and resolver behavior are missing. |
@@ -72,7 +80,7 @@
 | `openspec/specs/webview-extension/spec.md` | WebView facade is platform-neutral and native implementation is an extension atom. | Extend with platform package distribution and dynamic library discovery. |
 | `openspec/specs/monorepo-workspace/spec.md` | Platform package atoms are first-class workspace packages. | Extend the package set with ext-webview platform atoms. |
 | `openspec/specs/release-pipeline/spec.md` | CI publishes via trusted publishing and can bootstrap new package atoms. | Extend release workflow to include matrix native artifacts before publish. |
-| `openspec/changes/fix-daemon-idle-and-menu-quit` | Current change proves daemon health and macOS WebView visual path through an internal adapter. | Keep as evidence, but do not treat internal adapter as final release architecture. |
+| `openspec/changes/fix-daemon-idle-and-menu-quit` | Current change proves daemon health and macOS WebView visual path through an internal adapter. | Keep as evidence; final release architecture replaces the internal adapter with dynamic library registration plus host capability. |
 
 ### User Language System
 
@@ -176,14 +184,14 @@ Forbidden couplings:
 ## Intent-Driven Plan
 
 - [x] 1. Research and align intent.
-- [ ] 2. Write specs from the intent.
-- [ ] 3. Write BDD tasks from specs.
-- [ ] 4. Implement package atoms and artifact staging.
-- [ ] 5. Implement daemon binary resolver and tests.
-- [ ] 6. Implement generic dynamic extension host ABI boundary.
-- [ ] 7. Move WebView native runtime behind platform dynamic libraries.
-- [ ] 8. Implement CI matrix artifact build and publish staging.
-- [ ] 9. Add changesets and package version grouping.
+- [x] 2. Write specs from the intent.
+- [x] 3. Write BDD tasks from specs.
+- [x] 4. Implement package atoms and artifact staging.
+- [x] 5. Implement daemon binary resolver and tests.
+- [x] 6. Implement generic dynamic extension host ABI boundary.
+- [x] 7. Move WebView registration behind platform dynamic libraries and expose daemon UI authority through host capability.
+- [x] 8. Implement CI matrix artifact build and publish staging.
+- [x] 9. Add changesets and package version grouping.
 - [ ] 10. Publish through npm trusted publishing.
 - [ ] 11. Run fresh npm registry install smoke and human visual verification.
 - [ ] 12. Self-review against intent and decide whether to loop.
@@ -199,7 +207,7 @@ Forbidden couplings:
 
 | Path | Why rejected |
 | ---- | ------------ |
-| Keep WebView native runtime compiled into `opentray-bin` for first release | It hides the extension host problem the first stage is meant to validate. |
+| Register a daemon-internal WebView provider when the dynamic library is missing | It hides the extension host problem the first stage is meant to validate. |
 | Put all WebView native artifacts into `@opentray/ext-webview` | Bloats installs and violates platform atom isolation. |
 | Commit generated binaries to git | User explicitly requires source release without checked-in binaries. |
 | Use workspace smoke as final proof | User requires formal real npm environment testing. |

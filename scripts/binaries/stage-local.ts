@@ -1,7 +1,13 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
 
-import { resolveNativeTarget, stageArtifact } from "./artifacts";
+import {
+  normalizeArch,
+  platformToPackageOs,
+  resolveNativePackageTarget,
+  resolveNativeTarget,
+  stageArtifact,
+} from "./artifacts";
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -17,6 +23,12 @@ const { values } = parseArgs({
       type: "string",
       default: process.cwd(),
     },
+    "package-os": {
+      type: "string",
+    },
+    arch: {
+      type: "string",
+    },
   },
 });
 
@@ -26,8 +38,17 @@ if (values.source === undefined || values.source.length === 0) {
 if (values.kind !== "daemon" && values.kind !== "webview") {
   throw new Error("--kind must be daemon or webview");
 }
+if ((values["package-os"] === undefined) !== (values.arch === undefined)) {
+  throw new Error("--package-os and --arch must be provided together");
+}
 
-const target = resolveNativeTarget();
+const target =
+  values["package-os"] === undefined
+    ? resolveNativeTarget()
+    : resolveNativePackageTarget(
+        platformToPackageOs(values["package-os"]),
+        normalizeArch(values.arch),
+      );
 const destination = values.kind === "daemon" ? target.daemonArtifact : target.webviewArtifact;
 await stageArtifact(values.root ?? process.cwd(), values.source, destination);
 console.log(`staged ${values.kind} artifact: ${destination}`);

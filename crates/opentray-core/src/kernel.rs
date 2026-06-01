@@ -7,8 +7,8 @@ use opentray_spec::{
 use serde_json::Value;
 
 use crate::{
-    ExtensionError, ExtensionInstance, ExtensionRegistry, SurfaceBackend, SurfaceProjection,
-    TrayProjection,
+    ExtensionError, ExtensionHostContext, ExtensionInstance, ExtensionRegistry, SurfaceBackend,
+    SurfaceProjection, TrayProjection, UnsupportedExtensionHostContext,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -186,6 +186,15 @@ impl<B: SurfaceBackend> Kernel<B> {
     }
 
     pub fn close_lease(&mut self, lease_id: &str) -> Result<Vec<ExtensionEnvelope>, KernelError> {
+        let mut host = UnsupportedExtensionHostContext;
+        self.close_lease_with_host(lease_id, &mut host)
+    }
+
+    pub fn close_lease_with_host(
+        &mut self,
+        lease_id: &str,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
         let affected: Vec<_> = self
             .trays
             .values()
@@ -196,7 +205,7 @@ impl<B: SurfaceBackend> Kernel<B> {
         for surface_id in affected {
             self.sync_surface(&surface_id)?;
         }
-        Ok(self.extensions.lease_closed(lease_id)?)
+        Ok(self.extensions.lease_closed(lease_id, host)?)
     }
 
     pub fn route_event(&self, event: TrayEvent) -> Option<RoutedEvent> {
@@ -223,8 +232,22 @@ impl<B: SurfaceBackend> Kernel<B> {
         ext: String,
         data: Value,
     ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
+        let mut host = UnsupportedExtensionHostContext;
+        self.ext_command_with_host(surface_id, tray_id, ext, data, &mut host)
+    }
+
+    pub fn ext_command_with_host(
+        &mut self,
+        surface_id: SurfaceId,
+        tray_id: TrayId,
+        ext: String,
+        data: Value,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
         self.require_tray(&surface_id, &tray_id)?;
-        Ok(self.extensions.command(surface_id, tray_id, ext, data)?)
+        Ok(self
+            .extensions
+            .command(surface_id, tray_id, ext, data, host)?)
     }
 
     pub fn projection(&self, surface_id: &str) -> Result<SurfaceProjection, KernelError> {

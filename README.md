@@ -18,6 +18,7 @@ This repository uses `pnpm` workspaces and Lerna metadata.
 | `packages/cli`           | `opentray`                | Developer-facing SDK and CLI package.                    |
 | `packages/spec`          | `@opentray/spec`          | TypeScript protocol and shared contract package.         |
 | `packages/ext-webview`   | `@opentray/ext-webview`   | Rich popup extension backed by platform WebView engines. |
+| `packages/ext-webview-*` | `@opentray/ext-webview-*` | Platform WebView dynamic library packages.               |
 | `packages/ext-badge`     | `@opentray/ext-badge`     | Platform badge/progress/overlay API extension.           |
 | `packages/ext-island`    | `@opentray/ext-island`    | Roadmap dynamic island / live activity extension.        |
 | `packages/darwin-arm64`  | `@opentray/darwin-arm64`  | macOS Apple Silicon broker binary package.               |
@@ -26,6 +27,14 @@ This repository uses `pnpm` workspaces and Lerna metadata.
 | `packages/windows-x64`   | `@opentray/windows-x64`   | Windows x64 broker binary package.                       |
 | `packages/linux-arm64`   | `@opentray/linux-arm64`   | Linux ARM64 broker binary package.                       |
 | `packages/linux-x64`     | `@opentray/linux-x64`     | Linux x64 broker binary package.                         |
+
+## First-Stage Platform Truth
+
+The first native release publishes daemon and WebView artifact packages for macOS, Linux, and Windows so package topology can be validated in CI and npm. Runtime capability is still explicit:
+
+- macOS is the first human-visual acceptance path: daemon transport, tray menu, dynamic WebView loading, postMessage, and evaluate are expected to work.
+- Linux packages build and publish first-stage artifacts, but the current broker backend is capability-limited and WebView host UI may report unsupported instead of faking a window.
+- Windows packages build and publish first-stage artifacts, but broker transport is not yet a completed runtime acceptance path.
 
 ## Examples
 
@@ -83,7 +92,25 @@ Run the daemon-path tray example when you want to see the public TypeScript SDK 
 pnpm --filter opentray example:daemon-tray
 ```
 
-The daemon tray menu includes standard item/check/radio/submenu entries, a `Quit Demo` item, and a `WebView Commands` submenu. On macOS, `Show HTML` opens a real native WebView window through the daemon runtime, while the other WebView entries exercise navigate, postMessage, evaluate, and hide through the `@opentray/ext-webview` facade.
+After installing published packages from npm, use the package-owned smoke command instead of workspace scripts:
+
+```bash
+opentray smoke daemon-tray
+```
+
+The daemon tray menu includes standard item/check/radio/submenu entries, a `Quit Demo` item, and a `WebView Commands` submenu. On macOS, `Show HTML` opens a real native WebView window through `@opentray/ext-webview-darwin-*`; the daemon owns the main-thread UI capability, but the WebView extension must be loaded as a dynamic library. The other WebView entries exercise navigate, postMessage, evaluate, and hide through the `@opentray/ext-webview` facade.
+
+For local workspace smoke before publishing, stage current native artifacts and then run the same public command:
+
+```bash
+cargo build -p opentray-bin -p opentray-ext-webview
+bun run scripts/binaries/stage-local.ts --kind daemon --source target/debug/opentray
+bun run scripts/binaries/stage-local.ts --kind webview --source target/debug/libopentray_ext_webview.dylib
+pnpm --filter opentray cli -- daemon stop
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
+```
+
+`OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` runs show, postMessage, evaluate, navigate, and hide without menu clicks. `OPENTRAY_EXT_PATH` can point at an explicit extension directory for loader debugging, but the release path is package-adjacent discovery from the requested facade package, such as `@opentray/ext-webview` resolving to `@opentray/ext-webview-<os>-<arch>`.
 
 The standalone WebView visual smoke remains available:
 
@@ -117,13 +144,12 @@ pnpm --filter @opentray/spec example:parse
 
 ### Verification commands
 
-Use these commands to validate the change set end to end:
+Use these commands to validate the first-stage native package change set:
 
 ```bash
 pnpm run build
 pnpm run verify
-bun run openspec:vision -- validate implement-kernel-webview-foundation
-bun run openspec:vision -- check implement-kernel-webview-foundation
+bun run openspec:vision -- validate ship-native-binaries-and-webview-platform-packages
 ```
 
 ## Workflow

@@ -13,6 +13,10 @@ export type DaemonStopResult =
   | { status: "stopped"; pid: number; paths: DaemonPaths }
   | { status: "not-running"; paths: DaemonPaths };
 
+export type DaemonInspectResult =
+  | { status: "running"; pid: number; paths: DaemonPaths }
+  | { status: "not-running"; paths: DaemonPaths; stalePid?: number };
+
 export interface DaemonDriver {
   isAlive(pid: number): Promise<boolean>;
   spawnBroker(paths: DaemonPaths): Promise<number>;
@@ -26,6 +30,11 @@ export interface StartDaemonOptions {
 }
 
 export interface StopDaemonOptions {
+  paths: DaemonPaths;
+  driver: DaemonDriver;
+}
+
+export interface InspectDaemonOptions {
   paths: DaemonPaths;
   driver: DaemonDriver;
 }
@@ -99,6 +108,18 @@ export const stopDaemon = async ({ paths, driver }: StopDaemonOptions): Promise<
 export const restartDaemon = async (options: StartDaemonOptions): Promise<DaemonStartResult> => {
   await stopDaemon({ paths: options.paths, driver: options.driver });
   return startDaemon(options);
+};
+
+export const inspectDaemon = async ({ paths, driver }: InspectDaemonOptions): Promise<DaemonInspectResult> => {
+  const pid = await readPid(paths.pidFile);
+  if (pid !== undefined && (await driver.isAlive(pid))) {
+    return { status: "running", pid, paths };
+  }
+
+  await cleanupRuntimeFiles(paths);
+  return pid === undefined
+    ? { status: "not-running", paths }
+    : { status: "not-running", paths, stalePid: pid };
 };
 
 const readPid = async (pidFile: string): Promise<number | undefined> => {

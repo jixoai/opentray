@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { nativeTargets, resolveNativeTarget } from "./artifacts";
+import { nativeTargets, resolveNativePackageTarget, resolveNativeTarget } from "./artifacts";
 
 describe("Feature: native binary artifact topology", () => {
   test("Scenario: Given first-stage platforms When targets are enumerated Then daemon and webview packages map one-to-one", () => {
@@ -40,5 +40,12 @@ describe("Feature: native binary artifact topology", () => {
   test("Scenario: Given unsupported host When target is resolved Then the error is explicit", () => {
     expect(() => resolveNativeTarget("freebsd", "x64")).toThrow("unsupported OpenTray platform");
     expect(() => resolveNativeTarget("linux", "riscv64")).toThrow("unsupported OpenTray architecture");
+  });
+
+  test("Scenario: Given CI stages foreign artifacts When package target is explicit Then host platform is irrelevant", () => {
+    const target = resolveNativePackageTarget("windows", "arm64");
+
+    expect(target.daemonArtifact).toBe("packages/windows-arm64/bin/opentray.exe");
+    expect(target.webviewArtifact).toBe("packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll");
   });
 });

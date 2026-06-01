@@ -21,6 +21,8 @@ const menuLabels = new Map<number, string>([
   [99, "Quit Demo"],
 ]);
 let webview: ReturnType<typeof attachWebview> | undefined;
+let messageCount = 0;
+let evalCount = 0;
 
 connection.onEvent((frame) => {
   console.log(`broker -> client ${JSON.stringify(frame)}`);
@@ -89,6 +91,7 @@ webview = attachWebview(tray);
 console.log("webview facade attached to the daemon native WebView extension");
 console.log("open the system tray item and choose any enabled menu item to see routed events");
 
+let closed = false;
 const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
 let exitTimer: NodeJS.Timeout | undefined;
 if (exitAfter !== undefined && exitAfter.length > 0) {
@@ -104,12 +107,17 @@ const webviewSmoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
 if (webviewSmoke === "show") {
   await handleMenuClick(8);
 } else if (webviewSmoke === "1") {
-  for (const itemId of [8, 9, 10, 11, 12]) {
+  if (exitTimer !== undefined) {
+    clearTimeout(exitTimer);
+    exitTimer = undefined;
+  }
+  for (const itemId of [8, 10, 11, 9, 12]) {
     await handleMenuClick(itemId);
   }
+  await sleep(300);
+  await shutdown();
 }
 
-let closed = false;
 async function shutdown(): Promise<void> {
   if (closed) {
     return;
@@ -141,7 +149,7 @@ async function handleMenuClick(itemId: number): Promise<void> {
     case 8:
       await webview.show({
         type: "show",
-        html: "<main><h1>OpenTray WebView</h1><p>Daemon demo command.</p></main>",
+        html: createWebviewDemoHtml(),
         width: 420,
         height: 260,
         fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
@@ -153,11 +161,18 @@ async function handleMenuClick(itemId: number): Promise<void> {
       console.log("webview command: navigate");
       break;
     case 10:
-      await webview.postMessage({ kind: "ping", source: "daemon-tray" });
+      messageCount += 1;
+      await webview.postMessage({
+        kind: "ping",
+        source: "daemon-tray",
+        count: messageCount,
+        sentAt: new Date().toISOString(),
+      });
       console.log("webview command: postMessage");
       break;
     case 11:
-      await webview.evaluate("window.__OPENTRAY_DEMO__ = true");
+      evalCount += 1;
+      await webview.evaluate(createVisibleEvaluateScript(evalCount));
       console.log("webview command: evaluate");
       break;
     case 12:
@@ -190,4 +205,110 @@ function createVisibleIcon(): { type: "rgba"; width: number; height: number; dat
   }
 
   return { type: "rgba", width, height, data };
+}
+
+function createWebviewDemoHtml(): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray WebView</title>
+    <style>
+      :root {
+        color: #18220f;
+        background: #f6edd8;
+        font: 15px ui-rounded, "SF Pro Rounded", "Avenir Next", sans-serif;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        min-height: 100vh;
+        box-sizing: border-box;
+        padding: 22px;
+        background:
+          radial-gradient(circle at 84% 10%, rgba(34, 132, 96, 0.22), transparent 34%),
+          linear-gradient(135deg, #fff8e7 0%, #e9f0d8 100%);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+        letter-spacing: -0.04em;
+      }
+      p {
+        margin: 0 0 16px;
+        color: #526044;
+      }
+      section {
+        display: grid;
+        gap: 10px;
+      }
+      .card {
+        border: 1px solid rgba(24, 34, 15, 0.16);
+        border-radius: 14px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: 0 12px 30px rgba(56, 72, 36, 0.12);
+      }
+      .label {
+        margin-bottom: 5px;
+        color: #7b5b1d;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      code {
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OpenTray WebView</h1>
+      <p>Use the tray menu to mutate this native WebView through extension commands.</p>
+      <section>
+        <div class="card">
+          <div class="label">postMessage</div>
+          <code id="message-status">Waiting for WebView Commands -> Post Message</code>
+        </div>
+        <div class="card">
+          <div class="label">evaluate JS</div>
+          <code id="eval-status">Waiting for WebView Commands -> Evaluate JS</code>
+        </div>
+      </section>
+    </main>
+    <script>
+      window.addEventListener("message", (event) => {
+        const target = document.getElementById("message-status");
+        if (target) {
+          target.textContent = JSON.stringify(event.data, null, 2);
+        }
+      });
+    </script>
+  </body>
+</html>`;
+}
+
+function createVisibleEvaluateScript(count: number): string {
+  return `(() => {
+    let target = document.getElementById("eval-status");
+    if (!target) {
+      const panel = document.createElement("div");
+      panel.style.cssText = "position:fixed;left:16px;right:16px;bottom:16px;z-index:2147483647;padding:12px;border-radius:12px;background:#fff8e7;color:#18220f;box-shadow:0 12px 30px rgba(0,0,0,.18);font:14px ui-rounded, sans-serif;";
+      panel.textContent = "OpenTray Evaluate JS: ";
+      target = document.createElement("code");
+      target.id = "eval-status";
+      panel.appendChild(target);
+      document.body.appendChild(panel);
+    }
+    if (target) {
+      target.textContent = "Evaluate JS updated the WebView, count=${count}, at " + new Date().toLocaleTimeString();
+    }
+    window.__OPENTRAY_DEMO__ = { evaluated: true, count: ${count} };
+  })();`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

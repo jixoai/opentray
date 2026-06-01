@@ -34,6 +34,19 @@ class RecordingTransport implements OpenTrayTransport {
       case "unload-ext":
       case "resolve-default-surface":
         return { type: "ack", requestId: frame.requestId };
+      case "health":
+        return {
+          type: "daemon-health",
+          requestId: frame.requestId,
+          health: {
+            pid: process.pid,
+            endpoint: "recorded",
+            packageVersion: "0.1.0",
+            protocolVersion: 1,
+            sessionCount: 0,
+            sessions: [],
+          },
+        };
     }
   }
 }

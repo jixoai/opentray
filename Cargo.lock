@@ -2127,6 +2127,7 @@ dependencies = [
 name = "opentray-bin"
 version = "0.0.0"
 dependencies = [
+ "libloading",
  "opentray-backend-ksni",
  "opentray-backend-tray-icon",
  "opentray-core",
@@ -2144,6 +2145,14 @@ dependencies = [
  "opentray-spec",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "opentray-ext-webview"
+version = "0.0.0"
+dependencies = [
+ "opentray-spec",
+ "serde_json",
 ]
 
 [[package]]

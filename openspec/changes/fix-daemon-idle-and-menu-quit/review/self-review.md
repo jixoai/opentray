@@ -2,9 +2,9 @@
 
 ## Verdict
 
-The automated part of the follow-up intent is satisfied. The daemon now owns idle shutdown, Rust event frames serialize nested tray event fields as camelCase, TypeScript rejects snake_case tray event payloads, and the daemon tray example includes a `WebView Commands` submenu that exercises `@opentray/ext-webview` through a real macOS native WebView runtime.
+The automated part of the follow-up intent is satisfied. The daemon now owns idle shutdown, Rust event frames serialize nested tray event fields as camelCase, TypeScript rejects snake_case tray event payloads, `opentray daemon health` reports daemon/session state without auto-starting, and the daemon tray example includes a `WebView Commands` submenu that exercises `@opentray/ext-webview` through a real macOS native WebView runtime with visible `postMessage` and `Evaluate JS` state changes.
 
-Do not archive yet. The remaining gate is human-visible: run the example without auto-exit, click `WebView Commands -> Show HTML`, confirm a native window appears, then click `Quit Demo` and confirm the native menu event reaches the TS client and exits the demo.
+Do not archive yet. The remaining gate is human-visible: run the example without auto-exit, click `WebView Commands -> Show HTML`, confirm a native window appears, click `Post Message` and `Evaluate JS` and confirm the window content changes, then click `Quit Demo` and confirm the native menu event reaches the TS client and exits the demo.
 
 ## Trace
 
@@ -19,6 +19,9 @@ Do not archive yet. The remaining gate is human-visible: run the example without
 | Native WebView runtime | macOS daemon composition loads `@opentray/ext-webview` through `NativeWebviewLoader` and sends runtime commands through `EventLoopProxy`. | Pass |
 | Core boundary | `wry` is only added to `opentray-bin`; `opentray-core` still depends only on contracts and trait objects. | Pass |
 | Runtime event feedback | The daemon sends actual WebView runtime events such as `shown`, `navigated`, `message`, `evaluated`, and `hidden` back to the client. | Pass |
+| Daemon health | `health` / `daemon-health` frames are additive protocol frames, and `opentray daemon health` prints pid, endpoint, protocol/package metadata, session count, and session metadata. | Pass |
+| Health does not mutate lifecycle | Health uses `inspectDaemon` and `connectLocalBroker({ autoStart: false })`; absent daemon reports not running. | Pass |
+| Visible WebView message/evaluate feedback | Demo HTML and default runtime HTML expose `message-status` and `eval-status` targets; evaluate can create a visible fallback panel if the current page lacks the target. | Pass |
 
 ## Verification Evidence
 
@@ -29,7 +32,10 @@ Do not archive yet. The remaining gate is human-visible: run the example without
 - `pnpm --filter @opentray/ext-webview test` passed.
 - `pnpm --filter @opentray/ext-webview example:webview` passed.
 - `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1200 pnpm --filter opentray example:daemon-tray` passed and printed `{"type":"shown"}`.
-- `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1200 pnpm --filter opentray example:daemon-tray` passed and printed `shown`, `navigated`, `message`, `evaluated`, and `hidden` events.
+- `OPENTRAY_HOME=/tmp/opentray-health-smoke.KeSG1m pnpm --filter opentray cli -- daemon health` passed and reported `opentray daemon not running`.
+- `OPENTRAY_HOME=/tmp/opentray-health-smoke.KeSG1m OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0 pnpm --filter opentray cli -- daemon start` passed.
+- `OPENTRAY_HOME=/tmp/opentray-health-smoke.KeSG1m pnpm --filter opentray cli -- daemon health` passed and printed pid, endpoint, package/protocol metadata, `sessions: 1`, and `leaseId=lease-1`.
+- `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1800 pnpm --filter opentray example:daemon-tray` passed and printed `shown`, `message`, `evaluated`, `navigated`, and `hidden` events.
 - After waiting 1 second, `pnpm --filter opentray cli -- daemon stop` reported `opentray daemon not running`, confirming idle self-release.
 - `cargo fmt --check` passed.
 - `git diff --check` passed.
@@ -41,7 +47,7 @@ Do not archive yet. The remaining gate is human-visible: run the example without
 ## Residual Risks
 
 - Automated tests cannot click the macOS status menu. User confirmation is still required for the `Quit Demo` click path.
-- Automated smoke can prove the native WebView command completed, but a human still needs to visually confirm the window appears on screen.
+- Automated smoke can prove the native WebView commands completed, but a human still needs to visually confirm the window appears and the message/evaluate areas mutate on screen.
 - The 30s default is a product default, not a protocol compatibility law. It can be tuned before release if it feels too aggressive or too slow.
 
 ## Human Acceptance
@@ -65,5 +71,18 @@ Optional WebView command check:
 
 - Open the `WebView Commands` submenu.
 - Click `Show HTML` and confirm a native window appears.
-- Click `Navigate`, `Post Message`, `Evaluate JS`, and `Hide`.
+- Click `Post Message` and confirm the `postMessage` card changes.
+- Click `Evaluate JS` and confirm the `evaluate JS` card changes.
+- Click `Navigate` and `Hide`.
 - Terminal prints `webview command: ...` and `broker -> client {"type":"ext-event",...}` with `shown`, `navigated`, `message`, `evaluated`, and `hidden` events.
+
+Daemon health check:
+
+```bash
+pnpm --filter opentray cli -- daemon health
+```
+
+Expected:
+
+- If the daemon is absent, it prints `opentray daemon not running` and does not start one.
+- If the daemon is present, it prints pid, endpoint, package/protocol metadata, session count, and session records.

@@ -33,6 +33,15 @@ describe("@opentray/spec", () => {
     expect(frame.ext).toBe("webview");
   });
 
+  it("keeps health checks as additive typed protocol frames", () => {
+    const frame: ClientFrame = {
+      type: "health",
+      requestId: "req-health",
+    };
+
+    expect(frame.requestId).toBe("req-health");
+  });
+
   it("formats endpoint identity with package and protocol versions", () => {
     const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
 
@@ -96,6 +105,43 @@ describe("@opentray/spec", () => {
     );
 
     expect(parsed.ok).toBe(true);
+  });
+
+  it("parses daemon health responses", () => {
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "daemon-health",
+        requestId: "req-health",
+        health: {
+          pid: 12345,
+          packageVersion: "0.1.0",
+          protocolVersion: PROTOCOL_VERSION,
+          endpoint: "/tmp/opentray.sock",
+          sessionCount: 2,
+          sessions: [
+            { sessionId: 1, leaseId: "lease-1", initialized: true },
+            { sessionId: 2, initialized: false },
+          ],
+        },
+      }),
+    );
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.frame).toEqual({
+      type: "daemon-health",
+      requestId: "req-health",
+      health: {
+        pid: 12345,
+        packageVersion: "0.1.0",
+        protocolVersion: PROTOCOL_VERSION,
+        endpoint: "/tmp/opentray.sock",
+        sessionCount: 2,
+        sessions: [
+          { sessionId: 1, leaseId: "lease-1", initialized: true },
+          { sessionId: 2, initialized: false },
+        ],
+      },
+    });
   });
 
   it("parses camelCase tray event frames", () => {

@@ -16,8 +16,63 @@ permissions:
   pull-requests: write
 
 jobs:
+  native-artifacts:
+    name: Native artifacts (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+            daemon_artifact: opentray
+            webview_artifact: libopentray_ext_webview.dylib
+          - target: darwin-x64
+            runner: macos-15-intel
+            daemon_artifact: opentray
+            webview_artifact: libopentray_ext_webview.dylib
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            daemon_artifact: opentray
+            webview_artifact: libopentray_ext_webview.so
+          - target: linux-x64
+            runner: ubuntu-24.04
+            daemon_artifact: opentray
+            webview_artifact: libopentray_ext_webview.so
+          - target: windows-arm64
+            runner: windows-11-arm
+            daemon_artifact: opentray.exe
+            webview_artifact: opentray_ext_webview.dll
+          - target: windows-x64
+            runner: windows-2025
+            daemon_artifact: opentray.exe
+            webview_artifact: opentray_ext_webview.dll
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build native artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release -p opentray-bin -p opentray-ext-webview
+          mkdir -p native-artifacts
+          cp "target/release/${{ matrix.daemon_artifact }}" native-artifacts/
+          cp "target/release/${{ matrix.webview_artifact }}" native-artifacts/
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: native-artifacts/*
+          if-no-files-found: error
+
   release:
     name: Release packages
+    needs: native-artifacts
     runs-on: ubuntu-latest
     environment: npm-release
     steps:
@@ -81,6 +136,53 @@ jobs:
           git add .changeset packages package.json pnpm-lock.yaml
           git commit -m "chore: version packages"
           git push
+
+      - name: Download native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: native-artifacts
+
+      - name: Stage native artifacts into npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 windows-arm64 windows-x64; do
+            package_os="${target%-*}"
+            arch="${target##*-}"
+            if [ "$package_os" = "windows" ]; then
+              daemon_artifact="opentray.exe"
+              webview_artifact="opentray_ext_webview.dll"
+            elif [ "$package_os" = "darwin" ]; then
+              daemon_artifact="opentray"
+              webview_artifact="libopentray_ext_webview.dylib"
+            else
+              daemon_artifact="opentray"
+              webview_artifact="libopentray_ext_webview.so"
+            fi
+
+            bun run scripts/binaries/stage-local.ts \
+              --kind daemon \
+              --source "native-artifacts/native-${target}/${daemon_artifact}" \
+              --package-os "$package_os" \
+              --arch "$arch"
+            bun run scripts/binaries/stage-local.ts \
+              --kind webview \
+              --source "native-artifacts/native-${target}/${webview_artifact}" \
+              --package-os "$package_os" \
+              --arch "$arch"
+          done
+
+      - name: Validate native package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package_dir in \
+            packages/darwin-arm64 packages/darwin-x64 packages/linux-arm64 packages/linux-x64 packages/windows-arm64 packages/windows-x64 \
+            packages/ext-webview-darwin-arm64 packages/ext-webview-darwin-x64 packages/ext-webview-linux-arm64 packages/ext-webview-linux-x64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64
+          do
+            npm pack --dry-run --json "./${package_dir}" >/dev/null
+          done
 
       - name: Publish packages
         run: pnpm run release

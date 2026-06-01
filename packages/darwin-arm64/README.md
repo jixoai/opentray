@@ -2,4 +2,4 @@
 
 OpenTray broker binary package for macOS Apple Silicon.
 
-This package is installed as an optional dependency by `opentray`. It will contain the release-built broker binary for `darwin-arm64` once Rust builds are introduced.
+This package is installed as an optional dependency by `opentray`. CI stages the release-built broker binary into `bin/opentray` before npm publish; source control does not commit the generated binary.

@@ -1,10 +1,10 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { DaemonDriver } from "./lifecycle";
-import { restartDaemon, startDaemon, stopDaemon } from "./lifecycle";
+import { inspectDaemon, restartDaemon, startDaemon, stopDaemon } from "./lifecycle";
 import { resolveDaemonPaths } from "./paths";
 
 const tempDirs: string[] = [];
@@ -74,6 +74,31 @@ describe("daemon lifecycle", () => {
     expect(await driver.isAlive(first.pid)).toBe(false);
     expect(restarted.status).toBe("started");
     expect(restarted.pid).not.toBe(first.pid);
+  });
+
+  it("inspects a running daemon without spawning", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver();
+    const started = await startDaemon({ paths, driver });
+
+    const inspected = await inspectDaemon({ paths, driver });
+
+    expect(inspected).toEqual({ status: "running", pid: started.pid, paths });
+    expect(driver.spawned).toEqual([started.pid]);
+  });
+
+  it("inspects stale runtime files as not running", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver();
+    await mkdir(paths.runtimeDir, { recursive: true });
+    await writeFile(paths.pidFile, "12345\n", "utf8");
+
+    const inspected = await inspectDaemon({ paths, driver });
+
+    expect(inspected).toEqual({ status: "not-running", paths, stalePid: 12345 });
+    expect(driver.spawned).toEqual([]);
   });
 });
 

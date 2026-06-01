@@ -5,7 +5,8 @@ use opentray_spec::{
 
 use super::*;
 use crate::{
-    BackendCapabilities, BackendOperation, ExtensionLoader, FakeBackend, RecordingExtensionLoader,
+    BackendCapabilities, BackendOperation, ExtensionError, ExtensionHostContext, ExtensionInstance,
+    ExtensionLoadRequest, ExtensionLoader, FakeBackend, RecordingExtensionLoader,
     RECORDING_EXTENSION_PATH,
 };
 
@@ -336,6 +337,35 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
     ));
 }
 
+#[test]
+fn explicit_exit_uses_extension_host_for_lease_cleanup() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::with_extension_loader(backend, HostProbeLoader);
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_surface(&mut broker, &mut session);
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::LoadExt {
+            request_id: "req-load".to_string(),
+            surface_id: surface.surface_id,
+            name: "webview".to_string(),
+            path: "opentray://host-probe".to_string(),
+        },
+        "0.1.0",
+    );
+    let mut host = CountingHost::default();
+
+    let _ = broker.handle_frame_with_extension_host(
+        &mut session,
+        ClientFrame::Exit,
+        "0.1.0",
+        &mut host,
+    );
+
+    assert_eq!(host.calls, 1);
+}
+
 fn create_surface<L: ExtensionLoader>(
     broker: &mut BrokerKernel<FakeBackend, L>,
     session: &mut BrokerSession,
@@ -357,5 +387,58 @@ fn create_surface<L: ExtensionLoader>(
     {
         ServerFrame::SurfaceCreated { surface, .. } => surface,
         other => panic!("unexpected frame: {other:?}"),
+    }
+}
+
+#[derive(Default)]
+struct CountingHost {
+    calls: usize,
+}
+
+impl ExtensionHostContext for CountingHost {
+    fn invoke_host(
+        &mut self,
+        _capability: &str,
+        _request_json: &[u8],
+    ) -> Result<Vec<u8>, ExtensionError> {
+        self.calls += 1;
+        Ok(Vec::new())
+    }
+}
+
+#[derive(Clone)]
+struct HostProbeLoader;
+
+impl ExtensionLoader for HostProbeLoader {
+    fn load(
+        &self,
+        _request: &ExtensionLoadRequest,
+    ) -> Result<Box<dyn ExtensionInstance>, ExtensionError> {
+        Ok(Box::new(HostProbeExtension))
+    }
+}
+
+struct HostProbeExtension;
+
+impl ExtensionInstance for HostProbeExtension {
+    fn name(&self) -> &str {
+        "webview"
+    }
+
+    fn command(
+        &mut self,
+        envelope: opentray_spec::ExtensionEnvelope,
+        _host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<opentray_spec::ExtensionEnvelope>, ExtensionError> {
+        Ok(vec![envelope])
+    }
+
+    fn lease_closed(
+        &mut self,
+        lease_id: &str,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<opentray_spec::ExtensionEnvelope>, ExtensionError> {
+        host.invoke_host("probe", lease_id.as_bytes())?;
+        Ok(Vec::new())
     }
 }

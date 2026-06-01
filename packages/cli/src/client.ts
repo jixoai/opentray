@@ -143,6 +143,7 @@ const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
     case "default-surface":
     case "tray-created":
     case "ack":
+    case "daemon-health":
       return frame.requestId;
     case "error":
       return frame.requestId;

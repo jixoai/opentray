@@ -9,6 +9,26 @@ use crate::model::{
 pub const PROTOCOL_VERSION: u32 = 1;
 pub type RequestId = String;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonSessionHealth {
+    pub session_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_id: Option<LeaseId>,
+    pub initialized: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonHealth {
+    pub pid: u32,
+    pub package_version: String,
+    pub protocol_version: u32,
+    pub endpoint: String,
+    pub session_count: usize,
+    pub sessions: Vec<DaemonSessionHealth>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrokerEndpointIdentity {
     package_version: String,
@@ -190,6 +210,10 @@ pub enum ClientFrame {
         surface_id: SurfaceId,
         name: String,
     },
+    Health {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+    },
     Exit,
 }
 
@@ -225,6 +249,11 @@ pub enum ServerFrame {
     Ack {
         #[serde(rename = "requestId")]
         request_id: RequestId,
+    },
+    DaemonHealth {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        health: DaemonHealth,
     },
     Event {
         event: TrayEvent,
@@ -339,6 +368,68 @@ mod tests {
                 "requestId": "req-2",
                 "code": "not-initialized",
                 "message": "init required"
+            })
+        );
+    }
+
+    #[test]
+    fn health_frames_use_request_ids_and_camel_case_metadata() {
+        let request = ClientFrame::Health {
+            request_id: "req-health".to_string(),
+        };
+        let response = ServerFrame::DaemonHealth {
+            request_id: "req-health".to_string(),
+            health: DaemonHealth {
+                pid: 12345,
+                package_version: "0.1.0".to_string(),
+                protocol_version: PROTOCOL_VERSION,
+                endpoint: "/tmp/opentray.sock".to_string(),
+                session_count: 2,
+                sessions: vec![
+                    DaemonSessionHealth {
+                        session_id: 1,
+                        lease_id: Some("lease-1".to_string()),
+                        initialized: true,
+                    },
+                    DaemonSessionHealth {
+                        session_id: 2,
+                        lease_id: None,
+                        initialized: false,
+                    },
+                ],
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "type": "health",
+                "requestId": "req-health"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "type": "daemon-health",
+                "requestId": "req-health",
+                "health": {
+                    "pid": 12345,
+                    "packageVersion": "0.1.0",
+                    "protocolVersion": 1,
+                    "endpoint": "/tmp/opentray.sock",
+                    "sessionCount": 2,
+                    "sessions": [
+                        {
+                            "sessionId": 1,
+                            "leaseId": "lease-1",
+                            "initialized": true
+                        },
+                        {
+                            "sessionId": 2,
+                            "initialized": false
+                        }
+                    ]
+                }
             })
         );
     }

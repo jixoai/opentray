@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 3
-- Status: Revised after health/demo feedback: daemon must expose a non-starting health check, and WebView postMessage/evaluate must produce visible in-window state changes
-- Previous plan backup: `plans/plan-v3.md`
+- Round: 2
+- Status: Revised after visual feedback: daemon WebView menu actions must open a real native window, not only print preview recorder traffic
+- Previous plan backup: `plans/plan-v2.md`
 
 ## Workflow Command Surface
 
@@ -38,9 +38,6 @@
 > broker -> client {"type":"ext-event","surfaceId":"surface-1","trayId":"daemon-status","ext":"webview","data":{"command":{"fallbackRect":{"height":1,"width":1,"x":0,"y":0},"height":260,"html":"<main><h1>OpenTray WebView</h1><p>Daemon demo command.</p></main>","type":"show","width":420},"type":"recorded"}}
 > ```
 
-> 1. daemon还需要一个命令：daemon health 可以检查目前守护进程的状态，如果有守护进程显示它的信息、以及它连接的信息，最好包括pid。这可能需要我们对协议做一些修改（不用改协议版本号，直接加）
-> 2. webview Demo的postMessage和evalJs都看不到效果，只看得到日志，我们需要优化一下我们的demo
-
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -52,8 +49,6 @@
 | 2 | User | The event printed from the daemon uses `surface_id`, `tray_id`, and `item_id`, so the TS demo prints `menu click: undefined`. | Rust protocol serialization violates the TS camelCase contract for nested `TrayEvent`; fix protocol, not the demo branch. |
 | 2 | User | The demo should include as many first-stage capabilities as possible, including `@opentray/ext-webview`. | The daemon demo must include the ext-webview package command surface and broker extension event path where available. |
 | 3 | User | Clicking WebView test items only prints a recorded event and does not open a window. | Preview recorder traffic is insufficient for human visual acceptance; the daemon demo's WebView path must create a real native WebView window. |
-| 4 | User | `opentray daemon health` should inspect whether the current same-version daemon is running, print daemon information, connection/session information, and include pid. | Add a protocol-level health request/response handled by broker composition; CLI health must not accidentally auto-start the daemon. |
-| 4 | User | WebView demo `postMessage` and `evalJs` only show logs, not visible effects. | Demo HTML and runtime fallback HTML must include visible DOM targets that message/evaluate commands mutate. |
 
 ### Evidence Read
 
@@ -70,8 +65,6 @@
 | `crates/opentray-core/src/extension.rs` | `RecordingExtension` exists and returns extension events for command envelopes. | Use it only behind an explicit preview recorder loader path for demo-grade extension command acknowledgement; do not let normal dynamic extension paths silently fake success. |
 | `crates/opentray-backend-tray-icon/examples/visual_webview.rs` | A real WebView window can be created with `wry::WebViewBuilder` and a native window, but it currently lives outside the daemon path. | Reuse the proven visual behavior in the daemon composition layer, not in `opentray-core`. |
 | `crates/opentray-bin/src/main.rs` | macOS daemon already owns the winit event loop and can receive custom `UserEvent`s. | Native WebView commands can cross from `ExtensionInstance` into the main event loop through `EventLoopProxy` without making core depend on `wry`. |
-| `packages/cli/src/cli.ts` | CLI has `daemon start`, `daemon stop`, and `daemon restart` only. | Add `daemon health` as an operator observation command, not as a lifecycle mutation. |
-| `packages/cli/src/local-broker.ts` | Local broker connection currently auto-starts by default. | Health should use an explicit non-auto-start path so a check does not create the daemon it is inspecting. |
 
 ### Git Evidence
 
@@ -129,15 +122,13 @@ Auto-start changes trust boundaries. Once OpenTray starts background processes o
 
 ### Final Visible Effect
 
-The developer can run `pnpm --filter opentray cli -- daemon health` and see whether the same-version daemon is running. If it is running, the command prints pid, endpoint, package/protocol metadata, active session count, and per-session lease metadata returned by the daemon. The health command does not start a daemon when none exists.
-
-The developer can run `pnpm --filter opentray example:daemon-tray`, click the quit item, and see `itemId`-based event output plus process exit. The same demo can click `WebView Commands -> Show HTML` and see a real native WebView window created by the daemon runtime. `Post Message` and `Evaluate JS` visibly update state in that window, not only terminal logs. `Navigate` and `Hide` continue to operate on that window through the `@opentray/ext-webview` facade. After all clients disconnect, the daemon exits itself after the configured idle timeout. Running the example again starts a fresh daemon automatically.
+The developer can run `pnpm --filter opentray example:daemon-tray`, click the quit item, and see `itemId`-based event output plus process exit. The same demo can click `WebView Commands -> Show HTML` and see a real native WebView window created by the daemon runtime. `Navigate`, `Post Message`, `Evaluate JS`, and `Hide` operate on that window through the `@opentray/ext-webview` facade. After all clients disconnect, the daemon exits itself after the configured idle timeout. Running the example again starts a fresh daemon automatically.
 
 ## Platform Diagnosis
 
 - Current platform laws: broker daemon owns transport sessions and backend event ingress; TS SDK owns local broker connection; leases close on disconnect.
 - Does this fit as a regular atom: Mostly yes. Idle-stop is a broker lifecycle law extension; quit reliability is a demo/client behavior fix over the existing menu route law.
-- Does this require law upgrade: Yes for daemon lifecycle, protocol casing, native extension runtime delivery, and daemon observability. GUI extensions that need the main event loop must be loaded by the daemon composition layer and send runtime commands via `EventLoopProxy`; `opentray-core` remains only the protocol/registry law. Health frames are protocol observability, but the state is owned by daemon composition rather than the kernel.
+- Does this require law upgrade: Yes for daemon lifecycle, protocol casing, and native extension runtime delivery. GUI extensions that need the main event loop must be loaded by the daemon composition layer and send runtime commands via `EventLoopProxy`; `opentray-core` remains only the protocol/registry law.
 - Breaking update stance: Non-breaking. Add configurable timeout and clearer example behavior.
 - User confirmations still required: Idle timeout default can be adjusted later; use 30 seconds now to keep momentum.
 
@@ -156,8 +147,6 @@ The developer can run `pnpm --filter opentray example:daemon-tray`, click the qu
 9. Broker sees no sessions and starts an idle timer.
 10. If no new client connects before timeout, broker exits and runtime files become stale.
 11. Next SDK call sees the old pid is dead, cleans current-version runtime files, and starts a fresh broker.
-12. Developer can run `opentray daemon health`; when the daemon exists, the CLI connects without auto-start, sends a health request, and prints daemon/session state.
-13. Developer can click `Post Message` or `Evaluate JS`; the WebView window visibly changes its message/eval status areas.
 
 ### Interface Shape
 
@@ -178,12 +167,8 @@ The developer can run `pnpm --filter opentray example:daemon-tray`, click the qu
 - `idle_timeout`: broker-local duration; not part of protocol compatibility.
 - `item_id`: durable menu action id used for route lookup and TS example behavior.
 - `itemId`: protocol wire casing for menu events consumed by TS. Snake-case event fields are invalid on the wire.
-- `daemon health`: request-correlated protocol frame that returns daemon-owned process/session metadata without changing protocol version.
-- `daemon pid`: process id owned by the daemon process and mirrored in ready-file state for pre-connection inspection.
-- `health session`: the CLI health connection may appear as a short-lived session in returned state; this is honest observability, not a hidden side channel.
 - `webview command`: typed extension command emitted by the official `@opentray/ext-webview` package.
 - `native webview command`: daemon-internal runtime command sent from the WebView extension instance to the main event loop.
-- `visible WebView state`: HTML elements in the demo document that are updated by `postMessage` and `evaluate` commands.
 
 ### Architecture Shape
 
@@ -194,15 +179,12 @@ Platform laws:
 - Menu click semantics remain route-table based; no backend hardcoded quit special case.
 - Client examples can attach product behavior to routed `MenuClick` events.
 - WebView demo coverage uses extension command protocol through a daemon-composition native extension; it does not import `wry` into core or make the tray backend own WebView windows.
-- Health response generation belongs in daemon composition because it owns pid, endpoint, and active transport sessions.
 
 Forbidden couplings:
 
 - Do not make `tray-icon` know about `Quit Demo`.
 - Do not put process timers into `opentray-core`.
 - Do not make TS client kill arbitrary daemon processes on close.
-- Do not let `daemon health` auto-start a daemon; inspection must not mutate lifecycle.
-- Do not create a private WebView demo shortcut that bypasses `@opentray/ext-webview`.
 
 ### User Confirmation Gates
 
@@ -213,11 +195,11 @@ Forbidden couplings:
 ## Intent-Driven Plan
 
 - [x] 1. Research and align intent.
-- [x] 2. Write specs from the intent.
-- [x] 3. Write BDD tasks from specs.
+- [ ] 2. Write specs from the intent.
+- [ ] 3. Write BDD tasks from specs.
 - [ ] 4. Commit OpenSpec artifacts before product-code work starts.
-- [x] 5. Implement broker idle-stop, camelCase event protocol, daemon health observability, clearer reliable demo quit behavior, and ext-webview command coverage with a real daemon-owned native WebView runtime and visible message/evaluate feedback.
-- [x] 6. Verify with targeted tests, build, smoke, and OpenSpec gates.
+- [ ] 5. Implement broker idle-stop, camelCase event protocol, clearer reliable demo quit behavior, and ext-webview command coverage with a real daemon-owned native WebView runtime.
+- [ ] 6. Verify with targeted tests, build, smoke, and OpenSpec gates.
 - [ ] 7. Self-review and wait for human click confirmation before archive.
 
 ## Open Questions
@@ -239,4 +221,4 @@ Forbidden couplings:
 - Default max review iterations: 2
 - Issue recurrence threshold: Same menu click or idle lifecycle issue recurs twice after a fix.
 - Custom exit condition from intent: daemon exits after idle with no sessions; demo quit item prints event output and exits; next demo run auto-starts the daemon again.
-- Updated exit condition: event frames use `itemId`/`surfaceId`/`trayId`; `daemon health` prints non-auto-start daemon/session state including pid; demo includes ext-webview command actions; `Show HTML` opens a real native WebView window; `postMessage` and `Evaluate JS` visibly update the WebView document; and WebView commands print their broker response/event path.
+- Updated exit condition: event frames use `itemId`/`surfaceId`/`trayId`; demo includes ext-webview command actions, `Show HTML` opens a real native WebView window, and WebView commands print their broker response/event path.

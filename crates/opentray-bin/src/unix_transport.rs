@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::{create_dir_all, remove_file, File};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -14,10 +15,12 @@ use std::time::Instant;
 
 use opentray_core::BrokerSession;
 #[cfg(not(target_os = "macos"))]
-use opentray_core::{BrokerKernel, RecordingExtensionLoader, SurfaceBackend};
-use opentray_spec::{ClientFrame, ServerFrame};
+use opentray_core::{BrokerKernel, SurfaceBackend};
+use opentray_spec::{ClientFrame, DaemonHealth, DaemonSessionHealth, ServerFrame};
 use serde_json::json;
 
+#[cfg(not(target_os = "macos"))]
+use crate::dynamic_extension::DynamicExtensionLoader;
 use crate::BrokerOptions;
 
 pub type Writer = Arc<Mutex<UnixStream>>;
@@ -128,8 +131,9 @@ where
     let listener = spawn_listener(options.clone(), move |event| {
         let _ = sender.send(event);
     })?;
-    let mut broker = BrokerKernel::with_extension_loader(backend, RecordingExtensionLoader);
-    let mut sessions = std::collections::HashMap::<u64, TransportSession>::new();
+    let mut broker =
+        BrokerKernel::with_extension_loader(backend, DynamicExtensionLoader::from_env()?);
+    let mut sessions = HashMap::<u64, TransportSession>::new();
     let mut idle_since = Some(Instant::now());
 
     while let Some(event) = receive_next_event(&receiver, options.idle_timeout, idle_since) {
@@ -145,6 +149,13 @@ where
                 idle_since = None;
             }
             TransportEvent::Frame { id, frame } => {
+                if let ClientFrame::Health { request_id } = frame {
+                    let health = build_daemon_health(&options, &sessions);
+                    if let Some(session) = sessions.get_mut(&id) {
+                        session.write_frame(ServerFrame::DaemonHealth { request_id, health });
+                    }
+                    continue;
+                }
                 let Some(session) = sessions.get_mut(&id) else {
                     continue;
                 };
@@ -165,6 +176,30 @@ where
 
     listener.shutdown();
     Ok(())
+}
+
+pub fn build_daemon_health(
+    options: &BrokerOptions,
+    sessions: &HashMap<u64, TransportSession>,
+) -> DaemonHealth {
+    let mut sessions = sessions
+        .iter()
+        .map(|(session_id, session)| DaemonSessionHealth {
+            session_id: *session_id,
+            lease_id: session.broker.lease_id().map(ToOwned::to_owned),
+            initialized: session.broker.lease_id().is_some(),
+        })
+        .collect::<Vec<_>>();
+    sessions.sort_by_key(|session| session.session_id);
+
+    DaemonHealth {
+        pid: std::process::id(),
+        package_version: options.package_version.clone(),
+        protocol_version: options.protocol_version,
+        endpoint: options.endpoint.to_string_lossy().to_string(),
+        session_count: sessions.len(),
+        sessions,
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

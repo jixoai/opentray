@@ -1,8 +1,8 @@
 ## ADDED Requirements
 
-### Requirement: WebView native runtime SHALL ship as platform dynamic libraries
+### Requirement: WebView native extension provider SHALL ship as platform dynamic libraries
 
-The official WebView native runtime SHALL be distributed through `@opentray/ext-webview-<os>-<arch>` platform packages. `@opentray/ext-webview` SHALL remain a platform-neutral TypeScript facade and SHALL NOT include all platform libraries in one package.
+The official WebView native extension provider SHALL be distributed through `@opentray/ext-webview-<os>-<arch>` platform packages. `@opentray/ext-webview` SHALL remain a platform-neutral TypeScript facade and SHALL NOT include all platform libraries in one package.
 
 The platform packages SHALL contain the native dynamic library artifact at a documented package-adjacent path. The facade MAY declare platform packages as optional dependencies only if doing so does not force platform imports into the public facade API.
 
@@ -24,6 +24,8 @@ The platform packages SHALL contain the native dynamic library artifact at a doc
 
 The dynamically loaded WebView extension SHALL support `show`, `hide`, `navigate`, `evaluate`, and `postMessage` commands with the same public facade semantics as the current internal adapter. `show`, `postMessage`, and `evaluate` SHALL remain human-visible in the first-stage demo.
 
+The dynamic library SHALL be the required WebView extension registration path. The daemon MAY own the native event-loop/window capability as a host capability, but it SHALL NOT register a daemon-internal WebView extension fallback when the dynamic library is missing.
+
 #### Scenario: Dynamic WebView extension preserves visual demo
 
 - **GIVEN** the daemon loaded the WebView dynamic library
@@ -31,6 +33,13 @@ The dynamically loaded WebView extension SHALL support `show`, `hide`, `navigate
 - **THEN** `Show HTML` opens a native WebView window
 - **AND** `Post Message` and `Evaluate JS` visibly update the window
 - **AND** terminal logs show extension-host command/event traffic.
+
+#### Scenario: Missing dynamic library does not register internal WebView
+
+- **GIVEN** no WebView dynamic library is discoverable
+- **WHEN** a client requests `load-ext webview`
+- **THEN** the daemon returns a structured extension loading error
+- **AND** it does not register an internal WebView provider as a fallback.
 
 ### Requirement: WebView unsupported capability SHALL be explicit
 

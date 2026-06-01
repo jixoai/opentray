@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Native Package Self Review</title>
+    <style>
+      :root {
+        color: #17210f;
+        background: #f5efdf;
+        font-family: ui-rounded, "Avenir Next", sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 32px;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 34px;
+        letter-spacing: -0.04em;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+        margin-top: 24px;
+      }
+      .card {
+        border: 1px solid rgba(23, 33, 15, 0.16);
+        border-radius: 18px;
+        padding: 18px;
+        background: rgba(255, 255, 255, 0.68);
+        box-shadow: 0 18px 45px rgba(62, 73, 34, 0.12);
+      }
+      .status {
+        display: inline-block;
+        margin-bottom: 10px;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+      .pass {
+        background: #dcefc8;
+        color: #24521d;
+      }
+      .blocked {
+        background: #ffe1b8;
+        color: #7a4300;
+      }
+      code {
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>First-Stage Native Package Review</h1>
+      <p>
+        Dynamic WebView now goes through a platform dynamic library and daemon
+        host capability. Discovery now also follows the requested npm facade
+        package roots, so pnpm-style layouts do not have to place WebView
+        platform libraries beside the daemon binary package. Release completion
+        remains blocked on npm trust state, CI native artifacts, registry
+        publish, and fresh npm visual acceptance.
+      </p>
+      <section class="grid">
+        <article class="card">
+          <span class="status pass">Pass</span>
+          <h2>Extension Host Law</h2>
+          <p>
+            <code>opentray-core</code> only sees generic extension host context;
+            WebView authority stays outside the kernel.
+          </p>
+        </article>
+        <article class="card">
+          <span class="status pass">Pass</span>
+          <h2>Dynamic WebView</h2>
+          <p>
+            Local smoke emitted <code>shown</code>, <code>message</code>,
+            <code>evaluated</code>, <code>navigated</code>, and
+            <code>hidden</code> events.
+          </p>
+        </article>
+        <article class="card">
+          <span class="status pass">Pass</span>
+          <h2>Package Discovery</h2>
+          <p>
+            Request-package dependency roots are searched before daemon-adjacent
+            fallbacks, covering non-flat package manager layouts.
+          </p>
+        </article>
+        <article class="card">
+          <span class="status pass">Pass</span>
+          <h2>Package Shape</h2>
+          <p>
+            Current-platform dry-run packs include staged daemon and WebView
+            native artifacts.
+          </p>
+        </article>
+        <article class="card">
+          <span class="status blocked">Blocked</span>
+          <h2>Release Operation</h2>
+          <p>
+            <code>pnpm run trusted-publish:check</code> failed with npm E403 for
+            trust inspection using the current <code>NPM_TOKEN</code>.
+          </p>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

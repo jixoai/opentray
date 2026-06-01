@@ -4,6 +4,7 @@ members = [
   "crates/opentray-backend-tray-icon",
   "crates/opentray-bin",
   "crates/opentray-core",
+  "crates/opentray-ext-webview",
   "crates/opentray-spec",
 ]
 resolver = "2"
@@ -19,8 +20,10 @@ version = "0.0.0"
 opentray-backend-ksni = { path = "crates/opentray-backend-ksni", version = "0.0.0" }
 opentray-backend-tray-icon = { path = "crates/opentray-backend-tray-icon", version = "0.0.0" }
 opentray-core = { path = "crates/opentray-core", version = "0.0.0" }
+opentray-ext-webview = { path = "crates/opentray-ext-webview", version = "0.0.0" }
 opentray-spec = { path = "crates/opentray-spec", version = "0.0.0" }
 ksni = "0.3.4"
+libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

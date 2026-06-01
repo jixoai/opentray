@@ -53,15 +53,21 @@ export const nativeTargets: readonly NativeTarget[] = packageTargets.map(([packa
 export const resolveNativeTarget = (platform = process.platform, arch = process.arch): NativeTarget => {
   const packageOs = platformToPackageOs(platform);
   const nativeArch = normalizeArch(arch);
-  const target = nativeTargets.find((candidate) => candidate.packageOs === packageOs && candidate.arch === nativeArch);
+  return resolveNativePackageTarget(packageOs, nativeArch);
+};
+
+export const resolveNativePackageTarget = (packageOs: PackageOs, arch: NativeArch): NativeTarget => {
+  const target = nativeTargets.find((candidate) => candidate.packageOs === packageOs && candidate.arch === arch);
   if (target === undefined) {
-    throw new Error(`unsupported OpenTray native target: platform=${platform} arch=${arch}`);
+    throw new Error(`unsupported OpenTray native target: packageOs=${packageOs} arch=${arch}`);
   }
   return target;
 };
 
 export const platformToPackageOs = (platform: string): PackageOs => {
   switch (platform) {
+    case "windows":
+      return "windows";
     case "darwin":
     case "linux":
       return platform;
@@ -85,6 +91,7 @@ export const normalizeArch = (arch: string): NativeArch => {
 export const stageArtifact = async (workspaceRoot: string, source: string, destination: string): Promise<void> => {
   const absoluteDestination = join(workspaceRoot, destination);
   await mkdir(dirname(absoluteDestination), { recursive: true });
+  // Source control stays binary-free; local and CI staging populate package artifacts just before smoke/publish.
   await copyFile(source, absoluteDestination);
   if (!destination.endsWith(".dll")) {
     await chmod(absoluteDestination, 0o755);

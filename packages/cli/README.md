@@ -31,6 +31,12 @@ Run the human-visible daemon tray example:
 pnpm --filter opentray example:daemon-tray
 ```
 
+After installing from npm, use the published CLI smoke path instead of workspace scripts:
+
+```bash
+opentray smoke daemon-tray
+```
+
 This example starts or reuses the same-version daemon automatically, creates a real tray through the public SDK, and prints broker-routed menu events. Use manual lifecycle commands only for operator/debug control:
 
 ```bash
@@ -39,7 +45,18 @@ pnpm --filter opentray cli -- daemon stop
 pnpm --filter opentray cli -- daemon restart
 ```
 
-The menu includes `WebView Commands` entries that call the `@opentray/ext-webview` facade. On macOS, `Show HTML` opens a real native WebView window through the daemon runtime; `Navigate`, `Post Message`, `Evaluate JS`, and `Hide` operate on that window.
+The menu includes `WebView Commands` entries that call the `@opentray/ext-webview` facade. On macOS, `Show HTML` loads the platform WebView dynamic library and opens a real native WebView window through daemon-owned UI capability; `Navigate`, `Post Message`, `Evaluate JS`, and `Hide` operate on that window.
+
+First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists.
+
+For local native smoke before npm publish, stage the current platform artifacts first:
+
+```bash
+cargo build -p opentray-bin -p opentray-ext-webview
+bun run scripts/binaries/stage-local.ts --kind daemon --source target/debug/opentray
+bun run scripts/binaries/stage-local.ts --kind webview --source target/debug/libopentray_ext_webview.dylib
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
+```
 
 The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to keep it alive during debugging, or provide another millisecond value for a custom idle release window.
 

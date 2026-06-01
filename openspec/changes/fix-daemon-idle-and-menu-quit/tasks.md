@@ -15,6 +15,9 @@
 - [x] 2.7 Scenario: Given the broker emits a menu click event When TS parses it Then event fields are camelCase and `event.itemId` is defined.
 - [x] 2.8 Scenario: Given the daemon tray example exposes WebView actions When they are clicked Then `@opentray/ext-webview` facade commands travel through `TrayHandle.commandExtension` and the daemon native WebView extension path.
 - [x] 2.9 Scenario: Given the daemon tray example is running on macOS When the user clicks WebView Show HTML Then a real native WebView window appears.
+- [x] 2.10 Scenario: Given a same-version daemon is running When `opentray daemon health` is executed Then it prints daemon pid, endpoint, protocol/package metadata, session count, and session metadata.
+- [x] 2.11 Scenario: Given no same-version daemon is running When `opentray daemon health` is executed Then it reports not running without starting the daemon.
+- [x] 2.12 Scenario: Given the WebView demo window is visible When Post Message and Evaluate JS are clicked Then the document visibly updates inside the WebView.
 
 ## 3. OpenSpec Checkpoint
 
@@ -36,6 +39,10 @@
 - [x] 4.10 Ensure broker extension loading/command handling can acknowledge the demo WebView native path without hardcoding WebView behavior or pretending arbitrary dynamic loading works in `opentray-core`.
 - [x] 4.11 Replace the daemon preview recorder path with a macOS native WebView extension loader that sends runtime commands into the daemon event loop without importing `wry` into `opentray-core`.
 - [x] 4.12 Ensure `show`, `navigate`, `postMessage`, `evaluate`, and `hide` operate on the daemon-owned native WebView window.
+- [x] 4.13 Add additive protocol health request/response frames in Rust and TypeScript without bumping `PROTOCOL_VERSION`.
+- [x] 4.14 Implement daemon-composition health responses in macOS and Unix broker loops, keeping pid/session state out of `opentray-core`.
+- [x] 4.15 Add `opentray daemon health` CLI behavior that does not auto-start a daemon when it is absent.
+- [x] 4.16 Make WebView demo HTML and fallback runtime HTML expose visible state targets for `postMessage` and `evaluate`.
 
 ## 5. Verification
 
@@ -55,6 +62,11 @@
 - [x] 5.14 Run the daemon demo and confirm WebView menu actions produce broker command/event output through the native WebView extension path.
 - [x] 5.15 Run targeted Rust tests or compile gates proving the native WebView loader remains outside `opentray-core`.
 - [ ] 5.16 Run the daemon demo and ask the user to confirm `WebView Commands -> Show HTML` opens a real native WebView window.
+- [x] 5.17 Run Rust protocol tests proving `health` and `daemon-health` wire shapes.
+- [x] 5.18 Run TypeScript spec tests proving `daemon-health` parsing.
+- [x] 5.19 Run CLI tests proving `daemon health` is parsed and health output can be formatted.
+- [x] 5.20 Run `pnpm --filter opentray cli -- daemon health` against both non-running and running daemon states.
+- [ ] 5.21 Ask the user to confirm `Post Message` and `Evaluate JS` visibly update the WebView window.
 
 ## 6. Self-Review Loop
 

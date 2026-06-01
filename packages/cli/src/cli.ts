@@ -2,22 +2,30 @@
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-import { createNodeDaemonDriver, restartDaemon, startDaemon, stopDaemon } from "./daemon/lifecycle";
+import type { DaemonHealth } from "@opentray/spec";
+
+import { createNodeDaemonDriver, inspectDaemon, restartDaemon, startDaemon, stopDaemon } from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
+import { connectLocalBroker } from "./local-broker";
+import { runDaemonTraySmoke } from "./smoke/daemon-tray";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 
 type CliCommand =
-  | { type: "daemon"; action: "start" | "stop" | "restart" }
+  | { type: "daemon"; action: "start" | "stop" | "restart" | "health" }
+  | { type: "smoke"; name: "daemon-tray" }
   | { type: "help" };
 
 export const parseCliCommand = (argv: string[]): CliCommand => {
   const [group, action] = argv;
   if (group !== "daemon") {
+    if (group === "smoke" && action === "daemon-tray") {
+      return { type: "smoke", name: "daemon-tray" };
+    }
     return { type: "help" };
   }
-  if (action === "start" || action === "stop" || action === "restart") {
+  if (action === "start" || action === "stop" || action === "restart" || action === "health") {
     return { type: "daemon", action };
   }
 
@@ -35,6 +43,11 @@ export const runCli = async (argv: string[]): Promise<number> => {
   if (command.type === "help") {
     printHelp();
     return 1;
+  }
+
+  if (command.type === "smoke") {
+    await runDaemonTraySmoke();
+    return 0;
   }
 
   const driver = createNodeDaemonDriver(fileURLToPath(import.meta.url));
@@ -61,12 +74,60 @@ export const runCli = async (argv: string[]): Promise<number> => {
     return 0;
   }
 
+  if (command.action === "health") {
+    const inspected = await inspectDaemon({ paths, driver });
+    if (inspected.status === "not-running") {
+      console.log("opentray daemon not running");
+      return 0;
+    }
+
+    const connection = await connectLocalBroker({
+      autoStart: false,
+      endpoint: paths.endpoint,
+      homeDir: paths.homeDir,
+      packageVersion,
+    });
+    try {
+      const response = await connection.request({
+        type: "health",
+        requestId: "opentray-daemon-health",
+      });
+      if (response.type !== "daemon-health") {
+        throw new Error(`expected daemon-health response, received ${response.type}`);
+      }
+      console.log(formatDaemonHealthOutput(response.health));
+    } finally {
+      await connection.close();
+    }
+    return 0;
+  }
+
   printHelp();
   return 1;
 };
 
 const printHelp = (): void => {
-  console.error("Usage: opentray daemon <start|stop|restart>");
+  console.error("Usage: opentray daemon <start|stop|restart|health>");
+  console.error("       opentray smoke daemon-tray");
+};
+
+export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
+  const lines = [
+    "opentray daemon running",
+    `pid: ${health.pid}`,
+    `endpoint: ${health.endpoint}`,
+    `packageVersion: ${health.packageVersion}`,
+    `protocolVersion: ${health.protocolVersion}`,
+    `sessions: ${health.sessionCount}`,
+  ];
+
+  for (const session of health.sessions) {
+    lines.push(
+      `- sessionId=${session.sessionId} initialized=${session.initialized} leaseId=${session.leaseId ?? "(pending)"}`,
+    );
+  }
+
+  return lines.join("\n");
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

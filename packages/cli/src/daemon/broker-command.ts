@@ -1,10 +1,12 @@
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import type { DaemonPaths } from "./paths";
+import { MissingPlatformBrokerBinaryError, resolveBrokerNativeTarget } from "./native-target";
 
 export interface BrokerCommand {
   command: string;
@@ -13,41 +15,130 @@ export interface BrokerCommand {
 }
 
 const sourceUrl = import.meta.url;
+const requireFromSource = createRequire(sourceUrl);
 
-export const resolveBrokerCommand = async (paths: DaemonPaths): Promise<BrokerCommand> => {
-  const explicit = process.env.OPENTRAY_BROKER_BIN;
+export interface ResolveBrokerCommandOptions {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  arch?: string;
+  sourceDir?: string;
+  resolvePackageJson?: (packageName: string) => string | undefined;
+  findWorkspaceRoot?: (start: string) => Promise<string | undefined>;
+  ensureDevBrokerBinary?: (workspaceRoot: string) => Promise<string>;
+}
+
+export const resolveBrokerCommand = async (
+  paths: DaemonPaths,
+  options: ResolveBrokerCommandOptions = {},
+): Promise<BrokerCommand> => {
+  const env = options.env ?? process.env;
+  const explicit = env.OPENTRAY_BROKER_BIN;
   if (explicit !== undefined && explicit.length > 0) {
     return commandForBinary(explicit, paths);
   }
 
-  const workspaceRoot = await findWorkspaceRoot(dirname(fileURLToPath(sourceUrl)));
+  const platform = options.platform ?? process.platform;
+  const arch = options.arch ?? process.arch;
+  let installedBinaryError: MissingPlatformBrokerBinaryError | undefined;
+  try {
+    const installedBinary = await resolveInstalledBrokerBinary({
+      platform,
+      arch,
+      resolvePackageJson: options.resolvePackageJson ?? resolvePackageJson,
+    });
+    if (installedBinary !== undefined) {
+      return commandForBinary(installedBinary, paths);
+    }
+  } catch (error) {
+    if (!(error instanceof MissingPlatformBrokerBinaryError)) {
+      throw error;
+    }
+    installedBinaryError = error;
+  }
+
+  const sourceDir = options.sourceDir ?? dirname(fileURLToPath(sourceUrl));
+  const workspaceRoot = await (options.findWorkspaceRoot ?? findWorkspaceRoot)(sourceDir);
   if (workspaceRoot !== undefined) {
-    const binary = await ensureDevBrokerBinary(workspaceRoot);
+    const binary = await (options.ensureDevBrokerBinary ?? ensureDevBrokerBinary)(workspaceRoot);
     return commandForBinary(binary, paths, workspaceRoot);
   }
 
-  throw new Error("unable to resolve OpenTray broker binary; set OPENTRAY_BROKER_BIN");
+  if (installedBinaryError !== undefined) {
+    throw installedBinaryError;
+  }
+
+  const target = resolveBrokerNativeTarget(platform, arch);
+  throw new MissingPlatformBrokerBinaryError(
+    `unable to resolve OpenTray broker binary for ${platform}/${arch}; install ${target.packageName} or set OPENTRAY_BROKER_BIN`,
+    platform,
+    arch,
+    { packageName: target.packageName },
+  );
 };
 
 const commandForBinary = (binary: string, paths: DaemonPaths, cwd?: string): BrokerCommand => {
   const command: BrokerCommand = {
     command: binary,
     args: [
-    "broker",
-    "--endpoint",
-    paths.endpoint,
-    "--ready-file",
-    paths.readyFile,
-    "--package-version",
-    paths.packageVersion,
-    "--protocol-version",
-    `${paths.protocolVersion}`,
+      "broker",
+      "--endpoint",
+      paths.endpoint,
+      "--ready-file",
+      paths.readyFile,
+      "--package-version",
+      paths.packageVersion,
+      "--protocol-version",
+      `${paths.protocolVersion}`,
     ],
   };
   if (cwd !== undefined) {
     command.cwd = cwd;
   }
   return command;
+};
+
+interface ResolveInstalledBrokerBinaryOptions {
+  platform: NodeJS.Platform;
+  arch: string;
+  resolvePackageJson: (packageName: string) => string | undefined;
+}
+
+export const resolveInstalledBrokerBinary = async ({
+  platform,
+  arch,
+  resolvePackageJson,
+}: ResolveInstalledBrokerBinaryOptions): Promise<string | undefined> => {
+  const target = resolveBrokerNativeTarget(platform, arch);
+  const packageJsonPath = resolvePackageJson(target.packageName);
+  if (packageJsonPath === undefined) {
+    return undefined;
+  }
+
+  const binary = join(dirname(packageJsonPath), target.binaryRelativePath);
+  if (!(await exists(binary))) {
+    throw new MissingPlatformBrokerBinaryError(
+      `OpenTray broker package ${target.packageName} is installed but missing ${target.binaryRelativePath}`,
+      platform,
+      arch,
+      {
+        packageName: target.packageName,
+        binaryPath: binary,
+      },
+    );
+  }
+
+  return binary;
+};
+
+const resolvePackageJson = (packageName: string): string | undefined => {
+  try {
+    return requireFromSource.resolve(`${packageName}/package.json`);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "MODULE_NOT_FOUND") {
+      return undefined;
+    }
+    throw error;
+  }
 };
 
 const findWorkspaceRoot = async (start: string): Promise<string | undefined> => {
@@ -102,3 +193,6 @@ const exists = async (path: string): Promise<boolean> => {
     return false;
   }
 };
+
+const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error && "code" in error;

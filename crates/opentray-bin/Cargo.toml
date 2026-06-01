@@ -12,6 +12,7 @@ name = "opentray"
 path = "src/main.rs"
 
 [dependencies]
+libloading.workspace = true
 opentray-core.workspace = true
 opentray-spec.workspace = true
 serde_json.workspace = true

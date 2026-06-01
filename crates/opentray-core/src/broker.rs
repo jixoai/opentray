@@ -4,8 +4,8 @@ use opentray_spec::{
 };
 
 use crate::{
-    ExtensionLoadRequest, ExtensionLoader, Kernel, KernelError, RoutedEvent, SurfaceBackend,
-    UnsupportedExtensionLoader,
+    ExtensionHostContext, ExtensionLoadRequest, ExtensionLoader, Kernel, KernelError, RoutedEvent,
+    SurfaceBackend, UnsupportedExtensionHostContext, UnsupportedExtensionLoader,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -61,6 +61,17 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         frame: ClientFrame,
         broker_version: &str,
     ) -> Vec<ServerFrame> {
+        let mut host = UnsupportedExtensionHostContext;
+        self.handle_frame_with_extension_host(session, frame, broker_version, &mut host)
+    }
+
+    pub fn handle_frame_with_extension_host(
+        &mut self,
+        session: &mut BrokerSession,
+        frame: ClientFrame,
+        broker_version: &str,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Vec<ServerFrame> {
         match frame {
             ClientFrame::Init {
                 protocol_version,
@@ -86,7 +97,7 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     lease_id,
                 }]
             }
-            ClientFrame::Exit => self.close_session(session),
+            ClientFrame::Exit => self.close_session_with_extension_host(session, host),
             frame => {
                 let request_id = request_id(&frame);
                 // A lease is the authority boundary; no request may mutate kernel state before init.
@@ -97,18 +108,27 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                         "init must be accepted before broker commands",
                     )];
                 };
-                self.handle_initialized_frame(&lease_id, frame)
+                self.handle_initialized_frame(&lease_id, frame, host)
             }
         }
     }
 
     pub fn close_session(&mut self, session: &mut BrokerSession) -> Vec<ServerFrame> {
+        let mut host = UnsupportedExtensionHostContext;
+        self.close_session_with_extension_host(session, &mut host)
+    }
+
+    pub fn close_session_with_extension_host(
+        &mut self,
+        session: &mut BrokerSession,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Vec<ServerFrame> {
         let Some(lease_id) = session.lease_id.take() else {
             return Vec::new();
         };
 
         // Disconnect cleanup must flow through the kernel so only lease-owned state is removed.
-        match self.kernel.close_lease(&lease_id) {
+        match self.kernel.close_lease_with_host(&lease_id, host) {
             Ok(events) => extension_events(events),
             Err(error) => vec![kernel_error(None, error)],
         }
@@ -118,7 +138,12 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         self.kernel.route_event(event)
     }
 
-    fn handle_initialized_frame(&mut self, lease_id: &str, frame: ClientFrame) -> Vec<ServerFrame> {
+    fn handle_initialized_frame(
+        &mut self,
+        lease_id: &str,
+        frame: ClientFrame,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Vec<ServerFrame> {
         match frame {
             ClientFrame::CreateSurface {
                 request_id,
@@ -222,7 +247,10 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 tray_id,
                 ext,
                 data,
-            } => match self.kernel.ext_command(surface_id, tray_id, ext, data) {
+            } => match self
+                .kernel
+                .ext_command_with_host(surface_id, tray_id, ext, data, host)
+            {
                 Ok(events) => {
                     let mut frames = vec![ServerFrame::Ack { request_id }];
                     frames.extend(extension_events(events));
@@ -256,6 +284,11 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 "unsupported",
                 "dynamic extension unload is not implemented in this broker stage",
             )],
+            ClientFrame::Health { request_id } => vec![protocol_error(
+                Some(request_id),
+                "unsupported",
+                "daemon health is owned by the broker runtime composition layer",
+            )],
             ClientFrame::Init { .. } | ClientFrame::Exit => Vec::new(),
         }
     }
@@ -279,7 +312,8 @@ fn request_id(frame: &ClientFrame) -> Option<RequestId> {
         | ClientFrame::SetTrayTooltip { request_id, .. }
         | ClientFrame::LoadExt { request_id, .. }
         | ClientFrame::ExtCommand { request_id, .. }
-        | ClientFrame::UnloadExt { request_id, .. } => Some(request_id.clone()),
+        | ClientFrame::UnloadExt { request_id, .. }
+        | ClientFrame::Health { request_id } => Some(request_id.clone()),
         ClientFrame::Init { .. } | ClientFrame::Exit => None,
     }
 }
