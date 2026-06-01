@@ -1,5 +1,11 @@
 # @opentray/linux-arm64
 
+## 0.1.1
+
+### Patch Changes
+
+- fb75cf5: Publish daemon platform artifacts that include the macOS WebView hide crash fix.
+
 ## 0.1.0
 
 ### Minor Changes

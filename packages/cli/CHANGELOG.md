@@ -1,5 +1,11 @@
 # opentray
 
+## 0.2.4
+
+### Patch Changes
+
+- fb75cf5: Publish daemon platform artifacts that include the macOS WebView hide crash fix.
+
 ## 0.2.3
 
 ### Patch Changes
