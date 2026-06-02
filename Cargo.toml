@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/opentray-lynx-window-cli",
   "crates/opentray-backend-ksni",
   "crates/opentray-backend-tray-icon",
   "crates/opentray-bin",

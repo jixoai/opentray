@@ -140,37 +140,37 @@ PY
 
 smoke_launch_external_bundle() {
   local app_bundle_path="$1"
-  local smoke_dir="${artifacts_dir}/runtime-smoke"
+  local dist_dir="${artifacts_dir}/lynx-window-cli"
+  local smoke_dir="${dist_dir}/runtime-smoke"
   local source_bundle="${app_bundle_path}/Contents/Resources/Resource/homepage/main.lynx.bundle"
   local external_bundle="${smoke_dir}/homepage.main.lynx.bundle"
-  local app_executable="${app_bundle_path}/Contents/MacOS/LynxExplorer"
   local launch_log="${logs_dir}/lynx-runtime-smoke.log"
-  local smoke_pid=""
 
   mkdir -p "${smoke_dir}"
   cp "${source_bundle}" "${external_bundle}"
-  printf 'file://%s\n' "${external_bundle}" > "${artifacts_dir}/LynxExplorer.runtime-smoke-url.txt"
+  "${dist_dir}/lynx-window-cli" \
+    --bundle "${external_bundle}" \
+    --stability-window-ms 10000 \
+    --kill-after-stability-window \
+    --launch-log-out "${launch_log}" \
+    --process-snapshot-out "${artifacts_dir}/LynxExplorer.runtime-smoke-process.txt" \
+    --resolved-url-out "${artifacts_dir}/LynxExplorer.runtime-smoke-url.txt"
+}
 
-  "${app_executable}" "--url=file://${external_bundle}" \
-    > "${launch_log}" 2>&1 &
-  smoke_pid=$!
+build_lynx_window_cli() {
+  cargo build --manifest-path "${root_dir}/Cargo.toml" \
+    -p opentray-lynx-window-cli \
+    --release \
+    2>&1 | tee "${logs_dir}/cargo-build-lynx-window-cli.log"
+}
 
-  sleep 10
+stage_lynx_window_cli_artifacts() {
+  local dist_dir="${artifacts_dir}/lynx-window-cli"
+  mkdir -p "${dist_dir}"
 
-  if ! kill -0 "${smoke_pid}" >/dev/null 2>&1; then
-    echo "LynxExplorer runtime smoke exited before stability window" >&2
-    if [[ -f "${launch_log}" ]]; then
-      cat "${launch_log}" >&2
-    fi
-    wait "${smoke_pid}" || true
-    exit 1
-  fi
-
-  ps -p "${smoke_pid}" -o pid=,etime=,command= \
-    > "${artifacts_dir}/LynxExplorer.runtime-smoke-process.txt"
-
-  kill "${smoke_pid}" >/dev/null 2>&1 || true
-  wait "${smoke_pid}" || true
+  cp "${root_dir}/target/release/lynx-window-cli" "${dist_dir}/lynx-window-cli"
+  cp "${artifacts_dir}/LynxExplorer.app.zip" "${dist_dir}/LynxExplorer.app.zip"
+  ls -lh "${dist_dir}/lynx-window-cli" > "${artifacts_dir}/lynx-window-cli.binary-size.txt"
 }
 
 rewrite_resolved_dep_url_if_present() {
@@ -359,4 +359,6 @@ ditto -c -k --sequesterRsrc --keepParent \
   "${app_bundle_path}" \
   "${artifacts_dir}/LynxExplorer.app.zip"
 
+build_lynx_window_cli
+stage_lynx_window_cli_artifacts
 smoke_launch_external_bundle "${app_bundle_path}"

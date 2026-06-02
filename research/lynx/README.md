@@ -46,14 +46,18 @@ not yet materialized in the binary.
 The current Lynx probe is intentionally shaped like `visual_webview`:
 
 - build a real native executable (`LynxExplorer.app`)
+- build a small launcher binary (`lynx-window-cli`)
 - run a human-meaningful runtime path
 - keep WebView/Lynx-specific dependencies outside `opentray-core`
 
 Validated facts:
 
 1. `xcodebuild` can produce `LynxExplorer.app`.
-2. The app bundle can be archived and downloaded from CI.
-3. The app can load an external `file://.../*.lynx.bundle` and stay alive through a stability
+2. `cargo build -p opentray-lynx-window-cli --release` can produce a standalone launcher binary.
+3. The app bundle and launcher binary can be archived and downloaded from CI.
+4. `lynx-window-cli` can resolve `--bundle <path>` into a file URL, launch the Lynx runtime,
+   and keep the process alive through a stability window.
+5. The app can load an external `file://.../*.lynx.bundle` and stay alive through a stability
    window.
 
 This is the correct P0 proof, because it verifies the runtime atom itself before binding it to
@@ -83,6 +87,24 @@ Target shape:
 Current proof vehicle:
 
 - upstream `LynxExplorer.app`
+- `crates/opentray-lynx-window-cli`
+
+Current invocation shape:
+
+```bash
+cargo run -p opentray-lynx-window-cli -- \
+  --bundle /absolute/path/to/demo.lynx.bundle
+```
+
+Current CI artifact shape:
+
+```text
+research/lynx/artifacts/
+  lynx-window-cli/
+    lynx-window-cli
+    LynxExplorer.app.zip
+    runtime-smoke/homepage.main.lynx.bundle
+```
 
 ### Phase 2: Generic dynamic-loader foundation
 

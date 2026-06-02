@@ -6,6 +6,8 @@ on:
       - research/lynx-xcodebuild-gha
     paths:
       - .github/workflows/lynx-xcodebuild.yml
+      - Cargo.toml
+      - crates/opentray-lynx-window-cli/**
       - scripts/research/lynx-macos.args.gn
       - scripts/research/lynx-mirrored-urls.txt
       - scripts/research/lynx-xcodebuild-gha.sh
@@ -57,6 +59,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -69,7 +74,7 @@ jobs:
           path: |
             ~/.habitat_cache
             research/lynx/cache
-          key: lynx-probe-${{ runner.os }}-${{ github.event_name == 'workflow_dispatch' && inputs.runner_label || 'macos-15' }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-${{ hashFiles('.github/workflows/lynx-xcodebuild.yml', 'scripts/research/lynx-macos.args.gn', 'scripts/research/lynx-mirrored-urls.txt', 'scripts/research/lynx-xcodebuild-gha.sh') }}
+          key: lynx-probe-${{ runner.os }}-${{ github.event_name == 'workflow_dispatch' && inputs.runner_label || 'macos-15' }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-${{ hashFiles('Cargo.toml', 'crates/opentray-lynx-window-cli/**', '.github/workflows/lynx-xcodebuild.yml', 'scripts/research/lynx-macos.args.gn', 'scripts/research/lynx-mirrored-urls.txt', 'scripts/research/lynx-xcodebuild-gha.sh') }}
           restore-keys: |
             lynx-probe-${{ runner.os }}-${{ github.event_name == 'workflow_dispatch' && inputs.runner_label || 'macos-15' }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-
             lynx-probe-${{ runner.os }}-${{ github.event_name == 'workflow_dispatch' && inputs.runner_label || 'macos-15' }}-xcode-${{ env.LYNX_XCODE_VERSION }}-
@@ -85,6 +90,8 @@ jobs:
           python3 --version
           ruby --version
           node --version
+          rustc --version
+          cargo --version
           git --version
 
       - name: Run Lynx xcodebuild probe

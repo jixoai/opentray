@@ -2147,6 +2147,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentray-lynx-window-cli"
+version = "0.0.0"
+dependencies = [
+ "url",
+]
+
+[[package]]
 name = "opentray-spec"
 version = "0.0.0"
 dependencies = [
