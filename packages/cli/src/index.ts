@@ -11,6 +11,7 @@ export {
   type SurfaceHandle,
   type TrayHandle,
 } from "./client";
+export { createSpace, createSurface, createTray, resolveDefaultSpace, type BrokerConnectOptions, type CreateTrayOptions } from "./sdk";
 export {
   createBrokerEndpointIdentity,
   formatBrokerEndpointName,

@@ -86,6 +86,25 @@ Run the protocol-only TypeScript client example when you want to inspect the SDK
 pnpm --filter opentray example:basic
 ```
 
+The published `opentray` package also exposes the same broker-backed entrypoints directly:
+
+```ts
+import { createSpace, createTray } from "opentray";
+
+const space = await createSpace({ id: "com.example.status", default: true });
+await space.createTray({
+  trayId: "status",
+  title: "Status",
+  icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+});
+
+await createTray({
+  trayId: "secondary",
+  title: "Secondary",
+  icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+});
+```
+
 Run the daemon-path tray example when you want to see the public TypeScript SDK create a real system tray through the local broker:
 
 ```bash

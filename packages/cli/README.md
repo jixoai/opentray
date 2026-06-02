@@ -25,6 +25,28 @@ Run a protocol-only example that creates a space, creates a tray, dispatches an 
 pnpm --filter opentray example:basic
 ```
 
+The top-level SDK now exposes the mainline broker-backed path directly:
+
+```ts
+import { createSpace, createTray, resolveDefaultSpace } from "opentray";
+
+const space = await createSpace({ id: "com.example.status", default: true });
+await space.createTray({
+  trayId: "status",
+  title: "Status",
+  icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+});
+
+const defaultSpace = await resolveDefaultSpace();
+await createTray({
+  trayId: "secondary",
+  title: "Secondary",
+  icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+}, { space: defaultSpace.space });
+```
+
+`createTray()` resolves the broker default space when no explicit target is provided. If you already know the target, pass `space: defaultSpace.space` in the second argument instead of relying on default-space lookup.
+
 Run the human-visible daemon tray example:
 
 ```bash

@@ -73,6 +73,16 @@ describe("opentray client", () => {
     expect(transport.frames[0]).toEqual({ type: "create-space", requestId: "alias-1", id: "legacy" });
   });
 
+  it("resolves the broker default space through the client", async () => {
+    const transport = new RecordingTransport();
+    const client = createClient(transport, { requestIdPrefix: "default" });
+
+    const space = await client.resolveDefaultSpace();
+
+    expect(space.space).toEqual({ spaceId: "space-default" });
+    expect(transport.frames[0]).toEqual({ type: "resolve-default-space", requestId: "default-1" });
+  });
+
   it("exposes versioned broker endpoint identity helpers", () => {
     const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
 
@@ -101,6 +111,14 @@ class RecordingTransport implements OpenTrayTransport {
           spaceId: frame.space.spaceId,
           trayId: frame.tray.trayId ?? "tray-from-broker",
         };
+      case "resolve-default-space":
+        return {
+          type: "default-space",
+          requestId: frame.requestId,
+          space: {
+            spaceId: "space-default",
+          },
+        };
       case "destroy-tray":
       case "set-tray-menu":
       case "set-tray-icon":
@@ -108,7 +126,6 @@ class RecordingTransport implements OpenTrayTransport {
       case "load-ext":
       case "ext-command":
       case "unload-ext":
-      case "resolve-default-space":
         return { type: "ack", requestId: frame.requestId };
       case "health":
         return {

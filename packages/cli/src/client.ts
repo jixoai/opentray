@@ -16,6 +16,7 @@ export interface OpenTrayTransport {
 
 export interface OpenTrayClient {
   createSpace(options: SpaceOptions): Promise<SpaceHandle>;
+  resolveDefaultSpace(): Promise<SpaceHandle>;
   /** @deprecated Use `createSpace`. */
   createSurface(options: SpaceOptions): Promise<SpaceHandle>;
 }
@@ -60,6 +61,15 @@ export const createClient = (
         ...spaceOptions,
       });
       const space = expectResponse(response, requestId, "space-created").space;
+      return createSpaceHandle(transport, space, nextRequestId);
+    },
+    async resolveDefaultSpace(): Promise<SpaceHandle> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "resolve-default-space",
+        requestId,
+      });
+      const space = expectResponse(response, requestId, "default-space").space;
       return createSpaceHandle(transport, space, nextRequestId);
     },
     async createSurface(spaceOptions): Promise<SpaceHandle> {
