@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Navigator Window Review</title>
+    <style>
+      body {
+        margin: 0;
+        color: #17211b;
+        background:
+          radial-gradient(circle at 12% 14%, rgba(56, 112, 84, 0.14), transparent 28%),
+          linear-gradient(135deg, #f5efdf 0%, #e2ecdf 52%, #d7e6dc 100%);
+        font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 40px 28px 56px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 40px;
+        letter-spacing: -0.04em;
+      }
+      p {
+        line-height: 1.55;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+        margin: 24px 0;
+      }
+      .card {
+        border: 1px solid rgba(23, 33, 27, 0.14);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.78);
+        padding: 18px;
+        box-shadow: 0 16px 34px rgba(23, 33, 27, 0.08);
+      }
+      .pass {
+        color: #246b3a;
+        font-weight: 700;
+      }
+      .warn {
+        color: #7b5608;
+        font-weight: 700;
+      }
+      code,
+      pre {
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+      pre {
+        overflow: auto;
+        border-radius: 14px;
+        padding: 16px;
+        background: #17211b;
+        color: #def3de;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Navigator Window API Review</h1>
+      <p>
+        Status: <span class="pass">implementation and verification passed</span>.
+        This review covers the navigator bridge itself, not the separate registry-release parity issue.
+      </p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Public Surface</h2>
+          <p><code>navigator.window</code> is the promoted API and <code>navigator.opentrayWindow</code> is the prefixed fallback, both backed by the same object.</p>
+        </div>
+        <div class="card">
+          <h2>Tauri-Style Layering</h2>
+          <p>Pages see <code>invoke</code>, <code>listen</code>, and <code>once</code>, while the extension keeps callback ids and Wry IPC private.</p>
+        </div>
+        <div class="card">
+          <h2>Global Override Gate</h2>
+          <p><code>window.close()</code>, <code>window.moveTo()</code>, and <code>window.resizeTo()</code> remain untouched unless <code>bindWindowGlobals</code> is explicitly enabled.</p>
+        </div>
+        <div class="card">
+          <h2>Capability Honesty</h2>
+          <p><code>transparent</code> and <code>backgroundEffect</code> reject with typed unsupported errors instead of pretending macOS support exists.</p>
+        </div>
+        <div class="card">
+          <h2>Runtime Split</h2>
+          <p>The release binary check keeps <code>WebKit.framework</code> on the WebView dylib, not on the main <code>opentray</code> binary.</p>
+        </div>
+      </section>
+
+      <h2>Verified Commands</h2>
+      <pre><code>cargo test -p opentray-ext-webview
+pnpm --filter @opentray/ext-webview test
+pnpm --filter opentray typecheck
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray cli -- smoke daemon-tray
+cargo build --release -p opentray-bin -p opentray-ext-webview
+wc -c target/release/opentray target/release/libopentray_ext_webview.dylib
+otool -L target/release/opentray target/release/libopentray_ext_webview.dylib
+rg -n "navigator\.window|opentrayWindow|nativeWindowApi|bindWindowGlobals" crates/opentray-core crates/opentray-bin
+pnpm run build
+pnpm run verify
+git diff --check
+bun run openspec:vision -- validate add-webview-navigator-window-api
+bun run openspec:vision -- commit-check add-webview-navigator-window-api --phase self-review</code></pre>
+
+      <p class="warn">
+        Release note: npm latest still reflects the previous publish state. The bridge implementation reviewed here is ready, but registry parity depends on the next release run.
+      </p>
+    </main>
+  </body>
+</html>

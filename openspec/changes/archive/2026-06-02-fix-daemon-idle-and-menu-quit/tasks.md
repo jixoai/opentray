@@ -56,17 +56,17 @@
 - [x] 5.8 Run `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=500 pnpm --filter opentray example:daemon-tray` and confirm a later `daemon stop` reports not running or stale cleanup.
 - [x] 5.9 Run `bun run openspec:vision -- validate fix-daemon-idle-and-menu-quit`.
 - [x] 5.10 Run `git diff --check`.
-- [ ] 5.11 Ask the user to run the example without auto-exit and click the quit item before archive.
+- [x] 5.11 Ask the user to run the example without auto-exit and click the quit item before archive. User confirmed the full demo flow was tested and passed.
 - [x] 5.12 Run Rust protocol tests proving menu click events serialize as `itemId`.
 - [x] 5.13 Run TypeScript spec tests proving snake_case event frames are rejected and camelCase frames are accepted.
 - [x] 5.14 Run the daemon demo and confirm WebView menu actions produce broker command/event output through the native WebView extension path.
 - [x] 5.15 Run targeted Rust tests or compile gates proving the native WebView loader remains outside `opentray-core`.
-- [ ] 5.16 Run the daemon demo and ask the user to confirm `WebView Commands -> Show HTML` opens a real native WebView window.
+- [x] 5.16 Run the daemon demo and ask the user to confirm `WebView Commands -> Show HTML` opens a real native WebView window. User confirmed the full demo flow was tested and passed.
 - [x] 5.17 Run Rust protocol tests proving `health` and `daemon-health` wire shapes.
 - [x] 5.18 Run TypeScript spec tests proving `daemon-health` parsing.
 - [x] 5.19 Run CLI tests proving `daemon health` is parsed and health output can be formatted.
 - [x] 5.20 Run `pnpm --filter opentray cli -- daemon health` against both non-running and running daemon states.
-- [ ] 5.21 Ask the user to confirm `Post Message` and `Evaluate JS` visibly update the WebView window.
+- [x] 5.21 Ask the user to confirm `Post Message` and `Evaluate JS` visibly update the WebView window. User confirmed the full demo flow was tested and passed.
 
 ## 6. Self-Review Loop
 
@@ -76,5 +76,5 @@
 - [ ] 6.4 If review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
 - [ ] 6.5 If review enters a real loop, run `bun run openspec:vision -- review-state fix-daemon-idle-and-menu-quit`.
 - [ ] 6.6 If review cannot exit normally, run `bun run openspec:vision -- handoff fix-daemon-idle-and-menu-quit` and commit the handoff evidence.
-- [ ] 6.7 Do not archive until the user confirms idle-stop and quit click behavior.
+- [x] 6.7 Do not archive until the user confirms idle-stop and quit click behavior. User confirmation received.
 - [x] 6.8 Run `bun run openspec:vision -- check fix-daemon-idle-and-menu-quit` before claiming workflow completion.

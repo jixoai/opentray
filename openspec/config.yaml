@@ -4,8 +4,8 @@ schema: vision-driven
 # This is shown to AI when creating artifacts.
 context: |
   Project: OpenTray.
-  Product law: Surface-first Desktop Status Platform for Node/Deno/Bun CLI and AI-skill ecosystems.
-  Architecture stance: broker-owned Surface entries, Tray contributions, lease-scoped isolation, and extension-driven native capabilities.
+  Product law: Space-first Desktop Status Platform for Node/Deno/Bun CLI and AI-skill ecosystems.
+  Architecture stance: broker-owned Space entries, Tray contributions, session-scoped isolation, and extension-driven native capabilities.
   Working style: use vision-driven OpenSpec before implementation; keep plans/plan.md as the current Intent Document SSOT.
 
 # Per-artifact rules (optional)

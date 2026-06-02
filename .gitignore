@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+*HANDOFF.md
+!openspec/changes/*/HANDOFF.md
+!openspec/changes/*/v*.HANDOFF.md
 
 node_modules/
 dist/

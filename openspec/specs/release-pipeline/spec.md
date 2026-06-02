@@ -200,3 +200,157 @@ The package bootstrap script SHALL emit a concise human-readable summary and a m
 - **THEN** the report includes the package name, version, whether initial publish happened, whether trust was created or skipped, and the final trusted publisher claims
 - **AND** the report does not include secrets, OTP values, or npm auth tokens.
 
+### Requirement: Release workflow SHALL compile native binaries only in GitHub CI/CD
+
+Release-grade native daemon binaries and native extension dynamic libraries SHALL be compiled by GitHub Actions before npm publish. Local native builds MAY be used for developer smoke tests, but they SHALL NOT be used as release inputs and SHALL NOT be committed to source control.
+
+#### Scenario: Published tarballs come from CI artifacts
+
+- **GIVEN** the release workflow reaches npm publish
+- **WHEN** daemon and extension platform package tarballs are prepared
+- **THEN** their native files come from artifacts built in the same GitHub Actions workflow run
+- **AND** no local `target/release` artifact is required
+- **AND** no generated native binary is committed to git.
+
+#### Scenario: Local binary staging is not release authority
+
+- **GIVEN** a maintainer has locally staged native binaries for smoke testing
+- **WHEN** a release workflow runs on `main`
+- **THEN** the workflow rebuilds native artifacts in GitHub CI
+- **AND** it does not trust local staged binaries as publish inputs.
+
+### Requirement: Native build workflow SHALL use maintained Actions for toolchain cache and artifact transport
+
+The native build workflow SHALL use maintained GitHub Actions or GitHub Marketplace Actions for Rust toolchain setup, Cargo caching, and artifact upload/download. Custom shell scripts MAY copy files after build, but they SHALL NOT replace maintained Actions for toolchain installation, cache management, or cross-job artifact transport.
+
+The preferred Action shape SHALL be either `actions-rust-lang/setup-rust-toolchain` with cache enabled or `dtolnay/rust-toolchain` plus `Swatinem/rust-cache`. Cross-job artifact movement SHALL use `actions/upload-artifact` and `actions/download-artifact`.
+
+#### Scenario: Rust setup is not hand-rolled
+
+- **GIVEN** the native artifact workflow is inspected
+- **WHEN** Rust is installed and Cargo cache is configured
+- **THEN** the workflow uses a maintained Rust setup/cache Action
+- **AND** it does not rely on ad hoc curl/install/cache shell code.
+
+#### Scenario: Publish job receives artifacts through official artifact Actions
+
+- **GIVEN** native artifacts are built by platform matrix jobs
+- **WHEN** the release job stages npm packages
+- **THEN** it downloads build outputs through `actions/download-artifact`
+- **AND** the matrix jobs upload those outputs through `actions/upload-artifact`.
+
+### Requirement: Native build matrix SHALL prefer native runners for GUI extension artifacts
+
+Native daemon and WebView extension artifacts SHALL be built on platform-appropriate GitHub hosted runners when those runners are available. Cross-compilation Actions MAY be used only as a documented fallback for daemon-only artifacts or future non-GUI extension atoms. WebView dynamic libraries SHALL NOT use cross-compilation as the default because native GUI frameworks and system WebView dependencies must be exposed by CI.
+
+#### Scenario: WebView artifacts build on native platform runners
+
+- **GIVEN** the workflow builds `opentray-ext-webview`
+- **WHEN** the target is macOS, Linux, or Windows
+- **THEN** the build job runs on a matching native OS runner
+- **AND** it installs or uses that platform's native WebView dependencies.
+
+#### Scenario: Cross build fallback is explicit
+
+- **GIVEN** a native runner for a target is unavailable or unreliable
+- **WHEN** the workflow uses a cross-compilation Action
+- **THEN** the fallback is documented in the workflow or OpenSpec
+- **AND** it is not used to claim WebView visual/runtime validation unless the native dependency surface is also proven.
+
+### Requirement: Release workflow SHALL reject GitHub Release binary upload as the main artifact path
+
+OpenTray's release surface SHALL remain npm platform package tarballs. GitHub Release binary upload Actions MAY be used only for an additional distribution channel after npm package staging is proven. They SHALL NOT replace npm package artifact staging or trusted publishing.
+
+#### Scenario: Native artifacts are staged into npm packages
+
+- **GIVEN** native artifacts have been compiled by CI
+- **WHEN** the release job prepares publishable packages
+- **THEN** daemon artifacts are staged into daemon platform packages
+- **AND** extension dynamic libraries are staged into extension platform packages
+- **AND** the workflow does not require GitHub Release assets for npm consumers.
+
+### Requirement: Native artifact workflow SHALL keep daemon and extension atoms independent
+
+The CI build and staging law SHALL treat the daemon binary and each native extension artifact as independent atoms. Building `opentray-bin` SHALL NOT link WebView runtime into the daemon. Building `opentray-ext-webview` SHALL produce the WebView dynamic library for its platform package.
+
+#### Scenario: CI preserves WebView runtime ownership
+
+- **GIVEN** CI builds release artifacts for macOS
+- **WHEN** linkage evidence is inspected
+- **THEN** the daemon binary does not link WebView runtime frameworks
+- **AND** the WebView dynamic library owns WebView runtime linkage.
+
+#### Scenario: Package staging keeps atoms separate
+
+- **GIVEN** CI downloads native artifacts into the release job
+- **WHEN** staging scripts populate package directories
+- **THEN** daemon binaries go only to daemon platform packages
+- **AND** WebView dynamic libraries go only to WebView platform packages.
+
+### Requirement: Release workflow SHALL stage native artifacts before npm publish
+
+The release workflow SHALL build daemon binaries and WebView dynamic libraries on platform-appropriate CI runners before running `changeset publish`. The publish job SHALL download those artifacts and place them into the package directories listed by each package manifest `files` field.
+
+The source repository SHALL remain binary-free. CI-staged artifacts SHALL be present in the npm package tarballs.
+
+#### Scenario: Publish job receives all native artifacts
+
+- **GIVEN** the release workflow reaches npm publish
+- **WHEN** package tarballs are prepared
+- **THEN** each daemon platform package contains `bin/opentray` or `bin/opentray.exe`
+- **AND** each WebView platform package contains its dynamic library artifact
+- **AND** no generated native artifact needs to be committed to git.
+
+### Requirement: Native artifact build matrix SHALL cover first-stage platform packages
+
+The release workflow SHALL include build jobs for all first-stage platform packages: macOS arm64, macOS x64, Linux arm64, Linux x64, Windows arm64, and Windows x64. A platform target MAY initially publish a structured unsupported runtime if the native GUI capability cannot be validated, but the package and artifact path SHALL exist.
+
+#### Scenario: Matrix maps targets to package directories
+
+- **GIVEN** the release workflow build matrix is inspected
+- **WHEN** targets are enumerated
+- **THEN** each target maps to exactly one daemon package directory
+- **AND** each target maps to exactly one WebView platform package directory.
+
+### Requirement: Changesets SHALL version native platform packages with their facade packages
+
+The release configuration SHALL keep `opentray` and daemon platform packages version-compatible. It SHALL also keep `@opentray/ext-webview` and WebView platform packages version-compatible. Published package dependency ranges SHALL NOT point at unpublished or mismatched platform package versions.
+
+#### Scenario: Platform packages release with matching version
+
+- **GIVEN** a first-stage release changes daemon binary packaging
+- **WHEN** changesets versions packages
+- **THEN** `opentray` and all daemon platform packages publish the same release version
+- **AND** the `opentray` optional dependency ranges resolve to that version.
+
+#### Scenario: WebView platform packages release with matching version
+
+- **GIVEN** a first-stage release changes WebView dynamic runtime packaging
+- **WHEN** changesets versions packages
+- **THEN** `@opentray/ext-webview` and all WebView platform packages publish the same release version
+- **AND** the facade optional dependency ranges resolve to that version when used.
+
+### Requirement: Post-publish npm registry smoke SHALL be the final release gate
+
+After npm publish, maintainers SHALL verify the release from a fresh project that installs packages from the npm registry rather than workspace links. The smoke SHALL prove daemon binary resolution, daemon health, WebView dynamic library resolution, and human-visible WebView behavior.
+
+#### Scenario: Fresh npm install proves release
+
+- **GIVEN** packages have been published to npm
+- **WHEN** a fresh project installs the published versions
+- **THEN** `opentray daemon health` can inspect daemon state
+- **AND** the daemon can start from the installed platform binary
+- **AND** WebView can load from the installed platform dynamic library
+- **AND** the visual smoke works or reports a typed unsupported capability error.
+
+### Requirement: Package bootstrap SHALL cover WebView platform atoms
+
+The npm bootstrap/trusted-publish tooling SHALL support the `extension-platform` package kind for `@opentray/ext-webview-<os>-<arch>` packages. The script SHALL initialize missing local package manifests, publish initial packages only when explicitly requested, and configure or verify trusted publishing claims without product-specific branches.
+
+#### Scenario: WebView platform package bootstrap is generic
+
+- **GIVEN** a new `@opentray/ext-webview-darwin-arm64` package needs npm setup
+- **WHEN** the package bootstrap script runs with kind `extension-platform`
+- **THEN** it uses generic extension-platform manifest defaults
+- **AND** it does not contain hardcoded WebView-specific npm logic.
+

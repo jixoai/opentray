@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Self Review: move-webview-native-runtime-into-extension</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4efe4;
+        --panel: rgba(255, 252, 245, 0.9);
+        --ink: #1f2419;
+        --muted: #5a6651;
+        --line: rgba(31, 36, 25, 0.14);
+        --accent: #8b5e34;
+        --ok: #285f31;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(139, 94, 52, 0.18), transparent 35%),
+          linear-gradient(180deg, #f8f3e8 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        font-weight: 700;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 22px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      .deck {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .card {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 12px 36px rgba(71, 52, 21, 0.08);
+      }
+      .metric {
+        font-size: 27px;
+        font-weight: 700;
+      }
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: rgba(139, 94, 52, 0.08);
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      code,
+      pre {
+        font: 13px/1.45 "SFMono-Regular", "Menlo", "Monaco", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.65);
+        overflow: auto;
+      }
+      .ok {
+        color: var(--ok);
+        font-weight: 700;
+      }
+      .warn {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      ul {
+        padding-left: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>move-webview-native-runtime-into-extension</h1>
+      <p>
+        Review focus: prove that <code>opentray</code> is now only a generic extension
+        dispatcher for WebView traffic, while <code>libopentray_ext_webview.dylib</code>
+        owns the native runtime and its linkage.
+      </p>
+
+      <div class="deck">
+        <section class="card">
+          <div class="label">Daemon Size</div>
+          <div class="metric">1,874,112 B</div>
+          <p><code>target/release/opentray</code></p>
+        </section>
+        <section class="card">
+          <div class="label">Dylib Size</div>
+          <div class="metric">957,776 B</div>
+          <p><code>target/release/libopentray_ext_webview.dylib</code></p>
+        </section>
+        <section class="card">
+          <div class="label">Linkage Split</div>
+          <div class="metric ok">WebKit only on dylib</div>
+          <p><code>otool -L</code> proof on macOS arm64 release artifacts</p>
+        </section>
+      </div>
+
+      <h2>Intent Verdict</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Intent Point</th>
+            <th>Evidence</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>opentray</code> stays generic</td>
+            <td>
+              <code>crates/opentray-bin/Cargo.toml</code> drops <code>wry</code>;
+              <code>crates/opentray-bin/src/main.rs</code> no longer parses WebView payloads.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td><code>ext-webview</code> owns entry and exit</td>
+            <td>
+              <code>crates/opentray-ext-webview/src/lib.rs</code> parses and emits WebView
+              protocol; <code>src/macos.rs</code> owns native runtime objects.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Binary proof is visible</td>
+            <td>
+              <code>wc -c</code> matches both release and staged package artifacts; linker
+              tables show WebKit only on the dylib.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Docs/specs match new law</td>
+            <td>
+              New OpenSpec change plus updated README and skill references now describe the
+              extension-owned runtime path.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Command Evidence</h2>
+      <pre>cargo test -p opentray-bin
+cargo test -p opentray-ext-webview
+cargo test -p opentray-spec
+bun run openspec:vision -- validate move-webview-native-runtime-into-extension
+bun run openspec:vision -- commit-check move-webview-native-runtime-into-extension --phase apply
+bun run openspec:vision -- commit-check move-webview-native-runtime-into-extension --phase self-review
+wc -c target/release/opentray target/release/libopentray_ext_webview.dylib
+wc -c packages/darwin-arm64/bin/opentray packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib
+otool -L target/release/opentray
+otool -L target/release/libopentray_ext_webview.dylib</pre>
+
+      <h2>Residuals</h2>
+      <ul>
+        <li>
+          <span class="warn">Generic ABI hook remains:</span> <code>invoke_host</code> still
+          exists as a generic future-facing host callback, but WebView no longer depends on it.
+        </li>
+        <li>
+          <span class="warn">Install-name cleanup remains:</span> the dylib install name still
+          points at a build-directory path. Explicit-path loading makes this non-blocking today,
+          but it is still packaging residue.
+        </li>
+      </ul>
+
+      <h2>Exit Judgment</h2>
+      <p>
+        The requested runtime boundary is proven in code, docs, OpenSpec, tests, sizes, and
+        linkage evidence. Archive and commit evidence remain intentionally pending because this
+        working context has not produced a commit yet.
+      </p>
+    </main>
+  </body>
+</html>

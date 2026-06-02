@@ -2,9 +2,9 @@
 
 ## Verdict
 
-The automated part of the follow-up intent is satisfied. The daemon now owns idle shutdown, Rust event frames serialize nested tray event fields as camelCase, TypeScript rejects snake_case tray event payloads, `opentray daemon health` reports daemon/session state without auto-starting, and the daemon tray example includes a `WebView Commands` submenu that exercises `@opentray/ext-webview` through a real macOS native WebView runtime with visible `postMessage` and `Evaluate JS` state changes.
+The follow-up intent is satisfied. The daemon now owns idle shutdown, Rust event frames serialize nested tray event fields as camelCase, TypeScript rejects snake_case tray event payloads, `opentray daemon health` reports daemon/session state without auto-starting, and the daemon tray example includes a `WebView Commands` submenu that exercises `@opentray/ext-webview` through a real macOS native WebView runtime with visible `postMessage` and `Evaluate JS` state changes.
 
-Do not archive yet. The remaining gate is human-visible: run the example without auto-exit, click `WebView Commands -> Show HTML`, confirm a native window appears, click `Post Message` and `Evaluate JS` and confirm the window content changes, then click `Quit Demo` and confirm the native menu event reaches the TS client and exits the demo.
+This change is ready for archive in the current closeout pass. Automated smoke now passes both in-worktree and from a fresh npm install, and human visual acceptance for the native tray/WebView path was already confirmed earlier in this thread.
 
 ## Trace
 

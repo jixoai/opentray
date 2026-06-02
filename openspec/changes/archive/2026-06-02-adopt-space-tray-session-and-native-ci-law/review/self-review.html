@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Space Tray Session Review</title>
+    <style>
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at 12% 8%, rgba(42, 93, 73, 0.18), transparent 30%),
+          linear-gradient(135deg, #f7f1df 0%, #e9efe3 58%, #dfe8e2 100%);
+        color: #17211b;
+        font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      }
+      main {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 44px 28px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 40px;
+        letter-spacing: -0.04em;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 14px;
+        margin: 24px 0;
+      }
+      .card {
+        border: 1px solid #b7c9b5;
+        border-radius: 16px;
+        background: rgba(252, 255, 247, 0.88);
+        padding: 18px;
+      }
+      .pass {
+        color: #22643a;
+        font-weight: 700;
+      }
+      .warn {
+        color: #805200;
+        font-weight: 700;
+      }
+      code,
+      pre {
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+      pre {
+        overflow: auto;
+        border-radius: 14px;
+        background: #17211b;
+        color: #d9ffd8;
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Space / Tray / Session Review</h1>
+      <p>Status: <span class="pass">implementation and automated verification passed</span>. Archive remains intentionally deferred until commit evidence and release-cut decisions are handled.</p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Public Ontology</h2>
+          <p>The documented API now leads with <code>createSpace</code>, <code>SpaceHandle</code>, <code>Tray</code>, and session-oriented daemon health.</p>
+        </div>
+        <div class="card">
+          <h2>Compatibility</h2>
+          <p><code>createSurface</code> and <code>Surface*</code> names remain deprecated aliases only; they delegate to the new space path.</p>
+        </div>
+        <div class="card">
+          <h2>Release CI</h2>
+          <p>Native artifacts are built on GitHub runners and moved through official artifact actions before npm package staging.</p>
+        </div>
+        <div class="card">
+          <h2>Native Split</h2>
+          <p>Local release smoke shows <code>opentray</code> at 1,873,936 bytes and <code>libopentray_ext_webview.dylib</code> at 957,776 bytes.</p>
+        </div>
+        <div class="card">
+          <h2>Linkage</h2>
+          <p><code>WebKit.framework</code> appears in the WebView dynamic library and not in the main daemon binary.</p>
+        </div>
+      </section>
+
+      <h2>Verified Commands</h2>
+      <pre><code>pnpm --filter @opentray/spec test
+pnpm --filter opentray test
+bun test scripts/binaries/release-workflow.test.ts
+cargo test -p opentray-spec -p opentray-core -p opentray-bin
+pnpm run build
+cargo build --release -p opentray-bin -p opentray-ext-webview
+wc -c target/release/opentray target/release/libopentray_ext_webview.dylib
+otool -L target/release/opentray
+otool -L target/release/libopentray_ext_webview.dylib
+git diff --check
+bun run openspec:vision -- validate adopt-space-tray-session-and-native-ci-law
+pnpm run verify</code></pre>
+
+      <p class="warn">
+        Deferred workflow debt: the pre-apply research-plan commit checkpoint was skipped because implementation had already started under the user's direct continue instruction.
+      </p>
+    </main>
+  </body>
+</html>

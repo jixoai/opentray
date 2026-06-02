@@ -89,35 +89,41 @@ The running broker SHALL bind the endpoint derived from the current package vers
 - **AND** each broker owns a different endpoint
 - **AND** neither broker dispatches client frames from the other package version's endpoint.
 
-### Requirement: Broker daemon SHALL clean lease-owned state on disconnect
+### Requirement: Broker daemon SHALL clean session-owned state on disconnect
 
-When a client transport disconnects or exits after receiving a lease, the broker SHALL close that lease through the kernel. Cleanup SHALL remove only trays and extension state owned by that lease and SHALL resync affected backend projections.
+When a client transport disconnects or exits after receiving an accepted session, the broker SHALL close that session through the kernel. Cleanup SHALL remove only trays and extension state owned by that session and SHALL resync affected backend projections.
 
-#### Scenario: Disconnect removes owned tray only
+#### Scenario: Disconnect closes only owned session
 
-- **GIVEN** two client sessions have trays on the same surface
+- **GIVEN** two client sessions have trays on the same space
 - **WHEN** one client disconnects
-- **THEN** the broker closes only that client's lease
-- **AND** the other client's tray remains mounted
-- **AND** the backend receives the updated projection.
+- **THEN** the broker closes only that client's session
+- **AND** trays owned by the other session remain mounted.
 
-### Requirement: Broker daemon SHALL route backend-originated events to owning clients
+#### Scenario: Extension cleanup follows session ownership
 
-The daemon SHALL receive native backend events, route them through the kernel, and write resulting event frames only to the session that owns the matching lease. Backend-originated menu events SHALL use surface, tray, and item identifiers, not menu item id alone.
+- **GIVEN** a client session loaded an extension scoped to a space and tray
+- **WHEN** that session disconnects
+- **THEN** extension cleanup is invoked only for state owned by that session
+- **AND** other sessions' extension state is not destroyed.
+
+### Requirement: Broker daemon SHALL route native events to owning sessions
+
+The daemon SHALL receive native backend events, route them through the kernel, and write resulting event frames only to the session that owns the matching authority. Backend-originated menu events SHALL use space, tray, and item identifiers, not menu item id alone.
 
 #### Scenario: Menu click reaches owning session
 
-- **GIVEN** a visible tray was created by client lease `lease-a`
-- **WHEN** the native backend emits a menu click for that tray
-- **THEN** the daemon asks the kernel to route the event
-- **AND** only the connection for `lease-a` receives the `event` frame.
+- **GIVEN** a visible tray was created by client session `session-a`
+- **WHEN** the user clicks a menu item for that tray
+- **THEN** the daemon routes the event through the kernel
+- **AND** only the connection for `session-a` receives the `event` frame.
 
-#### Scenario: Unknown backend event is dropped safely
+#### Scenario: Unknown native event does not broadcast
 
-- **GIVEN** the native backend emits an event for an unknown surface or tray
-- **WHEN** the daemon routes it through the kernel
-- **THEN** no client receives a forged event
-- **AND** the broker process remains alive.
+- **GIVEN** the native backend emits an event for an unknown space or tray
+- **WHEN** the daemon routes that event
+- **THEN** no client receives a misleading event
+- **AND** the daemon may emit a structured diagnostic.
 
 ### Requirement: Broker daemon SHALL stay background-only on macOS
 
@@ -129,4 +135,92 @@ On macOS, a daemon started through `opentray daemon start` or local SDK auto-sta
 - **WHEN** the Rust broker creates the native event loop for tray support
 - **THEN** the broker runs with accessory/background activation behavior
 - **AND** no windowless daemon application appears in the Dock.
+
+### Requirement: Daemon health SHALL report public session state
+
+The daemon health command SHALL report the running broker process using public `Session` vocabulary. The output SHALL include daemon PID, package version, protocol version, endpoint identity, active session count, and per-session state. Internal lease identifiers MAY be included only as diagnostic implementation details when clearly labeled and not required by public API consumers.
+
+#### Scenario: Health output identifies active sessions
+
+- **GIVEN** a same-version daemon is running
+- **AND** one or more clients are connected
+- **WHEN** the operator runs `opentray daemon health`
+- **THEN** the output includes the daemon PID
+- **AND** it reports active sessions
+- **AND** it does not describe the primary public connection list as leases.
+
+#### Scenario: Health output remains useful during alpha migration
+
+- **GIVEN** the implementation still uses an internal lease id
+- **WHEN** health output includes that id for debugging
+- **THEN** it labels it as an internal or compatibility diagnostic
+- **AND** the stable public lifecycle field remains session-oriented.
+
+### Requirement: Broker daemon SHALL exit after an idle period with no sessions
+
+The broker daemon SHALL release itself after a configurable idle timeout when no client transport sessions are connected. Idle shutdown SHALL be owned by the broker composition layer that owns process and event-loop lifecycle. `opentray-core` SHALL NOT own process timers, and TypeScript clients SHALL NOT kill the daemon directly on normal close.
+
+The default idle timeout SHALL be 30 seconds. `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS` SHALL override the timeout in milliseconds. A value of `0` SHALL disable idle shutdown for debugging and operator workflows.
+
+#### Scenario: Daemon started but never used exits after idle timeout
+
+- **GIVEN** the daemon is started
+- **AND** no client session connects before the idle timeout
+- **WHEN** the idle timeout expires
+- **THEN** the broker process exits
+- **AND** a later local client can start a fresh same-version daemon.
+
+#### Scenario: Daemon exits after last client disconnects
+
+- **GIVEN** one or more clients connected to the daemon
+- **WHEN** the last client disconnects
+- **THEN** the broker starts an idle timer
+- **AND** the broker exits if no new client connects before the timeout expires.
+
+#### Scenario: New connection cancels pending idle shutdown
+
+- **GIVEN** the broker has scheduled idle shutdown after all sessions disconnected
+- **WHEN** a new client connects before the timeout expires
+- **THEN** the pending idle shutdown is cancelled
+- **AND** the broker continues serving the new session.
+
+#### Scenario: Idle shutdown can be disabled
+
+- **GIVEN** `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0`
+- **WHEN** no client sessions are connected
+- **THEN** the broker remains running until stopped by operator control or process termination.
+
+### Requirement: Broker daemon SHALL emit camelCase nested event fields
+
+Broker-originated `event` frames SHALL serialize nested tray event payload fields with the same camelCase contract as TypeScript protocol types. Menu click events SHALL use `surfaceId`, `trayId`, and `itemId` on the wire. The daemon SHALL NOT emit snake_case fields such as `surface_id`, `tray_id`, or `item_id`.
+
+#### Scenario: Menu click frame matches TypeScript event shape
+
+- **GIVEN** a native menu click is routed through the broker
+- **WHEN** the daemon serializes the `event` frame
+- **THEN** the JSON event payload includes `surfaceId`, `trayId`, and `itemId`
+- **AND** the payload does not include `surface_id`, `tray_id`, or `item_id`.
+
+### Requirement: Broker daemon SHALL report health through the local protocol
+
+The broker daemon SHALL accept a request-correlated `health` client frame without changing the protocol version. The daemon composition layer SHALL answer with a `daemon-health` server frame containing daemon process metadata and active transport session metadata. The response SHALL include at least `pid`, `packageVersion`, `protocolVersion`, `endpoint`, `sessionCount`, and `sessions`.
+
+`opentray-core` SHALL NOT own daemon process health state. Health state SHALL be assembled by the runtime composition layer that owns the endpoint, pid, and session map.
+
+#### Scenario: Running daemon reports process and session health
+
+- **GIVEN** a same-version daemon is running
+- **AND** a client sends a `health` request frame
+- **WHEN** the daemon answers
+- **THEN** the response type is `daemon-health`
+- **AND** it includes the daemon pid
+- **AND** it includes package/protocol metadata and endpoint
+- **AND** it includes the current session count and session records where available.
+
+#### Scenario: Health does not require a protocol version bump
+
+- **GIVEN** protocol version `1`
+- **WHEN** a client sends a `health` request frame
+- **THEN** the daemon accepts the frame as an additive command
+- **AND** the endpoint naming and protocol version remain unchanged.
 
