@@ -1,0 +1,24 @@
+{
+  "name": "@opentray/ext-lynx-darwin-x64",
+  "version": "0.0.0",
+  "description": "OpenTray Lynx native extension for macOS x64.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
+  "files": [
+    "lib",
+    "runtime",
+    "README.md"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "peerDependencies": {
+    "opentray": ">=0.0.0"
+  }
+}

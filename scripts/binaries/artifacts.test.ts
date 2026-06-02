@@ -21,6 +21,10 @@ describe("Feature: native binary artifact topology", () => {
       "@opentray/ext-webview-windows-arm64",
       "@opentray/ext-webview-windows-x64",
     ]);
+    expect(nativeTargets.map((target) => target.lynxPackageName).filter(Boolean)).toEqual([
+      "@opentray/ext-lynx-darwin-arm64",
+      "@opentray/ext-lynx-darwin-x64",
+    ]);
   });
 
   test("Scenario: Given platform packages When artifact paths are generated Then generated binaries land in package-owned directories", () => {
@@ -32,7 +36,10 @@ describe("Feature: native binary artifact topology", () => {
     expect(darwin.webviewArtifact).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib",
     );
+    expect(darwin.lynxArtifact).toBe("packages/ext-lynx-darwin-arm64/lib/libopentray_ext_lynx.dylib");
+    expect(darwin.lynxRuntimeArtifact).toBe("packages/ext-lynx-darwin-arm64/runtime/LynxExplorer.app.zip");
     expect(linux.webviewArtifact).toBe("packages/ext-webview-linux-x64/lib/libopentray_ext_webview.so");
+    expect(linux.lynxArtifact).toBeUndefined();
     expect(windows.daemonArtifact).toBe("packages/windows-x64/bin/opentray.exe");
     expect(windows.webviewArtifact).toBe("packages/ext-webview-windows-x64/bin/opentray_ext_webview.dll");
   });
@@ -47,5 +54,6 @@ describe("Feature: native binary artifact topology", () => {
 
     expect(target.daemonArtifact).toBe("packages/windows-arm64/bin/opentray.exe");
     expect(target.webviewArtifact).toBe("packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll");
+    expect(target.lynxArtifact).toBeUndefined();
   });
 });

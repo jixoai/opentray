@@ -27,10 +27,12 @@ jobs:
             runner: macos-15
             daemon_artifact: opentray
             webview_artifact: libopentray_ext_webview.dylib
+            lynx_artifact: libopentray_ext_lynx.dylib
           - target: darwin-x64
             runner: macos-15-intel
             daemon_artifact: opentray
             webview_artifact: libopentray_ext_webview.dylib
+            lynx_artifact: libopentray_ext_lynx.dylib
           - target: linux-arm64
             runner: ubuntu-24.04-arm
             daemon_artifact: opentray
@@ -54,6 +56,12 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup Xcode
+        if: startsWith(matrix.target, 'darwin-')
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.4"
+
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
 
@@ -61,10 +69,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release -p opentray-bin -p opentray-ext-webview
+          packages=(-p opentray-bin -p opentray-ext-webview)
+          if [[ "${{ matrix.target }}" == darwin-* ]]; then
+            packages+=(-p opentray-ext-lynx)
+          fi
+          cargo build --release "${packages[@]}"
           mkdir -p native-artifacts
           cp "target/release/${{ matrix.daemon_artifact }}" native-artifacts/
           cp "target/release/${{ matrix.webview_artifact }}" native-artifacts/
+          if [[ "${{ matrix.target }}" == darwin-* ]]; then
+            cp "target/release/${{ matrix.lynx_artifact }}" native-artifacts/
+            bash scripts/release/build-lynx-runtime.sh "native-artifacts/LynxExplorer.app.zip"
+          fi
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
@@ -174,6 +190,18 @@ jobs:
               --source "native-artifacts/native-${target}/${webview_artifact}" \
               --package-os "$package_os" \
               --arch "$arch"
+            if [ "$package_os" = "darwin" ]; then
+              bun run scripts/binaries/stage-local.ts \
+                --kind lynx \
+                --source "native-artifacts/native-${target}/libopentray_ext_lynx.dylib" \
+                --package-os "$package_os" \
+                --arch "$arch"
+              bun run scripts/binaries/stage-local.ts \
+                --kind lynx-runtime \
+                --source "native-artifacts/native-${target}/LynxExplorer.app.zip" \
+                --package-os "$package_os" \
+                --arch "$arch"
+            fi
           done
 
       - name: Validate native package contents
@@ -182,7 +210,8 @@ jobs:
           set -euo pipefail
           for package_dir in \
             packages/darwin-arm64 packages/darwin-x64 packages/linux-arm64 packages/linux-x64 packages/windows-arm64 packages/windows-x64 \
-            packages/ext-webview-darwin-arm64 packages/ext-webview-darwin-x64 packages/ext-webview-linux-arm64 packages/ext-webview-linux-x64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64
+            packages/ext-webview-darwin-arm64 packages/ext-webview-darwin-x64 packages/ext-webview-linux-arm64 packages/ext-webview-linux-x64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64 \
+            packages/ext-lynx-darwin-arm64 packages/ext-lynx-darwin-x64
           do
             npm pack --dry-run --json "./${package_dir}" >/dev/null
           done

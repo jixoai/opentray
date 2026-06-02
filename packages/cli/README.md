@@ -57,6 +57,7 @@ After installing from npm, use the published CLI smoke path instead of workspace
 
 ```bash
 opentray smoke daemon-tray
+opentray smoke daemon-lynx --bundle ./research/lynx/app/dist/main.lynx.bundle
 ```
 
 This example starts or reuses the same-version daemon automatically, creates a real tray through the public SDK, and prints broker-routed menu events. Use manual lifecycle commands only for operator/debug control:
@@ -71,15 +72,21 @@ The menu includes `WebView Commands` entries that call the `@opentray/ext-webvie
 
 The `Show HTML` demo also enables the injected page bridge so the rendered page can call `navigator.window` / `navigator.opentrayWindow` and, for the demo only, opt into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides. Use the in-page buttons to verify `getCapabilities`, `getStyle`, `setStyle({ frameless })`, move, resize, and close behavior visually instead of relying only on terminal logs.
 
-First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists.
+The Lynx smoke path uses the same generic extension loader but launches a real `LynxExplorer.app.zip` runtime sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` immediately on run and exposes `Reload Bundle`, `Hide Window`, and `Quit Smoke` through tray-routed events.
+
+First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
 
 For local native smoke before npm publish, stage the current platform artifacts first:
 
 ```bash
-cargo build -p opentray-bin -p opentray-ext-webview
+cargo build -p opentray-bin -p opentray-ext-webview -p opentray-ext-lynx
 bun run scripts/binaries/stage-local.ts --kind daemon --source target/debug/opentray
 bun run scripts/binaries/stage-local.ts --kind webview --source target/debug/libopentray_ext_webview.dylib
+bun run scripts/binaries/stage-local.ts --kind lynx --source target/debug/libopentray_ext_lynx.dylib
+bash scripts/release/build-lynx-runtime.sh /tmp/LynxExplorer.app.zip
+bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/LynxExplorer.app.zip
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
+pnpm --filter opentray cli -- smoke daemon-lynx --bundle ./research/lynx/app/dist/main.lynx.bundle
 ```
 
 The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to keep it alive during debugging, or provide another millisecond value for a custom idle release window.
@@ -87,10 +94,11 @@ The daemon exits automatically after 30 seconds with no connected clients. Set `
 To confirm the native runtime split on macOS after a release build:
 
 ```bash
-cargo build -p opentray-bin -p opentray-ext-webview --release
-wc -c target/release/opentray target/release/libopentray_ext_webview.dylib
+cargo build -p opentray-bin -p opentray-ext-webview -p opentray-ext-lynx --release
+wc -c target/release/opentray target/release/libopentray_ext_webview.dylib target/release/libopentray_ext_lynx.dylib
 otool -L target/release/opentray
 otool -L target/release/libopentray_ext_webview.dylib
+otool -L target/release/libopentray_ext_lynx.dylib
 ```
 
 Current native icon support is `rgba`. `encoded` and `file` are typed protocol shapes, but the native `tray-icon` backend reports them as unsupported until decoding and file loading policy are implemented.

@@ -6,6 +6,7 @@
     "baseUrl": ".",
     "paths": {
       "@opentray/spec": ["packages/spec/src/index.ts"],
+      "@opentray/ext-lynx": ["packages/ext-lynx/src/index.ts"],
       "opentray": ["packages/cli/src/index.ts"],
       "@opentray/ext-webview": ["packages/ext-webview/src/index.ts"]
     },

@@ -18,6 +18,14 @@ describe("opentray CLI", () => {
     expect(parseCliCommand(["smoke", "daemon-tray"])).toEqual({ type: "smoke", name: "daemon-tray" });
   });
 
+  it("parses the npm-installable daemon lynx smoke command", () => {
+    expect(parseCliCommand(["smoke", "daemon-lynx", "--bundle", "./dist/main.lynx.bundle"])).toEqual({
+      type: "smoke",
+      name: "daemon-lynx",
+      bundlePath: "./dist/main.lynx.bundle",
+    });
+  });
+
   it("does not treat the deamon typo as canonical", () => {
     expect(parseCliCommand(["deamon", "start"])).toEqual({ type: "help" });
   });

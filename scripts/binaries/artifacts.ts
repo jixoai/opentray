@@ -15,6 +15,10 @@ export interface NativeTarget {
   webviewPackageName: string;
   webviewPackageDir: string;
   webviewArtifact: string;
+  lynxPackageName?: string;
+  lynxPackageDir?: string;
+  lynxArtifact?: string;
+  lynxRuntimeArtifact?: string;
 }
 
 const packageTargets = [
@@ -29,6 +33,7 @@ const packageTargets = [
 export function createNativeTarget(packageOs: PackageOs, npmOs: NpmOs, arch: NativeArch): NativeTarget {
   const daemonPackageDir = `packages/${packageOs}-${arch}`;
   const webviewPackageDir = `packages/ext-webview-${packageOs}-${arch}`;
+  const lynxPackageDir = packageOs === "darwin" ? `packages/ext-lynx-${packageOs}-${arch}` : undefined;
 
   return {
     packageOs,
@@ -43,6 +48,12 @@ export function createNativeTarget(packageOs: PackageOs, npmOs: NpmOs, arch: Nat
       packageOs === "windows"
         ? `${webviewPackageDir}/bin/opentray_ext_webview.dll`
         : `${webviewPackageDir}/lib/libopentray_ext_webview.${packageOs === "darwin" ? "dylib" : "so"}`,
+    lynxPackageName: lynxPackageDir === undefined ? undefined : `@opentray/ext-lynx-${packageOs}-${arch}`,
+    lynxPackageDir,
+    lynxArtifact:
+      lynxPackageDir === undefined ? undefined : `${lynxPackageDir}/lib/libopentray_ext_lynx.dylib`,
+    lynxRuntimeArtifact:
+      lynxPackageDir === undefined ? undefined : `${lynxPackageDir}/runtime/LynxExplorer.app.zip`,
   };
 }
 

@@ -20,6 +20,11 @@
       "@opentray/ext-webview-linux-x64",
       "@opentray/ext-webview-windows-arm64",
       "@opentray/ext-webview-windows-x64"
+    ],
+    [
+      "@opentray/ext-lynx",
+      "@opentray/ext-lynx-darwin-arm64",
+      "@opentray/ext-lynx-darwin-x64"
     ]
   ],
   "linked": [],
