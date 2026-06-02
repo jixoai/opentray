@@ -19,7 +19,7 @@
 - [x] 3.2 Run repository verification if the package-level proof is green.
 - [x] 3.3 Pack or install the built package and confirm the top-level exports now include `createSpace` and `createTray`.
 
-- [ ] 4. Self-review and close the repair loop.
-- [ ] 4.1 Write self-review evidence for the repaired SDK surface.
-- [ ] 4.2 Run `bun run openspec:vision -- check fix-sdk-top-level-space-api`.
-- [ ] 4.3 Decide whether the change can ship as a patch release to complete the active goal.
+- [x] 4. Self-review and close the repair loop.
+- [x] 4.1 Write self-review evidence for the repaired SDK surface.
+- [x] 4.2 Run `bun run openspec:vision -- check fix-sdk-top-level-space-api`.
+- [x] 4.3 Decide whether the change can ship as a patch release to complete the active goal.

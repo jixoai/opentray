@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray SDK Top-Level API Review</title>
+    <style>
+      body {
+        margin: 0;
+        color: #1d2320;
+        background:
+          radial-gradient(circle at 12% 16%, rgba(44, 105, 80, 0.14), transparent 28%),
+          linear-gradient(135deg, #f6f0e3 0%, #e4ebdf 48%, #d9e4e4 100%);
+        font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 40px 28px 56px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 40px;
+        letter-spacing: -0.04em;
+      }
+      p {
+        line-height: 1.55;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+        margin: 24px 0;
+      }
+      .card {
+        border: 1px solid rgba(29, 35, 32, 0.14);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 18px;
+        box-shadow: 0 16px 34px rgba(29, 35, 32, 0.08);
+      }
+      .pass {
+        color: #27643a;
+        font-weight: 700;
+      }
+      .warn {
+        color: #7a5810;
+        font-weight: 700;
+      }
+      code,
+      pre {
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+      pre {
+        overflow: auto;
+        border-radius: 14px;
+        padding: 16px;
+        background: #18211f;
+        color: #def1e5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>SDK Top-Level API Review</h1>
+      <p>
+        Status: <span class="pass">implementation and local verification passed</span>.
+        This review covers the public TypeScript facade repair that aligns the published SDK promise with the actual package surface.
+      </p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Main Entry</h2>
+          <p><code>createSpace()</code> is now exported from <code>opentray</code> directly and uses the existing broker auto-connect law.</p>
+        </div>
+        <div class="card">
+          <h2>Compatibility</h2>
+          <p><code>createSurface()</code> remains available only as a deprecated wrapper over <code>createSpace()</code>.</p>
+        </div>
+        <div class="card">
+          <h2>Default Space</h2>
+          <p><code>resolveDefaultSpace()</code> is public, and top-level <code>createTray()</code> uses it when no explicit target space is supplied.</p>
+        </div>
+        <div class="card">
+          <h2>Law Preservation</h2>
+          <p>The fix reuses <code>connectLocalBroker</code> plus <code>createClient</code>; it does not fork daemon lifecycle logic or touch Rust/runtime atoms.</p>
+        </div>
+        <div class="card">
+          <h2>Release Shape</h2>
+          <p>The changeset plans a patch release to <code>0.3.1</code> for <code>opentray</code> and the platform binary packages.</p>
+        </div>
+      </section>
+
+      <h2>Verified Commands</h2>
+      <pre><code>pnpm --filter opentray test
+pnpm run verify
+node --input-type=module -e "const m=await import('./packages/cli/dist/index.mjs'); console.log(JSON.stringify(Object.keys(m).sort()));"
+pnpm exec changeset status --verbose
+bun run openspec:vision -- status fix-sdk-top-level-space-api</code></pre>
+
+      <p class="warn">
+        Release note: this review proves the working tree, not registry parity. A fresh npm install check still needs the published <code>0.3.1</code> package.
+      </p>
+    </main>
+  </body>
+</html>
