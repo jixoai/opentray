@@ -96,7 +96,13 @@ jobs:
 
       - name: Run Lynx xcodebuild probe
         shell: bash
-        run: scripts/research/lynx-xcodebuild-gha.sh
+        run: |
+          python3 scripts/ci/run_with_watchdog.py \
+            --label "lynx-xcodebuild-probe" \
+            --timeout-seconds 4500 \
+            --heartbeat-seconds 60 \
+            -- \
+            scripts/research/lynx-xcodebuild-gha.sh
 
       - name: Save Lynx caches
         if: always()
