@@ -87,6 +87,33 @@ path.write_text(text.replace(old, new, 1))
 PY
 }
 
+patch_macos_http_service() {
+  local service_file="${lynx_dir}/explorer/darwin/macos/lynx_explorer/LynxExplorer/service/LynxHttpService.mm"
+
+  python3 - "${service_file}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+pattern = re.compile(
+    r'void LynxHttpServiceImpl::Request\(std::shared_ptr<pub::LynxHttpRequest> http_request,\n'
+    r'\s+std::shared_ptr<pub::LynxHttpResponse> http_response\) \{\n'
+    r'.*?\n'
+    r'\}\n'
+    r'\n'
+    r'\}  // namespace service',
+    re.S,
+)
+replacement = """void LynxHttpServiceImpl::Request(std::shared_ptr<pub::LynxHttpRequest> http_request,\n                                  std::shared_ptr<pub::LynxHttpResponse> http_response) {\n  NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:http_request->GetUrl().c_str()]];\n  NSMutableURLRequest *nsRequest = [NSMutableURLRequest requestWithURL:url];\n  nsRequest.HTTPMethod = [NSString stringWithUTF8String:http_request->GetMethod().c_str()];\n\n  for (const auto &header : http_request->GetHeaders()) {\n    NSString *key = [NSString stringWithUTF8String:header.first.c_str()];\n    NSString *value = [NSString stringWithUTF8String:header.second.c_str()];\n    if (key && value) {\n      [nsRequest setValue:value forHTTPHeaderField:key];\n    }\n  }\n\n  const auto &request_body = http_request->GetBody();\n  if (!request_body.empty()) {\n    nsRequest.HTTPBody = [NSData dataWithBytes:request_body.data() length:request_body.size()];\n  }\n\n  NSURLSession *session = [NSURLSession sharedSession];\n  NSURLSessionDataTask *dataTask =\n      [session dataTaskWithRequest:nsRequest\n                 completionHandler:^(NSData *_Nullable data, NSURLResponse *_Nullable response,\n                                     NSError *_Nullable error) {\n                   if (response.URL.absoluteString) {\n                     http_response->SetUrl([response.URL.absoluteString UTF8String]);\n                   } else {\n                     http_response->SetUrl(http_request->GetUrl().c_str());\n                   }\n\n                   if (data && data.length > 0) {\n                     http_response->SetBody(\n                         (uint8_t *)data.bytes, data.length,\n                         [](uint8_t *body, size_t length, void *opaque) { CFRelease(opaque); },\n                         (__bridge_retained void *)data);\n                   }\n\n                   if (error) {\n                     static const int SDK_ERROR_STATUS_CODE = 499;\n                     http_response->SetStatusCode(SDK_ERROR_STATUS_CODE);\n                     http_response->SetStatusText([error.localizedDescription UTF8String]);\n                   } else if ([response isKindOfClass:[NSHTTPURLResponse class]]) {\n                     NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;\n                     http_response->SetStatusCode(httpResponse.statusCode);\n\n                     NSString *statusText =\n                         [NSHTTPURLResponse localizedStringForStatusCode:httpResponse.statusCode];\n                     http_response->SetStatusText(statusText ? [statusText UTF8String] : \"\");\n\n                     for (NSString *key in httpResponse.allHeaderFields) {\n                       NSString *value = httpResponse.allHeaderFields[key];\n                       if (key && value) {\n                         http_response->AddHeader([key UTF8String], [value UTF8String]);\n                       }\n                     }\n                   } else {\n                     http_response->SetStatusCode(-1);\n                     http_response->SetStatusText(\"missing http response\");\n                   }\n\n                   http_response->Complete();\n                 }];\n\n  [dataTask resume];\n}\n\n}  // namespace service"""
+patched, count = pattern.subn(replacement, text, count=1)
+if count != 1:
+    raise SystemExit("expected LynxHttpServiceImpl::Request body not found")
+path.write_text(patched)
+PY
+}
+
 patch_generated_lynx_explorer_outputs() {
   local project_file="${lynx_dir}/${out_dir}/all.xcodeproj/project.pbxproj"
 
@@ -138,23 +165,48 @@ raise SystemExit('lynx_explorer build phase not found in generated project')
 PY
 }
 
-smoke_launch_external_bundle() {
+patch_app_bundle_ats() {
   local app_bundle_path="$1"
-  local dist_dir="${artifacts_dir}/lynx-window-cli"
-  local smoke_dir="${dist_dir}/runtime-smoke"
-  local source_bundle="${app_bundle_path}/Contents/Resources/Resource/homepage/main.lynx.bundle"
-  local external_bundle="${smoke_dir}/homepage.main.lynx.bundle"
-  local launch_log="${logs_dir}/lynx-runtime-smoke.log"
+  local info_plist="${app_bundle_path}/Contents/Info.plist"
 
-  mkdir -p "${smoke_dir}"
-  cp "${source_bundle}" "${external_bundle}"
+  python3 - "${info_plist}" <<'PY'
+from pathlib import Path
+import plistlib
+import sys
+
+path = Path(sys.argv[1])
+data = plistlib.loads(path.read_bytes())
+ats = data.setdefault("NSAppTransportSecurity", {})
+ats["NSAllowsArbitraryLoads"] = True
+path.write_bytes(plistlib.dumps(data, sort_keys=False))
+PY
+}
+
+stage_smoke_bundle() {
+  local app_bundle_path="$1"
+  local source_rel="$2"
+  local staged_rel="$3"
+  local dist_dir="${artifacts_dir}/lynx-window-cli"
+  local source_bundle="${app_bundle_path}/Contents/Resources/Resource/${source_rel}"
+  local staged_bundle="${dist_dir}/${staged_rel}"
+
+  mkdir -p "$(dirname "${staged_bundle}")"
+  cp "${source_bundle}" "${staged_bundle}"
+}
+
+smoke_launch_external_bundle() {
+  local staged_bundle="$1"
+  local artifact_stem="$2"
+  local launch_log="$3"
+  local dist_dir="${artifacts_dir}/lynx-window-cli"
+
   "${dist_dir}/lynx-window-cli" \
-    --bundle "${external_bundle}" \
+    --bundle "${staged_bundle}" \
     --stability-window-ms 10000 \
     --kill-after-stability-window \
     --launch-log-out "${launch_log}" \
-    --process-snapshot-out "${artifacts_dir}/LynxExplorer.runtime-smoke-process.txt" \
-    --resolved-url-out "${artifacts_dir}/LynxExplorer.runtime-smoke-url.txt"
+    --process-snapshot-out "${artifacts_dir}/LynxExplorer.${artifact_stem}-process.txt" \
+    --resolved-url-out "${artifacts_dir}/LynxExplorer.${artifact_stem}-url.txt"
 }
 
 build_lynx_window_cli() {
@@ -297,6 +349,7 @@ git checkout --detach "${lynx_ref}" 2>&1 | tee "${logs_dir}/git-checkout.log"
 git rev-parse HEAD | tee "${logs_dir}/lynx-ref.txt"
 clone_tools_shared
 patch_build_resources_pnpm_path
+patch_macos_http_service
 
 unset all_proxy http_proxy https_proxy ALL_PROXY HTTP_PROXY HTTPS_PROXY
 export XDG_CONFIG_HOME="${lynx_dir}/.xdg-config"
@@ -349,6 +402,8 @@ if [[ ! -d "${app_bundle_path}" ]]; then
   exit 1
 fi
 
+patch_app_bundle_ats "${app_bundle_path}"
+
 printf '%s\n' "${app_bundle_path}" | tee "${logs_dir}/app-paths.txt"
 
 find "${app_bundle_path}" -print | sort > "${artifacts_dir}/LynxExplorer.bundle-tree.txt"
@@ -361,4 +416,18 @@ ditto -c -k --sequesterRsrc --keepParent \
 
 build_lynx_window_cli
 stage_lynx_window_cli_artifacts
-smoke_launch_external_bundle "${app_bundle_path}"
+stage_smoke_bundle "${app_bundle_path}" "homepage/main.lynx.bundle" \
+  "runtime-smoke/homepage.main.lynx.bundle"
+stage_smoke_bundle "${app_bundle_path}" "showcase/menu/main.lynx.bundle" \
+  "showcase-smoke/menu.main.lynx.bundle"
+stage_smoke_bundle "${app_bundle_path}" "showcase/fetch/main.lynx.bundle" \
+  "showcase-smoke/fetch.main.lynx.bundle"
+
+smoke_launch_external_bundle \
+  "${artifacts_dir}/lynx-window-cli/runtime-smoke/homepage.main.lynx.bundle" \
+  "runtime-smoke" \
+  "${logs_dir}/lynx-runtime-smoke.log"
+smoke_launch_external_bundle \
+  "${artifacts_dir}/lynx-window-cli/showcase-smoke/menu.main.lynx.bundle" \
+  "showcase-menu-smoke" \
+  "${logs_dir}/lynx-showcase-menu-smoke.log"

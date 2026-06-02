@@ -55,10 +55,11 @@ Validated facts:
 1. `xcodebuild` can produce `LynxExplorer.app`.
 2. `cargo build -p opentray-lynx-window-cli --release` can produce a standalone launcher binary.
 3. The app bundle and launcher binary can be archived and downloaded from CI.
-4. `lynx-window-cli` can resolve `--bundle <path>` into a file URL, launch the Lynx runtime,
-   and keep the process alive through a stability window.
-5. The app can load an external `file://.../*.lynx.bundle` and stay alive through a stability
-   window.
+4. `lynx-window-cli` can stage an external bundle into the runtime app resources, convert it to
+   LynxExplorer's `file://lynx?local://...` scheme, launch the runtime, and keep the process
+   alive through a stability window.
+5. The app can load an external `*.lynx.bundle` that is distinct from the built-in homepage
+   bundle and stay alive through a stability window.
 
 This is the correct P0 proof, because it verifies the runtime atom itself before binding it to
 the still-incomplete extension host.
@@ -104,7 +105,18 @@ research/lynx/artifacts/
     lynx-window-cli
     LynxExplorer.app.zip
     runtime-smoke/homepage.main.lynx.bundle
+    showcase-smoke/menu.main.lynx.bundle
+    showcase-smoke/fetch.main.lynx.bundle
 ```
+
+### Current macOS host additions
+
+The research probe now carries two macOS-specific host fixes before packaging the runtime:
+
+- patch `LynxHttpServiceImpl` so JS `fetch()` uses request headers/body, fills response URL and
+  status text, and completes the native callback
+- patch the built `LynxExplorer.app` `Info.plist` with permissive ATS settings so the current
+  upstream `showcase/fetch` example can reach its `http://` endpoint during research
 
 ### Phase 2: Generic dynamic-loader foundation
 
