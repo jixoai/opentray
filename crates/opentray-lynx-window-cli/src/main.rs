@@ -10,8 +10,6 @@ mod macos {
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use url::Url;
-
     #[derive(Debug, Default)]
     struct Cli {
         app: Option<PathBuf>,
@@ -25,15 +23,32 @@ mod macos {
         kill_after_stability_window: bool,
     }
 
+    #[derive(Debug)]
+    struct PreparedLaunch {
+        launch_url: String,
+        runtime_executable: PathBuf,
+    }
+
+    #[derive(Debug)]
+    struct ResolvedRuntime {
+        app_bundle: PathBuf,
+        executable: PathBuf,
+        is_staged: bool,
+    }
+
+    const STAGED_EXTERNAL_DIR: &str = "opentray-external";
+    const STAGED_EXTERNAL_BUNDLE_NAME: &str = "main.lynx.bundle";
+
     pub fn run() -> Result<(), Box<dyn Error>> {
         let cli = Cli::parse(env::args_os().skip(1))?;
-        let launch_url = cli.launch_url()?;
+        let runtime = cli.resolve_runtime()?;
+        let prepared = cli.prepare_launch(runtime)?;
+
         if let Some(path) = &cli.resolved_url_out {
-            write_text(path, &(launch_url.clone() + "\n"))?;
+            write_text(path, &(prepared.launch_url.clone() + "\n"))?;
         }
 
-        let runtime_executable = cli.resolve_runtime_executable()?;
-        let mut child = cli.spawn_runtime(&runtime_executable, &launch_url)?;
+        let mut child = cli.spawn_runtime(&prepared.runtime_executable, &prepared.launch_url)?;
 
         match cli.stability_window_ms {
             None => Ok(()),
@@ -89,30 +104,38 @@ mod macos {
             Ok(cli)
         }
 
-        fn launch_url(&self) -> Result<String, Box<dyn Error>> {
+        fn prepare_launch(
+            &self,
+            runtime: ResolvedRuntime,
+        ) -> Result<PreparedLaunch, Box<dyn Error>> {
             if let Some(url) = &self.url {
-                return Ok(url.clone());
+                return Ok(PreparedLaunch {
+                    launch_url: url.clone(),
+                    runtime_executable: runtime.executable,
+                });
             }
 
-            let bundle = self
+            let source_bundle = self
                 .bundle
                 .as_ref()
                 .expect("validated bundle/url exclusivity");
-            let bundle = bundle.canonicalize()?;
-            Url::from_file_path(&bundle)
-                .map(|url| url.to_string())
-                .map_err(|()| {
-                    format!(
-                        "failed to convert bundle path to file URL: {}",
-                        bundle.display()
-                    )
-                    .into()
-                })
+            let source_bundle = source_bundle.canonicalize()?;
+            let runtime = if runtime.is_staged {
+                runtime
+            } else {
+                stage_runtime_bundle(&runtime.app_bundle)?
+            };
+            let relative_bundle_path = stage_external_bundle(&source_bundle, &runtime.app_bundle)?;
+
+            Ok(PreparedLaunch {
+                launch_url: legacy_local_bundle_url(&relative_bundle_path),
+                runtime_executable: runtime.executable,
+            })
         }
 
-        fn resolve_runtime_executable(&self) -> Result<PathBuf, Box<dyn Error>> {
+        fn resolve_runtime(&self) -> Result<ResolvedRuntime, Box<dyn Error>> {
             if let Some(path) = &self.app {
-                return app_executable_path(path);
+                return runtime_from_path(path, false);
             }
 
             let current_exe = env::current_exe()?;
@@ -122,7 +145,7 @@ mod macos {
 
             let sibling_app = exe_dir.join("LynxExplorer.app");
             if sibling_app.is_dir() {
-                return app_executable_path(&sibling_app);
+                return runtime_from_path(&sibling_app, false);
             }
 
             let runtime_zip = self
@@ -201,6 +224,53 @@ mod macos {
         }
     }
 
+    fn runtime_from_path(path: &Path, is_staged: bool) -> Result<ResolvedRuntime, Box<dyn Error>> {
+        let app_bundle = app_bundle_path(path)?;
+        let executable = app_executable_path(&app_bundle)?;
+        Ok(ResolvedRuntime {
+            app_bundle,
+            executable,
+            is_staged,
+        })
+    }
+
+    fn app_bundle_path(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
+        if path.is_dir() {
+            let executable = path.join("Contents/MacOS/LynxExplorer");
+            if executable.is_file() {
+                return Ok(path.to_path_buf());
+            }
+        }
+
+        if path.is_file() {
+            let macos_dir = path
+                .parent()
+                .ok_or("runtime executable has no parent directory")?;
+            let contents_dir = macos_dir
+                .parent()
+                .ok_or("runtime executable has no Contents parent")?;
+            let app_bundle = contents_dir
+                .parent()
+                .ok_or("runtime executable has no app bundle parent")?;
+
+            if macos_dir.file_name() == Some(std::ffi::OsStr::new("MacOS"))
+                && contents_dir.file_name() == Some(std::ffi::OsStr::new("Contents"))
+                && app_bundle
+                    .file_name()
+                    .map(|name| name.to_string_lossy().ends_with(".app"))
+                    .unwrap_or(false)
+            {
+                return Ok(app_bundle.to_path_buf());
+            }
+        }
+
+        Err(format!(
+            "expected Lynx app bundle or executable, got {}",
+            path.display()
+        )
+        .into())
+    }
+
     fn app_executable_path(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
         if path.is_file() {
             return Ok(path.to_path_buf());
@@ -218,12 +288,8 @@ mod macos {
         .into())
     }
 
-    fn extract_runtime_zip(runtime_zip: &Path) -> Result<PathBuf, Box<dyn Error>> {
-        let launch_root = env::temp_dir()
-            .join("opentray-lynx-window-cli")
-            .join(unique_launch_id());
-        fs::create_dir_all(&launch_root)?;
-
+    fn extract_runtime_zip(runtime_zip: &Path) -> Result<ResolvedRuntime, Box<dyn Error>> {
+        let launch_root = fresh_launch_root()?;
         let status = Command::new("/usr/bin/ditto")
             .arg("-x")
             .arg("-k")
@@ -234,8 +300,50 @@ mod macos {
             return Err(format!("failed to extract {}", runtime_zip.display()).into());
         }
 
-        let app_path = launch_root.join("LynxExplorer.app");
-        app_executable_path(&app_path)
+        runtime_from_path(&launch_root.join("LynxExplorer.app"), true)
+    }
+
+    fn stage_runtime_bundle(app_bundle: &Path) -> Result<ResolvedRuntime, Box<dyn Error>> {
+        let launch_root = fresh_launch_root()?;
+        let staged_app_bundle = launch_root.join("LynxExplorer.app");
+        let status = Command::new("/usr/bin/ditto")
+            .arg(app_bundle)
+            .arg(&staged_app_bundle)
+            .status()?;
+        if !status.success() {
+            return Err(format!("failed to stage runtime bundle {}", app_bundle.display()).into());
+        }
+
+        runtime_from_path(&staged_app_bundle, true)
+    }
+
+    fn stage_external_bundle(
+        source_bundle: &Path,
+        app_bundle: &Path,
+    ) -> Result<String, Box<dyn Error>> {
+        let resource_dir = app_bundle
+            .join("Contents/Resources/Resource")
+            .join(STAGED_EXTERNAL_DIR);
+        fs::create_dir_all(&resource_dir)?;
+
+        let staged_bundle = resource_dir.join(STAGED_EXTERNAL_BUNDLE_NAME);
+        fs::copy(source_bundle, &staged_bundle)?;
+
+        Ok(format!(
+            "{STAGED_EXTERNAL_DIR}/{STAGED_EXTERNAL_BUNDLE_NAME}"
+        ))
+    }
+
+    fn legacy_local_bundle_url(relative_bundle_path: &str) -> String {
+        format!("file://lynx?local://{relative_bundle_path}")
+    }
+
+    fn fresh_launch_root() -> Result<PathBuf, io::Error> {
+        let launch_root = env::temp_dir()
+            .join("opentray-lynx-window-cli")
+            .join(unique_launch_id());
+        fs::create_dir_all(&launch_root)?;
+        Ok(launch_root)
     }
 
     fn unique_launch_id() -> String {
@@ -295,9 +403,14 @@ Options:
 
     #[cfg(test)]
     mod tests {
-        use super::Cli;
+        use super::{
+            app_bundle_path, legacy_local_bundle_url, stage_external_bundle, Cli,
+            STAGED_EXTERNAL_BUNDLE_NAME, STAGED_EXTERNAL_DIR,
+        };
         use std::ffi::OsString;
+        use std::fs;
         use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
 
         #[test]
         fn parses_bundle_invocation() {
@@ -334,6 +447,69 @@ Options:
             assert!(error
                 .to_string()
                 .contains("exactly one of --bundle or --url is required"));
+        }
+
+        #[test]
+        fn legacy_bundle_launch_uses_lynx_local_scheme() {
+            let relative_path = format!("{STAGED_EXTERNAL_DIR}/{STAGED_EXTERNAL_BUNDLE_NAME}");
+            assert_eq!(
+                legacy_local_bundle_url(&relative_path),
+                format!("file://lynx?local://{relative_path}")
+            );
+        }
+
+        #[test]
+        fn stages_external_bundle_into_runtime_resources() {
+            let temp_root = test_dir("stage-external-bundle");
+            let source_bundle = temp_root.join("external.lynx.bundle");
+            let app_bundle = temp_root.join("LynxExplorer.app");
+            let resource_dir = app_bundle.join("Contents/Resources/Resource");
+
+            fs::create_dir_all(&resource_dir).expect("create resource dir");
+            fs::write(&source_bundle, b"bundle-bytes").expect("write source bundle");
+
+            let relative_path =
+                stage_external_bundle(&source_bundle, &app_bundle).expect("stage bundle");
+            let staged_bundle = resource_dir
+                .join(STAGED_EXTERNAL_DIR)
+                .join(STAGED_EXTERNAL_BUNDLE_NAME);
+
+            assert_eq!(
+                relative_path,
+                format!("{STAGED_EXTERNAL_DIR}/{STAGED_EXTERNAL_BUNDLE_NAME}")
+            );
+            assert_eq!(
+                fs::read(&staged_bundle).expect("read staged bundle"),
+                b"bundle-bytes"
+            );
+
+            fs::remove_dir_all(&temp_root).expect("cleanup temp dir");
+        }
+
+        #[test]
+        fn resolves_app_bundle_from_executable_path() {
+            let temp_root = test_dir("resolve-app-bundle");
+            let executable = temp_root.join("LynxExplorer.app/Contents/MacOS/LynxExplorer");
+
+            fs::create_dir_all(executable.parent().expect("executable parent"))
+                .expect("create executable parent");
+            fs::write(&executable, b"").expect("write executable");
+
+            let resolved = app_bundle_path(&executable).expect("resolve bundle");
+            assert_eq!(resolved, temp_root.join("LynxExplorer.app"));
+
+            fs::remove_dir_all(&temp_root).expect("cleanup temp dir");
+        }
+
+        fn test_dir(label: &str) -> PathBuf {
+            let millis = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time")
+                .as_millis();
+            std::env::temp_dir().join(format!(
+                "opentray-lynx-window-cli-tests-{label}-{}-{millis}",
+                std::process::id()
+            ))
         }
     }
 }
