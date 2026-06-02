@@ -23,6 +23,9 @@ describe("Feature: release native binary CI law", () => {
     const releaseJob = workflow.slice(workflow.indexOf("  release:"));
 
     expect(workflow).toContain("packages+=(-p opentray-ext-lynx)");
+    expect(workflow).toContain("Seed Googlesource hosts");
+    expect(workflow).toContain("sudo python3 scripts/ci/seed_hosts_from_doh.py");
+    expect(workflow).toContain("flutter.googlesource.com");
     expect(workflow).toContain("Build Lynx runtime sidecar");
     expect(workflow).toContain("python3 scripts/ci/run_with_watchdog.py");
     expect(workflow).toContain("bash scripts/release/build-lynx-runtime.sh \"native-artifacts/LynxExplorer.app.zip\"");

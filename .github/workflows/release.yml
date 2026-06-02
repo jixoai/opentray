@@ -86,6 +86,17 @@ jobs:
           restore-keys: |
             lynx-release-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-
 
+      - name: Seed Googlesource hosts
+        if: startsWith(matrix.target, 'darwin-')
+        shell: bash
+        run: |
+          sudo python3 scripts/ci/seed_hosts_from_doh.py \
+            flutter.googlesource.com \
+            chromium.googlesource.com \
+            fuchsia.googlesource.com \
+            skia.googlesource.com \
+            swiftshader.googlesource.com
+
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
 
