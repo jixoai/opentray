@@ -1,5 +1,11 @@
 # opentray
 
+## 0.3.1
+
+### Patch Changes
+
+- 917f0b2: Export `createSpace`, `createTray`, and `resolveDefaultSpace` from the top-level `opentray` package so the published SDK matches the documented broker-backed entrypoints.
+
 ## 0.3.0
 
 ### Minor Changes
