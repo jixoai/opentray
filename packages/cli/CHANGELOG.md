@@ -1,5 +1,16 @@
 # opentray
 
+## 0.3.0
+
+### Minor Changes
+
+- 3ff6285: Adopt the public Space/Tray/Session vocabulary for protocol and SDK APIs, keep deprecated Surface aliases for alpha migration, and publish the WebView extension runtime/docs update with platform package versioning.
+
+### Patch Changes
+
+- Updated dependencies [3ff6285]
+  - @opentray/spec@0.3.0
+
 ## 0.2.4
 
 ### Patch Changes

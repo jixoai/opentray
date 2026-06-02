@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-webview-darwin-x64",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "OpenTray WebView native extension for macOS x64.",
   "license": "MIT",
   "repository": {

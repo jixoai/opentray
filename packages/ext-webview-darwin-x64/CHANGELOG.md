@@ -1,5 +1,7 @@
 # @opentray/ext-webview-darwin-x64
 
+## 0.3.0
+
 ## 0.1.0
 
 ### Minor Changes

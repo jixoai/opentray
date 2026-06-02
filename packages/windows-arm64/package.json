@@ -1,6 +1,6 @@
 {
   "name": "@opentray/windows-arm64",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "description": "OpenTray broker binary package for Windows ARM64.",
   "license": "MIT",
   "repository": {
