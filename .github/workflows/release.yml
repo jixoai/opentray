@@ -24,35 +24,47 @@ jobs:
   native-artifacts:
     name: Native artifacts (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.job_timeout_minutes }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: darwin-arm64
             runner: macos-15
+            job_timeout_minutes: 90
+            lynx_timeout_seconds: 4500
             daemon_artifact: opentray
             webview_artifact: libopentray_ext_webview.dylib
             lynx_artifact: libopentray_ext_lynx.dylib
           - target: darwin-x64
             runner: macos-15-intel
+            job_timeout_minutes: 120
+            lynx_timeout_seconds: 5700
             daemon_artifact: opentray
             webview_artifact: libopentray_ext_webview.dylib
             lynx_artifact: libopentray_ext_lynx.dylib
           - target: linux-arm64
             runner: ubuntu-24.04-arm
+            job_timeout_minutes: 90
+            lynx_timeout_seconds: 4500
             daemon_artifact: opentray
             webview_artifact: libopentray_ext_webview.so
           - target: linux-x64
             runner: ubuntu-24.04
+            job_timeout_minutes: 90
+            lynx_timeout_seconds: 4500
             daemon_artifact: opentray
             webview_artifact: libopentray_ext_webview.so
           - target: windows-arm64
             runner: windows-11-arm
+            job_timeout_minutes: 90
+            lynx_timeout_seconds: 4500
             daemon_artifact: opentray.exe
             webview_artifact: opentray_ext_webview.dll
           - target: windows-x64
             runner: windows-2025
+            job_timeout_minutes: 90
+            lynx_timeout_seconds: 4500
             daemon_artifact: opentray.exe
             webview_artifact: opentray_ext_webview.dll
     steps:
@@ -122,7 +134,7 @@ jobs:
         run: |
           python3 scripts/ci/run_with_watchdog.py \
             --label "lynx-runtime-${{ matrix.target }}" \
-            --timeout-seconds 4500 \
+            --timeout-seconds "${{ matrix.lynx_timeout_seconds }}" \
             --heartbeat-seconds 60 \
             -- \
             bash scripts/release/build-lynx-runtime.sh "native-artifacts/LynxExplorer.app.zip"

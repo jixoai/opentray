@@ -29,6 +29,8 @@ describe("Feature: release native binary CI law", () => {
     expect(workflow).toContain("Build Lynx runtime sidecar");
     expect(workflow).toContain("python3 scripts/ci/run_with_watchdog.py");
     expect(workflow).toContain("bash scripts/release/build-lynx-runtime.sh \"native-artifacts/LynxExplorer.app.zip\"");
+    expect(workflow).toContain("job_timeout_minutes: 120");
+    expect(workflow).toContain("lynx_timeout_seconds: 5700");
     expect(workflow).toContain("Upload Lynx build logs");
     expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("Download native artifacts");
