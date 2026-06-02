@@ -113,8 +113,8 @@ research/lynx/artifacts/
 
 The research probe now carries two macOS-specific host fixes before packaging the runtime:
 
-- patch `LynxHttpServiceImpl` so JS `fetch()` uses request headers/body, fills response URL and
-  status text, and completes the native callback
+- patch `LynxHttpServiceImpl` so JS `fetch()` uses request headers/body, fills response status
+  text and headers, and completes the native callback
 - patch the built `LynxExplorer.app` `Info.plist` with permissive ATS settings so the current
   upstream `showcase/fetch` example can reach its `http://` endpoint during research
 
