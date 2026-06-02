@@ -9,7 +9,10 @@ describe("Feature: release native binary CI law", () => {
   test("Scenario: Given release native artifacts When workflow is inspected Then Rust setup cache and artifact transport use maintained Actions", () => {
     const workflow = releaseWorkflow();
 
+    expect(workflow).toContain("uses: actions/setup-node@v6");
     expect(workflow).toContain("uses: dtolnay/rust-toolchain@stable");
+    expect(workflow).toContain("uses: actions/cache/restore@v4");
+    expect(workflow).toContain("uses: actions/cache/save@v4");
     expect(workflow).toContain("uses: Swatinem/rust-cache@v2");
     expect(workflow).toContain("uses: actions/upload-artifact@v4");
     expect(workflow).toContain("uses: actions/download-artifact@v4");

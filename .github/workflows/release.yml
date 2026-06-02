@@ -10,6 +10,11 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  LYNX_REF: "3a936299ec1669cfd1f3da71e41240296bc226b3"
+  LYNX_XCODE_VERSION: "16.4"
+
 permissions:
   contents: write
   id-token: write
@@ -19,6 +24,7 @@ jobs:
   native-artifacts:
     name: Native artifacts (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -53,6 +59,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        if: startsWith(matrix.target, 'darwin-')
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -60,7 +72,19 @@ jobs:
         if: startsWith(matrix.target, 'darwin-')
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "16.4"
+          xcode-version: ${{ env.LYNX_XCODE_VERSION }}
+
+      - name: Restore Lynx caches
+        if: startsWith(matrix.target, 'darwin-')
+        id: lynx-cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.habitat_cache
+            research/lynx/cache
+          key: lynx-release-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-${{ hashFiles('scripts/release/build-lynx-runtime.sh', 'scripts/release/lynx-macos.args.gn', 'scripts/release/lynx-mirrored-urls.txt') }}
+          restore-keys: |
+            lynx-release-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-
 
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
@@ -81,6 +105,15 @@ jobs:
             cp "target/release/${{ matrix.lynx_artifact }}" native-artifacts/
             bash scripts/release/build-lynx-runtime.sh "native-artifacts/LynxExplorer.app.zip"
           fi
+
+      - name: Save Lynx caches
+        if: startsWith(matrix.target, 'darwin-') && always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.habitat_cache
+            research/lynx/cache
+          key: ${{ steps.lynx-cache-restore.outputs.cache-primary-key }}
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4

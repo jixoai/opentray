@@ -20,7 +20,7 @@
 - [x] 3.7 Extend native artifact staging scripts, tests, and release workflow so darwin release jobs stage `libopentray_ext_lynx.dylib` plus `LynxExplorer.app.zip` into Lynx platform packages.
 - [x] 3.8 Add concise intent comments only at critical effect points where the runtime sidecar/package law would otherwise be easy to misread.
 - [x] 3.9 Add a changeset for any package releases required by the third-stage Lynx landing.
-- [ ] 3.10 Bootstrap any newly created npm package atoms and trusted publishing state needed before the release workflow can publish them.
+- [x] 3.10 Bootstrap any newly created npm package atoms and trusted publishing state needed before the release workflow can publish them.
 - [x] 3.11 Update only current-context completed task checkboxes and commit them with the matching implementation / BDD evidence.
 
 ## 4. Verification
@@ -29,7 +29,7 @@
 - [x] 4.2 Build or reuse a real `.lynx.bundle` and prove the local Lynx smoke path launches a visible macOS runtime through the generic extension path.
 - [x] 4.3 Run `bun run openspec:vision -- validate implement-ext-lynx-macos-extension` for this change.
 - [x] 4.4 Run repo-level verification after the Lynx-specific gates are green.
-- [ ] 4.5 Run `bun run openspec:vision -- commit-check implement-ext-lynx-macos-extension --phase self-review` before writing final review evidence.
+- [x] 4.5 Run `bun run openspec:vision -- commit-check implement-ext-lynx-macos-extension --phase self-review` before writing final review evidence.
 - [ ] 4.6 After publish, perform fresh-install npm acceptance for `opentray` + `@opentray/ext-lynx` and record the real package/version proof.
 
 ## 5. Self-Review Loop

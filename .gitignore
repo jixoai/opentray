@@ -22,5 +22,7 @@ packages/*/bin/opentray*
 packages/ext-webview-*/bin/*.dll
 packages/ext-webview-*/lib/*.dylib
 packages/ext-webview-*/lib/*.so
+packages/ext-lynx-*/lib/*.dylib
+packages/ext-lynx-*/runtime/*.zip
 
 *.tsbuildinfo
