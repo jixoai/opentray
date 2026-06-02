@@ -12,10 +12,28 @@ pnpm add opentray
 
 ## First Flow
 
-1. Create a broker connection.
+1. Import the top-level SDK from `opentray`.
 2. Create or resolve a space.
 3. Create a tray on that space.
 4. Set title, tooltip, icon, and menu through the public SDK.
+
+Typical consumer entrypoint:
+
+```ts
+import { createSpace } from "opentray";
+
+const space = await createSpace({
+  id: "com.example.app",
+  default: true,
+});
+
+await space.createTray({
+  trayId: "status",
+  title: "OpenTray",
+});
+```
+
+Use the lower-level transport APIs only for custom protocol work.
 
 For a ready-made example:
 
@@ -23,7 +41,7 @@ For a ready-made example:
 pnpm --filter opentray example:basic
 ```
 
-This is protocol-only and useful for learning request/response flow.
+This is still useful for learning the request/response flow, but the public consumer path should start from top-level `opentray` exports.
 
 ## Real Native Smoke
 

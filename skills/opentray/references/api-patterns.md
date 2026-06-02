@@ -4,29 +4,44 @@ Use this reference when the user asks how to write code with OpenTray.
 
 ## Main Public Pieces
 
-- `createClient()`: build a client over a transport.
-- `createSpace()`: get a broker-owned space.
-- `createTray()`: mount a client-owned tray onto that space.
+- `createSpace()`: top-level broker-backed entrypoint for creating a broker-owned space.
+- `createTray()`: top-level convenience API that mounts a client-owned tray onto an explicit or default space.
+- `resolveDefaultSpace()`: inspect or reuse the daemon's default space explicitly.
 - `TrayHandle.commandExtension()`: send extension traffic through the public contract.
+- `createClient()`: lower-level transport API for custom broker connections and protocol-only work.
 
 ## Typical Shape
 
 ```ts
-const connection = await connectLocalBroker();
-const client = createClient(connection);
+import { createSpace, createTray, resolveDefaultSpace } from "opentray";
 
-const space = await client.createSpace({
+const space = await createSpace({
   id: "com.example.app",
   title: "Example",
   default: true,
 });
 
-const tray = await space.createTray({
+await space.createTray({
   trayId: "status",
   title: "OpenTray",
   menu: { items: [{ type: "item", id: 1, title: "Open" }] },
 });
+
+const defaultSpace = await resolveDefaultSpace();
+await createTray(
+  {
+    trayId: "secondary",
+    title: "Secondary",
+  },
+  { space: defaultSpace.space },
+);
 ```
+
+If the caller omits `space` in `createTray(...)`, OpenTray resolves the broker default space automatically.
+
+## Lower-Level Shape
+
+Use `createClient()` only when the user explicitly needs custom transport ownership or protocol inspection.
 
 ## Extension Shape
 
