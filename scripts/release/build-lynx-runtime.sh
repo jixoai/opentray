@@ -366,15 +366,19 @@ deps_files=(
   "${lynx_dir}/dependencies/DEPS.clay"
   "${lynx_dir}/tools_shared/dependencies/DEPS"
 )
+echo "Prefetching mirrored Lynx dependencies"
 prefetch_and_rewrite_urls
+echo "Starting local Lynx dependency mirror on 127.0.0.1:${mirror_port}"
 start_local_mirror
 
 set +u
 source tools/envsetup.sh
 set -u
 
+echo "Running tools/hab sync"
 tools/hab sync . --target clay 2>&1 | tee "${logs_dir}/hab-sync.log"
 
+echo "Generating Xcode project with GN"
 buildtools/gn/gn gen "${out_dir}" \
   --args="$(<"${args_file}")" \
   --ide=xcode \
@@ -382,6 +386,7 @@ buildtools/gn/gn gen "${out_dir}" \
 
 patch_generated_lynx_explorer_outputs
 
+echo "Building Lynx Explorer with xcodebuild"
 xcodebuild \
   -project "${out_dir}/all.xcodeproj" \
   -scheme lynx_explorer \

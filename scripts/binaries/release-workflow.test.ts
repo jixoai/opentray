@@ -23,7 +23,11 @@ describe("Feature: release native binary CI law", () => {
     const releaseJob = workflow.slice(workflow.indexOf("  release:"));
 
     expect(workflow).toContain("packages+=(-p opentray-ext-lynx)");
+    expect(workflow).toContain("Build Lynx runtime sidecar");
+    expect(workflow).toContain("python3 scripts/ci/run_with_watchdog.py");
     expect(workflow).toContain("bash scripts/release/build-lynx-runtime.sh \"native-artifacts/LynxExplorer.app.zip\"");
+    expect(workflow).toContain("Upload Lynx build logs");
+    expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("Download native artifacts");
     expect(releaseJob).toContain("Stage native artifacts into npm packages");
     expect(releaseJob).toContain("--source \"native-artifacts/native-${target}/${daemon_artifact}\"");

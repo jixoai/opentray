@@ -89,7 +89,7 @@ jobs:
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
 
-      - name: Build native artifacts
+      - name: Build Rust artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -103,8 +103,18 @@ jobs:
           cp "target/release/${{ matrix.webview_artifact }}" native-artifacts/
           if [[ "${{ matrix.target }}" == darwin-* ]]; then
             cp "target/release/${{ matrix.lynx_artifact }}" native-artifacts/
-            bash scripts/release/build-lynx-runtime.sh "native-artifacts/LynxExplorer.app.zip"
           fi
+
+      - name: Build Lynx runtime sidecar
+        if: startsWith(matrix.target, 'darwin-')
+        shell: bash
+        run: |
+          python3 scripts/ci/run_with_watchdog.py \
+            --label "lynx-runtime-${{ matrix.target }}" \
+            --timeout-seconds 4500 \
+            --heartbeat-seconds 60 \
+            -- \
+            bash scripts/release/build-lynx-runtime.sh "native-artifacts/LynxExplorer.app.zip"
 
       - name: Save Lynx caches
         if: startsWith(matrix.target, 'darwin-') && always()
@@ -114,6 +124,18 @@ jobs:
             ~/.habitat_cache
             research/lynx/cache
           key: ${{ steps.lynx-cache-restore.outputs.cache-primary-key }}
+
+      - name: Upload Lynx build logs
+        if: startsWith(matrix.target, 'darwin-') && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lynx-build-logs-${{ matrix.target }}-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            research/lynx/logs/**
+            research/lynx/upstream/lynx/out/Default/args.gn
+            research/lynx/upstream/lynx/out/Default/all.xcodeproj/project.pbxproj
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
