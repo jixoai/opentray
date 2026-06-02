@@ -260,6 +260,40 @@ if patched != text:
 PY
 }
 
+rewrite_buildtools_template_urls_if_present() {
+  local file="$1"
+  local mirror_base="http://127.0.0.1:${mirror_port}"
+
+  python3 - "$file" "$mirror_base" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+mirror_base = sys.argv[2]
+if not path.exists():
+    raise SystemExit(0)
+
+text = path.read_text()
+pattern = re.compile(
+    r'(?P<prefix>["\']url["\']\s*:\s*f["\'])'
+    r'https://github\.com/lynx-family/buildtools/releases/download/[^/]+/'
+    r'(?P<basename>buildtools-[^"\']*?)\{system\}-\{machine\}'
+    r'(?P<suffix>\.tar\.gz["\'])'
+)
+patched = pattern.sub(
+    lambda match: (
+        f'{match.group("prefix")}{mirror_base}/'
+        f'{match.group("basename")}{{system}}-{{machine}}'
+        f'{match.group("suffix")}'
+    ),
+    text,
+)
+if patched != text:
+    path.write_text(patched)
+PY
+}
+
 start_local_mirror() {
   python3 -m http.server "${mirror_port}" \
     --bind 127.0.0.1 \
@@ -276,6 +310,10 @@ prefetch_and_rewrite_urls() {
   local cached=""
   local local_url=""
   local deps_file=""
+
+  for deps_file in "${deps_files[@]}"; do
+    rewrite_buildtools_template_urls_if_present "${deps_file}"
+  done
 
   while IFS= read -r url; do
     if [[ -z "${url}" ]]; then
