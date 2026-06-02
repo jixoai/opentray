@@ -25,21 +25,23 @@ interface WebviewShowCommand {
   width?: number;
   height?: number;
   fallbackRect?: Rect;
+  nativeWindowApi?: boolean;
+  bindWindowGlobals?: boolean;
 }
 
 export const runDaemonTraySmoke = async (): Promise<void> => {
   const connection = await connectLocalBroker();
   const client = createClient(connection, { requestIdPrefix: "daemon-smoke" });
-  console.log(`connected: endpoint=${connection.endpoint} lease=${connection.leaseId}`);
+  console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
 
-  const surface = await client.createSurface({
-    appId: "com.example.opentray.daemon-smoke",
+  const space = await client.createSpace({
+    id: "com.example.opentray.daemon-smoke",
     title: "OpenTray Daemon Smoke",
     default: true,
   });
-  console.log(`surface: ${JSON.stringify(surface.surface)}`);
+  console.log(`space: ${JSON.stringify(space.space)}`);
 
-  const tray = await surface.createTray({
+  const tray = await space.createTray({
     trayId: "daemon-smoke-status",
     title: "OpenTray",
     tooltip: {
@@ -84,7 +86,7 @@ export const runDaemonTraySmoke = async (): Promise<void> => {
   await connection.request({
     type: "load-ext",
     requestId: "daemon-smoke-load-webview",
-    surfaceId: surface.surface.surfaceId,
+    spaceId: space.space.spaceId,
     name: "webview",
     path: "@opentray/ext-webview",
   });
@@ -130,6 +132,8 @@ export const runDaemonTraySmoke = async (): Promise<void> => {
           width: 420,
           height: 260,
           fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
+          nativeWindowApi: true,
+          bindWindowGlobals: true,
         });
         console.log("webview command: show");
         break;

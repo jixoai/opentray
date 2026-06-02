@@ -124,8 +124,9 @@ export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
   ];
 
   for (const session of health.sessions) {
+    const internalLease = session.internalLeaseId ?? "(pending)";
     lines.push(
-      `- sessionId=${session.sessionId} initialized=${session.initialized} leaseId=${session.leaseId ?? "(pending)"}`,
+      `- sessionId=${session.sessionId} initialized=${session.initialized} internalLeaseId=${internalLease}`,
     );
   }
 

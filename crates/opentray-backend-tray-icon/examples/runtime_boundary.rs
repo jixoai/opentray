@@ -16,7 +16,7 @@ fn main() -> Result<(), BackendError> {
     let projections = projections.borrow();
     let projection = projections.last().expect("projection applied");
     println!("applied projections: {}", projections.len());
-    println!("surface: {}", projection.surface_id);
+    println!("space: {}", projection.space_id);
 
     for tray in &projection.trays {
         println!(

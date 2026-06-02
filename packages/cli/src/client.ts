@@ -4,8 +4,8 @@ import {
   type ClientRequestFrame,
   type RequestId,
   type ServerFrame,
-  type SurfaceOptions,
-  type SurfaceRef,
+  type SpaceOptions,
+  type SpaceRef,
   type TrayId,
   type TrayOptions,
 } from "@opentray/spec";
@@ -15,16 +15,21 @@ export interface OpenTrayTransport {
 }
 
 export interface OpenTrayClient {
-  createSurface(options: SurfaceOptions): Promise<SurfaceHandle>;
+  createSpace(options: SpaceOptions): Promise<SpaceHandle>;
+  /** @deprecated Use `createSpace`. */
+  createSurface(options: SpaceOptions): Promise<SpaceHandle>;
 }
 
-export interface SurfaceHandle {
-  surface: SurfaceRef;
+export interface SpaceHandle {
+  space: SpaceRef;
   createTray(options: TrayOptions): Promise<TrayHandle>;
 }
 
+/** @deprecated Use `SpaceHandle`. */
+export type SurfaceHandle = SpaceHandle;
+
 export interface TrayHandle {
-  surface: SurfaceRef;
+  space: SpaceRef;
   trayId: TrayId;
   commandExtension(ext: string, data: unknown): Promise<void>;
   destroy(): Promise<void>;
@@ -47,52 +52,58 @@ export const createClient = (
   const nextRequestId = createRequestIdFactory(options.requestIdPrefix ?? "opentray");
 
   return {
-    async createSurface(surfaceOptions): Promise<SurfaceHandle> {
+    async createSpace(spaceOptions): Promise<SpaceHandle> {
       const requestId = nextRequestId();
       const response = await transport.request({
-        type: "create-surface",
+        type: "create-space",
         requestId,
-        ...surfaceOptions,
+        ...spaceOptions,
       });
-      const surface = expectResponse(response, requestId, "surface-created").surface;
-      return createSurfaceHandle(transport, surface, nextRequestId);
+      const space = expectResponse(response, requestId, "space-created").space;
+      return createSpaceHandle(transport, space, nextRequestId);
+    },
+    async createSurface(spaceOptions): Promise<SpaceHandle> {
+      return this.createSpace(spaceOptions);
     },
   };
 };
 
-export const createSurfaceHandle = (
+export const createSpaceHandle = (
   transport: OpenTrayTransport,
-  surface: SurfaceRef,
+  space: SpaceRef,
   nextRequestId: () => RequestId = createRequestIdFactory("opentray"),
-): SurfaceHandle => ({
-  surface,
+): SpaceHandle => ({
+  space,
   async createTray(options: TrayOptions): Promise<TrayHandle> {
     const requestId = nextRequestId();
     const response = await transport.request({
       type: "create-tray",
       requestId,
-      surface,
+      space,
       tray: options,
     });
     const frame = expectResponse(response, requestId, "tray-created");
-    return createTrayHandle(transport, surface, frame.trayId, nextRequestId);
+    return createTrayHandle(transport, space, frame.trayId, nextRequestId);
   },
 });
 
+/** @deprecated Use `createSpaceHandle`. */
+export const createSurfaceHandle = createSpaceHandle;
+
 export const createTrayHandle = (
   transport: OpenTrayTransport,
-  surface: SurfaceRef,
+  space: SpaceRef,
   trayId: TrayId,
   nextRequestId: () => RequestId = createRequestIdFactory("opentray"),
 ): TrayHandle => ({
-  surface,
+  space,
   trayId,
   async commandExtension(ext: string, data: unknown): Promise<void> {
     const requestId = nextRequestId();
     const response = await transport.request({
       type: "ext-command",
       requestId,
-      surfaceId: surface.surfaceId,
+      spaceId: space.spaceId,
       trayId,
       ext,
       data,
@@ -104,7 +115,7 @@ export const createTrayHandle = (
     const response = await transport.request({
       type: "destroy-tray",
       requestId,
-      surfaceId: surface.surfaceId,
+      spaceId: space.spaceId,
       trayId,
     });
     expectResponse(response, requestId, "ack");
@@ -139,8 +150,8 @@ const expectResponse = <TType extends ServerFrame["type"]>(
 
 const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
   switch (frame.type) {
-    case "surface-created":
-    case "default-surface":
+    case "space-created":
+    case "default-space":
     case "tray-created":
     case "ack":
     case "daemon-health":

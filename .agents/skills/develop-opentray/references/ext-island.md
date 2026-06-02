@@ -14,7 +14,7 @@ Island/live-activity is a roadmap capability atom. It must not define global pla
 
 ## Design Rules
 
-- Treat this as a capability-gated extension, not a universal surface type.
+- Treat this as a capability-gated extension, not a universal space type.
 - Do not import or depend on `@opentray/ext-webview` for core behavior.
 - Do not add island-specific branches to `opentray-core`.
 - Prefer a small event model that can degrade gracefully to tray menu/status updates where native island/live-activity concepts do not exist.

@@ -1,49 +1,35 @@
 ---
 name: opentray
-description: OpenTray architecture, extension, visual-acceptance, and release workflow guide. Use when working in the OpenTray repo on kernel/runtime laws, tray or Linux backend adapters, extension host behavior, official extension packages such as ext-webview/ext-badge/ext-island, runnable examples, npm trusted publishing, changesets, or first-stage release readiness.
+description: OpenTray user guide for installing `opentray`, creating spaces and trays, using daemon commands, loading official extensions such as `@opentray/ext-webview`, running smoke examples, and troubleshooting local usage. Use when the task is about consuming OpenTray as a package rather than modifying the OpenTray repository internals.
 ---
 
 # OpenTray
 
 ## Overview
 
-Use this skill to preserve OpenTray's platform physics while changing the repository. Keep `SKILL.md` as the routing layer; load only the reference article that matches the current work.
+Use this skill when the user wants to build with OpenTray, not hack on the repo. Treat it as the docs entrypoint: install the package, create a space, create a tray, attach official extensions, run smoke commands, and debug daemon/runtime issues from the consumer side.
 
-## First Moves
+## Quick Routing
 
-- Inspect repo truth before proposing architecture: `git status --short --branch`, relevant `openspec/changes`, specs, package manifests, and crate boundaries.
-- Prefer platform-law changes over glue. If a new need cannot fit `Surface`, `Tray`, `Lease`, `SurfaceBackend`, or `ExtensionInstance`, propose the law upgrade before implementation.
-- Keep `opentray-core` free of concrete GUI, backend, npm package, and extension imports.
-- For human-visible work, provide a real visual command such as `cargo run --example native_tray` or `cargo run --example visual_webview`, not only unit tests.
+- Install and first tray usage: read `references/getting-started.md`.
+- Public API patterns and examples: read `references/api-patterns.md`.
+- Daemon lifecycle, smoke commands, and health checks: read `references/daemon-ops.md`.
+- Official WebView extension usage: read `references/ext-webview.md`.
+- Common local issues and capability limits: read `references/troubleshooting.md`.
 
-## Reference Map
+## Consumer Rules
 
-- Kernel/runtime laws: read `references/kernel-runtime.md`.
-- Backend adapter laws: read `references/backend-adapters.md`.
-- Extension host laws: read `references/extension-host.md`.
-- WebView extension work: read `references/ext-webview.md`.
-- Badge extension work: read `references/ext-badge.md`.
-- Island/live-activity extension work: read `references/ext-island.md`.
-- Release, changesets, and npm trusted publishing: read `references/release.md`.
-- Human-visible examples and acceptance: read `references/visual-acceptance.md`.
+- Prefer package-owned commands such as `opentray smoke daemon-tray` over workspace-only developer commands when answering usage questions.
+- Keep platform truth explicit. If a platform or icon/runtime capability is limited, say so instead of pretending it works.
+- Distinguish between protocol-only examples and real native smoke commands.
 
-## Non-Negotiable Boundaries
+## Quick Verification
 
-- Do not add `if ext == "webview"` or equivalent feature branches in core.
-- Do not import `tray-icon`, `ksni`, `winit`, `tao`, `wry`, or platform npm packages into `opentray-core`.
-- Do not fake unavailable backend capability. Return capability absence or a typed unsupported error.
-- Do not present visual work as complete unless a human-visible example command exists and has been smoked.
-- Do not store long-lived `NPM_TOKEN` in GitHub Actions release publishing. Use npm trusted publishing with OIDC.
-
-## Verification Baseline
-
-Use the smallest targeted gate first, then close with the repo gate relevant to the work:
+Use one of these depending on the question:
 
 ```bash
-pnpm run build
-pnpm run verify
-openspec validate --all --strict
-git diff --check
+opentray daemon health
+opentray smoke daemon-tray
+pnpm --filter opentray example:basic
+pnpm --filter @opentray/ext-webview example:webview
 ```
-
-For visual examples, also run the relevant `cargo run --example <example_name>` smoke command from `references/visual-acceptance.md`.

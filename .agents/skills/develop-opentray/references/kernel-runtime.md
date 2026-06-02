@@ -4,11 +4,11 @@ Use this reference when changing `crates/opentray-core`, `crates/opentray-spec`,
 
 ## Platform Laws
 
-- `Surface` is the broker-owned physical desktop entry and aggregation boundary.
-- `Tray` is a client-owned contribution mounted onto exactly one surface.
-- `Lease` is the authority boundary. Lease cleanup removes only trays owned by that lease.
-- A surface projection is the only shape sent to a backend adapter. Client declarations stay separate from physical state.
-- Kernel event routing uses `(leaseId, surfaceId, trayId, itemId)` authority, not menu item id alone.
+- `Space` is the public broker-owned desktop aggregation boundary.
+- `Tray` is a client-owned contribution mounted onto exactly one space.
+- `Session` is the public lifecycle boundary. Internal lease names may remain only as compatibility/ABI details.
+- A space projection is the only shape sent to a backend adapter. Client declarations stay separate from physical state.
+- Kernel event routing uses `(session authority, spaceId, trayId, itemId)` authority, not menu item id alone.
 
 ## Forbidden Couplings
 

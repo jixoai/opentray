@@ -21,8 +21,6 @@ pub const EXT_SYMBOL_LEASE_CLOSED: &str = "opentray_ext_lease_closed";
 pub const EXT_SYMBOL_DEINIT: &str = "opentray_ext_deinit";
 pub const EXT_SYMBOL_FREE_STRING: &str = "opentray_ext_free_string";
 
-pub const EXT_HOST_CAPABILITY_WEBVIEW: &str = "webview";
-
 pub const REQUIRED_EXTENSION_SYMBOLS: &[&str] = &[
     EXT_SYMBOL_ABI_VERSION,
     EXT_SYMBOL_INIT,
@@ -55,10 +53,10 @@ pub struct ExtContext {
 pub type ExtSendEventFn =
     extern "C" fn(host_data: *mut c_void, event_json: ExtBytes) -> ExtResultCode;
 pub type ExtGetRectFn = extern "C" fn(host_data: *mut c_void, out: *mut Rect) -> ExtResultCode;
-/// Generic daemon-owned capability call for dynamic extensions.
+/// Generic host-owned capability call for dynamic extensions.
 ///
-/// Extensions keep command semantics, but host-only authority such as native UI
-/// creation remains in the daemon composition layer.
+/// Extensions own their command protocol. This hook is reserved for future
+/// privileged host facilities that must not cross the ABI as concrete types.
 pub type ExtInvokeHostFn = extern "C" fn(
     host_data: *mut c_void,
     capability: ExtBytes,

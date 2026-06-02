@@ -1,14 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-pub type LeaseId = String;
-pub type SurfaceId = String;
+pub type SessionId = String;
+pub type SpaceId = String;
+pub type LeaseId = SessionId;
+pub type SurfaceId = SpaceId;
 pub type TrayId = String;
 pub type MenuItemId = u32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SurfaceOptions {
-    pub app_id: String,
+pub struct SpaceOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<SpaceId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -17,12 +20,15 @@ pub struct SurfaceOptions {
     pub default: bool,
 }
 
+pub type SurfaceOptions = SpaceOptions;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SurfaceRef {
-    pub surface_id: SurfaceId,
-    pub app_id: String,
+pub struct SpaceRef {
+    pub space_id: SpaceId,
 }
+
+pub type SurfaceRef = SpaceRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -132,21 +138,21 @@ pub enum MouseButton {
 )]
 pub enum TrayEvent {
     Ready {
-        surface_id: SurfaceId,
+        space_id: SpaceId,
     },
     MenuClick {
-        surface_id: SurfaceId,
+        space_id: SpaceId,
         tray_id: TrayId,
         item_id: MenuItemId,
     },
     TrayClick {
-        surface_id: SurfaceId,
+        space_id: SpaceId,
         button: MouseButton,
         x: i32,
         y: i32,
     },
     TrayDoubleClick {
-        surface_id: SurfaceId,
+        space_id: SpaceId,
         button: MouseButton,
         x: i32,
         y: i32,

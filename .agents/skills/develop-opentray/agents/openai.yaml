@@ -1,0 +1,4 @@
+interface:
+  display_name: "Develop OpenTray"
+  short_description: "Maintain OpenTray repo laws and workflows"
+  default_prompt: "Use $develop-opentray to work inside the OpenTray repo while preserving kernel, backend, extension, release, and visual-acceptance laws."

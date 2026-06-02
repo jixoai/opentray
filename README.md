@@ -4,10 +4,10 @@ OpenTray is a cross-platform Desktop Status Platform for Node/Deno/Bun CLI and A
 
 It is not just a tray icon wrapper. The platform model is:
 
-- `Surface`: broker-owned desktop entry and aggregation boundary.
-- `Tray`: client-owned status contribution mounted onto a surface.
-- `Lease`: lifecycle contract that removes contributions when a client exits.
-- `Extension`: optional native capability package attached to a surface/tray.
+- `Space`: broker-owned desktop aggregation boundary.
+- `Tray`: client-owned status contribution mounted onto a space.
+- `Session`: lifecycle contract that removes contributions when a client exits.
+- `Extension`: optional native capability package attached to a space/tray.
 
 ## Workspace
 
@@ -33,7 +33,7 @@ This repository uses `pnpm` workspaces and Lerna metadata.
 The first native release publishes daemon and WebView artifact packages for macOS, Linux, and Windows so package topology can be validated in CI and npm. Runtime capability is still explicit:
 
 - macOS is the first human-visual acceptance path: daemon transport, tray menu, dynamic WebView loading, postMessage, and evaluate are expected to work.
-- Linux packages build and publish first-stage artifacts, but the current broker backend is capability-limited and WebView host UI may report unsupported instead of faking a window.
+- Linux packages build and publish first-stage artifacts, but the current broker backend is capability-limited and the WebView native runtime may report unsupported instead of faking a window.
 - Windows packages build and publish first-stage artifacts, but broker transport is not yet a completed runtime acceptance path.
 
 ## Examples
@@ -75,7 +75,7 @@ These cover the two key laws:
 
 - `native_tray` creates a visible OS tray icon through a native event loop and an injected runtime atom.
 - `visual_webview` creates a visible native WebView window from an example/runtime atom without importing WebView dependencies into `opentray-core`.
-- `runtime_boundary` compiles `SurfaceProjection` into a backend projection and applies it through an injected runtime.
+- `runtime_boundary` compiles the space projection into a backend projection and applies it through an injected runtime.
 - The default runtime stays explicitly unbound until a native main-thread/event-loop implementation is added.
 
 ### TypeScript client and extension examples
@@ -98,7 +98,7 @@ After installing published packages from npm, use the package-owned smoke comman
 opentray smoke daemon-tray
 ```
 
-The daemon tray menu includes standard item/check/radio/submenu entries, a `Quit Demo` item, and a `WebView Commands` submenu. On macOS, `Show HTML` opens a real native WebView window through `@opentray/ext-webview-darwin-*`; the daemon owns the main-thread UI capability, but the WebView extension must be loaded as a dynamic library. The other WebView entries exercise navigate, postMessage, evaluate, and hide through the `@opentray/ext-webview` facade.
+The daemon tray menu includes standard item/check/radio/submenu entries, a `Quit Demo` item, and a `WebView Commands` submenu. On macOS, `Show HTML` loads `@opentray/ext-webview-darwin-*` as a dynamic library and opens a real native WebView window owned by that library. The page now exposes the extension-owned bridge through `navigator.window` / `navigator.opentrayWindow`, and the demo opts into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides so the in-page buttons can visually validate move, resize, close, and `setStyle({ frameless })`. The other WebView entries exercise navigate, postMessage, evaluate, and hide through the `@opentray/ext-webview` facade.
 
 For local workspace smoke before publishing, stage current native artifacts and then run the same public command:
 
@@ -111,6 +111,17 @@ OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
 ```
 
 `OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` runs show, postMessage, evaluate, navigate, and hide without menu clicks. `OPENTRAY_EXT_PATH` can point at an explicit extension directory for loader debugging, but the release path is package-adjacent discovery from the requested facade package, such as `@opentray/ext-webview` resolving to `@opentray/ext-webview-<os>-<arch>`.
+
+To verify the runtime split on macOS after a release build, inspect both size and linkage:
+
+```bash
+cargo build -p opentray-bin -p opentray-ext-webview --release
+wc -c target/release/opentray target/release/libopentray_ext_webview.dylib
+otool -L target/release/opentray
+otool -L target/release/libopentray_ext_webview.dylib
+```
+
+`opentray` should no longer link `WebKit.framework`, while `libopentray_ext_webview.dylib` should.
 
 The standalone WebView visual smoke remains available:
 
@@ -144,12 +155,13 @@ pnpm --filter @opentray/spec example:parse
 
 ### Verification commands
 
-Use these commands to validate the first-stage native package change set:
+Use these commands to validate the current workspace state:
 
 ```bash
 pnpm run build
 pnpm run verify
-bun run openspec:vision -- validate ship-native-binaries-and-webview-platform-packages
+bun run openspec:vision -- validate <change>
+bun run openspec:vision -- check <change>
 ```
 
 ## Workflow
@@ -196,7 +208,20 @@ Create a changeset before merging release-worthy changes:
 pnpm run changeset
 ```
 
-Release-worthy TypeScript package changes must build before publishing because `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The GitHub workflow runs `pnpm run verify` and then `pnpm run build` before changesets creates a version PR or publishes through OIDC trusted publishing.
+Release-worthy TypeScript package changes must build before publishing because `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The GitHub workflow runs `pnpm run verify` and then `pnpm run build` before it versions packages in-run and publishes through OIDC trusted publishing.
+
+After a release lands, prove the published npm packages in a clean temp directory:
+
+```bash
+tmpdir=$(mktemp -d /tmp/opentray-npm-XXXXXX)
+cd "$tmpdir"
+npm init -y
+pnpm add opentray @opentray/ext-webview
+pnpm exec opentray daemon health
+OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm exec opentray smoke daemon-tray
+```
+
+The smoke path checks the package-owned daemon binary, same-version daemon auto-start/reuse, and the published WebView extension package instead of any workspace-local build output.
 
 Changesets is configured to bump peer dependents only when their peer dependency range is out of range. This prevents roadmap placeholder extensions, such as `@opentray/ext-badge` and `@opentray/ext-island`, from being released just because `opentray` is released.
 

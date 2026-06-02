@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::model::{
-    Icon, LeaseId, Menu, SurfaceId, SurfaceOptions, SurfaceRef, Tooltip, TrayEvent, TrayId,
-    TrayOptions,
+    Icon, Menu, SessionId, SpaceId, SpaceOptions, SpaceRef, Tooltip, TrayEvent, TrayId, TrayOptions,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -13,8 +12,12 @@ pub type RequestId = String;
 #[serde(rename_all = "camelCase")]
 pub struct DaemonSessionHealth {
     pub session_id: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lease_id: Option<LeaseId>,
+    #[serde(
+        rename = "internalLeaseId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub internal_lease_id: Option<SessionId>,
     pub initialized: bool,
 }
 
@@ -134,35 +137,37 @@ pub enum ClientFrame {
         #[serde(rename = "clientVersion")]
         client_version: String,
     },
-    CreateSurface {
+    #[serde(alias = "create-surface")]
+    CreateSpace {
         #[serde(rename = "requestId")]
         request_id: RequestId,
         #[serde(flatten)]
-        options: SurfaceOptions,
+        options: SpaceOptions,
     },
-    ResolveDefaultSurface {
+    #[serde(alias = "resolve-default-surface")]
+    ResolveDefaultSpace {
         #[serde(rename = "requestId")]
         request_id: RequestId,
     },
     CreateTray {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        surface: SurfaceRef,
+        space: SpaceRef,
         tray: TrayOptions,
     },
     DestroyTray {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
     },
     SetTrayMenu {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         menu: Menu,
@@ -170,8 +175,8 @@ pub enum ClientFrame {
     SetTrayIcon {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         icon: Icon,
@@ -179,8 +184,8 @@ pub enum ClientFrame {
     SetTrayTooltip {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         tooltip: Tooltip,
@@ -188,16 +193,16 @@ pub enum ClientFrame {
     LoadExt {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         name: String,
         path: String,
     },
     ExtCommand {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         ext: String,
@@ -206,8 +211,8 @@ pub enum ClientFrame {
     UnloadExt {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         name: String,
     },
     Health {
@@ -225,24 +230,26 @@ pub enum ServerFrame {
         protocol_version: u32,
         #[serde(rename = "brokerVersion")]
         broker_version: String,
-        #[serde(rename = "leaseId")]
-        lease_id: LeaseId,
+        #[serde(rename = "sessionId")]
+        session_id: SessionId,
     },
-    SurfaceCreated {
+    #[serde(alias = "surface-created")]
+    SpaceCreated {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        surface: SurfaceRef,
+        space: SpaceRef,
     },
-    DefaultSurface {
+    #[serde(alias = "default-surface")]
+    DefaultSpace {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        surface: SurfaceRef,
+        space: SpaceRef,
     },
     TrayCreated {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
     },
@@ -259,8 +266,8 @@ pub enum ServerFrame {
         event: TrayEvent,
     },
     ExtEvent {
-        #[serde(rename = "surfaceId")]
-        surface_id: SurfaceId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         ext: String,
@@ -307,7 +314,7 @@ mod tests {
         let ready = ServerFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
             broker_version: "0.1.0".to_string(),
-            lease_id: "lease-1".to_string(),
+            session_id: "session-1".to_string(),
         };
 
         assert_eq!(
@@ -324,7 +331,7 @@ mod tests {
                 "type": "ready",
                 "protocolVersion": 1,
                 "brokerVersion": "0.1.0",
-                "leaseId": "lease-1"
+                "sessionId": "session-1"
             })
         );
     }
@@ -337,11 +344,10 @@ mod tests {
 
     #[test]
     fn command_responses_carry_request_ids() {
-        let frame = ServerFrame::SurfaceCreated {
+        let frame = ServerFrame::SpaceCreated {
             request_id: "req-1".to_string(),
-            surface: SurfaceRef {
-                surface_id: "surface-1".to_string(),
-                app_id: "app".to_string(),
+            space: SpaceRef {
+                space_id: "space-1".to_string(),
             },
         };
         let error = ServerFrame::Error {
@@ -353,11 +359,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(frame).unwrap(),
             serde_json::json!({
-                "type": "surface-created",
+                "type": "space-created",
                 "requestId": "req-1",
-                "surface": {
-                    "surfaceId": "surface-1",
-                    "appId": "app"
+                "space": {
+                    "spaceId": "space-1"
                 }
             })
         );
@@ -388,12 +393,12 @@ mod tests {
                 sessions: vec![
                     DaemonSessionHealth {
                         session_id: 1,
-                        lease_id: Some("lease-1".to_string()),
+                        internal_lease_id: Some("lease-1".to_string()),
                         initialized: true,
                     },
                     DaemonSessionHealth {
                         session_id: 2,
-                        lease_id: None,
+                        internal_lease_id: None,
                         initialized: false,
                     },
                 ],
@@ -421,7 +426,7 @@ mod tests {
                     "sessions": [
                         {
                             "sessionId": 1,
-                            "leaseId": "lease-1",
+                            "internalLeaseId": "lease-1",
                             "initialized": true
                         },
                         {
@@ -438,12 +443,12 @@ mod tests {
     fn protocol_uses_camel_case_identity_fields() {
         let frame = ServerFrame::TrayCreated {
             request_id: "req-1".to_string(),
-            surface_id: "surface-1".to_string(),
+            space_id: "space-1".to_string(),
             tray_id: "tray-1".to_string(),
         };
         let command = ClientFrame::DestroyTray {
             request_id: "req-2".to_string(),
-            surface_id: "surface-1".to_string(),
+            space_id: "space-1".to_string(),
             tray_id: "tray-1".to_string(),
         };
 
@@ -452,7 +457,7 @@ mod tests {
             serde_json::json!({
                 "type": "tray-created",
                 "requestId": "req-1",
-                "surfaceId": "surface-1",
+                "spaceId": "space-1",
                 "trayId": "tray-1"
             })
         );
@@ -461,7 +466,7 @@ mod tests {
             serde_json::json!({
                 "type": "destroy-tray",
                 "requestId": "req-2",
-                "surfaceId": "surface-1",
+                "spaceId": "space-1",
                 "trayId": "tray-1"
             })
         );
@@ -471,7 +476,7 @@ mod tests {
     fn event_frames_use_camel_case_tray_event_fields() {
         let frame = ServerFrame::Event {
             event: TrayEvent::MenuClick {
-                surface_id: "surface-1".to_string(),
+                space_id: "space-1".to_string(),
                 tray_id: "daemon-status".to_string(),
                 item_id: 99,
             },
@@ -483,7 +488,7 @@ mod tests {
                 "type": "event",
                 "event": {
                     "type": "menuClick",
-                    "surfaceId": "surface-1",
+                    "spaceId": "space-1",
                     "trayId": "daemon-status",
                     "itemId": 99
                 }

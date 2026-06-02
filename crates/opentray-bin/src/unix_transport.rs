@@ -186,7 +186,7 @@ pub fn build_daemon_health(
         .iter()
         .map(|(session_id, session)| DaemonSessionHealth {
             session_id: *session_id,
-            lease_id: session.broker.lease_id().map(ToOwned::to_owned),
+            internal_lease_id: session.broker.lease_id().map(ToOwned::to_owned),
             initialized: session.broker.lease_id().is_some(),
         })
         .collect::<Vec<_>>();

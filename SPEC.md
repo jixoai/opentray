@@ -1,6 +1,8 @@
 # OpenTray Specification
 
 > **For Claude:** This is the authoritative specification for the OpenTray project. All implementation decisions should reference this document.
+>
+> Historical bootstrap note: the current canonical requirements live under `openspec/specs/**`. Public docs and SDK APIs now use `Space / Tray / Session`; older `Surface` / `lease` vocabulary below is pre-0.3.0 planning history unless a section has been explicitly updated.
 
 **Goal:** Build a cross-platform Desktop Status Platform that lets any Node.js application publish lightweight desktop status surfaces — from basic menus to rich popups and platform-specific advanced APIs — via a single `npm install`.
 

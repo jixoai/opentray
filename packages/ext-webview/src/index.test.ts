@@ -7,7 +7,7 @@ describe("@opentray/ext-webview", () => {
   it("emits webview as a normal extension command", async () => {
     const commands: unknown[] = [];
     const tray: TrayHandle = {
-      surface: { surfaceId: "surface-1", appId: "host" },
+      space: { spaceId: "space-1" },
       trayId: "tray-1",
       async commandExtension(ext, data) {
         commands.push({ ext, data });
@@ -15,12 +15,26 @@ describe("@opentray/ext-webview", () => {
       async destroy() {},
     };
 
-    await attachWebview(tray).show({ type: "show", html: "<main />", width: 300, height: 200 });
+    await attachWebview(tray).show({
+      type: "show",
+      html: "<main />",
+      width: 300,
+      height: 200,
+      nativeWindowApi: true,
+      bindWindowGlobals: true,
+    });
 
     expect(commands).toEqual([
       {
         ext: "webview",
-        data: { type: "show", html: "<main />", width: 300, height: 200 },
+        data: {
+          type: "show",
+          html: "<main />",
+          width: 300,
+          height: 200,
+          nativeWindowApi: true,
+          bindWindowGlobals: true,
+        },
       },
     ]);
   });

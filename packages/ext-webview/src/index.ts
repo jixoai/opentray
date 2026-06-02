@@ -1,8 +1,37 @@
 import type { ExtensionEnvelope, Rect } from "@opentray/spec";
 import type { TrayHandle } from "opentray";
 
+export interface WebviewShowCommand {
+  type: "show";
+  html?: string;
+  url?: string;
+  width: number;
+  height: number;
+  fallbackRect?: Rect;
+  nativeWindowApi?: boolean;
+  bindWindowGlobals?: boolean;
+}
+
+export interface WebviewWindowStyle {
+  frameless: boolean;
+  transparent: boolean;
+  backgroundEffect: string | null;
+}
+
+export interface WebviewWindowCapabilities {
+  close: boolean;
+  move: boolean;
+  resize: boolean;
+  frameless: boolean;
+  transparent: boolean;
+  backgroundEffects: string[];
+  globalBindingsEnabled: boolean;
+  globalBindingsSupported: boolean;
+  platform: string;
+}
+
 export type WebviewCommand =
-  | { type: "show"; html?: string; url?: string; width: number; height: number; fallbackRect?: Rect }
+  | WebviewShowCommand
   | { type: "hide" }
   | { type: "navigate"; url: string }
   | { type: "evaluate"; js: string }

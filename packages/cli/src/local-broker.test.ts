@@ -32,7 +32,8 @@ describe("local broker client", () => {
     });
 
     expect(driver.spawned).toBe(1);
-    expect(connection.leaseId).toBe("lease-test");
+    expect(connection.sessionId).toBe("session-test");
+    expect(connection.leaseId).toBe("session-test");
 
     await connection.close();
   });
@@ -128,7 +129,7 @@ const writeReadyFrame = (socket: Socket, paths: DaemonPaths): void => {
       type: "ready",
       protocolVersion: PROTOCOL_VERSION,
       brokerVersion: paths.packageVersion,
-      leaseId: "lease-test",
+      sessionId: "session-test",
     })}\n`,
   );
 };

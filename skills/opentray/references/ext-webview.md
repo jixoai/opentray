@@ -1,32 +1,55 @@
 # ext-webview
 
-Use this reference when changing `packages/ext-webview`, native WebView examples, or WebView extension host behavior.
+Use this reference when the user asks how to use the official OpenTray WebView extension.
 
-## Extension Law
-
-WebView is an extension atom, not a core feature. It must route `show`, `hide`, `navigate`, `evaluate`, and `postMessage` commands through normal `ext-command` traffic with `ext: "webview"`.
-
-## Current State
-
-- TypeScript facade: `packages/ext-webview/src/index.ts`.
-- Broker-free facade example: `packages/ext-webview/examples/webview-command.ts`.
-- Human-visible native smoke example: `crates/opentray-backend-tray-icon/examples/visual_webview.rs`.
-- `visual_webview` uses `tao + wry` only inside the example/runtime boundary. It must not leak into `opentray-core`.
-
-## Positioning Rule
-
-WebView positioning depends on backend capabilities. If the backend cannot provide a physical tray rect, the extension must choose an explicit fallback such as cursor or platform default positioning and expose that fallback in logs, metadata, or events.
-
-## Lifecycle Rule
-
-WebView instances are scoped to `(surfaceId, trayId, leaseId)`. Lease cleanup must hide or destroy only the calling lease's WebView state.
-
-## Verification
+## Install
 
 ```bash
-pnpm --filter @opentray/ext-webview test
-pnpm --filter @opentray/ext-webview example:webview
-OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 cargo run --example visual_webview
+pnpm add opentray @opentray/ext-webview
 ```
 
-For human acceptance, run `cargo run --example visual_webview` without auto-exit and confirm a real native window is visible.
+The facade package stays platform-neutral. The daemon resolves the current platform native library package automatically.
+
+## Public Shape
+
+Attach the facade to an existing tray handle:
+
+```ts
+import { attachWebview } from "@opentray/ext-webview";
+
+const webview = attachWebview(tray);
+await webview.show({
+  type: "show",
+  html: "<main>Hello</main>",
+  width: 360,
+  height: 220,
+  fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
+});
+```
+
+Supported commands:
+
+- `show`
+- `hide`
+- `navigate`
+- `evaluate`
+- `postMessage`
+
+## Examples
+
+Protocol-only facade example:
+
+```bash
+pnpm --filter @opentray/ext-webview example:webview
+```
+
+Real native smoke through the public SDK:
+
+```bash
+opentray smoke daemon-tray
+```
+
+## Platform Truth
+
+- macOS is the current human-visible acceptance path.
+- If a platform cannot create a visible native WebView runtime, it should return explicit unsupported/capability failure rather than fake success.

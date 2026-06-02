@@ -41,6 +41,17 @@ Changesets must only bump peer dependents when their peer dependency range is ou
 
 `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The release workflow must run `pnpm run build` before `changeset publish`.
 
+## Native Artifact CI Rule
+
+Release-grade daemon binaries and native extension dynamic libraries must be built in GitHub Actions. Local `target/release` outputs are smoke evidence only and must not be used as npm publish inputs.
+
+The release workflow should use maintained Actions for Rust setup/cache and artifact transport:
+
+- `dtolnay/rust-toolchain@stable` plus `Swatinem/rust-cache@v2`, or an equivalent maintained setup/cache Action.
+- `actions/upload-artifact` and `actions/download-artifact` for passing native outputs into the npm publish job.
+
+Do not make Tauri app build Actions, GitHub Release binary upload Actions, or default `cross` builds the main OpenTray release path. OpenTray publishes npm platform packages, and WebView GUI artifacts should expose native runner dependency problems instead of hiding them behind cross-compilation.
+
 ## Provenance Metadata Rule
 
 Every public package manifest must include repository metadata with `url: "https://github.com/jixoai/opentray"`. npm trusted publishing rejects signed provenance when package metadata omits or mismatches the GitHub repository URL.

@@ -16,7 +16,7 @@ describe("opentray client", () => {
     const transport = new RecordingTransport();
     const tray = createTrayHandle(
       transport,
-      { surfaceId: "surface-1", appId: "host" },
+      { spaceId: "space-1" },
       "tray-1",
       createTestRequestId,
     );
@@ -27,7 +27,7 @@ describe("opentray client", () => {
       {
         type: "ext-command",
         requestId: "req-test",
-        surfaceId: "surface-1",
+        spaceId: "space-1",
         trayId: "tray-1",
         ext: "webview",
         data: { type: "show", width: 320, height: 240 },
@@ -43,24 +43,34 @@ describe("opentray client", () => {
     });
   });
 
-  it("resolves broker-created surface and tray identities", async () => {
+  it("resolves broker-created space and tray identities", async () => {
     const transport = new RecordingTransport();
     const client = createClient(transport, { requestIdPrefix: "test" });
 
-    const surface = await client.createSurface({
-      appId: "com.example.opentray",
+    const space = await client.createSpace({
+      id: "com.example.opentray",
       title: "Example",
       default: true,
     });
-    const tray = await surface.createTray({
+    const tray = await space.createTray({
       trayId: "status",
       title: "Status",
       icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
     });
 
-    expect(surface.surface).toEqual({ surfaceId: "surface-from-broker", appId: "com.example.opentray" });
+    expect(space.space).toEqual({ spaceId: "space-from-broker" });
     expect(tray.trayId).toBe("status");
     expect(transport.frames.map((frame) => frame.requestId)).toEqual(["test-1", "test-2"]);
+  });
+
+  it("keeps createSurface as a deprecated alias", async () => {
+    const transport = new RecordingTransport();
+    const client = createClient(transport, { requestIdPrefix: "alias" });
+
+    const space = await client.createSurface({ id: "legacy" });
+
+    expect(space.space).toEqual({ spaceId: "space-from-broker" });
+    expect(transport.frames[0]).toEqual({ type: "create-space", requestId: "alias-1", id: "legacy" });
   });
 
   it("exposes versioned broker endpoint identity helpers", () => {
@@ -76,20 +86,19 @@ class RecordingTransport implements OpenTrayTransport {
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {
     this.frames.push(frame);
     switch (frame.type) {
-      case "create-surface":
+      case "create-space":
         return {
-          type: "surface-created",
+          type: "space-created",
           requestId: frame.requestId,
-          surface: {
-            surfaceId: "surface-from-broker",
-            appId: frame.appId,
+          space: {
+            spaceId: "space-from-broker",
           },
         };
       case "create-tray":
         return {
           type: "tray-created",
           requestId: frame.requestId,
-          surfaceId: frame.surface.surfaceId,
+          spaceId: frame.space.spaceId,
           trayId: frame.tray.trayId ?? "tray-from-broker",
         };
       case "destroy-tray":
@@ -99,7 +108,7 @@ class RecordingTransport implements OpenTrayTransport {
       case "load-ext":
       case "ext-command":
       case "unload-ext":
-      case "resolve-default-surface":
+      case "resolve-default-space":
         return { type: "ack", requestId: frame.requestId };
       case "health":
         return {

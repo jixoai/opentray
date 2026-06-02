@@ -21,7 +21,6 @@ serde_json.workspace = true
 opentray-backend-tray-icon.workspace = true
 tray-icon.workspace = true
 winit = "0.30"
-wry = { version = "0.55.1", default-features = false, features = ["os-webview"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 opentray-backend-ksni.workspace = true

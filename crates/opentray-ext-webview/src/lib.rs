@@ -1,13 +1,112 @@
+#[cfg(target_os = "macos")]
+mod macos;
+
 use std::ffi::{c_char, c_void, CString};
+use std::fmt;
 
 use opentray_spec::{
-    ExtBytes, ExtContext, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
-    EXT_ABI_VERSION, EXT_ERR_REJECTED, EXT_HOST_CAPABILITY_WEBVIEW, EXT_OK,
+    ExtBytes, ExtContext, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope, Rect,
+    EXT_ABI_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED, EXT_OK,
 };
-use serde_json::{json, Value};
+use serde::Deserialize;
+use serde_json::Value;
+
+#[cfg(target_os = "macos")]
+type WebviewRuntime = macos::MacosWebviewRuntime;
+
+#[cfg(not(target_os = "macos"))]
+type WebviewRuntime = UnsupportedWebviewRuntime;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct NavigatorWindowSettings {
+    pub enabled: bool,
+    pub bind_window_globals: bool,
+}
 
 struct WebviewExtension {
     surface_id: String,
+    runtime: WebviewRuntime,
+}
+
+#[cfg(not(target_os = "macos"))]
+#[derive(Default)]
+struct UnsupportedWebviewRuntime;
+
+#[cfg(not(target_os = "macos"))]
+impl UnsupportedWebviewRuntime {
+    fn handle(
+        &mut self,
+        _tray_id: &str,
+        _command: WebviewCommand,
+    ) -> Result<Value, WebviewRuntimeError> {
+        Err(WebviewRuntimeError::Unsupported(
+            "webview runtime is not implemented for this platform".into(),
+        ))
+    }
+
+    fn lease_closed(&mut self, _lease_id: &str) {}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum WebviewCommand {
+    Show {
+        html: Option<String>,
+        url: Option<String>,
+        width: f64,
+        height: f64,
+        fallback_rect: Option<Rect>,
+        navigator_window: NavigatorWindowSettings,
+    },
+    Hide,
+    Navigate {
+        url: String,
+    },
+    Evaluate {
+        js: String,
+    },
+    PostMessage {
+        payload: Value,
+    },
+}
+
+#[derive(Debug)]
+enum WebviewRuntimeError {
+    Rejected(String),
+    Unsupported(String),
+    Internal(String),
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShowCommandData {
+    html: Option<String>,
+    url: Option<String>,
+    width: Option<f64>,
+    height: Option<f64>,
+    #[serde(rename = "fallbackRect")]
+    fallback_rect: Option<Rect>,
+    native_window_api: Option<bool>,
+    bind_window_globals: Option<bool>,
+}
+
+impl WebviewRuntimeError {
+    fn code(&self) -> ExtResultCode {
+        match self {
+            Self::Rejected(_) => EXT_ERR_REJECTED,
+            Self::Unsupported(_) => EXT_ERR_UNSUPPORTED,
+            Self::Internal(_) => EXT_ERR_INTERNAL,
+        }
+    }
+}
+
+impl fmt::Display for WebviewRuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rejected(message) | Self::Unsupported(message) | Self::Internal(message) => {
+                write!(f, "{message}")
+            }
+        }
+    }
 }
 
 #[no_mangle]
@@ -28,7 +127,10 @@ pub unsafe extern "C" fn opentray_ext_init(
         Some(value) => value,
         None => return EXT_ERR_REJECTED,
     };
-    let instance = Box::new(WebviewExtension { surface_id });
+    let instance = Box::new(WebviewExtension {
+        surface_id,
+        runtime: WebviewRuntime::default(),
+    });
     unsafe {
         *out_instance = Box::into_raw(instance).cast::<c_void>();
     }
@@ -38,11 +140,11 @@ pub unsafe extern "C" fn opentray_ext_init(
 #[no_mangle]
 pub unsafe extern "C" fn opentray_ext_command(
     instance: *mut c_void,
-    context: *const ExtHostContext,
+    _context: *const ExtHostContext,
     envelope_json: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
-    if instance.is_null() || context.is_null() {
+    if instance.is_null() {
         return EXT_ERR_REJECTED;
     }
     let Some(bytes) = (unsafe { ext_bytes_as_slice(envelope_json) }) else {
@@ -56,34 +158,23 @@ pub unsafe extern "C" fn opentray_ext_command(
     if envelope.scope.surface_id != extension.surface_id {
         return EXT_ERR_REJECTED;
     }
-
-    let Ok(request_json) = serde_json::to_vec(&json!({
-        "scope": envelope.scope,
-        "command": envelope.data,
-    })) else {
+    let Some(tray_id) = envelope.scope.tray_id.as_deref() else {
         return EXT_ERR_REJECTED;
     };
-
-    let mut response = ExtOwnedBytes {
-        ptr: std::ptr::null_mut(),
-        len: 0,
-    };
-    let result = invoke_host(
-        context,
-        EXT_HOST_CAPABILITY_WEBVIEW,
-        &request_json,
-        &mut response,
-    );
-    if result != EXT_OK {
-        return result;
-    }
-
-    let Some(data) = (unsafe { read_host_response(context, response) }) else {
+    let Ok(command) = parse_webview_command(&envelope.data) else {
         return EXT_ERR_REJECTED;
     };
+    let event = match extension.runtime.handle(tray_id, command) {
+        Ok(event) => event,
+        Err(error) => {
+            eprintln!("opentray-ext-webview command failed: {error}");
+            return error.code();
+        }
+    };
+
     let events = vec![ExtensionEnvelope {
         scope: envelope.scope,
-        data,
+        data: event,
     }];
     write_owned_events(out_events_json, &events)
 }
@@ -91,40 +182,18 @@ pub unsafe extern "C" fn opentray_ext_command(
 #[no_mangle]
 pub unsafe extern "C" fn opentray_ext_lease_closed(
     instance: *mut c_void,
-    context: *const ExtHostContext,
+    _context: *const ExtHostContext,
     lease_id: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
-    if instance.is_null() || context.is_null() {
+    if instance.is_null() {
         return EXT_ERR_REJECTED;
     }
     let Some(lease_id) = (unsafe { read_ext_string(lease_id) }) else {
         return EXT_ERR_REJECTED;
     };
-    let Ok(request_json) = serde_json::to_vec(&json!({
-        "command": {
-            "type": "leaseClosed",
-            "leaseId": lease_id,
-        },
-    })) else {
-        return EXT_ERR_REJECTED;
-    };
-    let mut response = ExtOwnedBytes {
-        ptr: std::ptr::null_mut(),
-        len: 0,
-    };
-    let result = invoke_host(
-        context,
-        EXT_HOST_CAPABILITY_WEBVIEW,
-        &request_json,
-        &mut response,
-    );
-    if result != EXT_OK {
-        return result;
-    }
-    unsafe {
-        ((*context).free_host_string)((*context).host_data, response);
-    }
+    let extension = unsafe { &mut *instance.cast::<WebviewExtension>() };
+    extension.runtime.lease_closed(&lease_id);
     write_owned_json(out_events_json, "[]")
 }
 
@@ -140,6 +209,54 @@ pub unsafe extern "C" fn opentray_ext_free_string(bytes: ExtOwnedBytes) {
     if !bytes.ptr.is_null() {
         drop(unsafe { CString::from_raw(bytes.ptr) });
     }
+}
+
+fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeError> {
+    let command_type = data
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| WebviewRuntimeError::Rejected("webview command requires type".into()))?;
+
+    match command_type {
+        "show" => {
+            let parsed: ShowCommandData =
+                serde_json::from_value(data.clone()).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!("invalid webview show command: {error}"))
+                })?;
+            let bind_window_globals = parsed.bind_window_globals.unwrap_or(false);
+            Ok(WebviewCommand::Show {
+                html: parsed.html,
+                url: parsed.url,
+                width: parsed.width.unwrap_or(420.0),
+                height: parsed.height.unwrap_or(260.0),
+                fallback_rect: parsed.fallback_rect,
+                navigator_window: NavigatorWindowSettings {
+                    enabled: parsed.native_window_api.unwrap_or(false) || bind_window_globals,
+                    bind_window_globals,
+                },
+            })
+        }
+        "hide" => Ok(WebviewCommand::Hide),
+        "navigate" => Ok(WebviewCommand::Navigate {
+            url: required_string(data, "url")?,
+        }),
+        "evaluate" => Ok(WebviewCommand::Evaluate {
+            js: required_string(data, "js")?,
+        }),
+        "postMessage" => Ok(WebviewCommand::PostMessage {
+            payload: data.get("payload").cloned().unwrap_or(Value::Null),
+        }),
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported webview command: {other}"
+        ))),
+    }
+}
+
+fn required_string(data: &Value, key: &str) -> Result<String, WebviewRuntimeError> {
+    data.get(key)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| WebviewRuntimeError::Rejected(format!("webview command requires {key}")))
 }
 
 unsafe fn read_ext_string(bytes: ExtBytes) -> Option<String> {
@@ -178,50 +295,6 @@ fn write_owned_events(out: *mut ExtOwnedBytes, events: &[ExtensionEnvelope]) -> 
     write_owned_json(out, &json)
 }
 
-fn invoke_host(
-    context: *const ExtHostContext,
-    capability: &str,
-    request_json: &[u8],
-    out_response_json: *mut ExtOwnedBytes,
-) -> ExtResultCode {
-    let Ok(capability) = CString::new(capability) else {
-        return EXT_ERR_REJECTED;
-    };
-    let Ok(request_json) = CString::new(request_json) else {
-        return EXT_ERR_REJECTED;
-    };
-    unsafe {
-        ((*context).invoke_host)(
-            (*context).host_data,
-            borrowed_bytes(&capability),
-            borrowed_bytes(&request_json),
-            out_response_json,
-        )
-    }
-}
-
-unsafe fn read_host_response(
-    context: *const ExtHostContext,
-    response: ExtOwnedBytes,
-) -> Option<Value> {
-    if response.ptr.is_null() || response.len == 0 {
-        return Some(Value::Null);
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(response.ptr.cast::<u8>(), response.len) };
-    let value = serde_json::from_slice(bytes).ok()?;
-    unsafe {
-        ((*context).free_host_string)((*context).host_data, response);
-    }
-    Some(value)
-}
-
-fn borrowed_bytes(value: &CString) -> ExtBytes {
-    ExtBytes {
-        ptr: value.as_ptr(),
-        len: value.as_bytes().len(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,9 +306,66 @@ mod tests {
     }
 
     #[test]
+    fn parse_show_command_keeps_extension_owned_protocol() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "html": "<main />",
+            "width": 360,
+            "height": 220,
+            "fallbackRect": { "x": 1, "y": 2, "width": 3, "height": 4 }
+        }))
+        .expect("show command");
+
+        assert_eq!(
+            command,
+            WebviewCommand::Show {
+                html: Some("<main />".to_string()),
+                url: None,
+                width: 360.0,
+                height: 220.0,
+                fallback_rect: Some(Rect {
+                    x: 1,
+                    y: 2,
+                    width: 3,
+                    height: 4,
+                }),
+                navigator_window: NavigatorWindowSettings::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_show_command_reads_navigator_window_flags() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "width": 360,
+            "height": 220,
+            "nativeWindowApi": true,
+            "bindWindowGlobals": true
+        }))
+        .expect("show command");
+
+        assert_eq!(
+            command,
+            WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: 360.0,
+                height: 220.0,
+                fallback_rect: None,
+                navigator_window: NavigatorWindowSettings {
+                    enabled: true,
+                    bind_window_globals: true,
+                },
+            }
+        );
+    }
+
+    #[test]
     fn lease_closed_returns_empty_event_array() {
         let instance = Box::into_raw(Box::new(WebviewExtension {
             surface_id: "surface-1".to_string(),
+            runtime: WebviewRuntime::default(),
         }))
         .cast::<c_void>();
         let mut output = ExtOwnedBytes {
@@ -265,44 +395,52 @@ mod tests {
     }
 
     #[test]
-    fn command_invokes_host_webview_capability_and_returns_event() {
+    fn hide_command_returns_platform_specific_result() {
         let instance = Box::into_raw(Box::new(WebviewExtension {
             surface_id: "surface-1".to_string(),
+            runtime: WebviewRuntime::default(),
         }))
         .cast::<c_void>();
-        let envelope = serde_json::to_string(&ExtensionEnvelope {
-            scope: opentray_spec::ExtensionScope {
-                surface_id: "surface-1".to_string(),
-                tray_id: Some("tray-1".to_string()),
-                ext: "webview".to_string(),
-            },
-            data: json!({ "type": "show" }),
-        })
+        let envelope = CString::new(
+            serde_json::to_string(&ExtensionEnvelope {
+                scope: opentray_spec::ExtensionScope {
+                    surface_id: "surface-1".to_string(),
+                    tray_id: Some("tray-1".to_string()),
+                    ext: "webview".to_string(),
+                },
+                data: serde_json::json!({ "type": "hide" }),
+            })
+            .unwrap(),
+        )
         .unwrap();
-        let envelope = CString::new(envelope).unwrap();
-        let mut state = HostState::default();
-        let host = host_context(&mut state);
         let mut output = ExtOwnedBytes {
             ptr: ptr::null_mut(),
             len: 0,
         };
 
         let result = unsafe {
-            opentray_ext_command(instance, &host, borrowed_bytes(&envelope), &mut output)
+            opentray_ext_command(
+                instance,
+                &unsupported_host_context(),
+                borrowed_bytes(&envelope),
+                &mut output,
+            )
         };
 
-        assert_eq!(result, EXT_OK);
-        assert_eq!(
-            state.capability,
-            Some(EXT_HOST_CAPABILITY_WEBVIEW.to_string())
-        );
-        assert_eq!(state.command_type, Some("show".to_string()));
-        let json = unsafe { CStr::from_ptr(output.ptr) }.to_str().unwrap();
-        assert!(json.contains("\"type\":\"shown\""));
-        unsafe {
-            opentray_ext_free_string(output);
-            opentray_ext_deinit(instance);
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(result, EXT_OK);
+            let json = unsafe { CStr::from_ptr(output.ptr) }.to_str().unwrap();
+            assert!(json.contains("\"type\":\"hidden\""));
+            unsafe { opentray_ext_free_string(output) };
         }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert_eq!(result, EXT_ERR_UNSUPPORTED);
+        }
+
+        unsafe { opentray_ext_deinit(instance) };
     }
 
     extern "C" fn unsupported_send_event(
@@ -312,10 +450,7 @@ mod tests {
         EXT_ERR_REJECTED
     }
 
-    extern "C" fn unsupported_get_rect(
-        _host_data: *mut c_void,
-        _out: *mut opentray_spec::Rect,
-    ) -> ExtResultCode {
+    extern "C" fn unsupported_get_rect(_host_data: *mut c_void, _out: *mut Rect) -> ExtResultCode {
         EXT_ERR_REJECTED
     }
 
@@ -325,7 +460,7 @@ mod tests {
         _request_json: ExtBytes,
         _out_response_json: *mut ExtOwnedBytes,
     ) -> ExtResultCode {
-        EXT_OK
+        EXT_ERR_REJECTED
     }
 
     extern "C" fn unsupported_free_host_string(_host_data: *mut c_void, _bytes: ExtOwnedBytes) {}
@@ -340,44 +475,10 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct HostState {
-        capability: Option<String>,
-        command_type: Option<String>,
-    }
-
-    extern "C" fn host_invoke(
-        host_data: *mut c_void,
-        capability: ExtBytes,
-        request_json: ExtBytes,
-        out_response_json: *mut ExtOwnedBytes,
-    ) -> ExtResultCode {
-        let state = unsafe { &mut *host_data.cast::<HostState>() };
-        state.capability = unsafe { read_ext_string(capability) };
-        let request = unsafe { ext_bytes_as_slice(request_json) }
-            .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok())
-            .unwrap();
-        state.command_type = request
-            .get("command")
-            .and_then(|command| command.get("type"))
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
-        write_owned_json(out_response_json, r#"{"type":"shown"}"#)
-    }
-
-    extern "C" fn host_free_string(_host_data: *mut c_void, bytes: ExtOwnedBytes) {
-        unsafe {
-            opentray_ext_free_string(bytes);
-        }
-    }
-
-    fn host_context(state: &mut HostState) -> ExtHostContext {
-        ExtHostContext {
-            host_data: (state as *mut HostState).cast::<c_void>(),
-            send_event: unsupported_send_event,
-            get_rect: unsupported_get_rect,
-            invoke_host: host_invoke,
-            free_host_string: host_free_string,
+    fn borrowed_bytes(value: &CString) -> ExtBytes {
+        ExtBytes {
+            ptr: value.as_ptr(),
+            len: value.as_bytes().len(),
         }
     }
 }

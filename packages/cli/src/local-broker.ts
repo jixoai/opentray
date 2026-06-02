@@ -22,6 +22,8 @@ export type BrokerEventFrame = Extract<ServerFrame, { type: "event" | "ext-event
 
 export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
+  readonly sessionId: string;
+  /** @deprecated Use `sessionId`. */
   readonly leaseId: string;
   onEvent(listener: (frame: BrokerEventFrame) => void): () => void;
   close(): Promise<void>;
@@ -81,6 +83,8 @@ export const connectLocalBroker = async (
 
 class LocalBrokerConnection implements LocalBrokerClient {
   readonly endpoint: string;
+  sessionId = "";
+  /** @deprecated Use `sessionId`. */
   leaseId = "";
 
   private buffer = "";
@@ -120,7 +124,8 @@ class LocalBrokerConnection implements LocalBrokerClient {
       clientVersion,
     });
     const frame = await ready;
-    this.leaseId = frame.leaseId;
+    this.sessionId = frame.sessionId;
+    this.leaseId = frame.sessionId;
   }
 
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {
@@ -235,8 +240,8 @@ const connectSocket = (endpoint: string): Promise<BrokerSocket> =>
 
 const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
   switch (frame.type) {
-    case "surface-created":
-    case "default-surface":
+    case "space-created":
+    case "default-space":
     case "tray-created":
     case "ack":
     case "daemon-health":

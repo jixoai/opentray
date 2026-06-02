@@ -42,7 +42,7 @@ impl NativeTrayIconRuntime {
 impl TrayIconRuntime for NativeTrayIconRuntime {
     fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
         let TrayIconProjection {
-            surface_id,
+            space_id,
             trays,
             routes,
             ..
@@ -71,9 +71,9 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
 
         let mut surfaces = self.surfaces.borrow_mut();
         if icons.is_empty() {
-            surfaces.remove(&surface_id);
+            surfaces.remove(&space_id);
         } else {
-            surfaces.insert(surface_id, NativeSurfaceState { icons, routes });
+            surfaces.insert(space_id, NativeSurfaceState { icons, routes });
         }
         Ok(())
     }

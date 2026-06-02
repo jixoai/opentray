@@ -1,0 +1,4 @@
+interface:
+  display_name: "Develop OpenTray Ext"
+  short_description: "Build OpenTray extension packages correctly"
+  default_prompt: "Use $develop-opentray-ext to design or implement an OpenTray extension package without leaking product-specific runtime into opentray core or the broker binary."

@@ -24,7 +24,7 @@ describe("@opentray/spec", () => {
     const frame: ClientFrame = {
       type: "ext-command",
       requestId: "req-1",
-      surfaceId: "surface-1",
+      spaceId: "space-1",
       trayId: "tray-1",
       ext: "webview",
       data: { type: "show" },
@@ -59,7 +59,7 @@ describe("@opentray/spec", () => {
     expect(parsed.ok).toBe(false);
   });
 
-  it("requires lease metadata in ready frames", () => {
+  it("requires session metadata in ready frames", () => {
     const parsed = parseServerFrame(
       JSON.stringify({ type: "ready", protocolVersion: PROTOCOL_VERSION, brokerVersion: "0.1.0" }),
     );
@@ -67,7 +67,7 @@ describe("@opentray/spec", () => {
     expect(parsed.ok).toBe(false);
   });
 
-  it("checks protocol compatibility before lease authority exists", () => {
+  it("checks protocol compatibility before session authority exists", () => {
     const init: ClientFrame = {
       type: "init",
       protocolVersion: PROTOCOL_VERSION + 1,
@@ -78,19 +78,29 @@ describe("@opentray/spec", () => {
   });
 
   it("parses request-correlated responses", () => {
-    const parsed = parseServerFrame(
+    const legacy = parseServerFrame(
       JSON.stringify({
         type: "surface-created",
+        requestId: "req-legacy",
+        surface: { surfaceId: "surface-legacy", appId: "app" },
+      }),
+    );
+
+    expect(legacy.ok).toBe(false);
+
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "space-created",
         requestId: "req-1",
-        surface: { surfaceId: "surface-1", appId: "app" },
+        space: { spaceId: "space-1" },
       }),
     );
 
     expect(parsed.ok).toBe(true);
     expect(parsed.frame).toEqual({
-      type: "surface-created",
+      type: "space-created",
       requestId: "req-1",
-      surface: { surfaceId: "surface-1", appId: "app" },
+      space: { spaceId: "space-1" },
     });
   });
 
@@ -119,7 +129,7 @@ describe("@opentray/spec", () => {
           endpoint: "/tmp/opentray.sock",
           sessionCount: 2,
           sessions: [
-            { sessionId: 1, leaseId: "lease-1", initialized: true },
+            { sessionId: 1, internalLeaseId: "lease-1", initialized: true },
             { sessionId: 2, initialized: false },
           ],
         },
@@ -137,7 +147,7 @@ describe("@opentray/spec", () => {
         endpoint: "/tmp/opentray.sock",
         sessionCount: 2,
         sessions: [
-          { sessionId: 1, leaseId: "lease-1", initialized: true },
+          { sessionId: 1, internalLeaseId: "lease-1", initialized: true },
           { sessionId: 2, initialized: false },
         ],
       },
@@ -150,7 +160,7 @@ describe("@opentray/spec", () => {
         type: "event",
         event: {
           type: "menuClick",
-          surfaceId: "surface-1",
+          spaceId: "space-1",
           trayId: "daemon-status",
           itemId: 99,
         },
@@ -162,7 +172,7 @@ describe("@opentray/spec", () => {
       type: "event",
       event: {
         type: "menuClick",
-        surfaceId: "surface-1",
+        spaceId: "space-1",
         trayId: "daemon-status",
         itemId: 99,
       },

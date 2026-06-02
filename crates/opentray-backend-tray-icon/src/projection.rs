@@ -5,7 +5,7 @@ use opentray_spec::{Icon, Menu, MenuItem, MenuItemId, SurfaceId, Tooltip, TrayEv
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayIconProjection {
-    pub surface_id: SurfaceId,
+    pub space_id: SurfaceId,
     pub title: Option<String>,
     pub tooltip: Option<Tooltip>,
     pub icon: Option<TrayIconAsset>,
@@ -21,7 +21,7 @@ impl TrayIconProjection {
             .iter()
             .map(|tray| {
                 TrayIconTrayProjection::from_tray_projection(
-                    &projection.surface.surface_id,
+                    &projection.surface.space_id,
                     tray,
                     &mut routes,
                 )
@@ -29,7 +29,7 @@ impl TrayIconProjection {
             .collect();
 
         Self {
-            surface_id: projection.surface.surface_id.clone(),
+            space_id: projection.surface.space_id.clone(),
             title: projection.title.clone(),
             tooltip: projection.tooltip.clone(),
             icon: projection.icon.as_ref().map(TrayIconAsset::from_icon),
@@ -50,7 +50,7 @@ pub struct TrayIconTrayProjection {
 
 impl TrayIconTrayProjection {
     fn from_tray_projection(
-        surface_id: &str,
+        space_id: &str,
         tray: &TrayProjection,
         routes: &mut TrayIconRouteTable,
     ) -> Self {
@@ -60,7 +60,7 @@ impl TrayIconTrayProjection {
             tooltip: tray.tooltip.clone(),
             icon: TrayIconAsset::from_icon(&tray.icon),
             menu: TrayIconMenuProjection::from_menu(
-                surface_id,
+                space_id,
                 &tray.tray_id,
                 tray.menu.as_ref(),
                 routes,
@@ -109,7 +109,7 @@ pub struct TrayIconMenuProjection {
 
 impl TrayIconMenuProjection {
     fn from_menu(
-        surface_id: &str,
+        space_id: &str,
         tray_id: &str,
         menu: Option<&Menu>,
         routes: &mut TrayIconRouteTable,
@@ -119,7 +119,7 @@ impl TrayIconMenuProjection {
                 .map(|menu| {
                     menu.items
                         .iter()
-                        .map(|item| menu_entry(surface_id, tray_id, item, routes))
+                        .map(|item| menu_entry(space_id, tray_id, item, routes))
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -158,7 +158,7 @@ pub enum TrayIconMenuEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayIconMenuRoute {
-    pub surface_id: SurfaceId,
+    pub space_id: SurfaceId,
     pub tray_id: TrayId,
     pub item_id: MenuItemId,
 }
@@ -171,18 +171,18 @@ pub struct TrayIconRouteTable {
 impl TrayIconRouteTable {
     pub fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
         self.routes.get(menu_id).map(|route| TrayEvent::MenuClick {
-            surface_id: route.surface_id.clone(),
+            space_id: route.space_id.clone(),
             tray_id: route.tray_id.clone(),
             item_id: route.item_id,
         })
     }
 
-    fn insert(&mut self, surface_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
-        let menu_id = stable_menu_id(surface_id, tray_id, item_id);
+    fn insert(&mut self, space_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
+        let menu_id = stable_menu_id(space_id, tray_id, item_id);
         self.routes.insert(
             menu_id.clone(),
             TrayIconMenuRoute {
-                surface_id: surface_id.to_string(),
+                space_id: space_id.to_string(),
                 tray_id: tray_id.to_string(),
                 item_id,
             },
@@ -192,7 +192,7 @@ impl TrayIconRouteTable {
 }
 
 fn menu_entry(
-    surface_id: &str,
+    space_id: &str,
     tray_id: &str,
     item: &MenuItem,
     routes: &mut TrayIconRouteTable,
@@ -204,7 +204,7 @@ fn menu_entry(
             enabled,
             shortcut,
         } => TrayIconMenuEntry::Item {
-            menu_id: routes.insert(surface_id, tray_id, *id),
+            menu_id: routes.insert(space_id, tray_id, *id),
             title: title.clone(),
             enabled: *enabled,
             shortcut: shortcut.clone(),
@@ -215,7 +215,7 @@ fn menu_entry(
             enabled,
             checked,
         } => TrayIconMenuEntry::Check {
-            menu_id: routes.insert(surface_id, tray_id, *id),
+            menu_id: routes.insert(space_id, tray_id, *id),
             title: title.clone(),
             enabled: *enabled,
             checked: *checked,
@@ -227,7 +227,7 @@ fn menu_entry(
             checked,
             group,
         } => TrayIconMenuEntry::Radio {
-            menu_id: routes.insert(surface_id, tray_id, *id),
+            menu_id: routes.insert(space_id, tray_id, *id),
             title: title.clone(),
             enabled: *enabled,
             checked: *checked,
@@ -243,16 +243,16 @@ fn menu_entry(
             enabled: *enabled,
             entries: items
                 .iter()
-                .map(|item| menu_entry(surface_id, tray_id, item, routes))
+                .map(|item| menu_entry(space_id, tray_id, item, routes))
                 .collect(),
         },
     }
 }
 
-fn stable_menu_id(surface_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
+fn stable_menu_id(space_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
     format!(
         "opentray:{}:{}:{}",
-        encode_component(surface_id),
+        encode_component(space_id),
         encode_component(tray_id),
         item_id
     )
@@ -283,8 +283,7 @@ mod tests {
     fn menu_ids_preserve_full_route_context() {
         let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
             surface: SurfaceRef {
-                surface_id: "surface:1".to_string(),
-                app_id: "host".to_string(),
+                space_id: "surface:1".to_string(),
             },
             title: Some("Host".to_string()),
             tooltip: None,
@@ -314,7 +313,7 @@ mod tests {
         assert_eq!(
             projection.routes.menu_event(&left),
             Some(TrayEvent::MenuClick {
-                surface_id: "surface:1".to_string(),
+                space_id: "surface:1".to_string(),
                 tray_id: "tray/a".to_string(),
                 item_id: 1,
             })
@@ -325,8 +324,7 @@ mod tests {
     fn submenu_routes_nested_items() {
         let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
             surface: SurfaceRef {
-                surface_id: "surface-1".to_string(),
-                app_id: "host".to_string(),
+                space_id: "surface-1".to_string(),
             },
             title: None,
             tooltip: None,

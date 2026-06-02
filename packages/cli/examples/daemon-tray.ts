@@ -4,7 +4,7 @@ import { attachWebview } from "../../ext-webview/src/index";
 
 const connection = await connectLocalBroker();
 const client = createClient(connection, { requestIdPrefix: "daemon-example" });
-console.log(`connected: endpoint=${connection.endpoint} lease=${connection.leaseId}`);
+console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
 
 const menuLabels = new Map<number, string>([
   [1, "Primary Action"],
@@ -32,14 +32,14 @@ connection.onEvent((frame) => {
   }
 });
 
-const surface = await client.createSurface({
-  appId: "com.example.opentray.daemon",
+const space = await client.createSpace({
+  id: "com.example.opentray.daemon",
   title: "OpenTray Daemon Example",
   default: true,
 });
-console.log(`surface: ${JSON.stringify(surface.surface)}`);
+console.log(`space: ${JSON.stringify(space.space)}`);
 
-const tray = await surface.createTray({
+const tray = await space.createTray({
   trayId: "daemon-status",
   title: "OpenTray",
   tooltip: {
@@ -83,7 +83,7 @@ console.log(`tray: ${tray.trayId}`);
 await connection.request({
   type: "load-ext",
   requestId: "daemon-example-load-webview",
-  surfaceId: surface.surface.surfaceId,
+  spaceId: space.space.spaceId,
   name: "webview",
   path: "@opentray/ext-webview",
 });
@@ -153,6 +153,8 @@ async function handleMenuClick(itemId: number): Promise<void> {
         width: 420,
         height: 260,
         fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
+        nativeWindowApi: true,
+        bindWindowGlobals: true,
       });
       console.log("webview command: show");
       break;
@@ -260,14 +262,47 @@ function createWebviewDemoHtml(): string {
       }
       code {
         word-break: break-word;
+        white-space: pre-wrap;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 8px 12px;
+        color: #f8f3de;
+        background: #2d654d;
+        font: inherit;
       }
     </style>
   </head>
   <body>
     <main>
       <h1>OpenTray WebView</h1>
-      <p>Use the tray menu to mutate this native WebView through extension commands.</p>
+      <p>Use the tray menu or the buttons below to exercise the extension-owned WebView bridge.</p>
       <section>
+        <div class="card">
+          <div class="label">navigator.window</div>
+          <code id="navigator-status">Waiting for navigator.window bootstrap</code>
+          <div class="actions">
+            <button id="capabilities-button">Capabilities</button>
+            <button id="frameless-button">Toggle Frameless</button>
+            <button id="navigator-resize-button">Grow via navigator.window</button>
+            <button id="navigator-move-button">Move via navigator.window</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">window globals</div>
+          <code id="globals-status">Waiting for global override bootstrap</code>
+          <div class="actions">
+            <button id="global-resize-button">Grow via window.resizeTo</button>
+            <button id="global-close-button">Close via window.close</button>
+          </div>
+        </div>
         <div class="card">
           <div class="label">postMessage</div>
           <code id="message-status">Waiting for WebView Commands -> Post Message</code>
@@ -275,6 +310,10 @@ function createWebviewDemoHtml(): string {
         <div class="card">
           <div class="label">evaluate JS</div>
           <code id="eval-status">Waiting for WebView Commands -> Evaluate JS</code>
+        </div>
+        <div class="card">
+          <div class="label">events</div>
+          <code id="event-status">Waiting for navigator.window events</code>
         </div>
       </section>
     </main>
@@ -285,6 +324,51 @@ function createWebviewDemoHtml(): string {
           target.textContent = JSON.stringify(event.data, null, 2);
         }
       });
+      const navigatorStatus = document.getElementById("navigator-status");
+      const globalsStatus = document.getElementById("globals-status");
+      const eventStatus = document.getElementById("event-status");
+      const pageWindow = navigator.window ?? navigator.opentrayWindow;
+
+      if (!pageWindow) {
+        navigatorStatus.textContent = "navigator.window is disabled";
+        globalsStatus.textContent = "window.close / window.resizeTo are using browser defaults";
+      } else {
+        navigatorStatus.textContent = "navigator.window is ready";
+        globalsStatus.textContent = "window.close / window.resizeTo are delegated to the extension for this demo";
+        pageWindow.getCapabilities().then((capabilities) => {
+          navigatorStatus.textContent = JSON.stringify(capabilities, null, 2);
+        });
+        const onEvent = (event) => {
+          if (eventStatus) {
+            eventStatus.textContent = JSON.stringify(event, null, 2);
+          }
+        };
+        void pageWindow.listen("moved", onEvent);
+        void pageWindow.listen("resized", onEvent);
+        void pageWindow.listen("stylechange", onEvent);
+        void pageWindow.listen("closed", onEvent);
+
+        document.getElementById("capabilities-button")?.addEventListener("click", async () => {
+          navigatorStatus.textContent = JSON.stringify(await pageWindow.getCapabilities(), null, 2);
+        });
+        document.getElementById("frameless-button")?.addEventListener("click", async () => {
+          const style = await pageWindow.getStyle();
+          await pageWindow.setStyle({ frameless: !style.frameless });
+          navigatorStatus.textContent = JSON.stringify(await pageWindow.getStyle(), null, 2);
+        });
+        document.getElementById("navigator-resize-button")?.addEventListener("click", () => {
+          void pageWindow.resizeTo(520, 320);
+        });
+        document.getElementById("navigator-move-button")?.addEventListener("click", () => {
+          void pageWindow.moveTo(140, 120);
+        });
+        document.getElementById("global-resize-button")?.addEventListener("click", () => {
+          window.resizeTo(560, 360);
+        });
+        document.getElementById("global-close-button")?.addEventListener("click", () => {
+          window.close();
+        });
+      }
     </script>
   </body>
 </html>`;

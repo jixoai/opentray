@@ -9,20 +9,19 @@ class RecordingTransport implements OpenTrayTransport {
     this.frames.push(frame);
     console.log(`client -> broker ${JSON.stringify(frame)}`);
     switch (frame.type) {
-      case "create-surface":
+      case "create-space":
         return {
-          type: "surface-created",
+          type: "space-created",
           requestId: frame.requestId,
-          surface: {
-            surfaceId: `recorded:${frame.appId}`,
-            appId: frame.appId,
+          space: {
+            spaceId: `recorded:${frame.id ?? "default"}`,
           },
         };
       case "create-tray":
         return {
           type: "tray-created",
           requestId: frame.requestId,
-          surfaceId: frame.surface.surfaceId,
+          spaceId: frame.space.spaceId,
           trayId: frame.tray.trayId ?? "recorded-tray",
         };
       case "destroy-tray":
@@ -32,7 +31,7 @@ class RecordingTransport implements OpenTrayTransport {
       case "load-ext":
       case "ext-command":
       case "unload-ext":
-      case "resolve-default-surface":
+      case "resolve-default-space":
         return { type: "ack", requestId: frame.requestId };
       case "health":
         return {
@@ -56,13 +55,13 @@ console.log(`client -> broker ${JSON.stringify(createInitFrame("0.1.0"))}`);
 
 const client = createClient(transport);
 
-const surface = await client.createSurface({
-  appId: "com.example.opentray",
+const space = await client.createSpace({
+  id: "com.example.opentray",
   title: "OpenTray Example",
   default: true,
 });
 
-const tray = await surface.createTray({
+const tray = await space.createTray({
   trayId: "build-status",
   title: "Build Status",
   tooltip: {
@@ -86,7 +85,7 @@ const tray = await surface.createTray({
 
 await tray.commandExtension("example-status", {
   type: "refresh",
-  source: "examples/basic-surface.ts",
+  source: "examples/basic-space.ts",
 });
 await tray.destroy();
 

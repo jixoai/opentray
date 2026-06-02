@@ -4,8 +4,7 @@ use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef, Tooltip};
 pub fn surface_projection() -> SurfaceProjection {
     SurfaceProjection {
         surface: SurfaceRef {
-            surface_id: "human-check".to_string(),
-            app_id: "examples".to_string(),
+            space_id: "human-check".to_string(),
         },
         title: Some("OpenTray Human Check".to_string()),
         tooltip: Some(Tooltip {

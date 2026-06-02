@@ -1,11 +1,13 @@
 export {
   createClient,
   createInitFrame,
+  createSpaceHandle,
   createSurfaceHandle,
   createTrayHandle,
   type CreateClientOptions,
   type OpenTrayClient,
   type OpenTrayTransport,
+  type SpaceHandle,
   type SurfaceHandle,
   type TrayHandle,
 } from "./client";

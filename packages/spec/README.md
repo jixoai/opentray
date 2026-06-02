@@ -6,7 +6,7 @@ Shared TypeScript protocol and contract package for OpenTray.
 
 - Define JSON-RPC payload shapes.
 - Define broker protocol version and endpoint identity helpers.
-- Define public `Surface`, `Tray`, `Lease`, and extension contract types.
+- Define public `Space`, `Tray`, `Session`, and extension contract types.
 - Keep protocol types reusable by the `opentray` package and official extensions.
 
 This package must stay platform-neutral and must not import native implementation packages.

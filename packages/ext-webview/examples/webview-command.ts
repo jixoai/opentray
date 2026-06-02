@@ -17,8 +17,7 @@ const transport = new RecordingTransport();
 const tray = createTrayHandle(
   transport,
   {
-    surfaceId: "example-surface",
-    appId: "com.example.opentray",
+    spaceId: "example-space",
   },
   "webview-tray",
 );
@@ -29,6 +28,8 @@ await webview.show({
   html: "<main><h1>OpenTray WebView</h1><p>Extension atom example.</p></main>",
   width: 360,
   height: 220,
+  nativeWindowApi: true,
+  bindWindowGlobals: true,
   fallbackRect: {
     x: 0,
     y: 0,

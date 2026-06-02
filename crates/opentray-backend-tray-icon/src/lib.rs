@@ -45,15 +45,15 @@ impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
             .apply_projection(TrayIconProjection::from_surface_projection(&projection))
     }
 
-    fn rect(&self, surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
+    fn rect(&self, space_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
         if !self.capabilities().rect {
             return Ok(None);
         }
-        self.runtime.rect(surface_id)
+        self.runtime.rect(space_id)
     }
 
-    fn show_menu(&self, surface_id: &SurfaceId) -> Result<(), BackendError> {
-        self.runtime.show_menu(surface_id)
+    fn show_menu(&self, space_id: &SurfaceId) -> Result<(), BackendError> {
+        self.runtime.show_menu(space_id)
     }
 
     fn emit_event(&self, event: TrayEvent) -> Result<(), BackendError> {
@@ -88,7 +88,7 @@ mod tests {
             .expect("projection apply");
 
         let projection = calls.borrow().last().expect("projection").clone();
-        assert_eq!(projection.surface_id, "surface-1");
+        assert_eq!(projection.space_id, "surface-1");
         assert_eq!(projection.trays[0].menu.entries.len(), 1);
         assert!(projection
             .routes
@@ -116,7 +116,7 @@ mod tests {
         assert_eq!(
             backend.menu_event("native-menu-id"),
             Some(TrayEvent::MenuClick {
-                surface_id: "surface-1".to_string(),
+                space_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 7,
             })
@@ -151,7 +151,7 @@ mod tests {
 
         fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
             (menu_id == "native-menu-id").then(|| TrayEvent::MenuClick {
-                surface_id: "surface-1".to_string(),
+                space_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 7,
             })
@@ -161,8 +161,7 @@ mod tests {
     fn surface_projection() -> SurfaceProjection {
         SurfaceProjection {
             surface: SurfaceRef {
-                surface_id: "surface-1".to_string(),
-                app_id: "host".to_string(),
+                space_id: "surface-1".to_string(),
             },
             title: Some("Host".to_string()),
             tooltip: None,

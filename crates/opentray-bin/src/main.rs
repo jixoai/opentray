@@ -108,16 +108,14 @@ mod native_broker {
     use std::{collections::HashMap, error::Error, time::Duration};
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
-    use opentray_core::{BrokerKernel, BrokerSession, ExtensionError, ExtensionHostContext};
-    use opentray_spec::{ClientFrame, ServerFrame, EXT_HOST_CAPABILITY_WEBVIEW};
-    use serde_json::{json, Value};
+    use opentray_core::{BrokerKernel, BrokerSession, UnsupportedExtensionHostContext};
+    use opentray_spec::{ClientFrame, ServerFrame};
     use winit::application::ApplicationHandler;
-    use winit::dpi::LogicalSize;
-    use winit::event::{StartCause, WindowEvent};
+    use winit::event::StartCause;
+    use winit::event::WindowEvent;
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
     use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
-    use winit::window::{Window, WindowId};
-    use wry::{WebView, WebViewBuilder};
+    use winit::window::WindowId;
 
     use super::{dynamic_extension::DynamicExtensionLoader, unix_transport, BrokerOptions};
 
@@ -156,7 +154,6 @@ mod native_broker {
             broker_version: options.package_version.clone(),
             idle_timeout: options.idle_timeout,
             idle_generation: 0,
-            webview: NativeWebviewRuntime::default(),
             proxy: event_loop.create_proxy(),
             listener: Some(listener),
             options,
@@ -171,7 +168,6 @@ mod native_broker {
         broker_version: String,
         idle_timeout: Option<Duration>,
         idle_generation: u64,
-        webview: NativeWebviewRuntime,
         proxy: EventLoopProxy<UserEvent>,
         listener: Option<unix_transport::ListenerHandle>,
         options: BrokerOptions,
@@ -189,7 +185,7 @@ mod native_broker {
 
         fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
             match event {
-                UserEvent::Transport(event) => self.handle_transport(event_loop, event),
+                UserEvent::Transport(event) => self.handle_transport(event),
                 UserEvent::Menu(event) => self.handle_menu(event),
                 UserEvent::IdleExpired(generation) => {
                     if self.sessions.is_empty() && generation == self.idle_generation {
@@ -202,14 +198,9 @@ mod native_broker {
         fn window_event(
             &mut self,
             _event_loop: &ActiveEventLoop,
-            window_id: WindowId,
-            event: WindowEvent,
+            _window_id: WindowId,
+            _event: WindowEvent,
         ) {
-            if matches!(event, WindowEvent::CloseRequested)
-                && self.webview.window_id() == Some(window_id)
-            {
-                self.webview.close();
-            }
         }
 
         fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
@@ -220,11 +211,7 @@ mod native_broker {
     }
 
     impl NativeBrokerApp {
-        fn handle_transport(
-            &mut self,
-            event_loop: &ActiveEventLoop,
-            event: unix_transport::TransportEvent,
-        ) {
+        fn handle_transport(&mut self, event: unix_transport::TransportEvent) {
             match event {
                 unix_transport::TransportEvent::Connected { id, writer } => {
                     self.bump_idle_generation();
@@ -248,10 +235,7 @@ mod native_broker {
                     let Some(session) = self.sessions.get_mut(&id) else {
                         return;
                     };
-                    let mut extension_host = NativeExtensionHost {
-                        event_loop,
-                        webview: &mut self.webview,
-                    };
+                    let mut extension_host = UnsupportedExtensionHostContext;
                     let frames = self.broker.handle_frame_with_extension_host(
                         &mut session.broker,
                         frame,
@@ -262,10 +246,7 @@ mod native_broker {
                 }
                 unix_transport::TransportEvent::Disconnected { id } => {
                     if let Some(mut session) = self.sessions.remove(&id) {
-                        let mut extension_host = NativeExtensionHost {
-                            event_loop,
-                            webview: &mut self.webview,
-                        };
+                        let mut extension_host = UnsupportedExtensionHostContext;
                         let _ = self.broker.close_session_with_extension_host(
                             &mut session.broker,
                             &mut extension_host,
@@ -313,329 +294,6 @@ mod native_broker {
                 let _ = proxy.send_event(UserEvent::IdleExpired(generation));
             });
         }
-    }
-
-    struct NativeExtensionHost<'a> {
-        event_loop: &'a ActiveEventLoop,
-        webview: &'a mut NativeWebviewRuntime,
-    }
-
-    impl ExtensionHostContext for NativeExtensionHost<'_> {
-        fn invoke_host(
-            &mut self,
-            capability: &str,
-            request_json: &[u8],
-        ) -> Result<Vec<u8>, ExtensionError> {
-            // WebView needs the main native event loop, so the daemon exposes it
-            // as a host capability instead of passing winit/wry types over ABI.
-            if capability != EXT_HOST_CAPABILITY_WEBVIEW {
-                return Err(ExtensionError::Unsupported(format!(
-                    "host capability is unavailable: {capability}"
-                )));
-            }
-
-            let request = serde_json::from_slice::<Value>(request_json).map_err(|error| {
-                ExtensionError::Rejected(format!("invalid host capability request: {error}"))
-            })?;
-            let command_data = request
-                .get("command")
-                .ok_or_else(|| {
-                    ExtensionError::Rejected("webview host request requires command".into())
-                })?
-                .clone();
-            if command_data.get("type").and_then(Value::as_str) == Some("leaseClosed") {
-                self.webview.close();
-                return serde_json::to_vec(&json!({ "type": "leaseClosed" })).map_err(|error| {
-                    ExtensionError::Rejected(format!("webview host response failed: {error}"))
-                });
-            }
-
-            let command = WebviewRuntimeCommand::from_data(&command_data)?;
-            let data = self
-                .webview
-                .handle(self.event_loop, command)
-                .map_err(|error| ExtensionError::Rejected(error.to_string()))?;
-            serde_json::to_vec(&data).map_err(|error| {
-                ExtensionError::Rejected(format!("webview host response failed: {error}"))
-            })
-        }
-    }
-
-    #[derive(Debug)]
-    enum WebviewRuntimeCommand {
-        Show {
-            html: Option<String>,
-            url: Option<String>,
-            width: f64,
-            height: f64,
-        },
-        Hide,
-        Navigate {
-            url: String,
-        },
-        Evaluate {
-            js: String,
-        },
-        PostMessage {
-            payload: Value,
-        },
-    }
-
-    impl WebviewRuntimeCommand {
-        fn from_data(data: &Value) -> Result<Self, ExtensionError> {
-            let command_type = data
-                .get("type")
-                .and_then(Value::as_str)
-                .ok_or_else(|| ExtensionError::Rejected("webview command requires type".into()))?;
-
-            match command_type {
-                "show" => Ok(Self::Show {
-                    html: data
-                        .get("html")
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned),
-                    url: data
-                        .get("url")
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned),
-                    width: data.get("width").and_then(Value::as_f64).unwrap_or(420.0),
-                    height: data.get("height").and_then(Value::as_f64).unwrap_or(260.0),
-                }),
-                "hide" => Ok(Self::Hide),
-                "navigate" => Ok(Self::Navigate {
-                    url: required_string(data, "url")?,
-                }),
-                "evaluate" => Ok(Self::Evaluate {
-                    js: required_string(data, "js")?,
-                }),
-                "postMessage" => Ok(Self::PostMessage {
-                    payload: data.get("payload").cloned().unwrap_or(Value::Null),
-                }),
-                other => Err(ExtensionError::Rejected(format!(
-                    "unsupported webview command: {other}"
-                ))),
-            }
-        }
-    }
-
-    fn required_string(data: &Value, key: &str) -> Result<String, ExtensionError> {
-        data.get(key)
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .ok_or_else(|| ExtensionError::Rejected(format!("webview command requires {key}")))
-    }
-
-    #[derive(Default)]
-    struct NativeWebviewRuntime {
-        webview: Option<WebView>,
-        window: Option<Window>,
-    }
-
-    impl NativeWebviewRuntime {
-        fn handle(
-            &mut self,
-            event_loop: &ActiveEventLoop,
-            command: WebviewRuntimeCommand,
-        ) -> Result<Value, Box<dyn Error>> {
-            match command {
-                WebviewRuntimeCommand::Show {
-                    html,
-                    url,
-                    width,
-                    height,
-                } => self.show(event_loop, html, url, width, height),
-                WebviewRuntimeCommand::Hide => {
-                    self.hide();
-                    Ok(json!({ "type": "hidden" }))
-                }
-                WebviewRuntimeCommand::Navigate { url } => self.navigate(event_loop, url),
-                WebviewRuntimeCommand::Evaluate { js } => {
-                    self.ensure_window(event_loop, None, None, 420.0, 260.0)?;
-                    if let Some(webview) = &self.webview {
-                        webview.evaluate_script(&js)?;
-                    }
-                    println!("native webview evaluated script");
-                    Ok(json!({ "type": "evaluated" }))
-                }
-                WebviewRuntimeCommand::PostMessage { payload } => {
-                    self.ensure_window(event_loop, None, None, 420.0, 260.0)?;
-                    if let Some(webview) = &self.webview {
-                        let payload_json = serde_json::to_string(&payload)?;
-                        webview.evaluate_script(&format!(
-                            "window.dispatchEvent(new MessageEvent('message', {{ data: {payload_json} }}));"
-                        ))?;
-                    }
-                    println!("native webview posted message");
-                    Ok(json!({ "type": "message", "payload": payload }))
-                }
-            }
-        }
-
-        fn show(
-            &mut self,
-            event_loop: &ActiveEventLoop,
-            html: Option<String>,
-            url: Option<String>,
-            width: f64,
-            height: f64,
-        ) -> Result<Value, Box<dyn Error>> {
-            self.ensure_window(event_loop, html, url, width, height)?;
-            self.focus();
-            println!("native webview shown");
-            Ok(json!({ "type": "shown" }))
-        }
-
-        fn navigate(
-            &mut self,
-            event_loop: &ActiveEventLoop,
-            url: String,
-        ) -> Result<Value, Box<dyn Error>> {
-            self.ensure_window(event_loop, None, Some(url.clone()), 420.0, 260.0)?;
-            if let Some(webview) = &self.webview {
-                webview.load_url(&url)?;
-            }
-            self.focus();
-            println!("native webview navigated: {url}");
-            Ok(json!({ "type": "navigated", "url": url }))
-        }
-
-        fn hide(&mut self) {
-            // On macOS, hiding a live wry/winit child window via set_visible(false)
-            // can crash while AppKit emits resign-key notifications. Dropping the
-            // scoped WebView window keeps the extension contract stable: hidden now,
-            // recreated on the next show/navigate/evaluate/postMessage command.
-            self.close();
-            println!("native webview hidden");
-        }
-
-        fn close(&mut self) {
-            self.webview = None;
-            self.window = None;
-            println!("native webview closed");
-        }
-
-        fn window_id(&self) -> Option<WindowId> {
-            self.window.as_ref().map(Window::id)
-        }
-
-        fn focus(&self) {
-            if let Some(window) = &self.window {
-                window.set_visible(true);
-                window.focus_window();
-            }
-        }
-
-        fn ensure_window(
-            &mut self,
-            event_loop: &ActiveEventLoop,
-            html: Option<String>,
-            url: Option<String>,
-            width: f64,
-            height: f64,
-        ) -> Result<(), Box<dyn Error>> {
-            if self.window.is_none() {
-                let window = event_loop.create_window(
-                    Window::default_attributes()
-                        .with_title("OpenTray WebView")
-                        .with_inner_size(LogicalSize::new(width.max(240.0), height.max(160.0)))
-                        .with_visible(true),
-                )?;
-                let webview = build_webview(&window, html, url)?;
-                self.webview = Some(webview);
-                self.window = Some(window);
-                println!("native webview created");
-                return Ok(());
-            }
-
-            if let Some(window) = &self.window {
-                let _ = window
-                    .request_inner_size(LogicalSize::new(width.max(240.0), height.max(160.0)));
-            }
-            if let Some(webview) = &self.webview {
-                if let Some(url) = url {
-                    webview.load_url(&url)?;
-                } else if let Some(html) = html {
-                    webview.load_html(&html)?;
-                }
-            }
-            Ok(())
-        }
-    }
-
-    fn build_webview(
-        window: &Window,
-        html: Option<String>,
-        url: Option<String>,
-    ) -> Result<WebView, Box<dyn Error>> {
-        let builder = WebViewBuilder::new();
-        let builder = if let Some(url) = url {
-            builder.with_url(url)
-        } else {
-            builder.with_html(html.unwrap_or_else(default_webview_html))
-        };
-        Ok(builder.build(window)?)
-    }
-
-    fn default_webview_html() -> String {
-        r#"<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>OpenTray WebView</title>
-    <style>
-      body {
-        margin: 0;
-        color: #18220f;
-        background: linear-gradient(135deg, #fff8e7 0%, #e9f0d8 100%);
-        font: 15px ui-rounded, "SF Pro Rounded", "Avenir Next", sans-serif;
-      }
-      main {
-        padding: 22px;
-      }
-      .card {
-        margin-top: 12px;
-        border: 1px solid rgba(24, 34, 15, 0.16);
-        border-radius: 14px;
-        padding: 12px;
-        background: rgba(255, 255, 255, 0.72);
-      }
-      .label {
-        margin-bottom: 5px;
-        color: #7b5b1d;
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-      code {
-        word-break: break-word;
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>OpenTray WebView</h1>
-      <p>Native daemon runtime.</p>
-      <div class="card">
-        <div class="label">postMessage</div>
-        <code id="message-status">Waiting for a message.</code>
-      </div>
-      <div class="card">
-        <div class="label">evaluate JS</div>
-        <code id="eval-status">Waiting for evaluation.</code>
-      </div>
-    </main>
-    <script>
-      window.addEventListener("message", (event) => {
-        const target = document.getElementById("message-status");
-        if (target) {
-          target.textContent = JSON.stringify(event.data, null, 2);
-        }
-      });
-    </script>
-  </body>
-</html>"#
-            .to_string()
     }
 }
 

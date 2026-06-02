@@ -54,6 +54,9 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+
       - name: Build native artifacts
         shell: bash
         run: |

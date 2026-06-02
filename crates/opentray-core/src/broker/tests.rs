@@ -1,5 +1,5 @@
 use opentray_spec::{
-    ClientFrame, Icon, Menu, MenuItem, ServerFrame, SurfaceOptions, TrayEvent, TrayOptions,
+    ClientFrame, Icon, Menu, MenuItem, ServerFrame, SpaceOptions, TrayEvent, TrayOptions,
     PROTOCOL_VERSION,
 };
 
@@ -55,10 +55,10 @@ fn compatible_init_accepts_session_lease() {
     assert!(matches!(
         &frames[0],
         ServerFrame::Ready {
-            lease_id,
+            session_id,
             protocol_version: PROTOCOL_VERSION,
             ..
-        } if lease_id == "lease-1"
+        } if session_id == "lease-1"
     ));
 }
 
@@ -92,10 +92,10 @@ fn command_before_init_is_rejected_without_backend_mutation() {
 
     let frames = broker.handle_frame(
         &mut session,
-        ClientFrame::CreateSurface {
+        ClientFrame::CreateSpace {
             request_id: "req-1".to_string(),
-            options: SurfaceOptions {
-                app_id: "app".to_string(),
+            options: SpaceOptions {
+                id: Some("app".to_string()),
                 title: None,
                 icon: None,
                 default: true,
@@ -116,7 +116,7 @@ fn command_before_init_is_rejected_without_backend_mutation() {
 }
 
 #[test]
-fn create_surface_returns_correlated_broker_identity() {
+fn create_space_returns_correlated_broker_identity() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::new(backend);
     let mut session = BrokerSession::new();
@@ -124,10 +124,10 @@ fn create_surface_returns_correlated_broker_identity() {
 
     let frames = broker.handle_frame(
         &mut session,
-        ClientFrame::CreateSurface {
+        ClientFrame::CreateSpace {
             request_id: "req-1".to_string(),
-            options: SurfaceOptions {
-                app_id: "app".to_string(),
+            options: SpaceOptions {
+                id: Some("app".to_string()),
                 title: Some("App".to_string()),
                 icon: None,
                 default: true,
@@ -138,10 +138,10 @@ fn create_surface_returns_correlated_broker_identity() {
 
     assert!(matches!(
         &frames[0],
-        ServerFrame::SurfaceCreated {
+        ServerFrame::SpaceCreated {
             request_id,
-            surface,
-        } if request_id == "req-1" && surface.surface_id == "surface-1"
+            space,
+        } if request_id == "req-1" && space.space_id == "app"
     ));
 }
 
@@ -151,13 +151,13 @@ fn create_tray_syncs_backend_projection() {
     let mut broker = BrokerKernel::new(backend.clone());
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
-    let surface = create_surface(&mut broker, &mut session);
+    let surface = create_space(&mut broker, &mut session);
 
     let frames = broker.handle_frame(
         &mut session,
         ClientFrame::CreateTray {
             request_id: "req-tray".to_string(),
-            surface,
+            space: surface,
             tray: tray_options("status"),
         },
         "0.1.0",
@@ -188,12 +188,12 @@ fn disconnect_cleans_only_session_lease() {
     let mut second = BrokerSession::new();
     broker.handle_frame(&mut first, init(), "0.1.0");
     broker.handle_frame(&mut second, init(), "0.1.0");
-    let surface = create_surface(&mut broker, &mut first);
+    let surface = create_space(&mut broker, &mut first);
     broker.handle_frame(
         &mut first,
         ClientFrame::CreateTray {
             request_id: "req-a".to_string(),
-            surface: surface.clone(),
+            space: surface.clone(),
             tray: tray_options("a"),
         },
         "0.1.0",
@@ -202,7 +202,7 @@ fn disconnect_cleans_only_session_lease() {
         &mut second,
         ClientFrame::CreateTray {
             request_id: "req-b".to_string(),
-            surface,
+            space: surface,
             tray: tray_options("b"),
         },
         "0.1.0",
@@ -229,12 +229,12 @@ fn backend_event_routes_to_owning_lease() {
     let mut broker = BrokerKernel::new(backend);
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
-    let surface = create_surface(&mut broker, &mut session);
+    let surface = create_space(&mut broker, &mut session);
     broker.handle_frame(
         &mut session,
         ClientFrame::CreateTray {
             request_id: "req-tray".to_string(),
-            surface: surface.clone(),
+            space: surface.clone(),
             tray: tray_options("status"),
         },
         "0.1.0",
@@ -242,7 +242,7 @@ fn backend_event_routes_to_owning_lease() {
 
     let routed = broker
         .route_backend_event(TrayEvent::MenuClick {
-            surface_id: surface.surface_id,
+            space_id: surface.space_id,
             tray_id: "status".to_string(),
             item_id: 7,
         })
@@ -257,13 +257,13 @@ fn load_ext_rejects_dynamic_paths_without_a_loader() {
     let mut broker = BrokerKernel::new(backend);
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
-    let surface = create_surface(&mut broker, &mut session);
+    let surface = create_space(&mut broker, &mut session);
 
     let frames = broker.handle_frame(
         &mut session,
         ClientFrame::LoadExt {
             request_id: "req-load".to_string(),
-            surface_id: surface.surface_id,
+            space_id: surface.space_id,
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
         },
@@ -286,12 +286,12 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
     let mut broker = BrokerKernel::with_extension_loader(backend, RecordingExtensionLoader);
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
-    let surface = create_surface(&mut broker, &mut session);
+    let surface = create_space(&mut broker, &mut session);
     broker.handle_frame(
         &mut session,
         ClientFrame::CreateTray {
             request_id: "req-tray".to_string(),
-            surface: surface.clone(),
+            space: surface.clone(),
             tray: tray_options("status"),
         },
         "0.1.0",
@@ -301,7 +301,7 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
         &mut session,
         ClientFrame::LoadExt {
             request_id: "req-load".to_string(),
-            surface_id: surface.surface_id.clone(),
+            space_id: surface.space_id.clone(),
             name: "webview".to_string(),
             path: RECORDING_EXTENSION_PATH.to_string(),
         },
@@ -311,7 +311,7 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
         &mut session,
         ClientFrame::ExtCommand {
             request_id: "req-ext".to_string(),
-            surface_id: surface.surface_id,
+            space_id: surface.space_id,
             tray_id: "status".to_string(),
             ext: "webview".to_string(),
             data: serde_json::json!({ "type": "show" }),
@@ -343,12 +343,12 @@ fn explicit_exit_uses_extension_host_for_lease_cleanup() {
     let mut broker = BrokerKernel::with_extension_loader(backend, HostProbeLoader);
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
-    let surface = create_surface(&mut broker, &mut session);
+    let surface = create_space(&mut broker, &mut session);
     broker.handle_frame(
         &mut session,
         ClientFrame::LoadExt {
             request_id: "req-load".to_string(),
-            surface_id: surface.surface_id,
+            space_id: surface.space_id,
             name: "webview".to_string(),
             path: "opentray://host-probe".to_string(),
         },
@@ -366,16 +366,16 @@ fn explicit_exit_uses_extension_host_for_lease_cleanup() {
     assert_eq!(host.calls, 1);
 }
 
-fn create_surface<L: ExtensionLoader>(
+fn create_space<L: ExtensionLoader>(
     broker: &mut BrokerKernel<FakeBackend, L>,
     session: &mut BrokerSession,
-) -> opentray_spec::SurfaceRef {
+) -> opentray_spec::SpaceRef {
     match broker.handle_frame(
         session,
-        ClientFrame::CreateSurface {
+        ClientFrame::CreateSpace {
             request_id: "req-surface".to_string(),
-            options: SurfaceOptions {
-                app_id: "app".to_string(),
+            options: SpaceOptions {
+                id: Some("app".to_string()),
                 title: None,
                 icon: None,
                 default: true,
@@ -385,7 +385,7 @@ fn create_surface<L: ExtensionLoader>(
     )[0]
     .clone()
     {
-        ServerFrame::SurfaceCreated { surface, .. } => surface,
+        ServerFrame::SpaceCreated { space, .. } => space,
         other => panic!("unexpected frame: {other:?}"),
     }
 }

@@ -11,7 +11,7 @@ pnpm add opentray
 ## Role
 
 - Resolve or auto-start the OpenTray broker.
-- Expose `createSurface()`, `defaultSurface`, and `createTray()`.
+- Expose `createSpace()`, default space resolution, and `createTray()`.
 - Route extension packages through public OpenTray contracts.
 - Resolve per-platform optional binary packages.
 
@@ -19,7 +19,7 @@ pnpm add opentray
 
 ## Example
 
-Run a protocol-only example that creates a surface, creates a tray, dispatches an extension command, and prints each client frame:
+Run a protocol-only example that creates a space, creates a tray, dispatches an extension command, and prints each client frame:
 
 ```bash
 pnpm --filter opentray example:basic
@@ -45,7 +45,9 @@ pnpm --filter opentray cli -- daemon stop
 pnpm --filter opentray cli -- daemon restart
 ```
 
-The menu includes `WebView Commands` entries that call the `@opentray/ext-webview` facade. On macOS, `Show HTML` loads the platform WebView dynamic library and opens a real native WebView window through daemon-owned UI capability; `Navigate`, `Post Message`, `Evaluate JS`, and `Hide` operate on that window.
+The menu includes `WebView Commands` entries that call the `@opentray/ext-webview` facade. On macOS, `Show HTML` loads the platform WebView dynamic library and opens a real native WebView window owned by that library; `Navigate`, `Post Message`, `Evaluate JS`, and `Hide` operate on that window.
+
+The `Show HTML` demo also enables the injected page bridge so the rendered page can call `navigator.window` / `navigator.opentrayWindow` and, for the demo only, opt into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides. Use the in-page buttons to verify `getCapabilities`, `getStyle`, `setStyle({ frameless })`, move, resize, and close behavior visually instead of relying only on terminal logs.
 
 First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists.
 
@@ -59,5 +61,14 @@ OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
 ```
 
 The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to keep it alive during debugging, or provide another millisecond value for a custom idle release window.
+
+To confirm the native runtime split on macOS after a release build:
+
+```bash
+cargo build -p opentray-bin -p opentray-ext-webview --release
+wc -c target/release/opentray target/release/libopentray_ext_webview.dylib
+otool -L target/release/opentray
+otool -L target/release/libopentray_ext_webview.dylib
+```
 
 Current native icon support is `rgba`. `encoded` and `file` are typed protocol shapes, but the native `tray-icon` backend reports them as unsupported until decoding and file loading policy are implemented.
