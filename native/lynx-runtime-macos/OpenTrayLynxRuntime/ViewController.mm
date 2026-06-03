@@ -963,8 +963,10 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     NSScreen *screen = screens[index];
     NSString *label = [NSString stringWithFormat:@"Screen %lu",
                                                  static_cast<unsigned long>(index + 1)];
-    if ([screen respondsToSelector:@selector(localizedName)] && screen.localizedName.length > 0) {
-      label = screen.localizedName;
+    if (@available(macOS 10.15, *)) {
+      if (screen.localizedName.length > 0) {
+        label = screen.localizedName;
+      }
     }
     NSDictionary *detail = @{
       @"id" : [NSString stringWithFormat:@"screen-%lu",
