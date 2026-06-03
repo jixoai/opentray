@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 
 import type { DaemonHealth } from "@opentray/spec";
 
-import { createNodeDaemonDriver, inspectDaemon, restartDaemon, startDaemon, stopDaemon } from "./daemon/lifecycle";
+import {
+  createNodeDaemonDriver,
+  inspectDaemon,
+  restartDaemon,
+  startDaemon,
+  stopDaemon,
+} from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
 import { connectLocalBroker } from "./local-broker";
@@ -35,7 +41,12 @@ export const parseCliCommand = (argv: string[]): CliCommand => {
     }
     return { type: "help" };
   }
-  if (action === "start" || action === "stop" || action === "restart" || action === "health") {
+  if (
+    action === "start" ||
+    action === "stop" ||
+    action === "restart" ||
+    action === "health"
+  ) {
     return { type: "daemon", action };
   }
 
@@ -44,7 +55,9 @@ export const parseCliCommand = (argv: string[]): CliCommand => {
 
 export const runCli = async (argv: string[]): Promise<number> => {
   const command = parseCliCommand(argv);
-  const packageVersion = process.env.OPENTRAY_DAEMON_PACKAGE_VERSION ?? (await readPackageVersion(packageJsonUrl));
+  const packageVersion =
+    process.env.OPENTRAY_DAEMON_PACKAGE_VERSION ??
+    (await readPackageVersion(packageJsonUrl));
   const paths = resolveDaemonPaths({
     homeDir: process.env.OPENTRAY_HOME ?? homedir(),
     packageVersion,
@@ -60,7 +73,9 @@ export const runCli = async (argv: string[]): Promise<number> => {
       await runDaemonTraySmoke();
     } else {
       await runDaemonLynxSmoke(
-        command.bundlePath === undefined ? {} : { bundlePath: command.bundlePath },
+        command.bundlePath === undefined
+          ? {}
+          : { bundlePath: command.bundlePath }
       );
     }
     return 0;
@@ -70,7 +85,9 @@ export const runCli = async (argv: string[]): Promise<number> => {
 
   if (command.action === "start") {
     const result = await startDaemon({ paths, driver });
-    console.log(`opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`);
+    console.log(
+      `opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`
+    );
     return 0;
   }
 
@@ -79,14 +96,16 @@ export const runCli = async (argv: string[]): Promise<number> => {
     console.log(
       result.status === "stopped"
         ? `opentray daemon stopped: pid=${result.pid}`
-        : "opentray daemon not running",
+        : "opentray daemon not running"
     );
     return 0;
   }
 
   if (command.action === "restart") {
     const result = await restartDaemon({ paths, driver });
-    console.log(`opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`);
+    console.log(
+      `opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`
+    );
     return 0;
   }
 
@@ -109,7 +128,9 @@ export const runCli = async (argv: string[]): Promise<number> => {
         requestId: "opentray-daemon-health",
       });
       if (response.type !== "daemon-health") {
-        throw new Error(`expected daemon-health response, received ${response.type}`);
+        throw new Error(
+          `expected daemon-health response, received ${response.type}`
+        );
       }
       console.log(formatDaemonHealthOutput(response.health));
     } finally {
@@ -125,7 +146,10 @@ export const runCli = async (argv: string[]): Promise<number> => {
 const printHelp = (): void => {
   console.error("Usage: opentray daemon <start|stop|restart|health>");
   console.error("       opentray smoke daemon-tray");
-  console.error("       opentray smoke daemon-lynx --bundle <path-to-main.lynx.bundle>");
+  console.error(
+    "       opentray smoke daemon-lynx [--bundle <path-to-main.lynx.bundle>]"
+  );
+  console.error("       default Lynx smoke uses the packaged review bundle");
 };
 
 export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
@@ -141,14 +165,17 @@ export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
   for (const session of health.sessions) {
     const internalLease = session.internalLeaseId ?? "(pending)";
     lines.push(
-      `- sessionId=${session.sessionId} initialized=${session.initialized} internalLeaseId=${internalLease}`,
+      `- sessionId=${session.sessionId} initialized=${session.initialized} internalLeaseId=${internalLease}`
     );
   }
 
   return lines.join("\n");
 };
 
-export const isCliEntrypoint = (argvEntryPath: string | undefined, modulePath: string): boolean => {
+export const isCliEntrypoint = (
+  argvEntryPath: string | undefined,
+  modulePath: string
+): boolean => {
   if (argvEntryPath === undefined) return false;
   try {
     return realpathSync(argvEntryPath) === realpathSync(modulePath);

@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
-const releaseWorkflow = (): string => readFileSync(resolve(repoRoot, ".github/workflows/release.yml"), "utf8");
-const packageJson = (): string => readFileSync(resolve(repoRoot, "package.json"), "utf8");
+const releaseWorkflow = (): string =>
+  readFileSync(resolve(repoRoot, ".github/workflows/release.yml"), "utf8");
+const packageJson = (): string =>
+  readFileSync(resolve(repoRoot, "package.json"), "utf8");
 
 describe("Feature: release native binary CI law", () => {
   test("Scenario: Given release native artifacts When workflow is inspected Then Rust setup cache and artifact transport use maintained Actions", () => {

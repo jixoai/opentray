@@ -1,9 +1,38 @@
 import type { ExtensionEnvelope } from "@opentray/spec";
 import type { TrayHandle } from "opentray";
 
+export interface LynxWindowStyle {
+  frameless: boolean;
+  transparent: boolean;
+  backgroundEffect: string | null;
+}
+
+export interface LynxWindowCapabilities {
+  close: boolean;
+  move: boolean;
+  resize: boolean;
+  frameless: boolean;
+  transparent: boolean;
+  backgroundEffects: string[];
+  globalBindingsEnabled: boolean;
+  globalBindingsSupported: boolean;
+  fitContentSize: boolean;
+  platform: string;
+}
+
 export interface LynxShowCommand {
   type: "show";
   bundlePath: string;
+  width?: number;
+  height?: number;
+  minWidth?: number;
+  minHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  fitContentSize?: boolean;
+  nativeWindowApi?: boolean;
+  bindWindowGlobals?: boolean;
+  style?: Partial<Pick<LynxWindowStyle, "frameless">>;
 }
 
 export type LynxCommand = LynxShowCommand | { type: "hide" };
@@ -15,6 +44,8 @@ export type LynxEvent =
       launchUrl: string;
       pid: number;
       runtimeZip: string;
+      fitContentSize: boolean;
+      nativeWindowApi: boolean;
     }
   | { type: "hidden" };
 

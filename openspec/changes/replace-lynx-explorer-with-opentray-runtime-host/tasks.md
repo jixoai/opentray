@@ -13,21 +13,21 @@
 
 ## 3. Implementation
 
-- [ ] 3.1 Run `bun run openspec:vision -- commit-check replace-lynx-explorer-with-opentray-runtime-host --phase apply` before product-code work starts and commit the ready OpenSpec artifacts.
-- [ ] 3.2 Establish the repo-owned macOS Lynx host app source root and move the current host bridge logic there as source of truth.
-- [ ] 3.3 Refactor `scripts/release/build-lynx-runtime.sh` so it builds the OpenTray-owned host app carrier instead of patching upstream Explorer as the mainline product path.
-- [ ] 3.4 Update `crates/opentray-ext-lynx` runtime staging and artifact naming to consume the new host app zip without regressing tray-scoped lifecycle.
+- [x] 3.1 Run `bun run openspec:vision -- commit-check replace-lynx-explorer-with-opentray-runtime-host --phase apply` before product-code work starts and commit the ready OpenSpec artifacts.
+- [x] 3.2 Establish the repo-owned macOS Lynx host app source root and move the current host bridge logic there as source of truth.
+- [x] 3.3 Refactor `scripts/release/build-lynx-runtime.sh` so it builds the OpenTray-owned host app carrier instead of patching upstream Explorer as the mainline product path.
+- [x] 3.4 Update `crates/opentray-ext-lynx` runtime staging and artifact naming to consume the new host app zip without regressing tray-scoped lifecycle.
 - [ ] 3.5 Preserve the accepted `navigator.window` / fit-content / frameless behavior while the host carrier changes.
-- [ ] 3.6 Update release workflow logic, artifact staging helpers, and platform-package expectations for the new runtime zip identity.
-- [ ] 3.7 Update README and skills so future Lynx runtime work follows the “OpenTray-owned host app” law instead of the borrowed Explorer shell.
-- [ ] 3.8 Add concise intent comments only at the critical ownership boundaries where maintainers might otherwise mistake upstream Lynx runtime reuse for upstream app-shell ownership.
-- [ ] 3.9 Update only current-context completed task checkboxes and commit them with matching implementation and BDD evidence.
+- [x] 3.6 Update release workflow logic, artifact staging helpers, and platform-package expectations for the new runtime zip identity.
+- [x] 3.7 Update README and skills so future Lynx runtime work follows the “OpenTray-owned host app” law instead of the borrowed Explorer shell.
+- [x] 3.8 Add concise intent comments only at the critical ownership boundaries where maintainers might otherwise mistake upstream Lynx runtime reuse for upstream app-shell ownership.
+- [x] 3.9 Update only current-context completed task checkboxes and commit them with matching implementation and BDD evidence.
 
 ## 4. Verification
 
-- [ ] 4.1 Run targeted Rust, TypeScript, and packaging verification for the renamed/repointed runtime carrier path.
+- [x] 4.1 Run targeted Rust, TypeScript, and packaging verification for the renamed/repointed runtime carrier path.
 - [ ] 4.2 Run GitHub Actions or workflow-equivalent verification for darwin runtime-host artifact staging because local Xcode is not the release authority.
-- [ ] 4.3 Run `bun run openspec:vision -- validate replace-lynx-explorer-with-opentray-runtime-host` for this change.
+- [x] 4.3 Run `bun run openspec:vision -- validate replace-lynx-explorer-with-opentray-runtime-host` for this change.
 - [ ] 4.4 Run `bun run openspec:vision -- commit-check replace-lynx-explorer-with-opentray-runtime-host --phase self-review` before writing final review evidence.
 
 ## 5. Self-Review Loop

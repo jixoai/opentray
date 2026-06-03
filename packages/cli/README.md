@@ -38,11 +38,14 @@ await space.createTray({
 });
 
 const defaultSpace = await resolveDefaultSpace();
-await createTray({
-  trayId: "secondary",
-  title: "Secondary",
-  icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
-}, { space: defaultSpace.space });
+await createTray(
+  {
+    trayId: "secondary",
+    title: "Secondary",
+    icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+  },
+  { space: defaultSpace.space }
+);
 ```
 
 `createTray()` resolves the broker default space when no explicit target is provided. If you already know the target, pass `space: defaultSpace.space` in the second argument instead of relying on default-space lookup.
@@ -94,8 +97,10 @@ After installing from npm, use the published CLI smoke path instead of workspace
 
 ```bash
 opentray smoke daemon-tray
-opentray smoke daemon-lynx --bundle ./research/lynx/app/dist/main.lynx.bundle
+opentray smoke daemon-lynx
 ```
+
+`opentray smoke daemon-lynx` now uses the package-owned review bundle by default so a fresh npm install can perform the final visual audit without a workspace checkout. Keep `--bundle <path-to-main.lynx.bundle>` only when you want to override that official audit asset with a custom bundle.
 
 This example starts or reuses the same-version daemon automatically, creates a real tray through the public SDK, and prints broker-routed menu events. Use manual lifecycle commands only for operator/debug control:
 
@@ -113,7 +118,7 @@ The host side of that example can call `await tray.getBounds()` to read the curr
 
 The opened WebView also enables the injected page bridge so the rendered page can call `navigator.window` / `navigator.opentrayWindow` and, for the demo only, opt into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides. Use the in-page buttons to verify `getCapabilities`, `getStyle`, `setStyle({ frameless })`, move, resize, close, and tray-bounds behavior visually instead of relying only on terminal logs.
 
-The Lynx smoke path uses the same generic extension loader but launches a real `LynxExplorer.app.zip` runtime sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` immediately on run and exposes `Reload Bundle`, `Hide Window`, and `Quit Smoke` through tray-routed events.
+The Lynx smoke path uses the same generic extension loader but launches a real `OpenTrayLynxRuntime.app.zip` sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` immediately in fit-content mode, enables `navigator.window`, enables global overrides for validation, and exposes `Show Fit Window`, `Show Fixed Window`, `Hide Window`, and `Quit Smoke` through tray-routed events. Inside the Lynx window, use the rendered controls to verify `getCapabilities`, `getStyle`, `resizeTo`, `moveTo`, frameless toggling, `window.resizeTo()`, and close behavior visually.
 
 First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
 
@@ -130,10 +135,10 @@ cargo build -p opentray-bin -p opentray-ext-webview -p opentray-ext-lynx
 bun run scripts/binaries/stage-local.ts --kind daemon --source target/debug/opentray
 bun run scripts/binaries/stage-local.ts --kind webview --source target/debug/libopentray_ext_webview.dylib
 bun run scripts/binaries/stage-local.ts --kind lynx --source target/debug/libopentray_ext_lynx.dylib
-bash scripts/release/build-lynx-runtime.sh /tmp/LynxExplorer.app.zip
-bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/LynxExplorer.app.zip
+bash scripts/release/build-lynx-runtime.sh /tmp/OpenTrayLynxRuntime.app.zip
+bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/OpenTrayLynxRuntime.app.zip
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
-pnpm --filter opentray cli -- smoke daemon-lynx --bundle ./research/lynx/app/dist/main.lynx.bundle
+pnpm --filter opentray cli -- smoke daemon-lynx
 ```
 
 During source-level daemon work, restart the daemon with the freshly built broker binary before testing tray behavior. Otherwise the CLI may reuse the already staged same-version daemon:
