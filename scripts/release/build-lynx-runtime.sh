@@ -8,6 +8,16 @@ if [[ -z "${output_zip}" ]]; then
   exit 1
 fi
 
+caller_dir="$(pwd)"
+case "${output_zip}" in
+  /*) ;;
+  *) output_zip="${caller_dir}/${output_zip}" ;;
+esac
+output_dir="$(dirname "${output_zip}")"
+mkdir -p "${output_dir}"
+output_dir="$(cd "${output_dir}" && pwd)"
+output_zip="${output_dir}/$(basename "${output_zip}")"
+
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cache_dir="${root_dir}/research/lynx/cache"
 logs_dir="${root_dir}/research/lynx/logs/release"
@@ -434,8 +444,7 @@ mkdir -p \
   "${cache_dir}" \
   "${logs_dir}" \
   "${upstream_dir}" \
-  "${derived_data_dir}" \
-  "$(dirname "${output_zip}")"
+  "${derived_data_dir}"
 
 echo "Cloning Lynx from ${lynx_repo} at ${lynx_ref}"
 git clone "${lynx_repo}" "${lynx_dir}" 2>&1 | tee "${logs_dir}/git-clone.log"
@@ -503,5 +512,10 @@ patch_app_bundle_ats "${app_bundle_path}"
 ditto -c -k --sequesterRsrc --keepParent \
   "${app_bundle_path}" \
   "${output_zip}"
+
+if [[ ! -f "${output_zip}" ]]; then
+  echo "expected runtime zip not found after ditto: ${output_zip}" >&2
+  exit 1
+fi
 
 echo "built Lynx runtime artifact: ${output_zip}"
