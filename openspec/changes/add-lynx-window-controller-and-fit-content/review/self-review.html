@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Self Review: add-lynx-window-controller-and-fit-content</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4efe3;
+        --panel: rgba(255, 252, 247, 0.94);
+        --ink: #182119;
+        --muted: #667266;
+        --line: rgba(24, 33, 25, 0.12);
+        --accent: #1f6b52;
+        --warn: #a95b00;
+        --warn-bg: #ffe4bf;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(31, 107, 82, 0.14), transparent 32%),
+          linear-gradient(180deg, #faf7f1 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      }
+      main {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 22px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      .deck {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        margin: 24px 0 8px;
+      }
+      .card {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 14px 34px rgba(51, 40, 19, 0.08);
+      }
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .metric {
+        color: var(--accent);
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .partial {
+        color: var(--warn);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: rgba(31, 107, 82, 0.08);
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      code,
+      pre {
+        font: 13px/1.45 "SFMono-Regular", "Menlo", "Monaco", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+        overflow: auto;
+      }
+      ul {
+        padding-left: 20px;
+      }
+      .pass {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .warn {
+        color: var(--warn);
+        font-weight: 700;
+      }
+      .callout {
+        margin-top: 18px;
+        padding: 16px 18px;
+        border-radius: 18px;
+        border: 1px solid rgba(169, 91, 0, 0.22);
+        background: rgba(255, 228, 191, 0.6);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>add-lynx-window-controller-and-fit-content</h1>
+      <p>
+        Review focus: prove that <code>@opentray/ext-lynx</code> now owns window control, title/icon,
+        screen APIs, and fit-content policy at the extension boundary, while keeping the final
+        macOS carrier rebuild as an explicit CI-owned gate.
+      </p>
+
+      <div class="deck">
+        <section class="card">
+          <div class="label">Window Bridge</div>
+          <div class="metric">navigator-owned</div>
+          <p><code>navigator.window</code> and <code>navigator.screen</code> are now first-class Lynx host APIs.</p>
+        </section>
+        <section class="card">
+          <div class="label">Sizing Law</div>
+          <div class="metric">fit by default</div>
+          <p>Explicit fixed size still wins, and min/max bounds remain part of the host policy.</p>
+        </section>
+        <section class="card">
+          <div class="label">Carrier Identity</div>
+          <div class="metric partial">source fixed</div>
+          <p><code>Info.plist</code>, <code>BUILD.gn</code>, and <code>.icns</code> now agree on a real Dock icon resource.</p>
+        </section>
+        <section class="card">
+          <div class="label">Archive State</div>
+          <div class="metric partial">waiting on CI</div>
+          <p>The local machine cannot rebuild the runtime app because full Xcode is unavailable.</p>
+        </section>
+      </div>
+
+      <h2>Gate Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Gate</th>
+            <th>Evidence</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Extension-owned window bridge</td>
+            <td>TS facade, Rust protocol, and the macOS runtime all expose the same Lynx-owned capability family.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Metadata ownership</td>
+            <td><code>title</code> and <code>icon</code> travel through <code>show</code>, <code>getTitle</code>, <code>setTitle</code>, <code>getIcon</code>, and <code>setIcon</code>.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Screen capability</td>
+            <td><code>navigator.screen</code>, <code>navigator.opentrayScreen</code>, and optional <code>window.getScreenDetails()</code> are installed by the native host bridge.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Fit-content default and fixed-size precedence</td>
+            <td>The smoke path and public command surface now support both fit and fixed modes without moving sizing law into the page layer.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Nonblank Dock identity</td>
+            <td>Static packaging test proves the bundle icon file, staged resource, and actual <code>.icns</code> asset are aligned. A rebuilt runtime app is still needed for visual proof.</td>
+            <td class="warn">Partial</td>
+          </tr>
+          <tr>
+            <td>Local carrier rebuild</td>
+            <td><code>xcodebuild -version</code> fails because the active developer directory is <code>/Library/Developer/CommandLineTools</code>.</td>
+            <td class="warn">Blocked locally</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Verified Commands</h2>
+      <pre><code>bun test scripts/release/build-lynx-runtime.test.ts
+pnpm --filter @opentray/ext-lynx test
+cargo test -p opentray-ext-lynx
+pnpm --dir research/lynx/app test
+pnpm --dir research/lynx/app typecheck
+pnpm --dir research/lynx/app build
+pnpm --filter opentray test
+pnpm --filter opentray typecheck
+bun run openspec:vision -- validate add-lynx-window-controller-and-fit-content
+bun run openspec:vision -- commit-check add-lynx-window-controller-and-fit-content --phase apply
+bun run openspec:vision -- commit-check add-lynx-window-controller-and-fit-content --phase self-review
+xcode-select -p
+xcodebuild -version</code></pre>
+
+      <div class="callout">
+        Next human gate after CI: run <code>pnpm --filter opentray cli -- smoke daemon-lynx</code> and confirm the Dock icon is nonblank, title and icon buttons visibly mutate the native window, screen detail buttons show real monitor data, and fit mode no longer leaves dead margins.
+      </div>
+    </main>
+  </body>
+</html>
