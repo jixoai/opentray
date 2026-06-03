@@ -21,6 +21,7 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 - Backend adapter laws: read `references/backend-adapters.md`.
 - Extension host and dynamic loader laws: read `references/extension-host.md`.
 - Official extension package boundaries: read `references/official-extensions.md`.
+- For Lynx-side window/controller work, also read `../develop-opentray-ext/references/lynx-window-host.md`.
 - Badge roadmap atom: read `references/ext-badge.md`.
 - Island/live-activity roadmap atom: read `references/ext-island.md`.
 - Release and trusted publishing flow: read `references/release.md`.
