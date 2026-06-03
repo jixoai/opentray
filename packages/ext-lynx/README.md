@@ -4,8 +4,9 @@ Official macOS-first Lynx window extension for OpenTray.
 
 ## Role
 
-- Launch a real Lynx Explorer runtime from the generic OpenTray extension host path.
-- Keep Lynx bundle loading, runtime extraction, and process lifecycle inside the extension artifact.
+- Launch a real OpenTray-owned Lynx runtime host from the generic OpenTray extension host path.
+- Expose native window controls through the Lynx host bridge when enabled.
+- Keep Lynx bundle loading, runtime extraction, process lifecycle, and sizing policy inside the extension artifact.
 - Treat `.lynx.bundle` files as client-owned payloads scoped to the owning `spaceId` / `trayId`.
 
 This package is an extension atom. It must not become the owner of core tray lifecycle or daemon policy.
@@ -16,21 +17,51 @@ The macOS native dylib owns the Lynx command protocol and the runtime sidecar co
 
 ## Command Surface
 
-First-stage public commands:
+Public commands:
 
-- `show({ bundlePath })`
+- `show({ bundlePath, fitContentSize?, width?, height?, minWidth?, minHeight?, maxWidth?, maxHeight?, nativeWindowApi?, bindWindowGlobals?, style? })`
 - `hide()`
 
-First-stage runtime events:
+Runtime events:
 
 - `shown`
 - `hidden`
 
-`show` expects a real `.lynx.bundle` file path. On macOS, the native extension extracts `LynxExplorer.app.zip`, stages the external bundle into the runtime resources, and launches:
+`show` expects a real `.lynx.bundle` file path. On macOS, the native extension extracts `OpenTrayLynxRuntime.app.zip`, stages the external bundle into the runtime resources, and launches:
 
 ```text
 file://lynx?local://opentray-external/main.lynx.bundle
 ```
+
+## Window Bridge
+
+When `nativeWindowApi: true` is enabled on `show`, the page receives:
+
+- `navigator.window`
+- `navigator.opentrayWindow`
+- optional `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides when `bindWindowGlobals` is `true`
+
+The injected capability follows the same public vocabulary as `@opentray/ext-webview`:
+
+- `await navigator.window.invoke("getCapabilities")`
+- `await navigator.window.listen("resized", handler)`
+- `await navigator.window.resizeTo(520, 320)`
+- `await navigator.window.setStyle({ frameless: true })`
+
+OpenTray keeps the public surface aligned, but the transport is Lynx-native: Native Modules, runtime-attached bootstrap, and `GlobalEventEmitter`. The daemon does not keep a Lynx-specific controller.
+
+## Fit-Content Policy
+
+Lynx supports host-owned fit-content sizing, but that is a host policy, not a DOM/body trick.
+
+OpenTray applies this product default for standalone Lynx windows:
+
+- `fitContentSize` defaults to `true`
+- `fitContentSize: false` opts out
+- explicit `width` / `height` win on the corresponding axis
+- `minWidth` / `minHeight` / `maxWidth` / `maxHeight` clamp the final frame
+
+This default-on behavior is an OpenTray product decision for popup-style usage. It is not a claim that Lynx Explorer itself defaults to fit-content in every host.
 
 ## Example
 
@@ -43,19 +74,34 @@ pnpm --filter @opentray/ext-lynx example:lynx
 Use the installed CLI smoke when you want a real native window:
 
 ```bash
-pnpm --filter opentray cli -- smoke daemon-lynx --bundle ./research/lynx/app/dist/main.lynx.bundle
+pnpm --filter opentray cli -- smoke daemon-lynx
 ```
+
+The published `opentray` CLI carries an official Lynx review bundle for final human acceptance. Pass `--bundle <path-to-main.lynx.bundle>` only when you want to override that package-owned audit asset with your own bundle.
+
+The smoke command now starts in fit-content mode, enables `navigator.window`, enables global overrides for validation, and exposes tray items for:
+
+- `Show Fit Window`
+- `Show Fixed Window`
+- `Hide Window`
+- `Quit Smoke`
+
+Inside the Lynx window, use the rendered buttons to verify `getCapabilities`, `getStyle`, `resizeTo`, `moveTo`, `setStyle({ frameless })`, `window.resizeTo()`, and close behavior visually.
 
 ## Runtime Sidecar
 
 The darwin platform package ships two artifacts:
 
 - `lib/libopentray_ext_lynx.dylib`
-- `runtime/LynxExplorer.app.zip`
+- `runtime/OpenTrayLynxRuntime.app.zip`
 
-The native extension resolves the runtime zip next to the loaded dylib by default. For local debugging, you may override the sidecar path with `OPENTRAY_LYNX_RUNTIME_ZIP=/absolute/path/to/LynxExplorer.app.zip`.
+The native extension resolves the runtime zip next to the loaded dylib by default. For local debugging, you may override the sidecar path with `OPENTRAY_LYNX_RUNTIME_ZIP=/absolute/path/to/OpenTrayLynxRuntime.app.zip`.
 
 Current first-stage native support:
 
 - macOS arm64 and x64: real runtime extraction and external bundle launch
+- macOS arm64 and x64: `navigator.window` / `navigator.opentrayWindow`
+- macOS arm64 and x64: `close`, `moveTo`, `resizeTo`, `getCapabilities`, `getStyle`, `setStyle({ frameless })`
+- macOS arm64 and x64: default-on fit-content with explicit fixed-size opt-out
+- macOS arm64 and x64: `transparent` and `backgroundEffect` reject with typed unsupported errors for now
 - Linux / Windows: not published yet; OpenTray should fail explicitly instead of pretending support exists

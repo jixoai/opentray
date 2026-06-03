@@ -30,10 +30,17 @@ const packageTargets = [
   ["windows", "win32", "x64"],
 ] as const satisfies ReadonlyArray<readonly [PackageOs, NpmOs, NativeArch]>;
 
-export function createNativeTarget(packageOs: PackageOs, npmOs: NpmOs, arch: NativeArch): NativeTarget {
+export function createNativeTarget(
+  packageOs: PackageOs,
+  npmOs: NpmOs,
+  arch: NativeArch
+): NativeTarget {
   const daemonPackageDir = `packages/${packageOs}-${arch}`;
   const webviewPackageDir = `packages/ext-webview-${packageOs}-${arch}`;
-  const lynxPackageDir = packageOs === "darwin" ? `packages/ext-lynx-${packageOs}-${arch}` : undefined;
+  const lynxPackageDir =
+    packageOs === "darwin"
+      ? `packages/ext-lynx-${packageOs}-${arch}`
+      : undefined;
 
   return {
     packageOs,
@@ -41,36 +48,57 @@ export function createNativeTarget(packageOs: PackageOs, npmOs: NpmOs, arch: Nat
     arch,
     daemonPackageName: `@opentray/${packageOs}-${arch}`,
     daemonPackageDir,
-    daemonArtifact: `${daemonPackageDir}/bin/${packageOs === "windows" ? "opentray.exe" : "opentray"}`,
+    daemonArtifact: `${daemonPackageDir}/bin/${
+      packageOs === "windows" ? "opentray.exe" : "opentray"
+    }`,
     webviewPackageName: `@opentray/ext-webview-${packageOs}-${arch}`,
     webviewPackageDir,
     webviewArtifact:
       packageOs === "windows"
         ? `${webviewPackageDir}/bin/opentray_ext_webview.dll`
-        : `${webviewPackageDir}/lib/libopentray_ext_webview.${packageOs === "darwin" ? "dylib" : "so"}`,
-    lynxPackageName: lynxPackageDir === undefined ? undefined : `@opentray/ext-lynx-${packageOs}-${arch}`,
+        : `${webviewPackageDir}/lib/libopentray_ext_webview.${
+            packageOs === "darwin" ? "dylib" : "so"
+          }`,
+    lynxPackageName:
+      lynxPackageDir === undefined
+        ? undefined
+        : `@opentray/ext-lynx-${packageOs}-${arch}`,
     lynxPackageDir,
     lynxArtifact:
-      lynxPackageDir === undefined ? undefined : `${lynxPackageDir}/lib/libopentray_ext_lynx.dylib`,
+      lynxPackageDir === undefined
+        ? undefined
+        : `${lynxPackageDir}/lib/libopentray_ext_lynx.dylib`,
     lynxRuntimeArtifact:
-      lynxPackageDir === undefined ? undefined : `${lynxPackageDir}/runtime/LynxExplorer.app.zip`,
+      lynxPackageDir === undefined
+        ? undefined
+        : `${lynxPackageDir}/runtime/OpenTrayLynxRuntime.app.zip`,
   };
 }
 
-export const nativeTargets: readonly NativeTarget[] = packageTargets.map(([packageOs, npmOs, arch]) =>
-  createNativeTarget(packageOs, npmOs, arch),
+export const nativeTargets: readonly NativeTarget[] = packageTargets.map(
+  ([packageOs, npmOs, arch]) => createNativeTarget(packageOs, npmOs, arch)
 );
 
-export const resolveNativeTarget = (platform = process.platform, arch = process.arch): NativeTarget => {
+export const resolveNativeTarget = (
+  platform = process.platform,
+  arch = process.arch
+): NativeTarget => {
   const packageOs = platformToPackageOs(platform);
   const nativeArch = normalizeArch(arch);
   return resolveNativePackageTarget(packageOs, nativeArch);
 };
 
-export const resolveNativePackageTarget = (packageOs: PackageOs, arch: NativeArch): NativeTarget => {
-  const target = nativeTargets.find((candidate) => candidate.packageOs === packageOs && candidate.arch === arch);
+export const resolveNativePackageTarget = (
+  packageOs: PackageOs,
+  arch: NativeArch
+): NativeTarget => {
+  const target = nativeTargets.find(
+    (candidate) => candidate.packageOs === packageOs && candidate.arch === arch
+  );
   if (target === undefined) {
-    throw new Error(`unsupported OpenTray native target: packageOs=${packageOs} arch=${arch}`);
+    throw new Error(
+      `unsupported OpenTray native target: packageOs=${packageOs} arch=${arch}`
+    );
   }
   return target;
 };
@@ -99,7 +127,11 @@ export const normalizeArch = (arch: string): NativeArch => {
   }
 };
 
-export const stageArtifact = async (workspaceRoot: string, source: string, destination: string): Promise<void> => {
+export const stageArtifact = async (
+  workspaceRoot: string,
+  source: string,
+  destination: string
+): Promise<void> => {
   const absoluteDestination = join(workspaceRoot, destination);
   await mkdir(dirname(absoluteDestination), { recursive: true });
   // Source control stays binary-free; local and CI staging populate package artifacts just before smoke/publish.

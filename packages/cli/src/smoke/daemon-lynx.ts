@@ -1,28 +1,34 @@
 import { existsSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createClient } from "../client";
 import { connectLocalBroker } from "../local-broker";
 
 const menuLabels = new Map<number, string>([
-  [1, "Reload Bundle"],
-  [2, "Hide Window"],
+  [1, "Show Fit Window"],
+  [2, "Show Fixed Window"],
+  [3, "Hide Window"],
   [99, "Quit Smoke"],
 ]);
 
 const DEFAULT_LYNX_BUNDLE_ENV = "OPENTRAY_LYNX_BUNDLE";
+const DEFAULT_REVIEW_BUNDLE_RELATIVE_PATH =
+  "assets/lynx-review/main.lynx.bundle";
 
 export interface DaemonLynxSmokeOptions {
   bundlePath?: string;
 }
 
 export const runDaemonLynxSmoke = async (
-  options: DaemonLynxSmokeOptions = {},
+  options: DaemonLynxSmokeOptions = {}
 ): Promise<void> => {
   const bundlePath = resolveLynxBundlePath(options.bundlePath);
   const connection = await connectLocalBroker();
   const client = createClient(connection, { requestIdPrefix: "daemon-lynx" });
-  console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
+  console.log(
+    `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
+  );
 
   const space = await client.createSpace({
     id: "com.example.opentray.daemon-lynx",
@@ -41,8 +47,9 @@ export const runDaemonLynxSmoke = async (
     icon: createVisibleIcon(),
     menu: {
       items: [
-        { type: "item", id: 1, title: "Reload Bundle" },
-        { type: "item", id: 2, title: "Hide Window" },
+        { type: "item", id: 1, title: "Show Fit Window" },
+        { type: "item", id: 2, title: "Show Fixed Window" },
+        { type: "item", id: 3, title: "Hide Window" },
         { type: "separator" },
         { type: "item", id: 99, title: "Quit Smoke" },
       ],
@@ -63,12 +70,21 @@ export const runDaemonLynxSmoke = async (
   let exitTimer: NodeJS.Timeout | undefined;
   let resolveClosed: (() => void) | undefined;
 
-  const show = async (): Promise<void> => {
+  const show = async (mode: "fit" | "fixed"): Promise<void> => {
     await tray.commandExtension("lynx", {
       type: "show",
       bundlePath,
+      fitContentSize: mode === "fit",
+      width: mode === "fixed" ? 720 : undefined,
+      height: mode === "fixed" ? 420 : undefined,
+      minWidth: 320,
+      minHeight: 220,
+      maxWidth: 960,
+      maxHeight: 720,
+      nativeWindowApi: true,
+      bindWindowGlobals: true,
     });
-    console.log(`lynx command: show bundle=${bundlePath}`);
+    console.log(`lynx command: show mode=${mode} bundle=${bundlePath}`);
   };
 
   const hide = async (): Promise<void> => {
@@ -98,9 +114,12 @@ export const runDaemonLynxSmoke = async (
   const handleMenuClick = async (itemId: number): Promise<void> => {
     switch (itemId) {
       case 1:
-        await show();
+        await show("fit");
         return;
       case 2:
+        await show("fixed");
+        return;
+      case 3:
         await hide();
         return;
       case 99:
@@ -115,7 +134,11 @@ export const runDaemonLynxSmoke = async (
   connection.onEvent((frame) => {
     console.log(`broker -> client ${JSON.stringify(frame)}`);
     if (frame.type === "event" && frame.event.type === "menuClick") {
-      console.log(`menu click: ${menuLabels.get(frame.event.itemId) ?? frame.event.itemId}`);
+      console.log(
+        `menu click: ${
+          menuLabels.get(frame.event.itemId) ?? frame.event.itemId
+        }`
+      );
       void handleMenuClick(frame.event.itemId);
       return;
     }
@@ -141,8 +164,10 @@ export const runDaemonLynxSmoke = async (
   }
 
   try {
-    await show();
-    console.log("use the tray menu to reload or hide the Lynx window, or press Ctrl+C to exit");
+    await show("fit");
+    console.log(
+      "use the tray menu to switch between fit-content and fixed sizing, or press Ctrl+C to exit"
+    );
   } catch (error) {
     await connection.close();
     process.off("SIGINT", onSignal);
@@ -158,9 +183,13 @@ export const runDaemonLynxSmoke = async (
 export const resolveLynxBundlePath = (value?: string): string => {
   const resolved = value ?? process.env[DEFAULT_LYNX_BUNDLE_ENV];
   if (resolved === undefined || resolved.length === 0) {
-    throw new Error(
-      `lynx smoke requires --bundle <path> or ${DEFAULT_LYNX_BUNDLE_ENV}=<path-to-main.lynx.bundle>`,
-    );
+    const bundledReviewBundle = resolveBundledReviewBundlePath();
+    if (!existsSync(bundledReviewBundle)) {
+      throw new Error(
+        `lynx smoke requires --bundle <path>, ${DEFAULT_LYNX_BUNDLE_ENV}=<path-to-main.lynx.bundle>, or a packaged review bundle at ${bundledReviewBundle}`
+      );
+    }
+    return realpathSync(bundledReviewBundle);
   }
   const baseDir = process.env.INIT_CWD ?? process.cwd();
   const absolutePath = resolve(baseDir, resolved);
@@ -170,7 +199,33 @@ export const resolveLynxBundlePath = (value?: string): string => {
   return realpathSync(absolutePath);
 };
 
-function createVisibleIcon(): { type: "rgba"; width: number; height: number; data: number[] } {
+export const resolveBundledReviewBundlePath = (
+  moduleUrl = import.meta.url
+): string => {
+  let currentDir = dirname(fileURLToPath(moduleUrl));
+
+  while (true) {
+    const packageJson = join(currentDir, "package.json");
+    if (existsSync(packageJson)) {
+      return join(currentDir, DEFAULT_REVIEW_BUNDLE_RELATIVE_PATH);
+    }
+
+    const parent = dirname(currentDir);
+    if (parent === currentDir) {
+      throw new Error(
+        `failed to resolve opentray package root from ${moduleUrl}`
+      );
+    }
+    currentDir = parent;
+  }
+};
+
+function createVisibleIcon(): {
+  type: "rgba";
+  width: number;
+  height: number;
+  data: number[];
+} {
   const width = 32;
   const height = 32;
   const data: number[] = [];

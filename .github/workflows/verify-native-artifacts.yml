@@ -1,14 +1,21 @@
-name: Release
+name: Verify Native Artifacts
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/verify-native-artifacts.yml"
+      - ".github/workflows/release.yml"
+      - "crates/**"
+      - "native/lynx-runtime-macos/**"
+      - "packages/**"
+      - "scripts/binaries/**"
+      - "scripts/ci/**"
+      - "scripts/release/**"
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: verify-native-artifacts-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -16,9 +23,7 @@ env:
   LYNX_XCODE_VERSION: "16.4"
 
 permissions:
-  contents: write
-  id-token: write
-  pull-requests: write
+  contents: read
 
 jobs:
   native-artifacts:
@@ -167,16 +172,13 @@ jobs:
           path: native-artifacts/*
           if-no-files-found: error
 
-  release:
-    name: Release packages
+  stage-and-pack:
+    name: Stage and pack native npm packages
     needs: native-artifacts
     runs-on: ubuntu-latest
-    environment: npm-release
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -186,53 +188,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
-      - name: Install npm with trusted publishing support
-        run: npm install -g "npm@^11.10.0"
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Verify
-        run: pnpm run verify
-
-      - name: Build publish artifacts
-        run: pnpm run build
-
-      - name: Detect pending changesets
-        id: pending-changesets
-        shell: bash
-        run: |
-          if find .changeset -maxdepth 1 -type f -name "*.md" ! -name "README.md" | grep -q .; then
-            echo "has_changesets=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changesets=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Version packages
-        if: steps.pending-changesets.outputs.has_changesets == 'true'
-        run: pnpm run version-packages
-
-      - name: Commit version packages
-        if: steps.pending-changesets.outputs.has_changesets == 'true'
-        shell: bash
-        run: |
-          if git diff --quiet; then
-            echo "No version changes generated."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .changeset packages package.json pnpm-lock.yaml
-          git commit -m "chore: version packages"
-          git push
 
       - name: Download native artifacts
         uses: actions/download-artifact@v4
@@ -282,22 +245,15 @@ jobs:
             fi
           done
 
-      - name: Validate publish package contents
+      - name: Validate native package contents
         shell: bash
         run: |
           set -euo pipefail
           for package_dir in \
             packages/cli \
             packages/darwin-arm64 packages/darwin-x64 packages/linux-arm64 packages/linux-x64 packages/windows-arm64 packages/windows-x64 \
-            packages/ext-lynx \
             packages/ext-webview-darwin-arm64 packages/ext-webview-darwin-x64 packages/ext-webview-linux-arm64 packages/ext-webview-linux-x64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64 \
-            packages/ext-lynx-darwin-arm64 packages/ext-lynx-darwin-x64
+            packages/ext-lynx packages/ext-lynx-darwin-arm64 packages/ext-lynx-darwin-x64
           do
             npm pack --dry-run --json "./${package_dir}" >/dev/null
           done
-
-      - name: Publish packages
-        run: pnpm run release
-
-      - name: Push release tags
-        run: git push origin --tags

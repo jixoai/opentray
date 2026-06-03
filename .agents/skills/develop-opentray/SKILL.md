@@ -30,6 +30,7 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 ## Non-Negotiable Boundaries
 
 - Do not add `if ext == "webview"` or equivalent product branches to `opentray-core`.
+- Do not add `if ext == "lynx"` or equivalent product branches to `opentray-core`.
 - Do not import `tray-icon`, `ksni`, `winit`, `tao`, `wry`, or platform npm packages into `opentray-core`.
 - Do not fake missing backend capability; return capability absence or a typed unsupported error.
 - Do not claim visual/native work is complete unless a human-visible command exists and has been smoked.
@@ -47,3 +48,8 @@ git diff --check
 ```
 
 For visual changes, also run the relevant smoke command from `references/visual-acceptance.md`.
+
+For Lynx window-controller work, the visual proof must cover both:
+
+- the tray-launched fit-content default window
+- the explicit fixed-size opt-out path plus in-window `navigator.window` controls

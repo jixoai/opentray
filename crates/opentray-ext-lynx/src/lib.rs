@@ -1,5 +1,6 @@
 #[cfg(target_os = "macos")]
 mod macos;
+mod protocol;
 
 use std::ffi::{c_char, c_void, CString};
 use std::fmt;
@@ -8,7 +9,10 @@ use opentray_spec::{
     ExtBytes, ExtContext, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
     EXT_ABI_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED, EXT_OK,
 };
-use serde::Deserialize;
+use protocol::parse_lynx_command;
+#[cfg(not(target_os = "macos"))]
+use protocol::LynxCommand;
+#[cfg(not(target_os = "macos"))]
 use serde_json::Value;
 
 #[cfg(target_os = "macos")]
@@ -38,18 +42,6 @@ impl UnsupportedLynxRuntime {
     }
 
     fn lease_closed(&mut self, _lease_id: &str) {}
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum LynxCommand {
-    Show { bundle_path: String },
-    Hide,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ShowCommandData {
-    bundle_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -181,30 +173,6 @@ pub unsafe extern "C" fn opentray_ext_free_string(bytes: ExtOwnedBytes) {
     }
 }
 
-fn parse_lynx_command(data: &Value) -> Result<LynxCommand, LynxRuntimeError> {
-    let command_type = data
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or_else(|| LynxRuntimeError::Rejected("lynx command requires type".into()))?;
-
-    match command_type {
-        "show" => {
-            let parsed: ShowCommandData = serde_json::from_value(data.clone()).map_err(|error| {
-                LynxRuntimeError::Rejected(format!("invalid lynx show command: {error}"))
-            })?;
-            Ok(LynxCommand::Show {
-                bundle_path: parsed.bundle_path.ok_or_else(|| {
-                    LynxRuntimeError::Rejected("lynx show command requires bundlePath".into())
-                })?,
-            })
-        }
-        "hide" => Ok(LynxCommand::Hide),
-        other => Err(LynxRuntimeError::Rejected(format!(
-            "unsupported lynx command: {other}"
-        ))),
-    }
-}
-
 unsafe fn read_ext_string(bytes: ExtBytes) -> Option<String> {
     let slice = unsafe { ext_bytes_as_slice(bytes) }?;
     String::from_utf8(slice.to_vec()).ok()
@@ -249,30 +217,6 @@ mod tests {
     #[test]
     fn abi_version_matches_public_contract() {
         assert_eq!(opentray_ext_abi_version(), EXT_ABI_VERSION);
-    }
-
-    #[test]
-    fn parse_show_command_requires_bundle_path() {
-        let command = parse_lynx_command(&serde_json::json!({
-            "type": "show",
-            "bundlePath": "/tmp/demo.main.lynx.bundle"
-        }))
-        .expect("show command");
-
-        assert_eq!(
-            command,
-            LynxCommand::Show {
-                bundle_path: "/tmp/demo.main.lynx.bundle".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn parse_hide_command_is_typed() {
-        assert_eq!(
-            parse_lynx_command(&serde_json::json!({ "type": "hide" })).expect("hide command"),
-            LynxCommand::Hide
-        );
     }
 
     #[test]

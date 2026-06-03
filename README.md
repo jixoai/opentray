@@ -17,7 +17,7 @@ This repository uses `pnpm` workspaces and Lerna metadata.
 | ------------------------ | ------------------------- | -------------------------------------------------------- |
 | `packages/cli`           | `opentray`                | Developer-facing SDK and CLI package.                    |
 | `packages/spec`          | `@opentray/spec`          | TypeScript protocol and shared contract package.         |
-| `packages/ext-lynx`      | `@opentray/ext-lynx`      | Lynx window extension backed by the Lynx Explorer app.   |
+| `packages/ext-lynx`      | `@opentray/ext-lynx`      | Lynx window extension backed by the OpenTray Lynx host.  |
 | `packages/ext-lynx-*`    | `@opentray/ext-lynx-*`    | macOS Lynx dynamic library and runtime sidecar packages. |
 | `packages/ext-webview`   | `@opentray/ext-webview`   | Rich popup extension backed by platform WebView engines. |
 | `packages/ext-webview-*` | `@opentray/ext-webview-*` | Platform WebView dynamic library packages.               |
@@ -35,7 +35,7 @@ This repository uses `pnpm` workspaces and Lerna metadata.
 OpenTray now has two official native extension families with different maturity levels:
 
 - macOS is the first human-visual acceptance path: daemon transport, tray menu, dynamic WebView loading, postMessage, and evaluate are expected to work.
-- macOS is also the first Lynx acceptance path: `@opentray/ext-lynx-darwin-*` ships both `libopentray_ext_lynx.dylib` and `LynxExplorer.app.zip`, and `opentray smoke daemon-lynx --bundle ...` is the public visual proof.
+- macOS is also the first Lynx acceptance path: `@opentray/ext-lynx-darwin-*` ships both `libopentray_ext_lynx.dylib` and `OpenTrayLynxRuntime.app.zip`, and `opentray smoke daemon-lynx` is the public visual proof.
 - Linux packages build and publish first-stage artifacts, but the current broker backend is capability-limited and the WebView native runtime may report unsupported instead of faking a window.
 - Windows packages build and publish first-stage artifacts, but broker transport is not yet a completed runtime acceptance path.
 - Lynx is intentionally macOS-first. Linux and Windows Lynx packages are not published yet, and the platform must fail honestly rather than pretending the runtime exists.
@@ -119,12 +119,14 @@ After installing published packages from npm, use the package-owned smoke comman
 
 ```bash
 opentray smoke daemon-tray
-opentray smoke daemon-lynx --bundle ./research/lynx/app/dist/main.lynx.bundle
+opentray smoke daemon-lynx
 ```
+
+The published Lynx smoke uses a package-owned review bundle by default so a fresh npm install can do the final human audit without any workspace path. Use `--bundle <path-to-main.lynx.bundle>` only when you want to override that official review asset.
 
 The daemon tray menu includes standard item/check/radio/submenu entries, a `Quit Demo` item, and a `WebView Commands` submenu. On macOS, `Show HTML` loads `@opentray/ext-webview-darwin-*` as a dynamic library and opens a real native WebView window owned by that library. The page now exposes the extension-owned bridge through `navigator.window` / `navigator.opentrayWindow`, and the demo opts into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides so the in-page buttons can visually validate move, resize, close, and `setStyle({ frameless })`. The other WebView entries exercise navigate, postMessage, evaluate, and hide through the `@opentray/ext-webview` facade.
 
-The Lynx smoke path uses the same generic extension loader without importing a Lynx parser into `opentray-core`. It creates a tray, loads `@opentray/ext-lynx`, immediately launches the requested `.lynx.bundle`, and exposes `Reload Bundle`, `Hide Window`, and `Quit Smoke` through broker-routed tray events.
+The Lynx smoke path uses the same generic extension loader without importing a Lynx parser into `opentray-core`. It creates a tray, loads `@opentray/ext-lynx`, immediately launches the requested `.lynx.bundle` in fit-content mode, enables `navigator.window`, and exposes `Show Fit Window`, `Show Fixed Window`, `Hide Window`, and `Quit Smoke` through broker-routed tray events. The Lynx page itself contains visual buttons for `getCapabilities`, `getStyle`, `resizeTo`, `moveTo`, frameless toggling, `window.resizeTo()`, and close verification.
 
 For local workspace smoke before publishing, stage current native artifacts and then run the same public command:
 
@@ -133,16 +135,16 @@ cargo build -p opentray-bin -p opentray-ext-webview -p opentray-ext-lynx
 bun run scripts/binaries/stage-local.ts --kind daemon --source target/debug/opentray
 bun run scripts/binaries/stage-local.ts --kind webview --source target/debug/libopentray_ext_webview.dylib
 bun run scripts/binaries/stage-local.ts --kind lynx --source target/debug/libopentray_ext_lynx.dylib
-bash scripts/release/build-lynx-runtime.sh /tmp/LynxExplorer.app.zip
-bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/LynxExplorer.app.zip
+bash scripts/release/build-lynx-runtime.sh /tmp/OpenTrayLynxRuntime.app.zip
+bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/OpenTrayLynxRuntime.app.zip
 pnpm --filter opentray cli -- daemon stop
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
-pnpm --filter opentray cli -- smoke daemon-lynx --bundle ./research/lynx/app/dist/main.lynx.bundle
+pnpm --filter opentray cli -- smoke daemon-lynx
 ```
 
 `OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` runs show, postMessage, evaluate, navigate, and hide without menu clicks. `OPENTRAY_EXT_PATH` can point at an explicit extension directory for loader debugging, but the release path is package-adjacent discovery from the requested facade package, such as `@opentray/ext-webview` resolving to `@opentray/ext-webview-<os>-<arch>`.
 
-The Lynx release path is similar, except the darwin platform package also carries `runtime/LynxExplorer.app.zip`. The extension dylib resolves that sidecar next to itself by default, and `OPENTRAY_LYNX_RUNTIME_ZIP=/absolute/path/to/LynxExplorer.app.zip` is available as a debugging override.
+The Lynx release path is similar, except the darwin platform package also carries `runtime/OpenTrayLynxRuntime.app.zip`. The extension dylib resolves that sidecar next to itself by default, and `OPENTRAY_LYNX_RUNTIME_ZIP=/absolute/path/to/OpenTrayLynxRuntime.app.zip` is available as a debugging override.
 
 To verify the runtime split on macOS after a release build, inspect both size and linkage:
 
@@ -260,7 +262,15 @@ For published Lynx verification:
 
 ```bash
 pnpm add opentray @opentray/ext-lynx
-pnpm exec opentray smoke daemon-lynx --bundle ./main.lynx.bundle
+pnpm exec opentray smoke daemon-lynx
+```
+
+That is the final review command for the published Lynx carrier path. If you want to inspect another bundle instead of the official review bundle shipped with `opentray`, append `--bundle ./main.lynx.bundle`.
+
+For GitHub-hosted native preflight before publish:
+
+```bash
+gh workflow run verify-native-artifacts.yml --ref <branch>
 ```
 
 Changesets is configured to bump peer dependents only when their peer dependency range is out of range. This prevents roadmap placeholder extensions, such as `@opentray/ext-badge` and `@opentray/ext-island`, from being released just because `opentray` is released.
