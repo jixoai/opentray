@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Self Review: replace-lynx-explorer-with-opentray-runtime-host</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f0e7;
+        --panel: rgba(255, 252, 248, 0.96);
+        --ink: #1e2520;
+        --muted: #627066;
+        --line: rgba(30, 37, 32, 0.12);
+        --accent: #2f6f5b;
+      }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at top left, rgba(47, 111, 91, 0.16), transparent 34%),
+          linear-gradient(180deg, #faf7f1 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      }
+      main {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 22px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      .deck {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .card {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 14px 34px rgba(51, 40, 19, 0.08);
+      }
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .metric {
+        color: var(--accent);
+        font-size: 28px;
+        font-weight: 700;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: rgba(47, 111, 91, 0.08);
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      code,
+      pre {
+        font: 13px/1.45 "SFMono-Regular", "Menlo", "Monaco", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+        overflow: auto;
+      }
+      ul {
+        padding-left: 20px;
+      }
+      .pass {
+        color: var(--accent);
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>replace-lynx-explorer-with-opentray-runtime-host</h1>
+      <p>
+        Review focus: prove that the Lynx carrier is now OpenTray-owned, that both GitHub verification and
+        release workflows can build <code>OpenTrayLynxRuntime.app.zip</code>, and that the published CLI keeps
+        <code>pnpm exec opentray smoke daemon-lynx</code> as the final human audit command.
+      </p>
+
+      <div class="deck">
+        <section class="card">
+          <div class="label">Carrier Identity</div>
+          <div class="metric">OpenTray-owned</div>
+          <p><code>native/lynx-runtime-macos/</code> is the host-app source of truth.</p>
+        </section>
+        <section class="card">
+          <div class="label">GitHub Proof</div>
+          <div class="metric">2 workflows green</div>
+          <p><code>26881392689</code> and <code>26886058460</code> both passed their darwin gates.</p>
+        </section>
+        <section class="card">
+          <div class="label">Registry Proof</div>
+          <div class="metric">npm published</div>
+          <p><code>opentray@0.4.1</code> and the Lynx packages resolved from npm in a fresh temp project.</p>
+        </section>
+      </div>
+
+      <h2>Gate Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Gate</th>
+            <th>Evidence</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Host app ownership is repo-owned</td>
+            <td><code>native/lynx-runtime-macos/</code> plus the release copier path in <code>scripts/release/build-lynx-runtime.sh</code>.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Runtime artifact naming is OpenTray-owned</td>
+            <td><code>OpenTrayLynxRuntime.app.zip</code> is used across Rust staging, platform packages, CI, and the published packages.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Authoritative darwin/Xcode proof exists</td>
+            <td><code>Verify Native Artifacts</code> run <code>26881392689</code> and <code>Release</code> run <code>26886058460</code> both completed successfully.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Fresh-install audit command exists and works</td>
+            <td>A temp npm project installed <code>opentray</code> and <code>@opentray/ext-lynx</code>, then ran <code>pnpm exec opentray smoke daemon-lynx</code>.</td>
+            <td class="pass">Pass</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Published Versions</h2>
+      <pre>
+opentray@0.4.1
+@opentray/ext-lynx@0.1.1
+@opentray/ext-lynx-darwin-arm64@0.1.1
+@opentray/ext-lynx-darwin-x64@0.1.1</pre>
+
+      <h2>Fresh-Install Audit</h2>
+      <pre>
+pnpm add opentray @opentray/ext-lynx
+pnpm exec opentray smoke daemon-lynx
+
+# unattended proof used in CI-like local verification
+OPENTRAY_HOME="$(mktemp -d)" OPENTRAY_EXAMPLE_EXIT_AFTER_MS=2500 pnpm exec opentray smoke daemon-lynx</pre>
+
+      <h2>Residuals</h2>
+      <ul>
+        <li>The bundled Lynx review asset is still a tracked built bundle rather than a repo-native source demo pipeline.</li>
+        <li>No architecture blocker remains for this change; the remaining work is archive bookkeeping only.</li>
+      </ul>
+    </main>
+  </body>
+</html>
