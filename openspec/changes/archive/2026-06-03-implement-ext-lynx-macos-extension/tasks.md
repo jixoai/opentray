@@ -39,5 +39,5 @@
 - [x] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
 - [ ] 5.4 If the review is entering a real loop, run `bun run openspec:vision -- review-state implement-ext-lynx-macos-extension`.
 - [ ] 5.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-ext-lynx-macos-extension` and commit the handoff evidence before returning to user discussion.
-- [ ] 5.6 If review exits normally, run `openspec archive implement-ext-lynx-macos-extension` and commit the archive result.
-- [ ] 5.7 Run `bun run openspec:vision -- check implement-ext-lynx-macos-extension` and decide whether to exit or return to `research-plan` with a backed-up plan revision.
+- [x] 5.6 If review exits normally, run `openspec archive implement-ext-lynx-macos-extension` and commit the archive result.
+- [x] 5.7 Run `bun run openspec:vision -- check implement-ext-lynx-macos-extension` and decide whether to exit or return to `research-plan` with a backed-up plan revision.
