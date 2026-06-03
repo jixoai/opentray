@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 type Command =
@@ -86,6 +86,7 @@ const requireCommitPhase = (value: string | undefined): CommitPhase => {
 };
 
 const changeDirOf = (change: string): string => join(projectRoot, "openspec", "changes", change);
+const changesArchiveDir = join(projectRoot, "openspec", "changes", "archive");
 const planPathOf = (change: string): string => join(changeDirOf(change), "plans", "plan.md");
 const reviewMarkdownPathOf = (change: string): string => join(changeDirOf(change), "review", "self-review.md");
 const reviewHtmlPathOf = (change: string): string => join(changeDirOf(change), "review", "self-review.html");
@@ -148,6 +149,20 @@ const assertChangeExists = (change: string): string => {
     throw new Error(`OpenSpec change not found: ${changeDir}`);
   }
   return changeDir;
+};
+
+const resolveArchivedChangeDir = async (change: string): Promise<string | null> => {
+  if (!existsSync(changesArchiveDir)) {
+    return null;
+  }
+  const archiveDirs = (await readdir(changesArchiveDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith(`-${change}`))
+    .map((entry) => entry.name);
+  if (archiveDirs.length === 0) {
+    return null;
+  }
+  archiveDirs.sort();
+  return join(changesArchiveDir, archiveDirs.at(-1) as string);
 };
 
 const nextPlanBackupPath = (change: string): string => {
@@ -259,13 +274,17 @@ const updateReviewState = async (change: string, args: string[]): Promise<void> 
 };
 
 const checkChange = async (change: string): Promise<void> => {
-  const changeDir = assertChangeExists(change);
+  const activeChangeDir = changeDirOf(change);
+  const changeDir = existsSync(activeChangeDir) ? activeChangeDir : await resolveArchivedChangeDir(change);
+  if (!changeDir) {
+    throw new Error(`OpenSpec change not found: ${activeChangeDir}`);
+  }
   const metadataPath = join(changeDir, ".openspec.yaml");
-  const planPath = planPathOf(change);
+  const planPath = join(changeDir, "plans", "plan.md");
   const tasksPath = join(changeDir, "tasks.md");
-  const reviewMarkdownPath = reviewMarkdownPathOf(change);
-  const reviewHtmlPath = reviewHtmlPathOf(change);
-  const reviewStatePath = reviewStatePathOf(change);
+  const reviewMarkdownPath = join(changeDir, "review", "self-review.md");
+  const reviewHtmlPath = join(changeDir, "review", "self-review.html");
+  const reviewStatePath = join(changeDir, "review", "state.json");
 
   const metadata = existsSync(metadataPath) ? await readFile(metadataPath, "utf-8") : "";
   const issues: string[] = [];
