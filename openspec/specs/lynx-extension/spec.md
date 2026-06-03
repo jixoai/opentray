@@ -3,7 +3,9 @@
 ## Purpose
 
 Define the official OpenTray Lynx extension family, its macOS-first runtime packaging law, and its tray-scoped lifecycle over the generic extension host boundary.
+
 ## Requirements
+
 ### Requirement: Lynx SHALL be an official extension atom
 
 The Lynx capability SHALL live outside the kernel as `@opentray/ext-lynx` plus platform-native package atoms. The daemon SHALL load it through the generic extension host law and SHALL NOT own Lynx command parsing, runtime setup, bundle staging, or process lifecycle.
@@ -18,19 +20,19 @@ The Lynx capability SHALL live outside the kernel as `@opentray/ext-lynx` plus p
 
 ### Requirement: Lynx show SHALL stage an external bundle into the runtime sidecar
 
-The Lynx extension SHALL accept a client-owned `.lynx.bundle` path and SHALL stage that bundle into the Lynx runtime app resources before launch. The extension SHALL launch the runtime with the Lynx-local URL form proven by research rather than a raw absolute `file://` bundle path.
+The Lynx extension SHALL accept a client-owned `.lynx.bundle` path and SHALL stage that bundle into the OpenTray-owned Lynx runtime host app resources before launch. The extension SHALL launch the runtime with the Lynx-local URL form proven by research rather than a raw absolute `file://` bundle path.
 
 #### Scenario: Show command uses the proven Lynx external-bundle URL shape
 
 - **GIVEN** a valid external `.lynx.bundle` path
 - **WHEN** the Lynx extension handles `show`
 - **THEN** it stages the bundle at `opentray-external/main.lynx.bundle` inside the runtime app resources
-- **AND** it launches Lynx Explorer with `file://lynx?local://opentray-external/main.lynx.bundle`
+- **AND** it launches the OpenTray Lynx runtime host app with `file://lynx?local://opentray-external/main.lynx.bundle`
 - **AND** it returns a success event only after the launch command succeeds.
 
 ### Requirement: Lynx runtime packaging SHALL stay extension-owned
 
-The official macOS Lynx platform packages SHALL contain the native extension dynamic library and the runtime sidecar zip required to launch Lynx Explorer. The daemon SHALL only discover and load the dynamic library generically. It SHALL NOT own or embed the Lynx runtime app bundle itself.
+The official macOS Lynx platform packages SHALL contain the native extension dynamic library and the runtime sidecar zip required to launch the OpenTray-owned Lynx runtime host app. The daemon SHALL only discover and load the dynamic library generically. It SHALL NOT own or embed the Lynx runtime app bundle itself.
 
 #### Scenario: Missing runtime sidecar is explicit
 
