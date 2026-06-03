@@ -7,7 +7,7 @@
 - Recurring issue counts:
   - none
 - Exit-condition judgment: The change now meets the stated exit condition. The Lynx carrier is OpenTray-owned, GitHub-built darwin runtime artifacts passed in both preflight and release, npm packages were published successfully, and a fresh-install smoke run from npm resolved the packaged review bundle plus the published runtime zip.
-- Next loop action: archive the change and record the archive result.
+- Next loop action: none. The change met its exit condition and was archived.
 
 ## Intent Alignment
 
@@ -56,5 +56,5 @@
 
 ## Exit Handling
 
-- Normal exit: run `openspec archive replace-lynx-explorer-with-opentray-runtime-host` and commit the archive result.
+- Normal exit: archived successfully as `2026-06-03-replace-lynx-explorer-with-opentray-runtime-host`.
 - Abnormal exit: not needed for this change.
