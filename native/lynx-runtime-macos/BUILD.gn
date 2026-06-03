@@ -151,6 +151,7 @@ bundle_data("resources_data") {
   sources = [
     "//third_party/icu/flutter/icudtl.dat",
     "OpenTrayLynxRuntime/Info.plist",
+    "OpenTrayLynxRuntime/OpenTrayLynxRuntime.icns",
   ]
   outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
 }

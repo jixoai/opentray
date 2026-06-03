@@ -1,5 +1,7 @@
-import type { ExtensionEnvelope } from "@opentray/spec";
+import type { ExtensionEnvelope, Icon, Rect } from "@opentray/spec";
 import type { TrayHandle } from "opentray";
+
+export type LynxWindowIcon = Icon | { type: "href"; href: string };
 
 export interface LynxWindowStyle {
   frameless: boolean;
@@ -11,13 +13,33 @@ export interface LynxWindowCapabilities {
   close: boolean;
   move: boolean;
   resize: boolean;
+  title: boolean;
+  icon: boolean;
+  screen: boolean;
   frameless: boolean;
   transparent: boolean;
   backgroundEffects: string[];
   globalBindingsEnabled: boolean;
   globalBindingsSupported: boolean;
+  screenBindingsEnabled: boolean;
+  screenBindingsSupported: boolean;
   fitContentSize: boolean;
   platform: string;
+}
+
+export interface LynxScreenDetail {
+  id: string;
+  label: string;
+  isPrimary: boolean;
+  frame: Rect;
+  visibleFrame: Rect;
+  scaleFactor: number;
+}
+
+export interface LynxScreenDetails {
+  currentScreen: LynxScreenDetail | null;
+  screens: LynxScreenDetail[];
+  isExtended: boolean;
 }
 
 export interface LynxShowCommand {
@@ -32,6 +54,10 @@ export interface LynxShowCommand {
   fitContentSize?: boolean;
   nativeWindowApi?: boolean;
   bindWindowGlobals?: boolean;
+  nativeScreenApi?: boolean;
+  bindScreenGlobals?: boolean;
+  title?: string;
+  icon?: LynxWindowIcon;
   style?: Partial<Pick<LynxWindowStyle, "frameless">>;
 }
 

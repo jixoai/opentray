@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
@@ -8,6 +8,8 @@ const runtimeBuildScript = (): string =>
     resolve(repoRoot, "scripts/release/build-lynx-runtime.sh"),
     "utf8"
   );
+const runtimeHostText = (relativePath: string): string =>
+  readFileSync(resolve(repoRoot, "native/lynx-runtime-macos", relativePath), "utf8");
 
 describe("Feature: Lynx runtime packaging path law", () => {
   test("Scenario: Given a relative output zip When the script changes directories Then the archive still lands in the caller-owned path", () => {
@@ -37,5 +39,19 @@ describe("Feature: Lynx runtime packaging path law", () => {
     expect(script).toContain(
       'app_bundle_path="${lynx_dir}/${out_dir}/${runtime_app_name}.app"'
     );
+  });
+
+  test("Scenario: Given macOS needs a nonblank Dock identity When the runtime host is packaged Then the carrier metadata references a real repo-owned app icon", () => {
+    const infoPlist = runtimeHostText("OpenTrayLynxRuntime/Info.plist");
+    const buildGn = runtimeHostText("BUILD.gn");
+    const iconPath = resolve(
+      repoRoot,
+      "native/lynx-runtime-macos/OpenTrayLynxRuntime/OpenTrayLynxRuntime.icns"
+    );
+
+    expect(infoPlist).toContain("<key>CFBundleIconFile</key>");
+    expect(infoPlist).toContain("<string>OpenTrayLynxRuntime.icns</string>");
+    expect(buildGn).toContain('"OpenTrayLynxRuntime/OpenTrayLynxRuntime.icns",');
+    expect(existsSync(iconPath)).toBe(true);
   });
 });

@@ -29,6 +29,15 @@ await lynx.show({
   fitContentSize: true,
   nativeWindowApi: true,
   bindWindowGlobals: true,
+  nativeScreenApi: true,
+  bindScreenGlobals: true,
+  title: "OpenTray Lynx Example",
+  icon: {
+    type: "rgba",
+    width: 1,
+    height: 1,
+    data: [15, 124, 109, 255],
+  },
   minWidth: 320,
   minHeight: 220,
 });

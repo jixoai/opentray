@@ -556,6 +556,12 @@ mod tests {
             fit_content_size: true,
             native_window_api: true,
             bind_window_globals: false,
+            native_screen_api: true,
+            bind_screen_globals: true,
+            title: Some("OpenTray Lynx".into()),
+            icon: Some(crate::protocol::LynxWindowIconConfig::Href {
+                href: "data:image/png;base64,AAAA".into(),
+            }),
             style: LynxWindowStyleConfig {
                 frameless: Some(true),
             },

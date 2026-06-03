@@ -83,6 +83,10 @@ export const runDaemonLynxSmoke = async (
       maxHeight: 720,
       nativeWindowApi: true,
       bindWindowGlobals: true,
+      nativeScreenApi: true,
+      bindScreenGlobals: true,
+      title: `OpenTray Lynx ${mode === "fit" ? "Fit" : "Fixed"} Smoke`,
+      icon: createVisibleIcon(),
     });
     console.log(`lynx command: show mode=${mode} bundle=${bundlePath}`);
   };
