@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   describeReleaseStagePlan,
   inferNativeBuildComponentsFromReleasePackages,
+  lynxRuntimeArtifactName,
   materializeNativeBuildExecutions,
   resolveReleaseTargetsForComponents,
 } from "./native-build-graph";
@@ -38,5 +39,9 @@ describe("Feature: shared native build graph", () => {
       },
     ]);
     expect(plan.validatePackageDirs).toEqual(["packages/ext-webview-darwin-arm64"]);
+  });
+
+  test("Scenario: Given Lynx runtime build and staging When artifact names are resolved Then the OpenTray host carrier name is shared", () => {
+    expect(lynxRuntimeArtifactName).toBe("OpenTrayLynxRuntime.app.zip");
   });
 });

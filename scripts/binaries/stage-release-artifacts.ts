@@ -10,6 +10,7 @@ import {
 import {
   parseNativeBuildTargetName,
   releaseArtifactName,
+  lynxRuntimeArtifactName,
   resolveNativeBuildTarget,
   type NativeArtifactKind,
 } from "./native-build-graph";
@@ -52,7 +53,7 @@ for (const entry of stagePlan) {
   for (const rawKind of entry.artifactKinds) {
     const kind = parseArtifactKind(rawKind);
     const fileName =
-      kind === "lynx-runtime" ? "LynxExplorer.app.zip" : releaseArtifactName(kind, target.packageOs);
+      kind === "lynx-runtime" ? lynxRuntimeArtifactName : releaseArtifactName(kind, target.packageOs);
     const source = join(artifactDirectory, fileName);
     const destination = resolveStageDestination(packageTarget, kind);
     await stageArtifact(values.root ?? process.cwd(), source, destination);

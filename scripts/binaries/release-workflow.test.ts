@@ -38,9 +38,18 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("Stage native artifacts into npm packages");
     expect(releaseJob).toContain("bun run scripts/binaries/stage-release-artifacts.ts");
     expect(releaseJob).toContain("bun run scripts/binaries/validate-package-dirs.ts");
+    expect(workflow).toContain("Seed Googlesource hosts");
+    expect(workflow).toContain(
+      "sudo python3 scripts/ci/seed_hosts_from_doh.py"
+    );
+    expect(workflow).toContain("flutter.googlesource.com");
+    expect(workflow).toContain("'native/lynx-runtime-macos/**'");
+    expect(workflow).toContain("Upload Lynx build logs");
+    expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("git push origin --tags");
     expect(releaseJob).not.toContain("git push --follow-tags");
     expect(releaseJob).not.toContain("--source target/release");
+    expect(releaseJob).not.toContain("stage-local.ts");
   });
 
   test("Scenario: Given alpha channel publish When workflow is inspected Then snapshot versioning and alpha dist-tag stay separate from stable release tags", () => {
