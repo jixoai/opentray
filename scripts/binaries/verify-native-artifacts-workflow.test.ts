@@ -22,6 +22,7 @@ describe("Feature: native artifact verification workflow", () => {
     expect(workflow).toContain("native/lynx-runtime-macos/**");
     expect(workflow).toContain("name: Stage and pack native npm packages");
     expect(workflow).toContain("packages/cli");
+    expect(workflow).not.toContain("darwin-x64");
     expect(workflow).not.toContain("pnpm run release");
     expect(workflow).not.toContain("environment: npm-release");
   });

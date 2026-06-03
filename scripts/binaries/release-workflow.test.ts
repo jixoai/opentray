@@ -35,8 +35,8 @@ describe("Feature: release native binary CI law", () => {
       'bash scripts/release/build-lynx-runtime.sh "native-artifacts/OpenTrayLynxRuntime.app.zip"'
     );
     expect(workflow).toContain("'native/lynx-runtime-macos/**'");
-    expect(workflow).toContain("job_timeout_minutes: 120");
-    expect(workflow).toContain("lynx_timeout_seconds: 5700");
+    expect(workflow).toContain("job_timeout_minutes: 90");
+    expect(workflow).toContain("lynx_timeout_seconds: 4500");
     expect(workflow).toContain("Upload Lynx build logs");
     expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("Download native artifacts");
@@ -44,6 +44,9 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("Validate publish package contents");
     expect(releaseJob).toContain("packages/cli");
     expect(releaseJob).toContain("packages/ext-lynx");
+    expect(releaseJob).not.toContain("packages/darwin-x64");
+    expect(releaseJob).not.toContain("packages/ext-webview-darwin-x64");
+    expect(releaseJob).not.toContain("packages/ext-lynx-darwin-x64");
     expect(releaseJob).toContain(
       '--source "native-artifacts/native-${target}/${daemon_artifact}"'
     );
@@ -55,5 +58,6 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("git push origin --tags");
     expect(releaseJob).not.toContain("git push --follow-tags");
     expect(releaseJob).not.toContain("--source target/release");
+    expect(workflow).not.toContain("darwin-x64");
   });
 });

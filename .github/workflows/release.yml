@@ -36,13 +36,6 @@ jobs:
             daemon_artifact: opentray
             webview_artifact: libopentray_ext_webview.dylib
             lynx_artifact: libopentray_ext_lynx.dylib
-          - target: darwin-x64
-            runner: macos-15-intel
-            job_timeout_minutes: 120
-            lynx_timeout_seconds: 5700
-            daemon_artifact: opentray
-            webview_artifact: libopentray_ext_webview.dylib
-            lynx_artifact: libopentray_ext_lynx.dylib
           - target: linux-arm64
             runner: ubuntu-24.04-arm
             job_timeout_minutes: 90
@@ -244,7 +237,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 windows-arm64 windows-x64; do
+          for target in darwin-arm64 linux-arm64 linux-x64 windows-arm64 windows-x64; do
             package_os="${target%-*}"
             arch="${target##*-}"
             if [ "$package_os" = "windows" ]; then
@@ -288,10 +281,10 @@ jobs:
           set -euo pipefail
           for package_dir in \
             packages/cli \
-            packages/darwin-arm64 packages/darwin-x64 packages/linux-arm64 packages/linux-x64 packages/windows-arm64 packages/windows-x64 \
+            packages/darwin-arm64 packages/linux-arm64 packages/linux-x64 packages/windows-arm64 packages/windows-x64 \
             packages/ext-lynx \
-            packages/ext-webview-darwin-arm64 packages/ext-webview-darwin-x64 packages/ext-webview-linux-arm64 packages/ext-webview-linux-x64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64 \
-            packages/ext-lynx-darwin-arm64 packages/ext-lynx-darwin-x64
+            packages/ext-webview-darwin-arm64 packages/ext-webview-linux-arm64 packages/ext-webview-linux-x64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64 \
+            packages/ext-lynx-darwin-arm64
           do
             npm pack --dry-run --json "./${package_dir}" >/dev/null
           done
