@@ -37,6 +37,10 @@ napi_value OpenTrayWindowModuleCreator(napi_env env, napi_value exports,
 @property(nonatomic, assign) BOOL fitContentSize;
 @property(nonatomic, assign) BOOL nativeWindowApi;
 @property(nonatomic, assign) BOOL bindWindowGlobals;
+@property(nonatomic, assign) BOOL nativeScreenApi;
+@property(nonatomic, assign) BOOL bindScreenGlobals;
+@property(nonatomic, copy) NSString *title;
+@property(nonatomic, strong, nullable) NSDictionary *icon;
 @property(nonatomic, assign) BOOL frameless;
 
 + (instancetype)fromEnvironment;
@@ -53,6 +57,7 @@ namespace {
 
 static NSString *const kOpenTrayWindowConfigEnv = @"OPENTRAY_LYNX_WINDOW_CONFIG_JSON";
 static NSString *const kOpenTrayWindowEventPrefix = @"opentray.window:";
+static NSString *const kOpenTrayDefaultWindowTitle = @"OpenTray Lynx";
 const uint64_t kOpenTrayWindowModuleID =
     reinterpret_cast<uint64_t>(&kOpenTrayWindowModuleID);
 
@@ -138,6 +143,169 @@ napi_value NapiString(napi_env env, NSString *value) {
   return result;
 }
 
+NSDictionary *NormalizedIconValue(id value) {
+  if (!value || value == [NSNull null]) {
+    return nil;
+  }
+  NSDictionary *icon = [value isKindOfClass:[NSDictionary class]] ? value : nil;
+  NSString *type = [icon[@"type"] isKindOfClass:[NSString class]] ? icon[@"type"] : nil;
+  if (!type) {
+    return nil;
+  }
+  if ([type isEqualToString:@"rgba"]) {
+    NSArray *data = [icon[@"data"] isKindOfClass:[NSArray class]] ? icon[@"data"] : nil;
+    NSNumber *width = [icon[@"width"] isKindOfClass:[NSNumber class]] ? icon[@"width"] : nil;
+    NSNumber *height =
+        [icon[@"height"] isKindOfClass:[NSNumber class]] ? icon[@"height"] : nil;
+    if (!data || !width || !height) {
+      return nil;
+    }
+    return @{
+      @"type" : @"rgba",
+      @"data" : data,
+      @"width" : width,
+      @"height" : height,
+    };
+  }
+  if ([type isEqualToString:@"encoded"]) {
+    NSArray *data = [icon[@"data"] isKindOfClass:[NSArray class]] ? icon[@"data"] : nil;
+    if (!data) {
+      return nil;
+    }
+    return @{
+      @"type" : @"encoded",
+      @"data" : data,
+    };
+  }
+  if ([type isEqualToString:@"file"]) {
+    NSString *path = [icon[@"path"] isKindOfClass:[NSString class]] ? icon[@"path"] : nil;
+    if (!path) {
+      return nil;
+    }
+    return @{
+      @"type" : @"file",
+      @"path" : path,
+    };
+  }
+  if ([type isEqualToString:@"href"]) {
+    NSString *href = [icon[@"href"] isKindOfClass:[NSString class]] ? icon[@"href"] : nil;
+    if (!href) {
+      return nil;
+    }
+    return @{
+      @"type" : @"href",
+      @"href" : href,
+    };
+  }
+  return nil;
+}
+
+NSData *ByteDataFromJSONArray(NSArray *values) {
+  NSMutableData *data = [NSMutableData dataWithCapacity:values.count];
+  for (id value in values) {
+    NSNumber *number = [value isKindOfClass:[NSNumber class]] ? value : nil;
+    if (!number) {
+      return nil;
+    }
+    NSInteger byteValue = number.integerValue;
+    if (byteValue < 0 || byteValue > 255) {
+      return nil;
+    }
+    uint8_t byte = static_cast<uint8_t>(byteValue);
+    [data appendBytes:&byte length:1];
+  }
+  return data;
+}
+
+NSData *ImageDataFromHref(NSString *href) {
+  if (![href hasPrefix:@"data:image/"]) {
+    return nil;
+  }
+  NSRange comma = [href rangeOfString:@","];
+  if (comma.location == NSNotFound || comma.location + 1 >= href.length) {
+    return nil;
+  }
+  NSString *metadata = [href substringToIndex:comma.location];
+  if (![metadata containsString:@";base64"]) {
+    return nil;
+  }
+  NSString *payload = [href substringFromIndex:comma.location + 1];
+  return [[NSData alloc] initWithBase64EncodedString:payload
+                                             options:NSDataBase64DecodingIgnoreUnknownCharacters];
+}
+
+NSImage *NSImageFromIconValue(NSDictionary *icon) {
+  NSString *type = [icon[@"type"] isKindOfClass:[NSString class]] ? icon[@"type"] : nil;
+  if (!type) {
+    return nil;
+  }
+  if ([type isEqualToString:@"file"]) {
+    NSString *path = [icon[@"path"] isKindOfClass:[NSString class]] ? icon[@"path"] : nil;
+    return path ? [[NSImage alloc] initWithContentsOfFile:path] : nil;
+  }
+  if ([type isEqualToString:@"href"]) {
+    NSString *href = [icon[@"href"] isKindOfClass:[NSString class]] ? icon[@"href"] : nil;
+    if (!href) {
+      return nil;
+    }
+    if (NSData *data = ImageDataFromHref(href)) {
+      return [[NSImage alloc] initWithData:data];
+    }
+    NSURL *url = [NSURL URLWithString:href];
+    return url ? [[NSImage alloc] initWithContentsOfURL:url] : nil;
+  }
+  if ([type isEqualToString:@"encoded"]) {
+    NSArray *dataArray = [icon[@"data"] isKindOfClass:[NSArray class]] ? icon[@"data"] : nil;
+    NSData *data = dataArray ? ByteDataFromJSONArray(dataArray) : nil;
+    return data ? [[NSImage alloc] initWithData:data] : nil;
+  }
+  if ([type isEqualToString:@"rgba"]) {
+    NSArray *dataArray = [icon[@"data"] isKindOfClass:[NSArray class]] ? icon[@"data"] : nil;
+    NSNumber *width = [icon[@"width"] isKindOfClass:[NSNumber class]] ? icon[@"width"] : nil;
+    NSNumber *height =
+        [icon[@"height"] isKindOfClass:[NSNumber class]] ? icon[@"height"] : nil;
+    if (!dataArray || !width || !height || width.integerValue <= 0 ||
+        height.integerValue <= 0) {
+      return nil;
+    }
+    NSData *data = ByteDataFromJSONArray(dataArray);
+    NSUInteger expectedLength =
+        static_cast<NSUInteger>(width.unsignedIntegerValue * height.unsignedIntegerValue * 4);
+    if (!data || data.length != expectedLength) {
+      return nil;
+    }
+    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
+        initWithBitmapDataPlanes:nil
+                      pixelsWide:width.integerValue
+                      pixelsHigh:height.integerValue
+                   bitsPerSample:8
+                 samplesPerPixel:4
+                        hasAlpha:YES
+                        isPlanar:NO
+                  colorSpaceName:NSCalibratedRGBColorSpace
+                     bytesPerRow:width.integerValue * 4
+                    bitsPerPixel:32];
+    if (!rep || !rep.bitmapData) {
+      return nil;
+    }
+    std::memcpy(rep.bitmapData, data.bytes, data.length);
+    NSImage *image =
+        [[NSImage alloc] initWithSize:NSMakeSize(width.doubleValue, height.doubleValue)];
+    [image addRepresentation:rep];
+    return image;
+  }
+  return nil;
+}
+
+NSDictionary *RectDictionary(NSRect rect) {
+  return @{
+    @"x" : @(static_cast<NSInteger>(std::llround(rect.origin.x))),
+    @"y" : @(static_cast<NSInteger>(std::llround(rect.origin.y))),
+    @"width" : @(static_cast<NSUInteger>(std::llround(MAX(rect.size.width, 0.0)))),
+    @"height" : @(static_cast<NSUInteger>(std::llround(MAX(rect.size.height, 0.0)))),
+  };
+}
+
 }  // namespace
 
 @implementation OpenTrayWindowLaunchConfig
@@ -173,6 +341,16 @@ napi_value NapiString(napi_env env, NSString *value) {
   if ([parsed[@"bindWindowGlobals"] isKindOfClass:[NSNumber class]]) {
     config.bindWindowGlobals = [parsed[@"bindWindowGlobals"] boolValue];
   }
+  if ([parsed[@"nativeScreenApi"] isKindOfClass:[NSNumber class]]) {
+    config.nativeScreenApi = [parsed[@"nativeScreenApi"] boolValue];
+  }
+  if ([parsed[@"bindScreenGlobals"] isKindOfClass:[NSNumber class]]) {
+    config.bindScreenGlobals = [parsed[@"bindScreenGlobals"] boolValue];
+  }
+  if ([parsed[@"title"] isKindOfClass:[NSString class]]) {
+    config.title = parsed[@"title"];
+  }
+  config.icon = NormalizedIconValue(parsed[@"icon"]);
   NSDictionary *style =
       [parsed[@"style"] isKindOfClass:[NSDictionary class]] ? parsed[@"style"] : nil;
   if ([style[@"frameless"] isKindOfClass:[NSNumber class]]) {
@@ -183,10 +361,12 @@ napi_value NapiString(napi_env env, NSString *value) {
 }
 
 - (BOOL)fitContentWidth {
+  // Explicit caller width wins; fit-content only owns axes left unspecified by the launcher.
   return self.fitContentSize && self.width == nil;
 }
 
 - (BOOL)fitContentHeight {
+  // Explicit caller height wins; fit-content only owns axes left unspecified by the launcher.
   return self.fitContentSize && self.height == nil;
 }
 
@@ -201,6 +381,10 @@ napi_value NapiString(napi_env env, NSString *value) {
   result[@"fitContentSize"] = @(self.fitContentSize);
   result[@"nativeWindowApi"] = @(self.nativeWindowApi);
   result[@"bindWindowGlobals"] = @(self.bindWindowGlobals);
+  result[@"nativeScreenApi"] = @(self.nativeScreenApi);
+  result[@"bindScreenGlobals"] = @(self.bindScreenGlobals);
+  if (self.title) result[@"title"] = self.title;
+  if (self.icon) result[@"icon"] = self.icon;
   result[@"style"] = @{@"frameless" : @(self.frameless)};
   return result;
 }
@@ -218,11 +402,16 @@ napi_value NapiString(napi_env env, NSString *value) {
     @"close" : @YES,
     @"move" : @YES,
     @"resize" : @YES,
+    @"title" : @YES,
+    @"icon" : @YES,
+    @"screen" : @YES,
     @"frameless" : @YES,
     @"transparent" : @NO,
     @"backgroundEffects" : @[],
     @"globalBindingsEnabled" : @(self.bindWindowGlobals),
     @"globalBindingsSupported" : @YES,
+    @"screenBindingsEnabled" : @(self.nativeScreenApi && self.bindScreenGlobals),
+    @"screenBindingsSupported" : @YES,
     @"fitContentSize" : @(self.fitContentSize),
     @"platform" : @"macos",
   };
@@ -313,12 +502,14 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   const eventPrefix = "opentray.window:";
   const INTERNALS_KEY = "__OPENTRAY_WINDOW_INTERNALS__";
   const API_KEY = "__OPENTRAY_WINDOW_API__";
+  const SCREEN_API_KEY = "__OPENTRAY_SCREEN_API__";
   if (!targetWindow[INTERNALS_KEY]) {
     const domListeners = Object.create(null);
     const originalWindowFns = {
       close: targetWindow.close,
       moveTo: targetWindow.moveTo,
-      resizeTo: targetWindow.resizeTo
+      resizeTo: targetWindow.resizeTo,
+      getScreenDetails: targetWindow.getScreenDetails
     };
     const typedError = (code, message) => ({ code, message });
     const callNative = (cmd, payload = {}) => {
@@ -384,6 +575,18 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
         getCapabilities() {
           return invoke("getCapabilities");
         },
+        getTitle() {
+          return invoke("getTitle");
+        },
+        setTitle(title) {
+          return invoke("setTitle", { title });
+        },
+        getIcon() {
+          return invoke("getIcon");
+        },
+        setIcon(icon) {
+          return invoke("setIcon", icon ?? null);
+        },
         addEventListener(event, handler) {
           const eventListeners = (domListeners[event] ??= new Map());
           if (eventListeners.has(handler)) return;
@@ -418,47 +621,105 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
       });
       return api;
     };
+    const createScreenApi = () => {
+      if (targetWindow[SCREEN_API_KEY]) return targetWindow[SCREEN_API_KEY];
+      const api = {
+        getScreenDetails() {
+          return invoke("getScreenDetails");
+        }
+      };
+      Object.freeze(api);
+      Object.defineProperty(targetWindow, SCREEN_API_KEY, {
+        value: api,
+        configurable: true
+      });
+      return api;
+    };
     const restoreGlobals = () => {
       try {
         targetWindow.close = originalWindowFns.close;
         targetWindow.moveTo = originalWindowFns.moveTo;
         targetWindow.resizeTo = originalWindowFns.resizeTo;
+        targetWindow.getScreenDetails = originalWindowFns.getScreenDetails;
       } catch (_) {}
     };
     const install = () => {
-      const api = createApi();
-      Object.defineProperty(navigatorObject, "window", {
-        value: api,
-        configurable: true
-      });
-      Object.defineProperty(navigatorObject, "opentrayWindow", {
-        value: api,
-        configurable: true
-      });
-      if (config.bindWindowGlobals) {
-        try {
-          targetWindow.close = () => {
-            void api.close();
-          };
-          targetWindow.moveTo = (x, y) => {
-            void api.moveTo(Number(x), Number(y));
-          };
-          targetWindow.resizeTo = (width, height) => {
-            void api.resizeTo(Number(width), Number(height));
-          };
-        } catch (_) {}
+      // The extension owns this navigator bridge; it does not reuse page messaging or daemon globals.
+      if (config.nativeWindowApi) {
+        const api = createApi();
+        Object.defineProperty(navigatorObject, "window", {
+          value: api,
+          configurable: true
+        });
+        Object.defineProperty(navigatorObject, "opentrayWindow", {
+          value: api,
+          configurable: true
+        });
+        if (config.bindWindowGlobals) {
+          try {
+            targetWindow.close = () => {
+              void api.close();
+            };
+            targetWindow.moveTo = (x, y) => {
+              void api.moveTo(Number(x), Number(y));
+            };
+            targetWindow.resizeTo = (width, height) => {
+              void api.resizeTo(Number(width), Number(height));
+            };
+          } catch (_) {}
+        }
       } else {
+        try {
+          delete navigatorObject.window;
+          delete navigatorObject.opentrayWindow;
+        } catch (_) {}
+      }
+      if (config.nativeScreenApi) {
+        const screenApi = createScreenApi();
+        Object.defineProperty(navigatorObject, "screen", {
+          value: screenApi,
+          configurable: true
+        });
+        Object.defineProperty(navigatorObject, "opentrayScreen", {
+          value: screenApi,
+          configurable: true
+        });
+        if (config.bindScreenGlobals) {
+          try {
+            targetWindow.getScreenDetails = () => screenApi.getScreenDetails();
+          } catch (_) {}
+        }
+      } else {
+        try {
+          delete navigatorObject.screen;
+          delete navigatorObject.opentrayScreen;
+        } catch (_) {}
+      }
+      if (!config.bindWindowGlobals && !config.bindScreenGlobals) {
         restoreGlobals();
+      } else if (!config.bindWindowGlobals) {
+        try {
+          targetWindow.close = originalWindowFns.close;
+          targetWindow.moveTo = originalWindowFns.moveTo;
+          targetWindow.resizeTo = originalWindowFns.resizeTo;
+        } catch (_) {}
+      } else if (!config.bindScreenGlobals) {
+        try {
+          targetWindow.getScreenDetails = originalWindowFns.getScreenDetails;
+        } catch (_) {}
       }
     };
     const uninstall = () => {
       try {
         delete navigatorObject.window;
         delete navigatorObject.opentrayWindow;
+        delete navigatorObject.screen;
+        delete navigatorObject.opentrayScreen;
       } catch (_) {}
       restoreGlobals();
     };
     const scheduleFitProbe = () => {
+      // Fit-content is a native host policy fed by Lynx layout snapshots, not a DOM/window identity claim.
       if (!config.fitContentSize) return;
       let attempts = 0;
       let lastKey = "";
@@ -506,7 +767,7 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     });
   }
   const internals = targetWindow[INTERNALS_KEY];
-  if (config.nativeWindowApi) {
+  if (config.nativeWindowApi || config.nativeScreenApi) {
     internals.install();
   } else {
     internals.uninstall();
@@ -532,6 +793,8 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 @property(nonatomic, assign) BOOL opentrayInitialFitApplied;
 @property(nonatomic, assign) BOOL opentrayApplyingWindowFrame;
 @property(nonatomic, strong) id opentrayWindowDelegateOwner;
+@property(nonatomic, copy) NSString *opentrayWindowTitle;
+@property(nonatomic, strong, nullable) NSDictionary *opentrayWindowIcon;
 #if ENABLE_TESTBENCH_REPLAY
 @property(nonatomic) std::shared_ptr<lynx::embedder::TestBenchActionManager> testBenchActionManager;
 @property(nonatomic) BOOL isTestBenchReplay;
@@ -552,6 +815,9 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   if (self) {
     self.url = url;
     self.opentrayWindowConfig = [OpenTrayWindowLaunchConfig fromEnvironment];
+    self.opentrayWindowTitle =
+        self.opentrayWindowConfig.title ?: kOpenTrayDefaultWindowTitle;
+    self.opentrayWindowIcon = self.opentrayWindowConfig.icon;
     NSScreen *screen = [NSScreen mainScreen];
     _lastScaleFactor = screen.backingScaleFactor;
 #if ENABLE_TESTBENCH_REPLAY
@@ -598,11 +864,13 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 
 - (void)windowScreenDidChange:(NSNotification *)notification {
   NSScreen *newScreen = self.view.window.screen;
-  if (!newScreen || _lastScaleFactor == newScreen.backingScaleFactor) return;
-
-  _lastScaleFactor = newScreen.backingScaleFactor;
-  _lynxView->UpdateScreenMetrics(self.view.frame.size.width, self.view.frame.size.height,
-                                 _lastScaleFactor);
+  if (!newScreen) return;
+  if (_lastScaleFactor != newScreen.backingScaleFactor) {
+    _lastScaleFactor = newScreen.backingScaleFactor;
+    _lynxView->UpdateScreenMetrics(self.view.frame.size.width, self.view.frame.size.height,
+                                   _lastScaleFactor);
+  }
+  [self emitWindowEvent:@"screenchange" payload:[self currentScreenDetailsDictionary]];
 }
 
 - (void)notifyWindowBecomeActive {
@@ -642,6 +910,8 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
                                        self.opentrayWindowConfig.maxHeight ? self.opentrayWindowConfig.maxHeight.doubleValue : CGFLOAT_MAX);
   }
   [window setContentSize:[self.opentrayWindowConfig initialContentSize]];
+  [self applyWindowTitle:self.opentrayWindowTitle emitEvent:NO];
+  [self applyWindowIconValue:self.opentrayWindowIcon emitEvent:NO errorMessage:nil];
   [window center];
   if ([self shouldDelayWindowReveal]) {
     window.alphaValue = 0.0;
@@ -674,11 +944,92 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   return [self.opentrayWindowConfig capabilitiesDictionary];
 }
 
+- (NSString *)currentWindowTitle {
+  return self.opentrayWindowTitle ?: kOpenTrayDefaultWindowTitle;
+}
+
+- (NSDictionary *)currentWindowIconValue {
+  return self.opentrayWindowIcon;
+}
+
+- (NSDictionary *)currentScreenDetailsDictionary {
+  NSArray<NSScreen *> *screens = [NSScreen screens] ?: @[];
+  NSScreen *primaryScreen = [NSScreen mainScreen];
+  NSScreen *currentScreen = self.view.window.screen ?: primaryScreen;
+  NSMutableArray<NSDictionary *> *screenDetails =
+      [NSMutableArray arrayWithCapacity:screens.count];
+  NSDictionary *currentDetail = nil;
+  for (NSUInteger index = 0; index < screens.count; index += 1) {
+    NSScreen *screen = screens[index];
+    NSString *label = [NSString stringWithFormat:@"Screen %lu",
+                                                 static_cast<unsigned long>(index + 1)];
+    if ([screen respondsToSelector:@selector(localizedName)] && screen.localizedName.length > 0) {
+      label = screen.localizedName;
+    }
+    NSDictionary *detail = @{
+      @"id" : [NSString stringWithFormat:@"screen-%lu",
+                                           static_cast<unsigned long>(index)],
+      @"label" : label,
+      @"isPrimary" : @(screen == primaryScreen),
+      @"frame" : RectDictionary(screen.frame),
+      @"visibleFrame" : RectDictionary(screen.visibleFrame),
+      @"scaleFactor" : @(screen.backingScaleFactor),
+    };
+    [screenDetails addObject:detail];
+    if (screen == currentScreen) {
+      currentDetail = detail;
+    }
+  }
+  return @{
+    @"currentScreen" : currentDetail ?: [NSNull null],
+    @"screens" : screenDetails,
+    @"isExtended" : @(screenDetails.count > 1),
+  };
+}
+
 - (NSSize)currentContentSize {
   if (!self.view.window) {
     return [self.opentrayWindowConfig initialContentSize];
   }
   return [self.view.window contentRectForFrameRect:self.view.window.frame].size;
+}
+
+- (void)applyWindowTitle:(NSString *)title emitEvent:(BOOL)emitEvent {
+  NSString *nextTitle = title ?: @"";
+  self.opentrayWindowTitle = nextTitle;
+  if (self.view.window) {
+    self.view.window.title = nextTitle;
+  }
+  NSString *processTitle =
+      nextTitle.length > 0 ? nextTitle : kOpenTrayDefaultWindowTitle;
+  [[NSProcessInfo processInfo] setProcessName:processTitle];
+  [[[NSApplication sharedApplication] dockTile] display];
+  if (emitEvent) {
+    [self emitWindowEvent:@"titlechange" payload:@{@"title" : nextTitle}];
+  }
+}
+
+- (BOOL)applyWindowIconValue:(NSDictionary *)icon
+                    emitEvent:(BOOL)emitEvent
+                 errorMessage:(NSString *_Nullable *_Nullable)errorMessage {
+  NSImage *nativeIcon = icon ? NSImageFromIconValue(icon) : nil;
+  if (icon && !nativeIcon) {
+    if (errorMessage) {
+      *errorMessage = @"icon could not be materialized as a native image";
+    }
+    return NO;
+  }
+  self.opentrayWindowIcon = icon;
+  if (self.view.window) {
+    [self.view.window setMiniwindowImage:nativeIcon];
+  }
+  [[NSApplication sharedApplication] setApplicationIconImage:nativeIcon];
+  [[[NSApplication sharedApplication] dockTile] display];
+  if (emitEvent) {
+    [self emitWindowEvent:@"iconchange"
+                  payload:@{@"icon" : icon ?: [NSNull null]}];
+  }
+  return YES;
 }
 
 - (void)applyFrameless:(BOOL)frameless {
@@ -771,8 +1122,9 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return [self jsonError:@"rejected" message:@"invalid OpenTray window request JSON"];
   }
   NSString *cmd = [request[@"cmd"] isKindOfClass:[NSString class]] ? request[@"cmd"] : nil;
+  id payloadValue = request[@"payload"];
   NSDictionary *payload =
-      [request[@"payload"] isKindOfClass:[NSDictionary class]] ? request[@"payload"] : @{};
+      [payloadValue isKindOfClass:[NSDictionary class]] ? payloadValue : @{};
   if (!cmd) {
     return [self jsonError:@"rejected" message:@"OpenTray window request requires cmd"];
   }
@@ -821,6 +1173,40 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
       response = [self jsonSuccess:[self currentWindowStyleDictionary]];
       return;
     }
+    if ([cmd isEqualToString:@"getTitle"]) {
+      response = [self jsonSuccess:[self currentWindowTitle]];
+      return;
+    }
+    if ([cmd isEqualToString:@"setTitle"]) {
+      NSString *title =
+          [payload[@"title"] isKindOfClass:[NSString class]] ? payload[@"title"] : nil;
+      if (!title) {
+        response = [self jsonError:@"rejected" message:@"setTitle requires title"];
+        return;
+      }
+      [self applyWindowTitle:title emitEvent:YES];
+      response = [self jsonSuccess:[self currentWindowTitle]];
+      return;
+    }
+    if ([cmd isEqualToString:@"getIcon"]) {
+      response = [self jsonSuccess:[self currentWindowIconValue]];
+      return;
+    }
+    if ([cmd isEqualToString:@"setIcon"]) {
+      NSDictionary *icon = NormalizedIconValue(payloadValue);
+      NSString *errorMessage = nil;
+      if (payloadValue != nil && payloadValue != [NSNull null] && !icon) {
+        response = [self jsonError:@"rejected" message:@"setIcon requires a valid icon payload"];
+        return;
+      }
+      if (![self applyWindowIconValue:icon emitEvent:YES errorMessage:&errorMessage]) {
+        response = [self jsonError:@"unsupported"
+                           message:errorMessage ?: @"icon could not be materialized as a native image"];
+        return;
+      }
+      response = [self jsonSuccess:[self currentWindowIconValue]];
+      return;
+    }
     if ([cmd isEqualToString:@"setStyle"]) {
       if ([payload[@"transparent"] boolValue]) {
         response = [self jsonError:@"unsupported"
@@ -840,6 +1226,10 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     }
     if ([cmd isEqualToString:@"getCapabilities"]) {
       response = [self jsonSuccess:[self currentCapabilitiesDictionary]];
+      return;
+    }
+    if ([cmd isEqualToString:@"getScreenDetails"]) {
+      response = [self jsonSuccess:[self currentScreenDetailsDictionary]];
       return;
     }
     if ([cmd isEqualToString:@"reportContentRect"]) {

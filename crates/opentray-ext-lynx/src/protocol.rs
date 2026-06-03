@@ -19,6 +19,25 @@ pub(crate) struct LynxWindowStyleConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub(crate) enum LynxWindowIconConfig {
+    Rgba {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    Encoded {
+        data: Vec<u8>,
+    },
+    File {
+        path: String,
+    },
+    Href {
+        href: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LynxLaunchConfig {
     pub width: Option<u32>,
@@ -30,6 +49,10 @@ pub(crate) struct LynxLaunchConfig {
     pub fit_content_size: bool,
     pub native_window_api: bool,
     pub bind_window_globals: bool,
+    pub native_screen_api: bool,
+    pub bind_screen_globals: bool,
+    pub title: Option<String>,
+    pub icon: Option<LynxWindowIconConfig>,
     pub style: LynxWindowStyleConfig,
 }
 
@@ -45,6 +68,10 @@ impl Default for LynxLaunchConfig {
             fit_content_size: true,
             native_window_api: false,
             bind_window_globals: false,
+            native_screen_api: false,
+            bind_screen_globals: false,
+            title: None,
+            icon: None,
             style: LynxWindowStyleConfig::default(),
         }
     }
@@ -63,6 +90,10 @@ struct ShowCommandData {
     fit_content_size: Option<bool>,
     native_window_api: Option<bool>,
     bind_window_globals: Option<bool>,
+    native_screen_api: Option<bool>,
+    bind_screen_globals: Option<bool>,
+    title: Option<String>,
+    icon: Option<LynxWindowIconConfig>,
     style: Option<LynxWindowStyleConfig>,
 }
 
@@ -92,6 +123,10 @@ pub(crate) fn parse_lynx_command(data: &Value) -> Result<LynxCommand, LynxRuntim
                     fit_content_size: parsed.fit_content_size.unwrap_or(true),
                     native_window_api: parsed.native_window_api.unwrap_or(false),
                     bind_window_globals: parsed.bind_window_globals.unwrap_or(false),
+                    native_screen_api: parsed.native_screen_api.unwrap_or(false),
+                    bind_screen_globals: parsed.bind_screen_globals.unwrap_or(false),
+                    title: parsed.title,
+                    icon: parsed.icon,
                     style: parsed.style.unwrap_or_default(),
                 },
             })
@@ -152,6 +187,13 @@ mod tests {
             "fitContentSize": true,
             "nativeWindowApi": true,
             "bindWindowGlobals": true,
+            "nativeScreenApi": true,
+            "bindScreenGlobals": false,
+            "title": "OpenTray Lynx",
+            "icon": {
+                "type": "href",
+                "href": "data:image/png;base64,AAAA"
+            },
             "style": {
                 "frameless": true
             }
@@ -172,6 +214,12 @@ mod tests {
                     fit_content_size: true,
                     native_window_api: true,
                     bind_window_globals: true,
+                    native_screen_api: true,
+                    bind_screen_globals: false,
+                    title: Some("OpenTray Lynx".into()),
+                    icon: Some(LynxWindowIconConfig::Href {
+                        href: "data:image/png;base64,AAAA".into(),
+                    }),
                     style: LynxWindowStyleConfig {
                         frameless: Some(true),
                     },
