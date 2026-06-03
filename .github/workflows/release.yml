@@ -298,4 +298,4 @@ jobs:
         run: pnpm run release
 
       - name: Push release tags
-        run: git push --follow-tags
+        run: git push origin --tags

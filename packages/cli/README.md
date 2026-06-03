@@ -91,6 +91,8 @@ pnpm --filter opentray cli -- smoke daemon-lynx --bundle ./research/lynx/app/dis
 
 The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to keep it alive during debugging, or provide another millisecond value for a custom idle release window.
 
+`OPENTRAY_HOME` should point at a home root, not the `.opentray` state directory itself. OpenTray always stores versioned state under `"$OPENTRAY_HOME/.opentray/<package-version>"`.
+
 To confirm the native runtime split on macOS after a release build:
 
 ```bash

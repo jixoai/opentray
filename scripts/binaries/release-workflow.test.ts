@@ -39,6 +39,8 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("--source \"native-artifacts/native-${target}/${webview_artifact}\"");
     expect(releaseJob).toContain("--kind lynx");
     expect(releaseJob).toContain("--kind lynx-runtime");
+    expect(releaseJob).toContain("git push origin --tags");
+    expect(releaseJob).not.toContain("git push --follow-tags");
     expect(releaseJob).not.toContain("--source target/release");
   });
 });
