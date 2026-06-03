@@ -30,13 +30,13 @@
 - [x] 4.3 Run `bun run openspec:vision -- validate implement-ext-lynx-macos-extension` for this change.
 - [x] 4.4 Run repo-level verification after the Lynx-specific gates are green.
 - [x] 4.5 Run `bun run openspec:vision -- commit-check implement-ext-lynx-macos-extension --phase self-review` before writing final review evidence.
-- [ ] 4.6 After publish, perform fresh-install npm acceptance for `opentray` + `@opentray/ext-lynx` and record the real package/version proof.
+- [x] 4.6 After publish, perform fresh-install npm acceptance for `opentray` + `@opentray/ext-lynx` and record the real package/version proof.
 
 ## 5. Self-Review Loop
 
 - [x] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
 - [x] 5.2 Generate separate `review/self-review.html` as the screenshot / interaction / structured evidence presentation.
-- [ ] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
+- [x] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
 - [ ] 5.4 If the review is entering a real loop, run `bun run openspec:vision -- review-state implement-ext-lynx-macos-extension`.
 - [ ] 5.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-ext-lynx-macos-extension` and commit the handoff evidence before returning to user discussion.
 - [ ] 5.6 If review exits normally, run `openspec archive implement-ext-lynx-macos-extension` and commit the archive result.
