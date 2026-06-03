@@ -20,6 +20,35 @@
 
 using lynx::pub::LynxValue;
 
+@class ViewController;
+
+napi_value OpenTrayWindowInvoke(napi_env env, napi_callback_info info);
+napi_value OpenTrayWindowModuleCreator(napi_env env, napi_value exports,
+                                       const char *module_name, void *opaque);
+
+@interface OpenTrayWindowLaunchConfig : NSObject
+
+@property(nonatomic, strong, nullable) NSNumber *width;
+@property(nonatomic, strong, nullable) NSNumber *height;
+@property(nonatomic, strong, nullable) NSNumber *minWidth;
+@property(nonatomic, strong, nullable) NSNumber *minHeight;
+@property(nonatomic, strong, nullable) NSNumber *maxWidth;
+@property(nonatomic, strong, nullable) NSNumber *maxHeight;
+@property(nonatomic, assign) BOOL fitContentSize;
+@property(nonatomic, assign) BOOL nativeWindowApi;
+@property(nonatomic, assign) BOOL bindWindowGlobals;
+@property(nonatomic, assign) BOOL frameless;
+
++ (instancetype)fromEnvironment;
+- (BOOL)fitContentWidth;
+- (BOOL)fitContentHeight;
+- (NSDictionary *)dictionaryRepresentation;
+- (NSDictionary *)windowStyleDictionary;
+- (NSDictionary *)capabilitiesDictionary;
+- (NSSize)initialContentSize;
+
+@end
+
 namespace {
 
 static NSString *const kOpenTrayWindowConfigEnv = @"OPENTRAY_LYNX_WINDOW_CONFIG_JSON";
@@ -109,32 +138,7 @@ napi_value NapiString(napi_env env, NSString *value) {
   return result;
 }
 
-napi_value OpenTrayWindowInvoke(napi_env env, napi_callback_info info);
-napi_value OpenTrayWindowModuleCreator(napi_env env, napi_value exports,
-                                       const char *module_name, void *opaque);
-
-@interface OpenTrayWindowLaunchConfig : NSObject
-
-@property(nonatomic, strong, nullable) NSNumber *width;
-@property(nonatomic, strong, nullable) NSNumber *height;
-@property(nonatomic, strong, nullable) NSNumber *minWidth;
-@property(nonatomic, strong, nullable) NSNumber *minHeight;
-@property(nonatomic, strong, nullable) NSNumber *maxWidth;
-@property(nonatomic, strong, nullable) NSNumber *maxHeight;
-@property(nonatomic, assign) BOOL fitContentSize;
-@property(nonatomic, assign) BOOL nativeWindowApi;
-@property(nonatomic, assign) BOOL bindWindowGlobals;
-@property(nonatomic, assign) BOOL frameless;
-
-+ (instancetype)fromEnvironment;
-- (BOOL)fitContentWidth;
-- (BOOL)fitContentHeight;
-- (NSDictionary *)dictionaryRepresentation;
-- (NSDictionary *)windowStyleDictionary;
-- (NSDictionary *)capabilitiesDictionary;
-- (NSSize)initialContentSize;
-
-@end
+}  // namespace
 
 @implementation OpenTrayWindowLaunchConfig
 
@@ -232,6 +236,8 @@ napi_value OpenTrayWindowModuleCreator(napi_env env, napi_value exports,
 }
 
 @end
+
+namespace {
 
 class OpenTrayRuntimeLifecycleObserver
     : public lynx::pub::LynxRuntimeLifecycleObserver {
