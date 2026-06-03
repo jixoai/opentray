@@ -46,10 +46,8 @@
 | `packages/ext-lynx/src/index.ts` | 当前 facade 只有 `show({ bundlePath })` 与 `hide()`。 | 现状并不存在 window controller，只能新增而不是修开关。 |
 | `crates/opentray-ext-lynx/src/lib.rs` | 当前 native command 只有 `show` / `hide`。 | 现有 ABI 面太窄，必须扩展命令协议与事件协议。 |
 | `crates/opentray-ext-lynx/src/macos.rs` | 当前 runtime 只负责解压 sidecar、stage bundle、spawn/kill LynxExplorer。 | 宿主窗口能力尚未下沉到 `ext-lynx` 原子内部。 |
-| `native/lynx-runtime-macos/OpenTrayLynxRuntime/Info.plist` | `CFBundleIconFile` 目前为空字符串。 | macOS Dock 空白图标的根因在 runtime app bundle 本身，而不是页面 CSS 或 tray 图标。 |
 | `research/lynx/app/src/App.css` | 当前 smoke bundle 自带深色根背景、外层 padding、居中卡片。 | 黑边现象部分来自 demo 视觉，不应误判成 controller 已存在但失效。 |
 | `packages/ext-webview/README.md` | `ext-webview` 已公开 `navigator.window` / `navigator.opentrayWindow` 与 move/resize/style 能力。 | `ext-lynx` 需要对齐用户可理解的宿主窗口能力面。 |
-| `.worktree/enrich-webview-window-macos-capabilities/*` | `ext-webview` 已有 `getTitle/setTitle/getIcon/setIcon` 与 `navigator.screen` / `window.getScreenDetails()` 的完整词汇。 | `ext-lynx` 的第二阶段要对齐这个公开词汇，但 transport 继续走 Lynx host bridge。 |
 | `research/lynx/upstream/lynx/explorer/darwin/macos/lynx_explorer/LynxExplorer/module/LynxDemoModule.mm` | 上游 LynxExplorer 默认窗口是 `800x600`，只在 URL query 存在 `width` / `height` 时改初始窗口尺寸。 | 上游默认不是 content-fit，而是宿主给定固定初始窗口尺寸。 |
 | `research/lynx/upstream/lynx/explorer/darwin/macos/lynx_explorer/LynxExplorer/ViewController.mm` | LynxView 由宿主显式 `SetScreenSize` 与 `SetFrame`，并在容器布局变化时更新。 | 官方宿主法则是“宿主给约束，页面响应约束”，不是“内容反推宿主默认尺寸”。 |
 | `research/lynx/upstream/lynx/platform/embedder/public/lynx_view.h` | LynxView 提供 `SendGlobalEvent` 给前端，前端通过 `GlobalEventEmitter` 监听。 | `ext-lynx` 可用原生宿主桥做回包与事件，不必伪装成 WebView 注入脚本。 |
@@ -116,10 +114,8 @@
 操作者最终看到的是：
 
 - `opentray` 加载 `@opentray/ext-lynx` 后，真实 Lynx 窗口能被显示、关闭、移动、调整大小、切换样式。
-- 页面里可通过 `navigator.window` / `navigator.opentrayWindow` 调用这些能力，并能读写 `title` / `icon`，且不会污染标准 `window.postMessage`。
-- 页面里可通过 `navigator.screen` / `navigator.opentrayScreen` 读取当前屏幕与屏幕集合信息，并在显式开启时通过 `window.getScreenDetails()` 做全局兼容覆盖。
+- 页面里可通过 `navigator.window` / `navigator.opentrayWindow` 调用这些能力，且不会污染标准 `window.postMessage`。
 - 默认情况下，Lynx 窗口不会再以一个任意固定壳子包住小卡片内容，而会按内容尺寸策略更自然地贴合。
-- macOS Dock 不再出现空白 runtime 图标；窗口图标、Dock 图标与窗口标题都能被 dedicated runtime 在同一进程内安全更新。
 - 如果开发者不想启用内容贴合，也能显式关闭并回到固定窗口尺寸策略。
 - skills 和 README 会把这条 law 讲清楚，后续做其它 native extension 不会再走弯路。
 
@@ -140,7 +136,7 @@
 ### Interface Shape
 
 - Public facade extends from launcher-only to host-window-aware:
-  - `show({ bundlePath, width?, height?, fitContentSize?, minWidth?, minHeight?, maxWidth?, maxHeight?, nativeWindowApi?, bindWindowGlobals?, nativeScreenApi?, bindScreenGlobals?, title?, icon? })`
+  - `show({ bundlePath, width?, height?, fitContentSize?, minWidth?, minHeight?, maxWidth?, maxHeight?, nativeWindowApi?, bindWindowGlobals? })`
   - `hide()`
   - host-window commands mirroring the current OpenTray window vocabulary:
     - `close`
@@ -149,15 +145,7 @@
     - `getStyle`
     - `setStyle`
     - `getCapabilities`
-    - `getTitle`
-    - `setTitle`
-    - `getIcon`
-    - `setIcon`
     - `listen` / event subscription
-- Public screen API:
-  - `navigator.screen`
-  - `navigator.opentrayScreen`
-  - optional `window.getScreenDetails()` override only when explicitly enabled
 - Public page API:
   - `navigator.window`
   - `navigator.opentrayWindow`
@@ -189,9 +177,9 @@
 - `packages/ext-lynx`
   - owns typed public API and README law
 - `crates/opentray-ext-lynx`
-  - owns command parsing, event shape, fit-content policy, metadata shape, screen shape, and the native bridge contract
+  - owns command parsing, event shape, fit-content policy, and the native bridge contract
 - Lynx sidecar runtime
-  - owns Native Module registration, runtime attach injection, GlobalEventEmitter forwarding, Dock/app/window metadata projection, and screen snapshots
+  - owns Native Module registration, runtime attach injection, and GlobalEventEmitter forwarding
 - `opentray-core` / daemon
   - remain generic and unaware of Lynx-specific window semantics
 
@@ -200,7 +188,6 @@ Forbidden couplings:
 - no `if ext == "lynx"` in core or broker
 - no reuse of Wry/WebView IPC internals inside `ext-lynx`
 - no DOM/body-driven default sizing law
-- no fake Dock/app icon parity from tray metadata alone; runtime app bundle metadata and runtime projection must be real
 - no fake cross-platform claims before a real Lynx host runtime exists there
 
 ### User Confirmation Gates
@@ -208,7 +195,6 @@ Forbidden couplings:
 | Gate | Why confirmation is required | Default until user answers |
 | ---- | ---------------------------- | -------------------------- |
 | Final visual default | The user cares about the visual feel of the default size policy, not only protocol correctness. | Ship with default-on fit-content plus explicit opt-out, then validate visually. |
-| macOS runtime identity | The user explicitly cares that the Dock no longer shows a blank icon and that title/name feels real. | On the dedicated Lynx runtime, project icon to both `NSWindow` and `NSApplication`, and project title to `NSWindow` plus best-effort process-name refresh. |
 
 ## Intent-Driven Plan
 
@@ -224,7 +210,6 @@ Forbidden couplings:
 | -------- | -------------- | ------------------------------------- |
 | Should fit-content continue to live-update after every content layout change, or only establish the initial window size and then respond to explicit API calls? | Affects jitter, resize loops, and visual stability. | Default to initial fit plus throttled follow-up updates on real content-size changes. |
 | Should `bindWindowGlobals` land for Lynx in the same change, or only `navigator.window` / `navigator.opentrayWindow`? | Affects how aggressive the host bridge is. | Provide `navigator.window` / `navigator.opentrayWindow` first-class; keep global overrides opt-in only. |
-| Should title changes also attempt to refresh the runtime app name in Dock/app UI, or stop at window title only? | Dedicated-process Lynx can safely mutate app-level identity, but the visible payoff depends on Cocoa behavior. | Treat app-name refresh as best-effort on macOS in the same dedicated runtime, while keeping `window.title` as the primary durable contract. |
 
 ## Rejected Paths
 
@@ -239,4 +224,4 @@ Forbidden couplings:
 
 - Default max review iterations: 2
 - Issue recurrence threshold: 2
-- Custom exit condition from intent: `ext-lynx` exposes a real host-window control surface plus fit-content sizing, window metadata and screen parity exist, the macOS Dock no longer shows a blank runtime icon, the default visible behavior is visually acceptable without black-edge confusion, the public docs and skills explain the law clearly, and the change is ready for focused human acceptance.
+- Custom exit condition from intent: `ext-lynx` exposes a real host-window control surface plus fit-content sizing, the default visible behavior is visually acceptable without black-edge confusion, the public docs and skills explain the law clearly, and the change is ready for focused human acceptance.
