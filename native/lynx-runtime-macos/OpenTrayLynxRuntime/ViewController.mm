@@ -722,13 +722,14 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
       // Fit-content is a native host policy fed by Lynx layout snapshots, not a DOM/window identity claim.
       if (!config.fitContentSize) return;
       let attempts = 0;
+      const maxAttempts = 60;
       let lastKey = "";
       const measure = () => {
         attempts += 1;
         try {
           const runtimeLynx = globalThis.lynx;
           if (!runtimeLynx || typeof runtimeLynx.createSelectorQuery !== "function") {
-            if (attempts < 12) setTimeout(measure, 80);
+            if (attempts < maxAttempts) setTimeout(measure, 80);
             return;
           }
           runtimeLynx
@@ -744,13 +745,13 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
                   void invoke("reportContentRect", { width, height });
                 }
               }
-              if (attempts < 12) {
+              if (attempts < maxAttempts) {
                 setTimeout(measure, attempts < 3 ? 16 : 120);
               }
             })
             .exec();
         } catch (_) {
-          if (attempts < 12) {
+          if (attempts < maxAttempts) {
             setTimeout(measure, 120);
           }
         }
@@ -852,9 +853,7 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 
 - (void)viewDidAppear {
   [super viewDidAppear];
-  if (![self shouldDelayWindowReveal]) {
-    [self revealWindowIfNeeded];
-  }
+  [self revealWindowIfNeeded];
 }
 
 - (void)dealloc {
@@ -913,18 +912,6 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   [self applyWindowTitle:self.opentrayWindowTitle emitEvent:NO];
   [self applyWindowIconValue:self.opentrayWindowIcon emitEvent:NO errorMessage:nil];
   [window center];
-  if ([self shouldDelayWindowReveal]) {
-    window.alphaValue = 0.0;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(700 * NSEC_PER_MSEC)),
-                   dispatch_get_main_queue(), ^{
-                     [self revealWindowIfNeeded];
-                   });
-  }
-}
-
-- (BOOL)shouldDelayWindowReveal {
-  return [self.opentrayWindowConfig fitContentWidth] ||
-         [self.opentrayWindowConfig fitContentHeight];
 }
 
 - (void)revealWindowIfNeeded {
