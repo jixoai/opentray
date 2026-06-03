@@ -34,8 +34,8 @@
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
-- [ ] 5.2 Generate separate `review/self-review.html` as the screenshot / interaction / structured evidence presentation.
+- [x] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
+- [x] 5.2 Generate separate `review/self-review.html` as the screenshot / interaction / structured evidence presentation.
 - [ ] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
 - [ ] 5.4 If the review is entering a real loop, run `bun run openspec:vision -- review-state implement-ext-lynx-macos-extension`.
 - [ ] 5.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-ext-lynx-macos-extension` and commit the handoff evidence before returning to user discussion.

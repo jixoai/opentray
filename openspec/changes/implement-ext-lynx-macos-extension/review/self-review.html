@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Self Review: implement-ext-lynx-macos-extension</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f3efe6;
+        --panel: rgba(255, 252, 247, 0.94);
+        --ink: #1d231c;
+        --muted: #5c6859;
+        --line: rgba(29, 35, 28, 0.12);
+        --accent: #8f5a2b;
+        --ok: #28633a;
+        --wait: #8f5a2b;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(143, 90, 43, 0.16), transparent 34%),
+          linear-gradient(180deg, #faf6ed 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      }
+      main {
+        max-width: 1024px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 22px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      .deck {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .card {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 12px 36px rgba(71, 52, 21, 0.08);
+      }
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .metric {
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .ok {
+        color: var(--ok);
+        font-weight: 700;
+      }
+      .wait {
+        color: var(--wait);
+        font-weight: 700;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: rgba(143, 90, 43, 0.08);
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      code,
+      pre {
+        font: 13px/1.45 "SFMono-Regular", "Menlo", "Monaco", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.68);
+        overflow: auto;
+      }
+      ul {
+        padding-left: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>implement-ext-lynx-macos-extension</h1>
+      <p>
+        Review focus: prove that <code>ext-lynx</code> is now a real official OpenTray
+        extension family with a public facade package, darwin runtime packages, extension-owned
+        native lifecycle, and release-CI staging for <code>LynxExplorer.app.zip</code>.
+      </p>
+
+      <div class="deck">
+        <section class="card">
+          <div class="label">Public Versions</div>
+          <div class="metric">0.4.0 / 0.1.0</div>
+          <p><code>opentray</code> and <code>@opentray/ext-lynx</code> in the local workspace</p>
+        </section>
+        <section class="card">
+          <div class="label">Rust Tests</div>
+          <div class="metric ok">11 passed</div>
+          <p><code>cargo test -p opentray-ext-lynx</code></p>
+        </section>
+        <section class="card">
+          <div class="label">Release State</div>
+          <div class="metric wait">Run 26855436901</div>
+          <p>darwin jobs still building the Lynx runtime sidecar at this review snapshot</p>
+        </section>
+      </div>
+
+      <h2>Gate Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Gate</th>
+            <th>Evidence</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Official extension split exists</td>
+            <td>
+              <code>packages/ext-lynx</code>, <code>packages/ext-lynx-darwin-arm64</code>,
+              <code>packages/ext-lynx-darwin-x64</code>, and
+              <code>crates/opentray-ext-lynx</code> all exist on mainline.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Runtime ownership stays inside the extension</td>
+            <td>
+              <code>crates/opentray-ext-lynx/src/macos.rs</code> owns adjacent runtime-zip
+              resolution, external bundle staging, URL launch, hide, and lease cleanup.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Release CI stages dylib plus runtime zip</td>
+            <td>
+              <code>.github/workflows/release.yml</code> now builds
+              <code>opentray-ext-lynx</code>, runs
+              <code>build-lynx-runtime.sh</code>, and stages
+              <code>LynxExplorer.app.zip</code> into darwin platform packages.
+            </td>
+            <td class="wait">Implementation pass, publish proof pending</td>
+          </tr>
+          <tr>
+            <td>Fresh-install npm acceptance</td>
+            <td>
+              Registry still reports <code>@opentray/ext-lynx</code> and both darwin platform
+              packages at <code>0.0.0</code> during this snapshot, so post-publish rerun is not
+              yet possible.
+            </td>
+            <td class="wait">Pending</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Command Evidence</h2>
+      <pre>cargo test -p opentray-ext-lynx
+pnpm --filter @opentray/ext-lynx test
+bun test scripts/binaries/artifacts.test.ts scripts/binaries/release-workflow.test.ts
+bun run openspec:vision -- validate implement-ext-lynx-macos-extension
+gh run view 26855436901 --json status,conclusion,url,jobs
+gh run list --workflow release.yml --branch feat/ext-lynx-phase3 --limit 3 --json databaseId,status,conclusion,headSha,createdAt,url
+npm view opentray version
+npm view @opentray/ext-lynx version
+npm view @opentray/ext-lynx-darwin-arm64 version
+npm view @opentray/ext-lynx-darwin-x64 version</pre>
+
+      <h2>Current Residuals</h2>
+      <ul>
+        <li>
+          <span class="wait">GitHub wall-clock only:</span> the remaining blocker is not local
+          code confidence but the external completion of release run <code>26855436901</code>.
+        </li>
+        <li>
+          <span class="wait">Registry evidence still stale:</span> until publish completes,
+          task <code>4.6</code> cannot be checked honestly.
+        </li>
+      </ul>
+
+      <h2>Exit Judgment</h2>
+      <p>
+        This change is implementation-complete enough to review, but not release-complete enough
+        to archive. The next honest action is to wait for the darwin jobs, rerun fresh-install
+        acceptance against the published packages, and only then close the OpenSpec loop.
+      </p>
+    </main>
+  </body>
+</html>
