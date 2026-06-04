@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include "explorer/darwin/macos/lynx_explorer/OpenTrayLynxRuntime/fetcher/ExampleGenericResourceFetcher.h"
+#include "explorer/darwin/macos/lynx_explorer/OpenTrayLynxRuntime/runtime/ExampleLynxRuntimeLifecycleObserver.h"
 #include "lynx_env.h"
 #include "lynx_native_view.h"
 #include "lynx_value.h"
@@ -443,10 +444,19 @@ namespace {
 class OpenTrayRuntimeLifecycleObserver
     : public lynx::pub::LynxRuntimeLifecycleObserver {
  public:
-  explicit OpenTrayRuntimeLifecycleObserver(std::string bootstrap_script)
-      : bootstrap_script_(std::move(bootstrap_script)) {}
+  OpenTrayRuntimeLifecycleObserver(
+      std::shared_ptr<lynx::pub::LynxRuntimeLifecycleObserver> upstream_observer,
+      std::string bootstrap_script)
+      : upstream_observer_(std::move(upstream_observer)),
+        bootstrap_script_(std::move(bootstrap_script)) {}
 
   void OnRuntimeAttach(napi_env env) override {
+    if (upstream_observer_) {
+      upstream_observer_->OnRuntimeAttach(env);
+    }
+    if (bootstrap_script_.empty()) {
+      return;
+    }
     napi_handle_scope scope = nullptr;
     napi_open_handle_scope(env, &scope);
     napi_value script;
@@ -457,7 +467,14 @@ class OpenTrayRuntimeLifecycleObserver
     napi_close_handle_scope(env, scope);
   }
 
+  void OnRuntimeDetach() override {
+    if (upstream_observer_) {
+      upstream_observer_->OnRuntimeDetach();
+    }
+  }
+
  private:
+  std::shared_ptr<lynx::pub::LynxRuntimeLifecycleObserver> upstream_observer_;
   std::string bootstrap_script_;
 };
 
@@ -1424,11 +1441,15 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 #endif
   _lynxView = builder.Build();
   _lynxView->RegisterNativeView<FakeView>("x-fake-view-alias", (__bridge void *)self);
+  std::shared_ptr<lynx::pub::LynxRuntimeLifecycleObserver> upstreamObserver =
+      std::make_shared<lynx::example::ExampleLynxRuntimeLifecycleObserver>();
+  std::string bootstrapScript;
   if (!self.opentrayBaselineHostMode) {
-    _opentrayRuntimeObserver = std::make_shared<OpenTrayRuntimeLifecycleObserver>(
-        OpenTrayBootstrapScript(self.opentrayWindowConfig));
-    _lynxView->RegisterRuntimeLifecycleObserver(_opentrayRuntimeObserver);
+    bootstrapScript = OpenTrayBootstrapScript(self.opentrayWindowConfig);
   }
+  _opentrayRuntimeObserver = std::make_shared<OpenTrayRuntimeLifecycleObserver>(
+      std::move(upstreamObserver), std::move(bootstrapScript));
+  _lynxView->RegisterRuntimeLifecycleObserver(_opentrayRuntimeObserver);
 #if ENABLE_TESTBENCH_REPLAY
   if (_isTestBenchReplay) {
     _testBenchActionManager = std::make_shared<lynx::embedder::TestBenchActionManager>(
