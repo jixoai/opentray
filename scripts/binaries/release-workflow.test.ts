@@ -35,6 +35,7 @@ describe("Feature: release native binary CI law", () => {
       'bash scripts/release/build-lynx-runtime.sh "native-artifacts/OpenTrayLynxRuntime.app.zip"'
     );
     expect(workflow).toContain("'native/lynx-runtime-macos/**'");
+    expect(workflow).toContain("'native/lynx-patches/**'");
     expect(workflow).toContain("job_timeout_minutes: 90");
     expect(workflow).toContain("lynx_timeout_seconds: 4500");
     expect(workflow).toContain("Upload Lynx build logs");
