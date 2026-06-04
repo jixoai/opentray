@@ -110,6 +110,21 @@ The darwin platform package ships two artifacts:
 
 The native extension resolves the runtime zip next to the loaded dylib by default. For local debugging, you may override the sidecar path with `OPENTRAY_LYNX_RUNTIME_ZIP=/absolute/path/to/OpenTrayLynxRuntime.app.zip`.
 
+For macOS-side runtime diagnostics, keep the default quiet behavior for normal users and opt in only while debugging:
+
+```bash
+OPENTRAY_LYNX_RUNTIME_STDIO=inherit \
+  pnpm --filter opentray cli -- smoke daemon-lynx \
+  2>&1 | tee /private/tmp/opentray-lynx-runtime.log
+```
+
+Accepted `OPENTRAY_LYNX_RUNTIME_STDIO` values:
+
+- `inherit`: forward `OpenTrayLynxRuntime` stdout/stderr into the parent terminal
+- `quiet` / `null` / unset: keep the runtime silent
+
+This is only a transport-level debug switch. It does not change tray, window, or extension behavior.
+
 Current first-stage native support:
 
 - macOS arm64 and x64: real runtime extraction and external bundle launch
