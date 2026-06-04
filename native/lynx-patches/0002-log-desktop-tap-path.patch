@@ -10,7 +10,7 @@ index bbe547d..620f2b9 100644
  #include <cstdint>
  #include <functional>
  #include <list>
-@@ -93,6 +94,74 @@ static constexpr int64_t kEventStateUpdateDelayTime = 1000;
+@@ -93,6 +94,78 @@ static constexpr int64_t kEventStateUpdateDelayTime = 1000;
  static constexpr int64_t kEventStateUpdateIntervalTime = 100;
  }  // namespace
  
@@ -62,6 +62,10 @@ index bbe547d..620f2b9 100644
 +      return "mouse";
 +    case PointerEvent::DeviceType::kTrackpad:
 +      return "trackpad";
++    case PointerEvent::DeviceType::kStylus:
++      return "stylus";
++    case PointerEvent::DeviceType::kInvertedStylus:
++      return "inverted-stylus";
 +  }
 +  return "unknown";
 +}
@@ -85,7 +89,7 @@ index bbe547d..620f2b9 100644
  #define DEBUG_KEYFRAMES 0
  
  PageView::PageView(uint32_t id, fml::RefPtr<GPUUnrefQueue> unref_queue,
-@@ -830,7 +899,12 @@ bool PageView::DispatchPointerEvent(std::vector<PointerEvent> events) {
+@@ -830,7 +903,12 @@ bool PageView::DispatchPointerEvent(std::vector<PointerEvent> events) {
                                kEventStateUpdateIntervalTime,
                                [render_settings = render_settings_] {
                                  render_settings->SetIsTouching(false);
@@ -99,7 +103,7 @@ index bbe547d..620f2b9 100644
      }
    }
    return consumed;
-@@ -874,6 +948,13 @@ void PageView::SetupIsolatedGestures() {
+@@ -874,6 +952,13 @@ void PageView::SetupIsolatedGestures() {
      } else {
        ReportTopViewEvent(event, kClayEventTypeMouseClick);
        // simulate primary mouse click as touch tap to adapt front-end code
@@ -113,7 +117,7 @@ index bbe547d..620f2b9 100644
        auto tap_event = event;
        tap_event.device = PointerEvent::DeviceType::kTouch;
        ReportTopViewEvent(tap_event, kClayEventTypeTap);
-@@ -992,8 +1073,27 @@ void PageView::ReportTopViewEvent(const PointerEvent& event,
+@@ -992,8 +1077,27 @@ void PageView::ReportTopViewEvent(const PointerEvent& event,
    }
  
    if (!top_view || top_view->IsAnonymousView()) {
