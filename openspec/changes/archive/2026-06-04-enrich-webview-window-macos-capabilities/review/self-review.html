@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>enrich-webview-window-macos-capabilities self review</title>
+  </head>
+  <body>
+    <main>
+      <h1>Self Review</h1>
+      <section>
+        <h2>Platform Law</h2>
+        <p>The WebView extension keeps ownership of macOS window metadata, material, transparent background, and screen capability. Tao is not introduced.</p>
+      </section>
+      <section>
+        <h2>Atomic Capability</h2>
+        <p>The TypeScript facade remains platform-neutral. The native dylib owns parsing, projection, sync policy, and navigator bootstrap.</p>
+      </section>
+      <section>
+        <h2>Proof</h2>
+        <p>Focused facade tests, native tests, root verify, release build, size checks, and otool linkage checks were run.</p>
+      </section>
+    </main>
+  </body>
+</html>

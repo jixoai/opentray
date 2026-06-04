@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tray Bounds API Review</title>
+    <style>
+      body {
+        margin: 0;
+        color: #152018;
+        background:
+          radial-gradient(circle at 14% 12%, rgba(74, 133, 103, 0.12), transparent 28%),
+          linear-gradient(140deg, #f6efdf 0%, #e3ebdc 50%, #d9e8de 100%);
+        font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      }
+      main {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 40px 28px 56px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 40px;
+        letter-spacing: -0.04em;
+      }
+      p,
+      li {
+        line-height: 1.55;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+        margin: 22px 0 28px;
+      }
+      .card {
+        border: 1px solid rgba(21, 32, 24, 0.12);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 18px;
+        box-shadow: 0 16px 34px rgba(21, 32, 24, 0.08);
+      }
+      .pass {
+        color: #25663a;
+        font-weight: 700;
+      }
+      .warn {
+        color: #7d5910;
+        font-weight: 700;
+      }
+      code,
+      pre {
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+      pre {
+        overflow: auto;
+        border-radius: 14px;
+        padding: 16px;
+        background: #162119;
+        color: #def4df;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.82);
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        border-bottom: 1px solid rgba(21, 32, 24, 0.1);
+        vertical-align: top;
+      }
+      th {
+        background: rgba(34, 82, 58, 0.08);
+      }
+      img {
+        display: block;
+        max-width: 100%;
+        border-radius: 14px;
+        border: 1px solid rgba(21, 32, 24, 0.12);
+        box-shadow: 0 12px 30px rgba(21, 32, 24, 0.08);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Tray Bounds API Review</h1>
+      <p>
+        Status: <span class="pass">API law and automated verification passed</span>.
+        The remaining caveat is visual capture quality: the automation workspace produced protocol/log proof for the tray-launched WebView path,
+        but not a clean screenshot of the panel itself.
+      </p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Backend Authority</h2>
+          <p><code>TrayHandle.getBounds()</code> now behaves as a real broker-backed tray capability, including the socket-level local-broker path.</p>
+        </div>
+        <div class="card">
+          <h2>Page Projection</h2>
+          <p><code>navigator.opentray.tray.getBounds()</code> stays a page projection of tray authority, not a second geometry source.</p>
+        </div>
+        <div class="card">
+          <h2>Type Ergonomics</h2>
+          <p>The facade now exports browser-global typings for the injected navigator/window surface and exposes the runtime <code>invoke(...)</code> escape hatch explicitly.</p>
+        </div>
+        <div class="card">
+          <h2>Scenario Guidance</h2>
+          <p>Skills and README now teach effect-driven tray-panel composition instead of leaving tray bounds as an abstract inventory item.</p>
+        </div>
+        <div class="card">
+          <h2>Smoke Result</h2>
+          <p>macOS smoke returned non-null tray bounds and emitted <code>{ type: "shown" }</code> for the WebView panel.</p>
+        </div>
+      </section>
+
+      <h2>Intent Trace</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Intent point</th>
+            <th>Evidence</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Tray bounds must be tray-owned backend authority.</td>
+            <td><code>packages/cli/src/client.ts</code>, kernel/backend test pass set, and local-broker response routing fix.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Page JS should receive the same capability family under <code>navigator.opentray.tray</code>.</td>
+            <td><code>packages/ext-webview/src/index.ts</code> + ext-webview navigator tests.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Skills should teach tray-launched custom panels with tray-aware placement.</td>
+            <td><code>.agents/skills/develop-opentray-ext/references/webview-window-patterns.md</code></td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Human-visible smoke should prove the tray-launched panel path.</td>
+            <td><code>review/artifacts/daemon-tray-smoke.log</code> proves non-null bounds and <code>shown</code>; screenshot capture is weaker.</td>
+            <td class="warn">Partial</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Smoke Evidence</h2>
+      <pre><code>connected: endpoint=/Users/kzf/.opentray/0.4.0/opentray-p1.sock session=lease-1
+space: {"spaceId":"com.example.opentray.daemon-smoke"}
+tray: daemon-smoke-status
+webview extension requested through the generic load-ext path
+click the tray icon: macOS should direct-trigger the single primary action without opening a menu
+tray bounds: {"x":0,"y":2520,"width":196,"height":0}
+broker -> client {"type":"ext-event","spaceId":"com.example.opentray.daemon-smoke","trayId":"daemon-smoke-status","ext":"webview","data":{"type":"shown"}}
+primary tray action: webview show</code></pre>
+
+      <p>
+        Full log: <code>review/artifacts/daemon-tray-smoke.log</code><br />
+        Auxiliary screenshot: <code>review/artifacts/daemon-tray-smoke.png</code><br />
+        Window-list capture during automation: <code>review/artifacts/window-list.json</code>
+      </p>
+
+      <h2>Screenshot Attempt</h2>
+      <img src="./artifacts/daemon-tray-smoke.png" alt="Desktop capture during tray-bounds smoke run" />
+      <p class="warn">
+        The screenshot records the desktop state during smoke, but does not isolate the accessory WebView panel cleanly. Treat the log and tray-bounds response as the stronger evidence in this automation context.
+      </p>
+
+      <h2>Verification Commands</h2>
+      <pre><code>cargo build -p opentray-bin -p opentray-ext-webview
+cargo test -p opentray-spec -p opentray-core -p opentray-backend-tray-icon -p opentray-backend-ksni -p opentray-ext-webview
+pnpm --filter @opentray/ext-webview test
+pnpm --filter @opentray/ext-webview typecheck
+pnpm --filter opentray test
+pnpm --filter opentray typecheck
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show OPENTRAY_EXAMPLE_EXIT_AFTER_MS=5000 OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- smoke daemon-tray
+bun run openspec:vision -- validate add-tray-bounds-api
+git diff --check</code></pre>
+
+      <p class="warn">
+        Archive remains deferred because this worktree currently carries multiple active OpenSpec changes. The tray-bounds change itself is reviewed; the branch integration boundary is the remaining packaging concern.
+      </p>
+    </main>
+  </body>
+</html>

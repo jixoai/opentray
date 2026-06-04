@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>clarify-webview-window-visibility-and-content-lifecycle self-review</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 32px auto;
+        max-width: 920px;
+        padding: 0 20px 48px;
+      }
+      h1,
+      h2 {
+        line-height: 1.2;
+      }
+      section {
+        margin-top: 24px;
+      }
+      ul {
+        padding-left: 20px;
+      }
+      pre {
+        overflow: auto;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: rgba(127, 127, 127, 0.12);
+      }
+      code {
+        font: 12px/1.5 ui-monospace, SFMono-Regular, monospace;
+      }
+      .pass {
+        color: #0a7a34;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Self Review</h1>
+    <p class="pass">Status: accepted for archive</p>
+
+    <section>
+      <h2>Lifecycle Law</h2>
+      <ul>
+        <li><code>show(...)</code> now means create-or-show, not implicit reload.</li>
+        <li><code>hide()</code> preserves the page runtime.</li>
+        <li><code>setContent(...)</code> is the explicit content replacement path.</li>
+        <li><code>destroy()</code> is the explicit session teardown path.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Smoke Evidence</h2>
+      <pre><code>reopen:
+shown
+hidden
+shown
+
+set-content:
+shown
+contentSet
+
+destroy-reopen:
+shown
+destroyed
+shown</code></pre>
+    </section>
+
+    <section>
+      <h2>Verification Commands</h2>
+      <pre><code>pnpm --filter @opentray/ext-webview test
+cargo test -p opentray-ext-webview
+pnpm --filter opentray typecheck
+OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=reopen pnpm --filter opentray example:tray-panel
+OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=set-content pnpm --filter opentray example:tray-panel
+OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=destroy-reopen pnpm --filter opentray example:tray-panel
+bun run openspec:vision -- validate clarify-webview-window-visibility-and-content-lifecycle
+bun run openspec:vision -- commit-check clarify-webview-window-visibility-and-content-lifecycle --phase self-review
+git diff --check</code></pre>
+    </section>
+
+    <section>
+      <h2>Residual Note</h2>
+      <p>
+        Reused-session live shell updates are supported, but precise incremental style patching is
+        still best done through <code>navigator.window.setStyle(...)</code> after the session exists.
+      </p>
+    </section>
+  </body>
+</html>

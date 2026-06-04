@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>add-tray-primary-event self review</title>
+    <style>
+      body {
+        color: #17202a;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.5;
+        margin: 2rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #ccd4dd;
+        padding: 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #eef3f7;
+      }
+      code {
+        background: #eef3f7;
+        padding: 0.1rem 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>add-tray-primary-event self review</h1>
+    <p>
+      <code>primaryEvent</code> is an additive role on a plain menu item. The
+      public event remains <code>menuClick</code>, while the tray-icon backend
+      owns native primary gesture routing.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Evidence</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Protocol contract</td>
+          <td>
+            <code>pnpm --filter @opentray/spec test</code> and
+            <code>cargo test -p opentray-spec</code> prove
+            <code>primaryEvent</code> is optional, camelCase on the wire, and
+            still pairs with normal <code>menuClick</code> event frames.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Kernel boundary</td>
+          <td>
+            <code>cargo test -p opentray-core</code> and the focused core grep
+            show that core preserves the role as data and has no
+            Windows/macOS/Linux primary-click branch.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Backend routing</td>
+          <td>
+            <code>cargo test -p opentray-backend-tray-icon</code> covers enabled
+            primary routes, disabled primary suppression, duplicate
+            first-enabled behavior, nested menu routes, and runtime primary
+            ingress delegation.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Broker ingress</td>
+          <td>
+            <code>cargo check -p opentray-bin</code> compiles the native
+            tray-icon event-loop ingress that routes supported primary
+            activation through backend and kernel ownership.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Human smoke path</td>
+          <td>
+            <code>OPENTRAY_EXAMPLE_EXIT_AFTER_MS=2000 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show pnpm --filter opentray cli -- smoke daemon-tray</code>
+            connected to the daemon, created the tray, loaded the WebView
+            extension, ran the single <code>Open WebView</code> primary item,
+            and received a WebView <code>shown</code> extension event. The
+            manual macOS path is pure because this tray declares no other
+            click-capable native menu items.
+          </td>
+          <td>Pass</td>
+        </tr>
+        <tr>
+          <td>Review finding</td>
+          <td>
+            Verification caught Rust serialization as
+            <code>primary_event</code>. The model now explicitly renames the
+            field to <code>primaryEvent</code> and has a default-false
+            regression test.
+          </td>
+          <td>Fixed</td>
+        </tr>
+        <tr>
+          <td>macOS direct-primary follow-up</td>
+          <td>
+            Manual testing showed that an attached AppKit <code>NSMenu</code>
+            can still produce menu chrome. macOS single-primary mode now avoids
+            attaching native menu chrome and routes the status-item click
+            through <code>TrayIconEvent</code>.
+          </td>
+          <td>Fixed</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>
