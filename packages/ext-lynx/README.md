@@ -114,8 +114,10 @@ For macOS-side runtime diagnostics, keep the default quiet behavior for normal u
 
 ```bash
 OPENTRAY_LYNX_RUNTIME_STDIO=inherit \
+OPENTRAY_LYNX_DEBUG=host-events,host-title,engine-tap \
+OPENTRAY_LYNX_DEBUG_LOG_PATH=/private/tmp/opentray-lynx-runtime.log \
   pnpm --filter opentray cli -- smoke daemon-lynx \
-  2>&1 | tee /private/tmp/opentray-lynx-runtime.log
+  2>&1 | tee /private/tmp/opentray-lynx-smoke.log
 ```
 
 Accepted `OPENTRAY_LYNX_RUNTIME_STDIO` values:
@@ -123,7 +125,22 @@ Accepted `OPENTRAY_LYNX_RUNTIME_STDIO` values:
 - `inherit`: forward `OpenTrayLynxRuntime` stdout/stderr into the parent terminal
 - `quiet` / `null` / unset: keep the runtime silent
 
-This is only a transport-level debug switch. It does not change tray, window, or extension behavior.
+Accepted `OPENTRAY_LYNX_DEBUG` modes:
+
+- `host-events`: trace AppKit `NSWindow` input events before they enter Lynx
+- `host-title`: project the last traced host event into the window title for visual confirmation
+- `engine-tap`: trace the patched Lynx desktop tap pipeline
+- `all`: enable every available runtime diagnostic mode
+
+`OPENTRAY_LYNX_DEBUG_LOG_PATH` writes runtime diagnostics straight to a file from inside the macOS host process. Use it when terminal inheritance alone is not trustworthy enough.
+
+Interpretation:
+
+- host logs present, engine logs absent: repair the Lynx macOS input bridge or pointer translation before gesture/tap dispatch
+- engine `page-dispatch` / `isolated-tap-up` logs present, but no `touch-enter` / `bubble-enter`: repair gesture routing or target dispatch inside Lynx
+- `touch-enter` / `bubble-enter` logs present, but the page still does not react: repair the JS binding/runtime adapter layer
+
+`OPENTRAY_LYNX_RUNTIME_STDIO` is only a transport-level debug switch. It does not change tray, window, or extension behavior.
 
 Current first-stage native support:
 

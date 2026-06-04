@@ -24,6 +24,14 @@ export const runDaemonLynxSmoke = async (
   options: DaemonLynxSmokeOptions = {}
 ): Promise<void> => {
   const bundlePath = resolveLynxBundlePath(options.bundlePath);
+  if (process.env.OPENTRAY_LYNX_DEBUG) {
+    console.log(`lynx debug modes: ${process.env.OPENTRAY_LYNX_DEBUG}`);
+  }
+  if (process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH) {
+    console.log(
+      `lynx debug log path: ${process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH}`
+    );
+  }
   const connection = await connectLocalBroker();
   const client = createClient(connection, { requestIdPrefix: "daemon-lynx" });
   console.log(

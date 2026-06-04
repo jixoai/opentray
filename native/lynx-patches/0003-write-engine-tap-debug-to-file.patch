@@ -1,0 +1,227 @@
+diff --git a/clay/ui/component/page_view.cc b/clay/ui/component/page_view.cc
+index c4c3bfe..47b7775 100644
+--- a/clay/ui/component/page_view.cc
++++ b/clay/ui/component/page_view.cc
+@@ -7,6 +7,8 @@
+ #include <algorithm>
+ #include <cstddef>
+ #include <cstdio>
++#include <cstdlib>
++#include <cstring>
+ #include <cstdint>
+ #include <functional>
+ #include <list>
+@@ -150,11 +152,77 @@ const char* OpenTrayPointerDeviceName(PointerEvent::DeviceType device) {
+   return "unknown";
+ }
+ 
++bool OpenTrayDebugModeEnabled(const char* mode) {
++  const char* raw = std::getenv("OPENTRAY_LYNX_DEBUG");
++  if (raw == nullptr || *raw == '\0' || mode == nullptr || *mode == '\0') {
++    return false;
++  }
++  if (std::strcmp(raw, "all") == 0) {
++    return true;
++  }
++  const size_t mode_len = std::strlen(mode);
++  const char* cursor = raw;
++  while (*cursor != '\0') {
++    while (*cursor == ',' || *cursor == ' ' || *cursor == '\t' || *cursor == '\n') {
++      cursor += 1;
++    }
++    if (*cursor == '\0') {
++      break;
++    }
++    const char* end = cursor;
++    while (*end != '\0' && *end != ',') {
++      end += 1;
++    }
++    size_t len = static_cast<size_t>(end - cursor);
++    while (len > 0 && (cursor[len - 1] == ' ' || cursor[len - 1] == '\t' || cursor[len - 1] == '\n')) {
++      len -= 1;
++    }
++    if ((len == 3 && std::strncmp(cursor, "all", 3) == 0) || (len == mode_len && std::strncmp(cursor, mode, mode_len) == 0)) {
++      return true;
++    }
++    cursor = end;
++    if (*cursor == ',') {
++      cursor += 1;
++    }
++  }
++  return false;
++}
++
++void OpenTrayDebugWriteLine(const char* line) {
++  if (line == nullptr || *line == '\0') {
++    return;
++  }
++  const char* log_path = std::getenv("OPENTRAY_LYNX_DEBUG_LOG_PATH");
++  FILE* stream = stderr;
++  if (log_path != nullptr && *log_path != '\0') {
++    stream = std::fopen(log_path, "a");
++  }
++  if (stream == nullptr) {
++    stream = stderr;
++  }
++  std::fputs(line, stream);
++  std::fputc('\n', stream);
++  std::fflush(stream);
++  if (stream != stderr) {
++    std::fclose(stream);
++  }
++}
++
++template <typename... Args>
++void OpenTrayDebugLogf(const char* mode, const char* format, Args... args) {
++  if (!OpenTrayDebugModeEnabled(mode)) {
++    return;
++  }
++  char buffer[1024];
++  std::snprintf(buffer, sizeof(buffer), format, args...);
++  OpenTrayDebugWriteLine(buffer);
++}
++
+ void OpenTrayLogPointerEvent(const char* stage, const PointerEvent& event,
+                              bool consumed) {
+-  std::fprintf(
+-      stderr,
+-      "[opentray][lynx-debug] stage=%s pointer=%s device=%s id=%d buttons=%lld consumed=%d page=(%.1f,%.1f) delta=(%.1f,%.1f)\n",
++  OpenTrayDebugLogf(
++      "engine-tap",
++      "[opentray][lynx-debug] stage=%s pointer=%s device=%s id=%d buttons=%lld consumed=%d page=(%.1f,%.1f) delta=(%.1f,%.1f)",
+       stage, OpenTrayPointerEventName(event.type),
+       OpenTrayPointerDeviceName(event.device), event.pointer_id,
+       static_cast<long long>(event.buttons), consumed ? 1 : 0,
+@@ -952,9 +1020,9 @@ void PageView::SetupIsolatedGestures() {
+     } else {
+       ReportTopViewEvent(event, kClayEventTypeMouseClick);
+       // simulate primary mouse click as touch tap to adapt front-end code
+-      std::fprintf(
+-          stderr,
+-          "[opentray][lynx-debug] stage=isolated-tap-up pointer=%s device=%s id=%d buttons=%lld page=(%.1f,%.1f)\n",
++      OpenTrayDebugLogf(
++          "engine-tap",
++          "[opentray][lynx-debug] stage=isolated-tap-up pointer=%s device=%s id=%d buttons=%lld page=(%.1f,%.1f)",
+           EventTypeToString(kClayEventTypeMouseClick),
+           OpenTrayPointerDeviceName(event.device), event.pointer_id,
+           static_cast<long long>(event.buttons), event.position.x(),
+@@ -1078,9 +1146,9 @@ void PageView::ReportTopViewEvent(const PointerEvent& event,
+ 
+   if (!top_view || top_view->IsAnonymousView()) {
+     if (IsOpenTrayDesktopTapDebugType(type)) {
+-      std::fprintf(
+-          stderr,
+-          "[opentray][lynx-debug] stage=report event=%s device=%s target=%s page=(%.1f,%.1f)\n",
++      OpenTrayDebugLogf(
++          "engine-tap",
++          "[opentray][lynx-debug] stage=report event=%s device=%s target=%s page=(%.1f,%.1f)",
+           EventTypeToString(type), OpenTrayPointerDeviceName(event.device),
+           top_view == nullptr ? "null" : "anonymous", event.position.x(),
+           event.position.y());
+@@ -1088,9 +1156,9 @@ void PageView::ReportTopViewEvent(const PointerEvent& event,
+     return;
+   }
+   if (IsOpenTrayDesktopTapDebugType(type)) {
+-    std::fprintf(
+-        stderr,
+-        "[opentray][lynx-debug] stage=report event=%s device=%s target=%d name=%s local=(%.1f,%.1f) page=(%.1f,%.1f)\n",
++    OpenTrayDebugLogf(
++        "engine-tap",
++        "[opentray][lynx-debug] stage=report event=%s device=%s target=%d name=%s local=(%.1f,%.1f) page=(%.1f,%.1f)",
+         EventTypeToString(type), OpenTrayPointerDeviceName(event.device),
+         top_view->id(), top_view->GetName().c_str(),
+         static_cast<double>(transformed_position.x()),
+diff --git a/core/renderer/events/touch_event_handler.cc b/core/renderer/events/touch_event_handler.cc
+index 769b57e..124d806 100644
+--- a/core/renderer/events/touch_event_handler.cc
++++ b/core/renderer/events/touch_event_handler.cc
+@@ -4,6 +4,8 @@
+ #include "core/renderer/events/touch_event_handler.h"
+ 
+ #include <cstdio>
++#include <cstdlib>
++#include <cstring>
+ #include <utility>
+ 
+ #include "base/include/string/string_number_convert.h"
+@@ -54,11 +56,77 @@ bool IsOpenTrayDesktopTapDebugName(const std::string& name) {
+          name == "mouseclick";
+ }
+ 
++bool OpenTrayDebugModeEnabled(const char* mode) {
++  const char* raw = std::getenv("OPENTRAY_LYNX_DEBUG");
++  if (raw == nullptr || *raw == '\0' || mode == nullptr || *mode == '\0') {
++    return false;
++  }
++  if (std::strcmp(raw, "all") == 0) {
++    return true;
++  }
++  const size_t mode_len = std::strlen(mode);
++  const char* cursor = raw;
++  while (*cursor != '\0') {
++    while (*cursor == ',' || *cursor == ' ' || *cursor == '\t' || *cursor == '\n') {
++      cursor += 1;
++    }
++    if (*cursor == '\0') {
++      break;
++    }
++    const char* end = cursor;
++    while (*end != '\0' && *end != ',') {
++      end += 1;
++    }
++    size_t len = static_cast<size_t>(end - cursor);
++    while (len > 0 && (cursor[len - 1] == ' ' || cursor[len - 1] == '\t' || cursor[len - 1] == '\n')) {
++      len -= 1;
++    }
++    if ((len == 3 && std::strncmp(cursor, "all", 3) == 0) || (len == mode_len && std::strncmp(cursor, mode, mode_len) == 0)) {
++      return true;
++    }
++    cursor = end;
++    if (*cursor == ',') {
++      cursor += 1;
++    }
++  }
++  return false;
++}
++
++void OpenTrayDebugWriteLine(const char* line) {
++  if (line == nullptr || *line == '\0') {
++    return;
++  }
++  const char* log_path = std::getenv("OPENTRAY_LYNX_DEBUG_LOG_PATH");
++  FILE* stream = stderr;
++  if (log_path != nullptr && *log_path != '\0') {
++    stream = std::fopen(log_path, "a");
++  }
++  if (stream == nullptr) {
++    stream = stderr;
++  }
++  std::fputs(line, stream);
++  std::fputc('\n', stream);
++  std::fflush(stream);
++  if (stream != stderr) {
++    std::fclose(stream);
++  }
++}
++
++template <typename... Args>
++void OpenTrayDebugLogf(const char* mode, const char* format, Args... args) {
++  if (!OpenTrayDebugModeEnabled(mode)) {
++    return;
++  }
++  char buffer[1024];
++  std::snprintf(buffer, sizeof(buffer), format, args...);
++  OpenTrayDebugWriteLine(buffer);
++}
++
+ void OpenTrayLogTouchEventHandler(const char* stage, const std::string& name,
+                                   const EventInfo& info, bool has_target) {
+-  std::fprintf(
+-      stderr,
+-      "[opentray][lynx-debug] stage=%s name=%s tag=%d target=%d multi=%d page=(%.1f,%.1f) local=(%.1f,%.1f)\n",
++  OpenTrayDebugLogf(
++      "engine-tap",
++      "[opentray][lynx-debug] stage=%s name=%s tag=%d target=%d multi=%d page=(%.1f,%.1f) local=(%.1f,%.1f)",
+       stage, name.c_str(), info.tag, has_target ? 1 : 0,
+       info.is_multi_finger ? 1 : 0, static_cast<double>(info.page_x),
+       static_cast<double>(info.page_y), static_cast<double>(info.x),
