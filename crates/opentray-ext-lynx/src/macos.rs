@@ -21,11 +21,18 @@ use crate::{
 const STAGED_EXTERNAL_DIR: &str = "opentray-external";
 const STAGED_EXTERNAL_BUNDLE_NAME: &str = "main.lynx.bundle";
 const LYNX_RUNTIME_ZIP_ENV: &str = "OPENTRAY_LYNX_RUNTIME_ZIP";
+const LYNX_RUNTIME_STDIO_ENV: &str = "OPENTRAY_LYNX_RUNTIME_STDIO";
 const LYNX_WINDOW_CONFIG_ENV: &str = "OPENTRAY_LYNX_WINDOW_CONFIG_JSON";
 const LAUNCH_STABILITY_WINDOW_MS: u64 = 300;
 const RUNTIME_APP_NAME: &str = "OpenTrayLynxRuntime";
 const RUNTIME_APP_BUNDLE_NAME: &str = "OpenTrayLynxRuntime.app";
 const RUNTIME_ZIP_NAME: &str = "OpenTrayLynxRuntime.app.zip";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeStdioMode {
+    Quiet,
+    Inherit,
+}
 
 #[derive(Default)]
 pub(crate) struct MacosLynxRuntime {
@@ -314,6 +321,20 @@ fn legacy_local_bundle_url(relative_bundle_path: &str) -> String {
     format!("file://lynx?local://{relative_bundle_path}")
 }
 
+fn resolve_runtime_stdio_mode() -> Result<RuntimeStdioMode, LynxRuntimeError> {
+    let Some(value) = env::var_os(LYNX_RUNTIME_STDIO_ENV) else {
+        return Ok(RuntimeStdioMode::Quiet);
+    };
+    let normalized = value.to_string_lossy().trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "quiet" | "null" => Ok(RuntimeStdioMode::Quiet),
+        "inherit" => Ok(RuntimeStdioMode::Inherit),
+        _ => Err(LynxRuntimeError::Rejected(format!(
+            "{LYNX_RUNTIME_STDIO_ENV} must be one of: inherit, quiet, null"
+        ))),
+    }
+}
+
 fn spawn_runtime(
     runtime_executable: &Path,
     launch_url: &str,
@@ -325,11 +346,18 @@ fn spawn_runtime(
             "failed to serialize lynx launch config for child process: {error}"
         ))
     })?;
+    let stdio_mode = resolve_runtime_stdio_mode()?;
     command
         .arg(format!("--url={launch_url}"))
-        .env(LYNX_WINDOW_CONFIG_ENV, launch_json)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .env(LYNX_WINDOW_CONFIG_ENV, launch_json);
+    match stdio_mode {
+        RuntimeStdioMode::Quiet => {
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+        RuntimeStdioMode::Inherit => {
+            command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        }
+    }
     command.spawn().map_err(|error| {
         LynxRuntimeError::Internal(format!(
             "failed to start lynx runtime {}: {error}",
@@ -384,10 +412,10 @@ fn cleanup_launch_root(launch_root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::{
-        close_slot, default_runtime_zip_path, legacy_local_bundle_url, resolve_runtime_zip,
-        spawn_runtime, stage_external_bundle, LynxRuntimeError, LynxSlot, MacosLynxRuntime,
-        RUNTIME_APP_BUNDLE_NAME, RUNTIME_ZIP_NAME, STAGED_EXTERNAL_BUNDLE_NAME,
-        STAGED_EXTERNAL_DIR,
+        close_slot, default_runtime_zip_path, legacy_local_bundle_url, resolve_runtime_stdio_mode,
+        resolve_runtime_zip, spawn_runtime, stage_external_bundle, LynxRuntimeError, LynxSlot,
+        MacosLynxRuntime, RuntimeStdioMode, RUNTIME_APP_BUNDLE_NAME, RUNTIME_ZIP_NAME,
+        STAGED_EXTERNAL_BUNDLE_NAME, STAGED_EXTERNAL_DIR,
     };
     use crate::protocol::{LynxLaunchConfig, LynxWindowStyleConfig};
     use std::fs;
@@ -459,6 +487,50 @@ mod tests {
 
         unsafe {
             std::env::remove_var(super::LYNX_RUNTIME_ZIP_ENV);
+        }
+    }
+
+    #[test]
+    fn runtime_stdio_defaults_to_quiet() {
+        unsafe {
+            std::env::remove_var(super::LYNX_RUNTIME_STDIO_ENV);
+        }
+
+        assert_eq!(
+            resolve_runtime_stdio_mode().expect("default stdio mode"),
+            RuntimeStdioMode::Quiet
+        );
+    }
+
+    #[test]
+    fn runtime_stdio_accepts_inherit() {
+        unsafe {
+            std::env::set_var(super::LYNX_RUNTIME_STDIO_ENV, "inherit");
+        }
+
+        assert_eq!(
+            resolve_runtime_stdio_mode().expect("inherit stdio mode"),
+            RuntimeStdioMode::Inherit
+        );
+
+        unsafe {
+            std::env::remove_var(super::LYNX_RUNTIME_STDIO_ENV);
+        }
+    }
+
+    #[test]
+    fn invalid_runtime_stdio_mode_is_rejected_explicitly() {
+        unsafe {
+            std::env::set_var(super::LYNX_RUNTIME_STDIO_ENV, "verbose");
+        }
+
+        let error = resolve_runtime_stdio_mode().expect_err("invalid stdio mode should fail");
+        assert!(
+            matches!(error, LynxRuntimeError::Rejected(message) if message.contains(super::LYNX_RUNTIME_STDIO_ENV))
+        );
+
+        unsafe {
+            std::env::remove_var(super::LYNX_RUNTIME_STDIO_ENV);
         }
     }
 
