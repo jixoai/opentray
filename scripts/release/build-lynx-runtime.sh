@@ -31,6 +31,7 @@ lynx_repo="${LYNX_REPO:-https://github.com/lynx-family/lynx.git}"
 lynx_ref="${LYNX_REF:-3a936299ec1669cfd1f3da71e41240296bc226b3}"
 mirror_port="${LYNX_MIRROR_PORT:-39123}"
 runtime_host_source_dir="${root_dir}/native/lynx-runtime-macos"
+lynx_patches_dir="${root_dir}/native/lynx-patches"
 runtime_host_upstream_dir="${lynx_dir}/explorer/darwin/macos/lynx_explorer"
 runtime_app_name="OpenTrayLynxRuntime"
 deps_files=()
@@ -171,6 +172,20 @@ install_opentray_runtime_host_sources() {
   mkdir -p "$(dirname "${runtime_host_upstream_dir}")"
   # The upstream checkout stays disposable; OpenTray's owned host-app sources are copied in fresh.
   cp -R "${runtime_host_source_dir}" "${runtime_host_upstream_dir}"
+}
+
+apply_opentray_lynx_patches() {
+  if [[ ! -d "${lynx_patches_dir}" ]]; then
+    return
+  fi
+
+  local patch_file=""
+  shopt -s nullglob
+  for patch_file in "${lynx_patches_dir}"/*.patch; do
+    echo "Applying OpenTray Lynx patch: ${patch_file}"
+    git apply --whitespace=nowarn "${patch_file}"
+  done
+  shopt -u nullglob
 }
 
 patch_generated_runtime_outputs() {
@@ -426,6 +441,7 @@ git checkout --detach "${lynx_ref}" 2>&1 | tee "${logs_dir}/git-checkout.log"
 git rev-parse HEAD | tee "${logs_dir}/lynx-ref.txt"
 clone_tools_shared
 install_opentray_runtime_host_sources
+apply_opentray_lynx_patches
 
 unset all_proxy http_proxy https_proxy ALL_PROXY HTTP_PROXY HTTPS_PROXY
 export XDG_CONFIG_HOME="${lynx_dir}/.xdg-config"

@@ -32,10 +32,15 @@ describe("Feature: Lynx runtime packaging path law", () => {
     expect(script).toContain(
       'runtime_host_source_dir="${root_dir}/native/lynx-runtime-macos"'
     );
+    expect(script).toContain(
+      'lynx_patches_dir="${root_dir}/native/lynx-patches"'
+    );
     expect(script).toContain('runtime_app_name="OpenTrayLynxRuntime"');
     expect(script).toContain(
       'cp -R "${runtime_host_source_dir}" "${runtime_host_upstream_dir}"'
     );
+    expect(script).toContain('git apply --whitespace=nowarn "${patch_file}"');
+    expect(script).toContain("apply_opentray_lynx_patches");
     expect(script).toContain(
       'app_bundle_path="${lynx_dir}/${out_dir}/${runtime_app_name}.app"'
     );
@@ -53,5 +58,20 @@ describe("Feature: Lynx runtime packaging path law", () => {
     expect(infoPlist).toContain("<string>OpenTrayLynxRuntime.icns</string>");
     expect(buildGn).toContain('"OpenTrayLynxRuntime/OpenTrayLynxRuntime.icns",');
     expect(existsSync(iconPath)).toBe(true);
+  });
+
+  test("Scenario: Given OpenTray owns upstream runtime law patches When native builds run Then a concrete patch file is versioned next to the runtime host sources", () => {
+    const patchPath = resolve(
+      repoRoot,
+      "native/lynx-patches/0001-delay-desktop-mouse-scroll-until-tap-slop.patch"
+    );
+
+    expect(existsSync(patchPath)).toBe(true);
+    expect(readFileSync(patchPath, "utf8")).toContain(
+      "default_gesture_handler.cc"
+    );
+    expect(readFileSync(patchPath, "utf8")).toContain(
+      "Desktop mouse input often reports a tiny move before button-up."
+    );
   });
 });

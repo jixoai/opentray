@@ -44,6 +44,7 @@ describe("Feature: release native binary CI law", () => {
     );
     expect(workflow).toContain("flutter.googlesource.com");
     expect(workflow).toContain("'native/lynx-runtime-macos/**'");
+    expect(workflow).toContain("'native/lynx-patches/**'");
     expect(workflow).toContain("Upload Lynx build logs");
     expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("git push origin --tags");
