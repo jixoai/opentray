@@ -16,6 +16,27 @@ const DEFAULT_LYNX_BUNDLE_ENV = "OPENTRAY_LYNX_BUNDLE";
 const DEFAULT_REVIEW_BUNDLE_RELATIVE_PATH =
   "assets/lynx-review/main.lynx.bundle";
 
+type LynxSmokeMode = "fit" | "fixed";
+export type LynxSmokeHostProfile = "baseline" | "full";
+
+interface LynxSmokeShowCommand {
+  type: "show";
+  bundlePath: string;
+  width?: number;
+  height?: number;
+  minWidth: number;
+  minHeight: number;
+  maxWidth: number;
+  maxHeight: number;
+  fitContentSize: boolean;
+  nativeWindowApi: boolean;
+  bindWindowGlobals: boolean;
+  nativeScreenApi: boolean;
+  bindScreenGlobals: boolean;
+  title: string;
+  icon: ReturnType<typeof createVisibleIcon>;
+}
+
 export interface DaemonLynxSmokeOptions {
   bundlePath?: string;
 }
@@ -24,6 +45,7 @@ export const runDaemonLynxSmoke = async (
   options: DaemonLynxSmokeOptions = {}
 ): Promise<void> => {
   const bundlePath = resolveLynxBundlePath(options.bundlePath);
+  const hostProfile = resolveLynxHostProfile();
   if (process.env.OPENTRAY_LYNX_DEBUG) {
     console.log(`lynx debug modes: ${process.env.OPENTRAY_LYNX_DEBUG}`);
   }
@@ -82,24 +104,15 @@ export const runDaemonLynxSmoke = async (
   let resolveClosed: (() => void) | undefined;
 
   const show = async (mode: "fit" | "fixed"): Promise<void> => {
-    await tray.commandExtension("lynx", {
-      type: "show",
+    const command = createLynxShowCommand({
       bundlePath,
-      fitContentSize: mode === "fit",
-      width: mode === "fixed" ? 720 : undefined,
-      height: mode === "fixed" ? 420 : undefined,
-      minWidth: 320,
-      minHeight: 220,
-      maxWidth: 960,
-      maxHeight: 720,
-      nativeWindowApi: true,
-      bindWindowGlobals: true,
-      nativeScreenApi: true,
-      bindScreenGlobals: true,
-      title: `OpenTray Lynx ${mode === "fit" ? "Fit" : "Fixed"} Smoke`,
-      icon: createVisibleIcon(),
+      hostProfile,
+      mode,
     });
-    console.log(`lynx command: show mode=${mode} bundle=${bundlePath}`);
+    await tray.commandExtension("lynx", command);
+    console.log(
+      `lynx command: show mode=${mode} profile=${hostProfile} bundle=${bundlePath}`
+    );
   };
 
   const hide = async (): Promise<void> => {
@@ -212,6 +225,46 @@ export const resolveLynxBundlePath = (value?: string): string => {
     throw new Error(`lynx smoke bundle does not exist: ${absolutePath}`);
   }
   return realpathSync(absolutePath);
+};
+
+export const resolveLynxHostProfile = (
+  env: NodeJS.ProcessEnv = process.env
+): LynxSmokeHostProfile => {
+  const value = env.OPENTRAY_LYNX_HOST_PROFILE?.trim().toLowerCase();
+  return value === "baseline" ? "baseline" : "full";
+};
+
+export const createLynxShowCommand = ({
+  bundlePath,
+  hostProfile,
+  mode,
+}: {
+  bundlePath: string;
+  hostProfile: LynxSmokeHostProfile;
+  mode: LynxSmokeMode;
+}): LynxSmokeShowCommand => {
+  const baseline = hostProfile === "baseline";
+  const fixedSize = baseline || mode === "fixed" ? { width: 720, height: 420 } : undefined;
+  const profileLabel = baseline ? "Baseline" : mode === "fit" ? "Fit" : "Fixed";
+
+  return {
+    type: "show",
+    bundlePath,
+    ...(fixedSize ?? {}),
+    minWidth: 320,
+    minHeight: 220,
+    maxWidth: 960,
+    maxHeight: 720,
+    // Baseline acceptance intentionally disables host-owned fit-content so the
+    // human check focuses on raw app interaction first.
+    fitContentSize: baseline ? false : mode === "fit",
+    nativeWindowApi: !baseline,
+    bindWindowGlobals: !baseline,
+    nativeScreenApi: !baseline,
+    bindScreenGlobals: !baseline,
+    title: `OpenTray Lynx ${profileLabel} Smoke`,
+    icon: createVisibleIcon(),
+  };
 };
 
 export const resolveBundledReviewBundlePath = (
