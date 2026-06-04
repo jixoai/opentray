@@ -27,6 +27,9 @@ export const runDaemonLynxSmoke = async (
   if (process.env.OPENTRAY_LYNX_DEBUG) {
     console.log(`lynx debug modes: ${process.env.OPENTRAY_LYNX_DEBUG}`);
   }
+  if (process.env.OPENTRAY_LYNX_HOST_PROFILE) {
+    console.log(`lynx host profile: ${process.env.OPENTRAY_LYNX_HOST_PROFILE}`);
+  }
   if (process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH) {
     console.log(
       `lynx debug log path: ${process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH}`

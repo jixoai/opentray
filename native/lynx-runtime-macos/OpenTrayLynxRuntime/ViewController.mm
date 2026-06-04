@@ -56,10 +56,22 @@ napi_value OpenTrayWindowModuleCreator(napi_env env, napi_value exports,
 namespace {
 
 static NSString *const kOpenTrayWindowConfigEnv = @"OPENTRAY_LYNX_WINDOW_CONFIG_JSON";
+static NSString *const kOpenTrayHostProfileEnv = @"OPENTRAY_LYNX_HOST_PROFILE";
 static NSString *const kOpenTrayWindowEventPrefix = @"opentray.window:";
 static NSString *const kOpenTrayDefaultWindowTitle = @"OpenTray Lynx";
 const uint64_t kOpenTrayWindowModuleID =
     reinterpret_cast<uint64_t>(&kOpenTrayWindowModuleID);
+
+BOOL OpenTrayBaselineHostModeEnabled() {
+  NSString *raw = [NSProcessInfo processInfo].environment[kOpenTrayHostProfileEnv];
+  if (raw.length == 0) {
+    return NO;
+  }
+  NSString *normalized =
+      [[raw stringByTrimmingCharactersInSet:
+                 [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+  return [normalized isEqualToString:@"baseline"];
+}
 
 NSSize ClampSize(NSSize size, NSNumber *minWidth, NSNumber *minHeight,
                  NSNumber *maxWidth, NSNumber *maxHeight) {
@@ -789,6 +801,7 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 
 @property(nonatomic) std::shared_ptr<lynx::pub::LynxView> lynxView;
 @property(nonatomic, strong) OpenTrayWindowLaunchConfig *opentrayWindowConfig;
+@property(nonatomic, assign) BOOL opentrayBaselineHostMode;
 @property(nonatomic, assign) BOOL opentrayWindowAttached;
 @property(nonatomic, assign) BOOL opentrayWindowRevealed;
 @property(nonatomic, assign) BOOL opentrayInitialFitApplied;
@@ -816,6 +829,17 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   if (self) {
     self.url = url;
     self.opentrayWindowConfig = [OpenTrayWindowLaunchConfig fromEnvironment];
+    self.opentrayBaselineHostMode = OpenTrayBaselineHostModeEnabled();
+    if (self.opentrayBaselineHostMode) {
+      // Baseline mode keeps the OpenTray-owned carrier but deliberately restores the
+      // upstream host interaction model before re-layering window APIs and fit-content.
+      self.opentrayWindowConfig.fitContentSize = NO;
+      self.opentrayWindowConfig.nativeWindowApi = NO;
+      self.opentrayWindowConfig.bindWindowGlobals = NO;
+      self.opentrayWindowConfig.nativeScreenApi = NO;
+      self.opentrayWindowConfig.bindScreenGlobals = NO;
+      self.opentrayWindowConfig.frameless = NO;
+    }
     self.opentrayWindowTitle =
         self.opentrayWindowConfig.title ?: kOpenTrayDefaultWindowTitle;
     self.opentrayWindowIcon = self.opentrayWindowConfig.icon;
@@ -897,6 +921,9 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return;
   }
   self.opentrayWindowAttached = YES;
+  if (self.opentrayBaselineHostMode) {
+    return;
+  }
   NSWindow *window = self.view.window;
   window.delegate = self;
   [window setStyleMask:OpenTrayWindowStyleMask(self.opentrayWindowConfig.frameless)];
@@ -919,6 +946,9 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return;
   }
   self.opentrayWindowRevealed = YES;
+  if (self.opentrayBaselineHostMode) {
+    return;
+  }
   self.view.window.alphaValue = 1.0;
   [self.view.window makeKeyAndOrderFront:nil];
 }
@@ -1378,9 +1408,11 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
       .SetFrame(0, 0, self.view.frame.size.width, self.view.frame.size.height)
       .SetParent((__bridge NativeWindow)self.view)
       .SetGenericResourceFetcher(std::make_shared<lynx::example::ExampleGenericResourceFetcher>())
-      .RegisterNativeView<FakeView>("x-fake-view", (__bridge void *)self)
-      .RegisterNativeModule("OpenTrayWindowModule", &OpenTrayWindowModuleCreator,
-                            (__bridge void *)self);
+      .RegisterNativeView<FakeView>("x-fake-view", (__bridge void *)self);
+  if (!self.opentrayBaselineHostMode) {
+    builder.RegisterNativeModule("OpenTrayWindowModule", &OpenTrayWindowModuleCreator,
+                                 (__bridge void *)self);
+  }
 #if ENABLE_TESTBENCH_REPLAY
   if (_isTestBenchReplay) {
     lynx::embedder::TestBenchReplayDataModule::RegisterJSB(
@@ -1392,9 +1424,11 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 #endif
   _lynxView = builder.Build();
   _lynxView->RegisterNativeView<FakeView>("x-fake-view-alias", (__bridge void *)self);
-  _opentrayRuntimeObserver = std::make_shared<OpenTrayRuntimeLifecycleObserver>(
-      OpenTrayBootstrapScript(self.opentrayWindowConfig));
-  _lynxView->RegisterRuntimeLifecycleObserver(_opentrayRuntimeObserver);
+  if (!self.opentrayBaselineHostMode) {
+    _opentrayRuntimeObserver = std::make_shared<OpenTrayRuntimeLifecycleObserver>(
+        OpenTrayBootstrapScript(self.opentrayWindowConfig));
+    _lynxView->RegisterRuntimeLifecycleObserver(_opentrayRuntimeObserver);
+  }
 #if ENABLE_TESTBENCH_REPLAY
   if (_isTestBenchReplay) {
     _testBenchActionManager = std::make_shared<lynx::embedder::TestBenchActionManager>(
