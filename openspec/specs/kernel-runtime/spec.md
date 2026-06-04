@@ -36,6 +36,8 @@ The kernel SHALL keep physical desktop aggregation state separate from client tr
 
 During alpha migration, backend implementation types MAY keep `SurfaceProjection` names only as deprecated internal aliases. New public protocol, docs, and SDK APIs SHALL use `Space` terminology.
 
+Primary menu item roles SHALL remain menu declaration data inside the projection. The kernel SHALL NOT interpret platform primary-click behavior, SHALL NOT choose Windows or macOS click gestures, and SHALL NOT emit a separate primary event type. If a backend activates a primary menu item, the kernel SHALL route it as the existing `menuClick` event for the owning session.
+
 #### Scenario: Non-owner tray is isolated by default
 
 - **GIVEN** a space already exists for `id` `com.example.host`
@@ -50,6 +52,14 @@ During alpha migration, backend implementation types MAY keep `SurfaceProjection
 - **WHEN** backend synchronization runs
 - **THEN** the backend receives one kernel-derived projection for that space
 - **AND** the backend does not receive per-client private tray state that would bypass session ownership checks.
+
+#### Scenario: Primary role does not create a kernel event family
+
+- **GIVEN** a tray menu contains a primary item
+- **WHEN** the kernel projects that tray to a backend
+- **THEN** the primary role remains part of the menu projection
+- **AND** backend-originated activation of that item routes as `menuClick`
+- **AND** the kernel does not expose a new `trayPrimaryClick` event.
 
 ### Requirement: Kernel SHALL expose typed protocol frames with Space Tray Session vocabulary
 
@@ -179,4 +189,22 @@ Client command frames that expect a broker response SHALL carry a `requestId`. T
 - **THEN** the broker sends an `event` frame
 - **AND** it does not use the pending command `requestId`
 - **AND** the pending command remains correlated only to its command response or error.
+
+### Requirement: Kernel SHALL route tray-bounds lookups through tray authority
+
+The kernel SHALL treat tray-bounds lookup as a trusted tray capability. A tray-bounds query SHALL be authorized by the same session authority that owns the tray and SHALL be routed by `(session authority, spaceId, trayId)`. The kernel SHALL reject queries for trays the caller does not own. The kernel SHALL NOT interpret tray bounds as a WebView-specific feature, and it SHALL NOT synthesize tray geometry on its own.
+
+#### Scenario: Owner can query tray bounds
+
+- **GIVEN** a client session owns tray `status` on space `space-1`
+- **WHEN** that session asks for tray bounds of `space-1/status`
+- **THEN** the kernel authorizes the request
+- **AND** it routes the lookup to the selected backend for that tray identity.
+
+#### Scenario: Non-owner cannot query tray bounds
+
+- **GIVEN** tray `status` on `space-1` is owned by session `a`
+- **WHEN** session `b` asks for bounds of `space-1/status`
+- **THEN** the kernel rejects the request using the existing ownership law
+- **AND** it does not leak tray geometry across sessions.
 

@@ -131,6 +131,8 @@ The public CLI SHALL support `opentray daemon health`. The command SHALL inspect
 
 The `opentray` TypeScript package SHALL expose user-facing APIs in `Space / Tray / Session` vocabulary. The primary creation API SHALL be `createSpace`. The primary handle types SHALL be `SpaceHandle` and `TrayHandle`. Public daemon lifecycle and health APIs SHALL describe accepted client connections as sessions.
 
+The same vocabulary rule SHALL apply to tray-owned capability helpers. Geometry, menu display, and other tray-scoped trusted operations SHALL live on `TrayHandle` rather than on `SpaceHandle` or extension-specific facades unless a later product story proves otherwise.
+
 The SDK MAY keep alpha compatibility aliases such as `createSurface` and `SurfaceHandle`, but aliases SHALL be documented as deprecated and SHALL delegate to the new space API without creating a second concept.
 
 #### Scenario: Developer creates a space through the primary API
@@ -140,6 +142,13 @@ The SDK MAY keep alpha compatibility aliases such as `createSurface` and `Surfac
 - **THEN** the documented API is `createSpace`
 - **AND** the returned handle is a `SpaceHandle`
 - **AND** example code does not use `createSurface`.
+
+#### Scenario: Tray-owned helper stays on TrayHandle
+
+- **GIVEN** a developer needs the physical anchor of a tray contribution
+- **WHEN** they inspect the typed SDK handles
+- **THEN** the tray-bounds capability is exposed on `TrayHandle`
+- **AND** it is not promoted to `SpaceHandle` where multiple trays would make the geometry ambiguous.
 
 #### Scenario: Deprecated surface alias is not a parallel law
 
@@ -242,4 +251,45 @@ The package MAY also expose an explicit `resolveDefaultSpace` helper so the defa
 - **WHEN** they call top-level `createTray` with that explicit space
 - **THEN** the SDK creates the tray under that space directly
 - **AND** it does not send an unnecessary default-space resolution request.
+
+### Requirement: Tray handles SHALL expose tray-bounds capability
+
+The public TypeScript SDK SHALL expose tray bounds as a tray-owned capability on `TrayHandle`. The promoted backend API SHALL be `await tray.getBounds()`. The returned value SHALL be `Rect | null` in the public SDK mental model: a `Rect` when truthful tray bounds are available for the current tray, and `null` when the tray exists but no truthful bounds are available on the current backend path.
+
+This capability SHALL remain tray-owned rather than WebView-owned. The SDK SHALL NOT require developers to go through `commandExtension("webview", ...)` or another extension-specific facade to query tray bounds for a tray they already own.
+
+#### Scenario: Trusted backend code reads tray bounds
+
+- **GIVEN** a developer has a `TrayHandle` for an existing tray contribution
+- **WHEN** they call `await tray.getBounds()`
+- **THEN** the SDK sends a broker-backed tray-bounds request for that tray identity
+- **AND** it resolves to `Rect` when truthful bounds are available
+- **AND** it resolves to `null` when the backend cannot provide truthful bounds.
+
+#### Scenario: Tray-bounds API remains tray-owned
+
+- **GIVEN** a developer inspects the public SDK surface
+- **WHEN** they look for tray geometry
+- **THEN** the capability exists on `TrayHandle`
+- **AND** it is not modeled as `webview.tray.getBounds()` or another extension-owned API.
+
+### Requirement: Tray menu items SHALL support a primary event role
+
+The public TypeScript protocol SHALL allow a plain menu button item to declare `primaryEvent: true`. A primary item SHALL remain a normal `type: "item"` menu entry: it SHALL still render as a native menu item where the backend shows menus, and choosing it from the menu SHALL emit the same `menuClick` event as before.
+
+The primary role SHALL be additive. Existing menu items without `primaryEvent` SHALL keep their existing behavior. Check, radio, separator, and submenu container items SHALL NOT become primary targets in this change.
+
+#### Scenario: Developer declares a primary menu item
+
+- **GIVEN** a developer creates a tray menu with a plain item `{ type: "item", id: 8, title: "Show Window", primaryEvent: true }`
+- **WHEN** TypeScript code type-checks the menu declaration
+- **THEN** the declaration is accepted by the public `MenuItem` type
+- **AND** the item still has the normal menu item fields such as `id`, `title`, `enabled`, and `shortcut`.
+
+#### Scenario: Primary item still emits menuClick
+
+- **GIVEN** a primary menu item has id `8`
+- **WHEN** the native backend activates the primary action
+- **THEN** the client receives an `event` frame whose event is `menuClick`
+- **AND** the event carries the same `itemId: 8` used by normal menu selection.
 

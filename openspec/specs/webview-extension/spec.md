@@ -29,20 +29,41 @@ The webview extension SHALL position a popup relative to the physical surface re
 
 ### Requirement: Webview lifecycle SHALL be scoped to surface tray and lease
 
-The webview extension SHALL associate each popup instance with a surface/tray scope and the owning lease. Lease cleanup SHALL hide or destroy webview state owned by the disconnected client without affecting webview state owned by other leases.
+The webview extension SHALL associate each window session with a surface/tray scope and the owning lease. A tray scope SHALL own at most one active WebView window session per extension instance. Lease cleanup SHALL hide or destroy webview state owned by the disconnected client without affecting webview state owned by other leases.
+
+`hide` SHALL make the tray-scoped window session invisible without destroying its page runtime. Re-showing the same tray with a compatible session SHALL reuse that session instead of replacing it. Explicit destroy, lease cleanup, or extension deinitialization SHALL destroy the owned session and its page runtime cleanly.
+
+Compatibility SHALL be defined by the bootstrap-immutable portion of the session contract, not by mutable shell state. Size, position, title, icon, and supported live style fields MAY update on a reused session. Bootstrap-level navigator injection, global binding, source-policy, sync-policy, and equivalent page-bridge settings SHALL NOT be silently changed under an existing page runtime.
+
+#### Scenario: Re-show preserves the existing tray session
+
+- **GIVEN** a client has already shown a WebView window for its tray
+- **AND** that window has been hidden instead of destroyed
+- **WHEN** the same tray receives another compatible `show`
+- **THEN** the extension reuses the existing tray session
+- **AND** the page runtime remains available instead of being replaced.
+
+#### Scenario: Destroy removes the owned tray session
+
+- **GIVEN** a tray has an active WebView session
+- **WHEN** the client sends the explicit destroy command
+- **THEN** the extension destroys the native slot and page runtime for that tray
+- **AND** a subsequent `show(...)` creates a new session from scratch.
 
 #### Scenario: Lease cleanup closes owned popup
 
 - **GIVEN** a client shows a webview popup for its tray
 - **WHEN** that client disconnects
-- **THEN** the kernel closes or invalidates the webview instance owned by that lease
-- **AND** other clients' webview instances remain unaffected.
+- **THEN** the kernel closes or invalidates the webview session owned by that lease
+- **AND** other clients' webview sessions remain unaffected.
 
 ### Requirement: Webview facade SHALL be typed and platform-neutral
 
 The TypeScript `@opentray/ext-webview` facade SHALL depend only on `opentray` public contracts and `@opentray/spec` types. It MUST NOT import platform binary packages, Rust backend implementation details, or private kernel protocol internals.
 
 The facade SHALL remain a platform-neutral contract layer even after the native runtime moves fully into `@opentray/ext-webview-<os>-<arch>` dynamic libraries. It SHALL not rely on daemon-side WebView parsers or hidden daemon-owned WebView runtime behavior.
+
+The public host-side contract SHALL expose separate typed verbs for visibility/session bootstrap, explicit hide, explicit content replacement, explicit destroy, script evaluation, and postMessage delivery. The facade SHALL NOT force callers to overload repeated `show(...)` as the only way to replace content or reset a page runtime.
 
 #### Scenario: Webview package stays platform neutral
 
@@ -51,11 +72,20 @@ The facade SHALL remain a platform-neutral contract layer even after the native 
 - **THEN** they expose typed webview commands and events
 - **AND** they do not require importing any `@opentray/<platform>` binary package directly.
 
+#### Scenario: Host facade exposes explicit lifecycle verbs
+
+- **GIVEN** a tray handle has the WebView facade attached
+- **WHEN** a developer inspects the host-side API
+- **THEN** visibility, destroy, and content replacement are exposed as separate typed operations
+- **AND** the developer does not need to encode page replacement through repeated `show(...)`.
+
 ### Requirement: Webview SHALL expose navigator-owned window controls
 
 The WebView extension SHALL expose native window controls to page JavaScript through `navigator.window` and `navigator.opentrayWindow` when the feature is enabled for the shown WebView. Both properties SHALL reference the same capability object. `navigator.window` SHALL be the promoted public surface, while `navigator.opentrayWindow` SHALL remain the OpenTray-prefixed fallback for future standards conflict.
 
-The capability object SHALL expose a Tauri-consistent scoped facade with asynchronous `invoke`, `listen`, and `once` methods. High-level asynchronous methods for `close`, `move`, `moveTo`, `resize`, `resizeTo`, `getStyle`, `setStyle`, and `getCapabilities` SHALL be implemented as wrappers over `invoke`. DOM-style `addEventListener` and `removeEventListener` MAY be provided as compatibility wrappers over `listen`, but SHALL NOT be the only event API.
+The capability object SHALL expose a Tauri-consistent scoped facade with asynchronous `invoke`, `listen`, and `once` methods. High-level asynchronous methods for `close`, `move`, `moveTo`, `resize`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, `isMinimized`, `getStyle`, `setStyle`, `getCapabilities`, `getTitle`, `setTitle`, `getIcon`, and `setIcon` SHALL be implemented as wrappers over `invoke`. DOM-style `addEventListener` and `removeEventListener` MAY be provided as compatibility wrappers over `listen`, but SHALL NOT be the only event API.
+
+Change events SHALL be subscription-driven. The extension SHALL NOT push page callbacks for `stylechange`, `titlechange`, `iconchange`, `windowstatechange`, geometry, or similar native state changes unless the page has registered a relevant listener. When a change event has a corresponding query method, the event payload SHALL align with the query result shape.
 
 The scoped `invoke` method SHALL accept only WebView window capability commands owned by this extension. It SHALL NOT expose a generic daemon RPC surface. The capability object SHALL NOT expose raw native handles, Wry internals, or the private channel object.
 
@@ -74,6 +104,13 @@ The scoped `invoke` method SHALL accept only WebView window capability commands 
 - **THEN** the injected API sends the same scoped native request as `navigator.window.invoke("resizeTo", { "width": 480, "height": 320 })`
 - **AND** it resolves or rejects the returned promise through the same callback-id response path.
 
+#### Scenario: Window metadata methods stay inside the same navigator family
+
+- **GIVEN** a WebView is shown with native window API enabled
+- **WHEN** the page calls `await navigator.window.setTitle("OpenTray Status")`
+- **THEN** the change uses the same extension-owned window capability object and private bridge family
+- **AND** the page does not need a second metadata-specific API surface.
+
 #### Scenario: Event subscription follows Tauri-style listen
 
 - **GIVEN** a WebView is shown with native window API enabled
@@ -81,6 +118,14 @@ The scoped `invoke` method SHALL accept only WebView window capability commands 
 - **THEN** the injected API registers the handler as a callback id
 - **AND** it sends a scoped native listen request
 - **AND** it resolves to an unlisten function.
+
+#### Scenario: State-change event payload matches the query method
+
+- **GIVEN** a WebView is shown with native window API enabled
+- **WHEN** the page listens to `windowstatechange`
+- **AND** the native runtime emits a state change
+- **THEN** the event payload matches the `getWindowState()` payload shape
+- **AND** no callback is pushed when there is no listener for the event.
 
 #### Scenario: Navigator API is not injected by accident
 
@@ -127,9 +172,11 @@ The extension MAY implement native-to-JavaScript callback delivery with the unde
 
 ### Requirement: Webview window operations SHALL be capability-gated and asynchronous
 
-Window operations exposed through `navigator.window` SHALL return promises. The native extension SHALL validate every request, check platform support, and resolve or reject with typed results. Unsupported transparency, blur, move, resize, or override behavior SHALL reject with a typed unsupported error instead of faking success.
+Window operations exposed through `navigator.window` SHALL return promises. The native extension SHALL validate every request, check platform support, and resolve or reject with typed results. Unsupported transparency, blur, move, resize, corner-radius projection, or override behavior SHALL reject with a typed unsupported error instead of faking success.
 
-Style state SHALL include the frameless and visual-effect concepts needed for future platform work, including transparency and background effect support. Blur, acrylic, vibrancy, and Windows transparency behavior SHALL remain best-effort capabilities and MUST NOT be forced when the platform implementation would be slow or unstable.
+Style state SHALL include the frameless and visual-effect concepts needed for future platform work, including transparency, background effect support, and adjustable `cornerRadius`. Blur, acrylic, vibrancy, rounded-corner, and Windows transparency behavior SHALL remain best-effort capabilities and MUST NOT be forced when the platform implementation would be slow or unstable.
+
+Capability metadata SHALL state whether corner-radius projection is supported so the page can decide whether to render borderless custom chrome.
 
 #### Scenario: Unsupported visual effect is explicit
 
@@ -139,43 +186,45 @@ Style state SHALL include the frameless and visual-effect concepts needed for fu
 - **THEN** the returned promise rejects with a typed unsupported error
 - **AND** the native runtime does not enable a slow fake blur path.
 
-#### Scenario: Capability metadata describes available operations
+#### Scenario: Capability metadata describes shell operations
 
 - **GIVEN** a page calls `navigator.window.getCapabilities()`
 - **WHEN** the extension responds
-- **THEN** the result states whether close, move, resize, transparency, background effects, and global overrides are supported
-- **AND** the page can decide whether to render frameless custom chrome.
+- **THEN** the result states whether transparent backgrounds, native background effects, and corner-radius projection are supported
+- **AND** the page can decide whether to render borderless custom chrome.
 
 ### Requirement: Webview global window overrides SHALL be opt-in
 
-The WebView extension MAY bind selected standard-like globals such as `window.close`, `window.resizeTo`, and `window.moveTo` to the navigator capability object, but only when the WebView command explicitly enables global override mode. Global overrides SHALL be disabled by default.
+The WebView extension MAY bind selected standard-like globals such as `window.close`, `window.resizeTo`, `window.moveTo`, and `window.getScreenDetails` to extension-owned capability objects, but only when the WebView command explicitly enables the relevant global override mode. Global overrides SHALL be disabled by default.
 
-When enabled, overrides SHALL delegate to the same private navigator channel and SHALL NOT create a second native-control protocol.
+When enabled, overrides SHALL delegate to the same private navigator capability family and SHALL NOT create a second native-control protocol.
 
 #### Scenario: Global overrides are disabled by default
 
 - **GIVEN** a WebView is shown with native window API enabled
 - **AND** global override mode is not enabled
-- **WHEN** the page inspects `window.close` and `window.resizeTo`
+- **WHEN** the page inspects `window.close`, `window.resizeTo`, and `window.getScreenDetails`
 - **THEN** OpenTray has not replaced those functions.
 
-#### Scenario: Global overrides delegate to navigator window
+#### Scenario: Global overrides delegate to navigator families
 
-- **GIVEN** a WebView is shown with global override mode enabled
-- **WHEN** the page calls `window.close()`
-- **THEN** the call delegates to `navigator.window.close()`
-- **AND** the native side receives the same `opentray.window` method request as the navigator path.
+- **GIVEN** a WebView is shown with global override mode enabled for window and screen bindings
+- **WHEN** the page calls `window.close()` and `await window.getScreenDetails()`
+- **THEN** the calls delegate to `navigator.window.close()` and `navigator.screen.getScreenDetails()`
+- **AND** the native side receives those requests through the same extension-owned capability families as the navigator paths.
 
 ### Requirement: WebView platform dylib SHALL own the public WebView protocol end-to-end
 
-The official WebView native library SHALL parse `show`, `hide`, `navigate`, `evaluate`, and `postMessage` commands itself and SHALL emit the resulting scoped extension events itself. `opentray` SHALL forward these commands through the generic extension host law and SHALL NOT keep a daemon-side shadow parser or shadow event builder for WebView payloads.
+The official WebView native library SHALL parse `show`, `hide`, explicit destroy, explicit content replacement, `navigate`, `evaluate`, and `postMessage` commands itself and SHALL emit the resulting scoped extension events itself. `opentray` SHALL forward these commands through the generic extension host law and SHALL NOT keep a daemon-side shadow parser or shadow event builder for WebView payloads.
 
-#### Scenario: The platform library owns WebView command parsing
+The same dylib SHALL also decide session-compatibility checks and the rejection path for implicit reload attempts on existing sessions. `opentray` SHALL NOT keep a daemon-side shadow implementation for those session semantics.
 
-- **GIVEN** the `@opentray/ext-webview` facade sends an `ext-command`
+#### Scenario: The platform library owns WebView lifecycle parsing
+
+- **GIVEN** the `@opentray/ext-webview` facade sends a lifecycle-shaped `ext-command`
 - **WHEN** the daemon dispatches that command to the platform library
-- **THEN** the platform library validates and interprets the WebView command payload
-- **AND** the daemon does not keep a second implementation of the same WebView protocol outside the extension artifact.
+- **THEN** the platform library validates and interprets the WebView lifecycle payload
+- **AND** the daemon does not keep a second implementation of the same session law outside the extension artifact.
 
 ### Requirement: WebView native runtime SHALL behave like a standalone binary packaged as a dylib
 
@@ -239,3 +288,224 @@ If a platform package exists but the native WebView runtime cannot create a visi
 - **WHEN** the client sends `show`
 - **THEN** the WebView extension returns a typed unsupported/capability error
 - **AND** the demo prints that failure as acceptance evidence rather than pretending the window appeared.
+
+### Requirement: Webview macOS runtime SHALL keep internal capability families modular
+
+As the WebView extension grows window metadata, screen, style, sync, and policy responsibilities, the macOS runtime SHALL keep those capability families in separate internal modules rather than a single monolithic source file. This modularity requirement exists to preserve extension-atom ownership without turning one file into a second untyped platform layer.
+
+The module split does not change the public protocol, but it SHALL keep bootstrap script concerns, style projection, metadata projection, and screen projection in explicit internal boundaries that future platform work can extend safely.
+
+#### Scenario: macOS runtime keeps capability families separate
+
+- **GIVEN** the macOS WebView runtime handles style, metadata, screen, and bootstrap concerns
+- **WHEN** a maintainer reads the native extension source
+- **THEN** those concerns live in separate internal modules or files
+- **AND** adding a new capability family does not require growing one giant catch-all runtime file further.
+
+### Requirement: Webview window overlay SHALL be extension-owned and standard-like
+
+The WebView extension SHALL expose a titlebar overlay capability through `navigator.opentrayWindow.overlay` when native window API and overlay support are enabled for the shown page. The overlay surface SHALL use the `windowControlsOverlay` mental model, but it SHALL NOT claim to polyfill CSS `env(titlebar-area-*)` values unless the runtime can actually provide those environment variables.
+
+The overlay capability SHALL expose `visible`, `getTitlebarAreaRect()`, and event subscription for geometry changes. The returned rect SHALL be page-viewport-relative, so page code can position custom titlebar content without native coordinate conversion.
+
+#### Scenario: Page reads titlebar overlay geometry
+
+- **GIVEN** a WebView is shown with native window API and overlay enabled
+- **WHEN** page code calls `await navigator.opentrayWindow.overlay.getTitlebarAreaRect()`
+- **THEN** the extension resolves a viewport-relative rect for custom titlebar content
+- **AND** the rect avoids the native window control cluster when native controls are visible.
+
+#### Scenario: Overlay does not claim CSS env support
+
+- **GIVEN** a WebView page uses the OpenTray overlay API
+- **WHEN** the runtime cannot inject `env(titlebar-area-*)`
+- **THEN** the public contract remains `navigator.opentrayWindow.overlay.getTitlebarAreaRect()`
+- **AND** the extension does not document or expose a fake CSS environment variable polyfill.
+
+### Requirement: Webview custom app region drag SHALL use native tracking
+
+The WebView extension SHALL expose `startAppRegionDrag(...)` and `stopAppRegionDrag()` on the navigator window capability object. These methods SHALL represent the narrow app-region drag action, not generic window movement. Implementations MUST use native drag tracking when available and MUST reject with a typed unsupported error rather than silently falling back to repeated `moveTo` calls.
+
+The native runtime SHALL automatically stop drag tracking when the mouse button is released, the tracking monitor is removed, or the owning WebView slot is closed.
+
+#### Scenario: Custom titlebar starts native drag tracking
+
+- **GIVEN** a page renders a custom titlebar over the WebView
+- **WHEN** a pointer-down handler calls `await navigator.opentrayWindow.startAppRegionDrag()`
+- **THEN** the native runtime starts platform drag tracking for the window
+- **AND** the window follows the pointer with native titlebar-like behavior.
+
+#### Scenario: Drag tracking stops automatically
+
+- **GIVEN** app-region drag tracking is active
+- **WHEN** the user releases the mouse button or the page calls `stopAppRegionDrag()`
+- **THEN** the extension stops native tracking
+- **AND** later mouse movement no longer moves the window.
+
+### Requirement: Webview window state controls SHALL include commands and state query
+
+The WebView extension SHALL expose `minimize()`, `maximize()`, and `restore()` as high-level asynchronous methods on the navigator window capability object. These methods SHALL delegate to the same scoped private invoke path as existing window controls and SHALL stay outside the overlay object.
+
+The same capability object SHALL expose `getWindowState()`, `isMaximized()`, and `isMinimized()` so custom chrome can render stable button state without guessing from the last command it sent. `minimize()`, `maximize()`, `restore()`, and `windowstatechange` SHALL use the same window-state payload shape as `getWindowState()`.
+
+#### Scenario: Page controls native window state
+
+- **GIVEN** a WebView is shown with native window API enabled
+- **WHEN** the page calls `navigator.opentrayWindow.minimize()`, `maximize()`, or `restore()`
+- **THEN** the native runtime applies the requested window state
+- **AND** the request travels through the extension-owned `opentray.window` channel.
+
+#### Scenario: Page reads native window state
+
+- **GIVEN** a WebView is shown with native window API enabled
+- **WHEN** the page calls `await navigator.opentrayWindow.getWindowState()`
+- **THEN** the result states whether the window is `normal`, `minimized`, or `maximized`
+- **AND** `isMaximized()` and `isMinimized()` resolve booleans from the same native state.
+
+### Requirement: Overlay and drag capability SHALL stay inside ext-webview
+
+The overlay geometry, custom app-region drag, and window-state controls SHALL be parsed and handled inside `crates/opentray-ext-webview`. `opentray-core`, `opentray-bin`, and the generic extension host SHALL NOT grow WebView-specific branches for these capabilities.
+
+#### Scenario: Core remains unaware of overlay and drag
+
+- **GIVEN** the page uses overlay and drag capabilities
+- **WHEN** native requests are inspected
+- **THEN** `crates/opentray-ext-webview` handles the request
+- **AND** the core broker remains a generic extension-command forwarder.
+
+### Requirement: Webview style SHALL support adjustable corner radius
+
+The WebView extension SHALL include `cornerRadius` in the durable window style state. `cornerRadius` SHALL be a numeric logical radius measured in CSS-like pixels. Omitted or `null` radius SHALL preserve the platform's default shell behavior. A numeric radius SHALL be validated, clamped to a safe non-negative range, reported by `getStyle()`, and projected into native window/content clipping when the platform supports it.
+
+On macOS, the runtime MAY implement rounded corners with a layer-backed content view and `CALayer` clipping. Unsupported platforms MUST reject or report lack of support explicitly rather than claiming a rounded shell that does not exist.
+
+#### Scenario: Page sets rounded corners
+
+- **GIVEN** a WebView window is shown with native window API enabled
+- **WHEN** the page calls `navigator.window.setStyle({ cornerRadius: 18 })`
+- **THEN** the native runtime clips the window content to the requested radius when supported
+- **AND** `navigator.window.getStyle()` reports `cornerRadius: 18`.
+
+#### Scenario: Unset corner radius preserves system behavior
+
+- **GIVEN** a WebView window is shown without a corner-radius style
+- **WHEN** the window is created
+- **THEN** the extension preserves the platform default corner behavior
+- **AND** it does not force a hard-coded radius.
+
+### Requirement: Webview material background SHALL use real native visual effects
+
+The WebView extension SHALL use native platform visual effects for background material or blur. On macOS, supported `backgroundEffect` values SHALL be implemented with the existing AppKit/Wry window plus `window-vibrancy` path. The runtime MUST NOT implement a fake page-level blur to claim that the native window background is blurred.
+
+The material path SHALL keep the WebView and NSWindow backgrounds clear when a material is active, so the native visual effect can blur content behind the window.
+
+#### Scenario: Material blur sees behind the window
+
+- **GIVEN** a WebView window has a supported background material enabled
+- **WHEN** the page content leaves a transparent area
+- **THEN** the native material layer can blur content behind the native window
+- **AND** the page is not merely rendering a CSS-only blur.
+
+### Requirement: Borderless transparent shell SHALL remain a style projection
+
+The WebView extension SHALL project borderless, transparent, material, and rounded-corner state through `getStyle()` / `setStyle()` and declarative `show(...).style`. These shell concerns SHALL remain inside the WebView extension atom and SHALL NOT add WebView-specific behavior to the core broker or daemon.
+
+#### Scenario: Borderless shell is controlled by style state
+
+- **GIVEN** a WebView window is shown with `style.frameless`, `style.transparent`, `style.backgroundEffect`, and `style.cornerRadius`
+- **WHEN** the native macOS runtime creates the window
+- **THEN** it applies those values as native window style projection
+- **AND** the daemon does not parse or apply those WebView-specific fields.
+
+### Requirement: Webview SHALL project tray bounds into navigator.opentray.tray
+
+The WebView extension SHALL expose tray bounds to page JavaScript through `navigator.opentray.tray.getBounds()` when the shown page is allowed to use the tray capability family. This API SHALL be the page projection of the same tray-owned capability used by trusted backend callers. It SHALL not rename the measured object as `host` or `space`, because the physical anchor being queried is the current tray contribution.
+
+The page bridge SHALL keep tray bounds under the OpenTray-prefixed navigator root because the web platform has no standard tray object. The extension SHALL NOT add a second unprefixed `navigator.tray` surface in this change.
+
+#### Scenario: Page reads tray bounds from OpenTray tray namespace
+
+- **GIVEN** a WebView is shown with tray capability enabled for the current page source
+- **WHEN** the page calls `await navigator.opentray.tray.getBounds()`
+- **THEN** the extension resolves the current tray's bounds in the shared `Rect` shape
+- **AND** the API does not require page code to know broker request details.
+
+#### Scenario: Tray namespace names the measured atom
+
+- **GIVEN** the page bridge exposes tray geometry
+- **WHEN** a developer inspects the navigator surface
+- **THEN** the capability lives under `navigator.opentray.tray`
+- **AND** it is not exposed as `navigator.opentrayHost` or `navigator.opentraySpace`.
+
+### Requirement: Webview tray capability SHALL follow declarative source policy
+
+Tray-bounds projection into the page SHALL follow the same declarative capability-policy mindset as window and screen projection. The WebView `show(...)` contract SHALL be able to gate tray capability independently from window and screen capability. Remote content SHALL NOT receive tray bounds by accident.
+
+The page bridge MAY use a dedicated tray capability family such as `tray` in the existing policy structure. The tray capability SHALL not be implicitly granted merely because `nativeWindowApi` or `nativeScreenApi` is enabled.
+
+#### Scenario: Remote page does not receive tray bounds by accident
+
+- **GIVEN** a WebView is shown with remote URL content
+- **AND** no tray capability policy explicitly allows that source
+- **WHEN** the page loads
+- **THEN** `navigator.opentray.tray` is absent or denies tray-bounds access
+- **AND** the extension does not widen the page bridge accidentally.
+
+#### Scenario: Tray capability can diverge from window and screen
+
+- **GIVEN** a WebView is shown with a declarative native capability policy
+- **WHEN** the policy allows tray capability for the current source but denies screen capability
+- **THEN** the page may call `navigator.opentray.tray.getBounds()`
+- **AND** it still does not receive `navigator.screen`.
+
+### Requirement: Webview window session architecture SHALL stay extension-owned
+
+The WebView extension SHALL own a tray-scoped window session law inside the extension atom itself. `opentray-core` and `opentray-bin` SHALL continue to forward generic extension traffic and SHALL NOT become the place where repeated `show`, `hide`, destroy, or content-replacement semantics are interpreted.
+
+The WebView session law SHALL remain distinct from the Lynx runtime law. The Lynx extension MAY replace a short-lived child process on repeated `show`, but the WebView extension SHALL treat page runtime continuity as a first-class concern and SHALL define its own explicit session semantics instead of inheriting the Lynx behavior by analogy.
+
+#### Scenario: Architecture law stays visible
+
+- **GIVEN** the WebView extension needs to distinguish visibility, session destruction, and content replacement
+- **WHEN** the lifecycle contract is implemented
+- **THEN** that distinction is owned by `@opentray/ext-webview` and `crates/opentray-ext-webview`
+- **AND** the kernel and daemon do not grow WebView-specific lifecycle branches.
+
+### Requirement: Webview window session data shape SHALL separate session, shell, and page runtime
+
+The WebView extension SHALL preserve three durable state domains instead of collapsing them into one ambiguous “window” concept:
+
+- `WindowSessionIdentity`: tray scope, bootstrap-immutable capability settings, and current content descriptor
+- `WindowShellState`: visibility, size, position, title, icon, and native style
+- `PageRuntimeState`: the live JS/DOM context, including transient UI state such as scroll, form input, and in-page caches
+
+`hide()` SHALL affect `WindowShellState` visibility only. Explicit content replacement SHALL replace `PageRuntimeState` and update the current content descriptor. Explicit destroy SHALL invalidate the whole session.
+
+#### Scenario: Data law stays visible
+
+- **GIVEN** a WebView session has live page state
+- **WHEN** the host hides and later re-shows the same tray window
+- **THEN** only shell visibility changes
+- **AND** the page runtime state remains intact.
+
+### Requirement: Webview content replacement SHALL be explicit
+
+The WebView extension SHALL NOT treat repeated `show(...)` as an implicit page reload path for an already-active compatible session. `show(...)` is the visibility and session-bootstrap verb. Content replacement SHALL use an explicit command surface.
+
+The public command family SHALL include an explicit content-replacement command that can replace either host HTML or URL content. `navigate(url)` MAY remain as a URL-focused alias, but it SHALL be semantically equivalent to an explicit content replacement request rather than a second hidden lifecycle path.
+
+If a caller sends `show(...)` against an existing compatible session and also supplies content that would differ from the active content descriptor, the extension SHALL reject that request explicitly and direct the caller toward the content-replacement or destroy path. It SHALL NOT silently reload the page runtime behind a visibility verb.
+
+#### Scenario: Re-show preserves page runtime
+
+- **GIVEN** a tray already has a compatible hidden WebView session with local HTML content
+- **WHEN** the host calls `show(...)` again for that tray
+- **THEN** the extension makes the existing window visible
+- **AND** it preserves the existing page runtime instead of reloading the HTML.
+
+#### Scenario: Show rejects implicit content replacement
+
+- **GIVEN** a tray already has an active WebView session
+- **WHEN** the host calls `show(...)` with a different HTML payload or URL for that same session
+- **THEN** the extension rejects the request with an explicit typed error
+- **AND** it tells the caller to use the content-replacement or destroy path instead of silently reloading.
