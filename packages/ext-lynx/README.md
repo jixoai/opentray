@@ -114,7 +114,7 @@ For macOS-side runtime diagnostics, keep the default quiet behavior for normal u
 
 ```bash
 OPENTRAY_LYNX_RUNTIME_STDIO=inherit \
-OPENTRAY_LYNX_DEBUG=host-events,host-title,engine-tap \
+OPENTRAY_LYNX_DEBUG=host-events,engine-tap \
 OPENTRAY_LYNX_DEBUG_LOG_PATH=/private/tmp/opentray-lynx-runtime.log \
   pnpm --filter opentray cli -- smoke daemon-lynx \
   2>&1 | tee /private/tmp/opentray-lynx-smoke.log
@@ -128,7 +128,7 @@ Accepted `OPENTRAY_LYNX_RUNTIME_STDIO` values:
 Accepted `OPENTRAY_LYNX_DEBUG` modes:
 
 - `host-events`: trace AppKit `NSWindow` input events before they enter Lynx
-- `host-title`: project the last traced host event into the window title for visual confirmation
+- `host-title`: project the last traced host event into the window title for visual confirmation; keep this off unless you specifically want a visual probe
 - `engine-tap`: trace the patched Lynx desktop tap pipeline
 - `all`: enable every available runtime diagnostic mode
 
