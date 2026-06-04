@@ -1,6 +1,6 @@
 {
   "name": "opentray",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "description": "Developer-facing OpenTray SDK and CLI package.",
   "type": "module",
   "license": "MIT",
@@ -24,6 +24,7 @@
   },
   "files": [
     "dist",
+    "assets",
     "README.md"
   ],
   "sideEffects": false,
@@ -31,6 +32,7 @@
     "build": "tsdown src/index.ts src/node.ts src/cli.ts --format esm --dts",
     "cli": "bun run src/cli.ts",
     "example:basic": "bun run examples/basic-space.ts",
+    "example:daemon-lynx": "bun run examples/daemon-lynx.ts",
     "example:daemon-tray": "bun run examples/daemon-tray.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

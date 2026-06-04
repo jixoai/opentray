@@ -332,7 +332,7 @@ The release configuration SHALL keep `opentray` and daemon platform packages ver
 
 ### Requirement: Post-publish npm registry smoke SHALL be the final release gate
 
-After npm publish, maintainers SHALL verify the release from a fresh project that installs packages from the npm registry rather than workspace links. The smoke SHALL prove daemon binary resolution, daemon health, WebView dynamic library resolution, and human-visible WebView behavior.
+After npm publish, maintainers SHALL verify the release from a fresh project that installs packages from the npm registry rather than workspace links. The smoke SHALL prove daemon binary resolution, daemon health, WebView dynamic library resolution, human-visible WebView behavior, Lynx runtime-host resolution, and the human-visible Lynx carrier audit path.
 
 #### Scenario: Fresh npm install proves release
 
@@ -342,6 +342,14 @@ After npm publish, maintainers SHALL verify the release from a fresh project tha
 - **AND** the daemon can start from the installed platform binary
 - **AND** WebView can load from the installed platform dynamic library
 - **AND** the visual smoke works or reports a typed unsupported capability error.
+
+#### Scenario: Fresh npm install proves Lynx carrier audit command
+
+- **GIVEN** `opentray` and `@opentray/ext-lynx` have been published to npm
+- **WHEN** a fresh project installs the published versions and runs `opentray smoke daemon-lynx`
+- **THEN** the CLI resolves the installed daemon binary and Lynx platform package
+- **AND** it launches the packaged review bundle without requiring a workspace path
+- **AND** maintainers can use that command as the final human-visible audit for the published Lynx carrier path.
 
 ### Requirement: Package bootstrap SHALL cover WebView platform atoms
 
@@ -354,3 +362,37 @@ The npm bootstrap/trusted-publish tooling SHALL support the `extension-platform`
 - **THEN** it uses generic extension-platform manifest defaults
 - **AND** it does not contain hardcoded WebView-specific npm logic.
 
+### Requirement: Release workflow SHALL stage Lynx dylib and runtime sidecar from GitHub CI
+
+When Lynx platform packages are part of the release set, the release workflow SHALL build the official Lynx extension dylib and the OpenTray-owned Lynx runtime host app zip in GitHub Actions before npm publish. The darwin platform packages SHALL receive both artifacts through workflow artifact transport, not from locally committed files.
+
+#### Scenario: Darwin release stages both Lynx artifacts
+
+- **GIVEN** the release workflow is preparing `@opentray/ext-lynx-darwin-arm64` or `@opentray/ext-lynx-darwin-x64`
+- **WHEN** the native darwin build job succeeds
+- **THEN** it uploads the Lynx extension dynamic library and the OpenTray Lynx runtime host app zip as GitHub Actions artifacts
+- **AND** the release job stages the dylib into the package `lib/` directory
+- **AND** the release job stages the runtime host zip into the package `runtime/` directory before npm publish.
+
+### Requirement: Darwin Lynx runtime build SHALL use Xcode selection and the proven research build path
+
+The release workflow SHALL select a full Xcode toolchain on darwin runners before building the official Lynx runtime sidecar. The workflow MAY reuse the researched Lynx build steps and upstream Lynx library build graph, but the mainline release path SHALL build an OpenTray-owned host app rather than zipping a long-term patched `LynxExplorer.app`.
+
+#### Scenario: Darwin release uses an explicit Xcode setup step
+
+- **GIVEN** the release workflow builds Lynx runtime artifacts on macOS
+- **WHEN** the workflow is inspected
+- **THEN** it selects Xcode explicitly before the Lynx runtime build step
+- **AND** the runtime zip is produced by a version-controlled build script in this repository
+- **AND** that build script targets the OpenTray-owned Lynx host app carrier.
+
+### Requirement: Published Lynx audit SHALL have a package-owned CLI command
+
+After npm publish, maintainers SHALL be able to run a documented CLI command from a fresh install to visually verify the Lynx carrier path without depending on a workspace checkout bundle path. The command MAY still accept an explicit bundle override, but the default audit path SHALL come from a package-owned review bundle.
+
+#### Scenario: Fresh install runs the final Lynx audit command
+
+- **GIVEN** `opentray` and `@opentray/ext-lynx` have been installed from npm
+- **WHEN** a maintainer runs `opentray smoke daemon-lynx`
+- **THEN** the command resolves a package-owned review bundle by default
+- **AND** it exercises the installed Lynx runtime host path instead of a workspace-local bundle path.

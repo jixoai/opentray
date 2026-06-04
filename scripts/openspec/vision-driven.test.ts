@@ -541,4 +541,29 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
+
+  test("Scenario: Given a vision-driven change is already archived When check runs Then the workflow gate resolves the archived change", async () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), "vision-driven-"));
+    try {
+      await copyVisionSchema(tmpRoot);
+      const changeDir = join(tmpRoot, "openspec", "changes", "archive", "2026-06-03-demo-change");
+      await mkdir(join(changeDir, "plans"), { recursive: true });
+      await mkdir(join(changeDir, "review"), { recursive: true });
+      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-28\n");
+      writeFileSync(join(changeDir, "plans", "plan.md"), "# Plan\n");
+      writeFileSync(join(changeDir, "tasks.md"), "- [x] archive complete\n");
+      writeFileSync(join(changeDir, "review", "self-review.md"), validReviewMarkdown);
+      writeFileSync(join(changeDir, "review", "self-review.html"), validReviewHtml);
+
+      const result = await runBun(
+        [join(repoRoot, "scripts", "openspec", "vision-driven.ts"), "check", "demo-change"],
+        tmpRoot,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('"ok": true');
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
 });

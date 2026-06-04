@@ -1,8 +1,11 @@
 # client-sdk Specification
 
 ## Purpose
+
 TBD - created by archiving change implement-broker-transport-kernel-dispatch. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: TypeScript SDK SHALL connect to the versioned local broker
 
 The `opentray` TypeScript package SHALL provide a local broker client that resolves the current package version and protocol version, connects to the derived daemon endpoint, sends `init`, and exposes broker-created space and tray handles. The client SHALL NOT return placeholder `pending:*` identities after a successful broker response path exists.
@@ -191,7 +194,7 @@ The resolver SHALL return a structured error when no platform binary is availabl
 
 ### Requirement: CLI SHALL provide npm-installable visual smoke
 
-The published `opentray` package SHALL include a public command path that can exercise daemon startup, tray creation, and WebView extension commands from a fresh npm install. The smoke path SHALL NOT require workspace source files or `pnpm --filter`.
+The published `opentray` package SHALL include public command paths that can exercise daemon startup, tray creation, and official extension commands from a fresh npm install. The smoke path SHALL NOT require workspace source files or `pnpm --filter`.
 
 #### Scenario: Fresh npm install can run visual smoke
 
@@ -199,6 +202,14 @@ The published `opentray` package SHALL include a public command path that can ex
 - **WHEN** the developer runs the documented smoke command
 - **THEN** it auto-starts the daemon from the installed platform package
 - **AND** it exposes a real tray/WebView flow for human visual verification.
+
+#### Scenario: Fresh npm install can run Lynx smoke from a package-owned review bundle
+
+- **GIVEN** a fresh project installed `opentray` and `@opentray/ext-lynx` from npm
+- **WHEN** the developer runs `opentray smoke daemon-lynx`
+- **THEN** it auto-starts the daemon from the installed platform package
+- **AND** it loads `@opentray/ext-lynx` through the generic extension host path
+- **AND** it uses a package-owned Lynx review bundle by default instead of requiring a workspace checkout path.
 
 ### Requirement: Top-level SDK SHALL expose broker-backed convenience entrypoints
 
@@ -242,4 +253,3 @@ The package MAY also expose an explicit `resolveDefaultSpace` helper so the defa
 - **WHEN** they call top-level `createTray` with that explicit space
 - **THEN** the SDK creates the tray under that space directly
 - **AND** it does not send an unnecessary default-space resolution request.
-

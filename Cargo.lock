@@ -2171,6 +2171,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentray-ext-lynx"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "opentray-spec",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "opentray-ext-webview"
 version = "0.0.0"
 dependencies = [

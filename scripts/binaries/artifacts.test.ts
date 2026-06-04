@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { nativeTargets, resolveNativePackageTarget, resolveNativeTarget } from "./artifacts";
+import {
+  nativeTargets,
+  resolveNativePackageTarget,
+  resolveNativeTarget,
+} from "./artifacts";
 
 describe("Feature: native binary artifact topology", () => {
   test("Scenario: Given first-stage platforms When targets are enumerated Then daemon and webview packages map one-to-one", () => {
@@ -21,6 +25,12 @@ describe("Feature: native binary artifact topology", () => {
       "@opentray/ext-webview-windows-arm64",
       "@opentray/ext-webview-windows-x64",
     ]);
+    expect(
+      nativeTargets.map((target) => target.lynxPackageName).filter(Boolean)
+    ).toEqual([
+      "@opentray/ext-lynx-darwin-arm64",
+      "@opentray/ext-lynx-darwin-x64",
+    ]);
   });
 
   test("Scenario: Given platform packages When artifact paths are generated Then generated binaries land in package-owned directories", () => {
@@ -30,22 +40,44 @@ describe("Feature: native binary artifact topology", () => {
 
     expect(darwin.daemonArtifact).toBe("packages/darwin-arm64/bin/opentray");
     expect(darwin.webviewArtifact).toBe(
-      "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib",
+      "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
     );
-    expect(linux.webviewArtifact).toBe("packages/ext-webview-linux-x64/lib/libopentray_ext_webview.so");
-    expect(windows.daemonArtifact).toBe("packages/windows-x64/bin/opentray.exe");
-    expect(windows.webviewArtifact).toBe("packages/ext-webview-windows-x64/bin/opentray_ext_webview.dll");
+    expect(darwin.lynxArtifact).toBe(
+      "packages/ext-lynx-darwin-arm64/lib/libopentray_ext_lynx.dylib"
+    );
+    expect(darwin.lynxRuntimeArtifact).toBe(
+      "packages/ext-lynx-darwin-arm64/runtime/OpenTrayLynxRuntime.app.zip"
+    );
+    expect(linux.webviewArtifact).toBe(
+      "packages/ext-webview-linux-x64/lib/libopentray_ext_webview.so"
+    );
+    expect(linux.lynxArtifact).toBeUndefined();
+    expect(windows.daemonArtifact).toBe(
+      "packages/windows-x64/bin/opentray.exe"
+    );
+    expect(windows.webviewArtifact).toBe(
+      "packages/ext-webview-windows-x64/bin/opentray_ext_webview.dll"
+    );
   });
 
   test("Scenario: Given unsupported host When target is resolved Then the error is explicit", () => {
-    expect(() => resolveNativeTarget("freebsd", "x64")).toThrow("unsupported OpenTray platform");
-    expect(() => resolveNativeTarget("linux", "riscv64")).toThrow("unsupported OpenTray architecture");
+    expect(() => resolveNativeTarget("freebsd", "x64")).toThrow(
+      "unsupported OpenTray platform"
+    );
+    expect(() => resolveNativeTarget("linux", "riscv64")).toThrow(
+      "unsupported OpenTray architecture"
+    );
   });
 
   test("Scenario: Given CI stages foreign artifacts When package target is explicit Then host platform is irrelevant", () => {
     const target = resolveNativePackageTarget("windows", "arm64");
 
-    expect(target.daemonArtifact).toBe("packages/windows-arm64/bin/opentray.exe");
-    expect(target.webviewArtifact).toBe("packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll");
+    expect(target.daemonArtifact).toBe(
+      "packages/windows-arm64/bin/opentray.exe"
+    );
+    expect(target.webviewArtifact).toBe(
+      "packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll"
+    );
+    expect(target.lynxArtifact).toBeUndefined();
   });
 });

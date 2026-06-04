@@ -1,6 +1,6 @@
 {
   "name": "@opentray/linux-arm64",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "description": "OpenTray broker binary package for Linux ARM64.",
   "license": "MIT",
   "repository": {
