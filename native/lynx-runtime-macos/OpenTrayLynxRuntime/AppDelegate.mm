@@ -215,7 +215,7 @@ static NSString *OpenTrayHitViewName(NSWindow *window, NSEvent *event) {
     return;
   }
 
-  __weak typeof(self) weakSelf = self;
+  __weak AppDelegate *weakSelf = self;
   self.opentrayLocalEventMonitor = [NSEvent
       addLocalMonitorForEventsMatchingMask:NSEventMaskAny
                                    handler:^NSEvent *_Nullable(NSEvent *_Nonnull event) {
