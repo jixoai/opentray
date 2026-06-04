@@ -29,6 +29,7 @@ fn tray_options(tray_id: &str) -> TrayOptions {
             items: vec![MenuItem::Item {
                 id: 7,
                 title: "Open".to_string(),
+                primary_event: false,
                 enabled: true,
                 shortcut: None,
             }],
@@ -178,6 +179,90 @@ fn create_tray_syncs_backend_projection() {
                 if projection.trays.iter().any(|tray| tray.tray_id == "status")
         )
     }));
+}
+
+#[test]
+fn get_tray_bounds_returns_correlated_bounds_for_owner() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::new(backend.clone());
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_space(&mut broker, &mut session);
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::CreateTray {
+            request_id: "req-tray".to_string(),
+            space: surface.clone(),
+            tray: tray_options("status"),
+        },
+        "0.1.0",
+    );
+
+    let frames = broker.handle_frame(
+        &mut session,
+        ClientFrame::GetTrayBounds {
+            request_id: "req-bounds".to_string(),
+            space_id: surface.space_id.clone(),
+            tray_id: "status".to_string(),
+        },
+        "0.1.0",
+    );
+
+    assert!(matches!(
+        &frames[0],
+        ServerFrame::TrayBounds {
+            request_id,
+            space_id,
+            tray_id,
+            bounds: Some(_),
+        } if request_id == "req-bounds" && space_id == "app" && tray_id == "status"
+    ));
+    assert!(backend.operations().iter().any(|operation| {
+        matches!(
+            operation,
+            BackendOperation::TrayBounds(space_id, tray_id)
+                if space_id == "app" && tray_id == "status"
+        )
+    }));
+}
+
+#[test]
+fn get_tray_bounds_rejects_non_owner_session() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::new(backend);
+    let mut owner = BrokerSession::new();
+    let mut other = BrokerSession::new();
+    broker.handle_frame(&mut owner, init(), "0.1.0");
+    broker.handle_frame(&mut other, init(), "0.1.0");
+    let surface = create_space(&mut broker, &mut owner);
+    broker.handle_frame(
+        &mut owner,
+        ClientFrame::CreateTray {
+            request_id: "req-tray".to_string(),
+            space: surface.clone(),
+            tray: tray_options("status"),
+        },
+        "0.1.0",
+    );
+
+    let frames = broker.handle_frame(
+        &mut other,
+        ClientFrame::GetTrayBounds {
+            request_id: "req-bounds".to_string(),
+            space_id: surface.space_id,
+            tray_id: "status".to_string(),
+        },
+        "0.1.0",
+    );
+
+    assert!(matches!(
+        &frames[0],
+        ServerFrame::Error {
+            request_id: Some(request_id),
+            code,
+            ..
+        } if request_id == "req-bounds" && code == "kernel-error"
+    ));
 }
 
 #[test]

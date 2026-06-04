@@ -29,6 +29,7 @@ pub fn surface_projection() -> SurfaceProjection {
                     MenuItem::Item {
                         id: 42,
                         title: "Open Panel".to_string(),
+                        primary_event: false,
                         enabled: true,
                         shortcut: Some("CmdOrCtrl+O".to_string()),
                     },
@@ -42,6 +43,7 @@ pub fn surface_projection() -> SurfaceProjection {
                     MenuItem::Item {
                         id: 99,
                         title: "Quit Example".to_string(),
+                        primary_event: false,
                         enabled: true,
                         shortcut: Some("CmdOrCtrl+Q".to_string()),
                     },

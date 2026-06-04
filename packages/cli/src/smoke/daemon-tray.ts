@@ -4,18 +4,7 @@ import { createClient } from "../client";
 import { connectLocalBroker } from "../local-broker";
 
 const menuLabels = new Map<number, string>([
-  [1, "Primary Action"],
-  [3, "Checked Capability"],
-  [4, "Radio: Active"],
-  [5, "Radio: Passive"],
-  [6, "Nested Action"],
-  [7, "Nested Check"],
-  [8, "WebView: Show HTML"],
-  [9, "WebView: Navigate"],
-  [10, "WebView: Post Message"],
-  [11, "WebView: Evaluate"],
-  [12, "WebView: Hide"],
-  [99, "Quit Demo"],
+  [1, "Open WebView"],
 ]);
 
 interface WebviewShowCommand {
@@ -27,6 +16,29 @@ interface WebviewShowCommand {
   fallbackRect?: Rect;
   nativeWindowApi?: boolean;
   bindWindowGlobals?: boolean;
+  nativeScreenApi?: boolean;
+  bindScreenGlobals?: boolean;
+  nativeTrayApi?: boolean;
+  title?: string;
+  icon?: { type: "href"; href: string };
+  style?: {
+    frameless?: boolean;
+    transparent?: boolean;
+    keepOnTop?: boolean;
+    backgroundEffect?: string | null;
+  };
+  titleSync?: boolean | { documentToWindow?: boolean; windowToDocument?: boolean };
+  iconSync?: boolean | { faviconToWindow?: boolean; windowToFavicon?: boolean };
+  nativeApiPolicy?: {
+    defaultSrc?: string[];
+    window?: string[];
+    screen?: string[];
+    tray?: string[];
+    windowGlobals?: string[];
+    screenGlobals?: string[];
+    titleSync?: string[];
+    iconSync?: string[];
+  };
 }
 
 export const runDaemonTraySmoke = async (): Promise<void> => {
@@ -46,38 +58,12 @@ export const runDaemonTraySmoke = async (): Promise<void> => {
     title: "OpenTray",
     tooltip: {
       title: "OpenTray",
-      description: "npm-installed daemon smoke with broker-routed menu events",
+      description: "Single primary tray action; macOS direct-triggers without opening a menu",
     },
     icon: createVisibleIcon(),
     menu: {
       items: [
-        { type: "item", id: 1, title: "Primary Action" },
-        { type: "item", id: 2, title: "Disabled Action", enabled: false },
-        { type: "check", id: 3, title: "Checked Capability", checked: true },
-        { type: "radio", id: 4, title: "Radio: Active", group: 1, checked: true },
-        { type: "radio", id: 5, title: "Radio: Passive", group: 1 },
-        { type: "separator" },
-        {
-          type: "submenu",
-          title: "Nested Actions",
-          items: [
-            { type: "item", id: 6, title: "Nested Action" },
-            { type: "check", id: 7, title: "Nested Check", checked: false },
-          ],
-        },
-        {
-          type: "submenu",
-          title: "WebView Commands",
-          items: [
-            { type: "item", id: 8, title: "Show HTML" },
-            { type: "item", id: 9, title: "Navigate" },
-            { type: "item", id: 10, title: "Post Message" },
-            { type: "item", id: 11, title: "Evaluate JS" },
-            { type: "item", id: 12, title: "Hide" },
-          ],
-        },
-        { type: "separator" },
-        { type: "item", id: 99, title: "Quit Demo" },
+        { type: "item", id: 1, title: "Open WebView", primaryEvent: true },
       ],
     },
   });
@@ -91,11 +77,9 @@ export const runDaemonTraySmoke = async (): Promise<void> => {
     path: "@opentray/ext-webview",
   });
   console.log("webview extension requested through the generic load-ext path");
-  console.log("open the system tray item and choose any enabled menu item to see routed events");
+  console.log("click the tray icon: macOS should direct-trigger the single primary action without opening a menu");
 
   let closed = false;
-  let messageCount = 0;
-  let evalCount = 0;
   let exitTimer: NodeJS.Timeout | undefined;
 
   const shutdown = async (): Promise<void> => {
@@ -114,55 +98,47 @@ export const runDaemonTraySmoke = async (): Promise<void> => {
   };
 
   const handleMenuClick = async (itemId: number): Promise<void> => {
-    if (itemId === 99) {
-      console.log("quit item routed; closing smoke connection");
-      await shutdown();
+    if (itemId === 1) {
+      const trayBounds = await tray.getBounds();
+      console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
+      await commandWebview({
+        type: "show",
+        html: createWebviewDemoHtml(),
+        width: 420,
+        height: 260,
+        title: "OpenTray WebView Smoke",
+        icon: {
+          type: "href",
+          href: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+        },
+        style: {
+          frameless: true,
+          transparent: true,
+          keepOnTop: true,
+          backgroundEffect: "hudWindow",
+        },
+        fallbackRect: trayBounds ?? { x: 0, y: 0, width: 1, height: 1 },
+        nativeWindowApi: true,
+        bindWindowGlobals: true,
+        nativeScreenApi: true,
+        bindScreenGlobals: true,
+        nativeTrayApi: true,
+        titleSync: {
+          documentToWindow: true,
+          windowToDocument: true,
+        },
+        iconSync: true,
+        nativeApiPolicy: {
+          defaultSrc: ["'local'"],
+          window: ["https://example.com"],
+          screen: ["https://example.com"],
+          tray: ["https://example.com"],
+          titleSync: ["https://example.com"],
+          iconSync: ["https://example.com"],
+        },
+      });
+      console.log("primary tray action: webview show");
       return;
-    }
-
-    if (itemId < 8 || itemId > 12) {
-      return;
-    }
-
-    switch (itemId) {
-      case 8:
-        await commandWebview({
-          type: "show",
-          html: createWebviewDemoHtml(),
-          width: 420,
-          height: 260,
-          fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
-          nativeWindowApi: true,
-          bindWindowGlobals: true,
-        });
-        console.log("webview command: show");
-        break;
-      case 9:
-        await commandWebview({ type: "navigate", url: "https://example.com/opentray-status" });
-        console.log("webview command: navigate");
-        break;
-      case 10:
-        messageCount += 1;
-        await commandWebview({
-          type: "postMessage",
-          payload: {
-            kind: "ping",
-            source: "opentray smoke daemon-tray",
-            count: messageCount,
-            sentAt: new Date().toISOString(),
-          },
-        });
-        console.log("webview command: postMessage");
-        break;
-      case 11:
-        evalCount += 1;
-        await commandWebview({ type: "evaluate", js: createVisibleEvaluateScript(evalCount) });
-        console.log("webview command: evaluate");
-        break;
-      case 12:
-        await commandWebview({ type: "hide" });
-        console.log("webview command: hide");
-        break;
     }
   };
 
@@ -186,15 +162,13 @@ export const runDaemonTraySmoke = async (): Promise<void> => {
 
   const webviewSmoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
   try {
-    if (webviewSmoke === "show") {
-      await handleMenuClick(8);
-    } else if (webviewSmoke === "1") {
+    if (webviewSmoke === "show" || webviewSmoke === "1") {
+      await handleMenuClick(1);
+    }
+    if (webviewSmoke === "1") {
       if (exitTimer !== undefined) {
         clearTimeout(exitTimer);
         exitTimer = undefined;
-      }
-      for (const itemId of [8, 10, 11, 9, 12]) {
-        await handleMenuClick(itemId);
       }
       await sleep(300);
       await shutdown();
@@ -289,47 +263,16 @@ function createWebviewDemoHtml(): string {
   <body>
     <main>
       <h1>OpenTray WebView</h1>
-      <p>Use the tray menu to mutate this native WebView through extension commands.</p>
+      <p>This window was opened by the single primary tray action.</p>
       <section>
         <div class="card">
-          <div class="label">postMessage</div>
-          <code id="message-status">Waiting for WebView Commands -> Post Message</code>
-        </div>
-        <div class="card">
-          <div class="label">evaluate JS</div>
-          <code id="eval-status">Waiting for WebView Commands -> Evaluate JS</code>
+          <div class="label">primary event</div>
+          <code>macOS single primary item direct-triggered menuClick -> WebView show</code>
         </div>
       </section>
     </main>
-    <script>
-      window.addEventListener("message", (event) => {
-        const target = document.getElementById("message-status");
-        if (target) {
-          target.textContent = JSON.stringify(event.data, null, 2);
-        }
-      });
-    </script>
   </body>
 </html>`;
-}
-
-function createVisibleEvaluateScript(count: number): string {
-  return `(() => {
-    let target = document.getElementById("eval-status");
-    if (!target) {
-      const panel = document.createElement("div");
-      panel.style.cssText = "position:fixed;left:16px;right:16px;bottom:16px;z-index:2147483647;padding:12px;border-radius:12px;background:#fff8e7;color:#18220f;box-shadow:0 12px 30px rgba(0,0,0,.18);font:14px ui-rounded, sans-serif;";
-      panel.textContent = "OpenTray Evaluate JS: ";
-      target = document.createElement("code");
-      target.id = "eval-status";
-      panel.appendChild(target);
-      document.body.appendChild(panel);
-    }
-    if (target) {
-      target.textContent = "Evaluate JS updated the WebView, count=${count}, at " + new Date().toLocaleTimeString();
-    }
-    window.__OPENTRAY_DEMO__ = { evaluated: true, count: ${count} };
-  })();`;
 }
 
 function sleep(ms: number): Promise<void> {

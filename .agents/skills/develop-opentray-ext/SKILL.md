@@ -13,8 +13,9 @@ Use this skill when the work is extension-centric rather than repo-wide. The cor
 
 1. Inspect the current extension split: facade package, native crate, platform packages, OpenSpec, and loader behavior.
 2. Keep runtime ownership inside the extension artifact, not in `opentray-core` or the broker binary.
-3. Wire platform distribution through package atoms, local staging, and CI staging.
-4. Prove the split with tests, smoke commands, and native size/linkage evidence.
+3. For user-facing WebView window work, read scenario cards first and ask effect-oriented questions before designing API shape.
+4. Wire platform distribution through package atoms, local staging, and CI staging.
+5. Prove the split with tests, smoke commands, and native size/linkage evidence.
 
 ## Reference Map
 
@@ -22,6 +23,7 @@ Use this skill when the work is extension-centric rather than repo-wide. The cor
 - Platform package and binary-distribution rules: read `references/platform-packages.md`.
 - Verification and acceptance checklist: read `references/verification.md`.
 - Current canonical case study: read `references/webview-runtime-case-study.md`.
+- WebView window style, event, and screen-aware recipes: read `references/webview-window-patterns.md`.
 - For Lynx host-window work, sizing defaults, and bridge law: read `references/lynx-window-host.md`.
 
 ## Non-Negotiable Boundaries

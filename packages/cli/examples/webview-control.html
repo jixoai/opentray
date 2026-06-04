@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray WebView Control Demo</title>
+    <style>
+      :root {
+        --titlebar-left: 0px;
+        --titlebar-height: 44px;
+        color: #152117;
+        background: transparent;
+        font: 14px ui-rounded, "SF Pro Rounded", "Avenir Next", system-ui, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        background: transparent;
+      }
+      body {
+        min-height: 100vh;
+      }
+      .custom-titlebar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        min-height: var(--titlebar-height);
+        border-bottom: 1px solid rgba(24, 34, 15, 0.12);
+        background: rgba(247, 249, 244, 0.66);
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .titlebar-safe {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+        height: 100%;
+        padding-left: max(var(--titlebar-left), 12px);
+        padding-right: 12px;
+      }
+      .titlebar-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+        font-weight: 800;
+      }
+      .overlay-meter {
+        flex: none;
+        max-width: 42vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #59655a;
+        font-size: 12px;
+      }
+      .window-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+      }
+      .window-control {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid rgba(24, 34, 15, 0.16);
+        border-radius: 8px;
+        padding: 0;
+        background: rgba(255, 255, 255, 0.78);
+        color: #263226;
+      }
+      .window-control.close {
+        background: rgba(178, 46, 55, 0.88);
+        color: #fff7f3;
+      }
+      main {
+        display: grid;
+        gap: 16px;
+        min-height: calc(100vh - var(--titlebar-height));
+        padding: 18px;
+      }
+      header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        letter-spacing: -0.03em;
+      }
+      p {
+        margin: 8px 0 0;
+        max-width: 74ch;
+        color: #5a665a;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .chip {
+        border: 1px solid rgba(30, 42, 29, 0.12);
+        border-radius: 999px;
+        padding: 6px 10px;
+        background: rgba(255, 255, 255, 0.72);
+        color: #405243;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .panel {
+        border: 1px solid rgba(24, 34, 15, 0.14);
+        border-radius: 8px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.64);
+      }
+      .material-stage {
+        min-height: 132px;
+        border: 1px dashed rgba(21, 33, 23, 0.26);
+        border-radius: 8px;
+        padding: 12px;
+        background:
+          linear-gradient(45deg, rgba(255, 255, 255, 0.18) 25%, transparent 25% 75%, rgba(255, 255, 255, 0.18) 75%),
+          linear-gradient(45deg, rgba(255, 255, 255, 0.18) 25%, transparent 25% 75%, rgba(255, 255, 255, 0.18) 75%);
+        background-position:
+          0 0,
+          12px 12px;
+        background-size: 24px 24px;
+      }
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #6e5a1f;
+      }
+      .stack {
+        display: grid;
+        gap: 10px;
+      }
+      .row {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      }
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+      .field label {
+        color: #425442;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      input,
+      button,
+      textarea {
+        font: inherit;
+      }
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid rgba(24, 34, 15, 0.16);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: rgba(255, 255, 255, 0.95);
+        color: inherit;
+      }
+      textarea {
+        min-height: 108px;
+        resize: vertical;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 9px 12px;
+        background: #2f684f;
+        color: #f8f7ef;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #5d6659;
+      }
+      button.ghost {
+        background: transparent;
+        border: 1px solid rgba(24, 34, 15, 0.16);
+        color: #2d3a2e;
+      }
+      input[type="range"] {
+        accent-color: #2f684f;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .muted {
+        color: #5d695d;
+      }
+      .spacer {
+        height: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="custom-titlebar" id="custom-titlebar">
+      <div class="titlebar-safe" id="titlebar-drag-region">
+        <div class="titlebar-title" id="custom-title">OpenTray WebView Control Demo</div>
+        <code class="overlay-meter" id="overlay-status">overlay: waiting</code>
+      </div>
+      <div class="window-controls" aria-label="Window controls">
+        <button class="window-control" id="titlebar-minimize-button" title="Minimize">-</button>
+        <button class="window-control" id="titlebar-maximize-button" title="Maximize">+</button>
+        <button class="window-control" id="titlebar-restore-button" title="Restore">o</button>
+        <button class="window-control close" id="titlebar-close-button" title="Close">x</button>
+      </div>
+    </div>
+    <main>
+      <header>
+        <div>
+          <h1>OpenTray WebView Control Demo</h1>
+          <p>
+            Use the page to drive the native window. The local control page keeps the bridge
+            available by default; remote navigation verifies source-scoped capability gating.
+            The page root stays transparent so native material shows only through real window
+            transparency, not CSS blur.
+          </p>
+        </div>
+        <div class="chips">
+          <span class="chip" id="bridge-chip">bridge: pending</span>
+          <span class="chip" id="screen-chip">screen: pending</span>
+          <span class="chip" id="globals-chip">globals: pending</span>
+        </div>
+      </header>
+
+      <section class="grid">
+        <section class="panel">
+          <h2>Window</h2>
+          <div class="stack">
+            <div class="row">
+              <button id="capabilities-button">Capabilities</button>
+              <button id="style-button">Refresh Style</button>
+              <button id="frameless-button">Toggle Frameless</button>
+              <button id="transparent-button">Toggle Transparent</button>
+            </div>
+            <div class="row">
+              <button id="topmost-button">Toggle Topmost</button>
+              <button id="material-button">Cycle Material</button>
+              <button id="borderless-button">Borderless Glass</button>
+              <button id="system-corner-button" class="ghost">System Corners</button>
+            </div>
+            <div class="field">
+              <label for="corner-radius-input">Corner radius <span id="corner-radius-value">system</span></label>
+              <input id="corner-radius-input" type="range" min="0" max="48" step="1" value="18" />
+            </div>
+            <div class="row">
+              <button id="minimize-button">Minimize</button>
+              <button id="maximize-button">Maximize</button>
+              <button id="restore-button">Restore</button>
+              <button id="window-state-button" class="ghost">Window State</button>
+            </div>
+            <div class="row">
+              <button id="resize-button">Resize</button>
+              <button id="move-button">Move</button>
+            </div>
+            <div class="row">
+              <button id="native-close-button">navigator.window.close()</button>
+              <button id="global-close-button" class="secondary">window.close()</button>
+            </div>
+            <div class="row">
+              <button id="global-resize-button" class="secondary">window.resizeTo()</button>
+              <button id="global-move-button" class="secondary">window.moveTo()</button>
+            </div>
+            <pre id="capabilities-status" class="muted">Waiting for window capabilities.</pre>
+            <pre id="window-state-status" class="muted">Waiting for window state.</pre>
+            <pre id="style-status" class="muted">Waiting for style.</pre>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Material Preview</h2>
+          <div class="stack">
+            <div class="material-stage">
+              <p class="muted">
+                Native material only shows through unpainted window regions. Keep the page root
+                transparent and avoid using CSS blur to fake the shell.
+              </p>
+            </div>
+            <pre id="overlay-rect-status" class="muted">Waiting for overlay geometry.</pre>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Metadata</h2>
+          <div class="stack">
+            <div class="field">
+              <label for="title-input">Document title</label>
+              <input id="title-input" value="OpenTray WebView Control Demo" />
+            </div>
+            <div class="row">
+              <button id="apply-title-button">Apply Title</button>
+              <button id="favicon-button">Toggle Favicon</button>
+              <button id="icon-button">Refresh Native Icon</button>
+            </div>
+            <div class="row">
+              <button id="get-title-button" class="ghost">Get Native Title</button>
+              <button id="get-icon-button" class="ghost">Get Native Icon</button>
+            </div>
+            <pre id="metadata-status" class="muted">Waiting for title/icon sync.</pre>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Navigation</h2>
+          <div class="stack">
+            <div class="field">
+              <label for="url-input">Location</label>
+              <input id="url-input" value="https://example.com/opentray-control" />
+            </div>
+            <div class="row">
+              <button id="navigate-button">Navigate</button>
+              <button id="back-button" class="secondary">Back</button>
+              <button id="reload-button" class="secondary">Reload</button>
+            </div>
+            <pre id="location-status" class="muted"></pre>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Screen</h2>
+          <div class="stack">
+            <div class="row">
+              <button id="screen-button">Get Screen Details</button>
+              <button id="screen-global-button" class="secondary">window.getScreenDetails()</button>
+            </div>
+            <pre id="screen-status" class="muted">Waiting for screen details.</pre>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Events</h2>
+          <div class="stack">
+            <pre id="event-status" class="muted">Waiting for native events.</pre>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const originalClose = window.close;
+      const originalMoveTo = window.moveTo;
+      const originalResizeTo = window.resizeTo;
+      const originalGetScreenDetails = window.getScreenDetails;
+      const bridge = navigator.opentrayWindow ?? navigator.window;
+      const screenApi =
+        navigator.opentrayScreen ??
+        (typeof navigator.screen?.getScreenDetails === "function" ? navigator.screen : undefined);
+      const materialEffects = [
+        null,
+        "hudWindow",
+        "sidebar",
+        "windowBackground",
+        "contentBackground",
+        "underWindowBackground",
+      ];
+      const iconVariantSpecs = [
+        { background: "#244f3b", mark: "T" },
+        { background: "#6a4d1e", mark: "O" },
+      ];
+      const iconVariants = [];
+      let iconVariantIndex = 0;
+      let materialIndex = 0;
+      const eventLog = [];
+      const $ = (id) => document.getElementById(id);
+      const eventPayload = (event) =>
+        event && typeof event === "object" && "payload" in event ? event.payload : event;
+      const text = (id, value) => {
+        const element = $(id);
+        if (element) {
+          element.textContent = value;
+        }
+      };
+      const applyStyleMode = (style) => {
+        const backgroundEffect =
+          style && typeof style === "object" && typeof style.backgroundEffect === "string"
+            ? style.backgroundEffect
+            : null;
+        const cornerRadius =
+          style && typeof style === "object" && typeof style.cornerRadius === "number"
+            ? style.cornerRadius
+            : null;
+        text("corner-radius-value", cornerRadius === null ? "system" : `${cornerRadius}px`);
+        const radiusInput = $("corner-radius-input");
+        if (radiusInput && cornerRadius !== null) {
+          radiusInput.value = String(Math.round(cornerRadius));
+        }
+      };
+      const toDisplayedStyle = (style) => {
+        if (!style || typeof style !== "object") {
+          return style;
+        }
+        const backgroundEffect =
+          typeof style.backgroundEffect === "string" && style.backgroundEffect.length > 0
+            ? style.backgroundEffect
+            : null;
+        return {
+          ...style,
+          backgroundEffect,
+          effectiveClearBackground: Boolean(style.transparent || backgroundEffect),
+        };
+      };
+      const updateOverlayGeometry = async () => {
+        if (!bridge?.overlay) {
+          text("overlay-status", "overlay: unavailable");
+          text("overlay-rect-status", "windowControlsOverlay was not enabled.");
+          return;
+        }
+        try {
+          const rect = await bridge.overlay.getTitlebarAreaRect();
+          document.documentElement.style.setProperty("--titlebar-left", `${rect.x}px`);
+          document.documentElement.style.setProperty("--titlebar-height", `${Math.max(rect.height, 38)}px`);
+          text("overlay-status", `overlay: x=${rect.x} w=${rect.width} h=${rect.height}`);
+          text("overlay-rect-status", JSON.stringify(rect, null, 2));
+        } catch (error) {
+          text("overlay-status", `overlay: ${formatError(error)}`);
+          text("overlay-rect-status", `Failed to load overlay geometry.\n${formatError(error)}`);
+        }
+      };
+      const bindTitlebarDrag = () => {
+        const dragRegion = $("titlebar-drag-region");
+        if (!dragRegion || !bridge?.startAppRegionDrag) return;
+        dragRegion.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          void bridge.startAppRegionDrag({
+            x: event.clientX,
+            y: event.clientY,
+            pointerId: event.pointerId,
+          }).catch((error) => {
+            text("overlay-status", `drag: ${formatError(error)}`);
+          });
+        });
+      };
+      const updateChips = () => {
+        text("bridge-chip", bridge ? "bridge: ready" : "bridge: unavailable");
+        text("screen-chip", screenApi ? "screen: ready" : "screen: unavailable");
+        text(
+          "globals-chip",
+          window.close === originalClose && window.resizeTo === originalResizeTo
+            ? "globals: native"
+            : "globals: overridden",
+        );
+        const locationElement = $("location-status");
+        if (locationElement) {
+          locationElement.textContent = `href: ${location.href}\norigin: ${
+            location.origin || "(opaque)"
+          }\nbridge: ${bridge ? "yes" : "no"}`;
+        }
+      };
+      const appendEvent = (label, payload) => {
+        const entry = `[${new Date().toLocaleTimeString()}] ${label} ${JSON.stringify(payload)}`;
+        eventLog.unshift(entry);
+        eventLog.length = Math.min(eventLog.length, 10);
+        text("event-status", eventLog.join("\n"));
+      };
+      const formatError = (error) => {
+        if (error && typeof error === "object") {
+          const message = typeof error.message === "string" ? error.message : "";
+          const code = typeof error.code === "string" ? error.code : "";
+          if (code || message) {
+            return [code ? `[${code}]` : "", message].filter(Boolean).join(" ");
+          }
+        }
+        if (error instanceof Error) {
+          return error.message || error.name;
+        }
+        if (typeof error === "string") {
+          return error;
+        }
+        try {
+          return JSON.stringify(error);
+        } catch (_jsonError) {
+          return String(error);
+        }
+      };
+      const ensureFaviconLink = () => {
+        let link = document.querySelector('link[rel~="icon"]');
+        if (!link) {
+          link = document.createElement("link");
+          link.setAttribute("rel", "icon");
+          document.head.appendChild(link);
+        }
+        return link;
+      };
+      const drawFaviconVariant = ({ background, mark }) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 64;
+        canvas.height = 64;
+        const context = canvas.getContext("2d");
+        if (!context) return "";
+        const radius = 16;
+        context.fillStyle = background;
+        context.beginPath();
+        context.moveTo(radius, 0);
+        context.lineTo(64 - radius, 0);
+        context.quadraticCurveTo(64, 0, 64, radius);
+        context.lineTo(64, 64 - radius);
+        context.quadraticCurveTo(64, 64, 64 - radius, 64);
+        context.lineTo(radius, 64);
+        context.quadraticCurveTo(0, 64, 0, 64 - radius);
+        context.lineTo(0, radius);
+        context.quadraticCurveTo(0, 0, radius, 0);
+        context.closePath();
+        context.fill();
+        context.fillStyle = "#f8f7ef";
+        context.font = "700 34px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(mark, 32, 35);
+        return canvas.toDataURL("image/png");
+      };
+      const ensureIconVariants = () => {
+        if (iconVariants.length > 0) return;
+        for (const spec of iconVariantSpecs) {
+          const href = drawFaviconVariant(spec);
+          if (href) {
+            iconVariants.push(href);
+          }
+        }
+      };
+      const setFaviconVariant = (index) => {
+        ensureIconVariants();
+        if (iconVariants.length === 0) {
+          text("metadata-status", "Canvas favicon generation is unavailable.");
+          return;
+        }
+        iconVariantIndex = index % iconVariants.length;
+        ensureFaviconLink().setAttribute("href", iconVariants[iconVariantIndex]);
+        text("metadata-status", `Favicon variant ${iconVariantIndex + 1} selected.`);
+      };
+      const setMaterialVariant = async () => {
+        if (!bridge) {
+          text("style-status", "navigator.window is unavailable for this page source.");
+          return;
+        }
+        try {
+          materialIndex = (materialIndex + 1) % materialEffects.length;
+          const nextEffect = materialEffects[materialIndex];
+          await bridge.setStyle({
+            backgroundEffect: nextEffect ?? "",
+          });
+          text(
+            "metadata-status",
+            `Background effect set to ${nextEffect ?? "none"}. Transparent request unchanged.`,
+          );
+          const style = await bridge.getStyle();
+          applyStyleMode(style);
+          text("style-status", JSON.stringify(toDisplayedStyle(style), null, 2));
+        } catch (error) {
+          text("style-status", `Failed to update style.\n${formatError(error)}`);
+        }
+      };
+      const refreshStyle = async () => {
+        if (!bridge) {
+          text("style-status", "navigator.window is unavailable for this page source.");
+          return;
+        }
+        try {
+          const style = await bridge.getStyle();
+          applyStyleMode(style);
+          text("style-status", JSON.stringify(toDisplayedStyle(style), null, 2));
+        } catch (error) {
+          text("style-status", `Failed to load style.\n${formatError(error)}`);
+        }
+      };
+      const refreshCapabilities = async () => {
+        if (!bridge) {
+          text("capabilities-status", "navigator.window is unavailable for this page source.");
+          return;
+        }
+        try {
+          const capabilities = await bridge.getCapabilities();
+          text("capabilities-status", JSON.stringify(capabilities, null, 2));
+        } catch (error) {
+          text("capabilities-status", `Failed to load capabilities.\n${formatError(error)}`);
+        }
+      };
+      const refreshNativeTitle = async () => {
+        if (!bridge) return;
+        try {
+          text("metadata-status", JSON.stringify({ title: await bridge.getTitle() }, null, 2));
+        } catch (error) {
+          text("metadata-status", `Failed to load title.\n${formatError(error)}`);
+        }
+      };
+      const refreshNativeIcon = async () => {
+        if (!bridge) return;
+        try {
+          text("metadata-status", JSON.stringify(await bridge.getIcon(), null, 2));
+        } catch (error) {
+          text("metadata-status", `Failed to load icon.\n${formatError(error)}`);
+        }
+      };
+      const refreshScreenDetails = async () => {
+        if (!screenApi) {
+          text("screen-status", "navigator.screen is unavailable for this page source.");
+          return;
+        }
+        try {
+          const details = await screenApi.getScreenDetails();
+          text("screen-status", JSON.stringify(details, null, 2));
+        } catch (error) {
+          text("screen-status", `Failed to load screen details.\n${formatError(error)}`);
+        }
+      };
+      const refreshWindowState = async () => {
+        if (!bridge || typeof bridge.getWindowState !== "function") {
+          text("window-state-status", "navigator.window.getWindowState is unavailable.");
+          return;
+        }
+        try {
+          const [state, maximized, minimized] = await Promise.all([
+            bridge.getWindowState(),
+            bridge.isMaximized(),
+            bridge.isMinimized(),
+          ]);
+          text("window-state-status", JSON.stringify({ ...state, maximized, minimized }, null, 2));
+        } catch (error) {
+          text("window-state-status", `Failed to load window state.\n${formatError(error)}`);
+        }
+      };
+      const applyTitle = async () => {
+        const titleInput = $("title-input");
+        const nextTitle = titleInput && typeof titleInput.value === "string"
+          ? titleInput.value.trim() || "OpenTray WebView Control Demo"
+          : "OpenTray WebView Control Demo";
+        document.title = nextTitle;
+        text("custom-title", nextTitle);
+        if (titleInput) {
+          titleInput.value = nextTitle;
+        }
+        text("metadata-status", `document.title -> ${nextTitle}`);
+      };
+      const bindIfPresent = (id, handler) => {
+        const element = $(id);
+        if (element) {
+          element.addEventListener("click", handler);
+        }
+      };
+      const bindWindowEvents = async () => {
+        if (!bridge) {
+          updateChips();
+          text("capabilities-status", "navigator.window is unavailable for this page source.");
+          text("style-status", "navigator.window is unavailable for this page source.");
+          text("window-state-status", "navigator.window is unavailable for this page source.");
+          return;
+        }
+        updateChips();
+        void bridge.listen("moved", (event) => appendEvent("moved", event));
+        void bridge.listen("resized", (event) => {
+          appendEvent("resized", event);
+          void updateOverlayGeometry();
+        });
+        void bridge.listen("stylechange", (event) => {
+          appendEvent("stylechange", event);
+          const payload = eventPayload(event);
+          if (payload && typeof payload === "object") {
+            applyStyleMode(payload);
+          }
+        });
+        void bridge.listen("titlechange", (event) => {
+          appendEvent("titlechange", event);
+          const payload = eventPayload(event);
+          const titleInput = $("title-input");
+          if (payload && typeof payload === "object" && typeof payload.title === "string") {
+            text("custom-title", payload.title);
+            if (titleInput) {
+              titleInput.value = payload.title;
+            }
+          }
+        });
+        void bridge.listen("iconchange", (event) => appendEvent("iconchange", event));
+        void bridge.listen("windowstatechange", (event) => {
+          appendEvent("windowstatechange", event);
+          text("window-state-status", JSON.stringify(eventPayload(event), null, 2));
+        });
+        void bridge.listen("closed", (event) => appendEvent("closed", event));
+        void refreshCapabilities();
+        void refreshStyle();
+        void refreshWindowState();
+        void refreshScreenDetails();
+        void updateOverlayGeometry();
+        if (bridge.overlay) {
+          void bridge.overlay.listen("geometrychange", (event) => {
+            appendEvent("overlay.geometrychange", event);
+            const rect = event.titlebarAreaRect;
+            if (rect) {
+              document.documentElement.style.setProperty("--titlebar-left", `${rect.x}px`);
+              document.documentElement.style.setProperty("--titlebar-height", `${Math.max(rect.height, 38)}px`);
+              text("overlay-status", `overlay: x=${rect.x} w=${rect.width} h=${rect.height}`);
+              text("overlay-rect-status", JSON.stringify(rect, null, 2));
+            }
+          });
+        }
+      };
+
+      bindWindowEvents();
+      bindTitlebarDrag();
+
+      bindIfPresent("capabilities-button", refreshCapabilities);
+      bindIfPresent("style-button", refreshStyle);
+      bindIfPresent("frameless-button", async () => {
+        if (!bridge) return;
+        try {
+          const style = await bridge.getStyle();
+          await bridge.setStyle({ frameless: !style.frameless });
+          await refreshStyle();
+        } catch (error) {
+          text("style-status", `Failed to toggle frameless.\n${formatError(error)}`);
+        }
+      });
+      bindIfPresent("transparent-button", async () => {
+        if (!bridge) return;
+        try {
+          const style = await bridge.getStyle();
+          await bridge.setStyle({ transparent: !style.transparent });
+          await refreshStyle();
+        } catch (error) {
+          text("style-status", `Failed to toggle transparency.\n${formatError(error)}`);
+        }
+      });
+      bindIfPresent("topmost-button", async () => {
+        if (!bridge) return;
+        try {
+          const style = await bridge.getStyle();
+          await bridge.setStyle({ keepOnTop: !style.keepOnTop });
+          await refreshStyle();
+        } catch (error) {
+          text("style-status", `Failed to toggle topmost.\n${formatError(error)}`);
+        }
+      });
+      bindIfPresent("material-button", setMaterialVariant);
+      bindIfPresent("borderless-button", async () => {
+        if (!bridge) return;
+        try {
+          await bridge.setStyle({
+            frameless: true,
+            transparent: true,
+            backgroundEffect: "hudWindow",
+            backgroundEffectState: "active",
+            cornerRadius: Number($("corner-radius-input")?.value ?? 18),
+          });
+          await refreshStyle();
+          await updateOverlayGeometry();
+        } catch (error) {
+          text("style-status", `Failed to enable borderless glass.\n${formatError(error)}`);
+        }
+      });
+      bindIfPresent("system-corner-button", async () => {
+        if (!bridge) return;
+        try {
+          await bridge.setStyle({ cornerRadius: null });
+          await refreshStyle();
+        } catch (error) {
+          text("style-status", `Failed to reset corner radius.\n${formatError(error)}`);
+        }
+      });
+      $("corner-radius-input")?.addEventListener("input", (event) => {
+        text("corner-radius-value", `${event.currentTarget.value}px`);
+      });
+      $("corner-radius-input")?.addEventListener("change", async (event) => {
+        if (!bridge) return;
+        try {
+          await bridge.setStyle({ cornerRadius: Number(event.currentTarget.value) });
+          await refreshStyle();
+        } catch (error) {
+          text("style-status", `Failed to update corner radius.\n${formatError(error)}`);
+        }
+      });
+      bindIfPresent("minimize-button", () => {
+        void bridge?.minimize()
+          .then(() => refreshWindowState())
+          .catch((error) => {
+            text("window-state-status", `Failed to minimize.\n${formatError(error)}`);
+          });
+      });
+      bindIfPresent("maximize-button", () => {
+        void bridge?.maximize()
+          .then(() => refreshWindowState())
+          .catch((error) => {
+            text("window-state-status", `Failed to maximize.\n${formatError(error)}`);
+          });
+      });
+      bindIfPresent("restore-button", () => {
+        void bridge?.restore()
+          .then(() => refreshWindowState())
+          .catch((error) => {
+            text("window-state-status", `Failed to restore.\n${formatError(error)}`);
+          });
+      });
+      bindIfPresent("window-state-button", refreshWindowState);
+      bindIfPresent("titlebar-minimize-button", () => {
+        void bridge?.minimize().then(() => refreshWindowState());
+      });
+      bindIfPresent("titlebar-maximize-button", () => {
+        void bridge?.maximize().then(() => refreshWindowState());
+      });
+      bindIfPresent("titlebar-restore-button", () => {
+        void bridge?.restore().then(() => refreshWindowState());
+      });
+      bindIfPresent("titlebar-close-button", () => {
+        void bridge?.close();
+      });
+      bindIfPresent("resize-button", async () => {
+        if (!bridge) return;
+        try {
+          await bridge.resizeTo(680, 520);
+          await refreshStyle();
+        } catch (error) {
+          text("style-status", `Failed to resize window.\n${formatError(error)}`);
+        }
+      });
+      bindIfPresent("move-button", async () => {
+        if (!bridge) return;
+        try {
+          await bridge.moveTo(120, 120);
+        } catch (error) {
+          text("metadata-status", `Failed to move window.\n${formatError(error)}`);
+        }
+      });
+      bindIfPresent("native-close-button", () => {
+        if (!bridge) return;
+        void bridge.close().catch((error) => {
+          text("metadata-status", `Failed to close window.\n${formatError(error)}`);
+        });
+      });
+      bindIfPresent("global-close-button", () => {
+        if (window.close === originalClose || !bridge) {
+          text("metadata-status", "window.close is not bound in this page source.");
+          return;
+        }
+        window.close();
+      });
+      bindIfPresent("global-resize-button", () => {
+        if (window.resizeTo === originalResizeTo || !bridge) {
+          text("metadata-status", "window.resizeTo is not bound in this page source.");
+          return;
+        }
+        window.resizeTo(760, 540);
+      });
+      bindIfPresent("global-move-button", () => {
+        if (window.moveTo === originalMoveTo || !bridge) {
+          text("metadata-status", "window.moveTo is not bound in this page source.");
+          return;
+        }
+        window.moveTo(88, 88);
+      });
+      bindIfPresent("apply-title-button", applyTitle);
+      bindIfPresent("favicon-button", () => {
+        setFaviconVariant(iconVariantIndex ^ 1);
+      });
+      bindIfPresent("icon-button", async () => {
+        if (!bridge) {
+          text("metadata-status", "navigator.window is unavailable for this page source.");
+          return;
+        }
+        try {
+          const href = iconVariants[iconVariantIndex];
+          setFaviconVariant(iconVariantIndex);
+          await bridge.setIcon({ type: "href", href });
+          text("metadata-status", `Native icon projected from favicon variant ${iconVariantIndex + 1}.`);
+          await refreshNativeIcon();
+        } catch (error) {
+          text("metadata-status", `Failed to project icon.\n${formatError(error)}`);
+        }
+      });
+      bindIfPresent("get-title-button", refreshNativeTitle);
+      bindIfPresent("get-icon-button", refreshNativeIcon);
+      bindIfPresent("navigate-button", () => {
+        const urlInput = $("url-input");
+        const nextUrl = urlInput && typeof urlInput.value === "string"
+          ? urlInput.value.trim()
+          : "";
+        if (!nextUrl) {
+          text("metadata-status", "Enter a URL first.");
+          return;
+        }
+        location.href = nextUrl;
+      });
+      bindIfPresent("back-button", () => {
+        history.back();
+      });
+      bindIfPresent("reload-button", () => {
+        location.reload();
+      });
+      bindIfPresent("screen-button", refreshScreenDetails);
+      bindIfPresent("screen-global-button", async () => {
+        if (window.getScreenDetails === originalGetScreenDetails || !bridge) {
+          text("screen-status", "window.getScreenDetails is not bound in this page source.");
+          return;
+        }
+        try {
+          const details = await window.getScreenDetails();
+          text("screen-status", JSON.stringify(details, null, 2));
+        } catch (error) {
+          text("screen-status", `Failed to load screen details.\n${formatError(error)}`);
+        }
+      });
+
+      updateChips();
+      setFaviconVariant(0);
+      text("metadata-status", "Waiting for title/icon sync.");
+      text("location-status", `href: ${location.href}\norigin: ${location.origin || "(opaque)"}`);
+      text("event-status", "Waiting for native events.");
+      window.addEventListener("message", (event) => {
+        appendEvent("message", event.data);
+      });
+      window.addEventListener("error", (event) => {
+        appendEvent("error", {
+          message: event.message,
+          source: event.filename,
+          line: event.lineno,
+          column: event.colno,
+        });
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        appendEvent("unhandledrejection", {
+          reason: formatError(event.reason),
+        });
+      });
+      window.addEventListener("hashchange", () => {
+        updateChips();
+      });
+    </script>
+  </body>
+</html>

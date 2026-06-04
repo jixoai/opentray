@@ -4,21 +4,21 @@ use opentray_spec::{Icon, Menu, Rect, SurfaceId, SurfaceRef, Tooltip, TrayEvent,
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendCapabilities {
-    pub rect: bool,
+    pub tray_bounds: bool,
     pub show_menu: bool,
 }
 
 impl BackendCapabilities {
     pub const fn full() -> Self {
         Self {
-            rect: true,
+            tray_bounds: true,
             show_menu: true,
         }
     }
 
-    pub const fn no_rect() -> Self {
+    pub const fn no_tray_bounds() -> Self {
         Self {
-            rect: false,
+            tray_bounds: false,
             show_menu: false,
         }
     }
@@ -45,7 +45,7 @@ pub struct SurfaceProjection {
 pub trait SurfaceBackend {
     fn capabilities(&self) -> BackendCapabilities;
     fn sync_surface(&self, projection: SurfaceProjection) -> Result<(), BackendError>;
-    fn rect(&self, surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError>;
+    fn tray_bounds(&self, space_id: &SurfaceId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError>;
     fn show_menu(&self, surface_id: &SurfaceId) -> Result<(), BackendError>;
     fn emit_event(&self, event: TrayEvent) -> Result<(), BackendError>;
 }
@@ -61,7 +61,7 @@ pub enum BackendError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendOperation {
     SyncSurface(SurfaceProjection),
-    Rect(SurfaceId),
+    TrayBounds(SurfaceId, TrayId),
     ShowMenu(SurfaceId),
     EmitEvent(TrayEvent),
 }
@@ -102,9 +102,12 @@ impl SurfaceBackend for FakeBackend {
         Ok(())
     }
 
-    fn rect(&self, surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
-        self.push(BackendOperation::Rect(surface_id.clone()));
-        if !self.capabilities.rect {
+    fn tray_bounds(&self, space_id: &SurfaceId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError> {
+        self.push(BackendOperation::TrayBounds(
+            space_id.clone(),
+            tray_id.clone(),
+        ));
+        if !self.capabilities.tray_bounds {
             return Ok(None);
         }
         Ok(Some(Rect {

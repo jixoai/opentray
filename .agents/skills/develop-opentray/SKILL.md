@@ -14,12 +14,14 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 - Inspect repo truth before proposing changes: `git status --short --branch`, relevant `openspec/changes`, package manifests, and crate boundaries.
 - Decide whether the request is kernel/runtime, backend adapter, extension host, official extension, release, or user-visible acceptance work.
 - If the change primarily creates or refactors an official extension package, also use `$develop-opentray-ext`.
+- When orthogonal OpenTray atoms are hard to explain, start from scenario examples and ask the user which visible effect they want before hardening the architecture.
 
 ## Reference Map
 
 - Kernel/runtime laws: read `references/kernel-runtime.md`.
 - Backend adapter laws: read `references/backend-adapters.md`.
 - Extension host and dynamic loader laws: read `references/extension-host.md`.
+- Tray primary action patterns: read `references/tray-primary-event-patterns.md`.
 - Official extension package boundaries: read `references/official-extensions.md`.
 - For Lynx-side window/controller work, also read `../develop-opentray-ext/references/lynx-window-host.md`.
 - Badge roadmap atom: read `references/ext-badge.md`.

@@ -1,6 +1,6 @@
 use opentray_spec::{
-    is_supported_protocol_version, ClientFrame, ExtensionEnvelope, LeaseId, RequestId, ServerFrame,
-    SpaceOptions, SpaceRef, TrayEvent, PROTOCOL_VERSION,
+    is_supported_protocol_version, ClientFrame, ExtensionEnvelope, LeaseId, Rect, RequestId,
+    ServerFrame, SpaceOptions, SpaceRef, TrayEvent, PROTOCOL_VERSION,
 };
 
 use crate::{
@@ -33,6 +33,29 @@ pub struct BrokerKernel<B: SurfaceBackend, L: ExtensionLoader = UnsupportedExten
     extension_loader: L,
     next_lease: u64,
     default_space: Option<SpaceRef>,
+}
+
+struct ScopedExtensionHost<'a> {
+    outer: &'a mut dyn ExtensionHostContext,
+    tray_bounds: Option<Rect>,
+}
+
+impl ExtensionHostContext for ScopedExtensionHost<'_> {
+    fn tray_bounds(&mut self) -> Result<Option<Rect>, crate::ExtensionError> {
+        Ok(self.tray_bounds)
+    }
+
+    fn invoke_host(
+        &mut self,
+        capability: &str,
+        request_json: &[u8],
+    ) -> Result<Vec<u8>, crate::ExtensionError> {
+        self.outer.invoke_host(capability, request_json)
+    }
+
+    fn send_event(&mut self, event_json: &[u8]) -> Result<(), crate::ExtensionError> {
+        self.outer.send_event(event_json)
+    }
 }
 
 impl<B: SurfaceBackend> BrokerKernel<B, UnsupportedExtensionLoader> {
@@ -196,6 +219,19 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
+            ClientFrame::GetTrayBounds {
+                request_id,
+                space_id,
+                tray_id,
+            } => match self.kernel.tray_bounds(lease_id, &space_id, &tray_id) {
+                Ok(bounds) => vec![ServerFrame::TrayBounds {
+                    request_id,
+                    space_id,
+                    tray_id,
+                    bounds,
+                }],
+                Err(error) => vec![kernel_error(Some(request_id), error)],
+            },
             ClientFrame::SetTrayMenu {
                 request_id,
                 space_id,
@@ -238,17 +274,28 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 tray_id,
                 ext,
                 data,
-            } => match self
-                .kernel
-                .ext_command_with_host(space_id, tray_id, ext, data, host)
-            {
+            } => {
+                let tray_bounds = self
+                    .kernel
+                    .tray_bounds(lease_id, &space_id, &tray_id)
+                    .ok()
+                    .flatten();
+                let mut scoped_host = ScopedExtensionHost {
+                    outer: host,
+                    tray_bounds,
+                };
+                match self
+                    .kernel
+                    .ext_command_with_host(space_id, tray_id, ext, data, &mut scoped_host)
+                {
                 Ok(events) => {
                     let mut frames = vec![ServerFrame::Ack { request_id }];
                     frames.extend(extension_events(events));
                     frames
                 }
                 Err(error) => vec![kernel_error(Some(request_id), error)],
-            },
+                }
+            }
             ClientFrame::LoadExt {
                 request_id,
                 space_id,
@@ -298,6 +345,7 @@ fn request_id(frame: &ClientFrame) -> Option<RequestId> {
         | ClientFrame::ResolveDefaultSpace { request_id }
         | ClientFrame::CreateTray { request_id, .. }
         | ClientFrame::DestroyTray { request_id, .. }
+        | ClientFrame::GetTrayBounds { request_id, .. }
         | ClientFrame::SetTrayMenu { request_id, .. }
         | ClientFrame::SetTrayIcon { request_id, .. }
         | ClientFrame::SetTrayTooltip { request_id, .. }

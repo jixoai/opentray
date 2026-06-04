@@ -2,6 +2,12 @@ use std::{cell::RefCell, collections::HashMap};
 
 use opentray_core::BackendError;
 use opentray_spec::{SurfaceId, TrayEvent};
+#[cfg(target_os = "macos")]
+use objc2::MainThreadMarker;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::NSEvent;
+#[cfg(target_os = "macos")]
+use objc2_foundation::NSRect;
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };
@@ -21,6 +27,8 @@ use crate::{
 #[derive(Default)]
 pub struct NativeTrayIconRuntime {
     surfaces: RefCell<HashMap<SurfaceId, NativeSurfaceState>>,
+    #[cfg(target_os = "macos")]
+    last_interaction_bounds: RefCell<HashMap<String, opentray_spec::Rect>>,
 }
 
 impl NativeTrayIconRuntime {
@@ -47,33 +55,59 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
             routes,
             ..
         } = projection;
-        let mut icons = Vec::with_capacity(trays.len());
+        let mut icons = HashMap::with_capacity(trays.len());
+        let mut direct_primary_routes = HashMap::new();
 
         for tray in trays {
+            let tray_icon_id = tray.tray_icon_id.clone();
             let icon = native_icon(&tray.icon)?;
-            let menu = native_menu(&tray.menu)?;
+            let menu_policy = native_menu_policy(&tray.menu);
+            let menu = if menu_policy.attach_menu {
+                Some(native_menu(&tray.menu)?)
+            } else {
+                None
+            };
             let tooltip = tray
                 .tooltip
                 .as_ref()
                 .map(|tooltip| format!("{}: {}", tooltip.title, tooltip.description))
                 .unwrap_or_else(|| tray.title.clone());
+            if menu_policy.direct_primary {
+                if let Some(primary_menu_id) = tray.menu.primary_menu_id.clone() {
+                    direct_primary_routes.insert(tray_icon_id.clone(), primary_menu_id);
+                }
+            }
 
-            let native = TrayIconBuilder::new()
+            let mut builder = TrayIconBuilder::new()
+                .with_id(tray_icon_id.clone())
                 .with_tooltip(tooltip)
                 .with_title(tray.title)
-                .with_icon(icon)
-                .with_menu(Box::new(menu))
+                .with_icon(icon);
+            if let Some(menu) = menu {
+                builder = builder.with_menu(Box::new(menu));
+            }
+
+            let native = builder
+                .with_menu_on_left_click(menu_policy.show_menu_on_left_click)
+                .with_menu_on_right_click(menu_policy.show_menu_on_right_click)
                 .build()
                 .map_err(|error| BackendError::Failure(error.to_string()))?;
 
-            icons.push(native);
+            icons.insert(tray_icon_id, native);
         }
 
         let mut surfaces = self.surfaces.borrow_mut();
         if icons.is_empty() {
             surfaces.remove(&space_id);
         } else {
-            surfaces.insert(space_id, NativeSurfaceState { icons, routes });
+            surfaces.insert(
+                space_id,
+                NativeSurfaceState {
+                    icons,
+                    routes,
+                    direct_primary_routes,
+                },
+            );
         }
         Ok(())
     }
@@ -84,11 +118,80 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
             .values()
             .find_map(|surface| surface.routes.menu_event(menu_id))
     }
+
+    fn primary_event(&self, tray_icon_id: &str) -> Option<TrayEvent> {
+        self.surfaces.borrow().values().find_map(|surface| {
+            surface
+                .direct_primary_routes
+                .get(tray_icon_id)
+                .and_then(|menu_id| surface.routes.menu_event(menu_id))
+        })
+    }
+
+    fn tray_bounds(&self, tray_icon_id: &str) -> Result<Option<opentray_spec::Rect>, BackendError> {
+        #[cfg(target_os = "macos")]
+        if let Some(bounds) = self.last_interaction_bounds.borrow().get(tray_icon_id).copied() {
+            return Ok(Some(bounds));
+        }
+        Ok(self
+            .surfaces
+            .borrow()
+            .values()
+            .find_map(|surface| surface.icons.get(tray_icon_id).and_then(native_tray_bounds)))
+    }
+
+    fn record_tray_interaction(&self, tray_icon_id: &str) {
+        #[cfg(target_os = "macos")]
+        if let Some(bounds) = self
+            .surfaces
+            .borrow()
+            .values()
+            .find_map(|surface| surface.icons.get(tray_icon_id).and_then(native_tray_bounds_from_mouse))
+        {
+            self.last_interaction_bounds
+                .borrow_mut()
+                .insert(tray_icon_id.to_string(), bounds);
+        }
+    }
 }
 
 struct NativeSurfaceState {
-    icons: Vec<TrayIcon>,
+    icons: HashMap<String, TrayIcon>,
     routes: TrayIconRouteTable,
+    direct_primary_routes: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NativeMenuPolicy {
+    attach_menu: bool,
+    show_menu_on_left_click: bool,
+    show_menu_on_right_click: bool,
+    direct_primary: bool,
+}
+
+#[cfg(target_os = "windows")]
+fn native_menu_policy(menu: &TrayIconMenuProjection) -> NativeMenuPolicy {
+    let direct_primary = menu.has_primary_event();
+    NativeMenuPolicy {
+        attach_menu: true,
+        show_menu_on_left_click: !direct_primary,
+        show_menu_on_right_click: true,
+        direct_primary,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn native_menu_policy(menu: &TrayIconMenuProjection) -> NativeMenuPolicy {
+    let direct_primary = menu.has_single_primary_event();
+    NativeMenuPolicy {
+        // AppKit's NSStatusItem may open its attached NSMenu before custom
+        // click routing. Single-primary mode is a launcher, so do not attach
+        // native menu chrome at all; route the click through TrayIconEvent.
+        attach_menu: !direct_primary,
+        show_menu_on_left_click: !direct_primary,
+        show_menu_on_right_click: !direct_primary,
+        direct_primary,
+    }
 }
 
 fn native_icon(asset: &TrayIconAsset) -> Result<NativeIcon, BackendError> {
@@ -116,6 +219,46 @@ fn native_menu(projection: &TrayIconMenuProjection) -> Result<NativeMenu, Backen
     }
 
     Ok(menu)
+}
+
+#[cfg(target_os = "macos")]
+fn native_tray_bounds(icon: &TrayIcon) -> Option<opentray_spec::Rect> {
+    let mtm = MainThreadMarker::new()?;
+    let status_item = icon.ns_status_item()?;
+    let button = status_item.button(mtm)?;
+    let window = button.window()?;
+    let button_rect_in_window = button.convertRect_toView(button.bounds(), None);
+    Some(ns_window_frame_to_rect(
+        window.convertRectToScreen(button_rect_in_window),
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn native_tray_bounds_from_mouse(icon: &TrayIcon) -> Option<opentray_spec::Rect> {
+    let mut bounds = native_tray_bounds(icon)?;
+    let mouse = NSEvent::mouseLocation();
+    bounds.x = (mouse.x - bounds.width as f64 / 2.0).round() as i32;
+    Some(bounds)
+}
+
+#[cfg(target_os = "windows")]
+fn native_tray_bounds(icon: &TrayIcon) -> Option<opentray_spec::Rect> {
+    icon.rect().map(|rect| opentray_spec::Rect {
+        x: rect.position.x.round() as i32,
+        y: rect.position.y.round() as i32,
+        width: rect.size.width,
+        height: rect.size.height,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn ns_window_frame_to_rect(frame: NSRect) -> opentray_spec::Rect {
+    opentray_spec::Rect {
+        x: frame.origin.x.round() as i32,
+        y: frame.origin.y.round() as i32,
+        width: frame.size.width.max(0.0).round() as u32,
+        height: frame.size.height.max(0.0).round() as u32,
+    }
 }
 
 fn append_menu_entry(menu: &NativeMenu, entry: &TrayIconMenuEntry) -> Result<(), BackendError> {
@@ -224,4 +367,80 @@ fn append_submenu_entry(submenu: &Submenu, entry: &TrayIconMenuEntry) -> Result<
         }
     }
     .map_err(|error| BackendError::Failure(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(target_os = "macos")]
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    fn menu(primary: bool, click_item_count: usize) -> TrayIconMenuProjection {
+        TrayIconMenuProjection {
+            entries: Vec::new(),
+            primary_menu_id: primary.then(|| "native-menu-id".to_string()),
+            click_item_count,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_single_primary_direct_mode_detaches_native_menu() {
+        assert_eq!(
+            native_menu_policy(&menu(true, 1)),
+            NativeMenuPolicy {
+                attach_menu: false,
+                show_menu_on_left_click: false,
+                show_menu_on_right_click: false,
+                direct_primary: true,
+            }
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_multi_item_primary_keeps_native_menu() {
+        assert_eq!(
+            native_menu_policy(&menu(true, 2)),
+            NativeMenuPolicy {
+                attach_menu: true,
+                show_menu_on_left_click: true,
+                show_menu_on_right_click: true,
+                direct_primary: false,
+            }
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_tray_bounds_use_appkit_global_points() {
+        let rect = ns_window_frame_to_rect(NSRect::new(
+            NSPoint::new(1500.0, 2490.0),
+            NSSize::new(196.0, 60.0),
+        ));
+
+        assert_eq!(
+            rect,
+            opentray_spec::Rect {
+                x: 1500,
+                y: 2490,
+                width: 196,
+                height: 60,
+            }
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_primary_keeps_context_menu_for_right_click() {
+        assert_eq!(
+            native_menu_policy(&menu(true, 2)),
+            NativeMenuPolicy {
+                attach_menu: true,
+                show_menu_on_left_click: false,
+                show_menu_on_right_click: true,
+                direct_primary: true,
+            }
+        );
+    }
 }

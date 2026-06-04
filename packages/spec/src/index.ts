@@ -118,6 +118,7 @@ export type MenuItem =
       type: "item";
       id: MenuItemId;
       title: string;
+      primaryEvent?: boolean;
       enabled?: boolean;
       shortcut?: string;
     }
@@ -202,6 +203,7 @@ export type ClientRequestFrame =
   | { type: "resolve-default-space"; requestId: RequestId }
   | { type: "create-tray"; requestId: RequestId; space: SpaceRef; tray: TrayOptions }
   | { type: "destroy-tray"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId }
+  | { type: "get-tray-bounds"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId }
   | { type: "set-tray-menu"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; menu: Menu }
   | { type: "set-tray-icon"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; icon: Icon }
   | { type: "set-tray-tooltip"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; tooltip: Tooltip }
@@ -215,6 +217,7 @@ export type ServerFrame =
   | { type: "space-created"; requestId: RequestId; space: SpaceRef }
   | { type: "default-space"; requestId: RequestId; space: SpaceRef }
   | { type: "tray-created"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId }
+  | { type: "tray-bounds"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; bounds: Rect | null }
   | { type: "ack"; requestId: RequestId }
   | { type: "daemon-health"; requestId: RequestId; health: DaemonHealth }
   | { type: "event"; event: TrayEvent }
@@ -267,6 +270,13 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
         typeof value.spaceId === "string" &&
         typeof value.trayId === "string"
       );
+    case "tray-bounds":
+      return (
+        typeof value.requestId === "string" &&
+        typeof value.spaceId === "string" &&
+        typeof value.trayId === "string" &&
+        (value.bounds === null || isRect(value.bounds))
+      );
     case "ack":
       return typeof value.requestId === "string";
     case "daemon-health":
@@ -311,6 +321,13 @@ const isDaemonSessionHealth = (value: unknown): value is DaemonSessionHealth =>
   typeof value.sessionId === "number" &&
   (value.internalLeaseId === undefined || typeof value.internalLeaseId === "string") &&
   typeof value.initialized === "boolean";
+
+const isRect = (value: unknown): value is Rect =>
+  isRecord(value) &&
+  typeof value.x === "number" &&
+  typeof value.y === "number" &&
+  typeof value.width === "number" &&
+  typeof value.height === "number";
 
 const isTrayEvent = (value: unknown): value is TrayEvent => {
   if (!isRecord(value) || typeof value.type !== "string") {

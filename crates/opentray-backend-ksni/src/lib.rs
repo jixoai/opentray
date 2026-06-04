@@ -1,5 +1,5 @@
 use opentray_core::{BackendCapabilities, BackendError, SurfaceBackend, SurfaceProjection};
-use opentray_spec::{Rect, SurfaceId, TrayEvent};
+use opentray_spec::{Rect, SurfaceId, TrayEvent, TrayId};
 
 #[derive(Debug, Default)]
 pub struct KsniBackend {
@@ -15,7 +15,7 @@ impl KsniBackend {
 impl SurfaceBackend for KsniBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            rect: false,
+            tray_bounds: false,
             show_menu: false,
         }
     }
@@ -24,7 +24,7 @@ impl SurfaceBackend for KsniBackend {
         Ok(())
     }
 
-    fn rect(&self, _surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
+    fn tray_bounds(&self, _surface_id: &SurfaceId, _tray_id: &TrayId) -> Result<Option<Rect>, BackendError> {
         Ok(None)
     }
 
@@ -49,10 +49,15 @@ mod tests {
     }
 
     #[test]
-    fn linux_rect_absence_is_explicit() {
+    fn linux_tray_bounds_absence_is_explicit() {
         let backend = KsniBackend::new();
 
-        assert_eq!(backend.capabilities().rect, false);
-        assert_eq!(backend.rect(&"surface".to_string()).expect("rect"), None);
+        assert_eq!(backend.capabilities().tray_bounds, false);
+        assert_eq!(
+            backend
+                .tray_bounds(&"surface".to_string(), &"tray".to_string())
+                .expect("tray bounds"),
+            None
+        );
     }
 }

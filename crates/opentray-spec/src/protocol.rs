@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::model::{
-    Icon, Menu, SessionId, SpaceId, SpaceOptions, SpaceRef, Tooltip, TrayEvent, TrayId, TrayOptions,
+    Icon, Menu, Rect, SessionId, SpaceId, SpaceOptions, SpaceRef, Tooltip, TrayEvent, TrayId,
+    TrayOptions,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -163,6 +164,14 @@ pub enum ClientFrame {
         #[serde(rename = "trayId")]
         tray_id: TrayId,
     },
+    GetTrayBounds {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
+        #[serde(rename = "trayId")]
+        tray_id: TrayId,
+    },
     SetTrayMenu {
         #[serde(rename = "requestId")]
         request_id: RequestId,
@@ -253,6 +262,15 @@ pub enum ServerFrame {
         #[serde(rename = "trayId")]
         tray_id: TrayId,
     },
+    TrayBounds {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
+        #[serde(rename = "trayId")]
+        tray_id: TrayId,
+        bounds: Option<Rect>,
+    },
     Ack {
         #[serde(rename = "requestId")]
         request_id: RequestId,
@@ -334,6 +352,53 @@ mod tests {
                 "sessionId": "session-1"
             })
         );
+    }
+
+    #[test]
+    fn primary_event_menu_item_serializes_as_camel_case_role() {
+        let menu = Menu {
+            items: vec![crate::model::MenuItem::Item {
+                id: 8,
+                title: "Show Window".to_string(),
+                primary_event: true,
+                enabled: true,
+                shortcut: None,
+            }],
+        };
+
+        assert_eq!(
+            serde_json::to_value(menu).unwrap(),
+            serde_json::json!({
+                "items": [
+                    {
+                        "type": "item",
+                        "id": 8,
+                        "title": "Show Window",
+                        "primaryEvent": true,
+                        "enabled": true
+                    }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn primary_event_menu_item_defaults_to_false_when_absent() {
+        let menu: Menu = serde_json::from_value(serde_json::json!({
+            "items": [
+                {
+                    "type": "item",
+                    "id": 8,
+                    "title": "Show Window"
+                }
+            ]
+        }))
+        .unwrap();
+
+        let [crate::model::MenuItem::Item { primary_event, .. }] = menu.items.as_slice() else {
+            panic!("expected plain menu item");
+        };
+        assert!(!*primary_event);
     }
 
     #[test]
@@ -491,6 +556,51 @@ mod tests {
                     "spaceId": "space-1",
                     "trayId": "daemon-status",
                     "itemId": 99
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn tray_bounds_frames_serialize_as_additive_protocol_shapes() {
+        let request = ClientFrame::GetTrayBounds {
+            request_id: "req-bounds".to_string(),
+            space_id: "space-1".to_string(),
+            tray_id: "tray-1".to_string(),
+        };
+        let response = ServerFrame::TrayBounds {
+            request_id: "req-bounds".to_string(),
+            space_id: "space-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            bounds: Some(Rect {
+                x: 12,
+                y: 18,
+                width: 24,
+                height: 24,
+            }),
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "type": "get-tray-bounds",
+                "requestId": "req-bounds",
+                "spaceId": "space-1",
+                "trayId": "tray-1"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "type": "tray-bounds",
+                "requestId": "req-bounds",
+                "spaceId": "space-1",
+                "trayId": "tray-1",
+                "bounds": {
+                    "x": 12,
+                    "y": 18,
+                    "width": 24,
+                    "height": 24
                 }
             })
         );

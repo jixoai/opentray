@@ -10,9 +10,15 @@ pub trait TrayIconRuntime {
         None
     }
 
-    fn rect(&self, _surface_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
-        Err(BackendError::Unsupported("tray_icon_rect_unbound"))
+    fn primary_event(&self, _tray_icon_id: &str) -> Option<TrayEvent> {
+        None
     }
+
+    fn tray_bounds(&self, _tray_icon_id: &str) -> Result<Option<Rect>, BackendError> {
+        Err(BackendError::Unsupported("tray_icon_tray_bounds_unbound"))
+    }
+
+    fn record_tray_interaction(&self, _tray_icon_id: &str) {}
 
     fn show_menu(&self, _surface_id: &SurfaceId) -> Result<(), BackendError> {
         Err(BackendError::Unsupported("tray_icon_show_menu_unbound"))

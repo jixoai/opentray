@@ -480,7 +480,7 @@ impl HostCallContext<'_> {
         ExtHostContext {
             host_data: (self as *mut HostCallContext<'_>).cast::<c_void>(),
             send_event: send_event,
-            get_rect: unsupported_get_rect,
+            get_rect: get_rect,
             invoke_host: invoke_host,
             free_host_string: free_host_string,
         }
@@ -500,8 +500,23 @@ extern "C" fn send_event(host_data: *mut c_void, event_json: ExtBytes) -> ExtRes
     }
 }
 
-extern "C" fn unsupported_get_rect(_host_data: *mut c_void, _out: *mut Rect) -> ExtResultCode {
-    EXT_ERR_UNSUPPORTED
+extern "C" fn get_rect(host_data: *mut c_void, out: *mut Rect) -> ExtResultCode {
+    if out.is_null() {
+        return EXT_ERR_REJECTED;
+    }
+    let Some(context) = (unsafe { host_context_from_ptr(host_data) }) else {
+        return EXT_ERR_REJECTED;
+    };
+    match context.host.tray_bounds() {
+        Ok(Some(rect)) => {
+            unsafe {
+                *out = rect;
+            }
+            EXT_OK
+        }
+        Ok(None) => EXT_ERR_UNSUPPORTED,
+        Err(error) => extension_error_code(error),
+    }
 }
 
 extern "C" fn invoke_host(

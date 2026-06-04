@@ -34,7 +34,7 @@ describe("broker command resolver", () => {
     expect(command.cwd).toBeUndefined();
   });
 
-  it("resolves the installed platform package before workspace fallback", async () => {
+  it("prefers the workspace broker build over an installed platform package when running from source", async () => {
     const packageJson = await createInstalledPackage("darwin", "arm64");
     const paths = resolveDaemonPaths({ homeDir: "/tmp/opentray-test", packageVersion: "0.1.0" });
 
@@ -44,15 +44,11 @@ describe("broker command resolver", () => {
       arch: "arm64",
       resolvePackageJson: () => packageJson,
       findWorkspaceRoot: async () => "/repo",
-      ensureDevBrokerBinary: async () => {
-        throw new Error("workspace fallback should not run");
-      },
+      ensureDevBrokerBinary: async (workspaceRoot) => `${workspaceRoot}/target/debug/opentray`,
     });
 
-    const binary = join(packageJson, "..", "bin", "opentray");
-    expect(command.command).toBe(binary);
-    expect(command.cwd).toBeUndefined();
-    expect((await stat(binary)).mode & 0o777).toBe(0o755);
+    expect(command.command).toBe("/repo/target/debug/opentray");
+    expect(command.cwd).toBe("/repo");
   });
 
   it("falls back to the workspace broker build when no installed package exists", async () => {
@@ -69,6 +65,24 @@ describe("broker command resolver", () => {
 
     expect(command.command).toBe("/repo/target/debug/opentray");
     expect(command.cwd).toBe("/repo");
+  });
+
+  it("falls back to the installed platform package outside a workspace", async () => {
+    const packageJson = await createInstalledPackage("darwin", "arm64");
+    const paths = resolveDaemonPaths({ homeDir: "/tmp/opentray-test", packageVersion: "0.1.0" });
+
+    const command = await resolveBrokerCommand(paths, {
+      env: {},
+      platform: "darwin",
+      arch: "arm64",
+      resolvePackageJson: () => packageJson,
+      findWorkspaceRoot: async () => undefined,
+    });
+
+    const binary = join(packageJson, "..", "bin", "opentray");
+    expect(command.command).toBe(binary);
+    expect(command.cwd).toBeUndefined();
+    expect((await stat(binary)).mode & 0o777).toBe(0o755);
   });
 
   it("falls back to workspace dev build when a workspace package has not staged its binary yet", async () => {

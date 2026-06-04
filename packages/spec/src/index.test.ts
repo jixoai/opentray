@@ -10,6 +10,7 @@ import {
   parseServerFrame,
   PROTOCOL_VERSION,
   type ClientFrame,
+  type Menu,
 } from "./index";
 
 describe("@opentray/spec", () => {
@@ -40,6 +41,68 @@ describe("@opentray/spec", () => {
     };
 
     expect(frame.requestId).toBe("req-health");
+  });
+
+  it("accepts tray-bounds request and response frames", () => {
+    const request: ClientFrame = {
+      type: "get-tray-bounds",
+      requestId: "req-bounds",
+      spaceId: "space-1",
+      trayId: "tray-1",
+    };
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "tray-bounds",
+        requestId: "req-bounds",
+        spaceId: "space-1",
+        trayId: "tray-1",
+        bounds: { x: 10, y: 20, width: 24, height: 24 },
+      }),
+    );
+
+    expect(request.trayId).toBe("tray-1");
+    expect(parsed.ok).toBe(true);
+    expect(parsed.frame).toEqual({
+      type: "tray-bounds",
+      requestId: "req-bounds",
+      spaceId: "space-1",
+      trayId: "tray-1",
+      bounds: { x: 10, y: 20, width: 24, height: 24 },
+    });
+  });
+
+  it("accepts primary-event menu items without changing menuClick events", () => {
+    const menu: Menu = {
+      items: [{ type: "item", id: 8, title: "Show Window", primaryEvent: true }],
+    };
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "event",
+        event: {
+          type: "menuClick",
+          spaceId: "space-1",
+          trayId: "daemon-status",
+          itemId: 8,
+        },
+      }),
+    );
+
+    expect(menu.items[0]).toEqual({
+      type: "item",
+      id: 8,
+      title: "Show Window",
+      primaryEvent: true,
+    });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.frame).toEqual({
+      type: "event",
+      event: {
+        type: "menuClick",
+        spaceId: "space-1",
+        trayId: "daemon-status",
+        itemId: 8,
+      },
+    });
   });
 
   it("formats endpoint identity with package and protocol versions", () => {

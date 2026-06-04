@@ -9,7 +9,7 @@ pub use projection::*;
 pub use runtime::*;
 
 use opentray_core::{BackendCapabilities, BackendError, SurfaceBackend, SurfaceProjection};
-use opentray_spec::{Rect, SurfaceId, TrayEvent};
+use opentray_spec::{Rect, SurfaceId, TrayEvent, TrayId};
 
 #[derive(Debug, Default)]
 pub struct TrayIconBackend<R = UnboundTrayIconRuntime> {
@@ -30,12 +30,20 @@ impl<R: TrayIconRuntime> TrayIconBackend<R> {
     pub fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
         self.runtime.menu_event(menu_id)
     }
+
+    pub fn primary_event(&self, tray_icon_id: &str) -> Option<TrayEvent> {
+        self.runtime.primary_event(tray_icon_id)
+    }
+
+    pub fn record_tray_interaction(&self, tray_icon_id: &str) {
+        self.runtime.record_tray_interaction(tray_icon_id);
+    }
 }
 
 impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            rect: cfg!(not(target_os = "linux")),
+            tray_bounds: cfg!(not(target_os = "linux")),
             show_menu: true,
         }
     }
@@ -45,11 +53,11 @@ impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
             .apply_projection(TrayIconProjection::from_surface_projection(&projection))
     }
 
-    fn rect(&self, space_id: &SurfaceId) -> Result<Option<Rect>, BackendError> {
-        if !self.capabilities().rect {
+    fn tray_bounds(&self, space_id: &SurfaceId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError> {
+        if !self.capabilities().tray_bounds {
             return Ok(None);
         }
-        self.runtime.rect(space_id)
+        self.runtime.tray_bounds(&stable_tray_icon_id(space_id, tray_id))
     }
 
     fn show_menu(&self, space_id: &SurfaceId) -> Result<(), BackendError> {
@@ -124,6 +132,44 @@ mod tests {
         assert_eq!(backend.menu_event("missing"), None);
     }
 
+    #[test]
+    fn primary_event_delegates_to_runtime_ingress() {
+        let backend = TrayIconBackend::with_runtime(RoutingRuntime);
+
+        assert_eq!(
+            backend.primary_event("native-tray-id"),
+            Some(TrayEvent::MenuClick {
+                space_id: "surface-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                item_id: 7,
+            })
+        );
+        assert_eq!(backend.primary_event("missing"), None);
+    }
+
+    #[test]
+    fn tray_bounds_delegate_to_runtime_by_tray_identity() {
+        let backend = TrayIconBackend::with_runtime(RoutingRuntime);
+
+        assert_eq!(
+            backend
+                .tray_bounds(&"surface-1".to_string(), &"tray-1".to_string())
+                .expect("tray bounds"),
+            Some(Rect {
+                x: 10,
+                y: 20,
+                width: 24,
+                height: 24,
+            })
+        );
+        assert_eq!(
+            backend
+                .tray_bounds(&"surface-1".to_string(), &"missing".to_string())
+                .expect("tray bounds"),
+            None
+        );
+    }
+
     #[derive(Clone, Default)]
     struct RecordingRuntime {
         calls: Rc<RefCell<Vec<TrayIconProjection>>>,
@@ -149,8 +195,25 @@ mod tests {
             Ok(())
         }
 
+        fn tray_bounds(&self, tray_icon_id: &str) -> Result<Option<Rect>, BackendError> {
+            Ok((tray_icon_id == "opentray-tray:surface-1:tray-1").then_some(Rect {
+                x: 10,
+                y: 20,
+                width: 24,
+                height: 24,
+            }))
+        }
+
         fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
             (menu_id == "native-menu-id").then(|| TrayEvent::MenuClick {
+                space_id: "surface-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                item_id: 7,
+            })
+        }
+
+        fn primary_event(&self, tray_icon_id: &str) -> Option<TrayEvent> {
+            (tray_icon_id == "native-tray-id").then(|| TrayEvent::MenuClick {
                 space_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 7,
@@ -179,6 +242,7 @@ mod tests {
                     items: vec![MenuItem::Item {
                         id: 7,
                         title: "Open".to_string(),
+                        primary_event: false,
                         enabled: true,
                         shortcut: None,
                     }],

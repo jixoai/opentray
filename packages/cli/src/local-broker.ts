@@ -243,6 +243,7 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
     case "space-created":
     case "default-space":
     case "tray-created":
+    case "tray-bounds":
     case "ack":
     case "daemon-health":
       return frame.requestId;

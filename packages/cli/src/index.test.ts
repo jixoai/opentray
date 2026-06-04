@@ -35,6 +35,28 @@ describe("opentray client", () => {
     ]);
   });
 
+  it("queries tray bounds through the broker-backed tray handle", async () => {
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(
+      transport,
+      { spaceId: "space-1" },
+      "tray-1",
+      createTestRequestId,
+    );
+
+    const bounds = await tray.getBounds();
+
+    expect(bounds).toEqual({ x: 10, y: 20, width: 24, height: 24 });
+    expect(transport.frames).toEqual([
+      {
+        type: "get-tray-bounds",
+        requestId: "req-test",
+        spaceId: "space-1",
+        trayId: "tray-1",
+      },
+    ]);
+  });
+
   it("creates explicit protocol handshake frames", () => {
     expect(createInitFrame("0.1.0")).toEqual({
       type: "init",
@@ -120,6 +142,14 @@ class RecordingTransport implements OpenTrayTransport {
           },
         };
       case "destroy-tray":
+      case "get-tray-bounds":
+        return {
+          type: "tray-bounds",
+          requestId: frame.requestId,
+          spaceId: frame.spaceId,
+          trayId: frame.trayId,
+          bounds: { x: 10, y: 20, width: 24, height: 24 },
+        };
       case "set-tray-menu":
       case "set-tray-icon":
       case "set-tray-tooltip":

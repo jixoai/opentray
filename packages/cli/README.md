@@ -53,6 +53,28 @@ Run the human-visible daemon tray example:
 pnpm --filter opentray example:daemon-tray
 ```
 
+Run the direct webview control demo:
+
+```bash
+pnpm --filter opentray example:webview-control
+```
+
+That demo opens a native WebView window immediately and puts the controls inside the page itself, so you can exercise frameless, transparent, keep-on-top, title, icon, screen, and navigation behavior without going through the tray menu first.
+Treat `example:webview-control` as the API exercise surface. It is useful for probing capabilities and events, but it is not the canonical recipe for a tray-anchored glass shell.
+
+Run the dedicated tray-panel demo:
+
+```bash
+cargo build -p opentray-bin -p opentray-ext-webview
+pnpm --filter opentray example:tray-panel
+```
+
+This demo is the canonical custom TrayPanel case: one `primaryEvent` tray item, backend `tray.getBounds()`, page `navigator.opentray.tray.getBounds()`, screen-aware repositioning, and a frameless glass panel with `keepOnTop`.
+It also follows the native-glass rule strictly: transparent native window background, no root HTML shell styling, and content padding only inside the page.
+It now also pins `backgroundEffectState: "active"` so the tray-launched material surface does not immediately fall back to the inactive grey AppKit appearance.
+
+When run from the repo worktree, the example automatically discovers `target/debug` or `target/release` `libopentray_ext_webview` and wires it through `OPENTRAY_EXT_PATH` before starting the daemon. That keeps the example on the real `load-ext` path without requiring a manual staging step for routine source-level testing.
+
 After installing from npm, use the published CLI smoke path instead of workspace scripts:
 
 ```bash
@@ -68,9 +90,13 @@ pnpm --filter opentray cli -- daemon stop
 pnpm --filter opentray cli -- daemon restart
 ```
 
-The menu includes `WebView Commands` entries that call the `@opentray/ext-webview` facade. On macOS, `Show HTML` loads the platform WebView dynamic library and opens a real native WebView window owned by that library; `Navigate`, `Post Message`, `Evaluate JS`, and `Hide` operate on that window.
+The menu intentionally declares only one plain item: `Open WebView` with `primaryEvent: true`. On macOS, that single primary item lets clicking the status item direct-trigger the normal `menuClick` event without opening a menu, so the example can behave like a one-action launcher for a WebView-built surface.
 
-The `Show HTML` demo also enables the injected page bridge so the rendered page can call `navigator.window` / `navigator.opentrayWindow` and, for the demo only, opt into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides. Use the in-page buttons to verify `getCapabilities`, `getStyle`, `setStyle({ frameless })`, move, resize, and close behavior visually instead of relying only on terminal logs.
+On platforms that expose a direct tray activation gesture, the same item opens the WebView immediately while still remaining a normal native menu item on platforms or gestures that show a menu.
+
+The host side of that example can call `await tray.getBounds()` to read the current tray geometry before opening the window. The rendered page can also opt into `navigator.opentray.tray.getBounds()` when it needs the same tray anchor for layout.
+
+The opened WebView also enables the injected page bridge so the rendered page can call `navigator.window` / `navigator.opentrayWindow` and, for the demo only, opt into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides. Use the in-page buttons to verify `getCapabilities`, `getStyle`, `setStyle({ frameless })`, move, resize, close, and tray-bounds behavior visually instead of relying only on terminal logs.
 
 The Lynx smoke path uses the same generic extension loader but launches a real `LynxExplorer.app.zip` runtime sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` immediately on run and exposes `Reload Bundle`, `Hide Window`, and `Quit Smoke` through tray-routed events.
 
@@ -87,6 +113,14 @@ bash scripts/release/build-lynx-runtime.sh /tmp/LynxExplorer.app.zip
 bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/LynxExplorer.app.zip
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
 pnpm --filter opentray cli -- smoke daemon-lynx --bundle ./research/lynx/app/dist/main.lynx.bundle
+```
+
+During source-level daemon work, restart the daemon with the freshly built broker binary before testing tray behavior. Otherwise the CLI may reuse the already staged same-version daemon:
+
+```bash
+cargo build -p opentray-bin
+OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- daemon restart
+OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- smoke daemon-tray
 ```
 
 The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to keep it alive during debugging, or provide another millisecond value for a custom idle release window.

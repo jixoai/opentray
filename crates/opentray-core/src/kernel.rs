@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use opentray_spec::{
-    ExtensionEnvelope, Icon, LeaseId, Menu, SpaceId, SpaceOptions, SpaceRef, Tooltip, TrayEvent,
-    TrayId, TrayOptions,
+    ExtensionEnvelope, Icon, LeaseId, Menu, Rect, SpaceId, SpaceOptions, SpaceRef, Tooltip,
+    TrayEvent, TrayId, TrayOptions,
 };
 use serde_json::Value;
 
@@ -184,6 +184,19 @@ impl<B: SurfaceBackend> Kernel<B> {
         Ok(())
     }
 
+    /// Tray bounds are routed by tray identity instead of by one ambiguous space-wide rect.
+    pub fn tray_bounds(
+        &self,
+        lease_id: &str,
+        space_id: &str,
+        tray_id: &str,
+    ) -> Result<Option<Rect>, KernelError> {
+        self.require_owned_tray(lease_id, space_id, tray_id)?;
+        self.backend
+            .tray_bounds(&space_id.to_string(), &tray_id.to_string())
+            .map_err(|error| KernelError::Backend(error.to_string()))
+    }
+
     pub fn close_lease(&mut self, lease_id: &str) -> Result<Vec<ExtensionEnvelope>, KernelError> {
         let mut host = UnsupportedExtensionHostContext;
         self.close_lease_with_host(lease_id, &mut host)
@@ -300,6 +313,23 @@ impl<B: SurfaceBackend> Kernel<B> {
             })
     }
 
+    fn require_owned_tray(
+        &self,
+        lease_id: &str,
+        space_id: &str,
+        tray_id: &str,
+    ) -> Result<&TrayState, KernelError> {
+        let tray = self.require_tray(space_id, tray_id)?;
+        if tray.lease_id != lease_id {
+            return Err(KernelError::LeaseMismatch {
+                lease_id: lease_id.to_string(),
+                space_id: space_id.to_string(),
+                tray_id: tray_id.to_string(),
+            });
+        }
+        Ok(tray)
+    }
+
     fn require_owned_tray_mut(
         &mut self,
         lease_id: &str,
@@ -362,6 +392,7 @@ mod tests {
                 items: vec![MenuItem::Item {
                     id: 1,
                     title: "Open".to_string(),
+                    primary_event: false,
                     enabled: true,
                     shortcut: None,
                 }],
@@ -424,6 +455,43 @@ mod tests {
             .expect("routed");
 
         assert_eq!(routed.lease_id, "lease-a");
+    }
+
+    #[test]
+    fn projection_preserves_primary_event_as_menu_data() {
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend);
+        let surface = kernel
+            .create_space(SpaceOptions {
+                id: Some("host".to_string()),
+                title: None,
+                icon: None,
+                default: false,
+            })
+            .expect("surface");
+        let mut options = tray_options("status", "Status");
+        options.menu = Some(Menu {
+            items: vec![MenuItem::Item {
+                id: 8,
+                title: "Show Window".to_string(),
+                primary_event: true,
+                enabled: true,
+                shortcut: None,
+            }],
+        });
+        kernel
+            .create_tray("lease-a".to_string(), &surface, options)
+            .expect("tray");
+
+        let projection = kernel.projection(&surface.space_id).expect("projection");
+        let Some(menu) = projection.trays[0].menu.as_ref() else {
+            panic!("expected projected menu");
+        };
+        let [MenuItem::Item { primary_event, .. }] = menu.items.as_slice() else {
+            panic!("expected projected primary menu item");
+        };
+
+        assert!(*primary_event);
     }
 
     #[test]
@@ -507,11 +575,17 @@ mod tests {
     }
 
     #[test]
-    fn missing_rect_capability_is_explicit() {
-        let backend = FakeBackend::new(BackendCapabilities::no_rect());
+    fn missing_tray_bounds_capability_is_explicit() {
+        let backend = FakeBackend::new(BackendCapabilities::no_tray_bounds());
         let surface_id = "surface".to_string();
-        assert_eq!(backend.rect(&surface_id).expect("rect query"), None);
-        assert_eq!(backend.capabilities().rect, false);
+        let tray_id = "tray".to_string();
+        assert_eq!(
+            backend
+                .tray_bounds(&surface_id, &tray_id)
+                .expect("tray bounds query"),
+            None
+        );
+        assert_eq!(backend.capabilities().tray_bounds, false);
     }
 
     #[test]
@@ -560,5 +634,74 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn tray_bounds_require_owning_lease() {
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend);
+        let surface = kernel
+            .create_space(SpaceOptions {
+                id: Some("host".to_string()),
+                title: None,
+                icon: None,
+                default: false,
+            })
+            .expect("surface");
+        kernel
+            .create_tray(
+                "lease-a".to_string(),
+                &surface,
+                tray_options("tray", "Tray"),
+            )
+            .expect("tray");
+
+        let error = kernel
+            .tray_bounds("lease-b", &surface.space_id, "tray")
+            .expect_err("wrong lease rejected");
+
+        assert!(matches!(error, KernelError::LeaseMismatch { .. }));
+    }
+
+    #[test]
+    fn tray_bounds_route_by_space_and_tray_identity() {
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend.clone());
+        let surface = kernel
+            .create_space(SpaceOptions {
+                id: Some("host".to_string()),
+                title: None,
+                icon: None,
+                default: false,
+            })
+            .expect("surface");
+        kernel
+            .create_tray(
+                "lease-a".to_string(),
+                &surface,
+                tray_options("tray", "Tray"),
+            )
+            .expect("tray");
+
+        let bounds = kernel
+            .tray_bounds("lease-a", &surface.space_id, "tray")
+            .expect("tray bounds");
+
+        assert_eq!(
+            bounds,
+            Some(Rect {
+                x: 0,
+                y: 0,
+                width: 24,
+                height: 24,
+            })
+        );
+        assert!(backend.operations().iter().any(|operation| {
+            matches!(
+                operation,
+                BackendOperation::TrayBounds(space_id, tray_id)
+                    if space_id == "host" && tray_id == "tray"
+            )
+        }));
     }
 }

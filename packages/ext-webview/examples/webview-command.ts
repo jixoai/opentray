@@ -28,8 +28,33 @@ await webview.show({
   html: "<main><h1>OpenTray WebView</h1><p>Extension atom example.</p></main>",
   width: 360,
   height: 220,
+  title: "OpenTray WebView Example",
+  icon: {
+    type: "href",
+    href: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+  },
+  style: {
+    frameless: true,
+    transparent: true,
+    keepOnTop: true,
+    backgroundEffect: "hudWindow",
+  },
   nativeWindowApi: true,
   bindWindowGlobals: true,
+  nativeScreenApi: true,
+  bindScreenGlobals: true,
+  titleSync: {
+    documentToWindow: true,
+    windowToDocument: true,
+  },
+  iconSync: true,
+  nativeApiPolicy: {
+    defaultSrc: ["'local'"],
+    window: ["https://example.com"],
+    screen: ["https://example.com"],
+    titleSync: ["https://example.com"],
+    iconSync: ["https://example.com"],
+  },
   fallbackRect: {
     x: 0,
     y: 0,

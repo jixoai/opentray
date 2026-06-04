@@ -24,6 +24,14 @@ class RecordingTransport implements OpenTrayTransport {
           spaceId: frame.space.spaceId,
           trayId: frame.tray.trayId ?? "recorded-tray",
         };
+      case "get-tray-bounds":
+        return {
+          type: "tray-bounds",
+          requestId: frame.requestId,
+          spaceId: frame.spaceId,
+          trayId: frame.trayId,
+          bounds: null,
+        };
       case "destroy-tray":
       case "set-tray-menu":
       case "set-tray-icon":

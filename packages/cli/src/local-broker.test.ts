@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { PROTOCOL_VERSION } from "@opentray/spec";
+import { PROTOCOL_VERSION, type ClientFrame, type ServerFrame } from "@opentray/spec";
 
 import { connectLocalBroker } from "./local-broker";
 import type { DaemonDriver } from "./daemon/lifecycle";
@@ -55,6 +55,40 @@ describe("local broker client", () => {
 
     expect(driver.spawned).toBe(0);
   });
+
+  it("routes tray-bounds responses back to the pending request", async () => {
+    const homeDir = await makeTempHome();
+    const driver = createSocketBrokerDriver((frame, socket) => {
+      if (frame.type === "get-tray-bounds") {
+        socket.write(
+          `${JSON.stringify({
+            type: "tray-bounds",
+            requestId: frame.requestId,
+            spaceId: frame.spaceId,
+            trayId: frame.trayId,
+            bounds: { x: 10, y: 20, width: 24, height: 24 },
+          })}\n`,
+        );
+      }
+    });
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+    const frame = (await connection.request({
+      type: "get-tray-bounds",
+      requestId: "bounds-1",
+      spaceId: "space-a",
+      trayId: "tray-a",
+    })) as Extract<ServerFrame, { type: "tray-bounds" }>;
+
+    expect(frame.bounds).toEqual({ x: 10, y: 20, width: 24, height: 24 });
+    await connection.close();
+  });
 });
 
 const makeTempHome = async (): Promise<string> => {
@@ -63,7 +97,9 @@ const makeTempHome = async (): Promise<string> => {
   return dir;
 };
 
-const createSocketBrokerDriver = (): DaemonDriver & {
+const createSocketBrokerDriver = (
+  onFrame?: (frame: ClientFrame, socket: Socket) => void,
+): DaemonDriver & {
   readonly spawned: number;
   close(): Promise<void>;
 } => {
@@ -80,7 +116,7 @@ const createSocketBrokerDriver = (): DaemonDriver & {
     },
     async spawnBroker(paths) {
       spawned += 1;
-      server = createReadyServer(paths);
+      server = createReadyServer(paths, onFrame);
       await listen(server, paths.endpoint);
       await writeFile(paths.readyFile, `${JSON.stringify({ pid })}\n`, "utf8");
       return pid;
@@ -115,11 +151,34 @@ const createCountingDriver = (): DaemonDriver & { readonly spawned: number } => 
   };
 };
 
-const createReadyServer = (paths: DaemonPaths): Server =>
+const createReadyServer = (
+  paths: DaemonPaths,
+  onFrame?: (frame: ClientFrame, socket: Socket) => void,
+): Server =>
   createServer((socket) => {
     socket.setEncoding("utf8");
-    socket.once("data", () => {
-      writeReadyFrame(socket, paths);
+    let initialized = false;
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += String(chunk);
+      while (true) {
+        const newline = buffer.indexOf("\n");
+        if (newline < 0) {
+          return;
+        }
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (line.length === 0) {
+          continue;
+        }
+        const frame = JSON.parse(line) as ClientFrame;
+        if (!initialized) {
+          initialized = true;
+          writeReadyFrame(socket, paths);
+          continue;
+        }
+        onFrame?.(frame, socket);
+      }
     });
   });
 

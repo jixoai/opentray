@@ -123,12 +123,19 @@ mod native_broker {
     enum UserEvent {
         Transport(unix_transport::TransportEvent),
         Menu(tray_icon::menu::MenuEvent),
+        Tray(tray_icon::TrayIconEvent),
         IdleExpired(u64),
     }
 
     pub fn run(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
         let mut builder = EventLoop::<UserEvent>::with_user_event();
         builder
+            // Keep the broker process in accessory mode on macOS.
+            // OpenTray can host mixed spaces and extensions inside one daemon, so letting one
+            // ext-webview window promote the whole process into a Dock-visible regular app would
+            // leak app identity across unrelated surfaces. If we ever need a Dock-owned web
+            // application, it should be a dedicated runtime atom (for example a future
+            // ext-webapp), not a mode toggle inside ext-webview.
             .with_activation_policy(ActivationPolicy::Accessory)
             .with_default_menu(false)
             .with_activate_ignoring_other_apps(false);
@@ -143,6 +150,11 @@ mod native_broker {
         let proxy = event_loop.create_proxy();
         tray_icon::menu::MenuEvent::set_event_handler(Some(move |event| {
             let _ = proxy.send_event(UserEvent::Menu(event));
+        }));
+
+        let proxy = event_loop.create_proxy();
+        tray_icon::TrayIconEvent::set_event_handler(Some(move |event| {
+            let _ = proxy.send_event(UserEvent::Tray(event));
         }));
 
         let mut app = NativeBrokerApp {
@@ -187,6 +199,7 @@ mod native_broker {
             match event {
                 UserEvent::Transport(event) => self.handle_transport(event),
                 UserEvent::Menu(event) => self.handle_menu(event),
+                UserEvent::Tray(event) => self.handle_tray(event),
                 UserEvent::IdleExpired(generation) => {
                     if self.sessions.is_empty() && generation == self.idle_generation {
                         event_loop.exit();
@@ -263,6 +276,23 @@ mod native_broker {
             let Some(event) = self.broker.backend().menu_event(&menu_id) else {
                 return;
             };
+            self.dispatch_backend_event(event);
+        }
+
+        fn handle_tray(&mut self, event: tray_icon::TrayIconEvent) {
+            if !is_primary_tray_activation(&event) {
+                return;
+            }
+            self.broker
+                .backend()
+                .record_tray_interaction(event.id().as_ref());
+            let Some(event) = self.broker.backend().primary_event(event.id().as_ref()) else {
+                return;
+            };
+            self.dispatch_backend_event(event);
+        }
+
+        fn dispatch_backend_event(&mut self, event: opentray_spec::TrayEvent) {
             let Some(routed) = self.broker.route_backend_event(event) else {
                 return;
             };
@@ -294,6 +324,17 @@ mod native_broker {
                 let _ = proxy.send_event(UserEvent::IdleExpired(generation));
             });
         }
+    }
+
+    fn is_primary_tray_activation(event: &tray_icon::TrayIconEvent) -> bool {
+        matches!(
+            event,
+            tray_icon::TrayIconEvent::Click {
+                button: tray_icon::MouseButton::Left,
+                button_state: tray_icon::MouseButtonState::Up,
+                ..
+            }
+        )
     }
 }
 

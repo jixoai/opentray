@@ -2,6 +2,7 @@ import {
   PROTOCOL_VERSION,
   type ClientFrame,
   type ClientRequestFrame,
+  type Rect,
   type RequestId,
   type ServerFrame,
   type SpaceOptions,
@@ -32,6 +33,7 @@ export type SurfaceHandle = SpaceHandle;
 export interface TrayHandle {
   space: SpaceRef;
   trayId: TrayId;
+  getBounds(): Promise<Rect | null>;
   commandExtension(ext: string, data: unknown): Promise<void>;
   destroy(): Promise<void>;
 }
@@ -108,6 +110,16 @@ export const createTrayHandle = (
 ): TrayHandle => ({
   space,
   trayId,
+  async getBounds(): Promise<Rect | null> {
+    const requestId = nextRequestId();
+    const response = await transport.request({
+      type: "get-tray-bounds",
+      requestId,
+      spaceId: space.spaceId,
+      trayId,
+    });
+    return expectResponse(response, requestId, "tray-bounds").bounds;
+  },
   async commandExtension(ext: string, data: unknown): Promise<void> {
     const requestId = nextRequestId();
     const response = await transport.request({
@@ -163,6 +175,7 @@ const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
     case "space-created":
     case "default-space":
     case "tray-created":
+    case "tray-bounds":
     case "ack":
     case "daemon-health":
       return frame.requestId;

@@ -10,6 +10,7 @@ use opentray_spec::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use url::Url;
 
 #[cfg(target_os = "macos")]
 type WebviewRuntime = macos::MacosWebviewRuntime;
@@ -21,6 +22,142 @@ type WebviewRuntime = UnsupportedWebviewRuntime;
 pub(crate) struct NavigatorWindowSettings {
     pub enabled: bool,
     pub bind_window_globals: bool,
+    pub window_controls_overlay: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct NavigatorScreenSettings {
+    pub enabled: bool,
+    pub bind_screen_globals: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct NavigatorTraySettings {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct MetadataSyncSettings {
+    pub page_to_native: bool,
+    pub native_to_page: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct WebviewMetadataSyncSettings {
+    pub title: MetadataSyncSettings,
+    pub icon: MetadataSyncSettings,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct WebviewInitialStyle {
+    pub frameless: bool,
+    pub transparent: bool,
+    pub keep_on_top: bool,
+    pub background_effect: Option<String>,
+    pub background_effect_state: WebviewBackgroundEffectState,
+    pub corner_radius: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum WebviewBackgroundEffectState {
+    #[default]
+    FollowsWindowActiveState,
+    Active,
+    Inactive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WebviewNativeApiSource {
+    None,
+    Any,
+    Local,
+    Remote,
+    Origin(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WebviewNativeApiPolicy {
+    pub default_src: Vec<WebviewNativeApiSource>,
+    pub window: Option<Vec<WebviewNativeApiSource>>,
+    pub screen: Option<Vec<WebviewNativeApiSource>>,
+    pub tray: Option<Vec<WebviewNativeApiSource>>,
+    pub window_globals: Option<Vec<WebviewNativeApiSource>>,
+    pub screen_globals: Option<Vec<WebviewNativeApiSource>>,
+    pub title_sync: Option<Vec<WebviewNativeApiSource>>,
+    pub icon_sync: Option<Vec<WebviewNativeApiSource>>,
+}
+
+impl Default for WebviewNativeApiPolicy {
+    fn default() -> Self {
+        Self {
+            default_src: vec![WebviewNativeApiSource::Local],
+            window: None,
+            screen: None,
+            tray: None,
+            window_globals: None,
+            screen_globals: None,
+            title_sync: None,
+            icon_sync: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub(crate) enum WebviewWindowIcon {
+    Rgba {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    Encoded {
+        data: Vec<u8>,
+    },
+    File {
+        path: String,
+    },
+    Href {
+        href: String,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct WebviewWindowOptions {
+    pub title: Option<String>,
+    pub icon: Option<WebviewWindowIcon>,
+    pub style: WebviewInitialStyle,
+    pub sync: WebviewMetadataSyncSettings,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct WebviewShowSettings {
+    pub navigator_window: NavigatorWindowSettings,
+    pub navigator_screen: NavigatorScreenSettings,
+    pub navigator_tray: NavigatorTraySettings,
+    pub window: WebviewWindowOptions,
+    pub native_api_policy: WebviewNativeApiPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WebviewSessionBootstrapSettings {
+    pub navigator_window: NavigatorWindowSettings,
+    pub navigator_screen: NavigatorScreenSettings,
+    pub navigator_tray: NavigatorTraySettings,
+    pub sync: WebviewMetadataSyncSettings,
+    pub native_api_policy: WebviewNativeApiPolicy,
+}
+
+impl WebviewShowSettings {
+    pub(crate) fn session_bootstrap_settings(&self) -> WebviewSessionBootstrapSettings {
+        WebviewSessionBootstrapSettings {
+            navigator_window: self.navigator_window,
+            navigator_screen: self.navigator_screen,
+            navigator_tray: self.navigator_tray,
+            sync: self.window.sync,
+            native_api_policy: self.native_api_policy.clone(),
+        }
+    }
 }
 
 struct WebviewExtension {
@@ -54,10 +191,16 @@ enum WebviewCommand {
         url: Option<String>,
         width: f64,
         height: f64,
+        tray_bounds: Option<Rect>,
         fallback_rect: Option<Rect>,
-        navigator_window: NavigatorWindowSettings,
+        show_settings: WebviewShowSettings,
     },
     Hide,
+    Destroy,
+    SetContent {
+        html: Option<String>,
+        url: Option<String>,
+    },
     Navigate {
         url: String,
     },
@@ -87,6 +230,75 @@ struct ShowCommandData {
     fallback_rect: Option<Rect>,
     native_window_api: Option<bool>,
     bind_window_globals: Option<bool>,
+    native_screen_api: Option<bool>,
+    bind_screen_globals: Option<bool>,
+    native_tray_api: Option<bool>,
+    window_controls_overlay: Option<bool>,
+    title: Option<String>,
+    icon: Option<WebviewWindowIcon>,
+    style: Option<ShowWindowStyleData>,
+    title_sync: Option<TitleSyncInput>,
+    icon_sync: Option<IconSyncInput>,
+    native_api_policy: Option<NativeApiPolicyInput>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetContentCommandData {
+    html: Option<String>,
+    url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShowWindowStyleData {
+    frameless: Option<bool>,
+    transparent: Option<bool>,
+    keep_on_top: Option<bool>,
+    background_effect: Option<String>,
+    background_effect_state: Option<String>,
+    corner_radius: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeApiPolicyInput {
+    default_src: Option<Vec<String>>,
+    window: Option<Vec<String>>,
+    screen: Option<Vec<String>>,
+    tray: Option<Vec<String>>,
+    window_globals: Option<Vec<String>>,
+    screen_globals: Option<Vec<String>>,
+    title_sync: Option<Vec<String>>,
+    icon_sync: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum TitleSyncInput {
+    Enabled(bool),
+    Directions(TitleSyncDirectionsInput),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TitleSyncDirectionsInput {
+    document_to_window: Option<bool>,
+    window_to_document: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum IconSyncInput {
+    Enabled(bool),
+    Directions(IconSyncDirectionsInput),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IconSyncDirectionsInput {
+    favicon_to_window: Option<bool>,
+    window_to_favicon: Option<bool>,
 }
 
 impl WebviewRuntimeError {
@@ -140,11 +352,11 @@ pub unsafe extern "C" fn opentray_ext_init(
 #[no_mangle]
 pub unsafe extern "C" fn opentray_ext_command(
     instance: *mut c_void,
-    _context: *const ExtHostContext,
+    context: *const ExtHostContext,
     envelope_json: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
-    if instance.is_null() {
+    if instance.is_null() || context.is_null() {
         return EXT_ERR_REJECTED;
     }
     let Some(bytes) = (unsafe { ext_bytes_as_slice(envelope_json) }) else {
@@ -164,6 +376,8 @@ pub unsafe extern "C" fn opentray_ext_command(
     let Ok(command) = parse_webview_command(&envelope.data) else {
         return EXT_ERR_REJECTED;
     };
+    let tray_bounds = unsafe { read_tray_bounds(context) };
+    let command = inject_tray_bounds(command, tray_bounds);
     let event = match extension.runtime.handle(tray_id, command) {
         Ok(event) => event,
         Err(error) => {
@@ -223,20 +437,98 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                 serde_json::from_value(data.clone()).map_err(|error| {
                     WebviewRuntimeError::Rejected(format!("invalid webview show command: {error}"))
                 })?;
+            let (html, url) = parse_optional_content_pair(
+                parsed.html,
+                parsed.url,
+                "show",
+                ContentPairRequirement::Optional,
+            )?;
             let bind_window_globals = parsed.bind_window_globals.unwrap_or(false);
+            let bind_screen_globals = parsed.bind_screen_globals.unwrap_or(false);
             Ok(WebviewCommand::Show {
-                html: parsed.html,
-                url: parsed.url,
+                html,
+                url,
                 width: parsed.width.unwrap_or(420.0),
                 height: parsed.height.unwrap_or(260.0),
+                tray_bounds: None,
                 fallback_rect: parsed.fallback_rect,
-                navigator_window: NavigatorWindowSettings {
-                    enabled: parsed.native_window_api.unwrap_or(false) || bind_window_globals,
-                    bind_window_globals,
+                show_settings: WebviewShowSettings {
+                    navigator_window: NavigatorWindowSettings {
+                        enabled: parsed.native_window_api.unwrap_or(false)
+                            || bind_window_globals
+                            || parsed.window_controls_overlay.unwrap_or(false),
+                        bind_window_globals,
+                        window_controls_overlay: parsed.window_controls_overlay.unwrap_or(false),
+                    },
+                    navigator_screen: NavigatorScreenSettings {
+                        enabled: parsed.native_screen_api.unwrap_or(false) || bind_screen_globals,
+                        bind_screen_globals,
+                    },
+                    navigator_tray: NavigatorTraySettings {
+                        enabled: parsed.native_tray_api.unwrap_or(false),
+                    },
+                    window: WebviewWindowOptions {
+                        title: parsed.title,
+                        icon: parsed.icon,
+                        style: WebviewInitialStyle {
+                            frameless: parsed
+                                .style
+                                .as_ref()
+                                .and_then(|style| style.frameless)
+                                .unwrap_or(false),
+                            transparent: parsed
+                                .style
+                                .as_ref()
+                                .and_then(|style| style.transparent)
+                                .unwrap_or(false),
+                            keep_on_top: parsed
+                                .style
+                                .as_ref()
+                                .and_then(|style| style.keep_on_top)
+                                .unwrap_or(false),
+                            background_effect: parsed
+                                .style
+                                .as_ref()
+                                .and_then(|style| style.background_effect.clone()),
+                            background_effect_state: parsed
+                                .style
+                                .as_ref()
+                                .and_then(|style| style.background_effect_state.as_deref())
+                                .map(parse_background_effect_state)
+                                .transpose()?
+                                .unwrap_or_default(),
+                            corner_radius: parsed
+                                .style
+                                .and_then(|style| style.corner_radius)
+                                .map(normalize_corner_radius)
+                                .transpose()?,
+                        },
+                        sync: WebviewMetadataSyncSettings {
+                            title: parse_title_sync(parsed.title_sync),
+                            icon: parse_icon_sync(parsed.icon_sync),
+                        },
+                    },
+                    native_api_policy: parse_native_api_policy(parsed.native_api_policy)?,
                 },
             })
         }
         "hide" => Ok(WebviewCommand::Hide),
+        "destroy" => Ok(WebviewCommand::Destroy),
+        "setContent" => {
+            let parsed: SetContentCommandData =
+                serde_json::from_value(data.clone()).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "invalid webview setContent command: {error}"
+                    ))
+                })?;
+            let (html, url) = parse_optional_content_pair(
+                parsed.html,
+                parsed.url,
+                "setContent",
+                ContentPairRequirement::ExactlyOne,
+            )?;
+            Ok(WebviewCommand::SetContent { html, url })
+        }
         "navigate" => Ok(WebviewCommand::Navigate {
             url: required_string(data, "url")?,
         }),
@@ -252,11 +544,202 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContentPairRequirement {
+    Optional,
+    ExactlyOne,
+}
+
+fn parse_optional_content_pair(
+    html: Option<String>,
+    url: Option<String>,
+    command_name: &str,
+    requirement: ContentPairRequirement,
+) -> Result<(Option<String>, Option<String>), WebviewRuntimeError> {
+    if html.is_some() && url.is_some() {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "webview {command_name} command accepts html or url, but not both"
+        )));
+    }
+    if matches!(requirement, ContentPairRequirement::ExactlyOne) && html.is_none() && url.is_none()
+    {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "webview {command_name} command requires html or url"
+        )));
+    }
+    Ok((html, url))
+}
+
 fn required_string(data: &Value, key: &str) -> Result<String, WebviewRuntimeError> {
     data.get(key)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
         .ok_or_else(|| WebviewRuntimeError::Rejected(format!("webview command requires {key}")))
+}
+
+fn normalize_corner_radius(radius: f64) -> Result<f64, WebviewRuntimeError> {
+    if !radius.is_finite() {
+        return Err(WebviewRuntimeError::Rejected(
+            "cornerRadius must be a finite number".into(),
+        ));
+    }
+    Ok(radius.clamp(0.0, 128.0))
+}
+
+fn parse_background_effect_state(
+    state: &str,
+) -> Result<WebviewBackgroundEffectState, WebviewRuntimeError> {
+    match state {
+        "followsWindowActiveState" => Ok(WebviewBackgroundEffectState::FollowsWindowActiveState),
+        "active" => Ok(WebviewBackgroundEffectState::Active),
+        "inactive" => Ok(WebviewBackgroundEffectState::Inactive),
+        other => Err(WebviewRuntimeError::Unsupported(format!(
+            "background effect state {other} is not supported on macOS"
+        ))),
+    }
+}
+
+fn parse_title_sync(input: Option<TitleSyncInput>) -> MetadataSyncSettings {
+    match input {
+        Some(TitleSyncInput::Enabled(enabled)) => MetadataSyncSettings {
+            page_to_native: enabled,
+            native_to_page: enabled,
+        },
+        Some(TitleSyncInput::Directions(directions)) => MetadataSyncSettings {
+            page_to_native: directions.document_to_window.unwrap_or(false),
+            native_to_page: directions.window_to_document.unwrap_or(false),
+        },
+        None => MetadataSyncSettings::default(),
+    }
+}
+
+fn parse_icon_sync(input: Option<IconSyncInput>) -> MetadataSyncSettings {
+    match input {
+        Some(IconSyncInput::Enabled(enabled)) => MetadataSyncSettings {
+            page_to_native: enabled,
+            native_to_page: enabled,
+        },
+        Some(IconSyncInput::Directions(directions)) => MetadataSyncSettings {
+            page_to_native: directions.favicon_to_window.unwrap_or(false),
+            native_to_page: directions.window_to_favicon.unwrap_or(false),
+        },
+        None => MetadataSyncSettings::default(),
+    }
+}
+
+fn parse_native_api_policy(
+    input: Option<NativeApiPolicyInput>,
+) -> Result<WebviewNativeApiPolicy, WebviewRuntimeError> {
+    let Some(input) = input else {
+        return Ok(WebviewNativeApiPolicy::default());
+    };
+    Ok(WebviewNativeApiPolicy {
+        default_src: parse_native_api_sources(input.default_src)?
+            .unwrap_or_else(|| WebviewNativeApiPolicy::default().default_src),
+        window: parse_native_api_sources(input.window)?,
+        screen: parse_native_api_sources(input.screen)?,
+        tray: parse_native_api_sources(input.tray)?,
+        window_globals: parse_native_api_sources(input.window_globals)?,
+        screen_globals: parse_native_api_sources(input.screen_globals)?,
+        title_sync: parse_native_api_sources(input.title_sync)?,
+        icon_sync: parse_native_api_sources(input.icon_sync)?,
+    })
+}
+
+unsafe fn read_tray_bounds(context: *const ExtHostContext) -> Option<Rect> {
+    if context.is_null() {
+        return None;
+    }
+    let mut rect = Rect {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
+    let context = unsafe { &*context };
+    match (context.get_rect)(context.host_data, &mut rect) {
+        EXT_OK => Some(rect),
+        _ => None,
+    }
+}
+
+fn inject_tray_bounds(command: WebviewCommand, tray_bounds: Option<Rect>) -> WebviewCommand {
+    match command {
+        WebviewCommand::Show {
+            html,
+            url,
+            width,
+            height,
+            tray_bounds: _,
+            fallback_rect,
+            show_settings,
+        } => WebviewCommand::Show {
+            html,
+            url,
+            width,
+            height,
+            tray_bounds,
+            fallback_rect,
+            show_settings,
+        },
+        other => other,
+    }
+}
+
+fn parse_native_api_sources(
+    input: Option<Vec<String>>,
+) -> Result<Option<Vec<WebviewNativeApiSource>>, WebviewRuntimeError> {
+    let Some(input) = input else {
+        return Ok(None);
+    };
+    let mut rules = Vec::with_capacity(input.len());
+    for value in input {
+        rules.push(parse_native_api_source(&value)?);
+    }
+    Ok(Some(rules))
+}
+
+fn parse_native_api_source(value: &str) -> Result<WebviewNativeApiSource, WebviewRuntimeError> {
+    match value {
+        "'none'" => Ok(WebviewNativeApiSource::None),
+        "*" => Ok(WebviewNativeApiSource::Any),
+        "'local'" => Ok(WebviewNativeApiSource::Local),
+        "'remote'" => Ok(WebviewNativeApiSource::Remote),
+        _ => {
+            let url = Url::parse(value).map_err(|error| {
+                WebviewRuntimeError::Rejected(format!(
+                    "invalid nativeApiPolicy source {value:?}: {error}"
+                ))
+            })?;
+            if !matches!(url.scheme(), "http" | "https") {
+                return Err(WebviewRuntimeError::Rejected(format!(
+                    "nativeApiPolicy source {value:?} must use http or https origin syntax"
+                )));
+            }
+            if !url.username().is_empty() || url.password().is_some() {
+                return Err(WebviewRuntimeError::Rejected(format!(
+                    "nativeApiPolicy source {value:?} must not include credentials"
+                )));
+            }
+            if url.query().is_some() || url.fragment().is_some() {
+                return Err(WebviewRuntimeError::Rejected(format!(
+                    "nativeApiPolicy source {value:?} must not include query or fragment"
+                )));
+            }
+            if url.path() != "/" {
+                return Err(WebviewRuntimeError::Rejected(format!(
+                    "nativeApiPolicy source {value:?} must be an origin, not a full path"
+                )));
+            }
+            let origin = url.origin().ascii_serialization();
+            if origin == "null" {
+                return Err(WebviewRuntimeError::Rejected(format!(
+                    "nativeApiPolicy source {value:?} is not a stable origin"
+                )));
+            }
+            Ok(WebviewNativeApiSource::Origin(origin))
+        }
+    }
 }
 
 unsafe fn read_ext_string(bytes: ExtBytes) -> Option<String> {
@@ -323,25 +806,57 @@ mod tests {
                 url: None,
                 width: 360.0,
                 height: 220.0,
+                tray_bounds: None,
                 fallback_rect: Some(Rect {
                     x: 1,
                     y: 2,
                     width: 3,
                     height: 4,
                 }),
-                navigator_window: NavigatorWindowSettings::default(),
+                show_settings: WebviewShowSettings::default(),
             }
         );
     }
 
     #[test]
-    fn parse_show_command_reads_navigator_window_flags() {
+    fn parse_show_command_reads_window_metadata_and_injection_flags() {
         let command = parse_webview_command(&serde_json::json!({
             "type": "show",
             "width": 360,
             "height": 220,
             "nativeWindowApi": true,
-            "bindWindowGlobals": true
+            "bindWindowGlobals": true,
+            "windowControlsOverlay": true,
+            "nativeScreenApi": true,
+            "bindScreenGlobals": true,
+            "nativeTrayApi": true,
+            "title": "OpenTray Status",
+            "icon": {
+              "type": "href",
+              "href": "data:image/png;base64,abc"
+            },
+            "style": {
+              "frameless": true,
+              "transparent": true,
+              "keepOnTop": true,
+              "backgroundEffect": "hudWindow",
+              "backgroundEffectState": "active",
+              "cornerRadius": 18
+            },
+            "titleSync": {
+              "documentToWindow": true,
+              "windowToDocument": true
+            },
+            "iconSync": true,
+            "nativeApiPolicy": {
+              "defaultSrc": ["'local'"],
+              "window": ["https://example.com"],
+              "screen": ["'local'"],
+              "tray": ["'local'"],
+              "windowGlobals": ["'none'"],
+              "titleSync": ["https://example.com"],
+              "iconSync": ["'local'"]
+            }
         }))
         .expect("show command");
 
@@ -352,12 +867,137 @@ mod tests {
                 url: None,
                 width: 360.0,
                 height: 220.0,
+                tray_bounds: None,
                 fallback_rect: None,
-                navigator_window: NavigatorWindowSettings {
-                    enabled: true,
-                    bind_window_globals: true,
+                show_settings: WebviewShowSettings {
+                    navigator_window: NavigatorWindowSettings {
+                        enabled: true,
+                        bind_window_globals: true,
+                        window_controls_overlay: true,
+                    },
+                    navigator_screen: NavigatorScreenSettings {
+                        enabled: true,
+                        bind_screen_globals: true,
+                    },
+                    navigator_tray: NavigatorTraySettings { enabled: true },
+                    window: WebviewWindowOptions {
+                        title: Some("OpenTray Status".to_string()),
+                        icon: Some(WebviewWindowIcon::Href {
+                            href: "data:image/png;base64,abc".to_string(),
+                        }),
+                        style: WebviewInitialStyle {
+                            frameless: true,
+                            transparent: true,
+                            keep_on_top: true,
+                            background_effect: Some("hudWindow".to_string()),
+                            background_effect_state: WebviewBackgroundEffectState::Active,
+                            corner_radius: Some(18.0),
+                        },
+                        sync: WebviewMetadataSyncSettings {
+                            title: MetadataSyncSettings {
+                                page_to_native: true,
+                                native_to_page: true,
+                            },
+                            icon: MetadataSyncSettings {
+                                page_to_native: true,
+                                native_to_page: true,
+                            },
+                        },
+                    },
+                    native_api_policy: WebviewNativeApiPolicy {
+                        default_src: vec![WebviewNativeApiSource::Local],
+                        window: Some(vec![WebviewNativeApiSource::Origin(
+                            "https://example.com".to_string(),
+                        )]),
+                        screen: Some(vec![WebviewNativeApiSource::Local]),
+                        tray: Some(vec![WebviewNativeApiSource::Local]),
+                        window_globals: Some(vec![WebviewNativeApiSource::None]),
+                        screen_globals: None,
+                        title_sync: Some(vec![WebviewNativeApiSource::Origin(
+                            "https://example.com".to_string(),
+                        )]),
+                        icon_sync: Some(vec![WebviewNativeApiSource::Local]),
+                    },
                 },
             }
+        );
+    }
+
+    #[test]
+    fn parse_show_command_defaults_native_api_policy_to_local_only() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "url": "https://example.com",
+            "nativeWindowApi": true
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show { show_settings, .. } = command else {
+            panic!("expected show command");
+        };
+
+        assert_eq!(
+            show_settings.native_api_policy,
+            WebviewNativeApiPolicy::default()
+        );
+    }
+
+    #[test]
+    fn parse_set_content_command_requires_explicit_content() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "setContent",
+            "html": "<main>updated</main>"
+        }))
+        .expect("setContent command");
+
+        assert_eq!(
+            command,
+            WebviewCommand::SetContent {
+                html: Some("<main>updated</main>".to_string()),
+                url: None,
+            }
+        );
+
+        let error = parse_webview_command(&serde_json::json!({
+            "type": "setContent"
+        }))
+        .expect_err("setContent should require html or url");
+
+        assert_eq!(
+            error.to_string(),
+            "webview setContent command requires html or url"
+        );
+    }
+
+    #[test]
+    fn parse_show_command_rejects_ambiguous_content_sources() {
+        let error = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "html": "<main />",
+            "url": "https://example.com"
+        }))
+        .expect_err("show should reject both html and url");
+
+        assert_eq!(
+            error.to_string(),
+            "webview show command accepts html or url, but not both"
+        );
+    }
+
+    #[test]
+    fn parse_show_command_rejects_invalid_native_api_policy_source() {
+        let error = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "nativeWindowApi": true,
+            "nativeApiPolicy": {
+              "window": ["https://example.com/path"]
+            }
+        }))
+        .expect_err("path sources should be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            r#"nativeApiPolicy source "https://example.com/path" must be an origin, not a full path"#
         );
     }
 

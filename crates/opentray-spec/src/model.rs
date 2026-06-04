@@ -65,6 +65,8 @@ pub enum MenuItem {
     Item {
         id: MenuItemId,
         title: String,
+        #[serde(rename = "primaryEvent", default, skip_serializing_if = "is_false")]
+        primary_event: bool,
         #[serde(default = "default_true")]
         enabled: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -161,4 +163,8 @@ pub enum TrayEvent {
 
 const fn default_true() -> bool {
     true
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
 }

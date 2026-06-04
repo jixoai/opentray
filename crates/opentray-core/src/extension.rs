@@ -1,12 +1,18 @@
 use std::collections::HashMap;
 
-use opentray_spec::{ExtensionEnvelope, ExtensionScope, SurfaceId, TrayId};
+use opentray_spec::{ExtensionEnvelope, ExtensionScope, Rect, SurfaceId, TrayId};
 use serde_json::Value;
 
 pub const RECORDING_EXTENSION_PATH: &str = "opentray://recording-extension";
 
 /// Broker-runtime authority exposed to extensions without leaking backend or UI types.
 pub trait ExtensionHostContext {
+    fn tray_bounds(&mut self) -> Result<Option<Rect>, ExtensionError> {
+        Err(ExtensionError::Unsupported(
+            "host tray bounds are unavailable".to_string(),
+        ))
+    }
+
     fn invoke_host(
         &mut self,
         capability: &str,

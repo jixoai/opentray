@@ -37,25 +37,6 @@ export const resolveBrokerCommand = async (
     return commandForBinary(explicit, paths);
   }
 
-  const platform = options.platform ?? process.platform;
-  const arch = options.arch ?? process.arch;
-  let installedBinaryError: MissingPlatformBrokerBinaryError | undefined;
-  try {
-    const installedBinary = await resolveInstalledBrokerBinary({
-      platform,
-      arch,
-      resolvePackageJson: options.resolvePackageJson ?? resolvePackageJson,
-    });
-    if (installedBinary !== undefined) {
-      return commandForBinary(installedBinary, paths);
-    }
-  } catch (error) {
-    if (!(error instanceof MissingPlatformBrokerBinaryError)) {
-      throw error;
-    }
-    installedBinaryError = error;
-  }
-
   const sourceDir = options.sourceDir ?? dirname(fileURLToPath(sourceUrl));
   const workspaceRoot = await (options.findWorkspaceRoot ?? findWorkspaceRoot)(sourceDir);
   if (workspaceRoot !== undefined) {
@@ -63,8 +44,15 @@ export const resolveBrokerCommand = async (
     return commandForBinary(binary, paths, workspaceRoot);
   }
 
-  if (installedBinaryError !== undefined) {
-    throw installedBinaryError;
+  const platform = options.platform ?? process.platform;
+  const arch = options.arch ?? process.arch;
+  const installedBinary = await resolveInstalledBrokerBinary({
+    platform,
+    arch,
+    resolvePackageJson: options.resolvePackageJson ?? resolvePackageJson,
+  });
+  if (installedBinary !== undefined) {
+    return commandForBinary(installedBinary, paths);
   }
 
   const target = resolveBrokerNativeTarget(platform, arch);

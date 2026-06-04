@@ -1,28 +1,30 @@
+import { spawn } from "node:child_process";
+import { access, constants } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
 import { attachWebview } from "../../ext-webview/src/index";
 
-const connection = await connectLocalBroker();
+const localWebviewExtension = await resolveLocalWebviewExtension();
+if (process.env.OPENTRAY_EXT_PATH === undefined && localWebviewExtension !== undefined) {
+  process.env.OPENTRAY_EXT_PATH = localWebviewExtension;
+}
+
+const demoHomeDir = process.env.OPENTRAY_HOME ?? join("/tmp", `opentray-daemon-tray-${process.pid}`);
+const connection = await connectLocalBroker({ homeDir: demoHomeDir });
 const client = createClient(connection, { requestIdPrefix: "daemon-example" });
 console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
+console.log(`broker home: ${demoHomeDir}`);
+if (localWebviewExtension !== undefined) {
+  console.log(`webview dylib: ${localWebviewExtension}`);
+}
 
 const menuLabels = new Map<number, string>([
-  [1, "Primary Action"],
-  [3, "Checked Capability"],
-  [4, "Radio: Active"],
-  [5, "Radio: Passive"],
-  [6, "Nested Action"],
-  [7, "Nested Check"],
-  [8, "WebView: Show HTML"],
-  [9, "WebView: Navigate"],
-  [10, "WebView: Post Message"],
-  [11, "WebView: Evaluate"],
-  [12, "WebView: Hide"],
-  [99, "Quit Demo"],
+  [1, "Open WebView"],
 ]);
 let webview: ReturnType<typeof attachWebview> | undefined;
-let messageCount = 0;
-let evalCount = 0;
 
 connection.onEvent((frame) => {
   console.log(`broker -> client ${JSON.stringify(frame)}`);
@@ -44,38 +46,12 @@ const tray = await space.createTray({
   title: "OpenTray",
   tooltip: {
     title: "OpenTray",
-    description: "Daemon-created tray with broker-routed menu events",
+    description: "Single primary tray action; macOS direct-triggers without opening a menu",
   },
   icon: createVisibleIcon(),
   menu: {
     items: [
-      { type: "item", id: 1, title: "Primary Action" },
-      { type: "item", id: 2, title: "Disabled Action", enabled: false },
-      { type: "check", id: 3, title: "Checked Capability", checked: true },
-      { type: "radio", id: 4, title: "Radio: Active", group: 1, checked: true },
-      { type: "radio", id: 5, title: "Radio: Passive", group: 1 },
-      { type: "separator" },
-      {
-        type: "submenu",
-        title: "Nested Actions",
-        items: [
-          { type: "item", id: 6, title: "Nested Action" },
-          { type: "check", id: 7, title: "Nested Check", checked: false },
-        ],
-      },
-      {
-        type: "submenu",
-        title: "WebView Commands",
-        items: [
-          { type: "item", id: 8, title: "Show HTML" },
-          { type: "item", id: 9, title: "Navigate" },
-          { type: "item", id: 10, title: "Post Message" },
-          { type: "item", id: 11, title: "Evaluate JS" },
-          { type: "item", id: 12, title: "Hide" },
-        ],
-      },
-      { type: "separator" },
-      { type: "item", id: 99, title: "Quit Demo" },
+      { type: "item", id: 1, title: "Open WebView", primaryEvent: true },
     ],
   },
 });
@@ -89,11 +65,17 @@ await connection.request({
 });
 webview = attachWebview(tray);
 console.log("webview facade attached to the daemon native WebView extension");
-console.log("open the system tray item and choose any enabled menu item to see routed events");
+console.log("click the tray icon: macOS should direct-trigger the single primary action without opening a menu");
+console.log("press Ctrl-C to exit the tray demo");
 
 let closed = false;
 const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
 let exitTimer: NodeJS.Timeout | undefined;
+let resolveLifecycle: (() => void) | undefined;
+const lifecycle = new Promise<void>((resolve) => {
+  resolveLifecycle = resolve;
+});
+const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 if (exitAfter !== undefined && exitAfter.length > 0) {
   const duration = Number.parseInt(exitAfter, 10);
   if (Number.isInteger(duration) && duration > 0) {
@@ -104,18 +86,22 @@ if (exitAfter !== undefined && exitAfter.length > 0) {
 }
 
 const webviewSmoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
-if (webviewSmoke === "show") {
-  await handleMenuClick(8);
-} else if (webviewSmoke === "1") {
+if (webviewSmoke === "show" || webviewSmoke === "1") {
+  await handleMenuClick(1);
+}
+if (webviewSmoke === "1") {
   if (exitTimer !== undefined) {
     clearTimeout(exitTimer);
     exitTimer = undefined;
   }
-  for (const itemId of [8, 10, 11, 9, 12]) {
-    await handleMenuClick(itemId);
-  }
   await sleep(300);
   await shutdown();
+}
+
+for (const signal of shutdownSignals) {
+  process.once(signal, () => {
+    void shutdown();
+  });
 }
 
 async function shutdown(): Promise<void> {
@@ -127,60 +113,30 @@ async function shutdown(): Promise<void> {
     clearTimeout(exitTimer);
   }
   await connection.close();
+  resolveLifecycle?.();
 }
 
 async function handleMenuClick(itemId: number): Promise<void> {
-  if (itemId === 99) {
-    console.log("quit item routed; closing demo connection");
-    await shutdown();
-    return;
-  }
+  if (itemId === 1) {
+    if (webview === undefined) {
+      console.error("webview facade is not ready");
+      return;
+    }
+    const trayBounds = await tray.getBounds();
+    console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
 
-  if (itemId < 8 || itemId > 12) {
+    await webview.show({
+      type: "show",
+      html: createWebviewDemoHtml(),
+      width: 420,
+      height: 260,
+      fallbackRect: trayBounds ?? { x: 0, y: 0, width: 1, height: 1 },
+      nativeWindowApi: true,
+      bindWindowGlobals: true,
+      nativeTrayApi: true,
+    });
+    console.log("webview command: show");
     return;
-  }
-
-  if (webview === undefined) {
-    console.error("webview facade is not ready");
-    return;
-  }
-
-  switch (itemId) {
-    case 8:
-      await webview.show({
-        type: "show",
-        html: createWebviewDemoHtml(),
-        width: 420,
-        height: 260,
-        fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
-        nativeWindowApi: true,
-        bindWindowGlobals: true,
-      });
-      console.log("webview command: show");
-      break;
-    case 9:
-      await webview.navigate("https://example.com/opentray-status");
-      console.log("webview command: navigate");
-      break;
-    case 10:
-      messageCount += 1;
-      await webview.postMessage({
-        kind: "ping",
-        source: "daemon-tray",
-        count: messageCount,
-        sentAt: new Date().toISOString(),
-      });
-      console.log("webview command: postMessage");
-      break;
-    case 11:
-      evalCount += 1;
-      await webview.evaluate(createVisibleEvaluateScript(evalCount));
-      console.log("webview command: evaluate");
-      break;
-    case 12:
-      await webview.hide();
-      console.log("webview command: hide");
-      break;
   }
 }
 
@@ -283,8 +239,12 @@ function createWebviewDemoHtml(): string {
   <body>
     <main>
       <h1>OpenTray WebView</h1>
-      <p>Use the tray menu or the buttons below to exercise the extension-owned WebView bridge.</p>
+      <p>This window was opened by the single primary tray action. Use the buttons below to exercise the extension-owned WebView bridge.</p>
       <section>
+        <div class="card">
+          <div class="label">primary event</div>
+          <code>macOS single primary item direct-triggered menuClick -> WebView show</code>
+        </div>
         <div class="card">
           <div class="label">navigator.window</div>
           <code id="navigator-status">Waiting for navigator.window bootstrap</code>
@@ -304,30 +264,22 @@ function createWebviewDemoHtml(): string {
           </div>
         </div>
         <div class="card">
-          <div class="label">postMessage</div>
-          <code id="message-status">Waiting for WebView Commands -> Post Message</code>
-        </div>
-        <div class="card">
-          <div class="label">evaluate JS</div>
-          <code id="eval-status">Waiting for WebView Commands -> Evaluate JS</code>
-        </div>
-        <div class="card">
           <div class="label">events</div>
           <code id="event-status">Waiting for navigator.window events</code>
+        </div>
+        <div class="card">
+          <div class="label">tray bounds</div>
+          <code id="tray-status">Waiting for navigator.opentray.tray</code>
         </div>
       </section>
     </main>
     <script>
-      window.addEventListener("message", (event) => {
-        const target = document.getElementById("message-status");
-        if (target) {
-          target.textContent = JSON.stringify(event.data, null, 2);
-        }
-      });
       const navigatorStatus = document.getElementById("navigator-status");
       const globalsStatus = document.getElementById("globals-status");
       const eventStatus = document.getElementById("event-status");
+      const trayStatus = document.getElementById("tray-status");
       const pageWindow = navigator.window ?? navigator.opentrayWindow;
+      const trayApi = navigator.opentray?.tray;
 
       if (!pageWindow) {
         navigatorStatus.textContent = "navigator.window is disabled";
@@ -369,30 +321,70 @@ function createWebviewDemoHtml(): string {
           window.close();
         });
       }
+
+      if (!trayApi) {
+        trayStatus.textContent = "navigator.opentray.tray is disabled";
+      } else {
+        trayApi.getBounds().then((bounds) => {
+          trayStatus.textContent = JSON.stringify(bounds, null, 2);
+        });
+      }
     </script>
   </body>
 </html>`;
 }
 
-function createVisibleEvaluateScript(count: number): string {
-  return `(() => {
-    let target = document.getElementById("eval-status");
-    if (!target) {
-      const panel = document.createElement("div");
-      panel.style.cssText = "position:fixed;left:16px;right:16px;bottom:16px;z-index:2147483647;padding:12px;border-radius:12px;background:#fff8e7;color:#18220f;box-shadow:0 12px 30px rgba(0,0,0,.18);font:14px ui-rounded, sans-serif;";
-      panel.textContent = "OpenTray Evaluate JS: ";
-      target = document.createElement("code");
-      target.id = "eval-status";
-      panel.appendChild(target);
-      document.body.appendChild(panel);
-    }
-    if (target) {
-      target.textContent = "Evaluate JS updated the WebView, count=${count}, at " + new Date().toLocaleTimeString();
-    }
-    window.__OPENTRAY_DEMO__ = { evaluated: true, count: ${count} };
-  })();`;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+await lifecycle;
+
+async function resolveLocalWebviewExtension(): Promise<string | undefined> {
+  const workspaceCargoToml = fileURLToPath(new URL("../../../Cargo.toml", import.meta.url));
+  try {
+    await access(workspaceCargoToml, constants.R_OK);
+    await runCargoBuild(fileURLToPath(new URL("../../../", import.meta.url)));
+  } catch {
+    // Not running from the workspace root layout, so skip the source-build path.
+  }
+
+  const artifactName =
+    process.platform === "win32"
+      ? "opentray_ext_webview.dll"
+      : process.platform === "darwin"
+        ? "libopentray_ext_webview.dylib"
+        : "libopentray_ext_webview.so";
+  const candidates = [
+    fileURLToPath(new URL(`../../../target/debug/${artifactName}`, import.meta.url)),
+    fileURLToPath(new URL(`../../../target/release/${artifactName}`, import.meta.url)),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.R_OK);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
+function runCargoBuild(workspaceRoot: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("cargo", ["build", "-p", "opentray-ext-webview"], {
+      cwd: workspaceRoot,
+      stdio: process.env.OPENTRAY_EXT_BUILD_LOGS === "1" ? "inherit" : "ignore",
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`cargo build -p opentray-ext-webview failed with code ${code ?? "unknown"}`));
+    });
+  });
 }
