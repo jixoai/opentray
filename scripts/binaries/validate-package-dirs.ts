@@ -34,8 +34,8 @@ function parsePackageDirs(value: string): string[] {
   return parsed;
 }
 
-const runCommand = (command: string, args: readonly string[], cwd: string): Promise<void> =>
-  new Promise((resolve, reject) => {
+function runCommand(command: string, args: readonly string[], cwd: string): Promise<void> {
+  return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
       cwd,
       stdio: "inherit",
@@ -49,3 +49,4 @@ const runCommand = (command: string, args: readonly string[], cwd: string): Prom
       reject(new Error(`${command} ${args.join(" ")} failed with code ${code ?? "unknown"}`));
     });
   });
+}
