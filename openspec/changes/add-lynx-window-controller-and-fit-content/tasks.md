@@ -5,14 +5,14 @@
 
 ## 2. BDD Contract
 
-- [ ] 2.1 Scenario: Given `ext-lynx` native window API is enabled When a Lynx page reads `navigator.window` and `navigator.opentrayWindow` Then both exist, reference the same capability object, and expose async host-window methods traceable to `openspec/changes/add-lynx-window-controller-and-fit-content/specs/lynx-extension/spec.md`.
-- [ ] 2.2 Scenario: Given a Lynx page uses `navigator.window.listen("resized", handler)` When the native host resizes or fit-content clamps the window Then the page receives the scoped event without depending on WebView IPC or global `window.postMessage`.
-- [ ] 2.3 Scenario: Given a Lynx page uses `navigator.window.setTitle(...)` or `navigator.window.setIcon(...)` When the native runtime applies the metadata Then the page can observe `titlechange` / `iconchange` and the macOS runtime no longer shows a blank Dock icon.
-- [ ] 2.4 Scenario: Given a Lynx page reads `navigator.screen` When native screen API is enabled Then `navigator.screen.getScreenDetails()` returns a durable screen-details-like payload and optional `window.getScreenDetails()` stays opt-in.
+- [x] 2.1 Scenario: Given `ext-lynx` native window API is enabled When a Lynx page reads `navigator.window` and `navigator.opentrayWindow` Then both exist, reference the same capability object, and expose async host-window methods traceable to `openspec/changes/add-lynx-window-controller-and-fit-content/specs/lynx-extension/spec.md`.
+- [x] 2.2 Scenario: Given a Lynx page uses `navigator.window.listen("resized", handler)` When the native host resizes or fit-content clamps the window Then the page receives the scoped event without depending on WebView IPC or global `window.postMessage`.
+- [x] 2.3 Scenario: Given a Lynx page uses `navigator.window.setTitle(...)` or `navigator.window.setIcon(...)` When the native runtime applies the metadata Then the page can observe `titlechange` / `iconchange` and the macOS runtime no longer shows a blank Dock icon.
+- [x] 2.4 Scenario: Given a Lynx page reads `navigator.screen` When native screen API is enabled Then `navigator.screen.getScreenDetails()` returns a durable screen-details-like payload and optional `window.getScreenDetails()` stays opt-in.
 - [x] 2.5 Scenario: Given no startup feature expression or explicit size When a Lynx bundle is shown Then the window uses the fixed fallback shell and no host-owned fit loop is active.
 - [x] 2.6 Scenario: Given startup capability flags are configured independently When the window launches Then the enabled host behavior matches the explicit startup request and disabling a parent feature also disables its dependent binding.
-- [ ] 2.7 Scenario: Given explicit `width` / `height` and min/max limits are provided When the window launches or resizes Then the final frame honors the explicit size intent and remains clamped to bounds.
-- [ ] 2.8 Scenario: Given a requested style or capability is unsupported When the page invokes that host-window method Then the promise rejects with a typed unsupported error instead of faking success.
+- [x] 2.7 Scenario: Given explicit `width` / `height` and min/max limits are provided When the window launches or resizes Then the final frame honors the explicit size intent and remains clamped to bounds.
+- [x] 2.8 Scenario: Given a requested style or capability is unsupported When the page invokes that host-window method Then the promise rejects with a typed unsupported error instead of faking success.
 - [x] 2.9 Confirm each task checkbox will be updated only by the agent that completed and verified that task in the current working context.
 
 ## 3. Implementation

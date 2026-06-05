@@ -129,7 +129,7 @@
       <p>
         Review focus: prove that <code>@opentray/ext-lynx</code> now owns its window bridge,
         screen bridge, startup feature law, and borderless behavior at the extension boundary,
-        while leaving the rebuilt macOS carrier as an explicit CI-owned gate.
+        with the rebuilt macOS carrier verified through human visual acceptance.
       </p>
 
       <div class="deck">
@@ -150,8 +150,8 @@
         </section>
         <section class="card">
           <div class="label">Archive State</div>
-          <div class="metric partial">waiting on CI</div>
-          <p>A fresh runtime artifact is still required for final human acceptance.</p>
+          <div class="metric">accepted</div>
+          <p>The CI-built runtime artifact passed the final visual smoke.</p>
         </section>
       </div>
 
@@ -192,8 +192,8 @@
           </tr>
           <tr>
             <td>Nonblank Dock identity</td>
-            <td>Static metadata and packaging stay in place, but the final visible proof still depends on a newly built runtime app.</td>
-            <td class="warn">Partial</td>
+            <td>Static metadata and packaging stay in place, and the CI-built runtime artifact was visually accepted by the human operator.</td>
+            <td class="pass">Pass</td>
           </tr>
         </tbody>
       </table>
@@ -201,15 +201,19 @@
       <h2>Verified Commands</h2>
       <pre><code>cargo test -p opentray-ext-lynx
 pnpm --filter opentray exec vitest run src/cli.test.ts src/smoke/daemon-lynx.test.ts
-pnpm --filter @opentray/ext-lynx exec vitest run src/index.test.ts
+pnpm --filter opentray typecheck
+pnpm --filter @opentray/ext-lynx test
+pnpm --filter @opentray/ext-lynx typecheck
+bun test scripts/binaries/*.test.ts
 bun test scripts/binaries/launch-lynx-smoke.test.ts
-openspec schema validate vision-driven
+bun run openspec:vision -- validate add-lynx-window-controller-and-fit-content
+bun run openspec:vision -- check add-lynx-window-controller-and-fit-content
 git diff --check</code></pre>
 
       <div class="callout">
-        Next human gate after CI: run baseline, window-bridge, <code>*,!frameless</code>, and full
-        <code>*</code> Lynx smoke commands, then confirm Dock identity plus click, scroll, and input behavior
-        with your eyes.
+        Human visual acceptance is complete: baseline behavior, bridge controls, click, scroll,
+        input, <code>Connect Bridge</code>, and the lexical <code>NativeModules</code> resolver path all
+        worked with the CI-built runtime artifact.
       </div>
     </main>
   </body>
