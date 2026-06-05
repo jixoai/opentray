@@ -14,6 +14,13 @@ Use these examples to verify the delivered window contract in this branch:
 - tray-owned placement projection through `tray.getBounds()` and `navigator.opentray.tray.getBounds()`
 - source-tree auto-discovery of the local `opentray-ext-webview` native library
 
+Current maturity truth for these examples:
+
+- macOS source-tree smoke is the stable human-visible proof path
+- Windows / Linux platform packages remain alpha runtime territory until their visible native runtimes land
+- typed unsupported errors are acceptable evidence for not-yet-landed platform runtimes
+- tray bounds with no injected anchor should show `kind: "unavailable"` rather than pretending the capability is absent everywhere
+
 This guide does **not** prove future bootstrap families such as managed `window.open()`, localhost asset origin hosting, profile/partition control, or host/page devtools APIs.
 
 ## Preflight

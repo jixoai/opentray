@@ -254,6 +254,8 @@ fn dispatch_navigator_window_command(
         }
         "getTitlebarAreaRect" => {
             if !bridge.borrow().navigator_window.window_controls_overlay {
+                // Overlay geometry is a capability gate on this session, not proof that the
+                // runtime lacks overlay support everywhere on the platform.
                 return Err(WebviewRuntimeError::Unsupported(
                     "window controls overlay is not enabled for this WebView".into(),
                 ));
@@ -379,6 +381,8 @@ fn dispatch_navigator_tray_command(
     match cmd {
         "getBounds" => {
             let bounds = bridge.borrow().tray_bounds;
+            // Tray placement uses an availability result on purpose: this session may simply
+            // lack an injected tray anchor even though tray bounds are a supported capability.
             Ok(json!({
                 "kind": if bounds.is_some() { "native" } else { "unavailable" },
                 "source": if bounds.is_some() { "host.trayBounds" } else { "host.unavailable" },

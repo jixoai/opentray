@@ -37,6 +37,17 @@ Release-worthy package API/runtime changes must include a `.changeset/*.md` note
 
 Changesets must only bump peer dependents when their peer dependency range is out of range. Keep `___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH.onlyUpdatePeerDependentsWhenOutOfRange` enabled so roadmap extension placeholders do not get stable releases from an `opentray` peer bump alone.
 
+## Alpha Channel Rule
+
+When the user wants `npm i opentray@alpha`, treat that as a real release path, not a casual `--tag alpha` afterthought.
+
+- The alpha path must not consume the later stable version numbers.
+- Prefer changesets snapshot or prerelease versioning plus `changeset publish --tag alpha`.
+- Keep stable `main` releases on the normal path.
+- Published docs and skills must say what is actually alpha versus stable.
+
+If the current branch only proves macOS visually while Windows/Linux still expose package topology or typed unsupported runtime paths, the alpha channel is the more honest public surface.
+
 ## Publish Artifact Rule
 
 `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The release workflow must run `pnpm run build` before `changeset publish`.
@@ -67,4 +78,10 @@ pnpm run build
 pnpm run verify
 openspec validate --all --strict
 git diff --check
+```
+
+For alpha publishes, add a fresh-install check that uses the alpha channel entrypoint and records that evidence separately from stable release evidence:
+
+```bash
+npm i opentray@alpha
 ```

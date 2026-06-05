@@ -74,6 +74,20 @@ It also follows the native-glass rule strictly: transparent native window backgr
 It now also pins `style.platform.macos.materialState: "active"` so the tray-launched material surface does not immediately fall back to the inactive grey AppKit appearance.
 For a step-by-step walkthrough of the examples and expected behavior, read [examples/EXAMPLE.md](./examples/EXAMPLE.md).
 
+## Release Channels And Maturity
+
+OpenTray uses release channels and capability maturity together. Do not read a published platform package as proof that every visible runtime path is already stable.
+
+- `latest`: the stable package line
+- `alpha`: the prerelease/testing package line, installed as `npm i opentray@alpha`
+
+Current WebView truth:
+
+- macOS is the current `stable` human-visible acceptance path
+- Windows and Linux are currently `alpha` for WebView runtime behavior, even though their platform packages are published
+- some requests are `unsupported by design`, such as asking the macOS runtime to apply a Windows-only style family
+- some results are `unavailable by context`, such as tray-bounds projection when the current session has no authoritative tray anchor
+
 When run from the repo worktree, the example automatically discovers `target/debug` or `target/release` `libopentray_ext_webview` and wires it through `OPENTRAY_EXT_PATH` before starting the daemon. That keeps the example on the real `load-ext` path without requiring a manual staging step for routine source-level testing.
 
 After installing from npm, use the published CLI smoke path instead of workspace scripts:
@@ -102,6 +116,12 @@ The opened WebView also enables the injected page bridge so the rendered page ca
 The Lynx smoke path uses the same generic extension loader but launches a real `LynxExplorer.app.zip` runtime sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` immediately on run and exposes `Reload Bundle`, `Hide Window`, and `Quit Smoke` through tray-routed events.
 
 First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
+
+If you are validating the current prerelease branch before stable publication, install from the alpha channel and treat that as alpha evidence rather than stable evidence:
+
+```bash
+npm i opentray@alpha
+```
 
 For local native smoke before npm publish, stage the current platform artifacts first:
 

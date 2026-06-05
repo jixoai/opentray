@@ -14,6 +14,22 @@ The facade stays platform-neutral. Native libraries are optional platform packag
 
 The platform dylib owns the full WebView protocol and native runtime. `opentray` forwards scoped extension traffic to it, but does not keep a daemon-side WebView parser or native WebView builder.
 
+## Maturity Truth
+
+Read the current platform story as four different truths, not one vague support flag:
+
+- `stable`: current human-visible acceptance path
+- `alpha`: published contract or package path that is still pre-stable for real user-facing runtime behavior
+- `unsupported by design`: the runtime deliberately rejects a request because it does not truthfully map to the current substrate
+- `unavailable by context`: the capability exists, but the current WebView session does not have authoritative data for that specific request
+
+Current WebView maturity:
+
+- macOS: `stable` for the window capability surface documented below
+- Windows / Linux: `alpha` for the package and contract surface; the published platform packages may exist, but visible native runtime behavior is not yet the stable acceptance path
+- requesting `platform.windows.*` from the macOS runtime, or unknown macOS material/material-state values: `unsupported by design`
+- tray bounds with no authoritative tray anchor in the current session: `unavailable by context`
+
 ## Window Capability
 
 `@opentray/ext-webview` owns its native window capability surface inside the extension atom. The broker only forwards extension traffic.
@@ -182,7 +198,14 @@ Current native support:
 - macOS: tray bounds projection through `navigator.opentray.tray.getBounds()`
 - macOS: transparent background and material effects through `style.platform.macos.material`, including `hudWindow`, `sidebar`, `windowBackground`, `contentBackground`, and `underWindowBackground`
 - macOS: global override binding through `bindWindowGlobals` and `bindScreenGlobals`
-- Linux / Windows: the native runtime package may exist for packaging validation, but unsupported runtime paths must fail explicitly until the platform implementation lands
+- Linux / Windows: the native runtime packages are currently alpha distribution atoms; unsupported runtime paths must fail explicitly until the visible platform implementations land
+
+Keep the unsupported taxonomy explicit:
+
+- runtime absent: `webview runtime is not implemented for this platform`
+- platform-family mismatch: a Windows/Linux style family is requested on the macOS runtime, or vice versa in the future
+- declarative gate: the runtime could provide a capability, but the current WebView session did not enable it, such as overlay geometry without `windowControlsOverlay`
+- context unavailable: the capability exists, but the current session has no authoritative data, such as tray bounds when no tray anchor was injected
 
 ## Authority Model
 
@@ -194,6 +217,8 @@ Keep the capability ownership lines explicit:
 - `navigator.opentrayWindow` and `navigator.opentrayScreen` are extension-owned page APIs. They are not broker-wide contracts in `opentray-core`.
 - `screen` stays in `@opentray/ext-webview` for now because its event model, coordinate-space law, and cross-platform substrate differences are not yet proven shared enough for core.
 - The package also exports page-side global typings for `navigator.window`, `navigator.opentrayWindow`, `navigator.opentrayScreen`, `navigator.opentray`, and `window.getScreenDetails()` so TypeScript page code matches the injected runtime shape.
+
+The page bridge does not currently expose maturity labels through `getCapabilities()`. For now, treat README, skills, and the release channel as the authoritative maturity surface.
 
 ## Events
 

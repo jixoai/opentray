@@ -197,6 +197,9 @@ impl UnsupportedWebviewRuntime {
         _tray_id: &str,
         _command: WebviewCommand,
     ) -> Result<Value, WebviewRuntimeError> {
+        // Non-macOS packages may already exist for distribution and contract validation.
+        // Until a real native runtime lands, keep that state explicit instead of pretending a
+        // visible WebView exists on this host.
         Err(WebviewRuntimeError::Unsupported(
             "webview runtime is not implemented for this platform".into(),
         ))

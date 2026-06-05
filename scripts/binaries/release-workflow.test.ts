@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
 const releaseWorkflow = (): string => readFileSync(resolve(repoRoot, ".github/workflows/release.yml"), "utf8");
+const packageJson = (): string => readFileSync(resolve(repoRoot, "package.json"), "utf8");
 
 describe("Feature: release native binary CI law", () => {
   test("Scenario: Given release native artifacts When workflow is inspected Then Rust setup cache and artifact transport use maintained Actions", () => {
@@ -42,5 +43,23 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("git push origin --tags");
     expect(releaseJob).not.toContain("git push --follow-tags");
     expect(releaseJob).not.toContain("--source target/release");
+  });
+
+  test("Scenario: Given alpha channel publish When workflow is inspected Then snapshot versioning and alpha dist-tag stay separate from stable release tags", () => {
+    const workflow = releaseWorkflow();
+    const pkg = packageJson();
+    const releaseJob = workflow.slice(workflow.indexOf("  release:"));
+
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("channel:");
+    expect(releaseJob).toContain("Resolve release channel");
+    expect(releaseJob).toContain("Snapshot packages for alpha");
+    expect(releaseJob).toContain("pnpm run version-packages:alpha");
+    expect(releaseJob).toContain("Publish alpha packages");
+    expect(releaseJob).toContain("pnpm run release:alpha");
+    expect(releaseJob).toContain("steps.release-channel.outputs.channel == 'stable'");
+    expect(releaseJob).toContain("steps.release-channel.outputs.channel == 'alpha'");
+    expect(pkg).toContain("\"version-packages:alpha\": \"changeset version --snapshot alpha\"");
+    expect(pkg).toContain("\"release:alpha\": \"changeset publish --tag alpha --no-git-tag\"");
   });
 });

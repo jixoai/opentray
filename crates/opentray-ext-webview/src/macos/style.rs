@@ -101,6 +101,8 @@ pub(super) fn validate_style_request(payload: &SetStylePayload) -> Result<(), We
         .map(|payload| payload.backdrop.is_some() || payload.corner_preference.is_some())
         .unwrap_or(false)
     {
+        // A cross-platform contract may carry multiple family placeholders, but the macOS
+        // substrate must still reject real Windows family requests truthfully.
         return Err(WebviewRuntimeError::Unsupported(
             "platform.windows window style is not supported on macOS".into(),
         ));

@@ -37,6 +37,8 @@ fn build_screen_details(
     window: &Retained<NSWindow>,
 ) -> Result<ScreenDetailsState, WebviewRuntimeError> {
     let mtm = MainThreadMarker::new().ok_or_else(|| {
+        // NSScreen snapshots are AppKit-owned state. This is a runtime precondition failure,
+        // not a missing feature toggle that page code could enable later.
         WebviewRuntimeError::Unsupported("screen details require the main thread".into())
     })?;
     let screen_list = NSScreen::screens(mtm);

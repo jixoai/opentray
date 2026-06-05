@@ -5,6 +5,14 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        type: choice
+        options:
+          - stable
+          - alpha
+        default: stable
 
 concurrency:
   group: release-${{ github.ref }}
@@ -215,12 +223,26 @@ jobs:
             echo "has_changesets=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve release channel
+        id: release-channel
+        shell: bash
+        run: |
+          channel=stable
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.channel }}" == "alpha" ]]; then
+            channel=alpha
+          fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+
       - name: Version packages
-        if: steps.pending-changesets.outputs.has_changesets == 'true'
+        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'
         run: pnpm run version-packages
 
+      - name: Snapshot packages for alpha
+        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'alpha'
+        run: pnpm run version-packages:alpha
+
       - name: Commit version packages
-        if: steps.pending-changesets.outputs.has_changesets == 'true'
+        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'
         shell: bash
         run: |
           if git diff --quiet; then
@@ -295,7 +317,13 @@ jobs:
           done
 
       - name: Publish packages
+        if: steps.release-channel.outputs.channel == 'stable'
         run: pnpm run release
 
+      - name: Publish alpha packages
+        if: steps.release-channel.outputs.channel == 'alpha'
+        run: pnpm run release:alpha
+
       - name: Push release tags
+        if: steps.release-channel.outputs.channel == 'stable'
         run: git push origin --tags

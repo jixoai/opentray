@@ -19,6 +19,22 @@ Events are subscription-driven. Do not add polling loops or unconditional page p
 
 Native APIs exposed to a page are a security boundary. Keep the CSP-like `nativeApiPolicy` model: grant each capability family explicitly, keep local-only defaults for remote content, and avoid hidden broad grants.
 
+## Maturity Truth
+
+Teach four truths explicitly when helping a user design against `@opentray/ext-webview`:
+
+- `stable`: the current human-visible acceptance path
+- `alpha`: published contract/package path that is still prerelease for visible runtime behavior
+- `unsupported by design`: the request does not truthfully map to the current substrate or capability family
+- `unavailable by context`: the capability exists, but the current session has no authoritative data
+
+Current repo truth for window patterns:
+
+- macOS patterns in this file are the current `stable` visible reference path
+- Windows and Linux remain `alpha` for WebView runtime behavior even if packages and contract shapes exist
+- do not explain Windows/Linux runtime absence as “almost stable”; call it alpha or typed unsupported instead
+- do not call tray-bounds `kind: "unavailable"` a platform unsupported error
+
 ## Authority Map
 
 Keep the ownership split explicit when describing or extending the API:
@@ -55,6 +71,14 @@ The next real platform-law shift should happen when Windows/Linux material, corn
 | Screen details/events | `NSScreen` and `NSWindow.screen()` provide current snapshots; event observers should be listener-driven. | Win32 display topology and DPI events have their own coordinate and scale rules. | X11/Wayland/GTK monitor events and permissions vary by stack. | Keep `getScreenDetails()` standard-like, but model event source, coordinate space, and permission/capability per substrate before broadening. |
 
 Do not pre-build `navigator.opentrayWindow.macos26|win11|gtk.*` namespaces only from speculation. First expose stable common capability state. Introduce substrate namespaces only when a concrete backend has behavior that cannot be truthfully represented by the common contract plus capability metadata.
+
+When a user asks for a cross-platform effect right now, ask which truth they want:
+
+- “stable now on macOS”
+- “alpha contract on Windows/Linux”
+- “future substrate plan only”
+
+That keeps the conversation aligned with what the current runtime can actually prove.
 
 ## Scenario Card: Native Framed Window
 

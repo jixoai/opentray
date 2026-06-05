@@ -7,32 +7,32 @@
 
 ## 2. BDD Contract
 
-- [ ] 2.1 Scenario: Given WebView capability truth is documented When a developer reads the spec, README, or skills Then runtime absence, family mismatch, declarative gate, and context unavailability remain distinct.
-- [ ] 2.2 Scenario: Given an unsupported Windows/Linux runtime path When a caller uses `@opentray/ext-webview` Then the runtime fails explicitly instead of being described as stable cross-platform support.
-- [ ] 2.3 Scenario: Given the alpha release channel is used When a developer installs `opentray@alpha` Then the published docs and skills present the same maturity matrix and unsupported taxonomy as the packages.
-- [ ] 2.4 Scenario: Given an alpha publish is prepared When changesets versions packages Then the alpha path does not consume the later stable version numbers.
+- [x] 2.1 Scenario: Given WebView capability truth is documented When a developer reads the spec, README, or skills Then runtime absence, family mismatch, declarative gate, and context unavailability remain distinct.
+- [x] 2.2 Scenario: Given an unsupported Windows/Linux runtime path When a caller uses `@opentray/ext-webview` Then the runtime fails explicitly instead of being described as stable cross-platform support.
+- [x] 2.3 Scenario: Given the alpha release channel is used When a developer installs `opentray@alpha` Then the published docs and skills present the same maturity matrix and unsupported taxonomy as the packages.
+- [x] 2.4 Scenario: Given an alpha publish is prepared When changesets versions packages Then the alpha path does not consume the later stable version numbers.
 - [ ] 2.5 Scenario: Given release workflow and smoke proof are inspected When alpha and stable evidence are compared Then prerelease evidence is kept distinct from stable release evidence.
-- [ ] 2.6 Confirm each task checkbox is updated only by the agent that completed and verified that task in the current working context.
+- [x] 2.6 Confirm each task checkbox is updated only by the agent that completed and verified that task in the current working context.
 
 ## 3. Implementation
 
-- [ ] 3.1 Run `bun run openspec:vision -- commit-check plan-webview-cross-platform-runtime-and-capability-matrix --phase research-plan` before product-code work starts and commit ready OpenSpec artifacts.
-- [ ] 3.2 Update `packages/ext-webview/README.md`, `packages/cli/README.md`, and any published platform-package README surfaces so they explicitly mark current WebView capability maturity (`stable`, `alpha`, `unsupported by design`, `unavailable by context`).
-- [ ] 3.3 Update repo skills and WebView guidance references so AI-facing documentation teaches the same maturity matrix and unsupported taxonomy as the published package docs.
-- [ ] 3.4 Add concise intent comments at critical runtime effect points in `crates/opentray-ext-webview` where runtime absence, family mismatch, declarative gate, and context unavailability are intentionally distinguished.
-- [ ] 3.5 Update release automation to support an alpha publish path that uses changesets snapshot or prerelease semantics and publishes with npm dist-tag `alpha`.
-- [ ] 3.6 Add or update scripts and tests that verify the alpha release workflow does not consume stable version numbers and keeps alpha/stable evidence distinct.
-- [ ] 3.7 Add or update a fresh-install alpha smoke path and operator instructions that verify `npm i opentray@alpha` against the published docs and runtime truth.
-- [ ] 3.8 Add or update the required changeset entries so package-facing doc/release-surface changes are captured in the published package notes.
+- [x] 3.1 Run `bun run openspec:vision -- commit-check plan-webview-cross-platform-runtime-and-capability-matrix --phase research-plan` before product-code work starts and commit ready OpenSpec artifacts.
+- [x] 3.2 Update `packages/ext-webview/README.md`, `packages/cli/README.md`, and any published platform-package README surfaces so they explicitly mark current WebView capability maturity (`stable`, `alpha`, `unsupported by design`, `unavailable by context`).
+- [x] 3.3 Update repo skills and WebView guidance references so AI-facing documentation teaches the same maturity matrix and unsupported taxonomy as the published package docs.
+- [x] 3.4 Add concise intent comments at critical runtime effect points in `crates/opentray-ext-webview` where runtime absence, family mismatch, declarative gate, and context unavailability are intentionally distinguished.
+- [x] 3.5 Update release automation to support an alpha publish path that uses changesets snapshot or prerelease semantics and publishes with npm dist-tag `alpha`.
+- [x] 3.6 Add or update scripts and tests that verify the alpha release workflow does not consume stable version numbers and keeps alpha/stable evidence distinct.
+- [x] 3.7 Add or update a fresh-install alpha smoke path and operator instructions that verify `npm i opentray@alpha` against the published docs and runtime truth.
+- [x] 3.8 Add or update the required changeset entries so package-facing doc/release-surface changes are captured in the published package notes.
 - [ ] 3.9 Perform the npm alpha publish using the approved release path if local credentials or trusted-publish state permit it; otherwise stop only after proving the exact external-state blocker with command evidence.
 - [ ] 3.10 Update only current-context completed task checkboxes with matching implementation and verification evidence.
 
 ## 4. Verification
 
-- [ ] 4.1 Run targeted tests for release workflow helpers, npm bootstrap/publish helpers, and any updated package or runtime tests affected by the maturity/release changes.
-- [ ] 4.2 Run targeted docs/contract verification by checking the updated README and skills surfaces for the required maturity matrix and unsupported taxonomy.
-- [ ] 4.3 Run `bun run openspec:vision -- validate plan-webview-cross-platform-runtime-and-capability-matrix`.
-- [ ] 4.4 Run `git diff --check`.
+- [x] 4.1 Run targeted tests for release workflow helpers, npm bootstrap/publish helpers, and any updated package or runtime tests affected by the maturity/release changes.
+- [x] 4.2 Run targeted docs/contract verification by checking the updated README and skills surfaces for the required maturity matrix and unsupported taxonomy.
+- [x] 4.3 Run `bun run openspec:vision -- validate plan-webview-cross-platform-runtime-and-capability-matrix`.
+- [x] 4.4 Run `git diff --check`.
 - [ ] 4.5 Run the chosen alpha smoke command or fresh-install verification path and record whether it succeeded, failed with typed unsupported runtime truth, or is blocked by missing publish authority.
 - [ ] 4.6 Run `bun run openspec:vision -- commit-check plan-webview-cross-platform-runtime-and-capability-matrix --phase self-review` before writing final review evidence.
 
