@@ -1,0 +1,232 @@
+name: Preview native build
+
+on:
+  push:
+    paths:
+      - ".changeset/*.md"
+  workflow_dispatch:
+    inputs:
+      alias:
+        description: Optional manual preview build alias
+        required: false
+        type: string
+      changeset:
+        description: Optional changed changeset path to inspect during manual dispatch
+        required: false
+        type: string
+      family:
+        description: Optional comma-separated preview build families
+        required: false
+        type: string
+      target:
+        description: Optional comma-separated preview build targets
+        required: false
+        type: string
+      smoke:
+        description: Optional comma-separated smoke identifiers
+        required: false
+        type: string
+
+concurrency:
+  group: preview-native-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  LYNX_REF: "3a936299ec1669cfd1f3da71e41240296bc226b3"
+  LYNX_XCODE_VERSION: "16.4"
+
+jobs:
+  plan:
+    name: Plan preview build
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.plan.outputs.enabled }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      alias: ${{ steps.plan.outputs.alias }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Collect changed changesets
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          changed_json='[]'
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            before="${{ github.event.before }}"
+            after="${{ github.sha }}"
+            if [[ -n "$before" && "$before" != "0000000000000000000000000000000000000000" ]]; then
+              mapfile -t files < <(git diff --name-only "$before" "$after" -- ".changeset/*.md" || true)
+            else
+              mapfile -t files < <(git diff-tree --no-commit-id --name-only -r "$after" -- ".changeset/*.md" || true)
+            fi
+            changed_json="$(printf '%s\n' "${files[@]}" | python3 -c 'import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))')"
+          elif [[ -n "${{ inputs.changeset }}" ]]; then
+            changed_json="$(python3 -c 'import json; print(json.dumps(["${{ inputs.changeset }}"]))')"
+          fi
+
+          echo "files=${changed_json}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve preview plan
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          manual_args=()
+          if [[ -n "${{ inputs.alias }}" ]]; then
+            manual_args+=(--alias "${{ inputs.alias }}")
+          fi
+
+          if [[ -n "${{ inputs.family }}" ]]; then
+            IFS=',' read -r -a families <<< "${{ inputs.family }}"
+            for family in "${families[@]}"; do
+              trimmed="${family// /}"
+              if [[ -n "$trimmed" ]]; then
+                manual_args+=(--family "$trimmed")
+              fi
+            done
+          fi
+
+          if [[ -n "${{ inputs.target }}" ]]; then
+            IFS=',' read -r -a targets <<< "${{ inputs.target }}"
+            for target in "${targets[@]}"; do
+              trimmed="${target// /}"
+              if [[ -n "$trimmed" ]]; then
+                manual_args+=(--target "$trimmed")
+              fi
+            done
+          fi
+
+          if [[ -n "${{ inputs.smoke }}" ]]; then
+            IFS=',' read -r -a smokes <<< "${{ inputs.smoke }}"
+            for smoke in "${smokes[@]}"; do
+              trimmed="${smoke// /}"
+              if [[ -n "$trimmed" ]]; then
+                manual_args+=(--smoke "$trimmed")
+              fi
+            done
+          fi
+
+          plan_json="$(bun run scripts/binaries/preview-plan.ts --root "$PWD" --changed-json '${{ steps.changed.outputs.files }}' "${manual_args[@]}")"
+          printf '%s\n' "$plan_json" > preview-plan.json
+          cat preview-plan.json
+
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("preview-plan.json", "r", encoding="utf-8") as handle:
+              plan = json.load(handle)
+
+          matrix = json.dumps({"include": plan.get("jobs", [])})
+          enabled = "true" if plan.get("enabled") else "false"
+          alias = plan.get("alias", "")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"enabled={enabled}\n")
+              handle.write(f"alias={alias}\n")
+              handle.write(f"matrix={matrix}\n")
+          PY
+
+  build:
+    name: Preview build (${{ matrix.family }} / ${{ matrix.target }})
+    needs: plan
+    if: needs.plan.outputs.enabled == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.jobTimeoutMinutes }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Xcode
+        if: startsWith(matrix.target, 'darwin-')
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.LYNX_XCODE_VERSION }}
+
+      - name: Restore Lynx caches
+        if: matrix.buildLynxRuntime == true
+        id: lynx-cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.habitat_cache
+            research/lynx/cache
+          key: lynx-preview-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-${{ hashFiles('scripts/release/build-lynx-runtime.sh', 'scripts/release/lynx-macos.args.gn', 'scripts/release/lynx-mirrored-urls.txt', 'native/lynx-runtime-macos/**', 'native/lynx-patches/**') }}
+          restore-keys: |
+            lynx-preview-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-
+
+      - name: Seed Googlesource hosts
+        if: matrix.buildLynxRuntime == true
+        shell: bash
+        run: |
+          sudo python3 scripts/ci/seed_hosts_from_doh.py \
+            flutter.googlesource.com \
+            chromium.googlesource.com \
+            fuchsia.googlesource.com \
+            skia.googlesource.com \
+            swiftshader.googlesource.com
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build preview job
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run scripts/binaries/build-preview-job.ts \
+            --root "$PWD" \
+            --alias "${{ matrix.alias }}" \
+            --family "${{ matrix.family }}" \
+            --target "${{ matrix.target }}" \
+            --output-dir preview-native-artifacts
+
+      - name: Save Lynx caches
+        if: matrix.buildLynxRuntime == true && always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.habitat_cache
+            research/lynx/cache
+          key: ${{ steps.lynx-cache-restore.outputs.cache-primary-key }}
+
+      - name: Upload Lynx build logs
+        if: matrix.buildLynxRuntime == true && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-lynx-build-logs-${{ matrix.alias }}-${{ matrix.target }}-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            research/lynx/logs/**
+            research/lynx/upstream/lynx/out/Default/args.gn
+            research/lynx/upstream/lynx/out/Default/all.xcodeproj/project.pbxproj
+
+      - name: Upload preview artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-${{ matrix.alias }}-${{ matrix.family }}-${{ matrix.target }}
+          path: preview-native-artifacts/*
+          if-no-files-found: error

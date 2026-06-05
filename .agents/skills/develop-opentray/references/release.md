@@ -48,6 +48,34 @@ When the user wants `npm i opentray@alpha`, treat that as a real release path, n
 
 If the current branch only proves macOS visually while Windows/Linux still expose package topology or typed unsupported runtime paths, the alpha channel is the more honest public surface.
 
+## Changeset-Gated Preview Build Rule
+
+Branch preview builds are not the same thing as the release workflow.
+
+- Automatic preview builds should start only when a push updates `.changeset/*.md`.
+- A changed changeset still does not spend heavy build resources unless it contains an OpenTray preview marker.
+- The marker is the operator-controlled build intent surface; changing its `alias` is the normal way to request a fresh preview build after several ordinary code commits.
+
+Recommended minimal marker:
+
+```md
+<!-- opentray-preview {"alias":"webview-20260605-1"} -->
+```
+
+Recommended explicit marker when the operator wants to override the inferred family or default target:
+
+```md
+<!-- opentray-preview {"alias":"webview-20260605-2","families":["ext-webview-native"],"targets":["darwin-arm64"]} -->
+```
+
+Planner law:
+
+- infer families from the changeset release packages when `families` is omitted
+- use the family default targets when `targets` is omitted
+- fail explicitly if one push changes multiple changesets that all request preview builds
+
+The first branch-preview priority is `ext-webview-native` isolation: WebView preview builds may compile the broker binary they need for testing, but they must not compile `opentray-ext-lynx` or build the Lynx runtime sidecar unless the preview request explicitly asks for a Lynx family.
+
 ## Publish Artifact Rule
 
 `opentray`, `@opentray/spec`, and `@opentray/ext-webview` publish from `dist`. The release workflow must run `pnpm run build` before `changeset publish`.

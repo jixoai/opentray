@@ -11,3 +11,5 @@ Clarify the current WebView platform maturity story across the published README 
 - `unavailable` results that only mean the current session lacks authoritative context
 
 Add an alpha-channel publish path based on changesets snapshot versioning so prerelease testing can use `npm i opentray@alpha` without consuming the later stable version numbers.
+
+<!-- opentray-preview {"alias":"webview-preview-20260605-1"} -->

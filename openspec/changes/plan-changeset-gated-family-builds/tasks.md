@@ -16,23 +16,23 @@
 
 ## 3. Implementation
 
-- [ ] 3.1 Run `bun run openspec:vision -- commit-check plan-changeset-gated-family-builds --phase research-plan` before product-code work starts and commit the OpenSpec artifacts.
-- [ ] 3.2 Introduce a durable artifact-family metadata module for branch preview builds, including default targets and the native artifact set for each supported family.
-- [ ] 3.3 Introduce a planner that reads changed changeset files, parses the OpenTray build marker, infers or validates families, and emits a normalized job matrix.
-- [ ] 3.4 Add a dedicated preview build workflow that auto-triggers only on `.changeset/*.md` updates and uses the planner output to drive jobs.
-- [ ] 3.5 Ensure the `ext-webview-native` family compiles only the broker binary plus WebView native library closure, without Lynx dylib or Lynx runtime work.
-- [ ] 3.6 Add manual `workflow_dispatch` overrides that still route through the same planner law.
-- [ ] 3.7 Add or update a changeset example / documentation surface that teaches how to request a preview build by updating the changeset alias marker.
-- [ ] 3.8 Add or update tests that prove planner parsing, family inference, workflow trigger law, and WebView/Lynx isolation.
-- [ ] 3.9 Update only current-context task checkboxes with matching implementation and verification evidence.
+- [x] 3.1 Run `bun run openspec:vision -- commit-check plan-changeset-gated-family-builds --phase research-plan` before product-code work starts and commit the OpenSpec artifacts.
+- [x] 3.2 Introduce a durable artifact-family metadata module for branch preview builds, including default targets and the native artifact set for each supported family.
+- [x] 3.3 Introduce a planner that reads changed changeset files, parses the OpenTray build marker, infers or validates families, and emits a normalized job matrix.
+- [x] 3.4 Add a dedicated preview build workflow that auto-triggers only on `.changeset/*.md` updates and uses the planner output to drive jobs.
+- [x] 3.5 Ensure the `ext-webview-native` family compiles only the broker binary plus WebView native library closure, without Lynx dylib or Lynx runtime work.
+- [x] 3.6 Add manual `workflow_dispatch` overrides that still route through the same planner law.
+- [x] 3.7 Add or update a changeset example / documentation surface that teaches how to request a preview build by updating the changeset alias marker.
+- [x] 3.8 Add or update tests that prove planner parsing, family inference, workflow trigger law, and WebView/Lynx isolation.
+- [x] 3.9 Update only current-context task checkboxes with matching implementation and verification evidence.
 
 ## 4. Verification
 
-- [ ] 4.1 Run targeted tests for the new planner / family metadata modules.
-- [ ] 4.2 Run targeted workflow static tests proving the preview build workflow is changeset-triggered and that `ext-webview-native` jobs do not invoke Lynx build steps.
-- [ ] 4.3 Run `bun run openspec:vision -- validate plan-changeset-gated-family-builds`.
-- [ ] 4.4 Run `git diff --check`.
-- [ ] 4.5 Run a local planner proof command for at least one changed WebView changeset and record the resulting matrix.
+- [x] 4.1 Run targeted tests for the new planner / family metadata modules.
+- [x] 4.2 Run targeted workflow static tests proving the preview build workflow is changeset-triggered and that `ext-webview-native` jobs do not invoke Lynx build steps.
+- [x] 4.3 Run `bun run openspec:vision -- validate plan-changeset-gated-family-builds`.
+- [x] 4.4 Run `git diff --check`.
+- [x] 4.5 Run a local planner proof command for at least one changed WebView changeset and record the resulting matrix.
 - [ ] 4.6 Run `bun run openspec:vision -- commit-check plan-changeset-gated-family-builds --phase self-review` before writing final review evidence.
 
 ## 5. Self-Review Loop
