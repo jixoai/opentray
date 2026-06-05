@@ -9,6 +9,13 @@ describe("@opentray/ext-lynx", () => {
     const tray: TrayHandle = {
       space: { spaceId: "space-1" },
       trayId: "tray-1",
+      async getBounds() {
+        return {
+          kind: "unavailable",
+          source: "test.stub",
+          rect: null,
+        };
+      },
       async commandExtension(ext, data) {
         commands.push({ ext, data });
       },
