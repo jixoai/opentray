@@ -745,7 +745,6 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 
 @property(nonatomic) std::shared_ptr<lynx::pub::LynxView> lynxView;
 @property(nonatomic, strong) OpenTrayWindowLaunchConfig *opentrayWindowConfig;
-@property(nonatomic, assign) BOOL opentrayRawCarrierMode;
 @property(nonatomic, assign) BOOL opentrayWindowAttached;
 @property(nonatomic, assign) BOOL opentrayWindowRevealed;
 @property(nonatomic, assign) BOOL opentrayApplyingWindowFrame;
@@ -763,12 +762,10 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   std::shared_ptr<lynx::pub::LynxRuntimeLifecycleObserver> _opentrayRuntimeObserver;
 }
 
-- (BOOL)shouldUseRawCarrierMode {
-  return !self.opentrayWindowConfig.nativeWindowApi &&
-         !self.opentrayWindowConfig.bindWindowGlobals &&
-         !self.opentrayWindowConfig.nativeScreenApi &&
-         !self.opentrayWindowConfig.bindScreenGlobals &&
-         !self.opentrayWindowConfig.frameless;
+- (BOOL)shouldApplyStartupWindowMutation {
+  // Bridge features must not imply Cocoa window takeover. Keep startup mutation
+  // narrowly scoped to features that explicitly change native chrome.
+  return self.opentrayWindowConfig.frameless;
 }
 
 - (void)loadView {
@@ -780,7 +777,6 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   if (self) {
     self.url = url;
     self.opentrayWindowConfig = [OpenTrayWindowLaunchConfig fromEnvironment];
-    self.opentrayRawCarrierMode = [self shouldUseRawCarrierMode];
     self.opentrayWindowTitle =
         self.opentrayWindowConfig.title ?: kOpenTrayDefaultWindowTitle;
     self.opentrayWindowIcon = self.opentrayWindowConfig.icon;
@@ -862,26 +858,17 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return;
   }
   self.opentrayWindowAttached = YES;
-  if (self.opentrayRawCarrierMode) {
+  if (![self shouldApplyStartupWindowMutation]) {
     return;
   }
   NSWindow *window = self.view.window;
-  window.delegate = self;
-  [window setStyleMask:OpenTrayWindowStyleMask(self.opentrayWindowConfig.frameless)];
-  window.titlebarAppearsTransparent = YES;
-  // `frameless` only removes native chrome. It must not silently turn the
-  // entire content area into a drag region, otherwise page input semantics break.
-  window.movableByWindowBackground = NO;
-  window.minSize = NSMakeSize(self.opentrayWindowConfig.minWidth ? self.opentrayWindowConfig.minWidth.doubleValue : 200.0,
-                              self.opentrayWindowConfig.minHeight ? self.opentrayWindowConfig.minHeight.doubleValue : 200.0);
-  if (self.opentrayWindowConfig.maxWidth || self.opentrayWindowConfig.maxHeight) {
-    window.contentMaxSize = NSMakeSize(self.opentrayWindowConfig.maxWidth ? self.opentrayWindowConfig.maxWidth.doubleValue : CGFLOAT_MAX,
-                                       self.opentrayWindowConfig.maxHeight ? self.opentrayWindowConfig.maxHeight.doubleValue : CGFLOAT_MAX);
+  if (self.opentrayWindowConfig.frameless) {
+    [window setStyleMask:OpenTrayWindowStyleMask(YES)];
+    window.titlebarAppearsTransparent = YES;
+    // `frameless` only removes native chrome. It must not silently turn the
+    // entire content area into a drag region, otherwise page input semantics break.
+    window.movableByWindowBackground = NO;
   }
-  [window setContentSize:[self.opentrayWindowConfig initialContentSize]];
-  [self applyWindowTitle:self.opentrayWindowTitle emitEvent:NO];
-  [self applyWindowIconValue:self.opentrayWindowIcon emitEvent:NO errorMessage:nil];
-  [window center];
 }
 
 - (void)revealWindowIfNeeded {
@@ -889,11 +876,11 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return;
   }
   self.opentrayWindowRevealed = YES;
-  if (self.opentrayRawCarrierMode) {
+  if (![self shouldApplyStartupWindowMutation]) {
     return;
   }
-  self.view.window.alphaValue = 1.0;
-  [self.view.window makeKeyAndOrderFront:nil];
+  // The upstream carrier owns the first reveal. Forcing key/main status here can
+  // change AppKit event routing and make input bugs look like feature bugs.
 }
 
 - (NSDictionary *)currentWindowStyleDictionary {
