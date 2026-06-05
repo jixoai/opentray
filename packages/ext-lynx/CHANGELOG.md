@@ -1,5 +1,11 @@
 # @opentray/ext-lynx
 
+## 0.1.2
+
+### Patch Changes
+
+- 710a86e: Republish the Lynx extension package group after the window-controller merge so npm receives the updated bridge and OpenTray-owned runtime host assets.
+
 ## 0.1.1
 
 ### Patch Changes
