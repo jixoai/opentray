@@ -11,7 +11,7 @@
 - [x] 2.2 Scenario: Given an unsupported Windows/Linux runtime path When a caller uses `@opentray/ext-webview` Then the runtime fails explicitly instead of being described as stable cross-platform support.
 - [x] 2.3 Scenario: Given the alpha release channel is used When a developer installs `opentray@alpha` Then the published docs and skills present the same maturity matrix and unsupported taxonomy as the packages.
 - [x] 2.4 Scenario: Given an alpha publish is prepared When changesets versions packages Then the alpha path does not consume the later stable version numbers.
-- [ ] 2.5 Scenario: Given release workflow and smoke proof are inspected When alpha and stable evidence are compared Then prerelease evidence is kept distinct from stable release evidence.
+- [x] 2.5 Scenario: Given release workflow and smoke proof are inspected When alpha and stable evidence are compared Then prerelease evidence is kept distinct from stable release evidence.
 - [x] 2.6 Confirm each task checkbox is updated only by the agent that completed and verified that task in the current working context.
 
 ## 3. Implementation
@@ -24,8 +24,8 @@
 - [x] 3.6 Add or update scripts and tests that verify the alpha release workflow does not consume stable version numbers and keeps alpha/stable evidence distinct.
 - [x] 3.7 Add or update a fresh-install alpha smoke path and operator instructions that verify `npm i opentray@alpha` against the published docs and runtime truth.
 - [x] 3.8 Add or update the required changeset entries so package-facing doc/release-surface changes are captured in the published package notes.
-- [ ] 3.9 Perform the npm alpha publish using the approved release path if local credentials or trusted-publish state permit it; otherwise stop only after proving the exact external-state blocker with command evidence.
-- [ ] 3.10 Update only current-context completed task checkboxes with matching implementation and verification evidence.
+- [x] 3.9 Perform the npm alpha publish using the approved release path if local credentials or trusted-publish state permit it; otherwise stop only after proving the exact external-state blocker with command evidence.
+- [x] 3.10 Update only current-context completed task checkboxes with matching implementation and verification evidence.
 
 ## 4. Verification
 
@@ -33,14 +33,14 @@
 - [x] 4.2 Run targeted docs/contract verification by checking the updated README and skills surfaces for the required maturity matrix and unsupported taxonomy.
 - [x] 4.3 Run `bun run openspec:vision -- validate plan-webview-cross-platform-runtime-and-capability-matrix`.
 - [x] 4.4 Run `git diff --check`.
-- [ ] 4.5 Run the chosen alpha smoke command or fresh-install verification path and record whether it succeeded, failed with typed unsupported runtime truth, or is blocked by missing publish authority.
-- [ ] 4.6 Run `bun run openspec:vision -- commit-check plan-webview-cross-platform-runtime-and-capability-matrix --phase self-review` before writing final review evidence.
+- [x] 4.5 Run the chosen alpha smoke command or fresh-install verification path and record whether it succeeded, failed with typed unsupported runtime truth, or is blocked by missing publish authority.
+- [x] 4.6 Run `bun run openspec:vision -- commit-check plan-webview-cross-platform-runtime-and-capability-matrix --phase self-review` before writing final review evidence.
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md` comparing implementation and publish evidence against `plans/plan.md`.
-- [ ] 5.2 Generate `review/self-review.html` as the structured evidence presentation for docs, workflow, and publish results.
-- [ ] 5.3 If review updates OpenSpec artifacts or task state, commit those artifact changes before the next apply loop.
+- [x] 5.1 Generate `review/self-review.md` comparing implementation and publish evidence against `plans/plan.md`.
+- [x] 5.2 Generate `review/self-review.html` as the structured evidence presentation for docs, workflow, and publish results.
+- [x] 5.3 If review updates OpenSpec artifacts or task state, commit those artifact changes before the next apply loop.
 - [ ] 5.4 If review enters a real recurrence loop, run `bun run openspec:vision -- review-state plan-webview-cross-platform-runtime-and-capability-matrix`.
 - [ ] 5.5 If review cannot exit normally because npm publish authority or another external dependency is missing, run `bun run openspec:vision -- handoff plan-webview-cross-platform-runtime-and-capability-matrix` and commit the handoff evidence before returning to discussion.
 - [ ] 5.6 If review exits normally, run `openspec archive plan-webview-cross-platform-runtime-and-capability-matrix` and commit the archive result.

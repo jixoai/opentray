@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Self Review: plan-webview-cross-platform-runtime-and-capability-matrix</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f6f8;
+        --panel: rgba(255, 255, 255, 0.94);
+        --ink: #18212b;
+        --muted: #5a6774;
+        --line: rgba(24, 33, 43, 0.12);
+        --accent: #275d90;
+        --ok: #1f7a45;
+        --warn: #9a6b12;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(39, 93, 144, 0.12), transparent 32%),
+          linear-gradient(180deg, #fbfbfc 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      }
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 30px;
+        font-size: 22px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      .deck {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .card {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 12px 32px rgba(24, 33, 43, 0.08);
+      }
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .metric {
+        margin-top: 6px;
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .ok {
+        color: var(--ok);
+        font-weight: 700;
+      }
+      .warn {
+        color: var(--warn);
+        font-weight: 700;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: rgba(39, 93, 144, 0.08);
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      code,
+      pre {
+        font: 13px/1.45 "SFMono-Regular", "Menlo", "Monaco", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.78);
+        overflow: auto;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>plan-webview-cross-platform-runtime-and-capability-matrix</h1>
+      <p>
+        Review focus: verify that the repository now tells one honest story across
+        runtime truth, docs, skills, release workflow, npm channel, and fresh-install proof.
+      </p>
+
+      <div class="deck">
+        <section class="card">
+          <div class="label">Release Run</div>
+          <div class="metric ok">27011489839</div>
+          <p>Second alpha run succeeded after the package-validation hotfix.</p>
+        </section>
+        <section class="card">
+          <div class="label">Alpha Version</div>
+          <div class="metric ok">0.0.0-alpha-20260605111358</div>
+          <p>`opentray` and `@opentray/ext-webview` both resolve to the same snapshot line under `alpha`.</p>
+        </section>
+        <section class="card">
+          <div class="label">Stable Line</div>
+          <div class="metric ok">untouched</div>
+          <p>`opentray latest=0.4.1`, `@opentray/ext-webview latest=0.3.0` remained intact.</p>
+        </section>
+        <section class="card">
+          <div class="label">Fresh Install Smoke</div>
+          <div class="metric ok">passed</div>
+          <p>New temp project installed npm packages and drove the daemon tray path without workspace links.</p>
+        </section>
+      </div>
+
+      <h2>Intent Gate Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Gate</th>
+            <th>Evidence</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Maturity truth aligns docs, skills, and release channel</td>
+            <td>
+              `d411fe7` updated the WebView/CLI guidance, and the published alpha channel stayed separate from `latest`.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Alpha publish avoids consuming stable version numbers</td>
+            <td>
+              Run <a href="https://github.com/jixoai/opentray/actions/runs/27011489839">27011489839</a>
+              skipped `Publish packages` and `Push release tags`, then succeeded on `Publish alpha packages`.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Fresh install proof comes from npm registry</td>
+            <td>
+              `/tmp/opentray-alpha-smoke.vO7xMV` installed `opentray@alpha` and `@opentray/ext-webview@alpha`, then `npx opentray smoke daemon-tray` produced live broker/tray/WebView evidence.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>WebView publish work is no longer dragged by Lynx</td>
+            <td>
+              All six native jobs in the successful run skipped `Restore Lynx caches`, `Seed Googlesource hosts`, `Save Lynx caches`, and `Upload Lynx build logs`.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Release blocker was repaired with explicit evidence</td>
+            <td>
+              Failed run <a href="https://github.com/jixoai/opentray/actions/runs/27010918550">27010918550</a>
+              exposed the `runCommand` TDZ bug; `23ebf6c` fixed it and the rerun completed.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Registry Truth</h2>
+      <pre>npm view opentray dist-tags --json
+{
+  "latest": "0.4.1",
+  "alpha": "0.0.0-alpha-20260605111358"
+}
+
+npm view @opentray/ext-webview dist-tags --json
+{
+  "latest": "0.3.0",
+  "alpha": "0.0.0-alpha-20260605111358"
+}</pre>
+
+      <h2>Smoke Output</h2>
+      <pre>connected: endpoint=/tmp/opentray-alpha-smoke.vO7xMV/home/.opentray/0.0.0-alpha-20260605111358/opentray-p1.sock session=lease-1
+space: {"spaceId":"com.example.opentray.daemon-smoke"}
+tray: daemon-smoke-status
+webview extension requested through the generic load-ext path
+click the tray icon: macOS should direct-trigger the single primary action without opening a menu
+tray bounds: {"kind":"native","source":"backend.nativeTrayBounds","rect":{"x":0,"y":-30,"width":98,"height":22}}
+broker -&gt; client {"type":"ext-event","spaceId":"com.example.opentray.daemon-smoke","trayId":"daemon-smoke-status","ext":"webview","data":{"type":"shown"}}
+primary tray action: webview show</pre>
+
+      <h2>Residual Risk</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Current truth</th>
+            <th>Disposition</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Windows/Linux visible WebView runtime</td>
+            <td>Still alpha or package-topology-only, as intended.</td>
+            <td class="ok">Explicit, not a blocker for this change</td>
+          </tr>
+          <tr>
+            <td>GitHub Actions Node 20 deprecation annotations</td>
+            <td>Present on artifact/pnpm actions during the successful run.</td>
+            <td class="warn">Follow-up CI hygiene atom recommended</td>
+          </tr>
+          <tr>
+            <td>User-owned Lynx working tree edits</td>
+            <td>`crates/opentray-ext-lynx/src/lib.rs`, `crates/opentray-ext-lynx/src/macos.rs` remain dirty.</td>
+            <td class="ok">Untouched by this review path</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+  </body>
+</html>
