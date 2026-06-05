@@ -485,7 +485,7 @@ std::vector<uint8_t> ConvertNSBinary(NSData *binary) {
   return result;
 }
 
-std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
+[[maybe_unused]] std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   std::string config_json = StdStringFromNSString(JSONStringFromObject([config dictionaryRepresentation]));
   std::string script = R"JS((function () {
   const config = __OPENTRAY_CONFIG__;
@@ -1320,10 +1320,8 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   std::shared_ptr<lynx::pub::LynxRuntimeLifecycleObserver> upstreamObserver =
       std::make_shared<lynx::example::ExampleLynxRuntimeLifecycleObserver>();
   std::string bootstrapScript;
-  if (self.opentrayWindowConfig.nativeWindowApi ||
-      self.opentrayWindowConfig.nativeScreenApi) {
-    bootstrapScript = OpenTrayBootstrapScript(self.opentrayWindowConfig);
-  }
+  // Keep startup attach side-effect-free. The bundled facade can install
+  // navigator.window/screen after page code explicitly requests the bridge.
   _opentrayRuntimeObserver = std::make_shared<OpenTrayRuntimeLifecycleObserver>(
       std::move(upstreamObserver), std::move(bootstrapScript));
   _lynxView->RegisterRuntimeLifecycleObserver(_opentrayRuntimeObserver);
