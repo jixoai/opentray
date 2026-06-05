@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Self Review: plan-changeset-gated-family-builds</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f1e8;
+        --panel: rgba(255, 252, 247, 0.95);
+        --ink: #1f251d;
+        --muted: #5f6a5d;
+        --line: rgba(31, 37, 29, 0.12);
+        --accent: #40637a;
+        --ok: #2d6a3f;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(64, 99, 122, 0.12), transparent 34%),
+          linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      }
+      main {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 22px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      .deck {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .card {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 12px 36px rgba(38, 46, 35, 0.08);
+      }
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .metric {
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .ok {
+        color: var(--ok);
+        font-weight: 700;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: rgba(64, 99, 122, 0.08);
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      code,
+      pre {
+        font: 13px/1.45 "SFMono-Regular", "Menlo", "Monaco", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+        overflow: auto;
+      }
+      ul {
+        padding-left: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>plan-changeset-gated-family-builds</h1>
+      <p>
+        Review focus: prove that branch preview builds are now driven by changed
+        changeset files plus an explicit preview marker, and that an
+        <code>ext-webview-native</code> preview build no longer enters the Lynx
+        build path.
+      </p>
+
+      <div class="deck">
+        <section class="card">
+          <div class="label">Remote Run</div>
+          <div class="metric ok">27006342558</div>
+          <p>Automatic push-triggered preview workflow completed successfully.</p>
+        </section>
+        <section class="card">
+          <div class="label">Local Planner</div>
+          <div class="metric ok">1 job</div>
+          <p><code>ext-webview-native / darwin-arm64</code> only.</p>
+        </section>
+        <section class="card">
+          <div class="label">Script Tests</div>
+          <div class="metric ok">18 passed</div>
+          <p><code>bun test scripts/binaries/*.test.ts</code></p>
+        </section>
+      </div>
+
+      <h2>Gate Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Gate</th>
+            <th>Evidence</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Changeset file updates trigger the preview workflow</td>
+            <td>
+              Push of commit <code>8ff6233</code> changed
+              <code>.changeset/webview-alpha-release-truth.md</code> and automatically
+              created run <code>27006342558</code> for workflow
+              <code>Preview native build</code>.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Preview marker acts as explicit build intent</td>
+            <td>
+              <code>.changeset/webview-alpha-release-truth.md</code> now carries
+              <code>&lt;!-- opentray-preview {"alias":"webview-preview-20260605-1"} --&gt;</code>,
+              and the local planner resolves that single changed file into one enabled plan.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>ext-webview preview is isolated from Lynx</td>
+            <td>
+              Remote build job name is
+              <code>Preview build (ext-webview-native / darwin-arm64)</code>;
+              steps <code>Restore Lynx caches</code>, <code>Seed Googlesource hosts</code>,
+              <code>Save Lynx caches</code>, and <code>Upload Lynx build logs</code> are all
+              <code>skipped</code>.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Workflow logic is planner-driven rather than YAML-special-cased</td>
+            <td>
+              <code>preview-native.yml</code> delegates planning to
+              <code>scripts/binaries/preview-plan.ts</code> and execution to
+              <code>scripts/binaries/build-preview-job.ts</code>.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Planner Output</h2>
+      <pre>{
+  "enabled": true,
+  "alias": "webview-preview-20260605-1",
+  "selectedChangeset": ".changeset/webview-alpha-release-truth.md",
+  "families": ["ext-webview-native"],
+  "targets": ["darwin-arm64"],
+  "jobs": [
+    {
+      "alias": "webview-preview-20260605-1",
+      "family": "ext-webview-native",
+      "target": "darwin-arm64",
+      "runner": "macos-15",
+      "jobTimeoutMinutes": 60,
+      "lynxRuntimeTimeoutSeconds": 4500,
+      "buildLynxRuntime": false
+    }
+  ]
+}</pre>
+
+      <h2>Command Evidence</h2>
+      <pre>bun test scripts/binaries/*.test.ts
+bun run scripts/binaries/preview-plan.ts --root "$PWD" --changed-json '[".changeset/webview-alpha-release-truth.md"]'
+bun run openspec:vision -- validate plan-changeset-gated-family-builds
+git diff --check
+gh run list --workflow "Preview native build" --branch enrich-webview-window-macos-capabilities --limit 10 --json databaseId,workflowName,displayTitle,headSha,status,conclusion,event,createdAt,url
+gh run view 27006342558 --json status,conclusion,jobs,url</pre>
+    </main>
+  </body>
+</html>

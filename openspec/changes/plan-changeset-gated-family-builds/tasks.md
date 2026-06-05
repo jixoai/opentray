@@ -33,13 +33,13 @@
 - [x] 4.3 Run `bun run openspec:vision -- validate plan-changeset-gated-family-builds`.
 - [x] 4.4 Run `git diff --check`.
 - [x] 4.5 Run a local planner proof command for at least one changed WebView changeset and record the resulting matrix.
-- [ ] 4.6 Run `bun run openspec:vision -- commit-check plan-changeset-gated-family-builds --phase self-review` before writing final review evidence.
+- [x] 4.6 Run `bun run openspec:vision -- commit-check plan-changeset-gated-family-builds --phase self-review` before writing final review evidence.
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md` comparing planner law, workflow trigger law, and WebView/Lynx isolation against `plans/plan.md`.
-- [ ] 5.2 Generate `review/self-review.html` as the structured evidence presentation for preview-build behavior.
-- [ ] 5.3 If review updates OpenSpec artifacts or task state, commit those artifact changes before the next apply loop.
+- [x] 5.1 Generate `review/self-review.md` comparing planner law, workflow trigger law, and WebView/Lynx isolation against `plans/plan.md`.
+- [x] 5.2 Generate `review/self-review.html` as the structured evidence presentation for preview-build behavior.
+- [x] 5.3 If review updates OpenSpec artifacts or task state, commit those artifact changes before the next apply loop.
 - [ ] 5.4 If review enters a real recurrence loop, run `bun run openspec:vision -- review-state plan-changeset-gated-family-builds`.
 - [ ] 5.5 If review cannot exit normally because GitHub Actions or external branch permissions block proof, run `bun run openspec:vision -- handoff plan-changeset-gated-family-builds` and commit the handoff evidence before returning to discussion.
 - [ ] 5.6 If review exits normally, run `openspec archive plan-changeset-gated-family-builds` and commit the archive result.
