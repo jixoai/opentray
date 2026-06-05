@@ -156,17 +156,25 @@ mod tests {
     fn tray_bounds_delegate_to_runtime_by_tray_identity() {
         let backend = TrayIconBackend::with_runtime(RoutingRuntime);
 
-        assert_eq!(
-            backend
-                .tray_bounds(&"surface-1".to_string(), &"tray-1".to_string())
-                .expect("tray bounds"),
-            Some(Rect {
-                x: 10,
-                y: 20,
-                width: 24,
-                height: 24,
-            })
-        );
+        let tray_bounds = backend
+            .tray_bounds(&"surface-1".to_string(), &"tray-1".to_string())
+            .expect("tray bounds");
+
+        // Linux keeps tray bounds out of the generic tray-icon backend because
+        // there is no stable cross-desktop anchor contract here yet.
+        if backend.capabilities().tray_bounds {
+            assert_eq!(
+                tray_bounds,
+                Some(Rect {
+                    x: 10,
+                    y: 20,
+                    width: 24,
+                    height: 24,
+                })
+            );
+        } else {
+            assert_eq!(tray_bounds, None);
+        }
         assert_eq!(
             backend
                 .tray_bounds(&"surface-1".to_string(), &"missing".to_string())
