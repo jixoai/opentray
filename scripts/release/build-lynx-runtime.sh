@@ -30,6 +30,10 @@ mirror_urls_file="${root_dir}/scripts/release/lynx-mirrored-urls.txt"
 lynx_repo="${LYNX_REPO:-https://github.com/lynx-family/lynx.git}"
 lynx_ref="${LYNX_REF:-3a936299ec1669cfd1f3da71e41240296bc226b3}"
 mirror_port="${LYNX_MIRROR_PORT:-39123}"
+runtime_host_source_dir="${root_dir}/native/lynx-runtime-macos"
+lynx_patches_dir="${root_dir}/native/lynx-patches"
+runtime_host_upstream_dir="${lynx_dir}/explorer/darwin/macos/lynx_explorer"
+runtime_app_name="OpenTrayLynxRuntime"
 deps_files=()
 mirror_pid=""
 
@@ -158,64 +162,47 @@ PY
   git -C "${tools_shared_dir}" checkout --detach "${tools_shared_ref}" 2>&1 | tee "${logs_dir}/tools-shared-checkout.log"
 }
 
-patch_build_resources_pnpm_path() {
-  local build_resources_py="${lynx_dir}/explorer/darwin/macos/lynx_explorer/build_resources.py"
+install_opentray_runtime_host_sources() {
+  if [[ ! -d "${runtime_host_source_dir}" ]]; then
+    echo "missing OpenTray Lynx runtime host sources: ${runtime_host_source_dir}" >&2
+    exit 1
+  fi
 
-  python3 - "${build_resources_py}" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text()
-old = "    subprocess.check_call(['bash', '-c', 'pnpm install --no-frozen-lockfile && pnpm run build'], cwd=homepage_dir)\n"
-new = """    homepage_env = os.environ.copy()\n    homepage_env[\"PATH\"] = os.path.join(root_dir, 'buildtools', 'node', 'bin') + os.pathsep + homepage_env.get(\"PATH\", \"\")\n    subprocess.check_call(['bash', '-c', 'pnpm install --no-frozen-lockfile && pnpm run build'], cwd=homepage_dir, env=homepage_env)\n"""
-if old not in text:
-    raise SystemExit("expected build_resources.py homepage pnpm invocation not found")
-path.write_text(text.replace(old, new, 1))
-PY
+  rm -rf "${runtime_host_upstream_dir}"
+  mkdir -p "$(dirname "${runtime_host_upstream_dir}")"
+  # The upstream checkout stays disposable; OpenTray's owned host-app sources are copied in fresh.
+  cp -R "${runtime_host_source_dir}" "${runtime_host_upstream_dir}"
 }
 
-patch_macos_http_service() {
-  local service_file="${lynx_dir}/explorer/darwin/macos/lynx_explorer/LynxExplorer/service/LynxHttpService.mm"
+apply_opentray_lynx_patches() {
+  if [[ ! -d "${lynx_patches_dir}" ]]; then
+    return
+  fi
 
-  python3 - "${service_file}" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text()
-pattern = re.compile(
-    r'void LynxHttpServiceImpl::Request\(std::shared_ptr<pub::LynxHttpRequest> http_request,\n'
-    r'\s+std::shared_ptr<pub::LynxHttpResponse> http_response\) \{\n'
-    r'.*?\n'
-    r'\}\n'
-    r'\n'
-    r'\}  // namespace service',
-    re.S,
-)
-replacement = """void LynxHttpServiceImpl::Request(std::shared_ptr<pub::LynxHttpRequest> http_request,\n                                  std::shared_ptr<pub::LynxHttpResponse> http_response) {\n  NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:http_request->GetUrl().c_str()]];\n  NSMutableURLRequest *nsRequest = [NSMutableURLRequest requestWithURL:url];\n  nsRequest.HTTPMethod = [NSString stringWithUTF8String:http_request->GetMethod().c_str()];\n\n  for (const auto &header : http_request->GetHeaders()) {\n    NSString *key = [NSString stringWithUTF8String:header.first.c_str()];\n    NSString *value = [NSString stringWithUTF8String:header.second.c_str()];\n    if (key && value) {\n      [nsRequest setValue:value forHTTPHeaderField:key];\n    }\n  }\n\n  const auto &request_body = http_request->GetBody();\n  if (!request_body.empty()) {\n    nsRequest.HTTPBody = [NSData dataWithBytes:request_body.data() length:request_body.size()];\n  }\n\n  NSURLSession *session = [NSURLSession sharedSession];\n  NSURLSessionDataTask *dataTask =\n      [session dataTaskWithRequest:nsRequest\n                 completionHandler:^(NSData *_Nullable data, NSURLResponse *_Nullable response,\n                                     NSError *_Nullable error) {\n                   if (data && data.length > 0) {\n                     http_response->SetBody(\n                         (uint8_t *)data.bytes, data.length,\n                         [](uint8_t *body, size_t length, void *opaque) { CFRelease(opaque); },\n                         (__bridge_retained void *)data);\n                   }\n\n                   if (error) {\n                     static const int SDK_ERROR_STATUS_CODE = 499;\n                     http_response->SetStatusCode(SDK_ERROR_STATUS_CODE);\n                     http_response->SetStatusText([error.localizedDescription UTF8String]);\n                   } else if ([response isKindOfClass:[NSHTTPURLResponse class]]) {\n                     NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;\n                     http_response->SetStatusCode(httpResponse.statusCode);\n\n                     NSString *statusText =\n                         [NSHTTPURLResponse localizedStringForStatusCode:httpResponse.statusCode];\n                     http_response->SetStatusText(statusText ? [statusText UTF8String] : \"\");\n\n                     for (NSString *key in httpResponse.allHeaderFields) {\n                       NSString *value = httpResponse.allHeaderFields[key];\n                       if (key && value) {\n                         http_response->AddHeader([key UTF8String], [value UTF8String]);\n                       }\n                     }\n                   } else {\n                     http_response->SetStatusCode(-1);\n                     http_response->SetStatusText(\"missing http response\");\n                   }\n\n                   http_response->Complete();\n                 }];\n\n  [dataTask resume];\n}\n\n}  // namespace service"""
-patched, count = pattern.subn(replacement, text, count=1)
-if count != 1:
-    raise SystemExit("expected LynxHttpServiceImpl::Request body not found")
-path.write_text(patched)
-PY
+  local patch_file=""
+  shopt -s nullglob
+  for patch_file in "${lynx_patches_dir}"/*.patch; do
+    echo "Applying OpenTray Lynx patch: ${patch_file}"
+    git apply --whitespace=nowarn "${patch_file}"
+  done
+  shopt -u nullglob
 }
 
-patch_generated_lynx_explorer_outputs() {
+patch_generated_runtime_outputs() {
   local project_file="${lynx_dir}/${out_dir}/all.xcodeproj/project.pbxproj"
 
-  python3 - "${project_file}" <<'PY'
+  python3 - "${project_file}" "${runtime_app_name}" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
+app_name = sys.argv[2]
 lines = path.read_text().splitlines(keepends=True)
 phase_name = 'name = "Action \\"Compile and copy lynx_explorer via ninja\\"";'
 outputs = (
-    '"$(PROJECT_DIR)/LynxExplorer.app/Contents/Info.plist"',
-    '"$(PROJECT_DIR)/LynxExplorer.app/Contents/PkgInfo"',
-    '"$(PROJECT_DIR)/LynxExplorer.app/Contents/MacOS/LynxExplorer"',
+    f'"$(PROJECT_DIR)/{app_name}.app/Contents/Info.plist"',
+    f'"$(PROJECT_DIR)/{app_name}.app/Contents/PkgInfo"',
+    f'"$(PROJECT_DIR)/{app_name}.app/Contents/MacOS/{app_name}"',
 )
 
 for index, line in enumerate(lines):
@@ -453,8 +440,8 @@ cd "${lynx_dir}"
 git checkout --detach "${lynx_ref}" 2>&1 | tee "${logs_dir}/git-checkout.log"
 git rev-parse HEAD | tee "${logs_dir}/lynx-ref.txt"
 clone_tools_shared
-patch_build_resources_pnpm_path
-patch_macos_http_service
+install_opentray_runtime_host_sources
+apply_opentray_lynx_patches
 
 unset all_proxy http_proxy https_proxy ALL_PROXY HTTP_PROXY HTTPS_PROXY
 export XDG_CONFIG_HOME="${lynx_dir}/.xdg-config"
@@ -485,9 +472,9 @@ buildtools/gn/gn gen "${out_dir}" \
   --ide=xcode \
   2>&1 | tee "${logs_dir}/gn-gen.log"
 
-patch_generated_lynx_explorer_outputs
+patch_generated_runtime_outputs
 
-echo "Building Lynx Explorer with xcodebuild"
+echo "Building OpenTray Lynx runtime host with xcodebuild"
 xcodebuild \
   -project "${out_dir}/all.xcodeproj" \
   -scheme lynx_explorer \
@@ -501,7 +488,7 @@ xcodebuild \
   build \
   2>&1 | tee "${logs_dir}/xcodebuild-build.log"
 
-app_bundle_path="${lynx_dir}/${out_dir}/LynxExplorer.app"
+app_bundle_path="${lynx_dir}/${out_dir}/${runtime_app_name}.app"
 if [[ ! -d "${app_bundle_path}" ]]; then
   echo "expected app bundle not found: ${app_bundle_path}" >&2
   exit 1

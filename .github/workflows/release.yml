@@ -110,7 +110,7 @@ jobs:
           path: |
             ~/.habitat_cache
             research/lynx/cache
-          key: lynx-release-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-${{ hashFiles('scripts/release/build-lynx-runtime.sh', 'scripts/release/lynx-macos.args.gn', 'scripts/release/lynx-mirrored-urls.txt') }}
+          key: lynx-release-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-${{ hashFiles('scripts/release/build-lynx-runtime.sh', 'scripts/release/lynx-macos.args.gn', 'scripts/release/lynx-mirrored-urls.txt', 'native/lynx-runtime-macos/**', 'native/lynx-patches/**') }}
           restore-keys: |
             lynx-release-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-
 

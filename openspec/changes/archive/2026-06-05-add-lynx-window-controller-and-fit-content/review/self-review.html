@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Self Review: add-lynx-window-controller-and-fit-content</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4efe3;
+        --panel: rgba(255, 252, 247, 0.94);
+        --ink: #182119;
+        --muted: #667266;
+        --line: rgba(24, 33, 25, 0.12);
+        --accent: #1f6b52;
+        --warn: #a95b00;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(31, 107, 82, 0.14), transparent 32%),
+          linear-gradient(180deg, #faf7f1 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      }
+      main {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 22px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      .deck {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        margin: 24px 0 8px;
+      }
+      .card {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 14px 34px rgba(51, 40, 19, 0.08);
+      }
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .metric {
+        color: var(--accent);
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .partial {
+        color: var(--warn);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: rgba(31, 107, 82, 0.08);
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      code,
+      pre {
+        font: 13px/1.45 "SFMono-Regular", "Menlo", "Monaco", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+        overflow: auto;
+      }
+      ul {
+        padding-left: 20px;
+      }
+      .pass {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .warn {
+        color: var(--warn);
+        font-weight: 700;
+      }
+      .callout {
+        margin-top: 18px;
+        padding: 16px 18px;
+        border-radius: 18px;
+        border: 1px solid rgba(169, 91, 0, 0.22);
+        background: rgba(255, 228, 191, 0.6);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>add-lynx-window-controller-and-fit-content</h1>
+      <p>
+        Review focus: prove that <code>@opentray/ext-lynx</code> now owns its window bridge,
+        screen bridge, startup feature law, and borderless behavior at the extension boundary,
+        with the rebuilt macOS carrier verified through human visual acceptance.
+      </p>
+
+      <div class="deck">
+        <section class="card">
+          <div class="label">Window Bridge</div>
+          <div class="metric">navigator-owned</div>
+          <p><code>navigator.window</code> and <code>navigator.screen</code> are now first-class Lynx host APIs.</p>
+        </section>
+        <section class="card">
+          <div class="label">Launch Law</div>
+          <div class="metric">explicit features</div>
+          <p>Baseline is a fixed shell; startup behavior is selected with feature expressions instead of implicit fit-content.</p>
+        </section>
+        <section class="card">
+          <div class="label">Frameless Law</div>
+          <div class="metric">input-safe</div>
+          <p>Borderless mode no longer maps the entire content area to a background drag region.</p>
+        </section>
+        <section class="card">
+          <div class="label">Archive State</div>
+          <div class="metric">accepted</div>
+          <p>The CI-built runtime artifact passed the final visual smoke.</p>
+        </section>
+      </div>
+
+      <h2>Gate Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Gate</th>
+            <th>Evidence</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Extension-owned window bridge</td>
+            <td>TS facade, runtime helper, Rust protocol, and the macOS runtime all expose the same Lynx-owned capability family.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Metadata ownership</td>
+            <td><code>title</code> and <code>icon</code> travel through <code>show</code>, <code>getTitle</code>, <code>setTitle</code>, <code>getIcon</code>, and <code>setIcon</code>.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Screen capability</td>
+            <td><code>navigator.screen</code>, <code>navigator.opentrayScreen</code>, and optional <code>window.getScreenDetails()</code> are installed by the native host bridge.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Startup feature law</td>
+            <td>Public types, smoke helpers, and protocol parsing now use a fixed fallback shell plus explicit startup tokens and wildcard-disable expressions.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Frameless input safety</td>
+            <td>The host no longer turns the whole content area into a draggable background when frameless is enabled.</td>
+            <td class="pass">Pass</td>
+          </tr>
+          <tr>
+            <td>Nonblank Dock identity</td>
+            <td>Static metadata and packaging stay in place, and the CI-built runtime artifact was visually accepted by the human operator.</td>
+            <td class="pass">Pass</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Verified Commands</h2>
+      <pre><code>cargo test -p opentray-ext-lynx
+pnpm --filter opentray exec vitest run src/cli.test.ts src/smoke/daemon-lynx.test.ts
+pnpm --filter opentray typecheck
+pnpm --filter @opentray/ext-lynx test
+pnpm --filter @opentray/ext-lynx typecheck
+bun test scripts/binaries/*.test.ts
+bun test scripts/binaries/launch-lynx-smoke.test.ts
+bun run openspec:vision -- validate add-lynx-window-controller-and-fit-content
+bun run openspec:vision -- check add-lynx-window-controller-and-fit-content
+git diff --check</code></pre>
+
+      <div class="callout">
+        Human visual acceptance is complete: baseline behavior, bridge controls, click, scroll,
+        input, <code>Connect Bridge</code>, and the lexical <code>NativeModules</code> resolver path all
+        worked with the CI-built runtime artifact.
+      </div>
+    </main>
+  </body>
+</html>

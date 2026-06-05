@@ -1,28 +1,86 @@
 import { existsSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createClient } from "../client";
 import { connectLocalBroker } from "../local-broker";
 
 const menuLabels = new Map<number, string>([
-  [1, "Reload Bundle"],
+  [1, "Show Window"],
   [2, "Hide Window"],
   [99, "Quit Smoke"],
 ]);
 
 const DEFAULT_LYNX_BUNDLE_ENV = "OPENTRAY_LYNX_BUNDLE";
+const DEFAULT_LYNX_HOST_FEATURES_ENV = "OPENTRAY_LYNX_HOST_FEATURES";
+const DEFAULT_REVIEW_BUNDLE_RELATIVE_PATH =
+  "assets/lynx-review/main.lynx.bundle";
+const LYNX_HOST_FEATURES = [
+  "nativeWindowApi",
+  "bindWindowGlobals",
+  "nativeScreenApi",
+  "bindScreenGlobals",
+  "frameless",
+] as const;
+
+export type LynxHostFeature = (typeof LYNX_HOST_FEATURES)[number];
+
+export interface LynxHostFeatureState {
+  nativeWindowApi: boolean;
+  bindWindowGlobals: boolean;
+  nativeScreenApi: boolean;
+  bindScreenGlobals: boolean;
+  frameless: boolean;
+}
+
+interface LynxSmokeShowCommand {
+  type: "show";
+  bundlePath: string;
+  width: number;
+  height: number;
+  minWidth: number;
+  minHeight: number;
+  maxWidth: number;
+  maxHeight: number;
+  nativeWindowApi: boolean;
+  bindWindowGlobals: boolean;
+  nativeScreenApi: boolean;
+  bindScreenGlobals: boolean;
+  title: string;
+  icon: ReturnType<typeof createVisibleIcon>;
+  style?: {
+    frameless: boolean;
+  };
+}
 
 export interface DaemonLynxSmokeOptions {
   bundlePath?: string;
+  featureExpression?: string;
 }
 
 export const runDaemonLynxSmoke = async (
   options: DaemonLynxSmokeOptions = {},
 ): Promise<void> => {
   const bundlePath = resolveLynxBundlePath(options.bundlePath);
+  const hostFeatures = resolveLynxHostFeatures(options.featureExpression);
+  if (process.env.OPENTRAY_LYNX_DEBUG) {
+    console.log(`lynx debug modes: ${process.env.OPENTRAY_LYNX_DEBUG}`);
+  }
+  if (process.env[DEFAULT_LYNX_HOST_FEATURES_ENV]) {
+    console.log(
+      `lynx host features: ${process.env[DEFAULT_LYNX_HOST_FEATURES_ENV]}`,
+    );
+  }
+  if (process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH) {
+    console.log(
+      `lynx debug log path: ${process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH}`,
+    );
+  }
   const connection = await connectLocalBroker();
   const client = createClient(connection, { requestIdPrefix: "daemon-lynx" });
-  console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
+  console.log(
+    `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`,
+  );
 
   const space = await client.createSpace({
     id: "com.example.opentray.daemon-lynx",
@@ -41,7 +99,7 @@ export const runDaemonLynxSmoke = async (
     icon: createVisibleIcon(),
     menu: {
       items: [
-        { type: "item", id: 1, title: "Reload Bundle" },
+        { type: "item", id: 1, title: "Show Window" },
         { type: "item", id: 2, title: "Hide Window" },
         { type: "separator" },
         { type: "item", id: 99, title: "Quit Smoke" },
@@ -64,11 +122,16 @@ export const runDaemonLynxSmoke = async (
   let resolveClosed: (() => void) | undefined;
 
   const show = async (): Promise<void> => {
-    await tray.commandExtension("lynx", {
-      type: "show",
+    const command = createLynxShowCommand({
       bundlePath,
+      hostFeatures,
     });
-    console.log(`lynx command: show bundle=${bundlePath}`);
+    await tray.commandExtension("lynx", command);
+    console.log(
+      `lynx command: show features=${describeLynxHostFeatures(
+        hostFeatures,
+      )} bundle=${bundlePath}`,
+    );
   };
 
   const hide = async (): Promise<void> => {
@@ -115,7 +178,9 @@ export const runDaemonLynxSmoke = async (
   connection.onEvent((frame) => {
     console.log(`broker -> client ${JSON.stringify(frame)}`);
     if (frame.type === "event" && frame.event.type === "menuClick") {
-      console.log(`menu click: ${menuLabels.get(frame.event.itemId) ?? frame.event.itemId}`);
+      console.log(
+        `menu click: ${menuLabels.get(frame.event.itemId) ?? frame.event.itemId}`,
+      );
       void handleMenuClick(frame.event.itemId);
       return;
     }
@@ -142,7 +207,11 @@ export const runDaemonLynxSmoke = async (
 
   try {
     await show();
-    console.log("use the tray menu to reload or hide the Lynx window, or press Ctrl+C to exit");
+    console.log(
+      `use the tray menu to re-show or hide the window, or press Ctrl+C to exit; features=${describeLynxHostFeatures(
+        hostFeatures,
+      )}`,
+    );
   } catch (error) {
     await connection.close();
     process.off("SIGINT", onSignal);
@@ -158,9 +227,13 @@ export const runDaemonLynxSmoke = async (
 export const resolveLynxBundlePath = (value?: string): string => {
   const resolved = value ?? process.env[DEFAULT_LYNX_BUNDLE_ENV];
   if (resolved === undefined || resolved.length === 0) {
-    throw new Error(
-      `lynx smoke requires --bundle <path> or ${DEFAULT_LYNX_BUNDLE_ENV}=<path-to-main.lynx.bundle>`,
-    );
+    const bundledReviewBundle = resolveBundledReviewBundlePath();
+    if (!existsSync(bundledReviewBundle)) {
+      throw new Error(
+        `lynx smoke requires --bundle <path>, ${DEFAULT_LYNX_BUNDLE_ENV}=<path-to-main.lynx.bundle>, or a packaged review bundle at ${bundledReviewBundle}`,
+      );
+    }
+    return realpathSync(bundledReviewBundle);
   }
   const baseDir = process.env.INIT_CWD ?? process.cwd();
   const absolutePath = resolve(baseDir, resolved);
@@ -170,7 +243,139 @@ export const resolveLynxBundlePath = (value?: string): string => {
   return realpathSync(absolutePath);
 };
 
-function createVisibleIcon(): { type: "rgba"; width: number; height: number; data: number[] } {
+export const resolveLynxHostFeatures = (
+  expression = process.env[DEFAULT_LYNX_HOST_FEATURES_ENV] ?? "",
+): LynxHostFeatureState => {
+  const features = createEmptyLynxHostFeatures();
+  for (const rawToken of expression.split(",")) {
+    const token = rawToken.trim();
+    if (token.length === 0) {
+      continue;
+    }
+    applyLynxHostFeatureToken(features, token);
+  }
+  return features;
+};
+
+export const createLynxShowCommand = ({
+  bundlePath,
+  hostFeatures,
+}: {
+  bundlePath: string;
+  hostFeatures: LynxHostFeatureState;
+}): LynxSmokeShowCommand => {
+  const command: LynxSmokeShowCommand = {
+    type: "show",
+    bundlePath,
+    width: 720,
+    height: 420,
+    minWidth: 320,
+    minHeight: 220,
+    maxWidth: 960,
+    maxHeight: 720,
+    nativeWindowApi: hostFeatures.nativeWindowApi,
+    bindWindowGlobals: hostFeatures.bindWindowGlobals,
+    nativeScreenApi: hostFeatures.nativeScreenApi,
+    bindScreenGlobals: hostFeatures.bindScreenGlobals,
+    title: `OpenTray Lynx Smoke (${describeLynxHostFeatures(hostFeatures)})`,
+    icon: createVisibleIcon(),
+  };
+  if (hostFeatures.frameless) {
+    command.style = { frameless: true };
+  }
+  return command;
+};
+
+export const describeLynxHostFeatures = (
+  features: LynxHostFeatureState,
+): string => {
+  const enabled = LYNX_HOST_FEATURES.filter((feature) => features[feature]);
+  return enabled.length === 0 ? "baseline" : enabled.join(",");
+};
+
+export const resolveBundledReviewBundlePath = (
+  moduleUrl = import.meta.url,
+): string => {
+  let currentDir = dirname(fileURLToPath(moduleUrl));
+
+  while (true) {
+    const packageJson = join(currentDir, "package.json");
+    if (existsSync(packageJson)) {
+      return join(currentDir, DEFAULT_REVIEW_BUNDLE_RELATIVE_PATH);
+    }
+
+    const parent = dirname(currentDir);
+    if (parent === currentDir) {
+      throw new Error(`failed to resolve opentray package root from ${moduleUrl}`);
+    }
+    currentDir = parent;
+  }
+};
+
+function createEmptyLynxHostFeatures(): LynxHostFeatureState {
+  return {
+    nativeWindowApi: false,
+    bindWindowGlobals: false,
+    nativeScreenApi: false,
+    bindScreenGlobals: false,
+    frameless: false,
+  };
+}
+
+function applyLynxHostFeatureToken(
+  features: LynxHostFeatureState,
+  rawToken: string,
+): void {
+  const disabled = rawToken.startsWith("!");
+  const token = disabled ? rawToken.slice(1) : rawToken;
+
+  if (token === "*" || token === "full") {
+    for (const feature of LYNX_HOST_FEATURES) {
+      features[feature] = !disabled;
+    }
+    return;
+  }
+  if (token === "baseline") {
+    for (const feature of LYNX_HOST_FEATURES) {
+      features[feature] = false;
+    }
+    return;
+  }
+  if (!isLynxHostFeature(token)) {
+    throw new Error(
+      `unsupported Lynx host feature token: ${rawToken}; supported tokens: baseline, full, *, !<feature>, ${LYNX_HOST_FEATURES.join(
+        ", ",
+      )}`,
+    );
+  }
+  features[token] = !disabled;
+  if (token === "nativeWindowApi" && disabled) {
+    features.bindWindowGlobals = false;
+    return;
+  }
+  if (token === "nativeScreenApi" && disabled) {
+    features.bindScreenGlobals = false;
+    return;
+  }
+  if (token === "bindWindowGlobals" && !disabled) {
+    features.nativeWindowApi = true;
+    return;
+  }
+  if (token === "bindScreenGlobals" && !disabled) {
+    features.nativeScreenApi = true;
+  }
+}
+
+function isLynxHostFeature(value: string): value is LynxHostFeature {
+  return (LYNX_HOST_FEATURES as readonly string[]).includes(value);
+}
+
+function createVisibleIcon(): {
+  type: "rgba";
+  width: number;
+  height: number;
+  data: number[];
+} {
   const width = 32;
   const height = 32;
   const data: number[] = [];

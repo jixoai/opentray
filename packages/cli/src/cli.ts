@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 
 import type { DaemonHealth } from "@opentray/spec";
 
-import { createNodeDaemonDriver, inspectDaemon, restartDaemon, startDaemon, stopDaemon } from "./daemon/lifecycle";
+import {
+  createNodeDaemonDriver,
+  inspectDaemon,
+  restartDaemon,
+  startDaemon,
+  stopDaemon,
+} from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
 import { connectLocalBroker } from "./local-broker";
@@ -18,7 +24,12 @@ const cliModulePath = fileURLToPath(import.meta.url);
 type CliCommand =
   | { type: "daemon"; action: "start" | "stop" | "restart" | "health" }
   | { type: "smoke"; name: "daemon-tray" }
-  | { type: "smoke"; name: "daemon-lynx"; bundlePath?: string }
+  | {
+      type: "smoke";
+      name: "daemon-lynx";
+      bundlePath?: string;
+      featureExpression?: string;
+    }
   | { type: "help" };
 
 export const parseCliCommand = (argv: string[]): CliCommand => {
@@ -28,14 +39,26 @@ export const parseCliCommand = (argv: string[]): CliCommand => {
       return { type: "smoke", name: "daemon-tray" };
     }
     if (group === "smoke" && action === "daemon-lynx") {
-      const bundlePath = parseSmokeBundlePath(rest);
-      return bundlePath === undefined
-        ? { type: "smoke", name: "daemon-lynx" }
-        : { type: "smoke", name: "daemon-lynx", bundlePath };
+      const smokeOptions = parseSmokeOptions(rest);
+      return {
+        type: "smoke",
+        name: "daemon-lynx",
+        ...(smokeOptions.bundlePath
+          ? { bundlePath: smokeOptions.bundlePath }
+          : {}),
+        ...(smokeOptions.featureExpression
+          ? { featureExpression: smokeOptions.featureExpression }
+          : {}),
+      };
     }
     return { type: "help" };
   }
-  if (action === "start" || action === "stop" || action === "restart" || action === "health") {
+  if (
+    action === "start" ||
+    action === "stop" ||
+    action === "restart" ||
+    action === "health"
+  ) {
     return { type: "daemon", action };
   }
 
@@ -44,7 +67,9 @@ export const parseCliCommand = (argv: string[]): CliCommand => {
 
 export const runCli = async (argv: string[]): Promise<number> => {
   const command = parseCliCommand(argv);
-  const packageVersion = process.env.OPENTRAY_DAEMON_PACKAGE_VERSION ?? (await readPackageVersion(packageJsonUrl));
+  const packageVersion =
+    process.env.OPENTRAY_DAEMON_PACKAGE_VERSION ??
+    (await readPackageVersion(packageJsonUrl));
   const paths = resolveDaemonPaths({
     homeDir: process.env.OPENTRAY_HOME ?? homedir(),
     packageVersion,
@@ -60,7 +85,14 @@ export const runCli = async (argv: string[]): Promise<number> => {
       await runDaemonTraySmoke();
     } else {
       await runDaemonLynxSmoke(
-        command.bundlePath === undefined ? {} : { bundlePath: command.bundlePath },
+        {
+          ...(command.bundlePath === undefined
+            ? {}
+            : { bundlePath: command.bundlePath }),
+          ...(command.featureExpression === undefined
+            ? {}
+            : { featureExpression: command.featureExpression }),
+        }
       );
     }
     return 0;
@@ -70,7 +102,9 @@ export const runCli = async (argv: string[]): Promise<number> => {
 
   if (command.action === "start") {
     const result = await startDaemon({ paths, driver });
-    console.log(`opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`);
+    console.log(
+      `opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`
+    );
     return 0;
   }
 
@@ -79,14 +113,16 @@ export const runCli = async (argv: string[]): Promise<number> => {
     console.log(
       result.status === "stopped"
         ? `opentray daemon stopped: pid=${result.pid}`
-        : "opentray daemon not running",
+        : "opentray daemon not running"
     );
     return 0;
   }
 
   if (command.action === "restart") {
     const result = await restartDaemon({ paths, driver });
-    console.log(`opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`);
+    console.log(
+      `opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`
+    );
     return 0;
   }
 
@@ -109,7 +145,9 @@ export const runCli = async (argv: string[]): Promise<number> => {
         requestId: "opentray-daemon-health",
       });
       if (response.type !== "daemon-health") {
-        throw new Error(`expected daemon-health response, received ${response.type}`);
+        throw new Error(
+          `expected daemon-health response, received ${response.type}`
+        );
       }
       console.log(formatDaemonHealthOutput(response.health));
     } finally {
@@ -125,7 +163,10 @@ export const runCli = async (argv: string[]): Promise<number> => {
 const printHelp = (): void => {
   console.error("Usage: opentray daemon <start|stop|restart|health>");
   console.error("       opentray smoke daemon-tray");
-  console.error("       opentray smoke daemon-lynx --bundle <path-to-main.lynx.bundle>");
+  console.error(
+    "       opentray smoke daemon-lynx [--bundle <path-to-main.lynx.bundle>] [--features <baseline|full|*,!feature,...>]"
+  );
+  console.error("       default Lynx smoke uses the packaged review bundle");
 };
 
 export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
@@ -141,14 +182,17 @@ export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
   for (const session of health.sessions) {
     const internalLease = session.internalLeaseId ?? "(pending)";
     lines.push(
-      `- sessionId=${session.sessionId} initialized=${session.initialized} internalLeaseId=${internalLease}`,
+      `- sessionId=${session.sessionId} initialized=${session.initialized} internalLeaseId=${internalLease}`
     );
   }
 
   return lines.join("\n");
 };
 
-export const isCliEntrypoint = (argvEntryPath: string | undefined, modulePath: string): boolean => {
+export const isCliEntrypoint = (
+  argvEntryPath: string | undefined,
+  modulePath: string
+): boolean => {
   if (argvEntryPath === undefined) return false;
   try {
     return realpathSync(argvEntryPath) === realpathSync(modulePath);
@@ -157,13 +201,25 @@ export const isCliEntrypoint = (argvEntryPath: string | undefined, modulePath: s
   }
 };
 
-function parseSmokeBundlePath(argv: string[]): string | undefined {
+function parseSmokeOptions(argv: string[]): {
+  bundlePath?: string;
+  featureExpression?: string;
+} {
+  let bundlePath: string | undefined;
+  let featureExpression: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === "--bundle") {
-      return argv[index + 1];
+      bundlePath = argv[index + 1];
+      continue;
+    }
+    if (argv[index] === "--features") {
+      featureExpression = argv[index + 1];
     }
   }
-  return undefined;
+  return {
+    ...(bundlePath === undefined ? {} : { bundlePath }),
+    ...(featureExpression === undefined ? {} : { featureExpression }),
+  };
 }
 
 if (isCliEntrypoint(process.argv[1], cliModulePath)) {

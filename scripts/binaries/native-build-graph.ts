@@ -20,6 +20,7 @@ export type NativeBuildTargetName =
 
 export type NativeBuildComponent = "daemon" | "webview" | "lynx" | "lynx-runtime";
 export type NativeArtifactKind = NativeStageKind;
+export const lynxRuntimeArtifactName = "OpenTrayLynxRuntime.app.zip";
 
 export interface NativeBuildTargetConfig {
   readonly id: NativeBuildTargetName;
@@ -327,7 +328,7 @@ export const executeNativeBuildExecution = async (
 
   for (const kind of execution.artifactKinds) {
     if (kind === "lynx-runtime") {
-      const runtimeOutput = join(outputDir, runtimeOutputName());
+      const runtimeOutput = join(outputDir, lynxRuntimeArtifactName);
       await runCommand("bash", ["scripts/release/build-lynx-runtime.sh", runtimeOutput], workspaceRoot);
       copiedFiles.push(runtimeOutput);
       continue;
@@ -409,8 +410,6 @@ const resolvePackageDirForComponent = (
       return target.lynxPackageDir;
   }
 };
-
-const runtimeOutputName = (): string => "LynxExplorer.app.zip";
 
 const runCommand = (command: string, args: readonly string[], cwd: string): Promise<void> =>
   new Promise((resolve, reject) => {

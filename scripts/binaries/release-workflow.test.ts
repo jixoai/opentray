@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
-const releaseWorkflow = (): string => readFileSync(resolve(repoRoot, ".github/workflows/release.yml"), "utf8");
-const packageJson = (): string => readFileSync(resolve(repoRoot, "package.json"), "utf8");
+const releaseWorkflow = (): string =>
+  readFileSync(resolve(repoRoot, ".github/workflows/release.yml"), "utf8");
+const packageJson = (): string =>
+  readFileSync(resolve(repoRoot, "package.json"), "utf8");
 
 describe("Feature: release native binary CI law", () => {
   test("Scenario: Given release native artifacts When workflow is inspected Then Rust setup cache and artifact transport use maintained Actions", () => {
@@ -36,9 +38,19 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("Stage native artifacts into npm packages");
     expect(releaseJob).toContain("bun run scripts/binaries/stage-release-artifacts.ts");
     expect(releaseJob).toContain("bun run scripts/binaries/validate-package-dirs.ts");
+    expect(workflow).toContain("Seed Googlesource hosts");
+    expect(workflow).toContain(
+      "sudo python3 scripts/ci/seed_hosts_from_doh.py"
+    );
+    expect(workflow).toContain("flutter.googlesource.com");
+    expect(workflow).toContain("'native/lynx-runtime-macos/**'");
+    expect(workflow).toContain("'native/lynx-patches/**'");
+    expect(workflow).toContain("Upload Lynx build logs");
+    expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("git push origin --tags");
     expect(releaseJob).not.toContain("git push --follow-tags");
     expect(releaseJob).not.toContain("--source target/release");
+    expect(releaseJob).not.toContain("stage-local.ts");
   });
 
   test("Scenario: Given alpha channel publish When workflow is inspected Then snapshot versioning and alpha dist-tag stay separate from stable release tags", () => {

@@ -12,12 +12,27 @@ use std::{
 use libc::{c_void, dladdr, Dl_info};
 use serde_json::{json, Value};
 
-use crate::{opentray_ext_abi_version, LynxCommand, LynxRuntimeError};
+use crate::{
+    opentray_ext_abi_version,
+    protocol::{LynxCommand, LynxLaunchConfig},
+    LynxRuntimeError,
+};
 
 const STAGED_EXTERNAL_DIR: &str = "opentray-external";
 const STAGED_EXTERNAL_BUNDLE_NAME: &str = "main.lynx.bundle";
 const LYNX_RUNTIME_ZIP_ENV: &str = "OPENTRAY_LYNX_RUNTIME_ZIP";
+const LYNX_RUNTIME_STDIO_ENV: &str = "OPENTRAY_LYNX_RUNTIME_STDIO";
+const LYNX_WINDOW_CONFIG_ENV: &str = "OPENTRAY_LYNX_WINDOW_CONFIG_JSON";
 const LAUNCH_STABILITY_WINDOW_MS: u64 = 300;
+const RUNTIME_APP_NAME: &str = "OpenTrayLynxRuntime";
+const RUNTIME_APP_BUNDLE_NAME: &str = "OpenTrayLynxRuntime.app";
+const RUNTIME_ZIP_NAME: &str = "OpenTrayLynxRuntime.app.zip";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeStdioMode {
+    Quiet,
+    Inherit,
+}
 
 #[derive(Default)]
 pub(crate) struct MacosLynxRuntime {
@@ -35,6 +50,7 @@ struct PreparedLaunch {
     runtime_executable: PathBuf,
     launch_url: String,
     runtime_zip: PathBuf,
+    launch: LynxLaunchConfig,
 }
 
 impl MacosLynxRuntime {
@@ -44,7 +60,10 @@ impl MacosLynxRuntime {
         command: LynxCommand,
     ) -> Result<Value, LynxRuntimeError> {
         match command {
-            LynxCommand::Show { bundle_path } => self.show(tray_id, &bundle_path),
+            LynxCommand::Show {
+                bundle_path,
+                launch,
+            } => self.show(tray_id, &bundle_path, launch),
             LynxCommand::Hide => self.hide(tray_id),
         }
     }
@@ -53,11 +72,20 @@ impl MacosLynxRuntime {
         self.close_all();
     }
 
-    fn show(&mut self, tray_id: &str, bundle_path: &str) -> Result<Value, LynxRuntimeError> {
+    fn show(
+        &mut self,
+        tray_id: &str,
+        bundle_path: &str,
+        launch: LynxLaunchConfig,
+    ) -> Result<Value, LynxRuntimeError> {
         let _ = self.hide(tray_id);
 
-        let prepared = PreparedLaunch::prepare(bundle_path)?;
-        let mut child = spawn_runtime(&prepared.runtime_executable, &prepared.launch_url)?;
+        let prepared = PreparedLaunch::prepare(bundle_path, launch)?;
+        let mut child = spawn_runtime(
+            &prepared.runtime_executable,
+            &prepared.launch_url,
+            &prepared.launch,
+        )?;
 
         if let Err(error) = verify_stability(&mut child, LAUNCH_STABILITY_WINDOW_MS) {
             cleanup_launch_root(&prepared.launch_root);
@@ -79,6 +107,7 @@ impl MacosLynxRuntime {
             "launchUrl": prepared.launch_url,
             "pid": pid,
             "runtimeZip": prepared.runtime_zip.display().to_string(),
+            "nativeWindowApi": prepared.launch.native_window_api,
         }))
     }
 
@@ -104,14 +133,14 @@ impl Drop for MacosLynxRuntime {
 }
 
 impl PreparedLaunch {
-    fn prepare(bundle_path: &str) -> Result<Self, LynxRuntimeError> {
+    fn prepare(bundle_path: &str, launch: LynxLaunchConfig) -> Result<Self, LynxRuntimeError> {
         let bundle_path = canonicalize_bundle(bundle_path)?;
         let runtime_zip = resolve_runtime_zip()?;
         let launch_root = fresh_launch_root()?;
         extract_runtime_zip(&runtime_zip, &launch_root)?;
-        let app_bundle = launch_root.join("LynxExplorer.app");
+        let app_bundle = launch_root.join(RUNTIME_APP_BUNDLE_NAME);
         let relative_bundle_path = stage_external_bundle(&bundle_path, &app_bundle)?;
-        let runtime_executable = app_bundle.join("Contents/MacOS/LynxExplorer");
+        let runtime_executable = app_bundle.join(format!("Contents/MacOS/{RUNTIME_APP_NAME}"));
         if !runtime_executable.is_file() {
             cleanup_launch_root(&launch_root);
             return Err(LynxRuntimeError::Internal(format!(
@@ -126,6 +155,7 @@ impl PreparedLaunch {
             runtime_executable,
             launch_url: legacy_local_bundle_url(&relative_bundle_path),
             runtime_zip,
+            launch,
         })
     }
 }
@@ -158,7 +188,7 @@ fn resolve_runtime_zip() -> Result<PathBuf, LynxRuntimeError> {
         })?;
         if !canonical.is_file() {
             return Err(LynxRuntimeError::Rejected(format!(
-                "{LYNX_RUNTIME_ZIP_ENV} must point to LynxExplorer.app.zip: {}",
+                "{LYNX_RUNTIME_ZIP_ENV} must point to {RUNTIME_ZIP_NAME}: {}",
                 canonical.display()
             )));
         }
@@ -207,12 +237,12 @@ fn resolve_current_library_file() -> Result<PathBuf, LynxRuntimeError> {
 
 fn default_runtime_zip_path(library_file: &Path) -> PathBuf {
     // The runtime stays owned by the platform package atom beside the dylib;
-    // the broker binary never becomes the storage location for Lynx Explorer.
+    // the broker binary never becomes the storage location for the host app.
     library_file
         .parent()
         .and_then(Path::parent)
         .unwrap_or_else(|| Path::new("."))
-        .join("runtime/LynxExplorer.app.zip")
+        .join(format!("runtime/{RUNTIME_ZIP_NAME}"))
 }
 
 fn fresh_launch_root() -> Result<PathBuf, LynxRuntimeError> {
@@ -290,12 +320,43 @@ fn legacy_local_bundle_url(relative_bundle_path: &str) -> String {
     format!("file://lynx?local://{relative_bundle_path}")
 }
 
-fn spawn_runtime(runtime_executable: &Path, launch_url: &str) -> Result<Child, LynxRuntimeError> {
+fn resolve_runtime_stdio_mode() -> Result<RuntimeStdioMode, LynxRuntimeError> {
+    let Some(value) = env::var_os(LYNX_RUNTIME_STDIO_ENV) else {
+        return Ok(RuntimeStdioMode::Quiet);
+    };
+    let normalized = value.to_string_lossy().trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "quiet" | "null" => Ok(RuntimeStdioMode::Quiet),
+        "inherit" => Ok(RuntimeStdioMode::Inherit),
+        _ => Err(LynxRuntimeError::Rejected(format!(
+            "{LYNX_RUNTIME_STDIO_ENV} must be one of: inherit, quiet, null"
+        ))),
+    }
+}
+
+fn spawn_runtime(
+    runtime_executable: &Path,
+    launch_url: &str,
+    launch: &LynxLaunchConfig,
+) -> Result<Child, LynxRuntimeError> {
     let mut command = Command::new(runtime_executable);
+    let launch_json = serde_json::to_string(launch).map_err(|error| {
+        LynxRuntimeError::Internal(format!(
+            "failed to serialize lynx launch config for child process: {error}"
+        ))
+    })?;
+    let stdio_mode = resolve_runtime_stdio_mode()?;
     command
         .arg(format!("--url={launch_url}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .env(LYNX_WINDOW_CONFIG_ENV, launch_json);
+    match stdio_mode {
+        RuntimeStdioMode::Quiet => {
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+        RuntimeStdioMode::Inherit => {
+            command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        }
+    }
     command.spawn().map_err(|error| {
         LynxRuntimeError::Internal(format!(
             "failed to start lynx runtime {}: {error}",
@@ -350,23 +411,29 @@ fn cleanup_launch_root(launch_root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::{
-        close_slot, default_runtime_zip_path, legacy_local_bundle_url, resolve_runtime_zip,
-        stage_external_bundle, LynxRuntimeError, LynxSlot, MacosLynxRuntime,
+        close_slot, default_runtime_zip_path, legacy_local_bundle_url, resolve_runtime_stdio_mode,
+        resolve_runtime_zip, spawn_runtime, stage_external_bundle, LynxRuntimeError, LynxSlot,
+        MacosLynxRuntime, RuntimeStdioMode, RUNTIME_APP_BUNDLE_NAME, RUNTIME_ZIP_NAME,
         STAGED_EXTERNAL_BUNDLE_NAME, STAGED_EXTERNAL_DIR,
     };
+    use crate::protocol::{LynxLaunchConfig, LynxWindowStyleConfig};
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
+    use std::sync::{LazyLock, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn default_runtime_zip_is_package_adjacent() {
-        let library_file =
-            PathBuf::from("/tmp/node_modules/@opentray/ext-lynx-darwin-arm64/lib/libopentray_ext_lynx.dylib");
+        let library_file = PathBuf::from(
+            "/tmp/node_modules/@opentray/ext-lynx-darwin-arm64/lib/libopentray_ext_lynx.dylib",
+        );
         assert_eq!(
             default_runtime_zip_path(&library_file),
             PathBuf::from(
-                "/tmp/node_modules/@opentray/ext-lynx-darwin-arm64/runtime/LynxExplorer.app.zip"
+                "/tmp/node_modules/@opentray/ext-lynx-darwin-arm64/runtime/OpenTrayLynxRuntime.app.zip"
             )
         );
     }
@@ -384,7 +451,7 @@ mod tests {
     fn stages_external_bundle_into_runtime_resources() {
         let temp_root = test_dir("stage-external-bundle");
         let source_bundle = temp_root.join("external.lynx.bundle");
-        let app_bundle = temp_root.join("LynxExplorer.app");
+        let app_bundle = temp_root.join(RUNTIME_APP_BUNDLE_NAME);
         let resource_dir = app_bundle.join("Contents/Resources/Resource");
 
         fs::create_dir_all(&resource_dir).expect("create resource dir");
@@ -410,16 +477,66 @@ mod tests {
 
     #[test]
     fn missing_runtime_override_path_is_rejected_explicitly() {
-        let missing = test_dir("missing-runtime").join("LynxExplorer.app.zip");
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let missing = test_dir("missing-runtime").join(RUNTIME_ZIP_NAME);
         unsafe {
             std::env::set_var(super::LYNX_RUNTIME_ZIP_ENV, &missing);
         }
 
         let error = resolve_runtime_zip().expect_err("missing override should fail");
-        assert!(matches!(error, LynxRuntimeError::Rejected(message) if message.contains(super::LYNX_RUNTIME_ZIP_ENV)));
+        assert!(
+            matches!(error, LynxRuntimeError::Rejected(message) if message.contains(super::LYNX_RUNTIME_ZIP_ENV))
+        );
 
         unsafe {
             std::env::remove_var(super::LYNX_RUNTIME_ZIP_ENV);
+        }
+    }
+
+    #[test]
+    fn runtime_stdio_defaults_to_quiet() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        unsafe {
+            std::env::remove_var(super::LYNX_RUNTIME_STDIO_ENV);
+        }
+
+        assert_eq!(
+            resolve_runtime_stdio_mode().expect("default stdio mode"),
+            RuntimeStdioMode::Quiet
+        );
+    }
+
+    #[test]
+    fn runtime_stdio_accepts_inherit() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        unsafe {
+            std::env::set_var(super::LYNX_RUNTIME_STDIO_ENV, "inherit");
+        }
+
+        assert_eq!(
+            resolve_runtime_stdio_mode().expect("inherit stdio mode"),
+            RuntimeStdioMode::Inherit
+        );
+
+        unsafe {
+            std::env::remove_var(super::LYNX_RUNTIME_STDIO_ENV);
+        }
+    }
+
+    #[test]
+    fn invalid_runtime_stdio_mode_is_rejected_explicitly() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        unsafe {
+            std::env::set_var(super::LYNX_RUNTIME_STDIO_ENV, "verbose");
+        }
+
+        let error = resolve_runtime_stdio_mode().expect_err("invalid stdio mode should fail");
+        assert!(
+            matches!(error, LynxRuntimeError::Rejected(message) if message.contains(super::LYNX_RUNTIME_STDIO_ENV))
+        );
+
+        unsafe {
+            std::env::remove_var(super::LYNX_RUNTIME_STDIO_ENV);
         }
     }
 
@@ -487,6 +604,57 @@ mod tests {
         close_slot(&mut slot).expect("close slot");
 
         assert!(!launch_root.exists());
+    }
+
+    #[test]
+    fn spawn_runtime_injects_launch_config_environment() {
+        let script_path = test_dir("spawn-runtime-env-script");
+        let output_path = test_dir("spawn-runtime-env-output");
+        fs::write(
+            &script_path,
+            format!(
+                "#!/bin/sh\nprintf '%s' \"$OPENTRAY_LYNX_WINDOW_CONFIG_JSON\" > \"{}\"\nsleep 1\n",
+                output_path.display()
+            ),
+        )
+        .expect("write script");
+        Command::new("chmod")
+            .arg("+x")
+            .arg(&script_path)
+            .status()
+            .expect("chmod script");
+
+        let launch = LynxLaunchConfig {
+            width: Some(520),
+            height: None,
+            min_width: Some(320),
+            min_height: Some(180),
+            max_width: None,
+            max_height: None,
+            native_window_api: true,
+            bind_window_globals: false,
+            native_screen_api: true,
+            bind_screen_globals: true,
+            title: Some("OpenTray Lynx".into()),
+            icon: Some(crate::protocol::LynxWindowIconConfig::Href {
+                href: "data:image/png;base64,AAAA".into(),
+            }),
+            style: LynxWindowStyleConfig {
+                frameless: Some(true),
+            },
+        };
+        let mut child = spawn_runtime(
+            &script_path,
+            "file://lynx?local://opentray-external/main.lynx.bundle",
+            &launch,
+        )
+        .expect("spawn script runtime");
+        let _ = child.wait();
+
+        let serialized = fs::read_to_string(&output_path).expect("read output");
+        let parsed: LynxLaunchConfig =
+            serde_json::from_str(&serialized).expect("parse serialized launch config");
+        assert_eq!(parsed, launch);
     }
 
     fn test_dir(label: &str) -> PathBuf {

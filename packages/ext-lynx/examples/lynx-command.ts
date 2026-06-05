@@ -19,13 +19,26 @@ const tray = createTrayHandle(
   {
     spaceId: "example-space",
   },
-  "lynx-tray",
+  "lynx-tray"
 );
 const lynx = attachLynx(tray);
 
 await lynx.show({
   type: "show",
   bundlePath: "/tmp/demo.main.lynx.bundle",
+  nativeWindowApi: true,
+  bindWindowGlobals: true,
+  nativeScreenApi: true,
+  bindScreenGlobals: true,
+  title: "OpenTray Lynx Example",
+  icon: {
+    type: "rgba",
+    width: 1,
+    height: 1,
+    data: [15, 124, 109, 255],
+  },
+  minWidth: 320,
+  minHeight: 220,
 });
 await lynx.hide();
 

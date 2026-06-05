@@ -4,25 +4,70 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { formatDaemonHealthOutput, isCliEntrypoint, parseCliCommand } from "./cli";
+import {
+  formatDaemonHealthOutput,
+  isCliEntrypoint,
+  parseCliCommand,
+} from "./cli";
 
 describe("opentray CLI", () => {
   it("parses daemon lifecycle commands", () => {
-    expect(parseCliCommand(["daemon", "start"])).toEqual({ type: "daemon", action: "start" });
-    expect(parseCliCommand(["daemon", "stop"])).toEqual({ type: "daemon", action: "stop" });
-    expect(parseCliCommand(["daemon", "restart"])).toEqual({ type: "daemon", action: "restart" });
-    expect(parseCliCommand(["daemon", "health"])).toEqual({ type: "daemon", action: "health" });
+    expect(parseCliCommand(["daemon", "start"])).toEqual({
+      type: "daemon",
+      action: "start",
+    });
+    expect(parseCliCommand(["daemon", "stop"])).toEqual({
+      type: "daemon",
+      action: "stop",
+    });
+    expect(parseCliCommand(["daemon", "restart"])).toEqual({
+      type: "daemon",
+      action: "restart",
+    });
+    expect(parseCliCommand(["daemon", "health"])).toEqual({
+      type: "daemon",
+      action: "health",
+    });
   });
 
   it("parses the npm-installable daemon tray smoke command", () => {
-    expect(parseCliCommand(["smoke", "daemon-tray"])).toEqual({ type: "smoke", name: "daemon-tray" });
+    expect(parseCliCommand(["smoke", "daemon-tray"])).toEqual({
+      type: "smoke",
+      name: "daemon-tray",
+    });
   });
 
   it("parses the npm-installable daemon lynx smoke command", () => {
-    expect(parseCliCommand(["smoke", "daemon-lynx", "--bundle", "./dist/main.lynx.bundle"])).toEqual({
+    expect(parseCliCommand(["smoke", "daemon-lynx"])).toEqual({
+      type: "smoke",
+      name: "daemon-lynx",
+    });
+    expect(
+      parseCliCommand([
+        "smoke",
+        "daemon-lynx",
+        "--bundle",
+        "./dist/main.lynx.bundle",
+      ])
+    ).toEqual({
       type: "smoke",
       name: "daemon-lynx",
       bundlePath: "./dist/main.lynx.bundle",
+    });
+    expect(
+      parseCliCommand([
+        "smoke",
+        "daemon-lynx",
+        "--bundle",
+        "./dist/main.lynx.bundle",
+        "--features",
+        "*,!nativeScreenApi",
+      ])
+    ).toEqual({
+      type: "smoke",
+      name: "daemon-lynx",
+      bundlePath: "./dist/main.lynx.bundle",
+      featureExpression: "*,!nativeScreenApi",
     });
   });
 
@@ -56,7 +101,7 @@ describe("opentray CLI", () => {
           { sessionId: 1, initialized: true, internalLeaseId: "lease-1" },
           { sessionId: 2, initialized: false },
         ],
-      }),
+      })
     ).toBe(`opentray daemon running
 pid: 12345
 endpoint: /tmp/opentray.sock

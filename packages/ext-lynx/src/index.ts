@@ -1,22 +1,9 @@
 import type { ExtensionEnvelope } from "@opentray/spec";
 import type { TrayHandle } from "opentray";
 
-export interface LynxShowCommand {
-  type: "show";
-  bundlePath: string;
-}
+import type { LynxCommand, LynxEvent, LynxShowCommand } from "./shared";
 
-export type LynxCommand = LynxShowCommand | { type: "hide" };
-
-export type LynxEvent =
-  | {
-      type: "shown";
-      bundlePath: string;
-      launchUrl: string;
-      pid: number;
-      runtimeZip: string;
-    }
-  | { type: "hidden" };
+export type * from "./shared";
 
 export interface LynxHandle {
   show(command: LynxShowCommand): Promise<void>;
