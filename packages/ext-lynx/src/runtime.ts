@@ -25,6 +25,12 @@ interface NativeModuleShape {
   invoke(payload: string): string | unknown;
 }
 
+interface NativeModulesShape {
+  OpenTrayWindowModule?: NativeModuleShape;
+}
+
+declare const NativeModules: NativeModulesShape | undefined;
+
 interface NativeBridgeSuccess<Result> {
   ok: true;
   result?: Result | null;
@@ -50,9 +56,7 @@ interface OpenTrayWindowGlobals {
     uninstall(): void;
   };
   GlobalEventEmitter?: GlobalEventEmitterShape;
-  NativeModules?: {
-    OpenTrayWindowModule?: NativeModuleShape;
-  };
+  NativeModules?: NativeModulesShape;
   getScreenDetails?: () => Promise<LynxScreenDetails>;
   lynx?: {
     getJSModule?(name: string): GlobalEventEmitterShape | undefined;
@@ -146,8 +150,16 @@ const resolveEmitter = (): GlobalEventEmitterShape | undefined => {
   );
 };
 
+const resolveLexicalNativeModules = (): NativeModulesShape | undefined => {
+  if (typeof NativeModules === "undefined") {
+    return undefined;
+  }
+  return NativeModules;
+};
+
 const resolveNativeModule = (): NativeModuleShape | undefined =>
-  resolveGlobals().NativeModules?.OpenTrayWindowModule;
+  resolveGlobals().NativeModules?.OpenTrayWindowModule ??
+  resolveLexicalNativeModules()?.OpenTrayWindowModule;
 
 function isBridgeSuccess<Result>(
   value: unknown,
