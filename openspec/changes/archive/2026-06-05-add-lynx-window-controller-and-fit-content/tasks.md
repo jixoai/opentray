@@ -40,7 +40,7 @@
 - [x] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
 - [x] 5.2 Generate separate `review/self-review.html` as the screenshot, interaction, and structured evidence presentation.
 - [x] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
-- [ ] 5.4 If the review is entering a real loop, run `bun run openspec:vision -- review-state add-lynx-window-controller-and-fit-content` to persist iteration and recurrence state.
-- [ ] 5.5 If review cannot exit normally, run `bun run openspec:vision -- handoff add-lynx-window-controller-and-fit-content` and commit the handoff evidence before returning to user discussion.
-- [ ] 5.6 If review exits normally, run `openspec archive add-lynx-window-controller-and-fit-content` and commit the archive result.
+- [x] 5.4 Review exited normally after the final human acceptance loop, so no new `review-state` persistence was required.
+- [x] 5.5 Review exited normally, so `bun run openspec:vision -- handoff add-lynx-window-controller-and-fit-content` was not required.
+- [x] 5.6 If review exits normally, run `openspec archive add-lynx-window-controller-and-fit-content` and commit the archive result.
 - [x] 5.7 Run `bun run openspec:vision -- check add-lynx-window-controller-and-fit-content` and decide whether to exit or return to `research-plan` with a backed-up plan revision.
