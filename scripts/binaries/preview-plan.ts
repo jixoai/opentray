@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parseArgs } from "node:util";
 
+import {
+  extractChangesetReleasePackages,
+  readOptionalWorkspaceFile,
+} from "./changeset-files";
 import {
   type PreviewBuildFamily,
   type PreviewTargetName,
@@ -91,7 +93,7 @@ export async function resolvePreviewBuildPlan(
     if (!relativePath.endsWith(".md")) {
       continue;
     }
-    const content = await readChangedChangeset(root, relativePath);
+    const content = await readOptionalWorkspaceFile(root, relativePath);
     if (content === undefined) {
       continue;
     }
@@ -185,20 +187,6 @@ export function parsePreviewBuildMarker(content: string): PreviewBuildMarker | u
     smokes: parseStringList(parsed.smokes, "smokes"),
   };
 }
-
-export function extractChangesetReleasePackages(content: string): string[] {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/u);
-  if (frontmatterMatch === null) {
-    return [];
-  }
-  const packages = new Set<string>();
-  const regex = /^\s*"?([^"\n:]+)"?\s*:\s*(major|minor|patch)\s*$/gmu;
-  for (const match of frontmatterMatch[1].matchAll(regex)) {
-    packages.add(match[1].trim());
-  }
-  return [...packages];
-}
-
 const normalizeChangedFiles = (
   changedFiles: readonly string[] | undefined,
 ): string[] => [...new Set((changedFiles ?? []).map((value) => value.trim()).filter((value) => value.length > 0))];
@@ -309,18 +297,4 @@ function parseChangedFilesJson(value: string): string[] {
     throw new Error("--changed-json must be a JSON array of strings");
   }
   return parsed.map((item) => item.trim()).filter((item) => item.length > 0);
-}
-
-async function readChangedChangeset(
-  root: string,
-  relativePath: string,
-): Promise<string | undefined> {
-  try {
-    return await readFile(join(root, relativePath), "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
 }

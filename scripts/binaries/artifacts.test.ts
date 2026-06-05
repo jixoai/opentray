@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { nativeTargets, resolveNativePackageTarget, resolveNativeTarget } from "./artifacts";
+import {
+  nativeTargets,
+  resolveNativePackageTarget,
+  resolveNativeTarget,
+  resolveStageDestination,
+} from "./artifacts";
 
 describe("Feature: native binary artifact topology", () => {
   test("Scenario: Given first-stage platforms When targets are enumerated Then daemon and webview packages map one-to-one", () => {
@@ -55,5 +60,17 @@ describe("Feature: native binary artifact topology", () => {
     expect(target.daemonArtifact).toBe("packages/windows-arm64/bin/opentray.exe");
     expect(target.webviewArtifact).toBe("packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll");
     expect(target.lynxArtifact).toBeUndefined();
+  });
+
+  test("Scenario: Given a staged artifact kind When the destination is resolved Then the package-owned path stays authoritative", () => {
+    const target = resolveNativePackageTarget("darwin", "arm64");
+
+    expect(resolveStageDestination(target, "daemon")).toBe("packages/darwin-arm64/bin/opentray");
+    expect(resolveStageDestination(target, "webview")).toBe(
+      "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib",
+    );
+    expect(resolveStageDestination(target, "lynx-runtime")).toBe(
+      "packages/ext-lynx-darwin-arm64/runtime/LynxExplorer.app.zip",
+    );
   });
 });

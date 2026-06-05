@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 export type PackageOs = "darwin" | "linux" | "windows";
 export type NpmOs = "darwin" | "linux" | "win32";
 export type NativeArch = "arm64" | "x64";
+export type NativeStageKind = "daemon" | "webview" | "lynx" | "lynx-runtime";
 
 export interface NativeTarget {
   packageOs: PackageOs;
@@ -96,6 +97,28 @@ export const normalizeArch = (arch: string): NativeArch => {
       return arch;
     default:
       throw new Error(`unsupported OpenTray architecture: ${arch}`);
+  }
+};
+
+export const resolveStageDestination = (
+  target: NativeTarget,
+  kind: NativeStageKind,
+): string => {
+  switch (kind) {
+    case "daemon":
+      return target.daemonArtifact;
+    case "webview":
+      return target.webviewArtifact;
+    case "lynx":
+      if (target.lynxArtifact === undefined) {
+        throw new Error(`target ${target.packageOs}-${target.arch} does not publish a lynx dylib`);
+      }
+      return target.lynxArtifact;
+    case "lynx-runtime":
+      if (target.lynxRuntimeArtifact === undefined) {
+        throw new Error(`target ${target.packageOs}-${target.arch} does not publish a lynx runtime`);
+      }
+      return target.lynxRuntimeArtifact;
   }
 };
 

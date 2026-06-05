@@ -29,52 +29,60 @@ permissions:
   pull-requests: write
 
 jobs:
+  plan-native:
+    name: Plan native release build
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.plan.outputs.enabled }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      stage-plan: ${{ steps.plan.outputs.stage-plan }}
+      validate-package-dirs: ${{ steps.plan.outputs.validate-package-dirs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Resolve native release plan
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          plan_json="$(bun run scripts/binaries/release-plan.ts --root "$PWD")"
+          printf '%s\n' "$plan_json" > release-native-plan.json
+          cat release-native-plan.json
+
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("release-native-plan.json", "r", encoding="utf-8") as handle:
+              plan = json.load(handle)
+
+          enabled = "true" if plan.get("enabled") else "false"
+          matrix = json.dumps({"include": plan.get("jobs", [])})
+          stage_plan = json.dumps(plan.get("stageEntries", []))
+          validate_package_dirs = json.dumps(plan.get("validatePackageDirs", []))
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"enabled={enabled}\n")
+              handle.write(f"matrix={matrix}\n")
+              handle.write(f"stage-plan={stage_plan}\n")
+              handle.write(f"validate-package-dirs={validate_package_dirs}\n")
+          PY
+
   native-artifacts:
     name: Native artifacts (${{ matrix.target }})
+    needs: plan-native
+    if: needs.plan-native.outputs.enabled == 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.job_timeout_minutes }}
+    timeout-minutes: ${{ matrix.jobTimeoutMinutes }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: darwin-arm64
-            runner: macos-15
-            job_timeout_minutes: 90
-            lynx_timeout_seconds: 4500
-            daemon_artifact: opentray
-            webview_artifact: libopentray_ext_webview.dylib
-            lynx_artifact: libopentray_ext_lynx.dylib
-          - target: darwin-x64
-            runner: macos-15-intel
-            job_timeout_minutes: 120
-            lynx_timeout_seconds: 5700
-            daemon_artifact: opentray
-            webview_artifact: libopentray_ext_webview.dylib
-            lynx_artifact: libopentray_ext_lynx.dylib
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-            job_timeout_minutes: 90
-            lynx_timeout_seconds: 4500
-            daemon_artifact: opentray
-            webview_artifact: libopentray_ext_webview.so
-          - target: linux-x64
-            runner: ubuntu-24.04
-            job_timeout_minutes: 90
-            lynx_timeout_seconds: 4500
-            daemon_artifact: opentray
-            webview_artifact: libopentray_ext_webview.so
-          - target: windows-arm64
-            runner: windows-11-arm
-            job_timeout_minutes: 90
-            lynx_timeout_seconds: 4500
-            daemon_artifact: opentray.exe
-            webview_artifact: opentray_ext_webview.dll
-          - target: windows-x64
-            runner: windows-2025
-            job_timeout_minutes: 90
-            lynx_timeout_seconds: 4500
-            daemon_artifact: opentray.exe
-            webview_artifact: opentray_ext_webview.dll
+      matrix: ${{ fromJson(needs.plan-native.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -95,7 +103,7 @@ jobs:
           xcode-version: ${{ env.LYNX_XCODE_VERSION }}
 
       - name: Restore Lynx caches
-        if: startsWith(matrix.target, 'darwin-')
+        if: matrix.buildsLynxRuntime == true
         id: lynx-cache-restore
         uses: actions/cache/restore@v4
         with:
@@ -107,7 +115,7 @@ jobs:
             lynx-release-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-
 
       - name: Seed Googlesource hosts
-        if: startsWith(matrix.target, 'darwin-')
+        if: matrix.buildsLynxRuntime == true
         shell: bash
         run: |
           sudo python3 scripts/ci/seed_hosts_from_doh.py \
@@ -120,35 +128,23 @@ jobs:
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
 
-      - name: Build Rust artifacts
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Build native artifacts
         shell: bash
         run: |
           set -euo pipefail
-          packages=(-p opentray-bin -p opentray-ext-webview)
-          if [[ "${{ matrix.target }}" == darwin-* ]]; then
-            packages+=(-p opentray-ext-lynx)
-          fi
-          cargo build --release "${packages[@]}"
-          mkdir -p native-artifacts
-          cp "target/release/${{ matrix.daemon_artifact }}" native-artifacts/
-          cp "target/release/${{ matrix.webview_artifact }}" native-artifacts/
-          if [[ "${{ matrix.target }}" == darwin-* ]]; then
-            cp "target/release/${{ matrix.lynx_artifact }}" native-artifacts/
-          fi
-
-      - name: Build Lynx runtime sidecar
-        if: startsWith(matrix.target, 'darwin-')
-        shell: bash
-        run: |
-          python3 scripts/ci/run_with_watchdog.py \
-            --label "lynx-runtime-${{ matrix.target }}" \
-            --timeout-seconds "${{ matrix.lynx_timeout_seconds }}" \
-            --heartbeat-seconds 60 \
-            -- \
-            bash scripts/release/build-lynx-runtime.sh "native-artifacts/LynxExplorer.app.zip"
+          bun run scripts/binaries/build-native-job.ts \
+            --root "$PWD" \
+            --target "${{ matrix.target }}" \
+            --components "${{ matrix.componentsCsv }}" \
+            --output-dir native-artifacts
 
       - name: Save Lynx caches
-        if: startsWith(matrix.target, 'darwin-') && always()
+        if: matrix.buildsLynxRuntime == true && always()
         uses: actions/cache/save@v4
         with:
           path: |
@@ -157,7 +153,7 @@ jobs:
           key: ${{ steps.lynx-cache-restore.outputs.cache-primary-key }}
 
       - name: Upload Lynx build logs
-        if: startsWith(matrix.target, 'darwin-') && always()
+        if: matrix.buildsLynxRuntime == true && always()
         uses: actions/upload-artifact@v4
         with:
           name: lynx-build-logs-${{ matrix.target }}-${{ github.run_id }}
@@ -177,7 +173,10 @@ jobs:
 
   release:
     name: Release packages
-    needs: native-artifacts
+    needs:
+      - plan-native
+      - native-artifacts
+    if: ${{ always() && needs.plan-native.result == 'success' && needs.native-artifacts.result != 'failure' && needs.native-artifacts.result != 'cancelled' }}
     runs-on: ubuntu-latest
     environment: npm-release
     steps:
@@ -257,64 +256,29 @@ jobs:
           git push
 
       - name: Download native artifacts
+        if: needs.plan-native.outputs.enabled == 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: native-*
           path: native-artifacts
 
       - name: Stage native artifacts into npm packages
+        if: needs.plan-native.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 windows-arm64 windows-x64; do
-            package_os="${target%-*}"
-            arch="${target##*-}"
-            if [ "$package_os" = "windows" ]; then
-              daemon_artifact="opentray.exe"
-              webview_artifact="opentray_ext_webview.dll"
-            elif [ "$package_os" = "darwin" ]; then
-              daemon_artifact="opentray"
-              webview_artifact="libopentray_ext_webview.dylib"
-            else
-              daemon_artifact="opentray"
-              webview_artifact="libopentray_ext_webview.so"
-            fi
-
-            bun run scripts/binaries/stage-local.ts \
-              --kind daemon \
-              --source "native-artifacts/native-${target}/${daemon_artifact}" \
-              --package-os "$package_os" \
-              --arch "$arch"
-            bun run scripts/binaries/stage-local.ts \
-              --kind webview \
-              --source "native-artifacts/native-${target}/${webview_artifact}" \
-              --package-os "$package_os" \
-              --arch "$arch"
-            if [ "$package_os" = "darwin" ]; then
-              bun run scripts/binaries/stage-local.ts \
-                --kind lynx \
-                --source "native-artifacts/native-${target}/libopentray_ext_lynx.dylib" \
-                --package-os "$package_os" \
-                --arch "$arch"
-              bun run scripts/binaries/stage-local.ts \
-                --kind lynx-runtime \
-                --source "native-artifacts/native-${target}/LynxExplorer.app.zip" \
-                --package-os "$package_os" \
-                --arch "$arch"
-            fi
-          done
+          bun run scripts/binaries/stage-release-artifacts.ts \
+            --root "$PWD" \
+            --artifact-root native-artifacts \
+            --stage-plan-json '${{ needs.plan-native.outputs.stage-plan }}'
 
       - name: Validate native package contents
+        if: needs.plan-native.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          for package_dir in \
-            packages/darwin-arm64 packages/darwin-x64 packages/linux-arm64 packages/linux-x64 packages/windows-arm64 packages/windows-x64 \
-            packages/ext-webview-darwin-arm64 packages/ext-webview-darwin-x64 packages/ext-webview-linux-arm64 packages/ext-webview-linux-x64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64 \
-            packages/ext-lynx-darwin-arm64 packages/ext-lynx-darwin-x64
-          do
-            npm pack --dry-run --json "./${package_dir}" >/dev/null
-          done
+          bun run scripts/binaries/validate-package-dirs.ts \
+            --package-dirs-json '${{ needs.plan-native.outputs.validate-package-dirs }}'
 
       - name: Publish packages
         if: steps.release-channel.outputs.channel == 'stable'

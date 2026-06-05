@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import {
   normalizeArch,
   platformToPackageOs,
+  resolveStageDestination,
   resolveNativePackageTarget,
   resolveNativeTarget,
   stageArtifact,
@@ -52,27 +53,3 @@ const target =
 const destination = resolveStageDestination(target, values.kind);
 await stageArtifact(values.root ?? process.cwd(), values.source, destination);
 console.log(`staged ${values.kind} artifact: ${destination}`);
-
-function resolveStageDestination(
-  target: ReturnType<typeof resolveNativeTarget>,
-  kind: string,
-): string {
-  switch (kind) {
-    case "daemon":
-      return target.daemonArtifact;
-    case "webview":
-      return target.webviewArtifact;
-    case "lynx":
-      if (target.lynxArtifact === undefined) {
-        throw new Error(`target ${target.packageOs}-${target.arch} does not publish a lynx dylib`);
-      }
-      return target.lynxArtifact;
-    case "lynx-runtime":
-      if (target.lynxRuntimeArtifact === undefined) {
-        throw new Error(`target ${target.packageOs}-${target.arch} does not publish a lynx runtime`);
-      }
-      return target.lynxRuntimeArtifact;
-    default:
-      throw new Error(`unsupported stage kind: ${kind}`);
-  }
-}

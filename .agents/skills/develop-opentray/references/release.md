@@ -91,6 +91,14 @@ The release workflow should use maintained Actions for Rust setup/cache and arti
 
 Do not make Tauri app build Actions, GitHub Release binary upload Actions, or default `cross` builds the main OpenTray release path. OpenTray publishes npm platform packages, and WebView GUI artifacts should expose native runner dependency problems instead of hiding them behind cross-compilation.
 
+Release planning is now package-truth-driven rather than platform-matrix-first:
+
+- preview and release share the same native build graph
+- the lowest-level native atoms are `daemon`, `webview`, `lynx`, and `lynx-runtime`
+- release reads pending changesets, infers which native atoms are actually part of this publish, and only builds those atoms on their supported targets
+- a WebView-only alpha or stable publish must not compile `opentray-ext-lynx` or build `LynxExplorer.app.zip`
+- a Lynx publish still includes both the darwin dylib and the darwin runtime zip, because those are separate atoms in the Lynx family rather than an accidental side effect of all macOS releases
+
 ## Provenance Metadata Rule
 
 Every public package manifest must include repository metadata with `url: "https://github.com/jixoai/opentray"`. npm trusted publishing rejects signed provenance when package metadata omits or mismatches the GitHub repository URL.

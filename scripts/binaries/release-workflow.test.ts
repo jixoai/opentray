@@ -11,6 +11,7 @@ describe("Feature: release native binary CI law", () => {
     const workflow = releaseWorkflow();
 
     expect(workflow).toContain("uses: actions/setup-node@v6");
+    expect(workflow).toContain("uses: oven-sh/setup-bun@v2");
     expect(workflow).toContain("uses: dtolnay/rust-toolchain@stable");
     expect(workflow).toContain("uses: actions/cache/restore@v4");
     expect(workflow).toContain("uses: actions/cache/save@v4");
@@ -21,25 +22,20 @@ describe("Feature: release native binary CI law", () => {
 
   test("Scenario: Given npm publish staging When workflow is inspected Then package tarballs receive GitHub-built artifacts only", () => {
     const workflow = releaseWorkflow();
+    const nativeJob = workflow.slice(workflow.indexOf("  native-artifacts:"));
     const releaseJob = workflow.slice(workflow.indexOf("  release:"));
 
-    expect(workflow).toContain("packages+=(-p opentray-ext-lynx)");
-    expect(workflow).toContain("Seed Googlesource hosts");
-    expect(workflow).toContain("sudo python3 scripts/ci/seed_hosts_from_doh.py");
-    expect(workflow).toContain("flutter.googlesource.com");
-    expect(workflow).toContain("Build Lynx runtime sidecar");
-    expect(workflow).toContain("python3 scripts/ci/run_with_watchdog.py");
-    expect(workflow).toContain("bash scripts/release/build-lynx-runtime.sh \"native-artifacts/LynxExplorer.app.zip\"");
-    expect(workflow).toContain("job_timeout_minutes: 120");
-    expect(workflow).toContain("lynx_timeout_seconds: 5700");
-    expect(workflow).toContain("Upload Lynx build logs");
-    expect(workflow).toContain("research/lynx/logs/**");
+    expect(workflow).toContain("Plan native release build");
+    expect(workflow).toContain("bun run scripts/binaries/release-plan.ts --root \"$PWD\"");
+    expect(nativeJob).toContain("if: needs.plan-native.outputs.enabled == 'true'");
+    expect(nativeJob).toContain("matrix: ${{ fromJson(needs.plan-native.outputs.matrix) }}");
+    expect(nativeJob).toContain("if: matrix.buildsLynxRuntime == true");
+    expect(nativeJob).toContain("bun run scripts/binaries/build-native-job.ts");
+    expect(nativeJob).not.toContain("packages+=(-p opentray-ext-lynx)");
     expect(releaseJob).toContain("Download native artifacts");
     expect(releaseJob).toContain("Stage native artifacts into npm packages");
-    expect(releaseJob).toContain("--source \"native-artifacts/native-${target}/${daemon_artifact}\"");
-    expect(releaseJob).toContain("--source \"native-artifacts/native-${target}/${webview_artifact}\"");
-    expect(releaseJob).toContain("--kind lynx");
-    expect(releaseJob).toContain("--kind lynx-runtime");
+    expect(releaseJob).toContain("bun run scripts/binaries/stage-release-artifacts.ts");
+    expect(releaseJob).toContain("bun run scripts/binaries/validate-package-dirs.ts");
     expect(releaseJob).toContain("git push origin --tags");
     expect(releaseJob).not.toContain("git push --follow-tags");
     expect(releaseJob).not.toContain("--source target/release");
