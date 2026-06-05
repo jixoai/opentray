@@ -25,6 +25,6 @@
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md` comparing deleted-file tolerance against `plans/plan.md`.
-- [ ] 5.2 Generate `review/self-review.html` as the structured evidence view.
+- [x] 5.1 Generate `review/self-review.md` comparing deleted-file tolerance against `plans/plan.md`.
+- [x] 5.2 Generate `review/self-review.html` as the structured evidence view.
 - [ ] 5.3 If review exits normally, archive the change and commit the archive result.
