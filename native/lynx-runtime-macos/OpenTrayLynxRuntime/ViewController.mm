@@ -745,6 +745,7 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 
 @property(nonatomic) std::shared_ptr<lynx::pub::LynxView> lynxView;
 @property(nonatomic, strong) OpenTrayWindowLaunchConfig *opentrayWindowConfig;
+@property(nonatomic, assign) BOOL opentrayRawCarrierMode;
 @property(nonatomic, assign) BOOL opentrayWindowAttached;
 @property(nonatomic, assign) BOOL opentrayWindowRevealed;
 @property(nonatomic, assign) BOOL opentrayApplyingWindowFrame;
@@ -762,6 +763,14 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   std::shared_ptr<lynx::pub::LynxRuntimeLifecycleObserver> _opentrayRuntimeObserver;
 }
 
+- (BOOL)shouldUseRawCarrierMode {
+  return !self.opentrayWindowConfig.nativeWindowApi &&
+         !self.opentrayWindowConfig.bindWindowGlobals &&
+         !self.opentrayWindowConfig.nativeScreenApi &&
+         !self.opentrayWindowConfig.bindScreenGlobals &&
+         !self.opentrayWindowConfig.frameless;
+}
+
 - (void)loadView {
   self.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)];
 }
@@ -771,6 +780,7 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   if (self) {
     self.url = url;
     self.opentrayWindowConfig = [OpenTrayWindowLaunchConfig fromEnvironment];
+    self.opentrayRawCarrierMode = [self shouldUseRawCarrierMode];
     self.opentrayWindowTitle =
         self.opentrayWindowConfig.title ?: kOpenTrayDefaultWindowTitle;
     self.opentrayWindowIcon = self.opentrayWindowConfig.icon;
@@ -852,6 +862,9 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return;
   }
   self.opentrayWindowAttached = YES;
+  if (self.opentrayRawCarrierMode) {
+    return;
+  }
   NSWindow *window = self.view.window;
   window.delegate = self;
   [window setStyleMask:OpenTrayWindowStyleMask(self.opentrayWindowConfig.frameless)];
@@ -876,6 +889,9 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return;
   }
   self.opentrayWindowRevealed = YES;
+  if (self.opentrayRawCarrierMode) {
+    return;
+  }
   self.view.window.alphaValue = 1.0;
   [self.view.window makeKeyAndOrderFront:nil];
 }
