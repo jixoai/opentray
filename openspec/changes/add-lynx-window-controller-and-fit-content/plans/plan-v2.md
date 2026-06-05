@@ -3,8 +3,8 @@
 ## Current Round
 
 - Round: 1
-- Status: self-review
-- Previous plan backup: `plans/plan-v2.md`
+- Status: research-plan
+- Previous plan backup: none
 
 ## Workflow Command Surface
 
@@ -38,8 +38,6 @@
 | 3 | User | Lynx 黑边问题的真正终点是补全 window controller，`fit-window-size` 应该是其上的扩展项。 | 第一层是 controller，第二层是 fit-content；两层都要做，但职责不能混淆。 |
 | 4 | User | 希望这次一次性做完两层，并同步补强 skills。 | 本 change 需要同时覆盖实现、文档、skills，而不是只补 runtime。 |
 | 5 | User | 询问是否应该默认启用 `fitContentSize`，并要求基于 Lynx 官方开发方式判断。 | 需要先锁定“官方法则”和“OpenTray 产品决策”的边界，再决定默认值。 |
-| 6 | User | 明确要求废弃 `fitContentSize`，理论上 `screen + resize API` 就够了。 | sizing law 从默认 fit-content 收缩为固定壳 + 显式控制。 |
-| 7 | User | 要求启动阶段控制变成独立开关，并支持 `*` / `!feature` 组合。 | smoke / runtime / docs 需要从 profile 模式切到 feature expression 模式。 |
 
 ### Evidence Read
 
@@ -107,7 +105,7 @@
 
 ### Surface Intent
 
-把 `ext-lynx` 做成和 `ext-webview` 同等级的可控窗口扩展：不仅能打开真实 Lynx 窗口，还要有内置 window controller，并把启动阶段行为收敛为显式 feature set，让肉眼验收不再依赖隐式 profile 或 fit-content 魔法。
+把 `ext-lynx` 做成和 `ext-webview` 同等级的可控窗口扩展：不仅能打开真实 Lynx 窗口，还要有内置 window controller，并且补上 `fitContentSize` 这层能力，让肉眼验收不再被固定 demo 布局和宿主窗口错位干扰。
 
 ### Underlying Drive
 
@@ -120,9 +118,9 @@
 - `opentray` 加载 `@opentray/ext-lynx` 后，真实 Lynx 窗口能被显示、关闭、移动、调整大小、切换样式。
 - 页面里可通过 `navigator.window` / `navigator.opentrayWindow` 调用这些能力，并能读写 `title` / `icon`，且不会污染标准 `window.postMessage`。
 - 页面里可通过 `navigator.screen` / `navigator.opentrayScreen` 读取当前屏幕与屏幕集合信息，并在显式开启时通过 `window.getScreenDetails()` 做全局兼容覆盖。
-- 默认情况下，Lynx 窗口使用固定壳体；需要的宿主能力通过启动阶段显式 feature set 打开，而不是靠默认 fit-content 魔法。
+- 默认情况下，Lynx 窗口不会再以一个任意固定壳子包住小卡片内容，而会按内容尺寸策略更自然地贴合。
 - macOS Dock 不再出现空白 runtime 图标；窗口图标、Dock 图标与窗口标题都能被 dedicated runtime 在同一进程内安全更新。
-- 如果开发者想验证不同宿主能力组合，可以在启动阶段用独立开关打开或关闭它们。
+- 如果开发者不想启用内容贴合，也能显式关闭并回到固定窗口尺寸策略。
 - skills 和 README 会把这条 law 讲清楚，后续做其它 native extension 不会再走弯路。
 
 ## Platform Diagnosis
@@ -137,12 +135,12 @@
 
 ### Interaction / Visual Story
 
-开发者启动一个 Lynx tray demo。默认情况下，窗口使用固定 host shell。页面可以通过 `navigator.window` 查询能力、监听尺寸变化、主动关闭窗口、请求移动/缩放；操作者也可以在启动阶段用独立 feature tokens 决定是否注入 `navigator.window`、是否绑定全局 override、是否启用 `navigator.screen`、以及是否以 frameless 启动。整个流程里，用户看到的是“Lynx 是一个完整窗口扩展”，而不是“某个 shell 把 bundle 丢给外部 App”。
+开发者启动一个 Lynx tray demo。默认情况下，窗口不是一个固定 800x600 外壳，而是更接近 Lynx 页面自己的内容占用。页面可以通过 `navigator.window` 查询能力、监听尺寸变化、主动关闭窗口、请求移动/缩放，也可以选择关闭默认 fit-content 策略，转回固定窗口尺寸。整个流程里，用户看到的是“Lynx 是一个完整窗口扩展”，而不是“某个 shell 把 bundle 丢给外部 App”。
 
 ### Interface Shape
 
 - Public facade extends from launcher-only to host-window-aware:
-  - `show({ bundlePath, width?, height?, minWidth?, minHeight?, maxWidth?, maxHeight?, nativeWindowApi?, bindWindowGlobals?, nativeScreenApi?, bindScreenGlobals?, title?, icon?, style? })`
+  - `show({ bundlePath, width?, height?, fitContentSize?, minWidth?, minHeight?, maxWidth?, maxHeight?, nativeWindowApi?, bindWindowGlobals?, nativeScreenApi?, bindScreenGlobals?, title?, icon? })`
   - `hide()`
   - host-window commands mirroring the current OpenTray window vocabulary:
     - `close`
@@ -164,10 +162,10 @@
   - `navigator.window`
   - `navigator.opentrayWindow`
   - optional global overrides only when explicitly enabled
-- Startup feature policy:
-  - baseline: no startup host features
-  - explicit startup tokens: `nativeWindowApi`, `bindWindowGlobals`, `nativeScreenApi`, `bindScreenGlobals`, `frameless`
-  - wildcard/disable expression support for smoke acceptance: `*`, `!feature`
+- Fit-content policy:
+  - OpenTray default for standalone Lynx windows: enabled
+  - explicit opt-out: `fitContentSize: false`
+  - explicit fixed size still wins over content fit
 
 ### Data Shape
 
@@ -175,7 +173,7 @@
   - current window frame
   - current style state
   - capability set
-  - explicit startup feature set and bounds
+  - fit-content policy and bounds
 - Page-facing bridge facts:
   - command name
   - command payload
@@ -191,7 +189,7 @@
 - `packages/ext-lynx`
   - owns typed public API and README law
 - `crates/opentray-ext-lynx`
-  - owns command parsing, event shape, startup feature policy, metadata shape, screen shape, and the native bridge contract
+  - owns command parsing, event shape, fit-content policy, metadata shape, screen shape, and the native bridge contract
 - Lynx sidecar runtime
   - owns Native Module registration, runtime attach injection, GlobalEventEmitter forwarding, Dock/app/window metadata projection, and screen snapshots
 - `opentray-core` / daemon
@@ -209,21 +207,22 @@ Forbidden couplings:
 
 | Gate | Why confirmation is required | Default until user answers |
 | ---- | ---------------------------- | -------------------------- |
-| Final visual default | The user cares about the visual feel of the default size policy, not only protocol correctness. | Ship with a fixed host shell plus explicit startup features, then validate visually. |
+| Final visual default | The user cares about the visual feel of the default size policy, not only protocol correctness. | Ship with default-on fit-content plus explicit opt-out, then validate visually. |
 | macOS runtime identity | The user explicitly cares that the Dock no longer shows a blank icon and that title/name feels real. | On the dedicated Lynx runtime, project icon to both `NSWindow` and `NSApplication`, and project title to `NSWindow` plus best-effort process-name refresh. |
 
 ## Intent-Driven Plan
 
 - [x] 1. Research and align intent.
-- [x] 2. Write specs from the intent.
-- [x] 3. Write BDD tasks from specs.
-- [x] 4. Implement tasks.
-- [x] 5. Self-review against intent and decide whether to loop.
+- [ ] 2. Write specs from the intent.
+- [ ] 3. Write BDD tasks from specs.
+- [ ] 4. Implement tasks.
+- [ ] 5. Self-review against intent and decide whether to loop.
 
 ## Open Questions
 
 | Question | Why it matters | Default assumption until user answers |
 | -------- | -------------- | ------------------------------------- |
+| Should fit-content continue to live-update after every content layout change, or only establish the initial window size and then respond to explicit API calls? | Affects jitter, resize loops, and visual stability. | Default to initial fit plus throttled follow-up updates on real content-size changes. |
 | Should `bindWindowGlobals` land for Lynx in the same change, or only `navigator.window` / `navigator.opentrayWindow`? | Affects how aggressive the host bridge is. | Provide `navigator.window` / `navigator.opentrayWindow` first-class; keep global overrides opt-in only. |
 | Should title changes also attempt to refresh the runtime app name in Dock/app UI, or stop at window title only? | Dedicated-process Lynx can safely mutate app-level identity, but the visible payoff depends on Cocoa behavior. | Treat app-name refresh as best-effort on macOS in the same dedicated runtime, while keeping `window.title` as the primary durable contract. |
 
@@ -240,4 +239,4 @@ Forbidden couplings:
 
 - Default max review iterations: 2
 - Issue recurrence threshold: 2
-- Custom exit condition from intent: `ext-lynx` exposes a real host-window control surface plus explicit startup feature controls, window metadata and screen parity exist, the macOS Dock no longer shows a blank runtime icon, the default visible behavior is visually acceptable without hidden sizing magic, the public docs and skills explain the law clearly, and the change is ready for focused human acceptance.
+- Custom exit condition from intent: `ext-lynx` exposes a real host-window control surface plus fit-content sizing, window metadata and screen parity exist, the macOS Dock no longer shows a blank runtime icon, the default visible behavior is visually acceptable without black-edge confusion, the public docs and skills explain the law clearly, and the change is ready for focused human acceptance.

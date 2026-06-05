@@ -19,7 +19,7 @@ The macOS native dylib owns the Lynx command protocol and the runtime sidecar co
 
 Public commands:
 
-- `show({ bundlePath, fitContentSize?, width?, height?, minWidth?, minHeight?, maxWidth?, maxHeight?, nativeWindowApi?, bindWindowGlobals?, nativeScreenApi?, bindScreenGlobals?, title?, icon?, style? })`
+- `show({ bundlePath, width?, height?, minWidth?, minHeight?, maxWidth?, maxHeight?, nativeWindowApi?, bindWindowGlobals?, nativeScreenApi?, bindScreenGlobals?, title?, icon?, style? })`
 - `hide()`
 
 Runtime events:
@@ -63,18 +63,25 @@ OpenTray keeps the public surface aligned, but the transport is Lynx-native: Nat
 
 Unlike `ext-webview`, the dedicated Lynx runtime is its own macOS app process. That means `title` and `icon` updates may safely project to both the window and the runtime app identity inside that process.
 
-## Fit-Content Policy
+## Launch Controls
 
-Lynx supports host-owned fit-content sizing, but that is a host policy, not a DOM/body trick.
+OpenTray now treats Lynx startup behavior as an explicit host-feature set rather than an implicit profile.
 
-OpenTray applies this product default for standalone Lynx windows:
+At the extension protocol layer:
 
-- `fitContentSize` defaults to `true`
-- `fitContentSize: false` opts out
-- explicit `width` / `height` win on the corresponding axis
-- `minWidth` / `minHeight` / `maxWidth` / `maxHeight` clamp the final frame
+- `nativeWindowApi`
+- `bindWindowGlobals`
+- `nativeScreenApi`
+- `bindScreenGlobals`
+- `style: { frameless: true }`
 
-This default-on behavior is an OpenTray product decision for popup-style usage. It is not a claim that Lynx Explorer itself defaults to fit-content in every host.
+`style.frameless` currently means "remove native window chrome". It does not turn the whole page into a draggable background region, because that would swallow Lynx pointer/input behavior. If you need drag affordances, build them explicitly on top of `navigator.window.moveTo()` / `resizeTo()` or wait for a future drag-region capability.
+
+Window size is fixed or explicit:
+
+- default smoke shell: `720x420`
+- explicit `width` / `height` override the fallback shell
+- `minWidth` / `minHeight` / `maxWidth` / `maxHeight` clamp the native frame
 
 ## Example
 
@@ -88,14 +95,16 @@ Use the installed CLI smoke when you want a real native window:
 
 ```bash
 pnpm --filter opentray cli -- smoke daemon-lynx
+pnpm --filter opentray cli -- smoke daemon-lynx --features "nativeWindowApi,bindWindowGlobals"
+pnpm --filter opentray cli -- smoke daemon-lynx --features "*,!frameless"
+pnpm --filter opentray cli -- smoke daemon-lynx --features "*,!nativeScreenApi"
 ```
 
 The published `opentray` CLI carries an official Lynx review bundle for final human acceptance. Pass `--bundle <path-to-main.lynx.bundle>` only when you want to override that package-owned audit asset with your own bundle.
 
-The smoke command now starts in fit-content mode, sets an initial title/icon, enables `navigator.window`, enables `navigator.screen`, enables global overrides for validation, and exposes tray items for:
+The smoke command now starts with a fixed host shell, sets an initial title/icon, applies an explicit host-feature expression, and exposes tray items for:
 
-- `Show Fit Window`
-- `Show Fixed Window`
+- `Show Window`
 - `Hide Window`
 - `Quit Smoke`
 
@@ -134,6 +143,20 @@ Accepted `OPENTRAY_LYNX_DEBUG` modes:
 
 `OPENTRAY_LYNX_DEBUG_LOG_PATH` writes runtime diagnostics straight to a file from inside the macOS host process. Use it when terminal inheritance alone is not trustworthy enough.
 
+`OPENTRAY_LYNX_HOST_FEATURES` selects which host behaviors OpenTray layers onto the same `OpenTrayLynxRuntime.app` carrier:
+
+- empty / unset: baseline carrier behavior only
+- `full` or `*`: enable every startup feature
+- comma-separated tokens such as `nativeWindowApi,bindWindowGlobals,nativeScreenApi,bindScreenGlobals,frameless`
+- explicit disable tokens such as `*,!nativeScreenApi`
+
+If you are debugging pointer/input regressions, try `*,!frameless` first. That keeps the window and screen bridge enabled while removing the borderless shell from the equation.
+
+Recommended acceptance order:
+
+1. Run baseline first with no host-feature expression until the macOS window behaves like a normal app again.
+2. Then run explicit feature sets on the same carrier artifact and verify OpenTray-only capabilities on top of that recovered baseline.
+
 Interpretation:
 
 - host logs present, engine logs absent: repair the Lynx macOS input bridge or pointer translation before gesture/tap dispatch
@@ -148,7 +171,6 @@ Current first-stage native support:
 - macOS arm64 and x64: `navigator.window` / `navigator.opentrayWindow`
 - macOS arm64 and x64: `navigator.screen` / `navigator.opentrayScreen`
 - macOS arm64 and x64: `close`, `moveTo`, `resizeTo`, `getCapabilities`, `getStyle`, `setStyle({ frameless })`, `getTitle`, `setTitle`, `getIcon`, `setIcon`, `getScreenDetails`
-- macOS arm64 and x64: default-on fit-content with explicit fixed-size opt-out
 - macOS arm64 and x64: dedicated runtime bundle icon plus dynamic Dock/window icon projection
 - macOS arm64 and x64: `transparent` and `backgroundEffect` reject with typed unsupported errors for now
 - Linux / Windows: not published yet; OpenTray should fail explicitly instead of pretending support exists

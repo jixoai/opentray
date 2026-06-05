@@ -35,7 +35,6 @@ napi_value OpenTrayWindowModuleCreator(napi_env env, napi_value exports,
 @property(nonatomic, strong, nullable) NSNumber *minHeight;
 @property(nonatomic, strong, nullable) NSNumber *maxWidth;
 @property(nonatomic, strong, nullable) NSNumber *maxHeight;
-@property(nonatomic, assign) BOOL fitContentSize;
 @property(nonatomic, assign) BOOL nativeWindowApi;
 @property(nonatomic, assign) BOOL bindWindowGlobals;
 @property(nonatomic, assign) BOOL nativeScreenApi;
@@ -45,8 +44,6 @@ napi_value OpenTrayWindowModuleCreator(napi_env env, napi_value exports,
 @property(nonatomic, assign) BOOL frameless;
 
 + (instancetype)fromEnvironment;
-- (BOOL)fitContentWidth;
-- (BOOL)fitContentHeight;
 - (NSDictionary *)dictionaryRepresentation;
 - (NSDictionary *)windowStyleDictionary;
 - (NSDictionary *)capabilitiesDictionary;
@@ -57,22 +54,10 @@ napi_value OpenTrayWindowModuleCreator(napi_env env, napi_value exports,
 namespace {
 
 static NSString *const kOpenTrayWindowConfigEnv = @"OPENTRAY_LYNX_WINDOW_CONFIG_JSON";
-static NSString *const kOpenTrayHostProfileEnv = @"OPENTRAY_LYNX_HOST_PROFILE";
 static NSString *const kOpenTrayWindowEventPrefix = @"opentray.window:";
 static NSString *const kOpenTrayDefaultWindowTitle = @"OpenTray Lynx";
 const uint64_t kOpenTrayWindowModuleID =
     reinterpret_cast<uint64_t>(&kOpenTrayWindowModuleID);
-
-BOOL OpenTrayBaselineHostModeEnabled() {
-  NSString *raw = [NSProcessInfo processInfo].environment[kOpenTrayHostProfileEnv];
-  if (raw.length == 0) {
-    return NO;
-  }
-  NSString *normalized =
-      [[raw stringByTrimmingCharactersInSet:
-                 [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
-  return [normalized isEqualToString:@"baseline"];
-}
 
 NSSize ClampSize(NSSize size, NSNumber *minWidth, NSNumber *minHeight,
                  NSNumber *maxWidth, NSNumber *maxHeight) {
@@ -325,7 +310,6 @@ NSDictionary *RectDictionary(NSRect rect) {
 
 + (instancetype)fromEnvironment {
   OpenTrayWindowLaunchConfig *config = [[OpenTrayWindowLaunchConfig alloc] init];
-  config.fitContentSize = YES;
   NSDictionary *environment = [NSProcessInfo processInfo].environment;
   NSString *json = environment[kOpenTrayWindowConfigEnv];
   id raw = JSONObjectFromString(json);
@@ -345,9 +329,6 @@ NSDictionary *RectDictionary(NSRect rect) {
       [parsed[@"maxWidth"] isKindOfClass:[NSNumber class]] ? parsed[@"maxWidth"] : nil;
   config.maxHeight =
       [parsed[@"maxHeight"] isKindOfClass:[NSNumber class]] ? parsed[@"maxHeight"] : nil;
-  if ([parsed[@"fitContentSize"] isKindOfClass:[NSNumber class]]) {
-    config.fitContentSize = [parsed[@"fitContentSize"] boolValue];
-  }
   if ([parsed[@"nativeWindowApi"] isKindOfClass:[NSNumber class]]) {
     config.nativeWindowApi = [parsed[@"nativeWindowApi"] boolValue];
   }
@@ -373,16 +354,6 @@ NSDictionary *RectDictionary(NSRect rect) {
   return config;
 }
 
-- (BOOL)fitContentWidth {
-  // Explicit caller width wins; fit-content only owns axes left unspecified by the launcher.
-  return self.fitContentSize && self.width == nil;
-}
-
-- (BOOL)fitContentHeight {
-  // Explicit caller height wins; fit-content only owns axes left unspecified by the launcher.
-  return self.fitContentSize && self.height == nil;
-}
-
 - (NSDictionary *)dictionaryRepresentation {
   NSMutableDictionary *result = [NSMutableDictionary dictionary];
   if (self.width) result[@"width"] = self.width;
@@ -391,7 +362,6 @@ NSDictionary *RectDictionary(NSRect rect) {
   if (self.minHeight) result[@"minHeight"] = self.minHeight;
   if (self.maxWidth) result[@"maxWidth"] = self.maxWidth;
   if (self.maxHeight) result[@"maxHeight"] = self.maxHeight;
-  result[@"fitContentSize"] = @(self.fitContentSize);
   result[@"nativeWindowApi"] = @(self.nativeWindowApi);
   result[@"bindWindowGlobals"] = @(self.bindWindowGlobals);
   result[@"nativeScreenApi"] = @(self.nativeScreenApi);
@@ -425,7 +395,6 @@ NSDictionary *RectDictionary(NSRect rect) {
     @"globalBindingsSupported" : @YES,
     @"screenBindingsEnabled" : @(self.nativeScreenApi && self.bindScreenGlobals),
     @"screenBindingsSupported" : @YES,
-    @"fitContentSize" : @(self.fitContentSize),
     @"platform" : @"macos",
   };
 }
@@ -747,51 +716,10 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
       } catch (_) {}
       restoreGlobals();
     };
-    const scheduleFitProbe = () => {
-      // Fit-content is a native host policy fed by Lynx layout snapshots, not a DOM/window identity claim.
-      if (!config.fitContentSize) return;
-      let attempts = 0;
-      const maxAttempts = 60;
-      let lastKey = "";
-      const measure = () => {
-        attempts += 1;
-        try {
-          const runtimeLynx = globalThis.lynx;
-          if (!runtimeLynx || typeof runtimeLynx.createSelectorQuery !== "function") {
-            if (attempts < maxAttempts) setTimeout(measure, 80);
-            return;
-          }
-          runtimeLynx
-            .createSelectorQuery()
-            .selectRoot()
-            .boundingClientRect((rect) => {
-              const width = Number(rect && (rect.width ?? (Number(rect.right) - Number(rect.left))));
-              const height = Number(rect && (rect.height ?? (Number(rect.bottom) - Number(rect.top))));
-              if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
-                const key = `${Math.round(width)}x${Math.round(height)}`;
-                if (key !== lastKey) {
-                  lastKey = key;
-                  void invoke("reportContentRect", { width, height });
-                }
-              }
-              if (attempts < maxAttempts) {
-                setTimeout(measure, attempts < 3 ? 16 : 120);
-              }
-            })
-            .exec();
-        } catch (_) {
-          if (attempts < maxAttempts) {
-            setTimeout(measure, 120);
-          }
-        }
-      };
-      setTimeout(measure, 0);
-    };
     Object.defineProperty(targetWindow, INTERNALS_KEY, {
       value: Object.freeze({
         install,
-        uninstall,
-        scheduleFitProbe
+        uninstall
       }),
       configurable: false
     });
@@ -802,7 +730,6 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   } else {
     internals.uninstall();
   }
-  internals.scheduleFitProbe();
 })();)JS";
 
   size_t pos = script.find("__OPENTRAY_CONFIG__");
@@ -818,10 +745,8 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
 
 @property(nonatomic) std::shared_ptr<lynx::pub::LynxView> lynxView;
 @property(nonatomic, strong) OpenTrayWindowLaunchConfig *opentrayWindowConfig;
-@property(nonatomic, assign) BOOL opentrayBaselineHostMode;
 @property(nonatomic, assign) BOOL opentrayWindowAttached;
 @property(nonatomic, assign) BOOL opentrayWindowRevealed;
-@property(nonatomic, assign) BOOL opentrayInitialFitApplied;
 @property(nonatomic, assign) BOOL opentrayApplyingWindowFrame;
 @property(nonatomic, strong) id opentrayWindowDelegateOwner;
 @property(nonatomic, copy) NSString *opentrayWindowTitle;
@@ -846,17 +771,6 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   if (self) {
     self.url = url;
     self.opentrayWindowConfig = [OpenTrayWindowLaunchConfig fromEnvironment];
-    self.opentrayBaselineHostMode = OpenTrayBaselineHostModeEnabled();
-    if (self.opentrayBaselineHostMode) {
-      // Baseline mode keeps the OpenTray-owned carrier but deliberately restores the
-      // upstream host interaction model before re-layering window APIs and fit-content.
-      self.opentrayWindowConfig.fitContentSize = NO;
-      self.opentrayWindowConfig.nativeWindowApi = NO;
-      self.opentrayWindowConfig.bindWindowGlobals = NO;
-      self.opentrayWindowConfig.nativeScreenApi = NO;
-      self.opentrayWindowConfig.bindScreenGlobals = NO;
-      self.opentrayWindowConfig.frameless = NO;
-    }
     self.opentrayWindowTitle =
         self.opentrayWindowConfig.title ?: kOpenTrayDefaultWindowTitle;
     self.opentrayWindowIcon = self.opentrayWindowConfig.icon;
@@ -938,14 +852,13 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return;
   }
   self.opentrayWindowAttached = YES;
-  if (self.opentrayBaselineHostMode) {
-    return;
-  }
   NSWindow *window = self.view.window;
   window.delegate = self;
   [window setStyleMask:OpenTrayWindowStyleMask(self.opentrayWindowConfig.frameless)];
   window.titlebarAppearsTransparent = YES;
-  window.movableByWindowBackground = self.opentrayWindowConfig.frameless;
+  // `frameless` only removes native chrome. It must not silently turn the
+  // entire content area into a drag region, otherwise page input semantics break.
+  window.movableByWindowBackground = NO;
   window.minSize = NSMakeSize(self.opentrayWindowConfig.minWidth ? self.opentrayWindowConfig.minWidth.doubleValue : 200.0,
                               self.opentrayWindowConfig.minHeight ? self.opentrayWindowConfig.minHeight.doubleValue : 200.0);
   if (self.opentrayWindowConfig.maxWidth || self.opentrayWindowConfig.maxHeight) {
@@ -963,9 +876,6 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     return;
   }
   self.opentrayWindowRevealed = YES;
-  if (self.opentrayBaselineHostMode) {
-    return;
-  }
   self.view.window.alphaValue = 1.0;
   [self.view.window makeKeyAndOrderFront:nil];
 }
@@ -1076,7 +986,7 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   }
   [window setStyleMask:OpenTrayWindowStyleMask(frameless)];
   window.titlebarAppearsTransparent = YES;
-  window.movableByWindowBackground = frameless;
+  window.movableByWindowBackground = NO;
   [self emitWindowEvent:@"stylechange" payload:[self currentWindowStyleDictionary]];
 }
 
@@ -1107,30 +1017,6 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     @"width" : @(contentSize.width),
     @"height" : @(contentSize.height),
   };
-}
-
-- (void)applyReportedContentRect:(CGFloat)width height:(CGFloat)height {
-  if (!self.opentrayWindowConfig.fitContentSize || !self.view.window) {
-    [self revealWindowIfNeeded];
-    return;
-  }
-  NSSize current = [self currentContentSize];
-  CGFloat targetWidth =
-      [self.opentrayWindowConfig fitContentWidth] ? width : current.width;
-  CGFloat targetHeight =
-      [self.opentrayWindowConfig fitContentHeight] ? height : current.height;
-  NSSize target =
-      ClampSize(NSMakeSize(targetWidth, targetHeight), self.opentrayWindowConfig.minWidth,
-                self.opentrayWindowConfig.minHeight, self.opentrayWindowConfig.maxWidth,
-                self.opentrayWindowConfig.maxHeight);
-  if (fabs(target.width - current.width) > 0.5 ||
-      fabs(target.height - current.height) > 0.5) {
-    self.opentrayApplyingWindowFrame = YES;
-    [self.view.window setContentSize:target];
-    self.opentrayApplyingWindowFrame = NO;
-  }
-  self.opentrayInitialFitApplied = YES;
-  [self revealWindowIfNeeded];
 }
 
 - (NSString *)jsonSuccess:(id)result {
@@ -1266,20 +1152,6 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
     }
     if ([cmd isEqualToString:@"getScreenDetails"]) {
       response = [self jsonSuccess:[self currentScreenDetailsDictionary]];
-      return;
-    }
-    if ([cmd isEqualToString:@"reportContentRect"]) {
-      NSNumber *width =
-          [payload[@"width"] isKindOfClass:[NSNumber class]] ? payload[@"width"] : nil;
-      NSNumber *height =
-          [payload[@"height"] isKindOfClass:[NSNumber class]] ? payload[@"height"] : nil;
-      if (!width || !height || width.doubleValue <= 0 || height.doubleValue <= 0) {
-        response = [self jsonError:@"rejected"
-                           message:@"reportContentRect requires positive width and height"];
-        return;
-      }
-      [self applyReportedContentRect:width.doubleValue height:height.doubleValue];
-      response = [self jsonSuccess:[self framePayload]];
       return;
     }
     response = [self jsonError:@"rejected"
@@ -1426,7 +1298,8 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
       .SetParent((__bridge NativeWindow)self.view)
       .SetGenericResourceFetcher(std::make_shared<lynx::example::ExampleGenericResourceFetcher>())
       .RegisterNativeView<FakeView>("x-fake-view", (__bridge void *)self);
-  if (!self.opentrayBaselineHostMode) {
+  if (self.opentrayWindowConfig.nativeWindowApi ||
+      self.opentrayWindowConfig.nativeScreenApi) {
     builder.RegisterNativeModule("OpenTrayWindowModule", &OpenTrayWindowModuleCreator,
                                  (__bridge void *)self);
   }
@@ -1444,7 +1317,8 @@ std::string OpenTrayBootstrapScript(OpenTrayWindowLaunchConfig *config) {
   std::shared_ptr<lynx::pub::LynxRuntimeLifecycleObserver> upstreamObserver =
       std::make_shared<lynx::example::ExampleLynxRuntimeLifecycleObserver>();
   std::string bootstrapScript;
-  if (!self.opentrayBaselineHostMode) {
+  if (self.opentrayWindowConfig.nativeWindowApi ||
+      self.opentrayWindowConfig.nativeScreenApi) {
     bootstrapScript = OpenTrayBootstrapScript(self.opentrayWindowConfig);
   }
   _opentrayRuntimeObserver = std::make_shared<OpenTrayRuntimeLifecycleObserver>(

@@ -24,7 +24,12 @@ const cliModulePath = fileURLToPath(import.meta.url);
 type CliCommand =
   | { type: "daemon"; action: "start" | "stop" | "restart" | "health" }
   | { type: "smoke"; name: "daemon-tray" }
-  | { type: "smoke"; name: "daemon-lynx"; bundlePath?: string }
+  | {
+      type: "smoke";
+      name: "daemon-lynx";
+      bundlePath?: string;
+      featureExpression?: string;
+    }
   | { type: "help" };
 
 export const parseCliCommand = (argv: string[]): CliCommand => {
@@ -34,10 +39,17 @@ export const parseCliCommand = (argv: string[]): CliCommand => {
       return { type: "smoke", name: "daemon-tray" };
     }
     if (group === "smoke" && action === "daemon-lynx") {
-      const bundlePath = parseSmokeBundlePath(rest);
-      return bundlePath === undefined
-        ? { type: "smoke", name: "daemon-lynx" }
-        : { type: "smoke", name: "daemon-lynx", bundlePath };
+      const smokeOptions = parseSmokeOptions(rest);
+      return {
+        type: "smoke",
+        name: "daemon-lynx",
+        ...(smokeOptions.bundlePath
+          ? { bundlePath: smokeOptions.bundlePath }
+          : {}),
+        ...(smokeOptions.featureExpression
+          ? { featureExpression: smokeOptions.featureExpression }
+          : {}),
+      };
     }
     return { type: "help" };
   }
@@ -73,9 +85,14 @@ export const runCli = async (argv: string[]): Promise<number> => {
       await runDaemonTraySmoke();
     } else {
       await runDaemonLynxSmoke(
-        command.bundlePath === undefined
-          ? {}
-          : { bundlePath: command.bundlePath }
+        {
+          ...(command.bundlePath === undefined
+            ? {}
+            : { bundlePath: command.bundlePath }),
+          ...(command.featureExpression === undefined
+            ? {}
+            : { featureExpression: command.featureExpression }),
+        }
       );
     }
     return 0;
@@ -147,7 +164,7 @@ const printHelp = (): void => {
   console.error("Usage: opentray daemon <start|stop|restart|health>");
   console.error("       opentray smoke daemon-tray");
   console.error(
-    "       opentray smoke daemon-lynx [--bundle <path-to-main.lynx.bundle>]"
+    "       opentray smoke daemon-lynx [--bundle <path-to-main.lynx.bundle>] [--features <baseline|full|*,!feature,...>]"
   );
   console.error("       default Lynx smoke uses the packaged review bundle");
 };
@@ -184,13 +201,25 @@ export const isCliEntrypoint = (
   }
 };
 
-function parseSmokeBundlePath(argv: string[]): string | undefined {
+function parseSmokeOptions(argv: string[]): {
+  bundlePath?: string;
+  featureExpression?: string;
+} {
+  let bundlePath: string | undefined;
+  let featureExpression: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === "--bundle") {
-      return argv[index + 1];
+      bundlePath = argv[index + 1];
+      continue;
+    }
+    if (argv[index] === "--features") {
+      featureExpression = argv[index + 1];
     }
   }
-  return undefined;
+  return {
+    ...(bundlePath === undefined ? {} : { bundlePath }),
+    ...(featureExpression === undefined ? {} : { featureExpression }),
+  };
 }
 
 if (isCliEntrypoint(process.argv[1], cliModulePath)) {

@@ -54,6 +54,21 @@ describe("opentray CLI", () => {
       name: "daemon-lynx",
       bundlePath: "./dist/main.lynx.bundle",
     });
+    expect(
+      parseCliCommand([
+        "smoke",
+        "daemon-lynx",
+        "--bundle",
+        "./dist/main.lynx.bundle",
+        "--features",
+        "*,!nativeScreenApi",
+      ])
+    ).toEqual({
+      type: "smoke",
+      name: "daemon-lynx",
+      bundlePath: "./dist/main.lynx.bundle",
+      featureExpression: "*,!nativeScreenApi",
+    });
   });
 
   it("does not treat the deamon typo as canonical", () => {

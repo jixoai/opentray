@@ -106,36 +106,28 @@ Style state SHALL include the frameless and visual-effect concepts needed for fu
 - **WHEN** the page inspects `window.close`, `window.resizeTo`, and `window.getScreenDetails`
 - **THEN** OpenTray has not replaced those functions.
 
-### Requirement: Lynx standalone windows SHALL default to fit-content sizing with explicit opt-out
+### Requirement: Lynx launch behavior SHALL use explicit startup controls instead of implicit fit-content
 
-For OpenTray standalone Lynx windows, the extension SHALL treat content-fitting as a host sizing policy rather than a DOM/body trick. The default behavior for `show` SHALL enable `fitContentSize` unless the caller explicitly disables it. Explicit `width` and `height` inputs SHALL override content-fit for the corresponding axis. The extension SHALL support sizing bounds such as `minWidth`, `minHeight`, `maxWidth`, and `maxHeight`.
+For OpenTray standalone Lynx windows, the extension SHALL treat startup behavior as an explicit host-launch contract. `show` SHALL accept fixed or explicit size inputs plus startup capability flags such as `nativeWindowApi`, `bindWindowGlobals`, `nativeScreenApi`, `bindScreenGlobals`, and `style.frameless`. The extension SHALL support sizing bounds such as `minWidth`, `minHeight`, `maxWidth`, and `maxHeight`, but it SHALL NOT enable host-owned fit-content policy implicitly.
 
-The extension MAY throttle or coalesce repeated content-driven frame updates, but it SHALL NOT leave an obviously oversized fixed shell around a small Lynx page when default fit-content mode is active.
+#### Scenario: Default Lynx launch uses a fixed host shell
 
-#### Scenario: Default Lynx window fits content
-
-- **GIVEN** a caller shows a Lynx bundle without explicit fixed size
-- **WHEN** the first visible layout stabilizes
-- **THEN** the extension sizes the native window according to fit-content policy
-- **AND** the user does not see a large arbitrary dead margin around the page by default.
-
-#### Scenario: Caller can disable fit-content
-
-- **GIVEN** a caller shows a Lynx bundle with `fitContentSize: false`
+- **GIVEN** a caller shows a Lynx bundle without explicit size or startup feature flags
 - **WHEN** the extension launches the window
-- **THEN** the extension uses the caller's fixed or fallback host size strategy
-- **AND** it does not keep applying content-fit updates.
+- **THEN** the native host uses its fixed fallback shell
+- **AND** the extension does not start a hidden content-fitting loop.
 
-#### Scenario: Explicit width and height win over default fit-content
+#### Scenario: Startup flags are independently controllable
 
-- **GIVEN** a caller shows a Lynx bundle with `fitContentSize` enabled and explicit `width` and `height`
+- **GIVEN** a caller shows a Lynx bundle with `nativeWindowApi`, `bindWindowGlobals`, `nativeScreenApi`, `bindScreenGlobals`, and `style.frameless` configured independently
+- **WHEN** the extension launches the window
+- **THEN** the enabled host capabilities match that startup request
+- **AND** disabling one parent capability such as `nativeScreenApi` also disables dependent startup bindings such as `bindScreenGlobals`.
+- **AND** enabling `style.frameless` does not silently remap the whole content area into a background drag region or swallow page pointer/input events.
+
+#### Scenario: Explicit width and height remain authoritative
+
+- **GIVEN** a caller shows a Lynx bundle with explicit `width` and `height`
 - **WHEN** the extension launches the window
 - **THEN** the native window starts from the explicit size
-- **AND** the content-fit policy does not override those explicit dimensions unless a future command requests it.
-
-#### Scenario: Fit-content respects bounds
-
-- **GIVEN** a caller shows a Lynx bundle with `fitContentSize` enabled and min/max size bounds
-- **WHEN** the content-driven size is computed
-- **THEN** the final native window frame is clamped to the configured bounds
-- **AND** the extension emits frame-change events using the clamped size.
+- **AND** no host-owned content-fitting policy overrides those explicit dimensions.

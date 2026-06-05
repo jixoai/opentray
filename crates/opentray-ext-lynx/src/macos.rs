@@ -107,7 +107,6 @@ impl MacosLynxRuntime {
             "launchUrl": prepared.launch_url,
             "pid": pid,
             "runtimeZip": prepared.runtime_zip.display().to_string(),
-            "fitContentSize": prepared.launch.fit_content_size,
             "nativeWindowApi": prepared.launch.native_window_api,
         }))
     }
@@ -421,7 +420,10 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
+    use std::sync::{LazyLock, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn default_runtime_zip_is_package_adjacent() {
@@ -475,6 +477,7 @@ mod tests {
 
     #[test]
     fn missing_runtime_override_path_is_rejected_explicitly() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
         let missing = test_dir("missing-runtime").join(RUNTIME_ZIP_NAME);
         unsafe {
             std::env::set_var(super::LYNX_RUNTIME_ZIP_ENV, &missing);
@@ -492,6 +495,7 @@ mod tests {
 
     #[test]
     fn runtime_stdio_defaults_to_quiet() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
         unsafe {
             std::env::remove_var(super::LYNX_RUNTIME_STDIO_ENV);
         }
@@ -504,6 +508,7 @@ mod tests {
 
     #[test]
     fn runtime_stdio_accepts_inherit() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
         unsafe {
             std::env::set_var(super::LYNX_RUNTIME_STDIO_ENV, "inherit");
         }
@@ -520,6 +525,7 @@ mod tests {
 
     #[test]
     fn invalid_runtime_stdio_mode_is_rejected_explicitly() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
         unsafe {
             std::env::set_var(super::LYNX_RUNTIME_STDIO_ENV, "verbose");
         }
@@ -625,7 +631,6 @@ mod tests {
             min_height: Some(180),
             max_width: None,
             max_height: None,
-            fit_content_size: true,
             native_window_api: true,
             bind_window_globals: false,
             native_screen_api: true,

@@ -26,7 +26,6 @@ const lynx = attachLynx(tray);
 await lynx.show({
   type: "show",
   bundlePath: "/tmp/demo.main.lynx.bundle",
-  fitContentSize: true,
   nativeWindowApi: true,
   bindWindowGlobals: true,
   nativeScreenApi: true,

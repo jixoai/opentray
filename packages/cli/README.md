@@ -118,7 +118,19 @@ The host side of that example can call `await tray.getBounds()` to read the curr
 
 The opened WebView also enables the injected page bridge so the rendered page can call `navigator.window` / `navigator.opentrayWindow` and, for the demo only, opt into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides. Use the in-page buttons to verify `getCapabilities`, `getStyle`, `setStyle({ frameless })`, move, resize, close, and tray-bounds behavior visually instead of relying only on terminal logs.
 
-The Lynx smoke path uses the same generic extension loader but launches a real `OpenTrayLynxRuntime.app.zip` sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` immediately in fit-content mode, sets an initial title and icon, enables `navigator.window`, enables `navigator.screen`, enables global overrides for validation, and exposes `Show Fit Window`, `Show Fixed Window`, `Hide Window`, and `Quit Smoke` through tray-routed events. Inside the Lynx window, use the rendered controls to verify `getCapabilities`, `getStyle`, `getTitle`, `setTitle`, `getIcon`, `setIcon`, `navigator.screen.getScreenDetails()`, `resizeTo`, `moveTo`, frameless toggling, `window.resizeTo()`, `window.getScreenDetails()`, and close behavior visually. On macOS, the runtime Dock icon should no longer appear blank.
+The Lynx smoke path uses the same generic extension loader but launches a real `OpenTrayLynxRuntime.app.zip` sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` in a fixed host shell, sets an initial title and icon, applies an explicit startup feature expression, and exposes `Show Window`, `Hide Window`, and `Quit Smoke` through tray-routed events. Inside the Lynx window, use the rendered controls to verify `getCapabilities`, `getStyle`, `getTitle`, `setTitle`, `getIcon`, `setIcon`, `navigator.screen.getScreenDetails()`, `resizeTo`, `moveTo`, frameless toggling, `window.resizeTo()`, `window.getScreenDetails()`, and close behavior visually. On macOS, the runtime Dock icon should no longer appear blank.
+
+For Lynx, `frameless` currently means borderless only. It does not imply a full-window drag region, because that would steal clicks from the page content. When isolating host-feature regressions, `--features "*,!frameless"` is the fastest way to keep the bridge on while removing the borderless shell from the test.
+
+When you need to validate a GitHub-built macOS artifact before publish, use the workspace launcher instead of hand-written `/tmp` scripts:
+
+```bash
+pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle research/lynx/app/dist/input-probe.lynx.bundle
+pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle research/lynx/app/dist/input-probe.lynx.bundle --features "nativeWindowApi,bindWindowGlobals,nativeScreenApi,bindScreenGlobals"
+pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle research/lynx/app/dist/input-probe.lynx.bundle --features "*,!nativeScreenApi"
+```
+
+The empty feature set is the baseline carrier check. Use it to validate the physical window baseline: click, scroll, input, red/yellow/green controls, and resize/move. Only after that baseline is healthy should you validate explicit startup feature sets on top of the same carrier.
 
 First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
 

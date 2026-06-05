@@ -25,7 +25,6 @@ describe("@opentray/ext-lynx", () => {
     await attachLynx(tray).show({
       type: "show",
       bundlePath: "/tmp/demo.main.lynx.bundle",
-      fitContentSize: true,
       nativeWindowApi: true,
       bindWindowGlobals: false,
       nativeScreenApi: true,
@@ -47,7 +46,6 @@ describe("@opentray/ext-lynx", () => {
         data: {
           type: "show",
           bundlePath: "/tmp/demo.main.lynx.bundle",
-          fitContentSize: true,
           nativeWindowApi: true,
           bindWindowGlobals: false,
           nativeScreenApi: true,
