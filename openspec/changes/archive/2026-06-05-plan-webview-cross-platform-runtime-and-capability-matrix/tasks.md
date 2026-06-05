@@ -41,7 +41,7 @@
 - [x] 5.1 Generate `review/self-review.md` comparing implementation and publish evidence against `plans/plan.md`.
 - [x] 5.2 Generate `review/self-review.html` as the structured evidence presentation for docs, workflow, and publish results.
 - [x] 5.3 If review updates OpenSpec artifacts or task state, commit those artifact changes before the next apply loop.
-- [ ] 5.4 If review enters a real recurrence loop, run `bun run openspec:vision -- review-state plan-webview-cross-platform-runtime-and-capability-matrix`.
-- [ ] 5.5 If review cannot exit normally because npm publish authority or another external dependency is missing, run `bun run openspec:vision -- handoff plan-webview-cross-platform-runtime-and-capability-matrix` and commit the handoff evidence before returning to discussion.
-- [ ] 5.6 If review exits normally, run `openspec archive plan-webview-cross-platform-runtime-and-capability-matrix` and commit the archive result.
-- [ ] 5.7 Run `bun run openspec:vision -- check plan-webview-cross-platform-runtime-and-capability-matrix` and decide whether the goal is complete end to end.
+- [x] 5.4 Review did not enter a real recurrence loop, so no `review-state` file was required.
+- [x] 5.5 Review exited normally after the alpha publish and fresh-install smoke succeeded, so no abnormal handoff was required.
+- [x] 5.6 If review exits normally, run `openspec archive plan-webview-cross-platform-runtime-and-capability-matrix` and commit the archive result.
+- [x] 5.7 Run `bun run openspec:vision -- check plan-webview-cross-platform-runtime-and-capability-matrix` and decide whether the goal is complete end to end.
