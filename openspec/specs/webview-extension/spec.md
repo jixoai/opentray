@@ -172,26 +172,24 @@ The extension MAY implement native-to-JavaScript callback delivery with the unde
 
 ### Requirement: Webview window operations SHALL be capability-gated and asynchronous
 
-Window operations exposed through `navigator.window` SHALL return promises. The native extension SHALL validate every request, check platform support, and resolve or reject with typed results. Unsupported transparency, blur, move, resize, corner-radius projection, or override behavior SHALL reject with a typed unsupported error instead of faking success.
+Window operations exposed through `navigator.window` SHALL return promises. The native extension SHALL validate every request, check platform support, and resolve or reject with typed results. Unsupported move, resize, shell, material, corner, or override behavior SHALL reject with a typed unsupported error instead of faking success.
 
-Style state SHALL include the frameless and visual-effect concepts needed for future platform work, including transparency, background effect support, and adjustable `cornerRadius`. Blur, acrylic, vibrancy, rounded-corner, and Windows transparency behavior SHALL remain best-effort capabilities and MUST NOT be forced when the platform implementation would be slow or unstable.
+The common window shell state for this change SHALL be limited to traits with stable cross-platform meaning, including frameless intent, transparent intent, and keep-on-top intent. Platform-specific material families, backdrop families, and detailed corner families SHALL be expressed through the platform-specific capability namespaces rather than the common `style` bag.
 
-Capability metadata SHALL state whether corner-radius projection is supported so the page can decide whether to render borderless custom chrome.
+#### Scenario: Unsupported platform-specific appearance remains explicit
 
-#### Scenario: Unsupported visual effect is explicit
-
-- **GIVEN** a page calls `navigator.window.setStyle({ backgroundEffect: "blur" })`
-- **AND** the current platform does not support blur cleanly
-- **WHEN** the extension handles the request
+- **GIVEN** a page or host requests a platform-specific appearance family for a substrate the current runtime does not support
+- **WHEN** the extension validates that request
 - **THEN** the returned promise rejects with a typed unsupported error
-- **AND** the native runtime does not enable a slow fake blur path.
+- **AND** the runtime does not silently ignore the platform-specific style family.
 
-#### Scenario: Capability metadata describes shell operations
+#### Scenario: Capability metadata distinguishes common shell support from platform substrate support
 
 - **GIVEN** a page calls `navigator.window.getCapabilities()`
 - **WHEN** the extension responds
-- **THEN** the result states whether transparent backgrounds, native background effects, and corner-radius projection are supported
-- **AND** the page can decide whether to render borderless custom chrome.
+- **THEN** the result states which common shell traits are supported
+- **AND** it separately states which platform-specific appearance families are available for the current runtime
+- **AND** the page can choose a portable or substrate-specific path intentionally.
 
 ### Requirement: Webview global window overrides SHALL be opt-in
 
@@ -419,23 +417,24 @@ The WebView extension SHALL project borderless, transparent, material, and round
 
 ### Requirement: Webview SHALL project tray bounds into navigator.opentray.tray
 
-The WebView extension SHALL expose tray bounds to page JavaScript through `navigator.opentray.tray.getBounds()` when the shown page is allowed to use the tray capability family. This API SHALL be the page projection of the same tray-owned capability used by trusted backend callers. It SHALL not rename the measured object as `host` or `space`, because the physical anchor being queried is the current tray contribution.
+The WebView extension SHALL expose tray placement to page JavaScript through `navigator.opentray.tray`, still as the page projection of the tray-owned capability family. The page API SHALL remain tray-scoped rather than host- or space-scoped, because the measured anchor is the current tray contribution.
 
-The page bridge SHALL keep tray bounds under the OpenTray-prefixed navigator root because the web platform has no standard tray object. The extension SHALL NOT add a second unprefixed `navigator.tray` surface in this change.
+This change SHALL allow the tray placement result to carry provenance instead of collapsing everything to `Rect | null`. The resolved result SHALL expose at least `kind`, `source`, and `rect`.
 
-#### Scenario: Page reads tray bounds from OpenTray tray namespace
+#### Scenario: Page sees provenance-bearing tray placement
 
-- **GIVEN** a WebView is shown with tray capability enabled for the current page source
-- **WHEN** the page calls `await navigator.opentray.tray.getBounds()`
-- **THEN** the extension resolves the current tray's bounds in the shared `Rect` shape
-- **AND** the API does not require page code to know broker request details.
+- **GIVEN** a WebView page calls the tray placement API
+- **WHEN** the extension resolves a result
+- **THEN** the result says whether placement is authoritative or unavailable through `kind`
+- **AND** it exposes the source explanation
+- **AND** page code reads the rectangle through `result.rect` instead of assuming the entire result is a bare `Rect`.
 
-#### Scenario: Tray namespace names the measured atom
+#### Scenario: Tray capability stays under the tray namespace
 
-- **GIVEN** the page bridge exposes tray geometry
+- **GIVEN** the page bridge exposes tray placement
 - **WHEN** a developer inspects the navigator surface
 - **THEN** the capability lives under `navigator.opentray.tray`
-- **AND** it is not exposed as `navigator.opentrayHost` or `navigator.opentraySpace`.
+- **AND** the extension does not rename the measured atom as `host` or `space`.
 
 ### Requirement: Webview tray capability SHALL follow declarative source policy
 
@@ -509,3 +508,33 @@ If a caller sends `show(...)` against an existing compatible session and also su
 - **WHEN** the host calls `show(...)` with a different HTML payload or URL for that same session
 - **THEN** the extension rejects the request with an explicit typed error
 - **AND** it tells the caller to use the content-replacement or destroy path instead of silently reloading.
+
+### Requirement: Webview cross-platform window contract SHALL separate common and platform-specific capability families
+
+The WebView extension SHALL keep the common page/window contract limited to capabilities with stable cross-platform meaning: lifecycle, title/icon metadata, frameless shell intent, transparent shell intent, keep-on-top intent, overlay, drag, geometry, window-state controls, screen details, tray placement access, and capability-policy gating.
+
+Platform-native appearance substrate and desktop-standard-specific behavior SHALL live under explicit platform families instead of the common `style` bag. The durable family names for this change SHALL be `platform.macos`, `platform.windows`, and `platform.linux`, nested under the owning host option group and the owning page capability object.
+
+Capability metadata SHALL describe both the common contract and the current platform family surface so callers can reason about truthful support without guessing from the OS name alone.
+
+#### Scenario: Common and platform APIs stop collapsing into one style bag
+
+- **GIVEN** a developer configures a WebView window for a specific desktop platform
+- **WHEN** they inspect the host options or page capability object
+- **THEN** common shell traits live in the common contract
+- **AND** macOS-, Windows-, and Linux-specific material or corner controls live under the matching `platform.<family>` namespace
+- **AND** the extension does not present platform-private nouns as universal style fields.
+
+### Requirement: Webview official guidance SHALL teach the nested platform-family contract truthfully
+
+The official `@opentray/ext-webview` README, CLI example docs, and repo skills SHALL teach material, corner, and tray-placement usage through the same nested platform-family contract that the public TypeScript surface exports.
+
+The examples SHALL show provenance-bearing tray placement results and SHALL avoid reviving retired flat fields such as a top-level `backgroundEffect` or `cornerRadius` on the common style object.
+
+#### Scenario: Docs and examples use the same contract the runtime exports
+
+- **GIVEN** a developer follows the official docs or examples
+- **WHEN** they configure a glass tray panel or read tray placement
+- **THEN** they use `style.platform.macos.*` for macOS substrate controls
+- **AND** they use `trayBounds.rect` from the provenance-bearing result when a fallback rect is required
+- **AND** the docs do not teach the retired flat style shape.
