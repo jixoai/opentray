@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 2
-- Status: apply
-- Previous plan backup: `plans/plan-v3.md`
+- Round: 1
+- Status: self-review
+- Previous plan backup: `plans/plan-v2.md`
 
 ## Workflow Command Surface
 
@@ -40,7 +40,6 @@
 | 5 | User | 询问是否应该默认启用 `fitContentSize`，并要求基于 Lynx 官方开发方式判断。 | 需要先锁定“官方法则”和“OpenTray 产品决策”的边界，再决定默认值。 |
 | 6 | User | 明确要求废弃 `fitContentSize`，理论上 `screen + resize API` 就够了。 | sizing law 从默认 fit-content 收缩为固定壳 + 显式控制。 |
 | 7 | User | 要求启动阶段控制变成独立开关，并支持 `*` / `!feature` 组合。 | smoke / runtime / docs 需要从 profile 模式切到 feature expression 模式。 |
-| 8 | User | 肉眼验收确认 baseline 正常，但 `nativeWindowApi`、`nativeScreenApi`、`frameless` 任意单独开启都会异常，并提示核心问题可能不是某个 feature 本身。 | 问题收敛到非-baseline 共同触发的启动阶段宿主副作用；bridge feature 不应隐式触发 Cocoa window takeover。 |
 
 ### Evidence Read
 
@@ -169,8 +168,6 @@
   - baseline: no startup host features
   - explicit startup tokens: `nativeWindowApi`, `bindWindowGlobals`, `nativeScreenApi`, `bindScreenGlobals`, `frameless`
   - wildcard/disable expression support for smoke acceptance: `*`, `!feature`
-  - bridge features only enable Lynx Native Module/bootstrap exposure; they must not mutate the carrier `NSWindow` at startup
-  - native chrome mutation is scoped to chrome features such as `frameless`; size, title, icon, center, and activation remain command-driven or carrier-owned unless explicitly separated later
 
 ### Data Shape
 
