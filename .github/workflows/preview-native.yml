@@ -66,9 +66,9 @@ jobs:
             before="${{ github.event.before }}"
             after="${{ github.sha }}"
             if [[ -n "$before" && "$before" != "0000000000000000000000000000000000000000" ]]; then
-              mapfile -t files < <(git diff --name-only "$before" "$after" -- ".changeset/*.md" || true)
+              mapfile -t files < <(git diff --diff-filter=ACMR --name-only "$before" "$after" -- ".changeset/*.md" || true)
             else
-              mapfile -t files < <(git diff-tree --no-commit-id --name-only -r "$after" -- ".changeset/*.md" || true)
+              mapfile -t files < <(git diff-tree --diff-filter=ACMR --no-commit-id --name-only -r "$after" -- ".changeset/*.md" || true)
             fi
             changed_json="$(printf '%s\n' "${files[@]}" | python3 -c 'import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))')"
           elif [[ -n "${{ inputs.changeset }}" ]]; then

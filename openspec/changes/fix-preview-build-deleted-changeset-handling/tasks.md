@@ -11,16 +11,16 @@
 
 ## 3. Implementation
 
-- [ ] 3.1 Update the preview workflow changed-file collector to exclude deleted changeset paths from automatic planning input.
-- [ ] 3.2 Update the preview planner to ignore `ENOENT` for changed changeset paths while still surfacing other read failures.
-- [ ] 3.3 Add or update tests proving planner tolerance and workflow filtering.
-- [ ] 3.4 Update only current-context task checkboxes with matching implementation evidence.
+- [x] 3.1 Update the preview workflow changed-file collector to exclude deleted changeset paths from automatic planning input.
+- [x] 3.2 Update the preview planner to ignore `ENOENT` for changed changeset paths while still surfacing other read failures.
+- [x] 3.3 Add or update tests proving planner tolerance and workflow filtering.
+- [x] 3.4 Update only current-context task checkboxes with matching implementation evidence.
 
 ## 4. Verification
 
-- [ ] 4.1 Run targeted preview planner/workflow tests.
-- [ ] 4.2 Run `git diff --check`.
-- [ ] 4.3 Run `bun run openspec:vision -- validate fix-preview-build-deleted-changeset-handling`.
+- [x] 4.1 Run targeted preview planner/workflow tests.
+- [x] 4.2 Run `git diff --check`.
+- [x] 4.3 Run `bun run openspec:vision -- validate fix-preview-build-deleted-changeset-handling`.
 - [ ] 4.4 Run `bun run openspec:vision -- check fix-preview-build-deleted-changeset-handling`.
 
 ## 5. Self-Review Loop

@@ -65,6 +65,27 @@ No preview build requested yet.
     expect(plan.jobs.map((job) => job.family)).toEqual(["ext-webview-native"]);
   });
 
+  test("Scenario: Given a deleted changeset path plus one live marked changeset When the planner runs Then missing files are ignored", async () => {
+    const root = await createTempChangeset(
+      "webview.md",
+      `---
+"@opentray/ext-webview": patch
+---
+
+<!-- opentray-preview {"alias":"webview-20260605-2"} -->
+`,
+    );
+
+    const plan = await resolvePreviewBuildPlan({
+      root,
+      changedFiles: [".changeset/deleted.md", ".changeset/webview.md"],
+    });
+
+    expect(plan.enabled).toBe(true);
+    expect(plan.alias).toBe("webview-20260605-2");
+    expect(plan.families).toEqual(["ext-webview-native"]);
+  });
+
   test("Scenario: Given explicit invalid family in marker When the marker is parsed Then the error is explicit", () => {
     expect(() =>
       parsePreviewBuildMarker(

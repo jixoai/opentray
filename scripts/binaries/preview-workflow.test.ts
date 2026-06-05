@@ -14,6 +14,7 @@ describe("Feature: changeset-gated preview build workflow", () => {
     expect(workflow).toContain(".changeset/*.md");
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("Collect changed changesets");
+    expect(workflow).toContain("--diff-filter=ACMR");
     expect(workflow).toContain("bun run scripts/binaries/preview-plan.ts");
     expect(workflow).toContain("needs.plan.outputs.enabled == 'true'");
   });

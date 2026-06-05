@@ -91,7 +91,10 @@ export async function resolvePreviewBuildPlan(
     if (!relativePath.endsWith(".md")) {
       continue;
     }
-    const content = await readFile(join(root, relativePath), "utf8");
+    const content = await readChangedChangeset(root, relativePath);
+    if (content === undefined) {
+      continue;
+    }
     const marker = parsePreviewBuildMarker(content);
     if (marker === undefined) {
       continue;
@@ -306,4 +309,18 @@ function parseChangedFilesJson(value: string): string[] {
     throw new Error("--changed-json must be a JSON array of strings");
   }
   return parsed.map((item) => item.trim()).filter((item) => item.length > 0);
+}
+
+async function readChangedChangeset(
+  root: string,
+  relativePath: string,
+): Promise<string | undefined> {
+  try {
+    return await readFile(join(root, relativePath), "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
 }
