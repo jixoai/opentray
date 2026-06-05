@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-webview-linux-arm64",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "OpenTray WebView native extension for Linux arm64.",
   "license": "MIT",
   "repository": {
