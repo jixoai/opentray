@@ -159,6 +159,14 @@ export interface Rect {
   height: number;
 }
 
+export type TrayBoundsKind = "native" | "inferred" | "unavailable";
+
+export interface TrayBoundsResult {
+  kind: TrayBoundsKind;
+  source: string;
+  rect: Rect | null;
+}
+
 export type MouseButton = "left" | "right" | "middle";
 
 export type TrayEvent =
@@ -217,7 +225,7 @@ export type ServerFrame =
   | { type: "space-created"; requestId: RequestId; space: SpaceRef }
   | { type: "default-space"; requestId: RequestId; space: SpaceRef }
   | { type: "tray-created"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId }
-  | { type: "tray-bounds"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; bounds: Rect | null }
+  | { type: "tray-bounds"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; bounds: TrayBoundsResult }
   | { type: "ack"; requestId: RequestId }
   | { type: "daemon-health"; requestId: RequestId; health: DaemonHealth }
   | { type: "event"; event: TrayEvent }
@@ -275,7 +283,7 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
         typeof value.requestId === "string" &&
         typeof value.spaceId === "string" &&
         typeof value.trayId === "string" &&
-        (value.bounds === null || isRect(value.bounds))
+        isTrayBoundsResult(value.bounds)
       );
     case "ack":
       return typeof value.requestId === "string";
@@ -328,6 +336,12 @@ const isRect = (value: unknown): value is Rect =>
   typeof value.y === "number" &&
   typeof value.width === "number" &&
   typeof value.height === "number";
+
+const isTrayBoundsResult = (value: unknown): value is TrayBoundsResult =>
+  isRecord(value) &&
+  (value.kind === "native" || value.kind === "inferred" || value.kind === "unavailable") &&
+  typeof value.source === "string" &&
+  (value.rect === null || isRect(value.rect));
 
 const isTrayEvent = (value: unknown): value is TrayEvent => {
   if (!isRecord(value) || typeof value.type !== "string") {

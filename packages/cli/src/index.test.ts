@@ -46,7 +46,11 @@ describe("opentray client", () => {
 
     const bounds = await tray.getBounds();
 
-    expect(bounds).toEqual({ x: 10, y: 20, width: 24, height: 24 });
+    expect(bounds).toEqual({
+      kind: "native",
+      source: "backend.nativeTrayBounds",
+      rect: { x: 10, y: 20, width: 24, height: 24 },
+    });
     expect(transport.frames).toEqual([
       {
         type: "get-tray-bounds",
@@ -148,7 +152,11 @@ class RecordingTransport implements OpenTrayTransport {
           requestId: frame.requestId,
           spaceId: frame.spaceId,
           trayId: frame.trayId,
-          bounds: { x: 10, y: 20, width: 24, height: 24 },
+          bounds: {
+            kind: "native",
+            source: "backend.nativeTrayBounds",
+            rect: { x: 10, y: 20, width: 24, height: 24 },
+          },
         };
       case "set-tray-menu":
       case "set-tray-icon":

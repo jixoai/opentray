@@ -24,7 +24,11 @@ impl SurfaceBackend for KsniBackend {
         Ok(())
     }
 
-    fn tray_bounds(&self, _surface_id: &SurfaceId, _tray_id: &TrayId) -> Result<Option<Rect>, BackendError> {
+    fn tray_bounds(
+        &self,
+        _surface_id: &SurfaceId,
+        _tray_id: &TrayId,
+    ) -> Result<Option<Rect>, BackendError> {
         Ok(None)
     }
 

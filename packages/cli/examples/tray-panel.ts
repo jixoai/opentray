@@ -1,16 +1,11 @@
-import { spawn } from "node:child_process";
-import { access, constants } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
 import { attachWebview } from "../../ext-webview/src/index";
+import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
 
-const localWebviewExtension = await resolveLocalWebviewExtension();
-if (process.env.OPENTRAY_EXT_PATH === undefined && localWebviewExtension !== undefined) {
-  process.env.OPENTRAY_EXT_PATH = localWebviewExtension;
-}
+const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
 
 const demoHomeDir = process.env.OPENTRAY_HOME ?? join("/tmp", `opentray-tray-panel-${process.pid}`);
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
@@ -35,7 +30,7 @@ const tray = await space.createTray({
     title: "OpenTray",
     description: "Single primary tray action launching a custom WebView tray panel",
   },
-  icon: createVisibleIcon(),
+  icon: createVisibleTrayIcon(),
   menu: {
     items: [{ type: "item", id: 1, title: "Open Tray Panel", primaryEvent: true }],
   },
@@ -146,14 +141,18 @@ async function openTrayPanel(): Promise<void> {
     width: 388,
     height: 286,
     title: "OpenTray Tray Panel",
-    fallbackRect: trayBounds ?? { x: 0, y: 0, width: 1, height: 1 },
+    fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
     style: {
       frameless: true,
       transparent: true,
       keepOnTop: true,
-      backgroundEffect: "hudWindow",
-      backgroundEffectState: "active",
-      cornerRadius: 22,
+      platform: {
+        macos: {
+          material: "hudWindow",
+          materialState: "active",
+          cornerRadius: 22,
+        },
+      },
     },
     nativeWindowApi: true,
     bindWindowGlobals: true,
@@ -186,30 +185,6 @@ async function shutdown(): Promise<void> {
 
 await lifecycle;
 
-function createVisibleIcon(): { type: "rgba"; width: number; height: number; data: number[] } {
-  const width = 32;
-  const height = 32;
-  const data: number[] = [];
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const dx = x - 15.5;
-      const dy = y - 15.5;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const inRing = distance >= 9 && distance <= 14;
-      const inCore = distance <= 5;
-      const inNeedle = Math.abs(dx + dy) <= 1.2 && x >= 9 && x <= 23 && y >= 9 && y <= 23;
-
-      if (inRing || inCore || inNeedle) {
-        data.push(inCore ? 255 : 24, inNeedle ? 240 : 132, inRing ? 72 : 96, 255);
-      } else {
-        data.push(0, 0, 0, 0);
-      }
-    }
-  }
-
-  return { type: "rgba", width, height, data };
-}
 
 function createTrayPanelHtml(mode: "default" | "content-set" = "default"): string {
   return `<!doctype html>
@@ -427,10 +402,13 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
           trayApi?.getBounds?.() ?? Promise.resolve(null),
         ]);
         const screen = details.currentScreen ?? details.screens[0];
+        const trayRect = bounds?.rect ?? null;
         const width = size.width;
         const height = size.height;
         const margin = 12;
-        const trayCenterX = bounds ? bounds.x + bounds.width / 2 : screen.visibleFrame.x + screen.visibleFrame.width / 2;
+        const trayCenterX = trayRect
+          ? trayRect.x + trayRect.width / 2
+          : screen.visibleFrame.x + screen.visibleFrame.width / 2;
         const targetX = Math.round(
           Math.min(
             screen.visibleFrame.x + screen.visibleFrame.width - width - margin,
@@ -442,7 +420,9 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
             screen.visibleFrame.y + screen.visibleFrame.height - height - margin,
             Math.max(
               screen.visibleFrame.y + margin,
-              bounds ? bounds.y - height - 8 : screen.visibleFrame.y + screen.visibleFrame.height - height - 24,
+              trayRect
+                ? trayRect.y - height - 8
+                : screen.visibleFrame.y + screen.visibleFrame.height - height - 24,
             ),
           ),
         );
@@ -473,17 +453,13 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
           return;
         }
         const style = await pageWindow.getStyle();
-        const backgroundEffect =
-          typeof style.backgroundEffect === "string" && style.backgroundEffect.length > 0
-            ? style.backgroundEffect
-            : null;
+        const macosMaterial = style.platform?.macos?.material ?? null;
         setText(
           "style-status",
           JSON.stringify(
             {
               ...style,
-              backgroundEffect,
-              effectiveClearBackground: Boolean(style.transparent || backgroundEffect),
+              effectiveClearBackground: Boolean(style.transparent || macosMaterial),
             },
             null,
             2,
@@ -516,9 +492,14 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
       async function toggleMaterial() {
         if (!pageWindow?.setStyle) return;
         const style = await pageWindow.getStyle();
+        const currentMaterial = style.platform?.macos?.material ?? null;
         await pageWindow.setStyle({
-          backgroundEffect: style.backgroundEffect ? "" : "hudWindow",
-          backgroundEffectState: "active",
+          platform: {
+            macos: {
+              material: currentMaterial ? null : "hudWindow",
+              materialState: "active",
+            },
+          },
         });
         await refreshStyle();
       }
@@ -568,53 +549,4 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function resolveLocalWebviewExtension(): Promise<string | undefined> {
-  const workspaceCargoToml = fileURLToPath(new URL("../../../Cargo.toml", import.meta.url));
-  try {
-    await access(workspaceCargoToml, constants.R_OK);
-    await runCargoBuild(fileURLToPath(new URL("../../../", import.meta.url)));
-  } catch {
-    // Not running from the workspace root layout, so skip the source-build path.
-  }
-
-  const artifactName =
-    process.platform === "win32"
-      ? "opentray_ext_webview.dll"
-      : process.platform === "darwin"
-        ? "libopentray_ext_webview.dylib"
-        : "libopentray_ext_webview.so";
-  const candidates = [
-    fileURLToPath(new URL(`../../../target/debug/${artifactName}`, import.meta.url)),
-    fileURLToPath(new URL(`../../../target/release/${artifactName}`, import.meta.url)),
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      await access(candidate, constants.R_OK);
-      return candidate;
-    } catch {
-      continue;
-    }
-  }
-
-  return undefined;
-}
-
-function runCargoBuild(workspaceRoot: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("cargo", ["build", "-p", "opentray-ext-webview"], {
-      cwd: workspaceRoot,
-      stdio: process.env.OPENTRAY_EXT_BUILD_LOGS === "1" ? "inherit" : "ignore",
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`cargo build -p opentray-ext-webview failed with code ${code ?? "unknown"}`));
-    });
-  });
 }

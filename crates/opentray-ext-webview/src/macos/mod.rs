@@ -102,17 +102,30 @@ struct WindowCapabilities {
     frameless: bool,
     transparent: bool,
     keep_on_top: bool,
-    corner_radius: bool,
     title: bool,
     icon: bool,
     screen: bool,
     tray: bool,
-    background_effects: Vec<String>,
     global_bindings_enabled: bool,
     global_bindings_supported: bool,
     screen_bindings_enabled: bool,
     screen_bindings_supported: bool,
     platform: &'static str,
+    platform_capabilities: WindowPlatformCapabilities,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowPlatformCapabilities {
+    macos: MacosWindowCapabilities,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MacosWindowCapabilities {
+    materials: Vec<String>,
+    material_state: bool,
+    corner_radius: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -289,9 +302,10 @@ impl MacosWebviewRuntime {
                     "setContent requires an existing webview session; call show first".into(),
                 )
             })?;
-        let descriptor = explicit_content_descriptor(html.as_ref(), url.as_ref()).ok_or_else(|| {
-            WebviewRuntimeError::Rejected("setContent requires html or url".into())
-        })?;
+        let descriptor =
+            explicit_content_descriptor(html.as_ref(), url.as_ref()).ok_or_else(|| {
+                WebviewRuntimeError::Rejected("setContent requires html or url".into())
+            })?;
         if slot.content_descriptor == descriptor {
             return Ok(());
         }
@@ -344,9 +358,13 @@ impl MacosWebviewRuntime {
                 frameless: show_settings.window.style.frameless,
                 transparent: show_settings.window.style.transparent,
                 keep_on_top: show_settings.window.style.keep_on_top,
-                background_effect: show_settings.window.style.background_effect.clone(),
-                background_effect_state: show_settings.window.style.background_effect_state,
-                corner_radius: show_settings.window.style.corner_radius,
+                platform: self::style::WindowPlatformStyleState {
+                    macos: self::style::MacosWindowStyleState {
+                        material: show_settings.window.style.platform.macos.material.clone(),
+                        material_state: show_settings.window.style.platform.macos.material_state,
+                        corner_radius: show_settings.window.style.platform.macos.corner_radius,
+                    },
+                },
             },
             navigator_window: show_settings.navigator_window,
             navigator_screen: show_settings.navigator_screen,
@@ -410,7 +428,7 @@ impl MacosWebviewRuntime {
                 }
             });
         let builder = if show_settings.window.style.transparent
-            || show_settings.window.style.background_effect.is_some()
+            || show_settings.window.style.platform.macos.material.is_some()
         {
             builder.with_transparent(true)
         } else {
@@ -601,7 +619,12 @@ fn apply_reused_show_updates(
     show_settings: &WebviewShowSettings,
 ) -> Result<(), WebviewRuntimeError> {
     if let Some(title) = show_settings.window.title.clone() {
-        update_window_title(&slot.bridge, &slot.window, title.clone(), MetadataSource::Native)?;
+        update_window_title(
+            &slot.bridge,
+            &slot.window,
+            title.clone(),
+            MetadataSource::Native,
+        )?;
         slot.show_settings.window.title = Some(title);
     }
     if let Some(icon) = show_settings.window.icon.clone() {
@@ -618,9 +641,13 @@ fn apply_reused_show_updates(
         frameless: show_settings.window.style.frameless,
         transparent: show_settings.window.style.transparent,
         keep_on_top: show_settings.window.style.keep_on_top,
-        background_effect: show_settings.window.style.background_effect.clone(),
-        background_effect_state: show_settings.window.style.background_effect_state,
-        corner_radius: show_settings.window.style.corner_radius,
+        platform: self::style::WindowPlatformStyleState {
+            macos: self::style::MacosWindowStyleState {
+                material: show_settings.window.style.platform.macos.material.clone(),
+                material_state: show_settings.window.style.platform.macos.material_state,
+                corner_radius: show_settings.window.style.platform.macos.corner_radius,
+            },
+        },
     };
     if slot.bridge.borrow().style != requested_style {
         {
@@ -637,7 +664,10 @@ fn apply_reused_show_updates(
     Ok(())
 }
 
-fn apply_initial_window_position(window: &Retained<NSWindow>, tray_bounds: Option<opentray_spec::Rect>) {
+fn apply_initial_window_position(
+    window: &Retained<NSWindow>,
+    tray_bounds: Option<opentray_spec::Rect>,
+) {
     let Some(bounds) = tray_bounds else {
         window.center();
         return;
@@ -737,20 +767,25 @@ impl NavigatorWindowBridge {
             frameless: true,
             transparent: true,
             keep_on_top: true,
-            corner_radius: true,
             title: true,
             icon: true,
             screen: self.page_access.screen,
             tray: self.page_access.tray,
-            background_effects: supported_background_effects()
-                .iter()
-                .map(|effect| (*effect).to_string())
-                .collect(),
             global_bindings_enabled: self.page_access.window_globals,
             global_bindings_supported: true,
             screen_bindings_enabled: self.page_access.screen_globals,
             screen_bindings_supported: true,
             platform: "macos",
+            platform_capabilities: WindowPlatformCapabilities {
+                macos: MacosWindowCapabilities {
+                    materials: supported_background_effects()
+                        .iter()
+                        .map(|effect| (*effect).to_string())
+                        .collect(),
+                    material_state: true,
+                    corner_radius: true,
+                },
+            },
         })
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
     }

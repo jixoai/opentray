@@ -50,8 +50,8 @@ The next real platform-law shift should happen when Windows/Linux material, corn
 
 | Capability family | macOS current substrate | Windows likely substrate | Linux likely substrate | Modeling rule |
 | --- | --- | --- | --- | --- |
-| Material/background | `NSVisualEffectView` via `window-vibrancy`; future macOS liquid-glass naming may diverge. | DWM/Mica/Acrylic/Tabbed/host-backdrop families vary by Windows version. | GTK/libadwaita/compositor-specific transparency and blur vary by desktop. | Keep common `backgroundEffect` as a negotiated effect, and add substrate-specific metadata only when a second platform proves the split. |
-| Corners | Layer-backed content clipping can project numeric radius; system shell corners remain platform-owned when unset. | Windows 11 exposes rounded-corner preferences, while older versions differ or lack system corners. | Window manager/compositor decides; app-side clipping may not equal native shell corners. | Treat `cornerRadius` as logical requested state plus capability metadata, not proof that every substrate used the same primitive. |
+| Material/background | `NSVisualEffectView` via `window-vibrancy`; future macOS liquid-glass naming may diverge. | DWM/Mica/Acrylic/Tabbed/host-backdrop families vary by Windows version. | GTK/libadwaita/compositor-specific transparency and blur vary by desktop. | Keep common shell state small; model substrate material under `style.platform.<family>` and capability metadata rather than inventing a fake universal blur field. |
+| Corners | Layer-backed content clipping can project numeric radius; system shell corners remain platform-owned when unset. | Windows 11 exposes rounded-corner preferences, while older versions differ or lack system corners. | Window manager/compositor decides; app-side clipping may not equal native shell corners. | Keep numeric radius or enum corner preference inside the platform family that can truthfully project it. |
 | Screen details/events | `NSScreen` and `NSWindow.screen()` provide current snapshots; event observers should be listener-driven. | Win32 display topology and DPI events have their own coordinate and scale rules. | X11/Wayland/GTK monitor events and permissions vary by stack. | Keep `getScreenDetails()` standard-like, but model event source, coordinate space, and permission/capability per substrate before broadening. |
 
 Do not pre-build `navigator.opentrayWindow.macos26|win11|gtk.*` namespaces only from speculation. First expose stable common capability state. Introduce substrate namespaces only when a concrete backend has behavior that cannot be truthfully represented by the common contract plus capability metadata.
@@ -95,11 +95,11 @@ Benefit: product teams can build branded titlebars without losing platform contr
 
 Ask the user: "Do you want native controls to remain visible, with only the titlebar content customized?"
 
-Implementation note: native material is not the same thing as CSS blur. To get a real glass surface, the extension must enable `transparent: true` plus `backgroundEffect`, and the page must leave at least some regions transparent. If the HTML paints a fully opaque layer over the whole window, the native material is technically active but visually hidden.
+Implementation note: native material is not the same thing as CSS blur. To get a real glass surface, the extension must enable `transparent: true` plus `style.platform.macos.material`, and the page must leave at least some regions transparent. If the HTML paints a fully opaque layer over the whole window, the native material is technically active but visually hidden.
 
-Implementation nuance: `transparent` and `backgroundEffect` are separate requested controls. On macOS, any active material still needs a clear non-opaque backing layer under the hood, so the runtime must clear the native backing whenever `backgroundEffect` is enabled even if the requested `transparent` flag is `false`. That is a substrate requirement, not proof that the two API fields are the same concept.
+Implementation nuance: `transparent` and `style.platform.macos.material` are separate requested controls. On macOS, any active material still needs a clear non-opaque backing layer under the hood, so the runtime must clear the native backing whenever `style.platform.macos.material` is enabled even if the requested `transparent` flag is `false`. That is a substrate requirement, not proof that the two API fields are the same concept.
 
-Second nuance: material kind and material state are different axes. `backgroundEffect: "hudWindow"` only chooses the AppKit material family. `backgroundEffectState` chooses whether that material follows window activation or stays forced active/inactive. Tray-launched panels in an accessory app often need `backgroundEffectState: "active"` because the window may not remain the frontmost regular app surface even though the developer still wants the vivid material appearance.
+Second nuance: material kind and material state are different axes. `style.platform.macos.material: "hudWindow"` only chooses the AppKit material family. `style.platform.macos.materialState` chooses whether that material follows window activation or stays forced active/inactive. Tray-launched panels in an accessory app often need `materialState: "active"` because the window may not remain the frontmost regular app surface even though the developer still wants the vivid material appearance.
 
 Hard rule for glass windows: reset `html, body` margin/padding to `0`, keep the native window background transparent, and do not draw the outer shell in HTML with root-level `box-shadow`, fake blur, or root-level `border-radius`. The page renders content inside the native box; the native layer owns the box itself.
 
@@ -133,8 +133,12 @@ await webview.show({
   windowControlsOverlay: true,
   style: {
     transparent: true,
-    backgroundEffect: "hudWindow",
-    backgroundEffectState: "followsWindowActiveState",
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "followsWindowActiveState",
+      },
+    },
   },
 });
 ```
@@ -166,7 +170,7 @@ titlebar.addEventListener("pointerdown", (event) => {
 
 Effect: the page owns the full window chrome. Native controls disappear, the background can be transparent/material-backed, and the page renders its own control buttons.
 
-Atoms composed: `frameless`, `transparent`, `backgroundEffect`, `cornerRadius`, `windowControlsOverlay`, custom page controls, `minimize()`, `maximize()`, `restore()`, `close()`, `getWindowState()`, and `windowstatechange`.
+Atoms composed: `frameless`, `transparent`, `style.platform.macos.material`, `style.platform.macos.cornerRadius`, `windowControlsOverlay`, custom page controls, `minimize()`, `maximize()`, `restore()`, `close()`, `getWindowState()`, and `windowstatechange`.
 
 Why this design: borderless is an intentional escalation from overlay. Once native controls disappear, page code must own window controls and state synchronization explicitly. The native layer still owns real minimize/maximize/drag operations.
 
@@ -195,9 +199,13 @@ await webview.show({
   style: {
     frameless: true,
     transparent: true,
-    backgroundEffect: "hudWindow",
-    backgroundEffectState: "active",
-    cornerRadius: 18,
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "active",
+        cornerRadius: 18,
+      },
+    },
   },
 });
 ```
@@ -224,7 +232,7 @@ closeButton.onclick = () => void pageWindow.close();
 
 Effect: a small frameless/translucent widget is pinned to a screen corner and stays above normal windows.
 
-Atoms composed: `navigator.opentrayScreen.getScreenDetails()`, `visibleFrame`, `keepOnTop`, `frameless`, `transparent`, `backgroundEffect`, `cornerRadius`, `resizeTo()`, and `moveTo()`.
+Atoms composed: `navigator.opentrayScreen.getScreenDetails()`, `visibleFrame`, `keepOnTop`, `frameless`, `transparent`, `style.platform.macos.material`, `style.platform.macos.cornerRadius`, `resizeTo()`, and `moveTo()`.
 
 Why this design: screen placement is a window capability, not a new extension. The page can own widget content and animation while the WebView atom owns native placement.
 
@@ -251,9 +259,13 @@ await navigator.opentrayWindow.setStyle({
   frameless: true,
   transparent: true,
   keepOnTop: true,
-  backgroundEffect: "hudWindow",
-  backgroundEffectState: "active",
-  cornerRadius: 18,
+  platform: {
+    macos: {
+      material: "hudWindow",
+      materialState: "active",
+      cornerRadius: 18,
+    },
+  },
 });
 await navigator.opentrayWindow.resizeTo(width, height);
 await navigator.opentrayWindow.moveTo(
@@ -292,8 +304,12 @@ await navigator.opentrayWindow.setStyle({
   frameless: true,
   transparent: true,
   keepOnTop: true,
-  backgroundEffect: "hudWindow",
-  cornerRadius: 24,
+  platform: {
+    macos: {
+      material: "hudWindow",
+      cornerRadius: 24,
+    },
+  },
 });
 await navigator.opentrayWindow.resizeTo(width, height);
 await navigator.opentrayWindow.moveTo(
@@ -367,15 +383,19 @@ await webview.show({
   html,
   width: 360,
   height: 240,
-  fallbackRect: bounds ?? { x: 0, y: 0, width: 1, height: 1 },
+  fallbackRect: bounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
   nativeWindowApi: true,
   nativeTrayApi: true,
   style: {
     frameless: true,
     transparent: true,
-    backgroundEffect: "hudWindow",
-    backgroundEffectState: "active",
-    cornerRadius: 18,
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "active",
+        cornerRadius: 18,
+      },
+    },
   },
 });
 ```
@@ -385,8 +405,8 @@ Minimal page shape:
 ```ts
 const trayBounds = await navigator.opentray.tray.getBounds();
 
-if (trayBounds) {
-  panel.style.setProperty("--anchor-x", `${trayBounds.x + trayBounds.width / 2}px`);
+if (trayBounds.rect) {
+  panel.style.setProperty("--anchor-x", `${trayBounds.rect.x + trayBounds.rect.width / 2}px`);
   panel.dataset.anchorEdge = "tray";
 }
 ```

@@ -1,4 +1,4 @@
-import type { ExtensionEnvelope, Icon, Rect } from "@opentray/spec";
+import type { ExtensionEnvelope, Icon, Rect, TrayBoundsResult } from "@opentray/spec";
 import type { TrayHandle } from "opentray";
 
 export type WebviewWindowIcon = Icon | { type: "href"; href: string };
@@ -30,7 +30,7 @@ export interface WebviewShowCommand {
   windowControlsOverlay?: boolean;
   title?: string;
   icon?: WebviewWindowIcon;
-  style?: Partial<WebviewWindowStyle>;
+  style?: WebviewWindowStylePatch;
   titleSync?: boolean | { documentToWindow?: boolean; windowToDocument?: boolean };
   iconSync?: boolean | { faviconToWindow?: boolean; windowToFavicon?: boolean };
   nativeApiPolicy?: WebviewNativeApiPolicy;
@@ -42,15 +42,62 @@ export interface WebviewSetContentCommand {
   url?: string;
 }
 
-export type WebviewBackgroundEffectState = "followsWindowActiveState" | "active" | "inactive";
+export type WebviewMacosMaterialState = "followsWindowActiveState" | "active" | "inactive";
+
+export interface WebviewMacosWindowStyle {
+  material: string | null;
+  materialState: WebviewMacosMaterialState;
+  cornerRadius: number | null;
+}
+
+export interface WebviewWindowsWindowStyle {
+  backdrop: string | null;
+  cornerPreference: string | null;
+}
+
+export interface WebviewWindowPlatformStyle {
+  macos?: WebviewMacosWindowStyle;
+  windows?: WebviewWindowsWindowStyle;
+  linux?: Record<string, never>;
+}
 
 export interface WebviewWindowStyle {
   frameless: boolean;
   transparent: boolean;
   keepOnTop: boolean;
-  backgroundEffect: string | null;
-  backgroundEffectState: WebviewBackgroundEffectState;
-  cornerRadius: number | null;
+  platform: WebviewWindowPlatformStyle;
+}
+
+export interface WebviewWindowStylePatch {
+  frameless?: boolean;
+  transparent?: boolean;
+  keepOnTop?: boolean;
+  platform?: {
+    macos?: Partial<WebviewMacosWindowStyle>;
+    windows?: Partial<WebviewWindowsWindowStyle>;
+    linux?: Record<string, never>;
+  };
+}
+
+export interface WebviewMacosWindowCapabilities {
+  materials: string[];
+  materialState: boolean;
+  cornerRadius: boolean;
+}
+
+export interface WebviewWindowsWindowCapabilities {
+  backdrops: string[];
+  cornerPreference: boolean;
+}
+
+export interface WebviewLinuxWindowCapabilities {
+  trayPlacementProbes: string[];
+}
+
+export interface WebviewWindowPlatformCapabilities {
+  macos?: WebviewMacosWindowCapabilities;
+  windows?: WebviewWindowsWindowCapabilities;
+  linux?: WebviewLinuxWindowCapabilities;
 }
 
 export interface WebviewWindowCapabilities {
@@ -66,17 +113,16 @@ export interface WebviewWindowCapabilities {
   frameless: boolean;
   transparent: boolean;
   keepOnTop: boolean;
-  cornerRadius: boolean;
   title: boolean;
   icon: boolean;
   screen: boolean;
   tray: boolean;
-  backgroundEffects: string[];
   globalBindingsEnabled: boolean;
   globalBindingsSupported: boolean;
   screenBindingsEnabled: boolean;
   screenBindingsSupported: boolean;
   platform: string;
+  platformCapabilities: WebviewWindowPlatformCapabilities;
 }
 
 export type WebviewWindowStateKind = "normal" | "minimized" | "maximized";
@@ -157,7 +203,7 @@ export interface WebviewNavigatorWindow {
   startAppRegionDrag(options?: { x?: number; y?: number; pointerId?: number }): Promise<{ active: boolean }>;
   stopAppRegionDrag(): Promise<{ active: boolean }>;
   getStyle(): Promise<WebviewWindowStyle>;
-  setStyle(style: Partial<WebviewWindowStyle>): Promise<WebviewWindowStyle>;
+  setStyle(style: WebviewWindowStylePatch): Promise<WebviewWindowStyle>;
   getCapabilities(): Promise<WebviewWindowCapabilities>;
   getTitle(): Promise<string>;
   setTitle(title: string): Promise<string>;
@@ -217,7 +263,7 @@ export interface WebviewNavigatorScreen {
 }
 
 export interface WebviewNavigatorTray {
-  getBounds(): Promise<Rect | null>;
+  getBounds(): Promise<TrayBoundsResult>;
 }
 
 export interface WebviewNavigatorNamespace {

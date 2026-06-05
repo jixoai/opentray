@@ -66,7 +66,11 @@ describe("local broker client", () => {
             requestId: frame.requestId,
             spaceId: frame.spaceId,
             trayId: frame.trayId,
-            bounds: { x: 10, y: 20, width: 24, height: 24 },
+            bounds: {
+              kind: "native",
+              source: "backend.nativeTrayBounds",
+              rect: { x: 10, y: 20, width: 24, height: 24 },
+            },
           })}\n`,
         );
       }
@@ -86,7 +90,11 @@ describe("local broker client", () => {
       trayId: "tray-a",
     })) as Extract<ServerFrame, { type: "tray-bounds" }>;
 
-    expect(frame.bounds).toEqual({ x: 10, y: 20, width: 24, height: 24 });
+    expect(frame.bounds).toEqual({
+      kind: "native",
+      source: "backend.nativeTrayBounds",
+      rect: { x: 10, y: 20, width: 24, height: 24 },
+    });
     await connection.close();
   });
 });

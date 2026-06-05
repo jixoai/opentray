@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { DaemonDriver } from "./lifecycle";
-import { inspectDaemon, restartDaemon, startDaemon, stopDaemon } from "./lifecycle";
+import {
+  inspectDaemon,
+  resolveBrokerStdio,
+  restartDaemon,
+  startDaemon,
+  stopDaemon,
+} from "./lifecycle";
 import { resolveDaemonPaths } from "./paths";
 
 const tempDirs: string[] = [];
@@ -20,6 +26,12 @@ afterEach(async () => {
 });
 
 describe("daemon lifecycle", () => {
+  it("keeps broker stdio quiet by default and allows explicit inherit for debugging", () => {
+    expect(resolveBrokerStdio(undefined)).toBe("ignore");
+    expect(resolveBrokerStdio("quiet")).toBe("ignore");
+    expect(resolveBrokerStdio("inherit")).toBe("inherit");
+  });
+
   it("starts once and reuses the healthy same-version broker", async () => {
     const homeDir = await makeTempHome();
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });

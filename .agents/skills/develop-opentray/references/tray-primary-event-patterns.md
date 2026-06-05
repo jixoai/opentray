@@ -176,8 +176,12 @@ if (frame.type === "event" && frame.event.type === "menuClick" && frame.event.it
     style: {
       frameless: true,
       transparent: true,
-      backgroundEffect: "hudWindow",
-      cornerRadius: 18,
+      platform: {
+        macos: {
+          material: "hudWindow",
+          cornerRadius: 18,
+        },
+      },
     },
   });
 }

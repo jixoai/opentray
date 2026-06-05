@@ -71,7 +71,8 @@ pnpm --filter opentray example:tray-panel
 
 This demo is the canonical custom TrayPanel case: one `primaryEvent` tray item, backend `tray.getBounds()`, page `navigator.opentray.tray.getBounds()`, screen-aware repositioning, and a frameless glass panel with `keepOnTop`.
 It also follows the native-glass rule strictly: transparent native window background, no root HTML shell styling, and content padding only inside the page.
-It now also pins `backgroundEffectState: "active"` so the tray-launched material surface does not immediately fall back to the inactive grey AppKit appearance.
+It now also pins `style.platform.macos.materialState: "active"` so the tray-launched material surface does not immediately fall back to the inactive grey AppKit appearance.
+For a step-by-step walkthrough of the examples and expected behavior, read [examples/EXAMPLE.md](./examples/EXAMPLE.md).
 
 When run from the repo worktree, the example automatically discovers `target/debug` or `target/release` `libopentray_ext_webview` and wires it through `OPENTRAY_EXT_PATH` before starting the daemon. That keeps the example on the real `load-ext` path without requiring a manual staging step for routine source-level testing.
 

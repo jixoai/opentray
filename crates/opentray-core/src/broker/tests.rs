@@ -214,8 +214,10 @@ fn get_tray_bounds_returns_correlated_bounds_for_owner() {
             request_id,
             space_id,
             tray_id,
-            bounds: Some(_),
+            bounds,
         } if request_id == "req-bounds" && space_id == "app" && tray_id == "status"
+            && matches!(bounds.kind, opentray_spec::TrayBoundsKind::Native)
+            && bounds.rect.is_some()
     ));
     assert!(backend.operations().iter().any(|operation| {
         matches!(

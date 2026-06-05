@@ -30,7 +30,11 @@ class RecordingTransport implements OpenTrayTransport {
           requestId: frame.requestId,
           spaceId: frame.spaceId,
           trayId: frame.trayId,
-          bounds: null,
+          bounds: {
+            kind: "unavailable",
+            source: "backend.unavailable",
+            rect: null,
+          },
         };
       case "destroy-tray":
       case "set-tray-menu":

@@ -1,6 +1,7 @@
 use opentray_spec::{
     is_supported_protocol_version, ClientFrame, ExtensionEnvelope, LeaseId, Rect, RequestId,
-    ServerFrame, SpaceOptions, SpaceRef, TrayEvent, PROTOCOL_VERSION,
+    ServerFrame, SpaceOptions, SpaceRef, TrayBoundsKind, TrayBoundsResult, TrayEvent,
+    PROTOCOL_VERSION,
 };
 
 use crate::{
@@ -228,7 +229,18 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     request_id,
                     space_id,
                     tray_id,
-                    bounds,
+                    bounds: match bounds {
+                        Some(rect) => TrayBoundsResult {
+                            kind: TrayBoundsKind::Native,
+                            source: "backend.nativeTrayBounds".to_string(),
+                            rect: Some(rect),
+                        },
+                        None => TrayBoundsResult {
+                            kind: TrayBoundsKind::Unavailable,
+                            source: "backend.unavailable".to_string(),
+                            rect: None,
+                        },
+                    },
                 }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
@@ -284,16 +296,19 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     outer: host,
                     tray_bounds,
                 };
-                match self
-                    .kernel
-                    .ext_command_with_host(space_id, tray_id, ext, data, &mut scoped_host)
-                {
-                Ok(events) => {
-                    let mut frames = vec![ServerFrame::Ack { request_id }];
-                    frames.extend(extension_events(events));
-                    frames
-                }
-                Err(error) => vec![kernel_error(Some(request_id), error)],
+                match self.kernel.ext_command_with_host(
+                    space_id,
+                    tray_id,
+                    ext,
+                    data,
+                    &mut scoped_host,
+                ) {
+                    Ok(events) => {
+                        let mut frames = vec![ServerFrame::Ack { request_id }];
+                        frames.extend(extension_events(events));
+                        frames
+                    }
+                    Err(error) => vec![kernel_error(Some(request_id), error)],
                 }
             }
             ClientFrame::LoadExt {

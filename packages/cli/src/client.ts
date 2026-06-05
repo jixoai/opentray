@@ -2,11 +2,11 @@ import {
   PROTOCOL_VERSION,
   type ClientFrame,
   type ClientRequestFrame,
-  type Rect,
   type RequestId,
   type ServerFrame,
   type SpaceOptions,
   type SpaceRef,
+  type TrayBoundsResult,
   type TrayId,
   type TrayOptions,
 } from "@opentray/spec";
@@ -33,7 +33,7 @@ export type SurfaceHandle = SpaceHandle;
 export interface TrayHandle {
   space: SpaceRef;
   trayId: TrayId;
-  getBounds(): Promise<Rect | null>;
+  getBounds(): Promise<TrayBoundsResult>;
   commandExtension(ext: string, data: unknown): Promise<void>;
   destroy(): Promise<void>;
 }
@@ -110,7 +110,7 @@ export const createTrayHandle = (
 ): TrayHandle => ({
   space,
   trayId,
-  async getBounds(): Promise<Rect | null> {
+  async getBounds(): Promise<TrayBoundsResult> {
     const requestId = nextRequestId();
     const response = await transport.request({
       type: "get-tray-bounds",

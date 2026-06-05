@@ -53,11 +53,16 @@ impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
             .apply_projection(TrayIconProjection::from_surface_projection(&projection))
     }
 
-    fn tray_bounds(&self, space_id: &SurfaceId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError> {
+    fn tray_bounds(
+        &self,
+        space_id: &SurfaceId,
+        tray_id: &TrayId,
+    ) -> Result<Option<Rect>, BackendError> {
         if !self.capabilities().tray_bounds {
             return Ok(None);
         }
-        self.runtime.tray_bounds(&stable_tray_icon_id(space_id, tray_id))
+        self.runtime
+            .tray_bounds(&stable_tray_icon_id(space_id, tray_id))
     }
 
     fn show_menu(&self, space_id: &SurfaceId) -> Result<(), BackendError> {
@@ -196,12 +201,14 @@ mod tests {
         }
 
         fn tray_bounds(&self, tray_icon_id: &str) -> Result<Option<Rect>, BackendError> {
-            Ok((tray_icon_id == "opentray-tray:surface-1:tray-1").then_some(Rect {
-                x: 10,
-                y: 20,
-                width: 24,
-                height: 24,
-            }))
+            Ok(
+                (tray_icon_id == "opentray-tray:surface-1:tray-1").then_some(Rect {
+                    x: 10,
+                    y: 20,
+                    width: 24,
+                    height: 24,
+                }),
+            )
         }
 
         fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {

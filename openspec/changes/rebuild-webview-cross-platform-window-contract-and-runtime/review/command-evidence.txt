@@ -1,0 +1,56 @@
+Change: rebuild-webview-cross-platform-window-contract-and-runtime
+Worktree: /Users/kzf/Dev/GitHub/jixoai-labs/opentray/.worktree/enrich-webview-window-macos-capabilities
+
+Commands rerun in the current review context:
+
+1. cargo build -p opentray-bin -p opentray-ext-webview
+   - result: passed
+   - note: used to refresh the local broker binary and ext-webview dylib before replaying runtime examples
+
+2. cargo test -p opentray-ext-webview -p opentray-core -p opentray-backend-tray-icon -p opentray-backend-ksni -p opentray-spec
+   - result: passed
+   - note: opentray-ext-webview = 40 tests, opentray-core = 23 tests, opentray-backend-tray-icon = 14 tests, opentray-backend-ksni = 2 tests, opentray-spec = 11 tests
+
+3. pnpm --filter @opentray/spec test
+   - result: passed (14 tests)
+
+4. pnpm --filter @opentray/ext-webview test
+   - result: passed (3 tests)
+
+5. pnpm --filter opentray test -- --runInBand src/index.test.ts src/local-broker.test.ts src/sdk.test.ts src/daemon/lifecycle.test.ts
+   - result: passed (39 tests across 8 files)
+
+6. pnpm --filter opentray typecheck
+   - result: passed
+
+7. OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control
+   - result: passed
+   - note: window opened, ext-webview loaded from the local debug dylib, and the example exited cleanly on timer
+
+8. OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:tray-panel
+   - result: passed
+   - note: tray primary action triggered the source-tree webview and emitted `{"type":"shown"}`
+
+9. OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray
+   - result: passed
+   - note: tray primary action triggered the source-tree webview and emitted `{"type":"shown"}`
+
+10. bun run openspec:vision -- status rebuild-webview-cross-platform-window-contract-and-runtime
+    - result: passed
+    - note: all four OpenSpec artifacts are present
+
+11. bun run openspec:vision -- validate rebuild-webview-cross-platform-window-contract-and-runtime
+    - result: passed
+
+12. bun run openspec:vision -- check rebuild-webview-cross-platform-window-contract-and-runtime
+    - result: passed
+
+13. git diff --check
+    - result: passed
+
+Debugging evidence collected during the review loop:
+
+- A foreground broker replay with `OPENTRAY_WEBVIEW_DEBUG=1` showed the failing pre-fix error:
+  - `opentray-ext-webview command failed: platform.windows window style is not supported on macOS`
+- The same foreground broker replay succeeded after the validator fix:
+  - `opentray-ext-webview create slot: tray_id=debug-tray url=None html=true native_window=true native_screen=true`

@@ -405,14 +405,20 @@
           element.textContent = value;
         }
       };
+      const getMacosStyle = (style) => {
+        if (!style || typeof style !== "object") return null;
+        const platform = style.platform;
+        if (!platform || typeof platform !== "object") return null;
+        const macos = platform.macos;
+        return macos && typeof macos === "object" ? macos : null;
+      };
       const applyStyleMode = (style) => {
-        const backgroundEffect =
-          style && typeof style === "object" && typeof style.backgroundEffect === "string"
-            ? style.backgroundEffect
-            : null;
+        const macosStyle = getMacosStyle(style);
+        const macosMaterial =
+          macosStyle && typeof macosStyle.material === "string" ? macosStyle.material : null;
         const cornerRadius =
-          style && typeof style === "object" && typeof style.cornerRadius === "number"
-            ? style.cornerRadius
+          macosStyle && typeof macosStyle.cornerRadius === "number"
+            ? macosStyle.cornerRadius
             : null;
         text("corner-radius-value", cornerRadius === null ? "system" : `${cornerRadius}px`);
         const radiusInput = $("corner-radius-input");
@@ -424,14 +430,14 @@
         if (!style || typeof style !== "object") {
           return style;
         }
-        const backgroundEffect =
-          typeof style.backgroundEffect === "string" && style.backgroundEffect.length > 0
-            ? style.backgroundEffect
+        const macosStyle = getMacosStyle(style);
+        const macosMaterial =
+          macosStyle && typeof macosStyle.material === "string" && macosStyle.material.length > 0
+            ? macosStyle.material
             : null;
         return {
           ...style,
-          backgroundEffect,
-          effectiveClearBackground: Boolean(style.transparent || backgroundEffect),
+          effectiveClearBackground: Boolean(style.transparent || macosMaterial),
         };
       };
       const updateOverlayGeometry = async () => {
@@ -572,7 +578,12 @@
           materialIndex = (materialIndex + 1) % materialEffects.length;
           const nextEffect = materialEffects[materialIndex];
           await bridge.setStyle({
-            backgroundEffect: nextEffect ?? "",
+            platform: {
+              macos: {
+                material: nextEffect,
+                materialState: "active",
+              },
+            },
           });
           text(
             "metadata-status",
@@ -771,9 +782,13 @@
           await bridge.setStyle({
             frameless: true,
             transparent: true,
-            backgroundEffect: "hudWindow",
-            backgroundEffectState: "active",
-            cornerRadius: Number($("corner-radius-input")?.value ?? 18),
+            platform: {
+              macos: {
+                material: "hudWindow",
+                materialState: "active",
+                cornerRadius: Number($("corner-radius-input")?.value ?? 18),
+              },
+            },
           });
           await refreshStyle();
           await updateOverlayGeometry();
@@ -784,7 +799,13 @@
       bindIfPresent("system-corner-button", async () => {
         if (!bridge) return;
         try {
-          await bridge.setStyle({ cornerRadius: null });
+          await bridge.setStyle({
+            platform: {
+              macos: {
+                cornerRadius: null,
+              },
+            },
+          });
           await refreshStyle();
         } catch (error) {
           text("style-status", `Failed to reset corner radius.\n${formatError(error)}`);
@@ -796,7 +817,13 @@
       $("corner-radius-input")?.addEventListener("change", async (event) => {
         if (!bridge) return;
         try {
-          await bridge.setStyle({ cornerRadius: Number(event.currentTarget.value) });
+          await bridge.setStyle({
+            platform: {
+              macos: {
+                cornerRadius: Number(event.currentTarget.value),
+              },
+            },
+          });
           await refreshStyle();
         } catch (error) {
           text("style-status", `Failed to update corner radius.\n${formatError(error)}`);

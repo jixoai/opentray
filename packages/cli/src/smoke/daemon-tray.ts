@@ -25,7 +25,13 @@ interface WebviewShowCommand {
     frameless?: boolean;
     transparent?: boolean;
     keepOnTop?: boolean;
-    backgroundEffect?: string | null;
+    platform?: {
+      macos?: {
+        material?: string | null;
+        materialState?: "followsWindowActiveState" | "active" | "inactive";
+        cornerRadius?: number | null;
+      };
+    };
   };
   titleSync?: boolean | { documentToWindow?: boolean; windowToDocument?: boolean };
   iconSync?: boolean | { faviconToWindow?: boolean; windowToFavicon?: boolean };
@@ -115,9 +121,14 @@ export const runDaemonTraySmoke = async (): Promise<void> => {
           frameless: true,
           transparent: true,
           keepOnTop: true,
-          backgroundEffect: "hudWindow",
+          platform: {
+            macos: {
+              material: "hudWindow",
+              materialState: "active",
+            },
+          },
         },
-        fallbackRect: trayBounds ?? { x: 0, y: 0, width: 1, height: 1 },
+        fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
         nativeWindowApi: true,
         bindWindowGlobals: true,
         nativeScreenApi: true,

@@ -269,7 +269,7 @@ pub enum ServerFrame {
         space_id: SpaceId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
-        bounds: Option<Rect>,
+        bounds: TrayBoundsResult,
     },
     Ack {
         #[serde(rename = "requestId")]
@@ -297,6 +297,22 @@ pub enum ServerFrame {
         code: String,
         message: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrayBoundsKind {
+    Native,
+    Inferred,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrayBoundsResult {
+    pub kind: TrayBoundsKind,
+    pub source: String,
+    pub rect: Option<Rect>,
 }
 
 #[cfg(test)]
@@ -572,12 +588,16 @@ mod tests {
             request_id: "req-bounds".to_string(),
             space_id: "space-1".to_string(),
             tray_id: "tray-1".to_string(),
-            bounds: Some(Rect {
-                x: 12,
-                y: 18,
-                width: 24,
-                height: 24,
-            }),
+            bounds: TrayBoundsResult {
+                kind: TrayBoundsKind::Native,
+                source: "backend.nativeTrayBounds".to_string(),
+                rect: Some(Rect {
+                    x: 12,
+                    y: 18,
+                    width: 24,
+                    height: 24,
+                }),
+            },
         };
 
         assert_eq!(
@@ -597,10 +617,14 @@ mod tests {
                 "spaceId": "space-1",
                 "trayId": "tray-1",
                 "bounds": {
-                    "x": 12,
-                    "y": 18,
-                    "width": 24,
-                    "height": 24
+                    "kind": "native",
+                    "source": "backend.nativeTrayBounds",
+                    "rect": {
+                        "x": 12,
+                        "y": 18,
+                        "width": 24,
+                        "height": 24
+                    }
                 }
             })
         );

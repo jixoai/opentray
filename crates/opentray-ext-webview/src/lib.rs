@@ -53,10 +53,31 @@ pub(crate) struct WebviewInitialStyle {
     pub frameless: bool,
     pub transparent: bool,
     pub keep_on_top: bool,
-    pub background_effect: Option<String>,
-    pub background_effect_state: WebviewBackgroundEffectState,
+    pub platform: WebviewInitialPlatformStyle,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct WebviewInitialPlatformStyle {
+    pub macos: WebviewInitialMacosStyle,
+    pub windows: WebviewInitialWindowsStyle,
+    pub linux: WebviewInitialLinuxStyle,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct WebviewInitialMacosStyle {
+    pub material: Option<String>,
+    pub material_state: WebviewBackgroundEffectState,
     pub corner_radius: Option<f64>,
 }
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct WebviewInitialWindowsStyle {
+    pub backdrop: Option<String>,
+    pub corner_preference: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct WebviewInitialLinuxStyle;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -255,10 +276,36 @@ struct ShowWindowStyleData {
     frameless: Option<bool>,
     transparent: Option<bool>,
     keep_on_top: Option<bool>,
-    background_effect: Option<String>,
-    background_effect_state: Option<String>,
+    platform: Option<ShowWindowPlatformStyleData>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShowWindowPlatformStyleData {
+    macos: Option<ShowWindowMacosStyleData>,
+    windows: Option<ShowWindowWindowsStyleData>,
+    #[allow(dead_code)]
+    linux: Option<ShowWindowLinuxStyleData>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShowWindowMacosStyleData {
+    material: Option<String>,
+    material_state: Option<String>,
     corner_radius: Option<f64>,
 }
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShowWindowWindowsStyleData {
+    backdrop: Option<String>,
+    corner_preference: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShowWindowLinuxStyleData {}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -445,6 +492,13 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
             )?;
             let bind_window_globals = parsed.bind_window_globals.unwrap_or(false);
             let bind_screen_globals = parsed.bind_screen_globals.unwrap_or(false);
+            let style = parsed.style.as_ref();
+            let macos_style = style
+                .and_then(|style| style.platform.as_ref())
+                .and_then(|platform| platform.macos.as_ref());
+            let windows_style = style
+                .and_then(|style| style.platform.as_ref())
+                .and_then(|platform| platform.windows.as_ref());
             Ok(WebviewCommand::Show {
                 html,
                 url,
@@ -471,37 +525,34 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                         title: parsed.title,
                         icon: parsed.icon,
                         style: WebviewInitialStyle {
-                            frameless: parsed
-                                .style
-                                .as_ref()
-                                .and_then(|style| style.frameless)
-                                .unwrap_or(false),
-                            transparent: parsed
-                                .style
-                                .as_ref()
-                                .and_then(|style| style.transparent)
-                                .unwrap_or(false),
-                            keep_on_top: parsed
-                                .style
-                                .as_ref()
-                                .and_then(|style| style.keep_on_top)
-                                .unwrap_or(false),
-                            background_effect: parsed
-                                .style
-                                .as_ref()
-                                .and_then(|style| style.background_effect.clone()),
-                            background_effect_state: parsed
-                                .style
-                                .as_ref()
-                                .and_then(|style| style.background_effect_state.as_deref())
-                                .map(parse_background_effect_state)
-                                .transpose()?
-                                .unwrap_or_default(),
-                            corner_radius: parsed
-                                .style
-                                .and_then(|style| style.corner_radius)
-                                .map(normalize_corner_radius)
-                                .transpose()?,
+                            frameless: style.and_then(|style| style.frameless).unwrap_or(false),
+                            transparent: style.and_then(|style| style.transparent).unwrap_or(false),
+                            keep_on_top: style.and_then(|style| style.keep_on_top).unwrap_or(false),
+                            platform: WebviewInitialPlatformStyle {
+                                macos: WebviewInitialMacosStyle {
+                                    material: macos_style
+                                        .and_then(|style| style.material.clone())
+                                        .filter(|material| !material.is_empty()),
+                                    material_state: macos_style
+                                        .and_then(|style| style.material_state.as_deref())
+                                        .map(parse_background_effect_state)
+                                        .transpose()?
+                                        .unwrap_or_default(),
+                                    corner_radius: macos_style
+                                        .and_then(|style| style.corner_radius)
+                                        .map(normalize_corner_radius)
+                                        .transpose()?,
+                                },
+                                windows: WebviewInitialWindowsStyle {
+                                    backdrop: windows_style
+                                        .and_then(|style| style.backdrop.clone())
+                                        .filter(|backdrop| !backdrop.is_empty()),
+                                    corner_preference: windows_style
+                                        .and_then(|style| style.corner_preference.clone())
+                                        .filter(|preference| !preference.is_empty()),
+                                },
+                                linux: WebviewInitialLinuxStyle,
+                            },
                         },
                         sync: WebviewMetadataSyncSettings {
                             title: parse_title_sync(parsed.title_sync),
@@ -839,9 +890,13 @@ mod tests {
               "frameless": true,
               "transparent": true,
               "keepOnTop": true,
-              "backgroundEffect": "hudWindow",
-              "backgroundEffectState": "active",
-              "cornerRadius": 18
+              "platform": {
+                "macos": {
+                  "material": "hudWindow",
+                  "materialState": "active",
+                  "cornerRadius": 18
+                }
+              }
             },
             "titleSync": {
               "documentToWindow": true,
@@ -889,9 +944,15 @@ mod tests {
                             frameless: true,
                             transparent: true,
                             keep_on_top: true,
-                            background_effect: Some("hudWindow".to_string()),
-                            background_effect_state: WebviewBackgroundEffectState::Active,
-                            corner_radius: Some(18.0),
+                            platform: WebviewInitialPlatformStyle {
+                                macos: WebviewInitialMacosStyle {
+                                    material: Some("hudWindow".to_string()),
+                                    material_state: WebviewBackgroundEffectState::Active,
+                                    corner_radius: Some(18.0),
+                                },
+                                windows: WebviewInitialWindowsStyle::default(),
+                                linux: WebviewInitialLinuxStyle,
+                            },
                         },
                         sync: WebviewMetadataSyncSettings {
                             title: MetadataSyncSettings {
@@ -939,6 +1000,47 @@ mod tests {
         assert_eq!(
             show_settings.native_api_policy,
             WebviewNativeApiPolicy::default()
+        );
+    }
+
+    #[test]
+    fn parse_show_command_preserves_platform_specific_style_families() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "style": {
+              "frameless": true,
+              "platform": {
+                "macos": {
+                  "material": "hudWindow"
+                },
+                "windows": {
+                  "backdrop": "mica",
+                  "cornerPreference": "round"
+                },
+                "linux": {}
+              }
+            }
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show { show_settings, .. } = command else {
+            panic!("expected show command");
+        };
+
+        assert_eq!(
+            show_settings.window.style.platform.macos.material,
+            Some("hudWindow".to_string())
+        );
+        assert_eq!(
+            show_settings.window.style.platform.windows,
+            WebviewInitialWindowsStyle {
+                backdrop: Some("mica".to_string()),
+                corner_preference: Some("round".to_string()),
+            }
+        );
+        assert_eq!(
+            show_settings.window.style.platform.linux,
+            WebviewInitialLinuxStyle
         );
     }
 

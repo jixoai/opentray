@@ -27,7 +27,7 @@ macOS support includes:
 - titlebar overlay geometry through `navigator.opentrayWindow.overlay`
 - native app-region dragging through `startAppRegionDrag()`
 - minimize, maximize, and restore window-state controls
-- adjustable content corner radius through `style.cornerRadius`
+- adjustable content corner radius through `style.platform.macos.cornerRadius`
 - native title and icon state
 - declarative `document.title` / native-title synchronization
 - declarative favicon / native-icon synchronization, with best-effort native projection
@@ -40,16 +40,16 @@ Visual effects stay capability-gated. Unsupported or platform-fragile effects mu
 For glass or blur-style surfaces, three things must line up at once:
 
 - native window style must enable `transparent: true`
-- native material must be requested through `backgroundEffect`
+- native material must be requested through `style.platform.macos.material`
 - the page must leave some regions genuinely transparent instead of covering the whole window with opaque HTML or CSS blur overlays
 
-Treat `transparent` and `backgroundEffect` as orthogonal requested states:
+Treat `transparent` and `style.platform.macos.material` as orthogonal requested states:
 
 - `transparent` means the window/WebView should request a clear backing surface even with no material
-- `backgroundEffect` means the native host should apply a system material surface
-- on macOS, a material surface still requires a clear, non-opaque backing layer underneath, so the runtime will clear the native backing whenever `backgroundEffect` is enabled even if the requested `transparent` flag is `false`
+- `style.platform.macos.material` means the native host should apply a system material surface
+- on macOS, a material surface still requires a clear, non-opaque backing layer underneath, so the runtime will clear the native backing whenever `style.platform.macos.material` is enabled even if the requested `transparent` flag is `false`
 
-`backgroundEffect` also has a second axis on macOS: material state. Use `backgroundEffectState` to choose whether the system material follows the window focus state or stays forced active/inactive:
+Material selection has a second axis on macOS: material state. Use `style.platform.macos.materialState` to choose whether the system material follows the window focus state or stays forced active/inactive:
 
 - `followsWindowActiveState` keeps the default AppKit behavior
 - `active` forces the material into its active appearance, which is often the right choice for tray panels and accessory-app utility surfaces
@@ -74,6 +74,7 @@ pnpm --filter @opentray/ext-webview example:webview
 ```
 
 Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe.
+The manual walkthrough for all three CLI examples lives in [../cli/examples/EXAMPLE.md](../cli/examples/EXAMPLE.md).
 
 To expose the injected page API, enable it on `show`:
 
@@ -88,9 +89,13 @@ await webview.show({
     frameless: true,
     transparent: true,
     keepOnTop: true,
-    backgroundEffect: "hudWindow",
-    backgroundEffectState: "active",
-    cornerRadius: 18,
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "active",
+        cornerRadius: 18,
+      },
+    },
   },
   windowControlsOverlay: true,
   nativeWindowApi: true,
@@ -147,7 +152,7 @@ The injected capability follows a typed facade, with a raw `invoke(cmd, payload)
 - `await navigator.window.resizeTo(520, 320)`
 - `await navigator.window.minimize()`, `maximize()`, and `restore()`
 - `await navigator.window.getWindowState()`, `isMaximized()`, and `isMinimized()`
-- `await navigator.window.setStyle({ frameless: true, cornerRadius: 18 })`
+- `await navigator.window.setStyle({ frameless: true, platform: { macos: { cornerRadius: 18 } } })`
 - `await navigator.opentrayWindow.overlay.getTitlebarAreaRect()`
 - `await navigator.opentrayWindow.startAppRegionDrag()`
 - `await navigator.window.setTitle("OpenTray Status")`
@@ -170,12 +175,12 @@ Current native support:
 - macOS: `close`, `moveTo`, `resizeTo`, `getCapabilities`, `getStyle`, `setStyle`
 - macOS: `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, `isMinimized`, and native app-region drag
 - macOS: `keepOnTop` through `setStyle({ keepOnTop: true })`
-- macOS: `cornerRadius` through layer-backed content clipping
+- macOS: `style.platform.macos.cornerRadius` through layer-backed content clipping
 - macOS: `getTitle`, `setTitle`, `getIcon`, `setIcon`
 - macOS: titlebar overlay geometry through `windowControlsOverlay`
 - macOS: `navigator.screen.getScreenDetails`
 - macOS: tray bounds projection through `navigator.opentray.tray.getBounds()`
-- macOS: transparent background and material effects such as `hudWindow`, `sidebar`, `windowBackground`, `contentBackground`, and `underWindowBackground`
+- macOS: transparent background and material effects through `style.platform.macos.material`, including `hudWindow`, `sidebar`, `windowBackground`, `contentBackground`, and `underWindowBackground`
 - macOS: global override binding through `bindWindowGlobals` and `bindScreenGlobals`
 - Linux / Windows: the native runtime package may exist for packaging validation, but unsupported runtime paths must fail explicitly until the platform implementation lands
 
@@ -232,8 +237,12 @@ await webview.show({
   windowControlsOverlay: true,
   style: {
     transparent: true,
-    backgroundEffect: "hudWindow",
-    backgroundEffectState: "followsWindowActiveState",
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "followsWindowActiveState",
+      },
+    },
   },
 });
 ```
@@ -262,9 +271,13 @@ await webview.show({
   style: {
     frameless: true,
     transparent: true,
-    backgroundEffect: "hudWindow",
-    backgroundEffectState: "active",
-    cornerRadius: 18,
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "active",
+        cornerRadius: 18,
+      },
+    },
   },
 });
 ```
@@ -299,9 +312,13 @@ await navigator.opentrayWindow.setStyle({
   frameless: true,
   transparent: true,
   keepOnTop: true,
-  backgroundEffect: "hudWindow",
-  backgroundEffectState: "active",
-  cornerRadius: 18,
+  platform: {
+    macos: {
+      material: "hudWindow",
+      materialState: "active",
+      cornerRadius: 18,
+    },
+  },
 });
 await navigator.opentrayWindow.resizeTo(320, 180);
 await navigator.opentrayWindow.moveTo(
@@ -323,15 +340,19 @@ await webview.show({
   html,
   width: 360,
   height: 240,
-  fallbackRect: bounds ?? { x: 0, y: 0, width: 1, height: 1 },
+  fallbackRect: bounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
   nativeWindowApi: true,
   nativeTrayApi: true,
   style: {
     frameless: true,
     transparent: true,
-    backgroundEffect: "hudWindow",
-    backgroundEffectState: "active",
-    cornerRadius: 18,
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "active",
+        cornerRadius: 18,
+      },
+    },
   },
 });
 ```
@@ -340,8 +361,8 @@ Inside the page, use the same tray capability family when the HTML layout needs 
 
 ```ts
 const trayBounds = await navigator.opentray.tray.getBounds();
-if (trayBounds) {
-  panel.dataset.anchorX = String(trayBounds.x + trayBounds.width / 2);
+if (trayBounds.rect) {
+  panel.dataset.anchorX = String(trayBounds.rect.x + trayBounds.rect.width / 2);
 }
 ```
 

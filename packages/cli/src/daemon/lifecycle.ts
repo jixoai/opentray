@@ -5,6 +5,8 @@ import { spawn } from "node:child_process";
 import { resolveBrokerCommand } from "./broker-command";
 import type { DaemonPaths } from "./paths";
 
+const DAEMON_STDIO_ENV = "OPENTRAY_DAEMON_STDIO";
+
 export type DaemonStartResult =
   | { status: "started"; pid: number; paths: DaemonPaths }
   | { status: "already-running"; pid: number; paths: DaemonPaths };
@@ -54,7 +56,7 @@ export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => (
         OPENTRAY_DAEMON_PACKAGE_VERSION: paths.packageVersion,
         OPENTRAY_DAEMON_CLI_ENTRYPOINT: cliEntrypoint,
       },
-      stdio: "ignore",
+      stdio: resolveBrokerStdio(process.env[DAEMON_STDIO_ENV]),
     });
 
     child.unref();
@@ -64,6 +66,12 @@ export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => (
     process.kill(pid, "SIGTERM");
   },
 });
+
+export const resolveBrokerStdio = (
+  value: string | undefined,
+): "ignore" | "inherit" => {
+  return value === "inherit" ? "inherit" : "ignore";
+};
 
 export const startDaemon = async ({
   paths,

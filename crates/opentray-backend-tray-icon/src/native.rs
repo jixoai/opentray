@@ -1,13 +1,13 @@
 use std::{cell::RefCell, collections::HashMap};
 
-use opentray_core::BackendError;
-use opentray_spec::{SurfaceId, TrayEvent};
 #[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSEvent;
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSRect;
+use opentray_core::BackendError;
+use opentray_spec::{SurfaceId, TrayEvent};
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };
@@ -130,7 +130,12 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
 
     fn tray_bounds(&self, tray_icon_id: &str) -> Result<Option<opentray_spec::Rect>, BackendError> {
         #[cfg(target_os = "macos")]
-        if let Some(bounds) = self.last_interaction_bounds.borrow().get(tray_icon_id).copied() {
+        if let Some(bounds) = self
+            .last_interaction_bounds
+            .borrow()
+            .get(tray_icon_id)
+            .copied()
+        {
             return Ok(Some(bounds));
         }
         Ok(self
@@ -142,12 +147,12 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
 
     fn record_tray_interaction(&self, tray_icon_id: &str) {
         #[cfg(target_os = "macos")]
-        if let Some(bounds) = self
-            .surfaces
-            .borrow()
-            .values()
-            .find_map(|surface| surface.icons.get(tray_icon_id).and_then(native_tray_bounds_from_mouse))
-        {
+        if let Some(bounds) = self.surfaces.borrow().values().find_map(|surface| {
+            surface
+                .icons
+                .get(tray_icon_id)
+                .and_then(native_tray_bounds_from_mouse)
+        }) {
             self.last_interaction_bounds
                 .borrow_mut()
                 .insert(tray_icon_id.to_string(), bounds);

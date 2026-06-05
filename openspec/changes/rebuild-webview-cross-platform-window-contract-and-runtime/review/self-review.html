@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Self Review - rebuild-webview-cross-platform-window-contract-and-runtime</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 32px;
+        line-height: 1.5;
+      }
+      main {
+        max-width: 1080px;
+        margin: 0 auto;
+      }
+      h1, h2 {
+        margin: 0 0 12px;
+      }
+      section {
+        margin-top: 28px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+        padding: 10px 12px;
+        vertical-align: top;
+        text-align: left;
+      }
+      code {
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      }
+      .ok {
+        color: #0a7d33;
+      }
+      .warn {
+        color: #b26b00;
+      }
+      .fail {
+        color: #b42318;
+      }
+      ul {
+        margin: 10px 0 0 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Self Review</h1>
+      <p>
+        Change: <code>rebuild-webview-cross-platform-window-contract-and-runtime</code><br />
+        Iteration: <code>2 / 5</code><br />
+        Exit judgment: <span class="ok">narrowed atom is complete; archive may proceed</span>
+      </p>
+
+      <section>
+        <h2>Intent Coverage</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Intent point</th>
+              <th>Evidence</th>
+              <th>Verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Common vs platform-specific window contract split</td>
+              <td>
+                <code>packages/ext-webview/src/index.ts</code>,
+                <code>crates/opentray-ext-webview/src/lib.rs</code>,
+                <code>crates/opentray-ext-webview/src/macos/style.rs</code>,
+                <code>crates/opentray-ext-webview/src/macos/bridge.rs</code>
+              </td>
+              <td class="ok">Aligned</td>
+            </tr>
+            <tr>
+              <td>Capability metadata separated into common and platform families</td>
+              <td>
+                <code>packages/ext-webview/src/index.ts</code>,
+                <code>crates/opentray-ext-webview/src/macos/mod.rs</code>
+              </td>
+              <td class="ok">Aligned</td>
+            </tr>
+            <tr>
+              <td>Tray placement provenance in SDK and page projection</td>
+              <td>
+                <code>packages/spec/src/index.ts</code>,
+                <code>crates/opentray-spec/src/protocol.rs</code>,
+                <code>packages/cli/src/client.ts</code>,
+                <code>crates/opentray-core/src/broker.rs</code>
+              </td>
+              <td class="ok">Aligned for native/unavailable truth</td>
+            </tr>
+            <tr>
+              <td>Docs, skills, and examples teach the nested contract</td>
+              <td>
+                <code>packages/ext-webview/README.md</code>,
+                <code>packages/cli/README.md</code>,
+                <code>packages/cli/examples/EXAMPLE.md</code>,
+                skill references under <code>.agents/skills/</code>
+              </td>
+              <td class="ok">Aligned</td>
+            </tr>
+            <tr>
+              <td>Maintained source-tree examples run against the local dylib again</td>
+              <td>
+                <code>packages/cli/examples/_support/webview-example-support.ts</code>,
+                <code>packages/cli/src/daemon/lifecycle.ts</code>,
+                three replayed example smoke commands
+              </td>
+              <td class="ok">Aligned</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Review Loop Outcome</h2>
+        <p>
+          The real bug found in this loop was not in OpenSpec. The macOS initial-style validator
+          interpreted the default placeholder <code>platform.windows</code> family as an explicit
+          Windows style request, so all three maintained examples failed with a false
+          <code>unsupported</code> at runtime. The fix now ignores placeholder Windows family
+          defaults in the initial validator while still rejecting real Windows style requests on
+          macOS.
+        </p>
+      </section>
+
+      <section>
+        <h2>Verification Evidence</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>cargo test -p opentray-ext-webview -p opentray-core -p opentray-backend-tray-icon -p opentray-backend-ksni -p opentray-spec</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>pnpm --filter @opentray/spec test</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>pnpm --filter @opentray/ext-webview test</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>pnpm --filter opentray test -- --runInBand src/index.test.ts src/local-broker.test.ts src/sdk.test.ts src/daemon/lifecycle.test.ts</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>pnpm --filter opentray typecheck</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:tray-panel</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:daemon-tray</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>bun run openspec:vision -- validate rebuild-webview-cross-platform-window-contract-and-runtime</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>bun run openspec:vision -- check rebuild-webview-cross-platform-window-contract-and-runtime</code></td><td class="ok">passed</td></tr>
+            <tr><td><code>git diff --check</code></td><td class="ok">passed</td></tr>
+          </tbody>
+        </table>
+        <p>Detailed command list: <code>review/command-evidence.txt</code></p>
+      </section>
+
+      <section>
+        <h2>Deferred Families</h2>
+        <ul>
+          <li>Windows and Linux runtime substrate implementations remain intentionally deferred.</li>
+          <li>Linux inferred tray fallback provenance remains intentionally deferred.</li>
+          <li>Bootstrap families such as <code>window.open()</code>, managed localhost origin, profile/partition, inject/ipc, and devtools remain intentionally deferred.</li>
+          <li>OS appearance propagation and platform-specialized material/corner matrices remain intentionally deferred.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Exit Path</h2>
+        <p>
+          This archive unit is ready for the normal path: commit the refreshed review artifacts,
+          archive the change, then commit the archive result. The recommended next atom is the real
+          Windows/Linux substrate family work, followed by Linux tray fallback provenance and then
+          the bootstrap families on top of that truthful runtime map.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

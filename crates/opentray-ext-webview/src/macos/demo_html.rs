@@ -207,10 +207,15 @@ pub(super) fn default_webview_html() -> String {
         document.getElementById("material-button")?.addEventListener("click", async () => {
           try {
             const style = await pageWindow.getStyle();
+            const macos = style.platform?.macos ?? {};
             await pageWindow.setStyle({
               transparent: true,
-              backgroundEffect: style.backgroundEffect ? "" : "hudWindow",
-              backgroundEffectState: "active",
+              platform: {
+                macos: {
+                  material: macos.material ? null : "hudWindow",
+                  materialState: "active",
+                },
+              },
             });
             await loadStyle();
           } catch (error) {

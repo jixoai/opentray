@@ -1,16 +1,11 @@
-import { spawn } from "node:child_process";
-import { access, constants } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
 import { attachWebview } from "../../ext-webview/src/index";
+import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
 
-const localWebviewExtension = await resolveLocalWebviewExtension();
-if (process.env.OPENTRAY_EXT_PATH === undefined && localWebviewExtension !== undefined) {
-  process.env.OPENTRAY_EXT_PATH = localWebviewExtension;
-}
+const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
 
 const demoHomeDir = process.env.OPENTRAY_HOME ?? join("/tmp", `opentray-daemon-tray-${process.pid}`);
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
@@ -48,7 +43,7 @@ const tray = await space.createTray({
     title: "OpenTray",
     description: "Single primary tray action; macOS direct-triggers without opening a menu",
   },
-  icon: createVisibleIcon(),
+  icon: createVisibleTrayIcon(),
   menu: {
     items: [
       { type: "item", id: 1, title: "Open WebView", primaryEvent: true },
@@ -130,7 +125,7 @@ async function handleMenuClick(itemId: number): Promise<void> {
       html: createWebviewDemoHtml(),
       width: 420,
       height: 260,
-      fallbackRect: trayBounds ?? { x: 0, y: 0, width: 1, height: 1 },
+      fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
       nativeWindowApi: true,
       bindWindowGlobals: true,
       nativeTrayApi: true,
@@ -140,30 +135,6 @@ async function handleMenuClick(itemId: number): Promise<void> {
   }
 }
 
-function createVisibleIcon(): { type: "rgba"; width: number; height: number; data: number[] } {
-  const width = 32;
-  const height = 32;
-  const data: number[] = [];
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const dx = x - 15.5;
-      const dy = y - 15.5;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const inRing = distance >= 9 && distance <= 14;
-      const inCore = distance <= 5;
-      const inNeedle = Math.abs(dx + dy) <= 1.2 && x >= 9 && x <= 23 && y >= 9 && y <= 23;
-
-      if (inRing || inCore || inNeedle) {
-        data.push(inCore ? 255 : 24, inNeedle ? 240 : 132, inRing ? 72 : 96, 255);
-      } else {
-        data.push(0, 0, 0, 0);
-      }
-    }
-  }
-
-  return { type: "rgba", width, height, data };
-}
 
 function createWebviewDemoHtml(): string {
   return `<!doctype html>
@@ -339,52 +310,3 @@ function sleep(ms: number): Promise<void> {
 }
 
 await lifecycle;
-
-async function resolveLocalWebviewExtension(): Promise<string | undefined> {
-  const workspaceCargoToml = fileURLToPath(new URL("../../../Cargo.toml", import.meta.url));
-  try {
-    await access(workspaceCargoToml, constants.R_OK);
-    await runCargoBuild(fileURLToPath(new URL("../../../", import.meta.url)));
-  } catch {
-    // Not running from the workspace root layout, so skip the source-build path.
-  }
-
-  const artifactName =
-    process.platform === "win32"
-      ? "opentray_ext_webview.dll"
-      : process.platform === "darwin"
-        ? "libopentray_ext_webview.dylib"
-        : "libopentray_ext_webview.so";
-  const candidates = [
-    fileURLToPath(new URL(`../../../target/debug/${artifactName}`, import.meta.url)),
-    fileURLToPath(new URL(`../../../target/release/${artifactName}`, import.meta.url)),
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      await access(candidate, constants.R_OK);
-      return candidate;
-    } catch {
-      continue;
-    }
-  }
-
-  return undefined;
-}
-
-function runCargoBuild(workspaceRoot: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("cargo", ["build", "-p", "opentray-ext-webview"], {
-      cwd: workspaceRoot,
-      stdio: process.env.OPENTRAY_EXT_BUILD_LOGS === "1" ? "inherit" : "ignore",
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`cargo build -p opentray-ext-webview failed with code ${code ?? "unknown"}`));
-    });
-  });
-}

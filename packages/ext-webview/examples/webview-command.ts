@@ -37,7 +37,12 @@ await webview.show({
     frameless: true,
     transparent: true,
     keepOnTop: true,
-    backgroundEffect: "hudWindow",
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "active",
+      },
+    },
   },
   nativeWindowApi: true,
   bindWindowGlobals: true,

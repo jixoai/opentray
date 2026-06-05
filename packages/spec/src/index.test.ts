@@ -56,7 +56,11 @@ describe("@opentray/spec", () => {
         requestId: "req-bounds",
         spaceId: "space-1",
         trayId: "tray-1",
-        bounds: { x: 10, y: 20, width: 24, height: 24 },
+        bounds: {
+          kind: "native",
+          source: "backend.nativeTrayBounds",
+          rect: { x: 10, y: 20, width: 24, height: 24 },
+        },
       }),
     );
 
@@ -67,7 +71,11 @@ describe("@opentray/spec", () => {
       requestId: "req-bounds",
       spaceId: "space-1",
       trayId: "tray-1",
-      bounds: { x: 10, y: 20, width: 24, height: 24 },
+      bounds: {
+        kind: "native",
+        source: "backend.nativeTrayBounds",
+        rect: { x: 10, y: 20, width: 24, height: 24 },
+      },
     });
   });
 

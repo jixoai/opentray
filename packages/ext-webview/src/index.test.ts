@@ -16,7 +16,11 @@ describe("@opentray/ext-webview", () => {
       space: { spaceId: "space-1" },
       trayId: "tray-1",
       async getBounds() {
-        return null;
+        return {
+          kind: "unavailable",
+          source: "backend.unavailable",
+          rect: null,
+        };
       },
       async commandExtension(ext, data) {
         commands.push({ ext, data });
@@ -40,8 +44,12 @@ describe("@opentray/ext-webview", () => {
         frameless: true,
         transparent: true,
         keepOnTop: true,
-        backgroundEffect: "hudWindow",
-        backgroundEffectState: "active",
+        platform: {
+          macos: {
+            material: "hudWindow",
+            materialState: "active",
+          },
+        },
       },
       titleSync: {
         documentToWindow: true,
@@ -78,8 +86,12 @@ describe("@opentray/ext-webview", () => {
             frameless: true,
             transparent: true,
             keepOnTop: true,
-            backgroundEffect: "hudWindow",
-            backgroundEffectState: "active",
+            platform: {
+              macos: {
+                material: "hudWindow",
+                materialState: "active",
+              },
+            },
           },
           titleSync: {
             documentToWindow: true,
@@ -106,7 +118,11 @@ describe("@opentray/ext-webview", () => {
       space: { spaceId: "space-1" },
       trayId: "tray-1",
       async getBounds() {
-        return null;
+        return {
+          kind: "unavailable",
+          source: "backend.unavailable",
+          rect: null,
+        };
       },
       async commandExtension(ext, data) {
         commands.push({ ext, data });

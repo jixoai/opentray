@@ -45,7 +45,11 @@ pub struct SurfaceProjection {
 pub trait SurfaceBackend {
     fn capabilities(&self) -> BackendCapabilities;
     fn sync_surface(&self, projection: SurfaceProjection) -> Result<(), BackendError>;
-    fn tray_bounds(&self, space_id: &SurfaceId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError>;
+    fn tray_bounds(
+        &self,
+        space_id: &SurfaceId,
+        tray_id: &TrayId,
+    ) -> Result<Option<Rect>, BackendError>;
     fn show_menu(&self, surface_id: &SurfaceId) -> Result<(), BackendError>;
     fn emit_event(&self, event: TrayEvent) -> Result<(), BackendError>;
 }
@@ -102,7 +106,11 @@ impl SurfaceBackend for FakeBackend {
         Ok(())
     }
 
-    fn tray_bounds(&self, space_id: &SurfaceId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError> {
+    fn tray_bounds(
+        &self,
+        space_id: &SurfaceId,
+        tray_id: &TrayId,
+    ) -> Result<Option<Rect>, BackendError> {
         self.push(BackendOperation::TrayBounds(
             space_id.clone(),
             tray_id.clone(),

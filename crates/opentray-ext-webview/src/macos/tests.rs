@@ -1,7 +1,10 @@
 use super::bridge::{
     callback_script, error_callback_script, parse_set_icon_payload, NavigatorWindowRequest,
 };
-use super::style::{validate_style_request, SetStylePayload};
+use super::style::{
+    validate_style_request, MacosWindowStyleState, SetStyleMacosPayload, SetStylePayload,
+    SetStylePlatformPayload, SetStyleWindowsPayload, WindowPlatformStyleState,
+};
 use super::*;
 use crate::{
     MetadataSyncSettings, WebviewBackgroundEffectState, WebviewNativeApiSource, WebviewWindowIcon,
@@ -99,7 +102,9 @@ fn session_reuse_rejects_bootstrap_drift_and_implicit_content_replacement() {
         WebviewShowSettings::default().session_bootstrap_settings(),
         WebviewShowSettings::default().session_bootstrap_settings(),
         &WebviewContentDescriptor::Html("<main>old</main>".to_string()),
-        Some(&WebviewContentDescriptor::Html("<main>new</main>".to_string())),
+        Some(&WebviewContentDescriptor::Html(
+            "<main>new</main>".to_string(),
+        )),
     )
     .expect_err("implicit content replacement should be rejected");
 
@@ -118,17 +123,17 @@ fn session_bootstrap_ignores_mutable_shell_state_differences() {
     let mut requested_settings = WebviewShowSettings::default();
     requested_settings.window.title = Some("Updated".to_string());
     requested_settings.window.style.keep_on_top = true;
-    requested_settings.window.style.background_effect = Some("hudWindow".to_string());
+    requested_settings.window.style.platform.macos.material = Some("hudWindow".to_string());
 
-    assert!(
-        ensure_session_reuse_allowed(
-            current_settings.session_bootstrap_settings(),
-            requested_settings.session_bootstrap_settings(),
-            &WebviewContentDescriptor::Html("<main>panel</main>".to_string()),
-            Some(&WebviewContentDescriptor::Html("<main>panel</main>".to_string())),
-        )
-        .is_ok()
-    );
+    assert!(ensure_session_reuse_allowed(
+        current_settings.session_bootstrap_settings(),
+        requested_settings.session_bootstrap_settings(),
+        &WebviewContentDescriptor::Html("<main>panel</main>".to_string()),
+        Some(&WebviewContentDescriptor::Html(
+            "<main>panel</main>".to_string()
+        )),
+    )
+    .is_ok());
 }
 
 #[test]
@@ -677,22 +682,29 @@ fn navigator_tray_runtime_uses_prefixed_namespace_and_policy_gate() {
 const trayPromise = navigator.opentray.tray.getBounds();
 const trayRequest = messages.shift();
 window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(trayRequest.callback, {
-  x: 10,
-  y: 20,
-  width: 24,
-  height: 24
+  kind: "native",
+  source: "host.trayBounds",
+  rect: {
+    x: 10,
+    y: 20,
+    width: 24,
+    height: 24
+  }
 });
 const bounds = await trayPromise;
 return {
   hasTray: typeof navigator.opentray?.tray !== "undefined",
   namespace: trayRequest.namespace,
-  width: bounds.width
+  width: bounds.rect.width
 };
 "#,
     );
 
     assert_eq!(allowed["hasTray"], Value::Bool(true));
-    assert_eq!(allowed["namespace"], Value::String("opentray.tray".to_string()));
+    assert_eq!(
+        allowed["namespace"],
+        Value::String("opentray.tray".to_string())
+    );
     assert_eq!(allowed["width"], Value::from(24));
 
     let denied = run_node_probe_at(
@@ -1035,9 +1047,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
         frameless: None,
         transparent: Some(true),
         keep_on_top: Some(true),
-        background_effect: None,
-        background_effect_state: None,
-        corner_radius: None,
+        platform: None,
     })
     .expect("transparent should be supported");
 
@@ -1045,9 +1055,15 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
         frameless: None,
         transparent: None,
         keep_on_top: None,
-        background_effect: Some("hudWindow".to_string()),
-        background_effect_state: Some("active".to_string()),
-        corner_radius: Some(Some(18.0)),
+        platform: Some(SetStylePlatformPayload {
+            macos: Some(SetStyleMacosPayload {
+                material: Some(Some("hudWindow".to_string())),
+                material_state: Some("active".to_string()),
+                corner_radius: Some(Some(18.0)),
+            }),
+            windows: None,
+            linux: None,
+        }),
     })
     .expect("known effect should be supported");
 
@@ -1055,15 +1071,46 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
         frameless: None,
         transparent: None,
         keep_on_top: None,
-        background_effect: Some("blur".to_string()),
-        background_effect_state: None,
-        corner_radius: None,
+        platform: Some(SetStylePlatformPayload {
+            macos: Some(SetStyleMacosPayload {
+                material: Some(Some("blur".to_string())),
+                material_state: None,
+                corner_radius: None,
+            }),
+            windows: None,
+            linux: None,
+        }),
     })
     .expect_err("blur should be unsupported");
     assert_eq!(
         blur_error.to_string(),
         "background effect blur is not supported on macOS"
     );
+
+    let windows_error = validate_style_request(&SetStylePayload {
+        frameless: None,
+        transparent: None,
+        keep_on_top: None,
+        platform: Some(SetStylePlatformPayload {
+            macos: None,
+            windows: Some(SetStyleWindowsPayload {
+                backdrop: Some(Some("mica".to_string())),
+                corner_preference: None,
+            }),
+            linux: None,
+        }),
+    })
+    .expect_err("windows platform style should be unsupported on macOS");
+    assert_eq!(
+        windows_error.to_string(),
+        "platform.windows window style is not supported on macOS"
+    );
+}
+
+#[test]
+fn validate_initial_style_ignores_default_placeholder_platform_families() {
+    validate_initial_style(&WebviewShowSettings::default())
+        .expect("default placeholder platform families should not be rejected");
 }
 
 #[test]
@@ -1072,19 +1119,29 @@ fn window_style_state_serializes_keep_on_top() {
         frameless: false,
         transparent: true,
         keep_on_top: true,
-        background_effect: Some("hudWindow".to_string()),
-        background_effect_state: WebviewBackgroundEffectState::Active,
-        corner_radius: Some(18.0),
+        platform: WindowPlatformStyleState {
+            macos: MacosWindowStyleState {
+                material: Some("hudWindow".to_string()),
+                material_state: WebviewBackgroundEffectState::Active,
+                corner_radius: Some(18.0),
+            },
+        },
     })
     .expect("style state should serialize");
 
     assert_eq!(value["keepOnTop"], Value::Bool(true));
     assert_eq!(
-        value["backgroundEffect"],
+        value["platform"]["macos"]["material"],
         Value::String("hudWindow".to_string())
     );
-    assert_eq!(value["backgroundEffectState"], Value::String("active".to_string()));
-    assert_eq!(value["cornerRadius"], Value::from(18.0));
+    assert_eq!(
+        value["platform"]["macos"]["materialState"],
+        Value::String("active".to_string())
+    );
+    assert_eq!(
+        value["platform"]["macos"]["cornerRadius"],
+        Value::from(18.0)
+    );
 }
 
 #[test]
@@ -1098,9 +1155,13 @@ fn navigator_window_bridge_tracks_listener_ids() {
             frameless: false,
             transparent: false,
             keep_on_top: false,
-            background_effect: None,
-            background_effect_state: WebviewBackgroundEffectState::FollowsWindowActiveState,
-            corner_radius: None,
+            platform: WindowPlatformStyleState {
+                macos: MacosWindowStyleState {
+                    material: None,
+                    material_state: WebviewBackgroundEffectState::FollowsWindowActiveState,
+                    corner_radius: None,
+                },
+            },
         },
         navigator_window: NavigatorWindowSettings {
             enabled: true,

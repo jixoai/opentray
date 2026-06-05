@@ -302,37 +302,36 @@ fn dispatch_navigator_window_command(
                     changed = true;
                 }
             }
-            if let Some(background_effect) = payload.background_effect {
-                let normalized_effect = if background_effect.is_empty() {
-                    None
-                } else {
-                    Some(background_effect)
-                };
-                if bridge_state.style.background_effect != normalized_effect {
-                    bridge_state.style.background_effect = normalized_effect;
-                    changed = true;
+            if let Some(macos_payload) = payload.platform.and_then(|platform| platform.macos) {
+                if let Some(material) = macos_payload.material {
+                    let normalized_material =
+                        material.and_then(|material| (!material.is_empty()).then_some(material));
+                    if bridge_state.style.platform.macos.material != normalized_material {
+                        bridge_state.style.platform.macos.material = normalized_material;
+                        changed = true;
+                    }
                 }
-            }
-            if let Some(background_effect_state) = payload.background_effect_state.as_deref() {
-                let normalized_state = parse_background_effect_state(background_effect_state)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Unsupported(format!(
-                            "background effect state {background_effect_state} is not supported on macOS"
-                        ))
-                    })?;
-                if bridge_state.style.background_effect_state != normalized_state {
-                    bridge_state.style.background_effect_state = normalized_state;
-                    changed = true;
+                if let Some(material_state) = macos_payload.material_state.as_deref() {
+                    let normalized_state = parse_background_effect_state(material_state)
+                        .ok_or_else(|| {
+                            WebviewRuntimeError::Unsupported(format!(
+                                "background effect state {material_state} is not supported on macOS"
+                            ))
+                        })?;
+                    if bridge_state.style.platform.macos.material_state != normalized_state {
+                        bridge_state.style.platform.macos.material_state = normalized_state;
+                        changed = true;
+                    }
                 }
-            }
-            if let Some(corner_radius) = payload.corner_radius {
-                let normalized_radius = match corner_radius {
-                    Some(radius) => Some(normalize_corner_radius(radius)?),
-                    None => None,
-                };
-                if bridge_state.style.corner_radius != normalized_radius {
-                    bridge_state.style.corner_radius = normalized_radius;
-                    changed = true;
+                if let Some(corner_radius) = macos_payload.corner_radius {
+                    let normalized_radius = match corner_radius {
+                        Some(radius) => Some(normalize_corner_radius(radius)?),
+                        None => None,
+                    };
+                    if bridge_state.style.platform.macos.corner_radius != normalized_radius {
+                        bridge_state.style.platform.macos.corner_radius = normalized_radius;
+                        changed = true;
+                    }
                 }
             }
             drop(bridge_state);
@@ -378,13 +377,14 @@ fn dispatch_navigator_tray_command(
     cmd: &str,
 ) -> Result<Value, WebviewRuntimeError> {
     match cmd {
-        "getBounds" => Ok(bridge
-            .borrow()
-            .tray_bounds
-            .map(serde_json::to_value)
-            .transpose()
-            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?
-            .unwrap_or(Value::Null)),
+        "getBounds" => {
+            let bounds = bridge.borrow().tray_bounds;
+            Ok(json!({
+                "kind": if bounds.is_some() { "native" } else { "unavailable" },
+                "source": if bounds.is_some() { "host.trayBounds" } else { "host.unavailable" },
+                "rect": bounds
+            }))
+        }
         other => Err(WebviewRuntimeError::Rejected(format!(
             "unsupported navigator tray command: {other}"
         ))),
