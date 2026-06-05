@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 3
+- Round: 2
 - Status: apply
-- Previous plan backup: `plans/plan-v4.md`
+- Previous plan backup: `plans/plan-v3.md`
 
 ## Workflow Command Surface
 
@@ -41,7 +41,6 @@
 | 6 | User | 明确要求废弃 `fitContentSize`，理论上 `screen + resize API` 就够了。 | sizing law 从默认 fit-content 收缩为固定壳 + 显式控制。 |
 | 7 | User | 要求启动阶段控制变成独立开关，并支持 `*` / `!feature` 组合。 | smoke / runtime / docs 需要从 profile 模式切到 feature expression 模式。 |
 | 8 | User | 肉眼验收确认 baseline 正常，但 `nativeWindowApi`、`nativeScreenApi`、`frameless` 任意单独开启都会异常，并提示核心问题可能不是某个 feature 本身。 | 问题收敛到非-baseline 共同触发的启动阶段宿主副作用；bridge feature 不应隐式触发 Cocoa window takeover。 |
-| 9 | User | 新 artifact 验收确认 baseline 与 `frameless` 正常，反而是 `nativeWindowApi` / `nativeScreenApi` 不正常。 | `styleMask/titlebar` 被排除；问题进一步收敛到 Native Module 注册或 runtime attach JS bootstrap。下一步先禁用启动期 bootstrap，保留 module 注册。 |
 
 ### Evidence Read
 
@@ -171,7 +170,6 @@
   - explicit startup tokens: `nativeWindowApi`, `bindWindowGlobals`, `nativeScreenApi`, `bindScreenGlobals`, `frameless`
   - wildcard/disable expression support for smoke acceptance: `*`, `!feature`
   - bridge features only enable Lynx Native Module/bootstrap exposure; they must not mutate the carrier `NSWindow` at startup
-  - bootstrap injection must not run during runtime attach until proven safe; the facade may install navigator APIs lazily after page code opts in
   - native chrome mutation is scoped to chrome features such as `frameless`; size, title, icon, center, and activation remain command-driven or carrier-owned unless explicitly separated later
 
 ### Data Shape
