@@ -125,12 +125,12 @@ For Lynx, `frameless` currently means borderless only. It does not imply a full-
 When you need to validate a GitHub-built macOS artifact before publish, use the workspace launcher instead of hand-written `/tmp` scripts:
 
 ```bash
-pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle research/lynx/app/dist/input-probe.lynx.bundle
-pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle research/lynx/app/dist/input-probe.lynx.bundle --features "nativeWindowApi,bindWindowGlobals,nativeScreenApi,bindScreenGlobals"
-pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle research/lynx/app/dist/input-probe.lynx.bundle --features "*,!nativeScreenApi"
+pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle packages/cli/assets/lynx-review/main.lynx.bundle
+pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "nativeWindowApi,bindWindowGlobals,nativeScreenApi,bindScreenGlobals"
+pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "*,!nativeScreenApi"
 ```
 
-The empty feature set is the baseline carrier check. Use it to validate the physical window baseline: click, scroll, input, red/yellow/green controls, and resize/move. Only after that baseline is healthy should you validate explicit startup feature sets on top of the same carrier.
+The package-owned review bundle is the full human acceptance surface. The separate `input-probe.lynx.bundle` is only a low-level diagnostic asset for isolating raw click/scroll/input delivery. The empty feature set is the baseline carrier check. Use it to validate the physical window baseline: click, scroll, input, red/yellow/green controls, and resize/move. Only after that baseline is healthy should you validate explicit startup feature sets on top of the same carrier.
 
 First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
 
