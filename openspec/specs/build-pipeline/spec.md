@@ -24,21 +24,13 @@ OpenTray SHALL provide a branch preview build workflow whose normal automatic tr
 
 OpenTray SHALL treat a machine-readable build marker inside a changeset file as the explicit request to spend CI resources on a preview build. A changed changeset file without that marker SHALL cause the workflow to no-op after planning.
 
-#### Scenario: Changed changeset without marker no-ops
+#### Scenario: Deleted changed changeset is ignored during preview planning
 
-- **GIVEN** a push updates `.changeset/example.md`
-- **AND** that file does not contain an OpenTray preview build marker
-- **WHEN** the planner inspects the changed file
-- **THEN** it reports `enabled=false`
-- **AND** no heavy native build job starts
-
-#### Scenario: Changed changeset with alias enables preview plan
-
-- **GIVEN** a push updates `.changeset/example.md`
-- **AND** that file contains an OpenTray preview build marker with `alias`
-- **WHEN** the planner inspects the changed file
-- **THEN** it reports `enabled=true`
-- **AND** the build alias is preserved in the planner output
+- **GIVEN** a push changes one or more `.changeset/*.md` paths
+- **AND** at least one of those paths was deleted in the resulting checkout
+- **WHEN** the preview planner inspects changed changesets
+- **THEN** deleted paths are ignored instead of causing file-read failure
+- **AND** any remaining live marked changeset still drives the preview plan normally
 
 ### Requirement: Planner SHALL infer or validate artifact families instead of hard-coding workflow branches
 
@@ -95,3 +87,4 @@ OpenTray SHALL keep `workflow_dispatch` as an escape hatch for manual preview bu
 - **WHEN** they provide explicit family or target overrides
 - **THEN** the planner applies the same family validation and job-matrix normalization rules as the automatic changeset path
 - **AND** the workflow still avoids unrelated family builds
+

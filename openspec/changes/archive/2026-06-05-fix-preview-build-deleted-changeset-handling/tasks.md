@@ -21,10 +21,10 @@
 - [x] 4.1 Run targeted preview planner/workflow tests.
 - [x] 4.2 Run `git diff --check`.
 - [x] 4.3 Run `bun run openspec:vision -- validate fix-preview-build-deleted-changeset-handling`.
-- [ ] 4.4 Run `bun run openspec:vision -- check fix-preview-build-deleted-changeset-handling`.
+- [x] 4.4 Run `bun run openspec:vision -- check fix-preview-build-deleted-changeset-handling`.
 
 ## 5. Self-Review Loop
 
 - [x] 5.1 Generate `review/self-review.md` comparing deleted-file tolerance against `plans/plan.md`.
 - [x] 5.2 Generate `review/self-review.html` as the structured evidence view.
-- [ ] 5.3 If review exits normally, archive the change and commit the archive result.
+- [x] 5.3 If review exits normally, archive the change and commit the archive result.
