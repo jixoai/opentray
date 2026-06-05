@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Self Review: plan-selective-release-family-builds</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f5f1;
+        --panel: rgba(255, 255, 255, 0.92);
+        --ink: #17202a;
+        --muted: #5f6b76;
+        --line: rgba(23, 32, 42, 0.12);
+        --accent: #2f6f94;
+        --ok: #1f7a45;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(47, 111, 148, 0.12), transparent 34%),
+          linear-gradient(180deg, #fbfbfa 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 15px/1.55 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      }
+      main {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 34px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 22px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      .deck {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .card {
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 12px 36px rgba(23, 32, 42, 0.08);
+      }
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .metric {
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .ok {
+        color: var(--ok);
+        font-weight: 700;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        background: rgba(47, 111, 148, 0.08);
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      code,
+      pre {
+        font: 13px/1.45 "SFMono-Regular", "Menlo", "Monaco", monospace;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>plan-selective-release-family-builds</h1>
+      <p>
+        Review focus: prove that release native builds now follow pending
+        changesets package truth, reuse the same native build graph as preview,
+        and no longer drag Lynx work into the current WebView-only publish set.
+      </p>
+
+      <div class="deck">
+        <section class="card">
+          <div class="label">Planner Result</div>
+          <div class="metric ok">6 jobs</div>
+          <p>All current jobs are `daemon + webview`. No Lynx atoms selected.</p>
+        </section>
+        <section class="card">
+          <div class="label">Repo Gate</div>
+          <div class="metric ok">verify passed</div>
+          <p><code>pnpm run verify</code> completed after the workflow refactor.</p>
+        </section>
+        <section class="card">
+          <div class="label">Workflow Law</div>
+          <div class="metric ok">planner-driven</div>
+          <p><code>release.yml</code> now executes from planner outputs instead of a fixed native matrix.</p>
+        </section>
+      </div>
+
+      <h2>Gate Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Gate</th>
+            <th>Evidence</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Native atoms are modeled independently</td>
+            <td>
+              <code>scripts/binaries/native-build-graph.ts</code> defines the
+              shared <code>daemon</code>, <code>webview</code>,
+              <code>lynx</code>, and <code>lynx-runtime</code> atoms.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Release planning is derived from pending changesets</td>
+            <td>
+              <code>bun run scripts/binaries/release-plan.ts --root "$PWD"</code>
+              resolved the three current pending WebView changesets into
+              components <code>["daemon","webview"]</code>.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>WebView release no longer drags Lynx</td>
+            <td>
+              Every planned job reported <code>buildsLynxRuntime: false</code>,
+              and no job contained <code>lynx</code> or
+              <code>lynx-runtime</code> in <code>artifactKinds</code>.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+          <tr>
+            <td>Workflow staging follows selected atoms only</td>
+            <td>
+              <code>stage-release-artifacts.ts</code> and
+              <code>validate-package-dirs.ts</code> consume the planner outputs
+              directly instead of looping over every first-stage family.
+            </td>
+            <td class="ok">Pass</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Planner Output</h2>
+      <pre>{
+  "components": ["daemon", "webview"],
+  "jobs": [
+    { "target": "darwin-arm64", "componentsCsv": "daemon,webview", "buildsLynxRuntime": false },
+    { "target": "darwin-x64", "componentsCsv": "daemon,webview", "buildsLynxRuntime": false },
+    { "target": "linux-arm64", "componentsCsv": "daemon,webview", "buildsLynxRuntime": false },
+    { "target": "linux-x64", "componentsCsv": "daemon,webview", "buildsLynxRuntime": false },
+    { "target": "windows-arm64", "componentsCsv": "daemon,webview", "buildsLynxRuntime": false },
+    { "target": "windows-x64", "componentsCsv": "daemon,webview", "buildsLynxRuntime": false }
+  ]
+}</pre>
+
+      <h2>Command Evidence</h2>
+      <pre>bun run scripts/binaries/release-plan.ts --root "$PWD"
+bun test scripts/binaries/*.test.ts
+pnpm run verify
+bun run openspec:vision -- validate plan-selective-release-family-builds
+git diff --check</pre>
+    </main>
+  </body>
+</html>
