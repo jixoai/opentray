@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   createBrokerEndpointIdentity,
+  compareOpenTrayProtocolLine,
   formatBrokerEndpointName,
+  formatOpenTrayProtocolLine,
+  formatProtocolDistTag,
   formatBrokerStateRoot,
   formatUnixSocketPath,
   formatWindowsPipeName,
+  isOpenTrayProtocolLineCompatible,
   isSupportedProtocolVersion,
+  parseProtocolDistTag,
+  OPENTRAY_PROTOCOL_FAMILY,
+  OPENTRAY_PROTOCOL_LINE,
   parseServerFrame,
   PROTOCOL_VERSION,
   type ClientFrame,
@@ -122,6 +129,64 @@ describe("@opentray/spec", () => {
       "/Users/example/.opentray/0.1.0/opentray-p1.sock",
     );
     expect(formatWindowsPipeName(identity)).toBe("\\\\.\\pipe\\opentray-0.1.0-p1");
+  });
+
+  it("formats extension-agnostic protocol-line dist-tags", () => {
+    expect(OPENTRAY_PROTOCOL_FAMILY).toBe("opentray-protocol");
+    expect(formatOpenTrayProtocolLine(OPENTRAY_PROTOCOL_LINE)).toBe("opentray-protocol/1.0");
+    expect(
+      formatOpenTrayProtocolLine({
+        family: OPENTRAY_PROTOCOL_FAMILY,
+        major: 1,
+        minor: 2,
+      }),
+    ).toBe("opentray-protocol/1.2");
+    expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-0");
+    expect(formatProtocolDistTag({ channel: "alpha" })).toBe("alpha-1-0");
+    expect(formatProtocolDistTag({ channel: "stable", major: 1, minor: 2 })).toBe("stable-1-2");
+    expect(parseProtocolDistTag("stable-1-0")).toEqual({
+      channel: "stable",
+      major: 1,
+      minor: 0,
+    });
+    expect(parseProtocolDistTag("alpha-1-2")).toEqual({
+      channel: "alpha",
+      major: 1,
+      minor: 2,
+    });
+  });
+
+  it("treats newer minor lines as backward-compatible within the same major", () => {
+    const stable12 = { family: OPENTRAY_PROTOCOL_FAMILY, major: 1, minor: 2 } as const;
+    const stable11 = { family: OPENTRAY_PROTOCOL_FAMILY, major: 1, minor: 1 } as const;
+    const stable10 = { family: OPENTRAY_PROTOCOL_FAMILY, major: 1, minor: 0 } as const;
+    const stable20 = { family: OPENTRAY_PROTOCOL_FAMILY, major: 2, minor: 0 } as const;
+
+    expect(compareOpenTrayProtocolLine(stable12, stable11)).toBeGreaterThan(0);
+    expect(compareOpenTrayProtocolLine(stable11, stable12)).toBeLessThan(0);
+    expect(compareOpenTrayProtocolLine(stable12, stable12)).toBe(0);
+    expect(isOpenTrayProtocolLineCompatible(stable12, stable11)).toBe(true);
+    expect(isOpenTrayProtocolLineCompatible(stable12, stable10)).toBe(true);
+    expect(isOpenTrayProtocolLineCompatible(stable10, stable12)).toBe(false);
+    expect(isOpenTrayProtocolLineCompatible(stable20, stable12)).toBe(false);
+  });
+
+  it("rejects extension-specific protocol-line dist-tags", () => {
+    expect(() => parseProtocolDistTag("stable-webview-1-0")).toThrow(
+      "invalid OpenTray protocol dist-tag",
+    );
+    expect(() => parseProtocolDistTag("alpha-lynx-1-0")).toThrow(
+      "invalid OpenTray protocol dist-tag",
+    );
+  });
+
+  it("keeps runtime protocol version separate from install-time protocol tags", () => {
+    expect(PROTOCOL_VERSION).toBe(1);
+    expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-0");
+    expect(createBrokerEndpointIdentity({ packageVersion: "0.5.1" })).toEqual({
+      packageVersion: "0.5.1",
+      protocolVersion: 1,
+    });
   });
 
   it("rejects ready frames without explicit protocol metadata", () => {

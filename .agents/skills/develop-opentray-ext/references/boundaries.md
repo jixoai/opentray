@@ -27,6 +27,8 @@ For an official native extension, keep three atoms distinct:
 - No daemon-side shadow parser for the extension protocol.
 - No daemon-side shadow runtime that makes the extension package look thinner than it really is.
 - No facade package that imports platform native packages from public API code.
+- No extension-specific OpenTray protocol-line names such as `stable-webview-1-0`; protocol-line tags stay core/extension agnostic.
+- No protocol-line selector that treats one minor bump as a new extension family; same-major newer minors stay in the same line.
 
 ## Scope Rules
 

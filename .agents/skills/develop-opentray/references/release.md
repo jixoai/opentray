@@ -48,6 +48,33 @@ When the user wants `npm i opentray@alpha`, treat that as a real release path, n
 
 If the current branch only proves macOS visually while Windows/Linux still expose package topology or typed unsupported runtime paths, the alpha channel is the more honest public surface.
 
+## Protocol-Line Dist-Tag Rule
+
+OpenTray uses npm dist-tags as install-time compatibility selectors, not runtime authority.
+
+- Runtime authority remains the broker handshake, daemon endpoint identity, and dynamic extension ABI validation.
+- The OpenTray-wide protocol family is `opentray-protocol`; the current protocol line is the versioned `opentray-protocol/<major>.<minor>` source of truth from `@opentray/spec`.
+- Protocol-line tags are extension-agnostic: `stable-A-B` and `alpha-A-B` (for example, `stable-1-0` today, `stable-1-2` after a compatible minor bump).
+- Do not create tags such as `stable-webview-1-0` or `alpha-lynx-1-0`; that implies core release law knows extension product protocols.
+- Apply the same protocol-line tag to the compatible public package closure: `opentray`, official extension facades, and platform binary atoms.
+- Same-major newer minor lines remain backward-compatible with earlier minors; when the line advances, update the selector for the whole compatible closure together.
+- `latest` is a convenience registry tag, not a compatibility contract.
+
+Use dry-run first:
+
+```bash
+pnpm run protocol-tags:dry-run -- --channel stable
+pnpm run protocol-tags:dry-run -- --channel alpha
+```
+
+Live tag mutation is explicit:
+
+```bash
+pnpm run protocol-tags:apply -- --channel stable
+```
+
+Trusted publishing OIDC does not make arbitrary npm registry mutations available. Keep CI publish on trusted publishing; treat `npm dist-tag add` as a separate authenticated operator action unless a later npm capability or approved security decision changes that law.
+
 ## Changeset-Gated Preview Build Rule
 
 Branch preview builds are not the same thing as the release workflow.

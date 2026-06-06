@@ -40,6 +40,15 @@ The release workflow should:
 
 The repo already demonstrates this shape in `.github/workflows/release.yml`.
 
+## Protocol-Line Tag Rule
+
+Extension platform packages are distribution atoms in the same OpenTray protocol line as their facade and compatible core package.
+
+- Use the OpenTray-wide tags `stable-A-B` / `alpha-A-B`; do not mint extension-specific tags such as `stable-webview-1-0`.
+- Replace `A-B` with the current line from `@opentray/spec`; same-major newer minor bumps stay in the same extension-agnostic closure.
+- A facade package such as `@opentray/ext-webview` and its platform packages must be tagged together for a compatible package closure.
+- The tag is an install-time selector only. Runtime compatibility is still enforced by the broker handshake and dynamic extension ABI version.
+
 ## Package Bootstrap
 
 When introducing a new package atom, use the existing bootstrap helper instead of hand-writing every manifest:

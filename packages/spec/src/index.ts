@@ -10,6 +10,99 @@ export type LeaseId = SessionId;
 export type SurfaceId = SpaceId;
 
 export const PROTOCOL_VERSION = 1;
+export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
+export const OPENTRAY_PROTOCOL_LINE_MAJOR = 1;
+export const OPENTRAY_PROTOCOL_LINE_MINOR = 0;
+
+export const protocolLineReleaseChannels = ["stable", "alpha"] as const;
+export type ProtocolLineReleaseChannel = (typeof protocolLineReleaseChannels)[number];
+
+export interface OpenTrayProtocolLine {
+  family: typeof OPENTRAY_PROTOCOL_FAMILY;
+  major: number;
+  minor: number;
+}
+
+export interface ProtocolDistTagOptions {
+  channel: ProtocolLineReleaseChannel;
+  major?: number;
+  minor?: number;
+}
+
+export interface ProtocolDistTag {
+  channel: ProtocolLineReleaseChannel;
+  major: number;
+  minor: number;
+}
+
+export const OPENTRAY_PROTOCOL_LINE: OpenTrayProtocolLine = {
+  family: OPENTRAY_PROTOCOL_FAMILY,
+  major: OPENTRAY_PROTOCOL_LINE_MAJOR,
+  minor: OPENTRAY_PROTOCOL_LINE_MINOR,
+};
+
+// Install-time protocol lines can advance by minor version while runtime authority stays numeric.
+export const compareOpenTrayProtocolLine = (
+  left: OpenTrayProtocolLine,
+  right: OpenTrayProtocolLine,
+): number => {
+  assertOpenTrayProtocolLine(left, "left");
+  assertOpenTrayProtocolLine(right, "right");
+  if (left.major !== right.major) {
+    return left.major - right.major;
+  }
+  return left.minor - right.minor;
+};
+
+export const isOpenTrayProtocolLineCompatible = (
+  supported: OpenTrayProtocolLine,
+  required: OpenTrayProtocolLine,
+): boolean => {
+  assertOpenTrayProtocolLine(supported, "supported");
+  assertOpenTrayProtocolLine(required, "required");
+  return supported.major === required.major && supported.minor >= required.minor;
+};
+
+export const formatOpenTrayProtocolLine = ({
+  family,
+  major,
+  minor,
+}: OpenTrayProtocolLine = OPENTRAY_PROTOCOL_LINE): string => {
+  assertProtocolLineVersion(major, "major");
+  assertProtocolLineVersion(minor, "minor");
+  return `${family}/${major}.${minor}`;
+};
+
+export const isProtocolLineReleaseChannel = (value: string): value is ProtocolLineReleaseChannel =>
+  protocolLineReleaseChannels.includes(value as ProtocolLineReleaseChannel);
+
+export const formatProtocolDistTag = ({
+  channel,
+  major = OPENTRAY_PROTOCOL_LINE_MAJOR,
+  minor = OPENTRAY_PROTOCOL_LINE_MINOR,
+}: ProtocolDistTagOptions): string => {
+  assertProtocolLineReleaseChannel(channel);
+  assertProtocolLineVersion(major, "major");
+  assertProtocolLineVersion(minor, "minor");
+  return `${channel}-${major}-${minor}`;
+};
+
+export const parseProtocolDistTag = (tag: string): ProtocolDistTag => {
+  const match = /^(?<channel>[a-z]+)-(?<major>\d+)-(?<minor>\d+)$/u.exec(tag);
+  const groups = match?.groups;
+  if (groups === undefined) {
+    throw new Error(`invalid OpenTray protocol dist-tag: ${tag}`);
+  }
+  const channel = groups.channel;
+  if (channel === undefined || !isProtocolLineReleaseChannel(channel)) {
+    throw new Error(`unsupported OpenTray protocol dist-tag channel: ${channel ?? ""}`);
+  }
+  const major = Number(groups.major);
+  const minor = Number(groups.minor);
+  assertProtocolLineVersion(major, "major");
+  assertProtocolLineVersion(minor, "minor");
+  return { channel, major, minor };
+};
 
 export interface BrokerEndpointIdentity {
   packageVersion: string;
@@ -61,6 +154,23 @@ export const formatWindowsPipeName = (identity: BrokerEndpointIdentity): string 
   `\\\\.\\pipe\\${formatBrokerEndpointName(identity)}`;
 
 const endpointComponentPattern = /^[0-9A-Za-z._+-]+$/u;
+
+const assertOpenTrayProtocolLine = (line: OpenTrayProtocolLine, name: string): void => {
+  assertProtocolLineVersion(line.major, `${name}.major`);
+  assertProtocolLineVersion(line.minor, `${name}.minor`);
+};
+
+const assertProtocolLineReleaseChannel = (channel: string): void => {
+  if (!isProtocolLineReleaseChannel(channel)) {
+    throw new Error(`unsupported OpenTray protocol release channel: ${channel}`);
+  }
+};
+
+const assertProtocolLineVersion = (value: number, name: string): void => {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`protocol line ${name} must be a non-negative integer: ${value}`);
+  }
+};
 
 const assertEndpointIdentity = (identity: BrokerEndpointIdentity): void => {
   assertEndpointComponent(identity.packageVersion, "packageVersion");

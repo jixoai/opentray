@@ -11,7 +11,7 @@ Use this skill when the user wants to build with OpenTray, not hack on the repo.
 
 ## Quick Routing
 
-- Install and first tray usage: read `references/getting-started.md`.
+- Install, protocol-line tags, and first tray usage: read `references/getting-started.md`.
 - Public API patterns and examples: read `references/api-patterns.md`.
 - Daemon lifecycle, smoke commands, and health checks: read `references/daemon-ops.md`.
 - Official WebView extension usage: read `references/ext-webview.md`.
@@ -22,6 +22,7 @@ Use this skill when the user wants to build with OpenTray, not hack on the repo.
 - Prefer package-owned commands such as `opentray smoke daemon-tray` over workspace-only developer commands when answering usage questions.
 - Keep platform truth explicit. If a platform or icon/runtime capability is limited, say so instead of pretending it works.
 - Distinguish between protocol-only examples and real native smoke commands.
+- Use `latest` for newest published packages and `stable-A-B` / `alpha-A-B` when the user wants to lock a whole OpenTray protocol line; replace `A-B` with the current line from `@opentray/spec`.
 
 ## Quick Verification
 
