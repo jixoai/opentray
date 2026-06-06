@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>evolve-opentray-protocol-line-major-minor self-review</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f5;
+        --panel: #ffffff;
+        --text: #1d1d1f;
+        --muted: #64646b;
+        --line: #d9d9dd;
+        --accent: #0f766e;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 32px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 30px;
+      }
+      h2 {
+        font-size: 18px;
+        margin-top: 28px;
+      }
+      p,
+      li {
+        line-height: 1.55;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 18px 20px;
+        margin-top: 16px;
+      }
+      .meta {
+        display: grid;
+        gap: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+      }
+      th {
+        width: 24%;
+        background: #fafafa;
+        font-weight: 600;
+      }
+      tr:last-child th,
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      code {
+        background: #f0f0f2;
+        border-radius: 6px;
+        padding: 0.1rem 0.35rem;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .ok {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      ul {
+        margin: 8px 0 0 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Vision-Driven Self Review</h1>
+      <div class="card meta">
+        <div><strong>Change:</strong> <code>evolve-opentray-protocol-line-major-minor</code></div>
+        <div><strong>Iteration:</strong> 1</div>
+        <div><strong>Recurring issue counts:</strong> none</div>
+        <div><strong>Exit-condition judgment:</strong> normal exit possible</div>
+        <div><strong>Next loop action:</strong> archive after the final OpenSpec check</div>
+      </div>
+
+      <h2>Intent Alignment</h2>
+      <table>
+        <tr>
+          <th>Intent point</th>
+          <th>Evidence</th>
+          <th>Verdict</th>
+        </tr>
+        <tr>
+          <td>`stable-A-B` / `alpha-A-B` should express a same-major protocol-line compatibility law.</td>
+          <td>`packages/spec/src/index.ts` adds line comparison and compatibility helpers; tests cover same-major minor compatibility and extension-agnostic formatting.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+        <tr>
+          <td>Runtime authority must stay in broker handshake, endpoint identity, and ABI validation.</td>
+          <td>No runtime handshake or endpoint identity contract changed. Release docs still keep <code>npm dist-tag add</code> separate from trusted publishing.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+        <tr>
+          <td>Release planning should expose the current line selector clearly enough for AI-driven release work.</td>
+          <td>`scripts/npm/protocol-dist-tags.ts` emits <code>protocolLine</code> alongside the install selector, and tests assert it.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+        <tr>
+          <td>Internal and external docs must tell humans and AI when `package.json` selectors should move.</td>
+          <td>Release and consumer skill docs now describe `stable-A-B` / `alpha-A-B` as the current line shape.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+      </table>
+
+      <h2>Deviations From Intent</h2>
+      <div class="card">
+        <p>None.</p>
+      </div>
+
+      <h2>New Questions For User</h2>
+      <div class="card">
+        <p>None.</p>
+      </div>
+
+      <h2>Evidence</h2>
+      <div class="card">
+        <ul>
+          <li><strong>HTML report:</strong> <code>review/self-review.html</code></li>
+          <li><strong>Command / log evidence:</strong>
+            <ul>
+              <li><code>bun run openspec:vision -- commit-check evolve-opentray-protocol-line-major-minor --phase apply</code></li>
+              <li><code>pnpm --filter @opentray/spec test</code></li>
+              <li><code>bun test scripts/npm/*.test.ts</code></li>
+              <li><code>pnpm run typecheck</code></li>
+              <li><code>bun run openspec:vision -- validate evolve-opentray-protocol-line-major-minor</code></li>
+              <li><code>git diff --check</code></li>
+              <li><code>bun run openspec:vision -- commit-check evolve-opentray-protocol-line-major-minor --phase self-review</code></li>
+            </ul>
+          </li>
+          <li><strong>Git commits reviewed:</strong> <code>13bb164</code>, <code>6f3ac87</code></li>
+          <li><strong>Uncommitted paths, if any:</strong> <code>package.json</code>, <code>.changeset/smooth-lobsters-burn.md</code>, <code>openspec/changes/define-opentray-protocol-line-dist-tags/**</code></li>
+          <li><strong>Task checkboxes updated by this working context:</strong> yes, only the current change's tasks were updated in this context.</li>
+        </ul>
+      </div>
+
+      <h2>Exit Handling</h2>
+      <div class="card">
+        <p>Normal exit: run <code>openspec archive evolve-opentray-protocol-line-major-minor</code> and commit the archive result.</p>
+        <p class="muted">There is no visible UI surface here; the proof surface is command output, tests, and git evidence.</p>
+      </div>
+    </main>
+  </body>
+</html>
