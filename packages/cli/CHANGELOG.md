@@ -1,5 +1,12 @@
 # opentray
 
+## 0.5.2
+
+### Patch Changes
+
+- Updated dependencies [e0d6274]
+  - @opentray/spec@0.4.1
+
 ## 0.5.1
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @opentray/spec
 
+## 0.4.1
+
+### Patch Changes
+
+- e0d6274: Add OpenTray protocol-line metadata and npm dist-tag helpers for extension-agnostic compatible package installs.
+
 ## 0.4.0
 
 ### Minor Changes
