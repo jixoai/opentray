@@ -206,6 +206,8 @@ pub enum ClientFrame {
         space_id: SpaceId,
         name: String,
         path: String,
+        #[serde(default, rename = "mountId", skip_serializing_if = "Option::is_none")]
+        mount_id: Option<String>,
     },
     ExtCommand {
         #[serde(rename = "requestId")]

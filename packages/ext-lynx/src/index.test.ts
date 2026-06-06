@@ -1,26 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
+import { createTrayHandle, type OpenTrayTransport } from "opentray";
 
 import { attachLynx } from "./index";
-import type { TrayHandle } from "opentray";
 
 describe("@opentray/ext-lynx", () => {
   it("emits lynx as a normal extension command", async () => {
-    const commands: unknown[] = [];
-    const tray: TrayHandle = {
-      space: { spaceId: "space-1" },
-      trayId: "tray-1",
-      async getBounds() {
-        return {
-          kind: "unavailable",
-          source: "test.stub",
-          rect: null,
-        };
-      },
-      async commandExtension(ext, data) {
-        commands.push({ ext, data });
-      },
-      async destroy() {},
-    };
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
 
     await attachLynx(tray).show({
       type: "show",
@@ -40,8 +27,12 @@ describe("@opentray/ext-lynx", () => {
       minHeight: 180,
     });
 
-    expect(commands).toEqual([
+    expect(transport.frames).toEqual([
       {
+        type: "ext-command",
+        requestId: "opentray-1",
+        spaceId: "space-1",
+        trayId: "tray-1",
         ext: "lynx",
         data: {
           type: "show",
@@ -64,3 +55,12 @@ describe("@opentray/ext-lynx", () => {
     ]);
   });
 });
+
+class RecordingTransport implements OpenTrayTransport {
+  readonly frames: ClientRequestFrame[] = [];
+
+  async request(frame: ClientRequestFrame): Promise<ServerFrame> {
+    this.frames.push(frame);
+    return { type: "ack", requestId: frame.requestId };
+  }
+}

@@ -50,7 +50,7 @@ impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
 
     fn sync_surface(&self, projection: SurfaceProjection) -> Result<(), BackendError> {
         self.runtime
-            .apply_projection(TrayIconProjection::from_surface_projection(&projection))
+            .apply_projection(TrayIconProjection::from_surface_projection(&projection)?)
     }
 
     fn tray_bounds(

@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
-import { attachWebview } from "../../ext-webview/src/index";
+import { WebviewExt, type WebviewWindowHandle } from "../../ext-webview/src/index";
 import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
 
 const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
@@ -19,7 +19,7 @@ if (localWebviewExtension !== undefined) {
 const menuLabels = new Map<number, string>([
   [1, "Open WebView"],
 ]);
-let webview: ReturnType<typeof attachWebview> | undefined;
+let webview: WebviewWindowHandle | undefined;
 
 connection.onEvent((frame) => {
   console.log(`broker -> client ${JSON.stringify(frame)}`);
@@ -51,15 +51,15 @@ const tray = await space.createTray({
   },
 });
 console.log(`tray: ${tray.trayId}`);
-await connection.request({
-  type: "load-ext",
-  requestId: "daemon-example-load-webview",
-  spaceId: space.space.spaceId,
-  name: "webview",
-  path: "@opentray/ext-webview",
+webview = tray.extend(WebviewExt).createWebviewWindow({
+  html: createWebviewDemoHtml(),
+  width: 420,
+  height: 260,
+  nativeWindowApi: true,
+  bindWindowGlobals: true,
+  nativeTrayApi: true,
 });
-webview = attachWebview(tray);
-console.log("webview facade attached to the daemon native WebView extension");
+console.log("webview extension mounted on the daemon tray");
 console.log("click the tray icon: macOS should direct-trigger the single primary action without opening a menu");
 console.log("press Ctrl-C to exit the tray demo");
 
@@ -121,14 +121,7 @@ async function handleMenuClick(itemId: number): Promise<void> {
     console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
 
     await webview.show({
-      type: "show",
-      html: createWebviewDemoHtml(),
-      width: 420,
-      height: 260,
       fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
-      nativeWindowApi: true,
-      bindWindowGlobals: true,
-      nativeTrayApi: true,
     });
     console.log("webview command: show");
     return;

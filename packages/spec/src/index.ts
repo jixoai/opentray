@@ -215,7 +215,7 @@ export type ClientRequestFrame =
   | { type: "set-tray-menu"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; menu: Menu }
   | { type: "set-tray-icon"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; icon: Icon }
   | { type: "set-tray-tooltip"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; tooltip: Tooltip }
-  | { type: "load-ext"; requestId: RequestId; spaceId: SpaceId; name: string; path: string }
+  | { type: "load-ext"; requestId: RequestId; spaceId: SpaceId; name: string; path: string; mountId?: string }
   | { type: "ext-command"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; ext: string; data: unknown }
   | { type: "unload-ext"; requestId: RequestId; spaceId: SpaceId; name: string }
   | { type: "health"; requestId: RequestId };

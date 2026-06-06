@@ -81,9 +81,9 @@ The broker composition layer SHALL own backend selection and SHALL apply `Surfac
 - **THEN** `opentray-core` has no dependency on concrete backend crates
 - **AND** kernel tests can still use `FakeBackend`.
 
-### Requirement: Native tray-icon backend SHALL expose honest icon capability boundaries
+### Requirement: Native tray-icon backend SHALL normalize supported icon sources before tray materialization
 
-The native `tray-icon` backend SHALL support `rgba` icon assets for visible tray items. Encoded and file icon asset shapes MAY remain in the shared protocol for future portability, but this backend SHALL return typed unsupported errors for those shapes until decoding and file policy are implemented. Human-visible examples SHALL use a deliberate nonblank RGBA icon rather than a transparent or one-pixel placeholder.
+The native `tray-icon` backend SHALL support `rgba` icon assets for visible tray items and SHALL also accept `encoded` and `file` icon sources that can be decoded to PNG RGBA. The backend SHALL normalize supported sources into RGBA before native tray materialization. Missing files, unreadable files, and undecodable inputs SHALL return typed backend failures. Human-visible examples SHALL use a deliberate nonblank RGBA icon rather than a transparent or one-pixel placeholder.
 
 #### Scenario: RGBA icon creates visible tray item
 
@@ -92,11 +92,18 @@ The native `tray-icon` backend SHALL support `rgba` icon assets for visible tray
 - **THEN** it converts the RGBA bytes into the native tray icon type
 - **AND** the example icon is visually nonblank.
 
-#### Scenario: Encoded or file icon is not faked
+#### Scenario: Encoded or file icon is normalized before native tray creation
 
-- **GIVEN** a tray projection contains an `encoded` or `file` icon asset
+- **GIVEN** a tray projection contains a decodable `encoded` or `file` PNG icon source
 - **WHEN** the native `tray-icon` backend applies the projection
-- **THEN** it returns a typed unsupported backend error
+- **THEN** it decodes the PNG into RGBA before native tray materialization
+- **AND** it does not require the client SDK to perform PNG decoding first.
+
+#### Scenario: Missing or undecodable icon source fails honestly
+
+- **GIVEN** a tray projection contains a missing file or undecodable PNG data
+- **WHEN** the native `tray-icon` backend applies the projection
+- **THEN** it returns a typed backend failure with an actionable icon-source code
 - **AND** it does not silently substitute a blank icon.
 
 ### Requirement: tray-icon backend SHALL expose tray-scoped native bounds honestly

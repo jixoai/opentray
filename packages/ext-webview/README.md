@@ -10,7 +10,7 @@ Official rich popup extension for OpenTray.
 
 This package is an extension atom. It must not become the owner of core tray lifecycle.
 
-The facade stays platform-neutral. Native libraries are optional platform packages named `@opentray/ext-webview-<os>-<arch>`, and the daemon resolves them through the dynamic extension discovery law when `load-ext` requests `@opentray/ext-webview`.
+The facade stays platform-neutral. Native libraries are optional platform packages named `@opentray/ext-webview-<os>-<arch>`, and the daemon resolves them through the dynamic extension discovery law when a mounted WebView capability loads `@opentray/ext-webview`.
 
 The platform dylib owns the full WebView protocol and native runtime. `opentray` forwards scoped extension traffic to it, but does not keep a daemon-side WebView parser or native WebView builder.
 
@@ -83,6 +83,29 @@ For tray panels or other glass-like borderless surfaces, keep these as hard rule
 
 ## Example
 
+Mount WebView on a tray, then create a tray-scoped window. The first window command loads the native extension automatically:
+
+```ts
+import { WebviewExt } from "@opentray/ext-webview";
+import { createTray } from "opentray";
+
+const tray = (await createTray({
+  trayId: "status",
+  title: "Status",
+  icon: { type: "file", path: "./tray-icon.png" },
+})).extend(WebviewExt);
+
+const webview = tray.createWebviewWindow({
+  html: "<main><h1>OpenTray</h1></main>",
+  width: 420,
+  height: 260,
+});
+
+await webview.show();
+```
+
+Use `attachWebview(tray)` only as a compatibility adapter for older code. New code should prefer `tray.extend(WebviewExt)` so multiple trays can mount isolated WebView instances.
+
 Run a broker-free example that sends WebView `show`, `navigate`, `postMessage`, and `hide` commands through the normal OpenTray extension command path:
 
 ```bash
@@ -92,11 +115,10 @@ pnpm --filter @opentray/ext-webview example:webview
 Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe.
 The manual walkthrough for all three CLI examples lives in [../cli/examples/EXAMPLE.md](../cli/examples/EXAMPLE.md).
 
-To expose the injected page API, enable it on `show`:
+To expose the injected page API, enable it on the window options or a later `show(...)` patch:
 
 ```ts
-await webview.show({
-  type: "show",
+const webview = tray.createWebviewWindow({
   html: "<main><h1>OpenTray</h1></main>",
   width: 420,
   height: 260,
@@ -136,6 +158,8 @@ await webview.show({
     iconSync: ["https://example.com"],
   },
 });
+
+await webview.show();
 ```
 
 Window session law:

@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
-import { attachWebview } from "../../ext-webview/src/index";
+import { WebviewExt } from "../../ext-webview/src/index";
 import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
 
 const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
@@ -37,15 +37,36 @@ const tray = await space.createTray({
 });
 console.log(`tray: ${tray.trayId}`);
 
-await connection.request({
-  type: "load-ext",
-  requestId: "tray-panel-load-webview",
-  spaceId: space.space.spaceId,
-  name: "webview",
-  path: "@opentray/ext-webview",
+const webview = tray.extend(WebviewExt).createWebviewWindow({
+  width: 388,
+  height: 286,
+  title: "OpenTray Tray Panel",
+  style: {
+    frameless: true,
+    transparent: true,
+    keepOnTop: true,
+    platform: {
+      macos: {
+        material: "hudWindow",
+        materialState: "active",
+        cornerRadius: 22,
+      },
+    },
+  },
+  nativeWindowApi: true,
+  bindWindowGlobals: true,
+  nativeScreenApi: true,
+  bindScreenGlobals: true,
+  nativeTrayApi: true,
+  titleSync: {
+    documentToWindow: true,
+    windowToDocument: true,
+  },
+  iconSync: true,
+  nativeApiPolicy: {
+    defaultSrc: ["'local'"],
+  },
 });
-
-const webview = attachWebview(tray);
 console.log("click the tray icon: macOS should direct-trigger the single primary action without opening a menu");
 console.log("press Ctrl-C to exit the tray demo");
 
@@ -136,37 +157,8 @@ async function openTrayPanel(): Promise<void> {
   console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
 
   await webview.show({
-    type: "show",
     html: createTrayPanelHtml(),
-    width: 388,
-    height: 286,
-    title: "OpenTray Tray Panel",
     fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
-    style: {
-      frameless: true,
-      transparent: true,
-      keepOnTop: true,
-      platform: {
-        macos: {
-          material: "hudWindow",
-          materialState: "active",
-          cornerRadius: 22,
-        },
-      },
-    },
-    nativeWindowApi: true,
-    bindWindowGlobals: true,
-    nativeScreenApi: true,
-    bindScreenGlobals: true,
-    nativeTrayApi: true,
-    titleSync: {
-      documentToWindow: true,
-      windowToDocument: true,
-    },
-    iconSync: true,
-    nativeApiPolicy: {
-      defaultSrc: ["'local'"],
-    },
   });
   console.log("tray panel command: show");
 }

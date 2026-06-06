@@ -316,11 +316,13 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 space_id,
                 name,
                 path,
+                mount_id,
             } => {
                 let request = ExtensionLoadRequest {
                     surface_id: space_id.clone(),
                     name,
                     path,
+                    mount_id,
                 };
                 match self
                     .extension_loader

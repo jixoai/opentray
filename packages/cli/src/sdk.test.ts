@@ -11,7 +11,7 @@ vi.mock("./local-broker", () => ({
 }));
 
 import { createSpace, createSurface, createTray, resolveDefaultSpace } from "./index";
-import type { OpenTrayTransport } from "./client";
+import type { OpenTrayTransport, TrayExtension } from "./client";
 
 describe("top-level opentray sdk facade", () => {
   beforeEach(() => {
@@ -100,6 +100,100 @@ describe("top-level opentray sdk facade", () => {
           title: "Status",
           icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
         },
+      },
+    ]);
+  });
+
+  it("forwards file-backed tray icons without local normalization", async () => {
+    const transport = new RecordingTransport();
+    connectLocalBroker.mockResolvedValue(transport);
+
+    await createTray({
+      trayId: "status",
+      title: "Status",
+      icon: { type: "file", path: "./assets/tray-icon.png" },
+    });
+
+    expect(transport.frames).toEqual([
+      { type: "resolve-default-space", requestId: "opentray-1" },
+      {
+        type: "create-tray",
+        requestId: "opentray-2",
+        space: { spaceId: "space-default" },
+        tray: {
+          trayId: "status",
+          title: "Status",
+          icon: { type: "file", path: "./assets/tray-icon.png" },
+        },
+      },
+    ]);
+  });
+
+  it("mounts tray extensions once and routes commands through the mount id", async () => {
+    const transport = new RecordingTransport();
+    connectLocalBroker.mockResolvedValue(transport);
+
+    const tray = await createTray(
+      {
+        trayId: "status",
+        title: "Status",
+        icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+      },
+      { space: { spaceId: "space-explicit" } },
+    );
+    const webviewExtension = {
+      name: "webview",
+      path: "@opentray/ext-webview",
+      resolveMount() {
+        return { mountId: "webview.status" };
+      },
+      extend(_tray, context) {
+        return {
+          async show() {
+            await context.command({ type: "show" });
+          },
+        };
+      },
+    } satisfies TrayExtension<{ show(): Promise<void> }>;
+
+    const webviewTray = tray.extend(webviewExtension);
+    await webviewTray.show();
+    await webviewTray.show();
+
+    expect(transport.frames).toEqual([
+      {
+        type: "create-tray",
+        requestId: "opentray-1",
+        space: { spaceId: "space-explicit" },
+        tray: {
+          trayId: "status",
+          title: "Status",
+          icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+        },
+      },
+      {
+        type: "load-ext",
+        requestId: "opentray-2",
+        spaceId: "space-explicit",
+        name: "webview",
+        path: "@opentray/ext-webview",
+        mountId: "webview.status",
+      },
+      {
+        type: "ext-command",
+        requestId: "opentray-3",
+        spaceId: "space-explicit",
+        trayId: "status",
+        ext: "webview.status",
+        data: { type: "show" },
+      },
+      {
+        type: "ext-command",
+        requestId: "opentray-4",
+        spaceId: "space-explicit",
+        trayId: "status",
+        ext: "webview.status",
+        data: { type: "show" },
       },
     ]);
   });

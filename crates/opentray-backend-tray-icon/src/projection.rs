@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Cursor};
 
 use opentray_core::{SurfaceProjection, TrayProjection};
 use opentray_spec::{Icon, Menu, MenuItem, MenuItemId, SurfaceId, Tooltip, TrayEvent, TrayId};
+use png::{ColorType, Decoder, Transformations};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayIconProjection {
@@ -14,7 +15,9 @@ pub struct TrayIconProjection {
 }
 
 impl TrayIconProjection {
-    pub fn from_surface_projection(projection: &SurfaceProjection) -> Self {
+    pub fn from_surface_projection(
+        projection: &SurfaceProjection,
+    ) -> Result<Self, opentray_core::BackendError> {
         let mut routes = TrayIconRouteTable::default();
         let trays = projection
             .trays
@@ -26,16 +29,19 @@ impl TrayIconProjection {
                     &mut routes,
                 )
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
-        Self {
+        Ok(Self {
             space_id: projection.surface.space_id.clone(),
             title: projection.title.clone(),
             tooltip: projection.tooltip.clone(),
-            icon: projection.icon.as_ref().map(TrayIconAsset::from_icon),
+            icon: match projection.icon.as_ref() {
+                Some(icon) => Some(TrayIconAsset::from_icon(icon)?),
+                None => None,
+            },
             trays,
             routes,
-        }
+        })
     }
 }
 
@@ -54,7 +60,7 @@ impl TrayIconTrayProjection {
         space_id: &str,
         tray: &TrayProjection,
         routes: &mut TrayIconRouteTable,
-    ) -> Self {
+    ) -> Result<Self, opentray_core::BackendError> {
         let tray_icon_id = stable_tray_icon_id(space_id, &tray.tray_id);
         let menu =
             TrayIconMenuProjection::from_menu(space_id, &tray.tray_id, tray.menu.as_ref(), routes);
@@ -62,14 +68,14 @@ impl TrayIconTrayProjection {
             routes.insert_primary_event(&tray_icon_id, primary_menu_id);
         }
 
-        Self {
+        Ok(Self {
             tray_icon_id,
             tray_id: tray.tray_id.clone(),
             title: tray.title.clone(),
             tooltip: tray.tooltip.clone(),
-            icon: TrayIconAsset::from_icon(&tray.icon),
+            icon: TrayIconAsset::from_icon(&tray.icon)?,
             menu,
-        }
+        })
     }
 }
 
@@ -80,29 +86,47 @@ pub enum TrayIconAsset {
         width: u32,
         height: u32,
     },
-    Encoded {
-        data: Vec<u8>,
-    },
-    File {
-        path: String,
-    },
 }
 
 impl TrayIconAsset {
-    fn from_icon(icon: &Icon) -> Self {
+    fn from_icon(icon: &Icon) -> Result<Self, opentray_core::BackendError> {
         match icon {
             Icon::Rgba {
                 data,
                 width,
                 height,
-            } => Self::Rgba {
-                data: data.clone(),
-                width: *width,
-                height: *height,
-            },
-            Icon::Encoded { data } => Self::Encoded { data: data.clone() },
-            Icon::File { path } => Self::File { path: path.clone() },
+            } => Self::from_rgba(data, *width, *height),
+            Icon::Encoded { data } => decode_png_bytes(
+                data,
+                "encoded tray icon bytes",
+                "tray_icon_encoded_decode_failed",
+            ),
+            Icon::File { path } => decode_png_file(path),
         }
+    }
+
+    fn from_rgba(
+        data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<Self, opentray_core::BackendError> {
+        validate_rgba_dimensions(width, height, "rgba tray icon")?;
+        let expected_length = rgba_byte_len(width, height)?;
+        if data.len() != expected_length {
+            return Err(tray_icon_failure(
+                "tray_icon_rgba_invalid_length",
+                format!(
+                    "rgba tray icon requires {expected_length} bytes for {width}x{height}, got {}",
+                    data.len()
+                ),
+            ));
+        }
+
+        Ok(Self::Rgba {
+            data: data.to_vec(),
+            width,
+            height,
+        })
     }
 }
 
@@ -340,9 +364,182 @@ fn encode_component(input: &str) -> String {
         .replace('/', "%2F")
 }
 
+fn decode_png_file(path: &str) -> Result<TrayIconAsset, opentray_core::BackendError> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        tray_icon_failure(
+            "tray_icon_file_read_failed",
+            format!("failed to read tray icon file {path}: {error}"),
+        )
+    })?;
+    decode_png_bytes(
+        &bytes,
+        &format!("file tray icon: {path}"),
+        "tray_icon_file_decode_failed",
+    )
+}
+
+fn decode_png_bytes(
+    bytes: &[u8],
+    source: &str,
+    error_code: &'static str,
+) -> Result<TrayIconAsset, opentray_core::BackendError> {
+    let mut decoder = Decoder::new(Cursor::new(bytes));
+    decoder.set_transformations(Transformations::normalize_to_color8() | Transformations::ALPHA);
+    let mut reader = decoder.read_info().map_err(|error| {
+        tray_icon_failure(
+            error_code,
+            format!("failed to decode {source} as PNG: {error}"),
+        )
+    })?;
+    let mut buffer = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buffer).map_err(|error| {
+        tray_icon_failure(
+            error_code,
+            format!("failed to decode {source} as PNG: {error}"),
+        )
+    })?;
+    buffer.truncate(info.buffer_size());
+
+    let data = match info.color_type {
+        ColorType::Rgba => buffer,
+        ColorType::Rgb => rgb_to_rgba(buffer, source, error_code)?,
+        ColorType::GrayscaleAlpha => grayscale_alpha_to_rgba(buffer, source, error_code)?,
+        ColorType::Grayscale => grayscale_to_rgba(buffer, source, error_code)?,
+        other => {
+            return Err(tray_icon_failure(
+                error_code,
+                format!("decoded {source} into unsupported PNG color type {other:?}"),
+            ));
+        }
+    };
+
+    Ok(TrayIconAsset::Rgba {
+        data,
+        width: info.width,
+        height: info.height,
+    })
+}
+
+fn rgb_to_rgba(
+    data: Vec<u8>,
+    source: &str,
+    error_code: &'static str,
+) -> Result<Vec<u8>, opentray_core::BackendError> {
+    let mut output = Vec::with_capacity((data.len() / 3).saturating_mul(4));
+    let chunks = data.chunks_exact(3);
+    if !chunks.remainder().is_empty() {
+        return Err(tray_icon_failure(
+            error_code,
+            format!(
+                "decoded {source} into malformed RGB data with {} bytes",
+                data.len()
+            ),
+        ));
+    }
+    for chunk in chunks {
+        output.extend_from_slice(chunk);
+        output.push(255);
+    }
+    Ok(output)
+}
+
+fn grayscale_alpha_to_rgba(
+    data: Vec<u8>,
+    source: &str,
+    error_code: &'static str,
+) -> Result<Vec<u8>, opentray_core::BackendError> {
+    let mut output = Vec::with_capacity((data.len() / 2).saturating_mul(4));
+    let chunks = data.chunks_exact(2);
+    if !chunks.remainder().is_empty() {
+        return Err(tray_icon_failure(
+            error_code,
+            format!(
+                "decoded {source} into malformed grayscale-alpha data with {} bytes",
+                data.len()
+            ),
+        ));
+    }
+    for chunk in chunks {
+        let gray = chunk[0];
+        let alpha = chunk[1];
+        output.extend_from_slice(&[gray, gray, gray, alpha]);
+    }
+    Ok(output)
+}
+
+fn grayscale_to_rgba(
+    data: Vec<u8>,
+    source: &str,
+    error_code: &'static str,
+) -> Result<Vec<u8>, opentray_core::BackendError> {
+    let mut output = Vec::with_capacity(data.len().saturating_mul(4));
+    for gray in data {
+        output.extend_from_slice(&[gray, gray, gray, 255]);
+    }
+    if output.is_empty() {
+        return Err(tray_icon_failure(
+            error_code,
+            format!("decoded {source} into empty grayscale data"),
+        ));
+    }
+    Ok(output)
+}
+
+fn validate_rgba_dimensions(
+    width: u32,
+    height: u32,
+    source: &str,
+) -> Result<(), opentray_core::BackendError> {
+    if width == 0 {
+        return Err(tray_icon_failure(
+            "tray_icon_rgba_invalid_size",
+            format!("{source} width must be a positive integer, got {width}"),
+        ));
+    }
+    if height == 0 {
+        return Err(tray_icon_failure(
+            "tray_icon_rgba_invalid_size",
+            format!("{source} height must be a positive integer, got {height}"),
+        ));
+    }
+    Ok(())
+}
+
+fn rgba_byte_len(width: u32, height: u32) -> Result<usize, opentray_core::BackendError> {
+    let pixels = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| {
+            tray_icon_failure(
+                "tray_icon_rgba_invalid_size",
+                "rgba tray icon dimensions overflow".to_string(),
+            )
+        })?;
+    pixels.checked_mul(4).ok_or_else(|| {
+        tray_icon_failure(
+            "tray_icon_rgba_invalid_size",
+            "rgba tray icon byte size overflow".to_string(),
+        )
+    })
+}
+
+fn tray_icon_failure(
+    code: &'static str,
+    message: impl Into<String>,
+) -> opentray_core::BackendError {
+    opentray_core::BackendError::Failure(format!("{code}: {}", message.into()))
+}
+
 #[cfg(test)]
 mod tests {
+    use std::{
+        fs,
+        io::Cursor,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef};
+    use png::Encoder;
 
     use super::*;
 
@@ -379,7 +576,8 @@ mod tests {
                     menu: Some(menu(1)),
                 },
             ],
-        });
+        })
+        .expect("projection");
 
         let left = first_menu_id(&projection.trays[0]);
         let right = first_menu_id(&projection.trays[1]);
@@ -422,7 +620,8 @@ mod tests {
                     }],
                 }),
             }],
-        });
+        })
+        .expect("projection");
 
         assert!(projection
             .routes
@@ -448,7 +647,8 @@ mod tests {
                     items: vec![primary_item(8, "Show Window", true, true)],
                 }),
             }],
-        });
+        })
+        .expect("projection");
 
         let tray = &projection.trays[0];
         assert_eq!(tray.tray_icon_id, "opentray-tray:surface-1:tray-1");
@@ -482,7 +682,8 @@ mod tests {
                     items: vec![primary_item(8, "Show Window", true, false)],
                 }),
             }],
-        });
+        })
+        .expect("projection");
 
         let tray = &projection.trays[0];
         assert!(tray.menu.primary_menu_id.is_none());
@@ -510,7 +711,8 @@ mod tests {
                     ],
                 }),
             }],
-        });
+        })
+        .expect("projection");
 
         let tray = &projection.trays[0];
         assert!(tray.menu.has_primary_event());
@@ -523,6 +725,60 @@ mod tests {
                 item_id: 8,
             })
         );
+    }
+
+    #[test]
+    fn encoded_png_icon_is_normalized_to_rgba() {
+        let projection =
+            TrayIconProjection::from_surface_projection(&projection_with_icon(Icon::Encoded {
+                data: rgba_png_bytes(&[13, 37, 91, 255], 1, 1),
+            }))
+            .expect("projection");
+
+        assert_eq!(
+            projection.trays[0].icon,
+            TrayIconAsset::Rgba {
+                data: vec![13, 37, 91, 255],
+                width: 1,
+                height: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn file_png_icon_is_normalized_to_rgba() {
+        let path = temp_png_path("file_png_icon_is_normalized_to_rgba");
+        fs::write(&path, rgba_png_bytes(&[21, 42, 84, 255], 1, 1)).expect("write png");
+
+        let projection =
+            TrayIconProjection::from_surface_projection(&projection_with_icon(Icon::File {
+                path: path.to_string_lossy().into_owned(),
+            }))
+            .expect("projection");
+
+        let _ = fs::remove_file(&path);
+        assert_eq!(
+            projection.trays[0].icon,
+            TrayIconAsset::Rgba {
+                data: vec![21, 42, 84, 255],
+                width: 1,
+                height: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn invalid_png_icon_reports_typed_failure() {
+        let error =
+            TrayIconProjection::from_surface_projection(&projection_with_icon(Icon::Encoded {
+                data: vec![0, 1, 2],
+            }))
+            .expect_err("projection");
+
+        assert!(matches!(
+            error,
+            opentray_core::BackendError::Failure(message) if message.contains("tray_icon_encoded_decode_failed")
+        ));
     }
 
     fn menu(id: MenuItemId) -> Menu {
@@ -552,5 +808,45 @@ mod tests {
             TrayIconMenuEntry::Item { menu_id, .. } => menu_id.clone(),
             entry => panic!("unexpected menu entry: {entry:?}"),
         }
+    }
+
+    fn projection_with_icon(icon: Icon) -> SurfaceProjection {
+        SurfaceProjection {
+            surface: SurfaceRef {
+                space_id: "surface-1".to_string(),
+            },
+            title: None,
+            tooltip: None,
+            icon: None,
+            trays: vec![TrayProjection {
+                tray_id: "tray-1".to_string(),
+                title: "Tray".to_string(),
+                tooltip: None,
+                icon,
+                menu: None,
+            }],
+        }
+    }
+
+    fn rgba_png_bytes(data: &[u8], width: u32, height: u32) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut encoder = Encoder::new(Cursor::new(&mut output), width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("png header");
+        writer.write_image_data(data).expect("png data");
+        drop(writer);
+        output
+    }
+
+    fn temp_png_path(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "opentray-backend-tray-icon-{name}-{}-{nonce}.png",
+            std::process::id()
+        ))
     }
 }

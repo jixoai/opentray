@@ -201,18 +201,13 @@ fn native_menu_policy(menu: &TrayIconMenuProjection) -> NativeMenuPolicy {
 
 fn native_icon(asset: &TrayIconAsset) -> Result<NativeIcon, BackendError> {
     match asset {
+        // The projection layer already normalized every icon source into RGBA.
         TrayIconAsset::Rgba {
             data,
             width,
             height,
         } => NativeIcon::from_rgba(data.clone(), *width, *height)
             .map_err(|error| BackendError::Failure(error.to_string())),
-        TrayIconAsset::Encoded { .. } => Err(BackendError::Unsupported(
-            "tray_icon_encoded_icon_unimplemented",
-        )),
-        TrayIconAsset::File { .. } => Err(BackendError::Unsupported(
-            "tray_icon_file_icon_unimplemented",
-        )),
     }
 }
 

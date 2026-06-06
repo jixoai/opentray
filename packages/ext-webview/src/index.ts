@@ -1,5 +1,5 @@
 import type { ExtensionEnvelope, Icon, Rect, TrayBoundsResult } from "@opentray/spec";
-import type { TrayHandle } from "opentray";
+import type { TrayExtension, TrayExtensionContext, TrayHandle } from "opentray";
 
 export type WebviewWindowIcon = Icon | { type: "href"; href: string };
 export type WebviewNativeApiSource = "*" | "'none'" | "'local'" | "'remote'" | `http://${string}` | `https://${string}`;
@@ -35,6 +35,8 @@ export interface WebviewShowCommand {
   iconSync?: boolean | { faviconToWindow?: boolean; windowToFavicon?: boolean };
   nativeApiPolicy?: WebviewNativeApiPolicy;
 }
+
+export type WebviewWindowOptions = Omit<WebviewShowCommand, "type">;
 
 export interface WebviewSetContentCommand {
   type: "setContent";
@@ -297,27 +299,141 @@ export interface WebviewHandle {
   postMessage(payload: unknown): Promise<void>;
 }
 
-export const attachWebview = (tray: TrayHandle): WebviewHandle => ({
+export interface WebviewWindowHandle {
+  show(command?: Partial<WebviewWindowOptions>): Promise<void>;
+  hide(): Promise<void>;
+  destroy(): Promise<void>;
+  setContent(command: Extract<WebviewCommand, { type: "setContent" }>): Promise<void>;
+  navigate(url: string): Promise<void>;
+  evaluate(js: string): Promise<void>;
+  postMessage(payload: unknown): Promise<void>;
+}
+
+export interface WebviewTrayCapability {
+  createWebviewWindow(options: WebviewWindowOptions): WebviewWindowHandle;
+  createWebviewHandle(): WebviewHandle;
+}
+
+export interface WebviewExtensionOptions {
+  mountId?: string;
+  path?: string;
+}
+
+export class WebviewExtensionLoadError extends Error {
+  readonly code = "webview_extension_load_failed";
+  readonly extensionName: string;
+  readonly mountId: string;
+  readonly cause: unknown;
+
+  constructor(context: TrayExtensionContext, cause: unknown) {
+    super(
+      `WebView extension "${context.name}" could not be loaded for mount "${context.mountId}". Install the matching @opentray/ext-webview platform package or provide a resolvable extension path.`,
+    );
+    this.name = "WebviewExtensionLoadError";
+    this.extensionName = context.name;
+    this.mountId = context.mountId;
+    this.cause = cause;
+  }
+}
+
+const WEBVIEW_EXTENSION_NAME = "webview";
+const WEBVIEW_EXTENSION_PACKAGE = "@opentray/ext-webview";
+
+export const WebviewExt = {
+  name: WEBVIEW_EXTENSION_NAME,
+  path: WEBVIEW_EXTENSION_PACKAGE,
+  resolveMount(options) {
+    return {
+      ...(options?.mountId === undefined ? {} : { mountId: options.mountId }),
+      ...(options?.path === undefined ? {} : { path: options.path }),
+    };
+  },
+  extend(tray, context) {
+    const endpoint = createWebviewEndpoint(tray, context);
+    return {
+      createWebviewWindow(options) {
+        return createWebviewWindowHandle(endpoint, options);
+      },
+      createWebviewHandle() {
+        return createLegacyWebviewHandle(endpoint);
+      },
+    };
+  },
+} satisfies TrayExtension<WebviewTrayCapability, WebviewExtensionOptions>;
+
+export const attachWebview = (tray: TrayHandle, options?: WebviewExtensionOptions): WebviewHandle => {
+  return tray
+    .extend(WebviewExt, {
+      ...options,
+      mountId: options?.mountId ?? WEBVIEW_EXTENSION_NAME,
+    })
+    .createWebviewHandle();
+};
+
+const createWebviewEndpoint = (
+  tray: TrayHandle,
+  context: TrayExtensionContext,
+): { command(command: WebviewCommand): Promise<void> } => ({
+  async command(command) {
+    try {
+      await context.ensureLoaded();
+    } catch (error) {
+      throw new WebviewExtensionLoadError(context, error);
+    }
+    await tray.commandExtension(context.mountId, command);
+  },
+});
+
+const createLegacyWebviewHandle = (endpoint: {
+  command(command: WebviewCommand): Promise<void>;
+}): WebviewHandle => ({
   show(command) {
-    return tray.commandExtension("webview", command);
+    return endpoint.command(command);
   },
   hide() {
-    return tray.commandExtension("webview", { type: "hide" } satisfies WebviewCommand);
+    return endpoint.command({ type: "hide" } satisfies WebviewCommand);
   },
   destroy() {
-    return tray.commandExtension("webview", { type: "destroy" } satisfies WebviewCommand);
+    return endpoint.command({ type: "destroy" } satisfies WebviewCommand);
   },
   setContent(command) {
-    return tray.commandExtension("webview", command);
+    return endpoint.command(command);
   },
   navigate(url) {
-    return tray.commandExtension("webview", { type: "navigate", url } satisfies WebviewCommand);
+    return endpoint.command({ type: "navigate", url } satisfies WebviewCommand);
   },
   evaluate(js) {
-    return tray.commandExtension("webview", { type: "evaluate", js } satisfies WebviewCommand);
+    return endpoint.command({ type: "evaluate", js } satisfies WebviewCommand);
   },
   postMessage(payload) {
-    return tray.commandExtension("webview", { type: "postMessage", payload } satisfies WebviewCommand);
+    return endpoint.command({ type: "postMessage", payload } satisfies WebviewCommand);
+  },
+});
+
+const createWebviewWindowHandle = (
+  endpoint: { command(command: WebviewCommand): Promise<void> },
+  options: WebviewWindowOptions,
+): WebviewWindowHandle => ({
+  show(command = {}) {
+    return endpoint.command({ type: "show", ...options, ...command });
+  },
+  hide() {
+    return endpoint.command({ type: "hide" } satisfies WebviewCommand);
+  },
+  destroy() {
+    return endpoint.command({ type: "destroy" } satisfies WebviewCommand);
+  },
+  setContent(command) {
+    return endpoint.command(command);
+  },
+  navigate(url) {
+    return endpoint.command({ type: "navigate", url } satisfies WebviewCommand);
+  },
+  evaluate(js) {
+    return endpoint.command({ type: "evaluate", js } satisfies WebviewCommand);
+  },
+  postMessage(payload) {
+    return endpoint.command({ type: "postMessage", payload } satisfies WebviewCommand);
   },
 });
 

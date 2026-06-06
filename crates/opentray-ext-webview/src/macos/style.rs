@@ -137,7 +137,13 @@ pub(super) fn validate_style_request(payload: &SetStylePayload) -> Result<(), We
 pub(super) fn validate_initial_style(
     show_settings: &WebviewShowSettings,
 ) -> Result<(), WebviewRuntimeError> {
-    let windows_payload = if show_settings.window.style.platform.windows.backdrop.is_some()
+    let windows_payload = if show_settings
+        .window
+        .style
+        .platform
+        .windows
+        .backdrop
+        .is_some()
         || show_settings
             .window
             .style

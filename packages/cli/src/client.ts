@@ -34,8 +34,40 @@ export interface TrayHandle {
   space: SpaceRef;
   trayId: TrayId;
   getBounds(): Promise<TrayBoundsResult>;
+  loadExtension(options: ExtensionLoadOptions): Promise<void>;
   commandExtension(ext: string, data: unknown): Promise<void>;
+  extend<TCapability extends object, TOptions = undefined>(
+    extension: TrayExtension<TCapability, TOptions>,
+    options?: TOptions,
+  ): TrayHandle & TCapability;
   destroy(): Promise<void>;
+}
+
+export interface ExtensionLoadOptions {
+  name: string;
+  path: string;
+  mountId?: string;
+}
+
+export interface TrayExtensionMountSpec {
+  name?: string;
+  path?: string;
+  mountId?: string;
+}
+
+export interface TrayExtensionContext {
+  readonly name: string;
+  readonly path: string;
+  readonly mountId: string;
+  ensureLoaded(): Promise<void>;
+  command(data: unknown): Promise<void>;
+}
+
+export interface TrayExtension<TCapability extends object, TOptions = undefined> {
+  readonly name: string;
+  readonly path: string;
+  resolveMount?(options: TOptions | undefined): TrayExtensionMountSpec;
+  extend(tray: TrayHandle, context: TrayExtensionContext, options: TOptions | undefined): TCapability;
 }
 
 export const createInitFrame = (clientVersion: string): ClientFrame => ({
@@ -107,42 +139,110 @@ export const createTrayHandle = (
   space: SpaceRef,
   trayId: TrayId,
   nextRequestId: () => RequestId = createRequestIdFactory("opentray"),
-): TrayHandle => ({
-  space,
-  trayId,
-  async getBounds(): Promise<TrayBoundsResult> {
-    const requestId = nextRequestId();
-    const response = await transport.request({
-      type: "get-tray-bounds",
-      requestId,
-      spaceId: space.spaceId,
-      trayId,
-    });
-    return expectResponse(response, requestId, "tray-bounds").bounds;
-  },
-  async commandExtension(ext: string, data: unknown): Promise<void> {
-    const requestId = nextRequestId();
-    const response = await transport.request({
-      type: "ext-command",
-      requestId,
-      spaceId: space.spaceId,
-      trayId,
-      ext,
-      data,
-    });
-    expectResponse(response, requestId, "ack");
-  },
-  async destroy(): Promise<void> {
-    const requestId = nextRequestId();
-    const response = await transport.request({
-      type: "destroy-tray",
-      requestId,
-      spaceId: space.spaceId,
-      trayId,
-    });
-    expectResponse(response, requestId, "ack");
-  },
-});
+): TrayHandle => {
+  let nextMountOrdinal = 1;
+  const nextMountId = (extensionName: string): string => {
+    const mountId = `${formatMountIdComponent(extensionName)}.${formatMountIdComponent(trayId)}.${nextMountOrdinal}`;
+    nextMountOrdinal += 1;
+    return mountId;
+  };
+  const handle: TrayHandle = {
+    space,
+    trayId,
+    async getBounds(): Promise<TrayBoundsResult> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "get-tray-bounds",
+        requestId,
+        spaceId: space.spaceId,
+        trayId,
+      });
+      return expectResponse(response, requestId, "tray-bounds").bounds;
+    },
+    async loadExtension(options): Promise<void> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "load-ext",
+        requestId,
+        spaceId: space.spaceId,
+        name: options.name,
+        path: options.path,
+        ...(options.mountId === undefined ? {} : { mountId: options.mountId }),
+      });
+      expectResponse(response, requestId, "ack");
+    },
+    async commandExtension(ext: string, data: unknown): Promise<void> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "ext-command",
+        requestId,
+        spaceId: space.spaceId,
+        trayId,
+        ext,
+        data,
+      });
+      expectResponse(response, requestId, "ack");
+    },
+    extend<TCapability extends object, TOptions = undefined>(
+      extension: TrayExtension<TCapability, TOptions>,
+      options?: TOptions,
+    ): TrayHandle & TCapability {
+      const context = createTrayExtensionContext(handle, extension, options, nextMountId);
+      const capability = extension.extend(handle, context, options);
+      return Object.assign({}, handle, capability);
+    },
+    async destroy(): Promise<void> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "destroy-tray",
+        requestId,
+        spaceId: space.spaceId,
+        trayId,
+      });
+      expectResponse(response, requestId, "ack");
+    },
+  };
+  return handle;
+};
+
+const createTrayExtensionContext = <TCapability extends object, TOptions>(
+  tray: TrayHandle,
+  extension: TrayExtension<TCapability, TOptions>,
+  options: TOptions | undefined,
+  nextMountId: (extensionName: string) => string,
+): TrayExtensionContext => {
+  const mount = extension.resolveMount?.(options) ?? {};
+  const name = mount.name ?? extension.name;
+  const path = mount.path ?? extension.path;
+  const mountId = mount.mountId ?? nextMountId(name);
+  let loadPromise: Promise<void> | undefined;
+
+  const ensureLoaded = async (): Promise<void> => {
+    if (loadPromise === undefined) {
+      loadPromise = tray.loadExtension({ name, path, mountId }).catch((error: unknown) => {
+        loadPromise = undefined;
+        throw error;
+      });
+    }
+    await loadPromise;
+  };
+
+  return {
+    name,
+    path,
+    mountId,
+    ensureLoaded,
+    async command(data: unknown): Promise<void> {
+      await ensureLoaded();
+      await tray.commandExtension(mountId, data);
+    },
+  };
+};
+
+const formatMountIdComponent = (value: string): string => {
+  const formatted = value.replaceAll(/[^a-zA-Z0-9._+-]/g, "_");
+  return formatted.length > 0 ? formatted : "ext";
+};
 
 const createRequestIdFactory = (prefix: string): (() => RequestId) => {
   let next = 1;

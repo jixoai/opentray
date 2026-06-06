@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
-import { attachWebview } from "../../ext-webview/src/index";
+import { WebviewExt } from "../../ext-webview/src/index";
 import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
 
 const controlPageUrl = new URL("./webview-control.html", import.meta.url);
@@ -41,17 +41,7 @@ const tray = await space.createTray({
 });
 console.log(`tray: ${tray.trayId}`);
 
-await connection.request({
-  type: "load-ext",
-  requestId: "webview-control-load-webview",
-  spaceId: space.space.spaceId,
-  name: "webview",
-  path: "@opentray/ext-webview",
-});
-
-const webview = attachWebview(tray);
-await webview.show({
-  type: "show",
+const webview = tray.extend(WebviewExt).createWebviewWindow({
   html: controlPageHtml,
   width: 960,
   height: 720,
@@ -87,6 +77,7 @@ await webview.show({
     defaultSrc: ["'local'"],
   },
 });
+await webview.show();
 
 console.log(`control page source: ${controlPageUrl.href}`);
 console.log(

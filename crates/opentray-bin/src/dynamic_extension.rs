@@ -320,7 +320,7 @@ impl DynamicExtensionInstance {
         }
 
         Ok(Self {
-            name: request.name.clone(),
+            name: request.instance_name().to_string(),
             instance,
             command,
             lease_closed,
@@ -808,6 +808,7 @@ mod tests {
             surface_id: "surface-1".to_string(),
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
+            mount_id: None,
         };
 
         let candidates = discovery.candidates(&request);
@@ -838,6 +839,7 @@ mod tests {
             surface_id: "surface-1".to_string(),
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
+            mount_id: None,
         };
 
         let candidates = discovery.candidates(&request);
@@ -888,6 +890,7 @@ mod tests {
             surface_id: "surface-1".to_string(),
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
+            mount_id: None,
         };
 
         let candidates = discovery.candidates(&request);

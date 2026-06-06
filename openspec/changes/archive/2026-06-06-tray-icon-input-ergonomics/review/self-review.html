@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>tray-icon-input-ergonomics self review</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px;
+        color: #1f2937;
+        background: #f8fafc;
+        font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+      section {
+        margin: 20px 0;
+        padding: 18px;
+        border: 1px solid #dbe3ef;
+        border-radius: 8px;
+        background: #fff;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 10px;
+        border-bottom: 1px solid #e5e7eb;
+        text-align: left;
+        vertical-align: top;
+      }
+      code {
+        padding: 2px 4px;
+        border-radius: 4px;
+        background: #eef2ff;
+      }
+      .ok {
+        color: #047857;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>tray-icon-input-ergonomics Self Review</h1>
+      <section>
+        <h2>Exit Judgment</h2>
+        <p class="ok">Normal exit is appropriate after final archive verification.</p>
+      </section>
+      <section>
+        <h2>Architecture Evidence</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Layer</th>
+              <th>Change</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>SDK</td>
+              <td>Tray icon inputs are forwarded unchanged.</td>
+              <td><code>packages/cli/src/sdk.test.ts</code> and <code>packages/cli/src/client.ts</code>.</td>
+            </tr>
+            <tr>
+              <td>Backend</td>
+              <td>Supported file/encoded sources normalize into RGBA; failures are typed.</td>
+              <td><code>crates/opentray-backend-tray-icon/src/projection.rs</code>.</td>
+            </tr>
+            <tr>
+              <td>Docs</td>
+              <td>Ordinary tray docs show the normalized icon path first.</td>
+              <td><code>packages/cli/README.md</code> and <code>packages/cli/examples/EXAMPLE.md</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Verification</h2>
+        <ul>
+          <li><code>cargo test -p opentray-backend-tray-icon</code>: passed, 17 tests.</li>
+          <li><code>pnpm --filter opentray test -- sdk.test.ts</code>: passed, 41 tests.</li>
+          <li><code>pnpm --filter opentray typecheck</code>: passed.</li>
+          <li><code>pnpm --filter @opentray/spec test</code>: passed, 14 tests.</li>
+          <li><code>cargo test -p opentray-core</code>: passed, 24 tests.</li>
+          <li><code>cargo test -p opentray-bin</code>: passed, 11 tests total across targets.</li>
+          <li><code>bun run openspec:vision -- validate tray-icon-input-ergonomics</code>: passed.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Open Question</h2>
+        <p>Should the visible tray icon helper remain internal smoke-only, or become a public SDK utility later?</p>
+      </section>
+    </main>
+  </body>
+</html>

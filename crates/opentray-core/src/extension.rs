@@ -68,6 +68,13 @@ pub struct ExtensionLoadRequest {
     pub surface_id: SurfaceId,
     pub name: String,
     pub path: String,
+    pub mount_id: Option<String>,
+}
+
+impl ExtensionLoadRequest {
+    pub fn instance_name(&self) -> &str {
+        self.mount_id.as_deref().unwrap_or(&self.name)
+    }
 }
 
 pub trait ExtensionLoader: Send {
@@ -107,7 +114,7 @@ impl ExtensionLoader for RecordingExtensionLoader {
             )));
         }
 
-        Ok(Box::new(RecordingExtension::new(request.name.clone())))
+        Ok(Box::new(RecordingExtension::new(request.instance_name())))
     }
 }
 

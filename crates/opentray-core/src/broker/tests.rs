@@ -353,6 +353,7 @@ fn load_ext_rejects_dynamic_paths_without_a_loader() {
             space_id: surface.space_id,
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
+            mount_id: None,
         },
         "0.1.0",
     );
@@ -391,6 +392,7 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
             space_id: surface.space_id.clone(),
             name: "webview".to_string(),
             path: RECORDING_EXTENSION_PATH.to_string(),
+            mount_id: None,
         },
         "0.1.0",
     );
@@ -425,6 +427,83 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
 }
 
 #[test]
+fn load_ext_mount_id_isolates_instances_with_the_same_extension_name() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::with_extension_loader(backend, RecordingExtensionLoader);
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_space(&mut broker, &mut session);
+    for tray_id in ["tray-a", "tray-b"] {
+        broker.handle_frame(
+            &mut session,
+            ClientFrame::CreateTray {
+                request_id: format!("req-{tray_id}"),
+                space: surface.clone(),
+                tray: tray_options(tray_id),
+            },
+            "0.1.0",
+        );
+    }
+
+    for mount_id in ["webview.tray-a", "webview.tray-b"] {
+        let frames = broker.handle_frame(
+            &mut session,
+            ClientFrame::LoadExt {
+                request_id: format!("req-load-{mount_id}"),
+                space_id: surface.space_id.clone(),
+                name: "webview".to_string(),
+                path: RECORDING_EXTENSION_PATH.to_string(),
+                mount_id: Some(mount_id.to_string()),
+            },
+            "0.1.0",
+        );
+        assert!(matches!(&frames[0], ServerFrame::Ack { .. }));
+    }
+
+    let command_a = broker.handle_frame(
+        &mut session,
+        ClientFrame::ExtCommand {
+            request_id: "req-command-a".to_string(),
+            space_id: surface.space_id.clone(),
+            tray_id: "tray-a".to_string(),
+            ext: "webview.tray-a".to_string(),
+            data: serde_json::json!({ "type": "show", "slot": "a" }),
+        },
+        "0.1.0",
+    );
+    let command_b = broker.handle_frame(
+        &mut session,
+        ClientFrame::ExtCommand {
+            request_id: "req-command-b".to_string(),
+            space_id: surface.space_id,
+            tray_id: "tray-b".to_string(),
+            ext: "webview.tray-b".to_string(),
+            data: serde_json::json!({ "type": "show", "slot": "b" }),
+        },
+        "0.1.0",
+    );
+
+    assert!(matches!(
+        &command_a[1],
+        ServerFrame::ExtEvent {
+            tray_id,
+            ext,
+            data,
+            ..
+        } if tray_id == "tray-a" && ext == "webview.tray-a" && data["command"]["slot"] == "a"
+    ));
+    assert!(matches!(
+        &command_b[1],
+        ServerFrame::ExtEvent {
+            tray_id,
+            ext,
+            data,
+            ..
+        } if tray_id == "tray-b" && ext == "webview.tray-b" && data["command"]["slot"] == "b"
+    ));
+}
+
+#[test]
 fn explicit_exit_uses_extension_host_for_lease_cleanup() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::with_extension_loader(backend, HostProbeLoader);
@@ -438,6 +517,7 @@ fn explicit_exit_uses_extension_host_for_lease_cleanup() {
             space_id: surface.space_id,
             name: "webview".to_string(),
             path: "opentray://host-probe".to_string(),
+            mount_id: None,
         },
         "0.1.0",
     );

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>auto-load-webview-extension self review</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px;
+        color: #1f2937;
+        background: #f8fafc;
+        font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+      h1,
+      h2 {
+        line-height: 1.2;
+      }
+      section {
+        margin: 20px 0;
+        padding: 18px;
+        border: 1px solid #dbe3ef;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 10px;
+        border-bottom: 1px solid #e5e7eb;
+        text-align: left;
+        vertical-align: top;
+      }
+      code {
+        padding: 2px 4px;
+        border-radius: 4px;
+        background: #eef2ff;
+      }
+      .ok {
+        color: #047857;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>auto-load-webview-extension Self Review</h1>
+      <section>
+        <h2>Exit Judgment</h2>
+        <p class="ok">Normal exit is appropriate after final archive verification.</p>
+      </section>
+      <section>
+        <h2>Architecture Evidence</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Layer</th>
+              <th>Change</th>
+              <th>Isolation proof</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Protocol</td>
+              <td><code>load-ext</code> accepts optional <code>mountId</code>.</td>
+              <td>Library resolution still uses <code>name/path</code>; command dispatch uses mount id.</td>
+            </tr>
+            <tr>
+              <td>SDK</td>
+              <td><code>TrayHandle.extend(...)</code> returns typed mounted capability.</td>
+              <td>First command loads once, later commands reuse the same mount promise.</td>
+            </tr>
+            <tr>
+              <td>WebView</td>
+              <td><code>WebviewExt</code> provides <code>createWebviewWindow(...)</code>.</td>
+              <td>Load failures become <code>webview_extension_load_failed</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Verification</h2>
+        <ul>
+          <li><code>pnpm --filter @opentray/ext-webview test</code>: passed, 5 tests.</li>
+          <li><code>pnpm --filter opentray test -- sdk.test.ts</code>: passed, 41 tests.</li>
+          <li><code>cargo test -p opentray-core</code>: passed, 24 tests.</li>
+          <li><code>cargo test -p opentray-bin</code>: passed, 11 tests across unit and integration targets.</li>
+          <li><code>bun run openspec:vision -- validate auto-load-webview-extension</code>: passed.</li>
+          <li><code>git diff --check</code>: passed.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Open Question</h2>
+        <p>Future API naming may need a collision-avoidance pass: <code>tray.webview.createWindow(...)</code> versus <code>tray.createWebviewWindow(...)</code>.</p>
+      </section>
+    </main>
+  </body>
+</html>

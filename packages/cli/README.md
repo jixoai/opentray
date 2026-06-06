@@ -34,7 +34,7 @@ const space = await createSpace({ id: "com.example.status", default: true });
 await space.createTray({
   trayId: "status",
   title: "Status",
-  icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+  icon: { type: "file", path: "./assets/tray-icon.png" },
 });
 
 const defaultSpace = await resolveDefaultSpace();
@@ -42,7 +42,7 @@ await createTray(
   {
     trayId: "secondary",
     title: "Secondary",
-    icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+    icon: { type: "file", path: "./assets/tray-icon.png" },
   },
   { space: defaultSpace.space }
 );
@@ -64,6 +64,27 @@ pnpm --filter opentray example:webview-control
 
 That demo opens a native WebView window immediately and puts the controls inside the page itself, so you can exercise frameless, transparent, keep-on-top, title, icon, screen, and navigation behavior without going through the tray menu first.
 Treat `example:webview-control` as the API exercise surface. It is useful for probing capabilities and events, but it is not the canonical recipe for a tray-anchored glass shell.
+
+Application code mounts WebView as a tray capability. The first WebView command loads the native extension automatically; ordinary code does not need to send `load-ext` manually:
+
+```ts
+import { WebviewExt } from "@opentray/ext-webview";
+import { createTray } from "opentray";
+
+const tray = (await createTray({
+  trayId: "status",
+  title: "Status",
+  icon: { type: "file", path: "./tray-icon.png" },
+})).extend(WebviewExt);
+
+const panel = tray.createWebviewWindow({
+  html: "<main>Status</main>",
+  width: 360,
+  height: 240,
+});
+
+await panel.show();
+```
 
 Run the dedicated tray-panel demo:
 
@@ -91,7 +112,7 @@ Current WebView truth:
 - some requests are `unsupported by design`, such as asking the macOS runtime to apply a Windows-only style family
 - some results are `unavailable by context`, such as tray-bounds projection when the current session has no authoritative tray anchor
 
-When run from the repo worktree, the example automatically discovers `target/debug` or `target/release` `libopentray_ext_webview` and wires it through `OPENTRAY_EXT_PATH` before starting the daemon. That keeps the example on the real `load-ext` path without requiring a manual staging step for routine source-level testing.
+When run from the repo worktree, the example automatically discovers `target/debug` or `target/release` `libopentray_ext_webview` and wires it through `OPENTRAY_EXT_PATH` before starting the daemon. The WebView mount still exercises the real generic extension loader, but example users do not author a manual `load-ext` request.
 
 After installing from npm, use the published CLI smoke path instead of workspace scripts:
 
@@ -175,4 +196,4 @@ otool -L target/release/libopentray_ext_webview.dylib
 otool -L target/release/libopentray_ext_lynx.dylib
 ```
 
-Current native icon support is `rgba`. `encoded` and `file` are typed protocol shapes, but the native `tray-icon` backend reports them as unsupported until decoding and file loading policy are implemented.
+The native `tray-icon` backend now normalizes `encoded` and `file` icon inputs into RGBA before native tray materialization. `rgba` still works when you already have pixel data, but ordinary app code can point at a PNG file instead of hand-building pixels.

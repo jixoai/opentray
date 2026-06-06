@@ -13,6 +13,8 @@ Use these examples to verify the delivered window contract in this branch:
 - window-state controls
 - tray-owned placement projection through `tray.getBounds()` and `navigator.opentray.tray.getBounds()`
 - source-tree auto-discovery of the local `opentray-ext-webview` native library
+- WebView examples mount `WebviewExt` on a tray and rely on automatic extension loading, not a hand-authored `load-ext` request
+- tray icon smoke helpers stay internal; ordinary tray code can supply file-backed or encoded PNG icon sources and let the backend normalize them to RGBA
 
 Current maturity truth for these examples:
 

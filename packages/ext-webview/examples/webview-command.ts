@@ -1,7 +1,7 @@
 import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 import { createTrayHandle, type OpenTrayTransport } from "../../cli/src/index";
 
-import { attachWebview } from "../src/index";
+import { WebviewExt } from "../src/index";
 
 class RecordingTransport implements OpenTrayTransport {
   readonly frames: ClientRequestFrame[] = [];
@@ -20,11 +20,8 @@ const tray = createTrayHandle(
     spaceId: "example-space",
   },
   "webview-tray",
-);
-const webview = attachWebview(tray);
-
-await webview.show({
-  type: "show",
+).extend(WebviewExt, { mountId: "webview.example" });
+const webview = tray.createWebviewWindow({
   html: "<main><h1>OpenTray WebView</h1><p>Extension atom example.</p></main>",
   width: 360,
   height: 220,
@@ -67,6 +64,8 @@ await webview.show({
     height: 1,
   },
 });
+
+await webview.show();
 await webview.navigate("https://example.com/status");
 await webview.postMessage({
   kind: "ping",
