@@ -14,6 +14,8 @@
     "release": "changeset publish",
     "release:alpha": "changeset publish --tag alpha --no-git-tag",
     "npm:bootstrap-package": "bun run scripts/npm/bootstrap-package.ts",
+    "protocol-tags:apply": "bun run scripts/npm/protocol-dist-tags.ts --apply",
+    "protocol-tags:dry-run": "bun run scripts/npm/protocol-dist-tags.ts",
     "setup:env": "bun run scripts/npm/setup-env.ts",
     "test:npm": "bun test scripts/npm/*.test.ts",
     "trusted-publish:check": "bun run scripts/npm/configure-trusted-publish.ts --check",
