@@ -589,4 +589,3 @@ The workflow MAY generate and test a protocol-line tag plan as release evidence.
 - **THEN** package publish remains OIDC-backed
 - **AND** protocol-line dist-tag mutation is documented as a separate authenticated operation
 - **AND** the workflow does not claim protocol-line tags were updated unless `npm dist-tag add` actually ran with suitable auth.
-

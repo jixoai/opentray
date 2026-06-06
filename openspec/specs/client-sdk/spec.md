@@ -369,4 +369,3 @@ The public `opentray` package documentation and examples SHALL explain that `lat
 - **WHEN** they read the install guidance
 - **THEN** the docs may still mention `latest`
 - **AND** they clearly label it as convenience rather than a compatibility contract.
-
