@@ -5,7 +5,7 @@ use crate::{
     WebviewNativeApiPolicy, WebviewNativeApiSource,
 };
 
-pub(super) fn navigator_window_bootstrap_script(
+pub(crate) fn navigator_window_bootstrap_script(
     window_settings: NavigatorWindowSettings,
     screen_settings: NavigatorScreenSettings,
     tray_settings: NavigatorTraySettings,
@@ -144,6 +144,30 @@ pub(super) fn navigator_window_bootstrap_script(
           })
         );
       });
+    const normalizeBackground = (background, options) => {
+      const state =
+        options && typeof options === "object" && typeof options.state === "string"
+          ? options.state
+          : undefined;
+      if (typeof background === "string") {
+        if (background === "opaque" || background === "default" || background === "none") {
+          return { kind: "opaque" };
+        }
+        if (background === "transparent") {
+          return { kind: "transparent" };
+        }
+        if (background === "blur") {
+          return state ? { kind: "semantic", token: "blur", state } : { kind: "semantic", token: "blur" };
+        }
+        return state
+          ? { kind: "platformMaterial", material: background, state }
+          : { kind: "platformMaterial", material: background };
+      }
+      if (background && typeof background === "object") {
+        return state ? { ...background, state } : background;
+      }
+      return { kind: "opaque" };
+    };
     const invoke = (cmd, payload = {}, options) =>
       invokeWithNamespace("opentray.window", cmd, payload, options);
     const createOverlayApi = (windowApi) => {
@@ -270,6 +294,9 @@ pub(super) fn navigator_window_bootstrap_script(
         },
         setStyle(style) {
           return invoke("setStyle", style ?? {});
+        },
+        setBackground(background, options) {
+          return invoke("setStyle", { background: normalizeBackground(background, options) });
         },
         getCapabilities() {
           return invoke("getCapabilities");

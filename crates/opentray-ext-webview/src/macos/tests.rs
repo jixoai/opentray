@@ -7,7 +7,8 @@ use super::style::{
 };
 use super::*;
 use crate::{
-    MetadataSyncSettings, WebviewBackgroundEffectState, WebviewNativeApiSource, WebviewWindowIcon,
+    MetadataSyncSettings, WebviewBackgroundEffectState, WebviewBackgroundInput,
+    WebviewNativeApiSource, WebviewWindowBackground, WebviewWindowIcon,
 };
 use std::process::Command;
 
@@ -123,7 +124,10 @@ fn session_bootstrap_ignores_mutable_shell_state_differences() {
     let mut requested_settings = WebviewShowSettings::default();
     requested_settings.window.title = Some("Updated".to_string());
     requested_settings.window.style.keep_on_top = true;
-    requested_settings.window.style.platform.macos.material = Some("hudWindow".to_string());
+    requested_settings.window.style.background = WebviewWindowBackground::PlatformMaterial {
+        material: "hudWindow".to_string(),
+        state: WebviewBackgroundEffectState::FollowsWindowActiveState,
+    };
 
     assert!(ensure_session_reuse_allowed(
         current_settings.session_bootstrap_settings(),
@@ -1045,20 +1049,18 @@ fn navigator_window_callback_scripts_use_private_run_callback() {
 fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
     validate_style_request(&SetStylePayload {
         frameless: None,
-        transparent: Some(true),
         keep_on_top: Some(true),
+        background: Some(WebviewBackgroundInput::Keyword("transparent".to_string())),
         platform: None,
     })
     .expect("transparent should be supported");
 
     validate_style_request(&SetStylePayload {
         frameless: None,
-        transparent: None,
         keep_on_top: None,
+        background: Some(WebviewBackgroundInput::Keyword("hudWindow".to_string())),
         platform: Some(SetStylePlatformPayload {
             macos: Some(SetStyleMacosPayload {
-                material: Some(Some("hudWindow".to_string())),
-                material_state: Some("active".to_string()),
                 corner_radius: Some(Some(18.0)),
             }),
             windows: None,
@@ -1069,33 +1071,24 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
 
     let blur_error = validate_style_request(&SetStylePayload {
         frameless: None,
-        transparent: None,
         keep_on_top: None,
-        platform: Some(SetStylePlatformPayload {
-            macos: Some(SetStyleMacosPayload {
-                material: Some(Some("blur".to_string())),
-                material_state: None,
-                corner_radius: None,
-            }),
-            windows: None,
-            linux: None,
-        }),
+        background: Some(WebviewBackgroundInput::Keyword("mica".to_string())),
+        platform: None,
     })
-    .expect_err("blur should be unsupported");
+    .expect_err("Windows material should be unsupported on macOS");
     assert_eq!(
         blur_error.to_string(),
-        "background effect blur is not supported on macOS"
+        "background material mica is not supported on macOS"
     );
 
     let windows_error = validate_style_request(&SetStylePayload {
         frameless: None,
-        transparent: None,
         keep_on_top: None,
+        background: None,
         platform: Some(SetStylePlatformPayload {
             macos: None,
             windows: Some(SetStyleWindowsPayload {
-                backdrop: Some(Some("mica".to_string())),
-                corner_preference: None,
+                corner_preference: Some(Some("round".to_string())),
             }),
             linux: None,
         }),
@@ -1117,12 +1110,13 @@ fn validate_initial_style_ignores_default_placeholder_platform_families() {
 fn window_style_state_serializes_keep_on_top() {
     let value = serde_json::to_value(WindowStyleState {
         frameless: false,
-        transparent: true,
         keep_on_top: true,
+        background: WebviewWindowBackground::PlatformMaterial {
+            material: "hudWindow".to_string(),
+            state: WebviewBackgroundEffectState::Active,
+        },
         platform: WindowPlatformStyleState {
             macos: MacosWindowStyleState {
-                material: Some("hudWindow".to_string()),
-                material_state: WebviewBackgroundEffectState::Active,
                 corner_radius: Some(18.0),
             },
         },
@@ -1131,11 +1125,15 @@ fn window_style_state_serializes_keep_on_top() {
 
     assert_eq!(value["keepOnTop"], Value::Bool(true));
     assert_eq!(
-        value["platform"]["macos"]["material"],
+        value["background"]["kind"],
+        Value::String("platformMaterial".to_string())
+    );
+    assert_eq!(
+        value["background"]["material"],
         Value::String("hudWindow".to_string())
     );
     assert_eq!(
-        value["platform"]["macos"]["materialState"],
+        value["background"]["state"],
         Value::String("active".to_string())
     );
     assert_eq!(
@@ -1153,12 +1151,10 @@ fn navigator_window_bridge_tracks_listener_ids() {
         next_event_id: 1,
         style: WindowStyleState {
             frameless: false,
-            transparent: false,
             keep_on_top: false,
+            background: WebviewWindowBackground::Opaque,
             platform: WindowPlatformStyleState {
                 macos: MacosWindowStyleState {
-                    material: None,
-                    material_state: WebviewBackgroundEffectState::FollowsWindowActiveState,
                     corner_radius: None,
                 },
             },

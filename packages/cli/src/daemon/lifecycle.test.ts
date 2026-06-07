@@ -75,6 +75,14 @@ describe("daemon lifecycle", () => {
     expect(driver.spawned).toHaveLength(1);
   });
 
+  it("reports broker exit before readiness instead of masking it as a timeout", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createExitedDriver();
+
+    await expect(startDaemon({ paths, driver })).rejects.toThrow("daemon broker exited before readiness");
+  });
+
   it("restarts by stopping and starting the same version endpoint", async () => {
     const homeDir = await makeTempHome();
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
@@ -140,3 +148,13 @@ const createFakeDriver = (spawnDelayMs = 0): DaemonDriver & { readonly spawned: 
     },
   };
 };
+
+const createExitedDriver = (): DaemonDriver => ({
+  async isAlive() {
+    return false;
+  },
+  async spawnBroker() {
+    return 40_000;
+  },
+  async stop() {},
+});

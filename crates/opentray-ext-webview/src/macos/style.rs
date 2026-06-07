@@ -11,7 +11,10 @@ use window_vibrancy::{
 };
 use wry::RGBA;
 
-use crate::{WebviewBackgroundEffectState, WebviewRuntimeError, WebviewShowSettings};
+use crate::{
+    parse_background_input, WebviewBackgroundEffectState, WebviewBackgroundInput,
+    WebviewRuntimeError, WebviewShowSettings, WebviewWindowBackground,
+};
 
 use super::{AppKitViewHandle, NavigatorWindowBridge, CLEAR_BACKGROUND, OPAQUE_BACKGROUND};
 
@@ -19,8 +22,8 @@ use super::{AppKitViewHandle, NavigatorWindowBridge, CLEAR_BACKGROUND, OPAQUE_BA
 #[serde(rename_all = "camelCase")]
 pub(super) struct WindowStyleState {
     pub(super) frameless: bool,
-    pub(super) transparent: bool,
     pub(super) keep_on_top: bool,
+    pub(super) background: WebviewWindowBackground,
     pub(super) platform: WindowPlatformStyleState,
 }
 
@@ -33,8 +36,6 @@ pub(super) struct WindowPlatformStyleState {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct MacosWindowStyleState {
-    pub(super) material: Option<String>,
-    pub(super) material_state: WebviewBackgroundEffectState,
     pub(super) corner_radius: Option<f64>,
 }
 
@@ -42,12 +43,10 @@ impl Default for WindowStyleState {
     fn default() -> Self {
         Self {
             frameless: false,
-            transparent: false,
             keep_on_top: false,
+            background: WebviewWindowBackground::Opaque,
             platform: WindowPlatformStyleState {
                 macos: MacosWindowStyleState {
-                    material: None,
-                    material_state: WebviewBackgroundEffectState::FollowsWindowActiveState,
                     corner_radius: None,
                 },
             },
@@ -59,8 +58,8 @@ impl Default for WindowStyleState {
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetStylePayload {
     pub(super) frameless: Option<bool>,
-    pub(super) transparent: Option<bool>,
     pub(super) keep_on_top: Option<bool>,
+    pub(super) background: Option<WebviewBackgroundInput>,
     pub(super) platform: Option<SetStylePlatformPayload>,
 }
 
@@ -76,15 +75,12 @@ pub(super) struct SetStylePlatformPayload {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetStyleMacosPayload {
-    pub(super) material: Option<Option<String>>,
-    pub(super) material_state: Option<String>,
     pub(super) corner_radius: Option<Option<f64>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetStyleWindowsPayload {
-    pub(super) backdrop: Option<Option<String>>,
     pub(super) corner_preference: Option<Option<String>>,
 }
 
@@ -98,7 +94,7 @@ pub(super) fn validate_style_request(payload: &SetStylePayload) -> Result<(), We
         .as_ref()
         .and_then(|platform| platform.windows.as_ref());
     if windows_payload
-        .map(|payload| payload.backdrop.is_some() || payload.corner_preference.is_some())
+        .map(|payload| payload.corner_preference.is_some())
         .unwrap_or(false)
     {
         // A cross-platform contract may carry multiple family placeholders, but the macOS
@@ -107,27 +103,13 @@ pub(super) fn validate_style_request(payload: &SetStylePayload) -> Result<(), We
             "platform.windows window style is not supported on macOS".into(),
         ));
     }
+    if let Some(background) = payload.background.clone() {
+        validate_background(&parse_background_input(background)?)?;
+    }
     let macos_payload = payload
         .platform
         .as_ref()
         .and_then(|platform| platform.macos.as_ref());
-    if let Some(effect) = macos_payload
-        .and_then(|payload| payload.material.as_ref())
-        .and_then(|material| material.as_ref())
-    {
-        if !effect.is_empty() && parse_background_effect(effect).is_none() {
-            return Err(WebviewRuntimeError::Unsupported(format!(
-                "background effect {effect} is not supported on macOS"
-            )));
-        }
-    }
-    if let Some(state) = macos_payload.and_then(|payload| payload.material_state.as_deref()) {
-        if parse_background_effect_state(state).is_none() {
-            return Err(WebviewRuntimeError::Unsupported(format!(
-                "background effect state {state} is not supported on macOS"
-            )));
-        }
-    }
     if let Some(Some(radius)) = macos_payload.and_then(|payload| payload.corner_radius) {
         normalize_corner_radius(radius)?;
     }
@@ -142,18 +124,10 @@ pub(super) fn validate_initial_style(
         .style
         .platform
         .windows
-        .backdrop
+        .corner_preference
         .is_some()
-        || show_settings
-            .window
-            .style
-            .platform
-            .windows
-            .corner_preference
-            .is_some()
     {
         Some(SetStyleWindowsPayload {
-            backdrop: Some(show_settings.window.style.platform.windows.backdrop.clone()),
             corner_preference: Some(
                 show_settings
                     .window
@@ -170,23 +144,17 @@ pub(super) fn validate_initial_style(
 
     validate_style_request(&SetStylePayload {
         frameless: Some(show_settings.window.style.frameless),
-        transparent: Some(show_settings.window.style.transparent),
         keep_on_top: Some(show_settings.window.style.keep_on_top),
+        background: None,
         platform: Some(SetStylePlatformPayload {
             macos: Some(SetStyleMacosPayload {
-                material: Some(show_settings.window.style.platform.macos.material.clone()),
-                material_state: Some(
-                    background_effect_state_name(
-                        show_settings.window.style.platform.macos.material_state,
-                    )
-                    .to_string(),
-                ),
                 corner_radius: Some(show_settings.window.style.platform.macos.corner_radius),
             }),
             windows: windows_payload,
             linux: Some(SetStyleLinuxPayload {}),
         }),
-    })
+    })?;
+    validate_background(&show_settings.window.style.background)
 }
 
 pub(super) fn framed_window_style_mask(frameless: bool, overlay: bool) -> NSWindowStyleMask {
@@ -229,26 +197,38 @@ fn parse_background_effect(effect: &str) -> Option<NSVisualEffectMaterial> {
 }
 
 fn requires_clear_backing(style: &WindowStyleState) -> bool {
-    // `transparent` and `backgroundEffect` are orthogonal requested states.
-    // On macOS, any vibrancy/material surface still needs a non-opaque, clear backing
-    // layer underneath so AppKit can composite the material correctly.
-    style.transparent || style.platform.macos.material.is_some()
+    matches!(
+        style.background,
+        WebviewWindowBackground::Transparent
+            | WebviewWindowBackground::PlatformMaterial { .. }
+            | WebviewWindowBackground::Semantic { .. }
+    )
 }
 
-pub(super) fn parse_background_effect_state(state: &str) -> Option<WebviewBackgroundEffectState> {
-    match state {
-        "followsWindowActiveState" => Some(WebviewBackgroundEffectState::FollowsWindowActiveState),
-        "active" => Some(WebviewBackgroundEffectState::Active),
-        "inactive" => Some(WebviewBackgroundEffectState::Inactive),
-        _ => None,
-    }
+fn validate_background(background: &WebviewWindowBackground) -> Result<(), WebviewRuntimeError> {
+    resolve_macos_background_effect(background).map(|_| ())
 }
 
-fn background_effect_state_name(state: WebviewBackgroundEffectState) -> &'static str {
-    match state {
-        WebviewBackgroundEffectState::FollowsWindowActiveState => "followsWindowActiveState",
-        WebviewBackgroundEffectState::Active => "active",
-        WebviewBackgroundEffectState::Inactive => "inactive",
+#[allow(deprecated)]
+fn resolve_macos_background_effect(
+    background: &WebviewWindowBackground,
+) -> Result<Option<(NSVisualEffectMaterial, WebviewBackgroundEffectState)>, WebviewRuntimeError> {
+    match background {
+        WebviewWindowBackground::Opaque | WebviewWindowBackground::Transparent => Ok(None),
+        WebviewWindowBackground::PlatformMaterial { material, state } => {
+            let effect = parse_background_effect(material).ok_or_else(|| {
+                WebviewRuntimeError::Unsupported(format!(
+                    "background material {material} is not supported on macOS"
+                ))
+            })?;
+            Ok(Some((effect, *state)))
+        }
+        WebviewWindowBackground::Semantic { token, state } => match token.as_str() {
+            "blur" => Ok(Some((NSVisualEffectMaterial::HudWindow, *state))),
+            other => Err(WebviewRuntimeError::Unsupported(format!(
+                "background token {other} is not supported on macOS"
+            ))),
+        },
     }
 }
 
@@ -312,19 +292,11 @@ pub(super) fn apply_window_style(
         })
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     clear_vibrancy(&host_view).map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
-    if let Some(effect) = style
-        .platform
-        .macos
-        .material
-        .as_deref()
-        .and_then(parse_background_effect)
-    {
+    if let Some((effect, state)) = resolve_macos_background_effect(&style.background)? {
         apply_vibrancy(
             &host_view,
             effect,
-            Some(native_background_effect_state(
-                style.platform.macos.material_state,
-            )),
+            Some(native_background_effect_state(state)),
             style.platform.macos.corner_radius,
         )
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;

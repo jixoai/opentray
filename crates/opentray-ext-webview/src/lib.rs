@@ -1,5 +1,8 @@
+mod bootstrap;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
 
 use std::ffi::{c_char, c_void, CString};
 use std::fmt;
@@ -15,7 +18,10 @@ use url::Url;
 #[cfg(target_os = "macos")]
 type WebviewRuntime = macos::MacosWebviewRuntime;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+type WebviewRuntime = windows::WindowsWebviewRuntime;
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 type WebviewRuntime = UnsupportedWebviewRuntime;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -51,8 +57,8 @@ pub(crate) struct WebviewMetadataSyncSettings {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct WebviewInitialStyle {
     pub frameless: bool,
-    pub transparent: bool,
     pub keep_on_top: bool,
+    pub background: WebviewWindowBackground,
     pub platform: WebviewInitialPlatformStyle,
 }
 
@@ -65,14 +71,11 @@ pub(crate) struct WebviewInitialPlatformStyle {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct WebviewInitialMacosStyle {
-    pub material: Option<String>,
-    pub material_state: WebviewBackgroundEffectState,
     pub corner_radius: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct WebviewInitialWindowsStyle {
-    pub backdrop: Option<String>,
     pub corner_preference: Option<String>,
 }
 
@@ -86,6 +89,22 @@ pub(crate) enum WebviewBackgroundEffectState {
     FollowsWindowActiveState,
     Active,
     Inactive,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum WebviewWindowBackground {
+    #[default]
+    Opaque,
+    Transparent,
+    PlatformMaterial {
+        material: String,
+        state: WebviewBackgroundEffectState,
+    },
+    Semantic {
+        token: String,
+        state: WebviewBackgroundEffectState,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,11 +205,11 @@ struct WebviewExtension {
     runtime: WebviewRuntime,
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[derive(Default)]
 struct UnsupportedWebviewRuntime;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl UnsupportedWebviewRuntime {
     fn handle(
         &mut self,
@@ -277,8 +296,8 @@ struct SetContentCommandData {
 #[serde(rename_all = "camelCase")]
 struct ShowWindowStyleData {
     frameless: Option<bool>,
-    transparent: Option<bool>,
     keep_on_top: Option<bool>,
+    background: Option<WebviewBackgroundInput>,
     platform: Option<ShowWindowPlatformStyleData>,
 }
 
@@ -294,21 +313,34 @@ struct ShowWindowPlatformStyleData {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ShowWindowMacosStyleData {
-    material: Option<String>,
-    material_state: Option<String>,
     corner_radius: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ShowWindowWindowsStyleData {
-    backdrop: Option<String>,
     corner_preference: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ShowWindowLinuxStyleData {}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum WebviewBackgroundInput {
+    Keyword(String),
+    Object(WebviewBackgroundObjectInput),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebviewBackgroundObjectInput {
+    kind: String,
+    material: Option<String>,
+    token: Option<String>,
+    state: Option<String>,
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -529,27 +561,20 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                         icon: parsed.icon,
                         style: WebviewInitialStyle {
                             frameless: style.and_then(|style| style.frameless).unwrap_or(false),
-                            transparent: style.and_then(|style| style.transparent).unwrap_or(false),
+                            background: style
+                                .and_then(|style| style.background.clone())
+                                .map(parse_background_input)
+                                .transpose()?
+                                .unwrap_or_default(),
                             keep_on_top: style.and_then(|style| style.keep_on_top).unwrap_or(false),
                             platform: WebviewInitialPlatformStyle {
                                 macos: WebviewInitialMacosStyle {
-                                    material: macos_style
-                                        .and_then(|style| style.material.clone())
-                                        .filter(|material| !material.is_empty()),
-                                    material_state: macos_style
-                                        .and_then(|style| style.material_state.as_deref())
-                                        .map(parse_background_effect_state)
-                                        .transpose()?
-                                        .unwrap_or_default(),
                                     corner_radius: macos_style
                                         .and_then(|style| style.corner_radius)
                                         .map(normalize_corner_radius)
                                         .transpose()?,
                                 },
                                 windows: WebviewInitialWindowsStyle {
-                                    backdrop: windows_style
-                                        .and_then(|style| style.backdrop.clone())
-                                        .filter(|backdrop| !backdrop.is_empty()),
                                     corner_preference: windows_style
                                         .and_then(|style| style.corner_preference.clone())
                                         .filter(|preference| !preference.is_empty()),
@@ -640,6 +665,68 @@ fn normalize_corner_radius(radius: f64) -> Result<f64, WebviewRuntimeError> {
     Ok(radius.clamp(0.0, 128.0))
 }
 
+pub(crate) fn parse_background_input(
+    input: WebviewBackgroundInput,
+) -> Result<WebviewWindowBackground, WebviewRuntimeError> {
+    match input {
+        WebviewBackgroundInput::Keyword(keyword) => {
+            parse_background_keyword(&keyword, WebviewBackgroundEffectState::default())
+        }
+        WebviewBackgroundInput::Object(input) => parse_background_object(input),
+    }
+}
+
+fn parse_background_object(
+    input: WebviewBackgroundObjectInput,
+) -> Result<WebviewWindowBackground, WebviewRuntimeError> {
+    let state = input
+        .state
+        .as_deref()
+        .map(parse_background_effect_state)
+        .transpose()?
+        .unwrap_or_default();
+    match input.kind.as_str() {
+        "opaque" | "default" => Ok(WebviewWindowBackground::Opaque),
+        "transparent" => Ok(WebviewWindowBackground::Transparent),
+        "platformMaterial" => {
+            let material = required_background_field(input.material, "material")?;
+            Ok(WebviewWindowBackground::PlatformMaterial { material, state })
+        }
+        "semantic" => {
+            let token = required_background_field(input.token, "token")?;
+            Ok(WebviewWindowBackground::Semantic { token, state })
+        }
+        other => parse_background_keyword(other, state),
+    }
+}
+
+fn parse_background_keyword(
+    keyword: &str,
+    state: WebviewBackgroundEffectState,
+) -> Result<WebviewWindowBackground, WebviewRuntimeError> {
+    match keyword {
+        "" | "default" | "opaque" | "none" => Ok(WebviewWindowBackground::Opaque),
+        "transparent" => Ok(WebviewWindowBackground::Transparent),
+        "blur" => Ok(WebviewWindowBackground::Semantic {
+            token: "blur".to_string(),
+            state,
+        }),
+        material => Ok(WebviewWindowBackground::PlatformMaterial {
+            material: material.to_string(),
+            state,
+        }),
+    }
+}
+
+fn required_background_field(
+    value: Option<String>,
+    field: &str,
+) -> Result<String, WebviewRuntimeError> {
+    value
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| WebviewRuntimeError::Rejected(format!("background requires {field}")))
+}
+
 fn parse_background_effect_state(
     state: &str,
 ) -> Result<WebviewBackgroundEffectState, WebviewRuntimeError> {
@@ -648,7 +735,7 @@ fn parse_background_effect_state(
         "active" => Ok(WebviewBackgroundEffectState::Active),
         "inactive" => Ok(WebviewBackgroundEffectState::Inactive),
         other => Err(WebviewRuntimeError::Unsupported(format!(
-            "background effect state {other} is not supported on macOS"
+            "background effect state {other} is not supported"
         ))),
     }
 }
@@ -867,7 +954,9 @@ mod tests {
                     width: 3,
                     height: 4,
                 }),
-                show_settings: WebviewShowSettings::default(),
+                show_settings: WebviewShowSettings {
+                    ..WebviewShowSettings::default()
+                },
             }
         );
     }
@@ -891,12 +980,14 @@ mod tests {
             },
             "style": {
               "frameless": true,
-              "transparent": true,
+              "background": {
+                "kind": "platformMaterial",
+                "material": "hudWindow",
+                "state": "active"
+              },
               "keepOnTop": true,
               "platform": {
                 "macos": {
-                  "material": "hudWindow",
-                  "materialState": "active",
                   "cornerRadius": 18
                 }
               }
@@ -945,12 +1036,13 @@ mod tests {
                         }),
                         style: WebviewInitialStyle {
                             frameless: true,
-                            transparent: true,
                             keep_on_top: true,
+                            background: WebviewWindowBackground::PlatformMaterial {
+                                material: "hudWindow".to_string(),
+                                state: WebviewBackgroundEffectState::Active,
+                            },
                             platform: WebviewInitialPlatformStyle {
                                 macos: WebviewInitialMacosStyle {
-                                    material: Some("hudWindow".to_string()),
-                                    material_state: WebviewBackgroundEffectState::Active,
                                     corner_radius: Some(18.0),
                                 },
                                 windows: WebviewInitialWindowsStyle::default(),
@@ -1007,17 +1099,61 @@ mod tests {
     }
 
     #[test]
-    fn parse_show_command_preserves_platform_specific_style_families() {
+    fn parse_show_command_defaults_background_to_opaque_when_omitted() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show"
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show { show_settings, .. } = command else {
+            panic!("expected show command");
+        };
+
+        assert_eq!(
+            show_settings.window.style.background,
+            WebviewWindowBackground::Opaque
+        );
+    }
+
+    #[test]
+    fn parse_show_command_preserves_explicit_background_request() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "style": {
+              "background": {
+                "kind": "semantic",
+                "token": "blur",
+                "state": "active"
+              }
+            }
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show { show_settings, .. } = command else {
+            panic!("expected show command");
+        };
+
+        assert_eq!(
+            show_settings.window.style.background,
+            WebviewWindowBackground::Semantic {
+                token: "blur".to_string(),
+                state: WebviewBackgroundEffectState::Active,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_show_command_preserves_background_and_platform_style_families() {
         let command = parse_webview_command(&serde_json::json!({
             "type": "show",
             "style": {
               "frameless": true,
+              "background": "mica",
               "platform": {
                 "macos": {
-                  "material": "hudWindow"
+                  "cornerRadius": 12
                 },
                 "windows": {
-                  "backdrop": "mica",
                   "cornerPreference": "round"
                 },
                 "linux": {}
@@ -1031,13 +1167,21 @@ mod tests {
         };
 
         assert_eq!(
-            show_settings.window.style.platform.macos.material,
-            Some("hudWindow".to_string())
+            show_settings.window.style.background,
+            WebviewWindowBackground::PlatformMaterial {
+                material: "mica".to_string(),
+                state: WebviewBackgroundEffectState::FollowsWindowActiveState,
+            }
+        );
+        assert_eq!(
+            show_settings.window.style.platform.macos,
+            WebviewInitialMacosStyle {
+                corner_radius: Some(12.0),
+            }
         );
         assert_eq!(
             show_settings.window.style.platform.windows,
             WebviewInitialWindowsStyle {
-                backdrop: Some("mica".to_string()),
                 corner_preference: Some("round".to_string()),
             }
         );
@@ -1172,7 +1316,7 @@ mod tests {
             )
         };
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
             assert_eq!(result, EXT_OK);
             let json = unsafe { CStr::from_ptr(output.ptr) }.to_str().unwrap();
@@ -1180,7 +1324,7 @@ mod tests {
             unsafe { opentray_ext_free_string(output) };
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             assert_eq!(result, EXT_ERR_UNSUPPORTED);
         }

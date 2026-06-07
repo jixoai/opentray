@@ -146,6 +146,8 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
     }
 
     fn record_tray_interaction(&self, tray_icon_id: &str) {
+        #[cfg(not(target_os = "macos"))]
+        let _ = tray_icon_id;
         #[cfg(target_os = "macos")]
         if let Some(bounds) = self.surfaces.borrow().values().find_map(|surface| {
             surface

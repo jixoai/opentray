@@ -93,7 +93,7 @@ export const startDaemon = async ({
       throw new Error("daemon broker process did not expose a valid pid");
     }
     await writeFile(paths.pidFile, `${pid}\n`, "utf8");
-    await waitForReadyFile(paths.readyFile);
+    await waitForReadyFile(paths.readyFile, driver, pid);
     return { status: "started", pid, paths };
   } finally {
     await lock.release();
@@ -160,7 +160,11 @@ const waitUntilStopped = async (driver: DaemonDriver, pid: number): Promise<void
   }
 };
 
-const waitForReadyFile = async (readyFile: string): Promise<void> => {
+const waitForReadyFile = async (
+  readyFile: string,
+  driver: DaemonDriver,
+  pid: number,
+): Promise<void> => {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       await readFile(readyFile, "utf8");
@@ -168,6 +172,11 @@ const waitForReadyFile = async (readyFile: string): Promise<void> => {
     } catch (error) {
       if (!isNodeError(error) || error.code !== "ENOENT") {
         throw error;
+      }
+      if (!(await driver.isAlive(pid))) {
+        throw new Error(
+          `daemon broker exited before readiness: pid=${pid}; readyFile=${readyFile}; set ${DAEMON_STDIO_ENV}=inherit to inspect broker stderr`,
+        );
       }
       await sleep(50);
     }

@@ -7,9 +7,46 @@
       :root {
         --titlebar-left: 0px;
         --titlebar-height: 44px;
-        color: #152117;
+        --text: #152117;
+        --muted: #5a665a;
+        --muted-strong: #405243;
+        --border: rgba(24, 34, 15, 0.14);
+        --border-strong: rgba(24, 34, 15, 0.2);
+        --titlebar-bg: rgba(247, 249, 244, 0.58);
+        --surface: rgba(255, 255, 255, 0.5);
+        --surface-strong: rgba(255, 255, 255, 0.74);
+        --input-bg: rgba(255, 255, 255, 0.9);
+        --accent: #2f684f;
+        --accent-text: #f8f7ef;
+        --secondary: #5d6659;
+        --secondary-text: #f8f7ef;
+        --ghost-text: #2d3a2e;
+        --danger: rgba(178, 46, 55, 0.88);
+        --heading: #6e5a1f;
+        color: var(--text);
+        color-scheme: light dark;
         background: transparent;
         font: 14px ui-rounded, "SF Pro Rounded", "Avenir Next", system-ui, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --text: rgba(246, 249, 247, 0.96);
+          --muted: rgba(210, 220, 214, 0.78);
+          --muted-strong: rgba(228, 237, 231, 0.88);
+          --border: rgba(255, 255, 255, 0.13);
+          --border-strong: rgba(255, 255, 255, 0.22);
+          --titlebar-bg: rgba(14, 18, 16, 0.42);
+          --surface: rgba(15, 20, 18, 0.38);
+          --surface-strong: rgba(24, 30, 27, 0.62);
+          --input-bg: rgba(8, 12, 10, 0.56);
+          --accent: #7dd3a4;
+          --accent-text: #07110c;
+          --secondary: rgba(168, 184, 172, 0.36);
+          --secondary-text: rgba(245, 250, 247, 0.92);
+          --ghost-text: rgba(238, 246, 241, 0.9);
+          --danger: rgba(210, 80, 92, 0.9);
+          --heading: rgba(231, 210, 126, 0.86);
+        }
       }
       * {
         box-sizing: border-box;
@@ -32,8 +69,8 @@
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
         min-height: var(--titlebar-height);
-        border-bottom: 1px solid rgba(24, 34, 15, 0.12);
-        background: rgba(247, 249, 244, 0.66);
+        border-bottom: 1px solid var(--border);
+        background: var(--titlebar-bg);
         -webkit-user-select: none;
         user-select: none;
       }
@@ -60,7 +97,7 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        color: #59655a;
+        color: var(--muted);
         font-size: 12px;
       }
       .window-controls {
@@ -74,14 +111,14 @@
         place-items: center;
         width: 28px;
         height: 28px;
-        border: 1px solid rgba(24, 34, 15, 0.16);
+        border: 1px solid var(--border-strong);
         border-radius: 8px;
         padding: 0;
-        background: rgba(255, 255, 255, 0.78);
-        color: #263226;
+        background: var(--surface-strong);
+        color: var(--text);
       }
       .window-control.close {
-        background: rgba(178, 46, 55, 0.88);
+        background: var(--danger);
         color: #fff7f3;
       }
       main {
@@ -104,7 +141,7 @@
       p {
         margin: 8px 0 0;
         max-width: 74ch;
-        color: #5a665a;
+        color: var(--muted);
       }
       .chips {
         display: flex;
@@ -113,11 +150,11 @@
         gap: 8px;
       }
       .chip {
-        border: 1px solid rgba(30, 42, 29, 0.12);
+        border: 1px solid var(--border);
         border-radius: 999px;
         padding: 6px 10px;
-        background: rgba(255, 255, 255, 0.72);
-        color: #405243;
+        background: var(--surface-strong);
+        color: var(--muted-strong);
         font-size: 12px;
         font-weight: 600;
         white-space: nowrap;
@@ -128,30 +165,17 @@
         gap: 16px;
       }
       .panel {
-        border: 1px solid rgba(24, 34, 15, 0.14);
+        border: 1px solid var(--border);
         border-radius: 8px;
         padding: 14px;
-        background: rgba(255, 255, 255, 0.64);
-      }
-      .material-stage {
-        min-height: 132px;
-        border: 1px dashed rgba(21, 33, 23, 0.26);
-        border-radius: 8px;
-        padding: 12px;
-        background:
-          linear-gradient(45deg, rgba(255, 255, 255, 0.18) 25%, transparent 25% 75%, rgba(255, 255, 255, 0.18) 75%),
-          linear-gradient(45deg, rgba(255, 255, 255, 0.18) 25%, transparent 25% 75%, rgba(255, 255, 255, 0.18) 75%);
-        background-position:
-          0 0,
-          12px 12px;
-        background-size: 24px 24px;
+        background: var(--surface);
       }
       .panel h2 {
         margin: 0 0 10px;
         font-size: 14px;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        color: #6e5a1f;
+        color: var(--heading);
       }
       .stack {
         display: grid;
@@ -167,24 +191,39 @@
         gap: 6px;
       }
       .field label {
-        color: #425442;
+        color: var(--muted-strong);
         font-size: 12px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.05em;
       }
+      .toggle-field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: max-content;
+        max-width: 100%;
+        color: var(--muted-strong);
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .toggle-field input {
+        width: auto;
+      }
       input,
+      select,
       button,
       textarea {
         font: inherit;
       }
       input,
+      select,
       textarea {
         width: 100%;
-        border: 1px solid rgba(24, 34, 15, 0.16);
+        border: 1px solid var(--border-strong);
         border-radius: 10px;
         padding: 10px 12px;
-        background: rgba(255, 255, 255, 0.95);
+        background: var(--input-bg);
         color: inherit;
       }
       textarea {
@@ -195,20 +234,21 @@
         border: 0;
         border-radius: 999px;
         padding: 9px 12px;
-        background: #2f684f;
-        color: #f8f7ef;
+        background: var(--accent);
+        color: var(--accent-text);
         cursor: pointer;
       }
       button.secondary {
-        background: #5d6659;
+        background: var(--secondary);
+        color: var(--secondary-text);
       }
       button.ghost {
         background: transparent;
-        border: 1px solid rgba(24, 34, 15, 0.16);
-        color: #2d3a2e;
+        border: 1px solid var(--border-strong);
+        color: var(--ghost-text);
       }
       input[type="range"] {
-        accent-color: #2f684f;
+        accent-color: var(--accent);
       }
       button:disabled {
         opacity: 0.5;
@@ -220,7 +260,18 @@
         word-break: break-word;
       }
       .muted {
-        color: #5d695d;
+        color: var(--muted);
+      }
+      .overlay-drag {
+        min-height: 58px;
+        border: 1px dashed var(--border-strong);
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: var(--surface);
+        color: var(--muted-strong);
+        font-weight: 700;
+        user-select: none;
       }
       .spacer {
         height: 6px;
@@ -266,23 +317,62 @@
               <button id="capabilities-button">Capabilities</button>
               <button id="style-button">Refresh Style</button>
               <button id="frameless-button">Toggle Frameless</button>
-              <button id="transparent-button">Toggle Transparent</button>
             </div>
             <div class="row">
               <button id="topmost-button">Toggle Topmost</button>
-              <button id="material-button">Cycle Material</button>
-              <button id="borderless-button">Borderless Glass</button>
-              <button id="system-corner-button" class="ghost">System Corners</button>
+              <button id="window-state-button" class="ghost">Window State</button>
             </div>
             <div class="field">
-              <label for="corner-radius-input">Corner radius <span id="corner-radius-value">system</span></label>
+              <label for="background-select">Background</label>
+              <select id="background-select">
+                <option value="opaque">opaque</option>
+                <option value="transparent">transparent</option>
+                <option value="blur">blur</option>
+                <option value="mica">mica</option>
+                <option value="acrylic">acrylic</option>
+                <option value="tabbed">tabbed</option>
+                <option value="auto">auto</option>
+                <option value="hudWindow">hudWindow</option>
+                <option value="sidebar">sidebar</option>
+                <option value="windowBackground">windowBackground</option>
+                <option value="contentBackground">contentBackground</option>
+                <option value="underWindowBackground">underWindowBackground</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="background-state-select">Background state</label>
+              <select id="background-state-select">
+                <option value="followsWindowActiveState">followsWindowActiveState</option>
+                <option value="active">active</option>
+                <option value="inactive">inactive</option>
+              </select>
+            </div>
+            <div class="row">
+              <button id="apply-background-button">Apply Background</button>
+              <button id="opaque-background-button" class="ghost">Opaque Background</button>
+            </div>
+            <div class="field">
+              <label for="corner-radius-input">macOS corner radius <span id="corner-radius-value">system</span></label>
               <input id="corner-radius-input" type="range" min="0" max="48" step="1" value="18" />
+            </div>
+            <div class="field">
+              <label for="windows-corner-select">Windows corner preference</label>
+              <select id="windows-corner-select">
+                <option value="">system</option>
+                <option value="default">default</option>
+                <option value="doNotRound">doNotRound</option>
+                <option value="round">round</option>
+                <option value="roundSmall">roundSmall</option>
+              </select>
+            </div>
+            <div class="row">
+              <button id="apply-corner-button">Apply Corner</button>
+              <button id="system-corner-button" class="ghost">System Corner</button>
             </div>
             <div class="row">
               <button id="minimize-button">Minimize</button>
               <button id="maximize-button">Maximize</button>
               <button id="restore-button">Restore</button>
-              <button id="window-state-button" class="ghost">Window State</button>
             </div>
             <div class="row">
               <button id="resize-button">Resize</button>
@@ -303,13 +393,17 @@
         </section>
 
         <section class="panel">
-          <h2>Material Preview</h2>
+          <h2>Overlay</h2>
           <div class="stack">
-            <div class="material-stage">
-              <p class="muted">
-                Native material only shows through unpainted window regions. Keep the page root
-                transparent and avoid using CSS blur to fake the shell.
-              </p>
+            <label class="toggle-field" for="overlay-launch-toggle">
+              <input id="overlay-launch-toggle" type="checkbox" />
+              <span>Overlay at launch</span>
+            </label>
+            <div class="overlay-drag" id="overlay-drag-test">startAppRegionDrag test area</div>
+            <div class="row">
+              <button id="overlay-geometry-button">getTitlebarAreaRect()</button>
+              <button id="overlay-listen-button">Listen geometrychange</button>
+              <button id="overlay-unlisten-button" class="ghost">Unlisten geometrychange</button>
             </div>
             <pre id="overlay-rect-status" class="muted">Waiting for overlay geometry.</pre>
           </div>
@@ -380,13 +474,25 @@
       const screenApi =
         navigator.opentrayScreen ??
         (typeof navigator.screen?.getScreenDetails === "function" ? navigator.screen : undefined);
-      const materialEffects = [
-        null,
-        "hudWindow",
-        "sidebar",
-        "windowBackground",
-        "contentBackground",
-        "underWindowBackground",
+      const commonBackgroundOptions = [
+        ["opaque", "opaque"],
+        ["transparent", "transparent"],
+        ["blur", "blur"],
+      ];
+      const macosBackgroundOptions = [
+        ...commonBackgroundOptions,
+        ["hudWindow", "hudWindow"],
+        ["sidebar", "sidebar"],
+        ["windowBackground", "windowBackground"],
+        ["contentBackground", "contentBackground"],
+        ["underWindowBackground", "underWindowBackground"],
+      ];
+      const windowsBackgroundOptions = [
+        ...commonBackgroundOptions,
+        ["mica", "mica"],
+        ["acrylic", "acrylic"],
+        ["tabbed", "tabbed"],
+        ["auto", "auto"],
       ];
       const iconVariantSpecs = [
         { background: "#244f3b", mark: "T" },
@@ -394,8 +500,9 @@
       ];
       const iconVariants = [];
       let iconVariantIndex = 0;
-      let materialIndex = 0;
+      let runtimePlatform = "unknown";
       const eventLog = [];
+      let overlayGeometryUnlisten = null;
       const $ = (id) => document.getElementById(id);
       const eventPayload = (event) =>
         event && typeof event === "object" && "payload" in event ? event.payload : event;
@@ -412,15 +519,91 @@
         const macos = platform.macos;
         return macos && typeof macos === "object" ? macos : null;
       };
+      const getWindowsStyle = (style) => {
+        if (!style || typeof style !== "object") return null;
+        const platform = style.platform;
+        if (!platform || typeof platform !== "object") return null;
+        const windows = platform.windows;
+        return windows && typeof windows === "object" ? windows : null;
+      };
+      const setSelectOptions = (id, options) => {
+        const select = $(id);
+        if (!select) return;
+        const current = select.value;
+        select.replaceChildren(
+          ...options.map(([value, label]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            return option;
+          }),
+        );
+        if (options.some(([value]) => value === current)) {
+          select.value = current;
+        }
+      };
+      const isWindowsStyle = (style) => runtimePlatform === "windows" || Boolean(getWindowsStyle(style));
+      const backgroundValue = (style) => {
+        const background = style && typeof style === "object" ? style.background : null;
+        if (!background || typeof background !== "object") return "opaque";
+        if (background.kind === "platformMaterial" && typeof background.material === "string") {
+          return background.material;
+        }
+        if (background.kind === "semantic" && typeof background.token === "string") {
+          return background.token;
+        }
+        return typeof background.kind === "string" ? background.kind : "opaque";
+      };
+      const backgroundState = (style) => {
+        const background = style && typeof style === "object" ? style.background : null;
+        return background && typeof background === "object" && typeof background.state === "string"
+          ? background.state
+          : "followsWindowActiveState";
+      };
+      const backgroundPayload = (value, state) => {
+        if (value === "opaque" || value === "transparent") {
+          return value;
+        }
+        if (value === "blur") {
+          return { kind: "semantic", token: "blur", state };
+        }
+        return { kind: "platformMaterial", material: value, state };
+      };
+      const syncBackgroundControl = (style) => {
+        const select = $("background-select");
+        if (!select) return;
+        if (isWindowsStyle(style)) {
+          setSelectOptions("background-select", windowsBackgroundOptions);
+        } else {
+          setSelectOptions("background-select", macosBackgroundOptions);
+        }
+        const value = backgroundValue(style);
+        select.value = [...select.options].some((option) => option.value === value) ? value : "opaque";
+        const stateSelect = $("background-state-select");
+        if (stateSelect) {
+          stateSelect.value = backgroundState(style);
+        }
+      };
       const applyStyleMode = (style) => {
         const macosStyle = getMacosStyle(style);
-        const macosMaterial =
-          macosStyle && typeof macosStyle.material === "string" ? macosStyle.material : null;
+        const windowsStyle = getWindowsStyle(style);
+        syncBackgroundControl(style);
+        const windowsCornerPreference =
+          windowsStyle && typeof windowsStyle.cornerPreference === "string"
+            ? windowsStyle.cornerPreference
+            : null;
+        const windowsCornerSelect = $("windows-corner-select");
+        if (windowsCornerSelect) {
+          windowsCornerSelect.value = windowsCornerPreference ?? "";
+        }
         const cornerRadius =
           macosStyle && typeof macosStyle.cornerRadius === "number"
             ? macosStyle.cornerRadius
             : null;
-        text("corner-radius-value", cornerRadius === null ? "system" : `${cornerRadius}px`);
+        text(
+          "corner-radius-value",
+          windowsStyle ? (windowsCornerPreference ?? "system") : cornerRadius === null ? "system" : `${cornerRadius}px`,
+        );
         const radiusInput = $("corner-radius-input");
         if (radiusInput && cornerRadius !== null) {
           radiusInput.value = String(Math.round(cornerRadius));
@@ -430,20 +613,24 @@
         if (!style || typeof style !== "object") {
           return style;
         }
-        const macosStyle = getMacosStyle(style);
-        const macosMaterial =
-          macosStyle && typeof macosStyle.material === "string" && macosStyle.material.length > 0
-            ? macosStyle.material
-            : null;
         return {
           ...style,
-          effectiveClearBackground: Boolean(style.transparent || macosMaterial),
+          effectiveClearBackground: Boolean(
+            style.background?.kind === "transparent" ||
+              style.background?.kind === "platformMaterial" ||
+              style.background?.kind === "semantic",
+          ),
         };
       };
       const updateOverlayGeometry = async () => {
         if (!bridge?.overlay) {
-          text("overlay-status", "overlay: unavailable");
-          text("overlay-rect-status", "windowControlsOverlay was not enabled.");
+          text("overlay-status", bridge ? "overlay: disabled" : "overlay: unavailable");
+          text(
+            "overlay-rect-status",
+            bridge
+              ? "windowControlsOverlay is disabled for this run. Restart without --no-overlay or pass --overlay."
+              : "navigator.window is unavailable for this page source.",
+          );
           return;
         }
         try {
@@ -457,8 +644,8 @@
           text("overlay-rect-status", `Failed to load overlay geometry.\n${formatError(error)}`);
         }
       };
-      const bindTitlebarDrag = () => {
-        const dragRegion = $("titlebar-drag-region");
+      const bindDragRegion = (id) => {
+        const dragRegion = $(id);
         if (!dragRegion || !bridge?.startAppRegionDrag) return;
         dragRegion.addEventListener("pointerdown", (event) => {
           if (event.button !== 0) return;
@@ -471,6 +658,48 @@
             text("overlay-status", `drag: ${formatError(error)}`);
           });
         });
+      };
+      const bindTitlebarDrag = () => {
+        bindDragRegion("titlebar-drag-region");
+        bindDragRegion("overlay-drag-test");
+      };
+      const listenOverlayGeometry = async () => {
+        if (!bridge?.overlay) {
+          text("overlay-rect-status", "windowControlsOverlay is disabled for this run.");
+          return;
+        }
+        if (overlayGeometryUnlisten) {
+          text("overlay-rect-status", "overlay.geometrychange listener is already active.");
+          return;
+        }
+        try {
+          overlayGeometryUnlisten = await bridge.overlay.listen("geometrychange", (event) => {
+            appendEvent("overlay.geometrychange", event);
+            const rect = event.titlebarAreaRect;
+            if (rect) {
+              document.documentElement.style.setProperty("--titlebar-left", `${rect.x}px`);
+              document.documentElement.style.setProperty("--titlebar-height", `${Math.max(rect.height, 38)}px`);
+              text("overlay-status", `overlay: x=${rect.x} w=${rect.width} h=${rect.height}`);
+              text("overlay-rect-status", JSON.stringify(rect, null, 2));
+            }
+          });
+          text("overlay-rect-status", "overlay.geometrychange listener active.");
+        } catch (error) {
+          text("overlay-rect-status", `Failed to listen for overlay geometry.\n${formatError(error)}`);
+        }
+      };
+      const unlistenOverlayGeometry = async () => {
+        if (!overlayGeometryUnlisten) {
+          text("overlay-rect-status", "overlay.geometrychange listener is not active.");
+          return;
+        }
+        try {
+          await overlayGeometryUnlisten();
+          overlayGeometryUnlisten = null;
+          text("overlay-rect-status", "overlay.geometrychange listener removed.");
+        } catch (error) {
+          text("overlay-rect-status", `Failed to remove overlay listener.\n${formatError(error)}`);
+        }
       };
       const updateChips = () => {
         text("bridge-chip", bridge ? "bridge: ready" : "bridge: unavailable");
@@ -487,6 +716,14 @@
             location.origin || "(opaque)"
           }\nbridge: ${bridge ? "yes" : "no"}`;
         }
+      };
+      const syncOverlayLaunchToggle = () => {
+        const toggle = $("overlay-launch-toggle");
+        if (!toggle) return;
+        toggle.checked = Boolean(bridge?.overlay);
+        toggle.title = bridge?.overlay
+          ? "Overlay is enabled for this run. Restart with --no-overlay to test the disabled state."
+          : "Overlay is disabled for this run. Restart without --no-overlay or pass --overlay.";
       };
       const appendEvent = (label, payload) => {
         const entry = `[${new Date().toLocaleTimeString()}] ${label} ${JSON.stringify(payload)}`;
@@ -569,31 +806,69 @@
         ensureFaviconLink().setAttribute("href", iconVariants[iconVariantIndex]);
         text("metadata-status", `Favicon variant ${iconVariantIndex + 1} selected.`);
       };
-      const setMaterialVariant = async () => {
+      const applyBackground = async () => {
         if (!bridge) {
           text("style-status", "navigator.window is unavailable for this page source.");
           return;
         }
         try {
-          materialIndex = (materialIndex + 1) % materialEffects.length;
-          const nextEffect = materialEffects[materialIndex];
+          const select = $("background-select");
+          const stateSelect = $("background-state-select");
+          const nextBackground = select && typeof select.value === "string" ? select.value : "opaque";
+          const nextState =
+            stateSelect && typeof stateSelect.value === "string"
+              ? stateSelect.value
+              : "followsWindowActiveState";
+          await bridge.setBackground(backgroundPayload(nextBackground, nextState));
+          text(
+            "metadata-status",
+            `Background set to ${nextBackground}.`,
+          );
+          const nextStyle = await bridge.getStyle();
+          applyStyleMode(nextStyle);
+          text("style-status", JSON.stringify(toDisplayedStyle(nextStyle), null, 2));
+        } catch (error) {
+          text("style-status", `Failed to update background.\n${formatError(error)}`);
+        }
+      };
+      const setOpaqueBackground = async () => {
+        const select = $("background-select");
+        if (select) {
+          select.value = "opaque";
+        }
+        await bridge?.setBackground?.("opaque");
+        await refreshStyle();
+      };
+      const applyCorner = async () => {
+        if (!bridge) {
+          text("style-status", "navigator.window is unavailable for this page source.");
+          return;
+        }
+        try {
+          const style = await bridge.getStyle();
+          if (isWindowsStyle(style)) {
+            const select = $("windows-corner-select");
+            const preference = select && typeof select.value === "string" ? select.value : "";
+            await bridge.setStyle({
+              platform: {
+                windows: {
+                  cornerPreference: preference === "" ? null : preference,
+                },
+              },
+            });
+            await refreshStyle();
+            return;
+          }
           await bridge.setStyle({
             platform: {
               macos: {
-                material: nextEffect,
-                materialState: "active",
+                cornerRadius: Number($("corner-radius-input")?.value ?? 18),
               },
             },
           });
-          text(
-            "metadata-status",
-            `Background effect set to ${nextEffect ?? "none"}. Transparent request unchanged.`,
-          );
-          const style = await bridge.getStyle();
-          applyStyleMode(style);
-          text("style-status", JSON.stringify(toDisplayedStyle(style), null, 2));
+          await refreshStyle();
         } catch (error) {
-          text("style-status", `Failed to update style.\n${formatError(error)}`);
+          text("style-status", `Failed to update corner.\n${formatError(error)}`);
         }
       };
       const refreshStyle = async () => {
@@ -616,6 +891,7 @@
         }
         try {
           const capabilities = await bridge.getCapabilities();
+          runtimePlatform = typeof capabilities.platform === "string" ? capabilities.platform : runtimePlatform;
           text("capabilities-status", JSON.stringify(capabilities, null, 2));
         } catch (error) {
           text("capabilities-status", `Failed to load capabilities.\n${formatError(error)}`);
@@ -726,18 +1002,6 @@
         void refreshWindowState();
         void refreshScreenDetails();
         void updateOverlayGeometry();
-        if (bridge.overlay) {
-          void bridge.overlay.listen("geometrychange", (event) => {
-            appendEvent("overlay.geometrychange", event);
-            const rect = event.titlebarAreaRect;
-            if (rect) {
-              document.documentElement.style.setProperty("--titlebar-left", `${rect.x}px`);
-              document.documentElement.style.setProperty("--titlebar-height", `${Math.max(rect.height, 38)}px`);
-              text("overlay-status", `overlay: x=${rect.x} w=${rect.width} h=${rect.height}`);
-              text("overlay-rect-status", JSON.stringify(rect, null, 2));
-            }
-          });
-        }
       };
 
       bindWindowEvents();
@@ -755,16 +1019,6 @@
           text("style-status", `Failed to toggle frameless.\n${formatError(error)}`);
         }
       });
-      bindIfPresent("transparent-button", async () => {
-        if (!bridge) return;
-        try {
-          const style = await bridge.getStyle();
-          await bridge.setStyle({ transparent: !style.transparent });
-          await refreshStyle();
-        } catch (error) {
-          text("style-status", `Failed to toggle transparency.\n${formatError(error)}`);
-        }
-      });
       bindIfPresent("topmost-button", async () => {
         if (!bridge) return;
         try {
@@ -775,30 +1029,26 @@
           text("style-status", `Failed to toggle topmost.\n${formatError(error)}`);
         }
       });
-      bindIfPresent("material-button", setMaterialVariant);
-      bindIfPresent("borderless-button", async () => {
-        if (!bridge) return;
-        try {
-          await bridge.setStyle({
-            frameless: true,
-            transparent: true,
-            platform: {
-              macos: {
-                material: "hudWindow",
-                materialState: "active",
-                cornerRadius: Number($("corner-radius-input")?.value ?? 18),
-              },
-            },
-          });
-          await refreshStyle();
-          await updateOverlayGeometry();
-        } catch (error) {
-          text("style-status", `Failed to enable borderless glass.\n${formatError(error)}`);
-        }
+      bindIfPresent("apply-background-button", applyBackground);
+      bindIfPresent("opaque-background-button", () => {
+        void setOpaqueBackground();
       });
+      bindIfPresent("apply-corner-button", applyCorner);
       bindIfPresent("system-corner-button", async () => {
         if (!bridge) return;
         try {
+          const style = await bridge.getStyle();
+          if (isWindowsStyle(style)) {
+            await bridge.setStyle({
+              platform: {
+                windows: {
+                  cornerPreference: null,
+                },
+              },
+            });
+            await refreshStyle();
+            return;
+          }
           await bridge.setStyle({
             platform: {
               macos: {
@@ -813,21 +1063,6 @@
       });
       $("corner-radius-input")?.addEventListener("input", (event) => {
         text("corner-radius-value", `${event.currentTarget.value}px`);
-      });
-      $("corner-radius-input")?.addEventListener("change", async (event) => {
-        if (!bridge) return;
-        try {
-          await bridge.setStyle({
-            platform: {
-              macos: {
-                cornerRadius: Number(event.currentTarget.value),
-              },
-            },
-          });
-          await refreshStyle();
-        } catch (error) {
-          text("style-status", `Failed to update corner radius.\n${formatError(error)}`);
-        }
       });
       bindIfPresent("minimize-button", () => {
         void bridge?.minimize()
@@ -879,6 +1114,23 @@
         } catch (error) {
           text("metadata-status", `Failed to move window.\n${formatError(error)}`);
         }
+      });
+      bindIfPresent("overlay-geometry-button", updateOverlayGeometry);
+      bindIfPresent("overlay-listen-button", () => {
+        void listenOverlayGeometry();
+      });
+      bindIfPresent("overlay-unlisten-button", () => {
+        void unlistenOverlayGeometry();
+      });
+      $("overlay-launch-toggle")?.addEventListener("change", (event) => {
+        const current = Boolean(bridge?.overlay);
+        event.currentTarget.checked = current;
+        text(
+          "overlay-rect-status",
+          current
+            ? "Overlay is enabled for this run. Restart with --no-overlay to test the disabled state."
+            : "Overlay is disabled for this run. Restart without --no-overlay or pass --overlay.",
+        );
       });
       bindIfPresent("native-close-button", () => {
         if (!bridge) return;
@@ -960,6 +1212,7 @@
       });
 
       updateChips();
+      syncOverlayLaunchToggle();
       setFaviconVariant(0);
       text("metadata-status", "Waiting for title/icon sync.");
       text("location-status", `href: ${location.href}\norigin: ${location.origin || "(opaque)"}`);

@@ -60,9 +60,11 @@ Run the direct webview control demo:
 
 ```bash
 pnpm --filter opentray example:webview-control
+pnpm --filter opentray example:webview-control -- --overlay
+pnpm --filter opentray example:webview-control -- --no-overlay
 ```
 
-That demo opens a native WebView window immediately and puts the controls inside the page itself, so you can exercise frameless, transparent, keep-on-top, title, icon, screen, and navigation behavior without going through the tray menu first.
+That demo opens a native WebView window immediately and puts the controls inside the page itself, so you can exercise frameless, background modes, keep-on-top, title, icon, screen, overlay, and navigation behavior without going through the tray menu first. The control demo enables the show-time `windowControlsOverlay` capability by default; use `-- --no-overlay` when you want to test the disabled path.
 Treat `example:webview-control` as the API exercise surface. It is useful for probing capabilities and events, but it is not the canonical recipe for a tray-anchored glass shell.
 
 Application code mounts WebView as a tray capability. The first WebView command loads the native extension automatically; ordinary code does not need to send `load-ext` manually:
@@ -94,8 +96,8 @@ pnpm --filter opentray example:tray-panel
 ```
 
 This demo is the canonical custom TrayPanel case: one `primaryEvent` tray item, backend `tray.getBounds()`, page `navigator.opentray.tray.getBounds()`, screen-aware repositioning, and a frameless glass panel with `keepOnTop`.
-It also follows the native-glass rule strictly: transparent native window background, no root HTML shell styling, and content padding only inside the page.
-It now also pins `style.platform.macos.materialState: "active"` so the tray-launched material surface does not immediately fall back to the inactive grey AppKit appearance.
+It also follows the native-glass rule strictly: material background through `style.background`, no root HTML shell styling, and content padding only inside the page.
+On macOS it requests `{ kind: "platformMaterial", material: "hudWindow", state: "active" }` so the tray-launched material surface does not immediately fall back to the inactive grey AppKit appearance. On Windows it uses `background: "mica"` and `cornerPreference: "round"` instead of sending macOS-only style.
 For a step-by-step walkthrough of the examples and expected behavior, read [examples/EXAMPLE.md](./examples/EXAMPLE.md).
 
 ## Release Channels And Maturity
@@ -108,7 +110,8 @@ OpenTray uses release channels and capability maturity together. Do not read a p
 Current WebView truth:
 
 - macOS is the current `stable` human-visible acceptance path
-- Windows and Linux are currently `alpha` for WebView runtime behavior, even though their platform packages are published
+- Windows is `alpha` for the first visible WebView2-backed runtime, common bridge/window controls, background material/corner preferences, and native icon projection
+- Linux is currently `alpha` for the WebView package/contract surface; visible runtime behavior remains explicitly unsupported
 - some requests are `unsupported by design`, such as asking the macOS runtime to apply a Windows-only style family
 - some results are `unavailable by context`, such as tray-bounds projection when the current session has no authoritative tray anchor
 
@@ -153,7 +156,7 @@ pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle packages/cli/asset
 
 The package-owned review bundle is the full human acceptance surface. The separate `input-probe.lynx.bundle` is only a low-level diagnostic asset for isolating raw click/scroll/input delivery. The empty feature set is the baseline carrier check. Use it to validate the physical window baseline: click, scroll, input, red/yellow/green controls, and resize/move. Only after that baseline is healthy should you validate explicit startup feature sets on top of the same carrier.
 
-First-stage platform packages are published for macOS, Linux, and Windows. macOS is the current human-visual acceptance path. Linux and Windows artifacts are present for package topology validation, but unsupported broker/WebView capability must fail explicitly rather than pretending a visible UI exists. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
+First-stage platform packages are published for macOS, Linux, and Windows. macOS is the stable WebView human-visual acceptance path. Windows now has an alpha WebView2-backed visible runtime for common window and bridge commands plus DWM-backed Mica/Acrylic/Tabbed style projection. Linux WebView artifacts are present for package topology validation, but unsupported runtime capability must fail explicitly rather than pretending a visible UI exists. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
 
 If you are validating the current prerelease branch before stable publication, install from the alpha channel and treat that as alpha evidence rather than stable evidence:
 

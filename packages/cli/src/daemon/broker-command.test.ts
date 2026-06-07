@@ -82,7 +82,9 @@ describe("broker command resolver", () => {
     const binary = join(packageJson, "..", "bin", "opentray");
     expect(command.command).toBe(binary);
     expect(command.cwd).toBeUndefined();
-    expect((await stat(binary)).mode & 0o777).toBe(0o755);
+    if (process.platform !== "win32") {
+      expect((await stat(binary)).mode & 0o777).toBe(0o755);
+    }
   });
 
   it("falls back to workspace dev build when a workspace package has not staged its binary yet", async () => {

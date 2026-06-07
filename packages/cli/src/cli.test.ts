@@ -75,7 +75,9 @@ describe("opentray CLI", () => {
     expect(parseCliCommand(["deamon", "start"])).toEqual({ type: "help" });
   });
 
-  it("recognizes the npm .bin symlink as the CLI entrypoint", () => {
+  const itWithFileSymlink = process.platform === "win32" ? it.skip : it;
+
+  itWithFileSymlink("recognizes the npm .bin symlink as the CLI entrypoint", () => {
     const dir = mkdtempSync(join(tmpdir(), "opentray-cli-entry-"));
     try {
       const target = join(dir, "cli.mjs");

@@ -1,13 +1,15 @@
+﻿import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
-import { WebviewExt } from "../../ext-webview/src/index";
+import { attachWebview } from "../../ext-webview/src/index";
+import type { WebviewWindowStylePatch } from "../../ext-webview/src/index";
 import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
 
 const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
 
-const demoHomeDir = process.env.OPENTRAY_HOME ?? join("/tmp", `opentray-tray-panel-${process.pid}`);
+const demoHomeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `opentray-tray-panel-${process.pid}`);
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
 const client = createClient(connection, { requestIdPrefix: "tray-panel" });
 console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
@@ -37,37 +39,16 @@ const tray = await space.createTray({
 });
 console.log(`tray: ${tray.trayId}`);
 
-const webview = tray.extend(WebviewExt).createWebviewWindow({
-  width: 388,
-  height: 286,
-  title: "OpenTray Tray Panel",
-  style: {
-    frameless: true,
-    transparent: true,
-    keepOnTop: true,
-    platform: {
-      macos: {
-        material: "hudWindow",
-        materialState: "active",
-        cornerRadius: 22,
-      },
-    },
-  },
-  nativeWindowApi: true,
-  bindWindowGlobals: true,
-  nativeScreenApi: true,
-  bindScreenGlobals: true,
-  nativeTrayApi: true,
-  titleSync: {
-    documentToWindow: true,
-    windowToDocument: true,
-  },
-  iconSync: true,
-  nativeApiPolicy: {
-    defaultSrc: ["'local'"],
-  },
+await connection.request({
+  type: "load-ext",
+  requestId: "tray-panel-load-webview",
+  spaceId: space.space.spaceId,
+  name: "webview",
+  path: "@opentray/ext-webview",
 });
-console.log("click the tray icon: macOS should direct-trigger the single primary action without opening a menu");
+
+const webview = attachWebview(tray);
+console.log("click the tray icon: platforms with primary tray events should open the WebView panel");
 console.log("press Ctrl-C to exit the tray demo");
 
 let closed = false;
@@ -157,8 +138,28 @@ async function openTrayPanel(): Promise<void> {
   console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
 
   await webview.show({
+    type: "show",
     html: createTrayPanelHtml(),
+    width: 388,
+    height: 286,
+    title: "OpenTray Tray Panel",
     fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
+    style: {
+      ...createTrayPanelWindowStyle(),
+    },
+    nativeWindowApi: true,
+    bindWindowGlobals: true,
+    nativeScreenApi: true,
+    bindScreenGlobals: true,
+    nativeTrayApi: true,
+    titleSync: {
+      documentToWindow: true,
+      windowToDocument: true,
+    },
+    iconSync: true,
+    nativeApiPolicy: {
+      defaultSrc: ["'local'"],
+    },
   });
   console.log("tray panel command: show");
 }
@@ -177,6 +178,46 @@ async function shutdown(): Promise<void> {
 
 await lifecycle;
 
+
+function createTrayPanelWindowStyle(): WebviewWindowStylePatch {
+  const common = {
+    frameless: true,
+    keepOnTop: true,
+  } satisfies Pick<WebviewWindowStylePatch, "frameless" | "keepOnTop">;
+
+  if (process.platform === "win32") {
+    return {
+      ...common,
+      background: "mica",
+      platform: {
+        windows: {
+          cornerPreference: "round",
+        },
+      },
+    };
+  }
+
+  if (process.platform === "darwin") {
+    return {
+      ...common,
+      background: {
+        kind: "platformMaterial",
+        material: "hudWindow",
+        state: "active",
+      },
+      platform: {
+        macos: {
+          cornerRadius: 22,
+        },
+      },
+    };
+  }
+
+  return {
+    ...common,
+    background: "transparent",
+  };
+}
 
 function createTrayPanelHtml(mode: "default" | "content-set" = "default"): string {
   return `<!doctype html>
@@ -309,7 +350,7 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
         </div>
         <div class="actions">
           <button class="secondary" id="toggle-transparent-button">Toggle Transparent</button>
-          <button class="secondary" id="toggle-material-button">Toggle hudWindow Active</button>
+          <button class="secondary" id="toggle-material-button">Toggle Backdrop</button>
           <button class="secondary" id="reposition-button">Reposition</button>
           <button id="close-button">Close</button>
         </div>
@@ -445,13 +486,16 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
           return;
         }
         const style = await pageWindow.getStyle();
-        const macosMaterial = style.platform?.macos?.material ?? null;
         setText(
           "style-status",
           JSON.stringify(
             {
               ...style,
-              effectiveClearBackground: Boolean(style.transparent || macosMaterial),
+              effectiveClearBackground: Boolean(
+                style.background?.kind === "transparent" ||
+                  style.background?.kind === "platformMaterial" ||
+                  style.background?.kind === "semantic",
+              ),
             },
             null,
             2,
@@ -473,26 +517,28 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
       }
 
       async function toggleTransparent() {
-        if (!pageWindow?.setStyle) return;
+        if (!pageWindow?.setBackground) return;
         const style = await pageWindow.getStyle();
-        await pageWindow.setStyle({
-          transparent: !style.transparent,
-        });
+        await pageWindow.setBackground(
+          style.background?.kind === "transparent" ? "opaque" : "transparent",
+        );
         await refreshStyle();
       }
 
       async function toggleMaterial() {
-        if (!pageWindow?.setStyle) return;
+        if (!pageWindow?.setBackground) return;
         const style = await pageWindow.getStyle();
-        const currentMaterial = style.platform?.macos?.material ?? null;
-        await pageWindow.setStyle({
-          platform: {
-            macos: {
-              material: currentMaterial ? null : "hudWindow",
-              materialState: "active",
-            },
-          },
-        });
+        const hasMaterial =
+          style.background?.kind === "platformMaterial" ||
+          style.background?.kind === "semantic";
+        if (style.platform?.windows) {
+          await pageWindow.setBackground(hasMaterial ? "opaque" : "mica");
+          await refreshStyle();
+          return;
+        }
+        await pageWindow.setBackground(
+          hasMaterial ? "opaque" : { kind: "platformMaterial", material: "hudWindow", state: "active" },
+        );
         await refreshStyle();
       }
 

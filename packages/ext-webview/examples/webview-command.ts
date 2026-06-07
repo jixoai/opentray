@@ -32,12 +32,15 @@ const webview = tray.createWebviewWindow({
   },
   style: {
     frameless: true,
-    transparent: true,
     keepOnTop: true,
+    background: {
+      kind: "platformMaterial",
+      material: "hudWindow",
+      state: "active",
+    },
     platform: {
       macos: {
-        material: "hudWindow",
-        materialState: "active",
+        cornerRadius: null,
       },
     },
   },

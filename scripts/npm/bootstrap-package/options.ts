@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import type { AuthMode, Options, PackageKind } from "./types";
 
 const defaultOptions: Omit<Options, "packageName" | "dir"> = {
@@ -49,7 +47,7 @@ const usage = (): string =>
 export const defaultPackageDir = (packageName: string): string => {
   const unscoped = packageName.startsWith("@") ? packageName.split("/").at(1) : packageName;
   if (!unscoped) throw new Error(`Invalid package name: ${packageName}`);
-  return join("packages", unscoped);
+  return `packages/${unscoped}`;
 };
 
 const requireValue = (arg: string, next: string | undefined): string => {

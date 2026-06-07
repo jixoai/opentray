@@ -23,12 +23,19 @@ interface WebviewShowCommand {
   icon?: { type: "href"; href: string };
   style?: {
     frameless?: boolean;
-    transparent?: boolean;
     keepOnTop?: boolean;
+    background?:
+      | "opaque"
+      | "transparent"
+      | "blur"
+      | {
+          kind: "platformMaterial";
+          material: string;
+          state?: "followsWindowActiveState" | "active" | "inactive";
+        }
+      | { kind: "semantic"; token: "blur"; state?: "followsWindowActiveState" | "active" | "inactive" };
     platform?: {
       macos?: {
-        material?: string | null;
-        materialState?: "followsWindowActiveState" | "active" | "inactive";
         cornerRadius?: number | null;
       };
     };
@@ -119,12 +126,15 @@ export const runDaemonTraySmoke = async (): Promise<void> => {
         },
         style: {
           frameless: true,
-          transparent: true,
           keepOnTop: true,
+          background: {
+            kind: "platformMaterial",
+            material: "hudWindow",
+            state: "active",
+          },
           platform: {
             macos: {
-              material: "hudWindow",
-              materialState: "active",
+              cornerRadius: null,
             },
           },
         },

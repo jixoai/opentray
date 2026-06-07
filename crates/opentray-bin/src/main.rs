@@ -1,6 +1,8 @@
 mod dynamic_extension;
 #[cfg(unix)]
 mod unix_transport;
+#[cfg(target_os = "windows")]
+mod windows_transport;
 
 use std::{env, error::Error, path::PathBuf, time::Duration};
 
@@ -29,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn run_broker(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
     native_broker::run(options)
 }
@@ -39,7 +41,7 @@ fn run_broker(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
     unix_transport::run_blocking_broker(options, opentray_backend_ksni::KsniBackend::new())
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(target_os = "windows")))]
 fn run_broker(_options: BrokerOptions) -> Result<(), Box<dyn Error>> {
     Err("opentray broker transport is not implemented for this platform yet".into())
 }
@@ -103,7 +105,7 @@ fn parse_daemon_idle_timeout(value: Option<&str>) -> Result<Option<Duration>, St
     Ok(Some(Duration::from_millis(timeout_ms)))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod native_broker {
     use std::{collections::HashMap, error::Error, time::Duration};
 
@@ -114,36 +116,30 @@ mod native_broker {
     use winit::event::StartCause;
     use winit::event::WindowEvent;
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
+    #[cfg(target_os = "macos")]
     use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
     use winit::window::WindowId;
 
-    use super::{dynamic_extension::DynamicExtensionLoader, unix_transport, BrokerOptions};
+    #[cfg(target_os = "macos")]
+    use super::unix_transport as broker_transport;
+    #[cfg(target_os = "windows")]
+    use super::windows_transport as broker_transport;
+    use super::{dynamic_extension::DynamicExtensionLoader, BrokerOptions};
 
     #[derive(Debug)]
     enum UserEvent {
-        Transport(unix_transport::TransportEvent),
+        Transport(broker_transport::TransportEvent),
         Menu(tray_icon::menu::MenuEvent),
         Tray(tray_icon::TrayIconEvent),
         IdleExpired(u64),
     }
 
     pub fn run(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
-        let mut builder = EventLoop::<UserEvent>::with_user_event();
-        builder
-            // Keep the broker process in accessory mode on macOS.
-            // OpenTray can host mixed spaces and extensions inside one daemon, so letting one
-            // ext-webview window promote the whole process into a Dock-visible regular app would
-            // leak app identity across unrelated surfaces. If we ever need a Dock-owned web
-            // application, it should be a dedicated runtime atom (for example a future
-            // ext-webapp), not a mode toggle inside ext-webview.
-            .with_activation_policy(ActivationPolicy::Accessory)
-            .with_default_menu(false)
-            .with_activate_ignoring_other_apps(false);
-        let event_loop = builder.build()?;
+        let event_loop = build_event_loop()?;
         event_loop.set_control_flow(ControlFlow::Wait);
 
         let proxy = event_loop.create_proxy();
-        let listener = unix_transport::spawn_listener(options.clone(), move |event| {
+        let listener = broker_transport::spawn_listener(options.clone(), move |event| {
             let _ = proxy.send_event(UserEvent::Transport(event));
         })?;
 
@@ -174,14 +170,30 @@ mod native_broker {
         Ok(())
     }
 
+    fn build_event_loop() -> Result<EventLoop<UserEvent>, Box<dyn Error>> {
+        let mut builder = EventLoop::<UserEvent>::with_user_event();
+        #[cfg(target_os = "macos")]
+        builder
+            // Keep the broker process in accessory mode on macOS.
+            // OpenTray can host mixed spaces and extensions inside one daemon, so letting one
+            // ext-webview window promote the whole process into a Dock-visible regular app would
+            // leak app identity across unrelated surfaces. If we ever need a Dock-owned web
+            // application, it should be a dedicated runtime atom (for example a future
+            // ext-webapp), not a mode toggle inside ext-webview.
+            .with_activation_policy(ActivationPolicy::Accessory)
+            .with_default_menu(false)
+            .with_activate_ignoring_other_apps(false);
+        Ok(builder.build()?)
+    }
+
     struct NativeBrokerApp {
         broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>, DynamicExtensionLoader>,
-        sessions: HashMap<u64, unix_transport::TransportSession>,
+        sessions: HashMap<u64, broker_transport::TransportSession>,
         broker_version: String,
         idle_timeout: Option<Duration>,
         idle_generation: u64,
         proxy: EventLoopProxy<UserEvent>,
-        listener: Option<unix_transport::ListenerHandle>,
+        listener: Option<broker_transport::ListenerHandle>,
         options: BrokerOptions,
     }
 
@@ -224,22 +236,22 @@ mod native_broker {
     }
 
     impl NativeBrokerApp {
-        fn handle_transport(&mut self, event: unix_transport::TransportEvent) {
+        fn handle_transport(&mut self, event: broker_transport::TransportEvent) {
             match event {
-                unix_transport::TransportEvent::Connected { id, writer } => {
+                broker_transport::TransportEvent::Connected { id, writer } => {
                     self.bump_idle_generation();
                     self.sessions.insert(
                         id,
-                        unix_transport::TransportSession {
+                        broker_transport::TransportSession {
                             writer,
                             broker: BrokerSession::new(),
                         },
                     );
                 }
-                unix_transport::TransportEvent::Frame { id, frame } => {
+                broker_transport::TransportEvent::Frame { id, frame } => {
                     if let ClientFrame::Health { request_id } = frame {
                         let health =
-                            unix_transport::build_daemon_health(&self.options, &self.sessions);
+                            broker_transport::build_daemon_health(&self.options, &self.sessions);
                         if let Some(session) = self.sessions.get_mut(&id) {
                             session.write_frame(ServerFrame::DaemonHealth { request_id, health });
                         }
@@ -257,7 +269,7 @@ mod native_broker {
                     );
                     session.write_frames(frames);
                 }
-                unix_transport::TransportEvent::Disconnected { id } => {
+                broker_transport::TransportEvent::Disconnected { id } => {
                     if let Some(mut session) = self.sessions.remove(&id) {
                         let mut extension_host = UnsupportedExtensionHostContext;
                         let _ = self.broker.close_session_with_extension_host(

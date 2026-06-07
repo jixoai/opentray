@@ -44,17 +44,44 @@ export interface WebviewSetContentCommand {
   url?: string;
 }
 
-export type WebviewMacosMaterialState = "followsWindowActiveState" | "active" | "inactive";
+export type WebviewBackgroundEffectState = "followsWindowActiveState" | "active" | "inactive";
+
+export type WebviewBackgroundKeyword =
+  | "default"
+  | "opaque"
+  | "transparent"
+  | "blur"
+  | "auto"
+  | "mica"
+  | "acrylic"
+  | "tabbed"
+  | "appearanceBased"
+  | "sidebar"
+  | "hudWindow"
+  | "windowBackground"
+  | "contentBackground"
+  | "underWindowBackground";
+
+export type WebviewWindowBackground =
+  | { kind: "opaque" }
+  | { kind: "transparent" }
+  | { kind: "platformMaterial"; material: string; state?: WebviewBackgroundEffectState }
+  | { kind: "semantic"; token: "blur"; state?: WebviewBackgroundEffectState };
+
+export type WebviewWindowBackgroundInput = WebviewBackgroundKeyword | WebviewWindowBackground;
+
+export interface WebviewBackgroundOptions {
+  state?: WebviewBackgroundEffectState;
+}
 
 export interface WebviewMacosWindowStyle {
-  material: string | null;
-  materialState: WebviewMacosMaterialState;
   cornerRadius: number | null;
 }
 
+export type WebviewWindowsCornerPreference = "default" | "doNotRound" | "round" | "roundSmall";
+
 export interface WebviewWindowsWindowStyle {
-  backdrop: string | null;
-  cornerPreference: string | null;
+  cornerPreference: WebviewWindowsCornerPreference | null;
 }
 
 export interface WebviewWindowPlatformStyle {
@@ -65,15 +92,15 @@ export interface WebviewWindowPlatformStyle {
 
 export interface WebviewWindowStyle {
   frameless: boolean;
-  transparent: boolean;
   keepOnTop: boolean;
+  background: WebviewWindowBackground;
   platform: WebviewWindowPlatformStyle;
 }
 
 export interface WebviewWindowStylePatch {
   frameless?: boolean;
-  transparent?: boolean;
   keepOnTop?: boolean;
+  background?: WebviewWindowBackgroundInput;
   platform?: {
     macos?: Partial<WebviewMacosWindowStyle>;
     windows?: Partial<WebviewWindowsWindowStyle>;
@@ -82,13 +109,16 @@ export interface WebviewWindowStylePatch {
 }
 
 export interface WebviewMacosWindowCapabilities {
-  materials: string[];
-  materialState: boolean;
+  backgroundMaterials: string[];
+  semanticBackgrounds: string[];
+  backgroundStates: WebviewBackgroundEffectState[];
   cornerRadius: boolean;
 }
 
 export interface WebviewWindowsWindowCapabilities {
-  backdrops: string[];
+  backgroundMaterials: string[];
+  semanticBackgrounds: string[];
+  backgroundStates: WebviewBackgroundEffectState[];
   cornerPreference: boolean;
 }
 
@@ -113,7 +143,6 @@ export interface WebviewWindowCapabilities {
   overlay: boolean;
   appRegionDrag: boolean;
   frameless: boolean;
-  transparent: boolean;
   keepOnTop: boolean;
   title: boolean;
   icon: boolean;
@@ -124,6 +153,7 @@ export interface WebviewWindowCapabilities {
   screenBindingsEnabled: boolean;
   screenBindingsSupported: boolean;
   platform: string;
+  background: boolean;
   platformCapabilities: WebviewWindowPlatformCapabilities;
 }
 
@@ -206,6 +236,10 @@ export interface WebviewNavigatorWindow {
   stopAppRegionDrag(): Promise<{ active: boolean }>;
   getStyle(): Promise<WebviewWindowStyle>;
   setStyle(style: WebviewWindowStylePatch): Promise<WebviewWindowStyle>;
+  setBackground(
+    background: WebviewWindowBackgroundInput,
+    options?: WebviewBackgroundOptions,
+  ): Promise<WebviewWindowStyle>;
   getCapabilities(): Promise<WebviewWindowCapabilities>;
   getTitle(): Promise<string>;
   setTitle(title: string): Promise<string>;

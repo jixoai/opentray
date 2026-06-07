@@ -28,3 +28,14 @@ png = "0.17.16"
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 window-vibrancy = "0.7.1"
 wry = { version = "0.55.1", default-features = false, features = ["os-webview", "transparent"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+base64 = "0.22.1"
+png = "0.17.16"
+raw-window-handle = { version = "0.6.2", features = ["std"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+window-vibrancy = "0.7.1"
+wry = { version = "0.55.1", default-features = false, features = ["os-webview", "transparent"] }
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+tao = { version = "0.35.3", default-features = false, features = ["rwh_06"] }

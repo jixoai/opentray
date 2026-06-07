@@ -1,5 +1,4 @@
 mod app_menu;
-mod bootstrap;
 mod bridge;
 mod demo_html;
 mod drag;
@@ -26,7 +25,6 @@ use crate::{
 };
 
 use self::app_menu::ensure_standard_edit_menu;
-use self::bootstrap::navigator_window_bootstrap_script;
 use self::bridge::{emit_window_event, handle_navigator_window_request};
 use self::demo_html::default_webview_html;
 use self::drag::AppRegionDragState;
@@ -41,6 +39,7 @@ use self::style::{
     apply_window_style, framed_window_style_mask, supported_background_effects,
     validate_initial_style, WindowStyleState,
 };
+use crate::bootstrap::navigator_window_bootstrap_script;
 
 const WINDOW_NAMESPACE: &str = "opentray.window";
 const SCREEN_NAMESPACE: &str = "opentray.screen";
@@ -100,7 +99,6 @@ struct WindowCapabilities {
     overlay: bool,
     app_region_drag: bool,
     frameless: bool,
-    transparent: bool,
     keep_on_top: bool,
     title: bool,
     icon: bool,
@@ -111,6 +109,7 @@ struct WindowCapabilities {
     screen_bindings_enabled: bool,
     screen_bindings_supported: bool,
     platform: &'static str,
+    background: bool,
     platform_capabilities: WindowPlatformCapabilities,
 }
 
@@ -123,8 +122,9 @@ struct WindowPlatformCapabilities {
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MacosWindowCapabilities {
-    materials: Vec<String>,
-    material_state: bool,
+    background_materials: Vec<String>,
+    semantic_backgrounds: Vec<String>,
+    background_states: Vec<String>,
     corner_radius: bool,
 }
 
@@ -356,12 +356,10 @@ impl MacosWebviewRuntime {
             next_event_id: 1,
             style: WindowStyleState {
                 frameless: show_settings.window.style.frameless,
-                transparent: show_settings.window.style.transparent,
                 keep_on_top: show_settings.window.style.keep_on_top,
+                background: show_settings.window.style.background.clone(),
                 platform: self::style::WindowPlatformStyleState {
                     macos: self::style::MacosWindowStyleState {
-                        material: show_settings.window.style.platform.macos.material.clone(),
-                        material_state: show_settings.window.style.platform.macos.material_state,
                         corner_radius: show_settings.window.style.platform.macos.corner_radius,
                     },
                 },
@@ -427,9 +425,12 @@ impl MacosWebviewRuntime {
                     }
                 }
             });
-        let builder = if show_settings.window.style.transparent
-            || show_settings.window.style.platform.macos.material.is_some()
-        {
+        let builder = if matches!(
+            &show_settings.window.style.background,
+            crate::WebviewWindowBackground::Transparent
+                | crate::WebviewWindowBackground::PlatformMaterial { .. }
+                | crate::WebviewWindowBackground::Semantic { .. }
+        ) {
             builder.with_transparent(true)
         } else {
             builder
@@ -639,12 +640,10 @@ fn apply_reused_show_updates(
 
     let requested_style = WindowStyleState {
         frameless: show_settings.window.style.frameless,
-        transparent: show_settings.window.style.transparent,
         keep_on_top: show_settings.window.style.keep_on_top,
+        background: show_settings.window.style.background.clone(),
         platform: self::style::WindowPlatformStyleState {
             macos: self::style::MacosWindowStyleState {
-                material: show_settings.window.style.platform.macos.material.clone(),
-                material_state: show_settings.window.style.platform.macos.material_state,
                 corner_radius: show_settings.window.style.platform.macos.corner_radius,
             },
         },
@@ -765,7 +764,6 @@ impl NavigatorWindowBridge {
             overlay: self.page_access.window && self.navigator_window.window_controls_overlay,
             app_region_drag: self.page_access.window,
             frameless: true,
-            transparent: true,
             keep_on_top: true,
             title: true,
             icon: true,
@@ -776,13 +774,19 @@ impl NavigatorWindowBridge {
             screen_bindings_enabled: self.page_access.screen_globals,
             screen_bindings_supported: true,
             platform: "macos",
+            background: true,
             platform_capabilities: WindowPlatformCapabilities {
                 macos: MacosWindowCapabilities {
-                    materials: supported_background_effects()
+                    background_materials: supported_background_effects()
                         .iter()
                         .map(|effect| (*effect).to_string())
                         .collect(),
-                    material_state: true,
+                    semantic_backgrounds: vec!["blur".to_string()],
+                    background_states: vec![
+                        "followsWindowActiveState".to_string(),
+                        "active".to_string(),
+                        "inactive".to_string(),
+                    ],
                     corner_radius: true,
                 },
             },

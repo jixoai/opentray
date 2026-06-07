@@ -26,7 +26,8 @@ Read the current platform story as four different truths, not one vague support 
 Current WebView maturity:
 
 - macOS: `stable` for the window capability surface documented below
-- Windows / Linux: `alpha` for the package and contract surface; the published platform packages may exist, but visible native runtime behavior is not yet the stable acceptance path
+- Windows: `alpha` for the first visible WebView2-backed runtime, common window bridge, and lifecycle behavior
+- Linux: `alpha` for the package and contract surface; visible native runtime behavior is still explicitly unsupported
 - requesting `platform.windows.*` from the macOS runtime, or unknown macOS material/material-state values: `unsupported by design`
 - tray bounds with no authoritative tray anchor in the current session: `unavailable by context`
 
@@ -51,25 +52,44 @@ macOS support includes:
 - tray bounds through `navigator.opentray.tray.getBounds()`
 - source-scoped native capability policy with local-only defaults for remote safety
 
+Windows alpha support includes:
+
+- visible WebView2-backed windows through Wry
+- `show`, `hide`, `destroy`, `setContent`, `navigate`, `evaluate`, and `postMessage`
+- `navigator.window` / `navigator.opentrayWindow` bridge injection with source-scoped `nativeApiPolicy`
+- `close`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, and `isMinimized`
+- `getStyle` / `setStyle` for common `frameless`, `background`, and `keepOnTop`
+- `windowControlsOverlay` geometry, `startAppRegionDrag()`, and subscription-driven bridge events
+- title sync and native window/taskbar icon projection for RGBA icons, local icon files, and PNG data URLs
+- Windows DWM background materials through `style.background`: `auto`, `mica`, `acrylic`, and `tabbed`
+- Windows 11 corner preference through `style.platform.windows.cornerPreference`: `default`, `doNotRound`, `round`, and `roundSmall`
+- current-monitor screen snapshot through `navigator.screen` / `navigator.opentrayScreen`
+- tray bounds projection through `navigator.opentray.tray.getBounds()`
+
+Full Windows multi-monitor enumeration remains an alpha follow-up; the current screen API is a current-monitor snapshot.
+
 Visual effects stay capability-gated. Unsupported or platform-fragile effects must reject with typed unsupported errors rather than faking success.
 
-For glass or blur-style surfaces, three things must line up at once:
+For glass or blur-style surfaces, two things must line up at once:
 
-- native window style must enable `transparent: true`
-- native material must be requested through `style.platform.macos.material`
+- native background must be one mutually exclusive mode: `transparent`, `semantic: blur`, or `platformMaterial`
 - the page must leave some regions genuinely transparent instead of covering the whole window with opaque HTML or CSS blur overlays
 
-Treat `transparent` and `style.platform.macos.material` as orthogonal requested states:
+Treat `style.background` as the single source of truth for native backing and material composition:
 
-- `transparent` means the window/WebView should request a clear backing surface even with no material
-- `style.platform.macos.material` means the native host should apply a system material surface
-- on macOS, a material surface still requires a clear, non-opaque backing layer underneath, so the runtime will clear the native backing whenever `style.platform.macos.material` is enabled even if the requested `transparent` flag is `false`
+- `{ kind: "opaque" }` means an opaque native/WebView backing
+- `{ kind: "transparent" }` means a clear native/WebView backing with no material
+- `{ kind: "semantic", token: "blur" }` means the runtime should choose the platform blur material, currently Windows Acrylic and macOS `hudWindow`
+- `{ kind: "platformMaterial", material: "..." }` means a substrate-specific material name, such as Windows `mica` or macOS `hudWindow`
+- material modes clear the native/WebView backing as part of the same transaction; callers must not combine a separate transparent flag with material fields
 
-Material selection has a second axis on macOS: material state. Use `style.platform.macos.materialState` to choose whether the system material follows the window focus state or stays forced active/inactive:
+Material selection has a second axis: background state. Use `background.state` to choose whether the system material follows the window focus state or stays forced active/inactive:
 
-- `followsWindowActiveState` keeps the default AppKit behavior
-- `active` forces the material into its active appearance, which is often the right choice for tray panels and accessory-app utility surfaces
-- `inactive` forces the subdued inactive material appearance
+- `followsWindowActiveState` keeps the platform default behavior
+- `active` requests the vivid active appearance, which is often the right choice for tray panels and accessory-app utility surfaces
+- `inactive` requests the subdued inactive material appearance
+
+macOS maps the state to `NSVisualEffectState`. The current Windows DWM backdrop path exposes only `followsWindowActiveState`; requests for forced `active` or `inactive` return a typed unsupported error until the runtime grows a composition-controller path that can truthfully force input-active state.
 
 If the page paints every pixel itself, the native material is still present, but users will not see it.
 
@@ -125,12 +145,14 @@ const webview = tray.createWebviewWindow({
   title: "OpenTray WebView",
   style: {
     frameless: true,
-    transparent: true,
     keepOnTop: true,
+    background: {
+      kind: "platformMaterial",
+      material: "hudWindow",
+      state: "active",
+    },
     platform: {
       macos: {
-        material: "hudWindow",
-        materialState: "active",
         cornerRadius: 18,
       },
     },
@@ -220,14 +242,16 @@ Current native support:
 - macOS: titlebar overlay geometry through `windowControlsOverlay`
 - macOS: `navigator.screen.getScreenDetails`
 - macOS: tray bounds projection through `navigator.opentray.tray.getBounds()`
-- macOS: transparent background and material effects through `style.platform.macos.material`, including `hudWindow`, `sidebar`, `windowBackground`, `contentBackground`, and `underWindowBackground`
+- macOS: transparent background and material effects through `style.background`, including `hudWindow`, `sidebar`, `windowBackground`, `contentBackground`, and `underWindowBackground`
 - macOS: global override binding through `bindWindowGlobals` and `bindScreenGlobals`
-- Linux / Windows: the native runtime packages are currently alpha distribution atoms; unsupported runtime paths must fail explicitly until the visible platform implementations land
+- Windows alpha: visible WebView2-backed windows, lifecycle verbs, content replacement/navigation, `evaluate`, `postMessage`, common window bridge commands, title/icon sync, current-monitor screen snapshot, tray bounds projection, and global override binding through `bindWindowGlobals` / `bindScreenGlobals`
+- Windows alpha: `frameless`, `background`, `keepOnTop`, and `style.platform.windows.cornerPreference`
+- Linux: the native runtime package is currently an alpha distribution atom; unsupported runtime paths must fail explicitly until a visible platform implementation lands
 
 Keep the unsupported taxonomy explicit:
 
 - runtime absent: `webview runtime is not implemented for this platform`
-- platform-family mismatch: a Windows/Linux style family is requested on the macOS runtime, or vice versa in the future
+- platform-family mismatch: a Windows/Linux style family is requested on the macOS runtime, macOS material/corner style is requested on Windows, or a platform-specific family is otherwise requested on the wrong substrate
 - declarative gate: the runtime could provide a capability, but the current WebView session did not enable it, such as overlay geometry without `windowControlsOverlay`
 - context unavailable: the capability exists, but the current session has no authoritative data, such as tray bounds when no tray anchor was injected
 
@@ -257,7 +281,7 @@ Common event names:
 - `moved` / `resized`: emitted after extension-owned move or resize requests
 - `overlay.geometrychange`: emitted through `navigator.opentrayWindow.overlay.listen("geometrychange", ...)`
 
-For favicon-to-native-icon projection, prefer a materialized PNG data URL such as a `canvas.toDataURL("image/png")` result. URL-backed or SVG favicons may remain logical icon state when the platform cannot convert them into a native `NSImage`.
+For favicon-to-native-icon projection, prefer a materialized PNG data URL such as a `canvas.toDataURL("image/png")` result. URL-backed or SVG favicons may remain logical icon state when the platform cannot convert them into a native image handle.
 
 ## Window Recipes
 
@@ -285,13 +309,7 @@ await webview.show({
   nativeWindowApi: true,
   windowControlsOverlay: true,
   style: {
-    transparent: true,
-    platform: {
-      macos: {
-        material: "hudWindow",
-        materialState: "followsWindowActiveState",
-      },
-    },
+    background: { kind: "semantic", token: "blur" },
   },
 });
 ```
@@ -319,11 +337,13 @@ await webview.show({
   windowControlsOverlay: true,
   style: {
     frameless: true,
-    transparent: true,
+    background: {
+      kind: "platformMaterial",
+      material: "hudWindow",
+      state: "active",
+    },
     platform: {
       macos: {
-        material: "hudWindow",
-        materialState: "active",
         cornerRadius: 18,
       },
     },
@@ -359,12 +379,14 @@ Pin a small widget to a visible screen corner:
 const margin = 16;
 await navigator.opentrayWindow.setStyle({
   frameless: true,
-  transparent: true,
   keepOnTop: true,
+  background: {
+    kind: "platformMaterial",
+    material: "hudWindow",
+    state: "active",
+  },
   platform: {
     macos: {
-      material: "hudWindow",
-      materialState: "active",
       cornerRadius: 18,
     },
   },
@@ -394,11 +416,13 @@ await webview.show({
   nativeTrayApi: true,
   style: {
     frameless: true,
-    transparent: true,
+    background: {
+      kind: "platformMaterial",
+      material: "hudWindow",
+      state: "active",
+    },
     platform: {
       macos: {
-        material: "hudWindow",
-        materialState: "active",
         cornerRadius: 18,
       },
     },

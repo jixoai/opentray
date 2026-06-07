@@ -207,16 +207,10 @@ pub(super) fn default_webview_html() -> String {
         document.getElementById("material-button")?.addEventListener("click", async () => {
           try {
             const style = await pageWindow.getStyle();
-            const macos = style.platform?.macos ?? {};
-            await pageWindow.setStyle({
-              transparent: true,
-              platform: {
-                macos: {
-                  material: macos.material ? null : "hudWindow",
-                  materialState: "active",
-                },
-              },
-            });
+            const hasMaterial = style.background?.kind === "platformMaterial" || style.background?.kind === "semantic";
+            await pageWindow.setBackground(
+              hasMaterial ? "opaque" : { kind: "platformMaterial", material: "hudWindow", state: "active" },
+            );
             await loadStyle();
           } catch (error) {
             setNavigatorStatus(`Failed to toggle material.\n${formatError(error)}`);

@@ -67,12 +67,15 @@ describe("@opentray/ext-webview", () => {
       icon: { type: "href", href: "data:image/png;base64,abc" },
       style: {
         frameless: true,
-        transparent: true,
         keepOnTop: true,
+        background: {
+          kind: "platformMaterial",
+          material: "hudWindow",
+          state: "active",
+        },
         platform: {
           macos: {
-            material: "hudWindow",
-            materialState: "active",
+            cornerRadius: null,
           },
         },
       },
@@ -121,12 +124,15 @@ describe("@opentray/ext-webview", () => {
           icon: { type: "href", href: "data:image/png;base64,abc" },
           style: {
             frameless: true,
-            transparent: true,
             keepOnTop: true,
+            background: {
+              kind: "platformMaterial",
+              material: "hudWindow",
+              state: "active",
+            },
             platform: {
               macos: {
-                material: "hudWindow",
-                materialState: "active",
+                cornerRadius: null,
               },
             },
           },

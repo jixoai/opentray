@@ -15,10 +15,7 @@ use super::{
     },
     overlay::{emit_overlay_geometry_change_if_enabled, titlebar_area_rect_json},
     screen::screen_details_json,
-    style::{
-        apply_window_style, normalize_corner_radius, parse_background_effect_state,
-        validate_style_request, SetStylePayload,
-    },
+    style::{apply_window_style, normalize_corner_radius, validate_style_request, SetStylePayload},
     window_state::window_state_json,
     NavigatorWindowBridge, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE,
     WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
@@ -292,39 +289,20 @@ fn dispatch_navigator_window_command(
                     changed = true;
                 }
             }
-            if let Some(transparent) = payload.transparent {
-                if bridge_state.style.transparent != transparent {
-                    bridge_state.style.transparent = transparent;
-                    changed = true;
-                }
-            }
             if let Some(keep_on_top) = payload.keep_on_top {
                 if bridge_state.style.keep_on_top != keep_on_top {
                     bridge_state.style.keep_on_top = keep_on_top;
                     changed = true;
                 }
             }
+            if let Some(background) = payload.background {
+                let background = crate::parse_background_input(background)?;
+                if bridge_state.style.background != background {
+                    bridge_state.style.background = background;
+                    changed = true;
+                }
+            }
             if let Some(macos_payload) = payload.platform.and_then(|platform| platform.macos) {
-                if let Some(material) = macos_payload.material {
-                    let normalized_material =
-                        material.and_then(|material| (!material.is_empty()).then_some(material));
-                    if bridge_state.style.platform.macos.material != normalized_material {
-                        bridge_state.style.platform.macos.material = normalized_material;
-                        changed = true;
-                    }
-                }
-                if let Some(material_state) = macos_payload.material_state.as_deref() {
-                    let normalized_state = parse_background_effect_state(material_state)
-                        .ok_or_else(|| {
-                            WebviewRuntimeError::Unsupported(format!(
-                                "background effect state {material_state} is not supported on macOS"
-                            ))
-                        })?;
-                    if bridge_state.style.platform.macos.material_state != normalized_state {
-                        bridge_state.style.platform.macos.material_state = normalized_state;
-                        changed = true;
-                    }
-                }
                 if let Some(corner_radius) = macos_payload.corner_radius {
                     let normalized_radius = match corner_radius {
                         Some(radius) => Some(normalize_corner_radius(radius)?),

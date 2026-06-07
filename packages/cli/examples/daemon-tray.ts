@@ -1,13 +1,14 @@
+﻿import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
-import { WebviewExt, type WebviewWindowHandle } from "../../ext-webview/src/index";
+import { attachWebview } from "../../ext-webview/src/index";
 import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
 
 const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
 
-const demoHomeDir = process.env.OPENTRAY_HOME ?? join("/tmp", `opentray-daemon-tray-${process.pid}`);
+const demoHomeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `opentray-daemon-tray-${process.pid}`);
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
 const client = createClient(connection, { requestIdPrefix: "daemon-example" });
 console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
@@ -19,7 +20,7 @@ if (localWebviewExtension !== undefined) {
 const menuLabels = new Map<number, string>([
   [1, "Open WebView"],
 ]);
-let webview: WebviewWindowHandle | undefined;
+let webview: ReturnType<typeof attachWebview> | undefined;
 
 connection.onEvent((frame) => {
   console.log(`broker -> client ${JSON.stringify(frame)}`);
@@ -51,16 +52,16 @@ const tray = await space.createTray({
   },
 });
 console.log(`tray: ${tray.trayId}`);
-webview = tray.extend(WebviewExt).createWebviewWindow({
-  html: createWebviewDemoHtml(),
-  width: 420,
-  height: 260,
-  nativeWindowApi: true,
-  bindWindowGlobals: true,
-  nativeTrayApi: true,
+await connection.request({
+  type: "load-ext",
+  requestId: "daemon-example-load-webview",
+  spaceId: space.space.spaceId,
+  name: "webview",
+  path: "@opentray/ext-webview",
 });
-console.log("webview extension mounted on the daemon tray");
-console.log("click the tray icon: macOS should direct-trigger the single primary action without opening a menu");
+webview = attachWebview(tray);
+console.log("webview facade attached to the daemon native WebView extension");
+console.log("click the tray icon: platforms with primary tray events should run the WebView action");
 console.log("press Ctrl-C to exit the tray demo");
 
 let closed = false;
@@ -121,7 +122,14 @@ async function handleMenuClick(itemId: number): Promise<void> {
     console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
 
     await webview.show({
+      type: "show",
+      html: createWebviewDemoHtml(),
+      width: 420,
+      height: 260,
       fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
+      nativeWindowApi: true,
+      bindWindowGlobals: true,
+      nativeTrayApi: true,
     });
     console.log("webview command: show");
     return;

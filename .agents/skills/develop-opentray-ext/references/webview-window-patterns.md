@@ -31,8 +31,9 @@ Teach four truths explicitly when helping a user design against `@opentray/ext-w
 Current repo truth for window patterns:
 
 - macOS patterns in this file are the current `stable` visible reference path
-- Windows and Linux remain `alpha` for WebView runtime behavior even if packages and contract shapes exist
-- do not explain Windows/Linux runtime absence as “almost stable”; call it alpha or typed unsupported instead
+- Windows has an `alpha` visible WebView2 runtime for common lifecycle, bridge, window-control behavior, background material/corner preferences, and native icon projection
+- Linux remains `alpha` for package/contract shape while visible runtime behavior is still explicitly unsupported
+- do not explain missing platform-specific runtime behavior as "almost stable"; call it alpha, typed unsupported, or unavailable by context
 - do not call tray-bounds `kind: "unavailable"` a platform unsupported error
 
 ## Authority Map
@@ -66,7 +67,7 @@ The next real platform-law shift should happen when Windows/Linux material, corn
 
 | Capability family | macOS current substrate | Windows likely substrate | Linux likely substrate | Modeling rule |
 | --- | --- | --- | --- | --- |
-| Material/background | `NSVisualEffectView` via `window-vibrancy`; future macOS liquid-glass naming may diverge. | DWM/Mica/Acrylic/Tabbed/host-backdrop families vary by Windows version. | GTK/libadwaita/compositor-specific transparency and blur vary by desktop. | Keep common shell state small; model substrate material under `style.platform.<family>` and capability metadata rather than inventing a fake universal blur field. |
+| Material/background | `NSVisualEffectView` via `window-vibrancy`; future macOS liquid-glass naming may diverge. | DWM/Mica/Acrylic/Tabbed/host-backdrop families vary by Windows version. | GTK/libadwaita/compositor-specific transparency and blur vary by desktop. | Keep common shell state small; model native backing and material as one `style.background` atom, with semantic tokens only when the runtime can truthfully project them. |
 | Corners | Layer-backed content clipping can project numeric radius; system shell corners remain platform-owned when unset. | Windows 11 exposes rounded-corner preferences, while older versions differ or lack system corners. | Window manager/compositor decides; app-side clipping may not equal native shell corners. | Keep numeric radius or enum corner preference inside the platform family that can truthfully project it. |
 | Screen details/events | `NSScreen` and `NSWindow.screen()` provide current snapshots; event observers should be listener-driven. | Win32 display topology and DPI events have their own coordinate and scale rules. | X11/Wayland/GTK monitor events and permissions vary by stack. | Keep `getScreenDetails()` standard-like, but model event source, coordinate space, and permission/capability per substrate before broadening. |
 
@@ -74,9 +75,10 @@ Do not pre-build `navigator.opentrayWindow.macos26|win11|gtk.*` namespaces only 
 
 When a user asks for a cross-platform effect right now, ask which truth they want:
 
-- “stable now on macOS”
-- “alpha contract on Windows/Linux”
-- “future substrate plan only”
+- "stable now on macOS"
+- "alpha WebView2/common bridge on Windows"
+- "alpha contract only on Linux"
+- "future substrate plan only"
 
 That keeps the conversation aligned with what the current runtime can actually prove.
 
@@ -119,11 +121,21 @@ Benefit: product teams can build branded titlebars without losing platform contr
 
 Ask the user: "Do you want native controls to remain visible, with only the titlebar content customized?"
 
-Implementation note: native material is not the same thing as CSS blur. To get a real glass surface, the extension must enable `transparent: true` plus `style.platform.macos.material`, and the page must leave at least some regions transparent. If the HTML paints a fully opaque layer over the whole window, the native material is technically active but visually hidden.
+Implementation note: native material is not the same thing as CSS blur. To get a real glass surface, the extension must set one mutually exclusive `style.background` mode (`transparent`, `semantic: blur`, or `platformMaterial`) and the page must leave at least some regions transparent. If the HTML paints a fully opaque layer over the whole window, the native material is technically active but visually hidden.
 
-Implementation nuance: `transparent` and `style.platform.macos.material` are separate requested controls. On macOS, any active material still needs a clear non-opaque backing layer under the hood, so the runtime must clear the native backing whenever `style.platform.macos.material` is enabled even if the requested `transparent` flag is `false`. That is a substrate requirement, not proof that the two API fields are the same concept.
+Background law: `style.background` is the single source of truth for native backing and native material. Do not model transparent, macOS material, and Windows backdrop as independent mutable axes. The valid modes are `opaque`, `transparent`, `platformMaterial`, and semantic tokens such as `blur`. Platform fields remain for orthogonal style families such as corner preference/radius.
 
-Second nuance: material kind and material state are different axes. `style.platform.macos.material: "hudWindow"` only chooses the AppKit material family. `style.platform.macos.materialState` chooses whether that material follows window activation or stays forced active/inactive. Tray-launched panels in an accessory app often need `materialState: "active"` because the window may not remain the frontmost regular app surface even though the developer still wants the vivid material appearance.
+Projection law: `transparent` clears backing with no material; `platformMaterial` clears backing and applies a substrate material; semantic `blur` resolves to Windows Acrylic and macOS `hudWindow`. macOS material state uses `background.state`. Windows currently exposes only `followsWindowActiveState` through the DWM backdrop path; forced `active`/`inactive` must return typed unsupported until a truthful composition-controller implementation exists.
+
+Windows default-window law: ordinary WebView windows start with `background: opaque`. Do not default Windows to transparent just because transparent-first composition has special DWM requirements; tray panels, glass shells, and diagnostic transparent probes must request `background: "transparent"` or a material mode explicitly.
+
+Windows transparent first-show law: create plain transparent WebView2 host HWNDs with `WS_EX_NOREDIRECTIONBITMAP` before first `ShowWindow`. Without it, DWM can expose an opaque white initial redirection bitmap that does not track normal WebView or DOM repaint behavior. DWM backdrop materials such as Mica/Acrylic/Tabbed need the redirection surface, so remove this ex-style for material backgrounds and add it back only for plain transparent windows. For Windows material backgrounds, reuse `window-vibrancy`'s Mica/Acrylic/Tabbed projection, keep the host/WebView backing clear, and keep the host client area in the same transparent substrate tao/Tauri require for vibrancy. Do not use `WS_EX_LAYERED`, WebView child opacity hacks, tao/softbuffer test windows, or private host-only switches as runtime fixes; those are diagnostics or incompatible composition paths.
+
+Windows background reset law: treat `style.background` as a host-surface family selector, not a paint-only toggle. The real families are `opaque + redirection`, `transparent + no-redirection`, and `material/semantic blur + transparent backdrop`. If a runtime change stays inside one family, a normal transactional update is enough: clear existing `window-vibrancy` families, clear host backdrop best-effort, set `DWMWA_SYSTEMBACKDROP_TYPE` to `DWMSBT_NONE`, update WebView backing color, apply the target host transparency/material mode, re-fit the WebView child, and refresh the native surface. If a runtime change crosses family boundaries, rebuild the hidden HWND + WebView pair and swap it in place instead of stacking repaint/resize/controller-only hacks. `tauri#10318` / `#8632` are the reference class of bugs here: the white block is a host-window composition artifact, not a DOM repaint bug. If the host was maximized, restore `SW_MAXIMIZE` after the swap/commit because rewriting `GWL_STYLE` or recreating the host can disturb maximized shell state even when the rectangle still looks maximized.
+
+Windows native theme law: system backdrop material and HTML color-scheme are separate layers. The runtime should read Windows app theme (`AppsUseLightTheme`) and apply `DWMWA_USE_IMMERSIVE_DARK_MODE` on the native HWND, then pass the same dark/light value into Mica/Tabbed application. Page CSS can follow `prefers-color-scheme`, but it is not a substitute for native HWND theme projection.
+
+Second nuance: material kind and material state are different axes inside the same background atom. `background.material: "hudWindow"` chooses the AppKit material family, while `background.state` chooses whether that material follows window activation or stays forced active/inactive. Tray-launched panels in an accessory app often need `state: "active"` because the window may not remain the frontmost regular app surface even though the developer still wants the vivid material appearance.
 
 Hard rule for glass windows: reset `html, body` margin/padding to `0`, keep the native window background transparent, and do not draw the outer shell in HTML with root-level `box-shadow`, fake blur, or root-level `border-radius`. The page renders content inside the native box; the native layer owns the box itself.
 
@@ -156,13 +168,7 @@ await webview.show({
   nativeWindowApi: true,
   windowControlsOverlay: true,
   style: {
-    transparent: true,
-    platform: {
-      macos: {
-        material: "hudWindow",
-        materialState: "followsWindowActiveState",
-      },
-    },
+    background: { kind: "semantic", token: "blur" },
   },
 });
 ```
@@ -194,7 +200,7 @@ titlebar.addEventListener("pointerdown", (event) => {
 
 Effect: the page owns the full window chrome. Native controls disappear, the background can be transparent/material-backed, and the page renders its own control buttons.
 
-Atoms composed: `frameless`, `transparent`, `style.platform.macos.material`, `style.platform.macos.cornerRadius`, `windowControlsOverlay`, custom page controls, `minimize()`, `maximize()`, `restore()`, `close()`, `getWindowState()`, and `windowstatechange`.
+Atoms composed: `frameless`, `style.background`, `style.platform.macos.cornerRadius`, `windowControlsOverlay`, custom page controls, `minimize()`, `maximize()`, `restore()`, `close()`, `getWindowState()`, and `windowstatechange`.
 
 Why this design: borderless is an intentional escalation from overlay. Once native controls disappear, page code must own window controls and state synchronization explicitly. The native layer still owns real minimize/maximize/drag operations.
 
@@ -222,11 +228,13 @@ await webview.show({
   windowControlsOverlay: true,
   style: {
     frameless: true,
-    transparent: true,
+    background: {
+      kind: "platformMaterial",
+      material: "hudWindow",
+      state: "active",
+    },
     platform: {
       macos: {
-        material: "hudWindow",
-        materialState: "active",
         cornerRadius: 18,
       },
     },
@@ -256,7 +264,7 @@ closeButton.onclick = () => void pageWindow.close();
 
 Effect: a small frameless/translucent widget is pinned to a screen corner and stays above normal windows.
 
-Atoms composed: `navigator.opentrayScreen.getScreenDetails()`, `visibleFrame`, `keepOnTop`, `frameless`, `transparent`, `style.platform.macos.material`, `style.platform.macos.cornerRadius`, `resizeTo()`, and `moveTo()`.
+Atoms composed: `navigator.opentrayScreen.getScreenDetails()`, `visibleFrame`, `keepOnTop`, `frameless`, `style.background`, `style.platform.macos.cornerRadius`, `resizeTo()`, and `moveTo()`.
 
 Why this design: screen placement is a window capability, not a new extension. The page can own widget content and animation while the WebView atom owns native placement.
 
@@ -281,12 +289,14 @@ const screen = details.currentScreen ?? details.screens[0];
 
 await navigator.opentrayWindow.setStyle({
   frameless: true,
-  transparent: true,
   keepOnTop: true,
+  background: {
+    kind: "platformMaterial",
+    material: "hudWindow",
+    state: "active",
+  },
   platform: {
     macos: {
-      material: "hudWindow",
-      materialState: "active",
       cornerRadius: 18,
     },
   },
@@ -326,11 +336,13 @@ const screen = details.currentScreen ?? details.screens[0];
 
 await navigator.opentrayWindow.setStyle({
   frameless: true,
-  transparent: true,
   keepOnTop: true,
+  background: {
+    kind: "platformMaterial",
+    material: "hudWindow",
+  },
   platform: {
     macos: {
-      material: "hudWindow",
       cornerRadius: 24,
     },
   },
@@ -412,11 +424,13 @@ await webview.show({
   nativeTrayApi: true,
   style: {
     frameless: true,
-    transparent: true,
+    background: {
+      kind: "platformMaterial",
+      material: "hudWindow",
+      state: "active",
+    },
     platform: {
       macos: {
-        material: "hudWindow",
-        materialState: "active",
         cornerRadius: 18,
       },
     },
@@ -437,7 +451,7 @@ if (trayBounds.rect) {
 
 Reference implementation in this repo: `pnpm --filter opentray example:tray-panel`
 
-Use `pnpm --filter opentray example:webview-control` as the capability exerciser only. For glass-window guidance, prefer `example:tray-panel`, because it keeps the page root transparent and avoids teaching CSS shell decoration as a substitute for native material.
+Use `pnpm --filter opentray example:webview-control` as the capability exerciser only. It starts as a normal opaque window and enables overlay probes by default because this is the manual acceptance surface for `windowControlsOverlay`; use `-- --no-overlay` only to test the disabled branch. Do not implement the page switch as a fake runtime style toggle: `windowControlsOverlay` is a show-time bridge gate, so page UI may show the current launch state but cannot truthfully enable the overlay object after bootstrap. For glass-window guidance, prefer `example:tray-panel`, because it keeps the page root transparent and avoids teaching CSS shell decoration as a substitute for native material.
 
 Repo-maintainer note: when this example is run from source, build `opentray` and `opentray-ext-webview` first. The example auto-discovers the local `target/debug|release` WebView dylib and injects it through `OPENTRAY_EXT_PATH`, so developers can stay on the real extension-loading path without manual staging during iteration.
 
