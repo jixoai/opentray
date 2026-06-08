@@ -2205,6 +2205,7 @@ dependencies = [
  "tao",
  "url",
  "window-vibrancy",
+ "windows-core",
  "windows-sys 0.61.2",
  "wry",
 ]

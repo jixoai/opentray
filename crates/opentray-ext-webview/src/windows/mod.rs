@@ -58,6 +58,10 @@ use wry::{
     PageLoadEvent, Rect as WryRect, WebView, WebViewBuilder, WebViewExtWindows, RGBA,
 };
 
+mod appwindow;
+mod appwindow_abi;
+
+use self::appwindow::apply_windows_titlebar_overlay;
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::{
     parse_background_input, MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings,
@@ -1522,9 +1526,14 @@ fn apply_window_style(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     previous_background: Option<&WebviewWindowBackground>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (hwnd, webview, style) = {
+    let (hwnd, webview, style, overlay_enabled) = {
         let state = bridge.borrow();
-        (state.hwnd, state.webview, state.style.clone())
+        (
+            state.hwnd,
+            state.webview,
+            state.style.clone(),
+            state.navigator_window.window_controls_overlay,
+        )
     };
     let was_maximized = is_window_maximized(hwnd);
     let needs_rebuild = previous_background
@@ -1551,6 +1560,7 @@ fn apply_window_style(
     apply_webview_background_color(webview, wants_clear_background(&style))?;
     apply_native_window_style(hwnd, &style)?;
     sync_transparent_host_surface(bridge, &style)?;
+    apply_windows_titlebar_overlay(hwnd, overlay_enabled)?;
     refresh_dwm_backdrop_activation_state(hwnd);
 
     if was_maximized {
@@ -2616,8 +2626,12 @@ fn titlebar_area_rect(hwnd: HWND) -> Rect {
         x: 0,
         y: 0,
         width,
-        height: 40,
+        height: titlebar_area_height(hwnd),
     }
+}
+
+fn titlebar_area_height(_hwnd: HWND) -> u32 {
+    40
 }
 
 fn rect_to_opentray_rect(rect: RECT) -> Rect {
