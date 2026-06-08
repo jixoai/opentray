@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Cursor;
-use std::num::NonZeroU32;
 use std::num::NonZeroIsize;
+use std::num::NonZeroU32;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::{null, null_mut, NonNull};
@@ -13,7 +13,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use opentray_spec::Rect;
 use raw_window_handle::{
     DisplayHandle, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
-    WindowHandle, Win32WindowHandle, WindowsDisplayHandle,
+    Win32WindowHandle, WindowHandle, WindowsDisplayHandle,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -48,8 +48,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
     ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SWP_FRAMECHANGED,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WM_CLOSE, WM_ERASEBKGND, WM_NCLBUTTONDOWN, WM_PAINT,
-    WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WM_CLOSE, WM_ERASEBKGND, WM_NCACTIVATE, WM_NCLBUTTONDOWN,
+    WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
     WS_EX_NOREDIRECTIONBITMAP, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX,
     WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
 };
@@ -77,7 +77,7 @@ const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
 const OPAQUE_BACKGROUND: RGBA = (255, 255, 255, 255);
 const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
 const WINDOWS_BACKGROUND_MATERIALS: &[&str] = &["auto", "mica", "acrylic", "tabbed"];
-const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState"];
+const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active", "inactive"];
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
 
 thread_local! {
@@ -103,6 +103,15 @@ struct WindowProcState {
     window: Option<NonNull<Win32HostWindow>>,
     webview: Option<NonNull<WebView>>,
     host_surface_fill_color: Option<u32>,
+    backdrop_state_policy: WindowsBackdropStatePolicy,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum WindowsBackdropStatePolicy {
+    #[default]
+    FollowWindowActivation,
+    ForceActive,
+    ForceInactive,
 }
 
 struct NavigatorWindowBridge {
@@ -601,6 +610,7 @@ impl WindowsWebviewRuntime {
             Some(NonNull::from(slot.window.as_mut())),
             Some(NonNull::from(slot.webview.as_mut())),
             None,
+            backdrop_state_policy(&slot.bridge.borrow().style.background),
         );
         apply_window_style(&slot.bridge, None)?;
         apply_window_icon_from_bridge(&slot.bridge)?;
@@ -668,7 +678,13 @@ impl WindowsWebviewRuntime {
 
 impl Drop for WindowsWebviewSlot {
     fn drop(&mut self) {
-        sync_window_proc_state(self.window.hwnd, None, None, None);
+        sync_window_proc_state(
+            self.window.hwnd,
+            None,
+            None,
+            None,
+            WindowsBackdropStatePolicy::FollowWindowActivation,
+        );
         self.window.detach_webview();
     }
 }
@@ -1295,7 +1311,7 @@ fn normalize_windows_background(
             _ => Ok(WebviewWindowBackground::PlatformMaterial {
                 material: "acrylic".to_string(),
                 state: normalize_windows_background_state(*state),
-            })
+            }),
         },
     }
 }
@@ -1313,12 +1329,47 @@ fn validate_windows_background(
 fn normalize_windows_background_state(
     state: WebviewBackgroundEffectState,
 ) -> WebviewBackgroundEffectState {
-    match state {
-        WebviewBackgroundEffectState::FollowsWindowActiveState
-        | WebviewBackgroundEffectState::Active
-        | WebviewBackgroundEffectState::Inactive => {
+    state
+}
+
+fn backdrop_state_policy(background: &WebviewWindowBackground) -> WindowsBackdropStatePolicy {
+    let state = match background {
+        WebviewWindowBackground::PlatformMaterial { state, .. }
+        | WebviewWindowBackground::Semantic { state, .. } => *state,
+        WebviewWindowBackground::Opaque | WebviewWindowBackground::Transparent => {
             WebviewBackgroundEffectState::FollowsWindowActiveState
         }
+    };
+    match state {
+        WebviewBackgroundEffectState::FollowsWindowActiveState => {
+            WindowsBackdropStatePolicy::FollowWindowActivation
+        }
+        WebviewBackgroundEffectState::Active => WindowsBackdropStatePolicy::ForceActive,
+        WebviewBackgroundEffectState::Inactive => WindowsBackdropStatePolicy::ForceInactive,
+    }
+}
+
+fn nc_activate_wparam_for_policy(wparam: WPARAM, policy: WindowsBackdropStatePolicy) -> WPARAM {
+    match policy {
+        WindowsBackdropStatePolicy::FollowWindowActivation => wparam,
+        WindowsBackdropStatePolicy::ForceActive => 1,
+        WindowsBackdropStatePolicy::ForceInactive => 0,
+    }
+}
+
+fn current_nc_activate_wparam(hwnd: HWND) -> WPARAM {
+    unsafe { usize::from(GetForegroundWindow() == hwnd) }
+}
+
+fn refresh_dwm_backdrop_activation_state(hwnd: HWND) {
+    let wparam = with_window_proc_state(hwnd, |state| {
+        nc_activate_wparam_for_policy(
+            current_nc_activate_wparam(hwnd),
+            state.backdrop_state_policy,
+        )
+    });
+    unsafe {
+        SendMessageW(hwnd, WM_NCACTIVATE, wparam, 0);
     }
 }
 
@@ -1409,14 +1460,7 @@ fn needs_host_window_rebuild_for_background_transition(
 fn rebuild_host_window_for_background_transition(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (
-        hwnd,
-        window,
-        webview,
-        style,
-        title,
-        tray_bounds,
-    ) = {
+    let (hwnd, window, webview, style, title, tray_bounds) = {
         let state = bridge.borrow();
         (
             state.hwnd,
@@ -1427,8 +1471,8 @@ fn rebuild_host_window_for_background_transition(
             state.tray_bounds,
         )
     };
-    let window = window
-        .ok_or_else(|| WebviewRuntimeError::Internal("window bridge is not ready".into()))?;
+    let window =
+        window.ok_or_else(|| WebviewRuntimeError::Internal("window bridge is not ready".into()))?;
     let webview = webview
         .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
     let snapshot = snapshot_window_host_rebuild_state(hwnd)?;
@@ -1448,10 +1492,18 @@ fn rebuild_host_window_for_background_transition(
     unsafe {
         let old_window = replace_boxed_value_in_place(window, rebuilt_window);
         bridge.borrow_mut().hwnd = window.as_ref().hwnd;
-        webview.as_ref().reparent(window.as_ref().hwnd as isize)
+        webview
+            .as_ref()
+            .reparent(window.as_ref().hwnd as isize)
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
         window.as_ref().attach_webview(webview.as_ref());
-        sync_window_proc_state(window.as_ref().hwnd, Some(window), Some(webview), None);
+        sync_window_proc_state(
+            window.as_ref().hwnd,
+            Some(window),
+            Some(webview),
+            None,
+            backdrop_state_policy(&style.background),
+        );
         apply_webview_client_bounds(webview.as_ref(), window.as_ref().hwnd)?;
         sync_transparent_host_surface(bridge, &style)?;
         restore_rebuilt_window_host_state(window.as_ref().hwnd, snapshot, was_active);
@@ -1499,6 +1551,7 @@ fn apply_window_style(
     apply_webview_background_color(webview, wants_clear_background(&style))?;
     apply_native_window_style(hwnd, &style)?;
     sync_transparent_host_surface(bridge, &style)?;
+    refresh_dwm_backdrop_activation_state(hwnd);
 
     if was_maximized {
         unsafe {
@@ -1574,6 +1627,7 @@ fn sync_transparent_host_surface(
         Some(NonNull::from(window)),
         bridge.borrow().webview,
         host_surface_fill_color,
+        backdrop_state_policy(&style.background),
     );
     Ok(())
 }
@@ -1608,6 +1662,7 @@ fn sync_window_proc_state(
     window: Option<NonNull<Win32HostWindow>>,
     webview: Option<NonNull<WebView>>,
     host_surface_fill_color: Option<u32>,
+    backdrop_state_policy: WindowsBackdropStatePolicy,
 ) {
     WINDOW_PROC_STATES.with(|states| {
         let mut states = states.borrow_mut();
@@ -1621,6 +1676,7 @@ fn sync_window_proc_state(
                 window,
                 webview,
                 host_surface_fill_color,
+                backdrop_state_policy,
             },
         );
     });
@@ -3105,7 +3161,9 @@ struct WindowsDisplayBridge;
 
 impl HasDisplayHandle for WindowsDisplayBridge {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, raw_window_handle::HandleError> {
-        Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Windows(WindowsDisplayHandle::new())) })
+        Ok(unsafe {
+            DisplayHandle::borrow_raw(RawDisplayHandle::Windows(WindowsDisplayHandle::new()))
+        })
     }
 }
 
@@ -3146,6 +3204,12 @@ unsafe extern "system" fn window_proc(
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
+        WM_NCACTIVATE => {
+            let wparam = with_window_proc_state(hwnd, |state| {
+                nc_activate_wparam_for_policy(wparam, state.backdrop_state_policy)
+            });
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_SIZE => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
             refresh_attached_window_surface(hwnd);
@@ -3165,9 +3229,7 @@ fn refresh_attached_window_surface(hwnd: HWND) {
         if let (Some(mut window), Some(fill_color)) = (state.window, state.host_surface_fill_color)
         {
             if let Err(error) = unsafe { window.as_mut() }.present_host_surface(fill_color) {
-                eprintln!(
-                    "opentray-ext-webview failed to present Windows host surface: {error}"
-                );
+                eprintln!("opentray-ext-webview failed to present Windows host surface: {error}");
             }
         }
         if let Some(webview) = state.webview {
@@ -3308,8 +3370,61 @@ mod tests {
             state.background,
             crate::WebviewWindowBackground::PlatformMaterial {
                 material: "acrylic".to_string(),
-                state: WebviewBackgroundEffectState::FollowsWindowActiveState,
+                state: WebviewBackgroundEffectState::Active,
             }
+        );
+    }
+
+    #[test]
+    fn windows_background_states_are_exposed_as_dwm_policies() {
+        assert_eq!(
+            WINDOWS_BACKGROUND_STATES,
+            &["followsWindowActiveState", "active", "inactive"]
+        );
+    }
+
+    #[test]
+    fn windows_background_state_policy_tracks_requested_material_state() {
+        assert_eq!(
+            backdrop_state_policy(&crate::WebviewWindowBackground::PlatformMaterial {
+                material: "mica".to_string(),
+                state: WebviewBackgroundEffectState::FollowsWindowActiveState,
+            }),
+            WindowsBackdropStatePolicy::FollowWindowActivation
+        );
+        assert_eq!(
+            backdrop_state_policy(&crate::WebviewWindowBackground::PlatformMaterial {
+                material: "tabbed".to_string(),
+                state: WebviewBackgroundEffectState::Active,
+            }),
+            WindowsBackdropStatePolicy::ForceActive
+        );
+        assert_eq!(
+            backdrop_state_policy(&crate::WebviewWindowBackground::Semantic {
+                token: "blur".to_string(),
+                state: WebviewBackgroundEffectState::Inactive,
+            }),
+            WindowsBackdropStatePolicy::ForceInactive
+        );
+        assert_eq!(
+            backdrop_state_policy(&crate::WebviewWindowBackground::Transparent),
+            WindowsBackdropStatePolicy::FollowWindowActivation
+        );
+    }
+
+    #[test]
+    fn nc_activate_policy_rewrites_dwm_activation_state() {
+        assert_eq!(
+            nc_activate_wparam_for_policy(0, WindowsBackdropStatePolicy::FollowWindowActivation),
+            0
+        );
+        assert_eq!(
+            nc_activate_wparam_for_policy(0, WindowsBackdropStatePolicy::ForceActive),
+            1
+        );
+        assert_eq!(
+            nc_activate_wparam_for_policy(1, WindowsBackdropStatePolicy::ForceInactive),
+            0
         );
     }
 
