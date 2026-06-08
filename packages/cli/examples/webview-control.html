@@ -501,6 +501,7 @@
       const iconVariants = [];
       let iconVariantIndex = 0;
       let runtimePlatform = "unknown";
+      let runtimeCapabilities = null;
       const eventLog = [];
       let overlayGeometryUnlisten = null;
       const $ = (id) => document.getElementById(id);
@@ -542,6 +543,17 @@
           select.value = current;
         }
       };
+      const currentBackgroundStateOptions = () => {
+        const platformCapabilities = runtimeCapabilities?.platformCapabilities;
+        const platform =
+          runtimePlatform === "windows"
+            ? platformCapabilities?.windows
+            : runtimePlatform === "macos"
+              ? platformCapabilities?.macos
+              : null;
+        const states = Array.isArray(platform?.backgroundStates) ? platform.backgroundStates : null;
+        return states && states.length > 0 ? states.map((state) => [state, state]) : [["followsWindowActiveState", "followsWindowActiveState"]];
+      };
       const isWindowsStyle = (style) => runtimePlatform === "windows" || Boolean(getWindowsStyle(style));
       const backgroundValue = (style) => {
         const background = style && typeof style === "object" ? style.background : null;
@@ -581,7 +593,12 @@
         select.value = [...select.options].some((option) => option.value === value) ? value : "opaque";
         const stateSelect = $("background-state-select");
         if (stateSelect) {
-          stateSelect.value = backgroundState(style);
+          const stateOptions = currentBackgroundStateOptions();
+          setSelectOptions("background-state-select", stateOptions);
+          const state = backgroundState(style);
+          stateSelect.value = stateOptions.some(([value]) => value === state)
+            ? state
+            : stateOptions[0]?.[0] ?? "followsWindowActiveState";
         }
       };
       const applyStyleMode = (style) => {
@@ -891,7 +908,9 @@
         }
         try {
           const capabilities = await bridge.getCapabilities();
+          runtimeCapabilities = capabilities;
           runtimePlatform = typeof capabilities.platform === "string" ? capabilities.platform : runtimePlatform;
+          await refreshStyle();
           text("capabilities-status", JSON.stringify(capabilities, null, 2));
         } catch (error) {
           text("capabilities-status", `Failed to load capabilities.\n${formatError(error)}`);
@@ -998,7 +1017,6 @@
         });
         void bridge.listen("closed", (event) => appendEvent("closed", event));
         void refreshCapabilities();
-        void refreshStyle();
         void refreshWindowState();
         void refreshScreenDetails();
         void updateOverlayGeometry();
