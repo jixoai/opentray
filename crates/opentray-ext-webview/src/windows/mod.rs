@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Cursor;
+use std::num::NonZeroU32;
 use std::num::NonZeroIsize;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
@@ -10,9 +11,13 @@ use std::rc::Rc;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use opentray_spec::Rect;
-use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle};
+use raw_window_handle::{
+    DisplayHandle, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
+    WindowHandle, Win32WindowHandle, WindowsDisplayHandle,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use softbuffer::{Context as SoftbufferContext, Surface as SoftbufferSurface};
 use url::Url;
 use window_vibrancy::{
     apply_acrylic, apply_mica, apply_tabbed, clear_acrylic, clear_mica, clear_tabbed,
@@ -33,6 +38,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 use windows_sys::Win32::UI::Controls::MARGINS;
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
@@ -42,14 +48,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
     ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SWP_FRAMECHANGED,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WM_CLOSE, WM_ERASEBKGND, WM_NCLBUTTONDOWN, WM_SETICON,
-    WM_SETTINGCHANGE, WM_SIZE, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WM_CLOSE, WM_ERASEBKGND, WM_NCLBUTTONDOWN, WM_PAINT,
+    WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
     WS_EX_NOREDIRECTIONBITMAP, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX,
     WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
-    PageLoadEvent, Rect as WryRect, WebView, WebViewBuilder, RGBA,
+    PageLoadEvent, Rect as WryRect, WebView, WebViewBuilder, WebViewExtWindows, RGBA,
 };
 
 use crate::bootstrap::navigator_window_bootstrap_script;
@@ -74,6 +80,10 @@ const WINDOWS_BACKGROUND_MATERIALS: &[&str] = &["auto", "mica", "acrylic", "tabb
 const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState"];
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
 
+thread_local! {
+    static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
+}
+
 #[derive(Default)]
 pub(crate) struct WindowsWebviewRuntime {
     slot: Option<WindowsWebviewSlot>,
@@ -86,6 +96,13 @@ struct WindowsWebviewSlot {
     bridge: Rc<RefCell<NavigatorWindowBridge>>,
     content_descriptor: WebviewContentDescriptor,
     show_settings: WebviewShowSettings,
+}
+
+#[derive(Clone, Copy, Default)]
+struct WindowProcState {
+    window: Option<NonNull<Win32HostWindow>>,
+    webview: Option<NonNull<WebView>>,
+    host_surface_fill_color: Option<u32>,
 }
 
 struct NavigatorWindowBridge {
@@ -327,7 +344,7 @@ struct WindowStateSnapshot {
 }
 
 #[derive(Clone, Copy)]
-struct WindowRebuildSnapshot {
+struct WindowHostRebuildSnapshot {
     rect: RECT,
     state: WindowStateSnapshot,
 }
@@ -579,6 +596,12 @@ impl WindowsWebviewRuntime {
             bridge.window = Some(NonNull::from(slot.window.as_mut()));
             bridge.webview = Some(NonNull::from(slot.webview.as_mut()));
         }
+        sync_window_proc_state(
+            slot.window.hwnd,
+            Some(NonNull::from(slot.window.as_mut())),
+            Some(NonNull::from(slot.webview.as_mut())),
+            None,
+        );
         apply_window_style(&slot.bridge, None)?;
         apply_window_icon_from_bridge(&slot.bridge)?;
         apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
@@ -645,6 +668,7 @@ impl WindowsWebviewRuntime {
 
 impl Drop for WindowsWebviewSlot {
     fn drop(&mut self) {
+        sync_window_proc_state(self.window.hwnd, None, None, None);
         self.window.detach_webview();
     }
 }
@@ -801,6 +825,7 @@ fn dispatch_navigator_window_command(
             let x = finite_i32(payload.x, "x")?;
             let y = finite_i32(payload.y, "y")?;
             set_window_position(bridge.borrow().hwnd, x, y)?;
+            notify_webview_parent_window_position_changed_from_bridge(bridge)?;
             let response = json!({ "x": x, "y": y });
             emit_window_event(bridge, "moved", response.clone())?;
             Ok(response)
@@ -986,20 +1011,6 @@ fn page_source_state_for_content(content: &WebviewContentDescriptor) -> PageSour
     }
 }
 
-fn reload_payload_for_bridge(
-    content_descriptor: &WebviewContentDescriptor,
-    page_source: &PageSourceState,
-) -> (Option<String>, Option<String>) {
-    if !page_source.host_html {
-        return (None, page_source.url.clone());
-    }
-    match content_descriptor {
-        WebviewContentDescriptor::DefaultHtml => (None, None),
-        WebviewContentDescriptor::Html(html) => (Some(html.clone()), None),
-        WebviewContentDescriptor::Url(url) => (None, Some(url.clone())),
-    }
-}
-
 fn build_webview(
     window: &impl HasWindowHandle,
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
@@ -1071,9 +1082,13 @@ fn client_webview_bounds(hwnd: HWND) -> Option<WryRect> {
     if client_width == 0 || client_height == 0 {
         return None;
     }
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let scale = if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 };
+    let logical_width = ((client_width as f64) / scale).round().max(1.0) as i32;
+    let logical_height = ((client_height as f64) / scale).round().max(1.0) as i32;
     Some(WryRect {
         position: PhysicalPosition::new(0, 0).into(),
-        size: PhysicalSize::new(client_width, client_height).into(),
+        size: PhysicalSize::new(logical_width, logical_height).into(),
     })
 }
 
@@ -1083,7 +1098,8 @@ fn apply_webview_client_bounds(webview: &WebView, hwnd: HWND) -> Result<(), Webv
     };
     webview
         .set_bounds(bounds)
-        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    notify_webview_parent_window_position_changed(webview)
 }
 
 fn apply_webview_client_bounds_from_bridge(
@@ -1097,6 +1113,23 @@ fn apply_webview_client_bounds_from_bridge(
         return Ok(());
     };
     apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd)
+}
+
+fn notify_webview_parent_window_position_changed(
+    webview: &WebView,
+) -> Result<(), WebviewRuntimeError> {
+    unsafe { webview.controller().NotifyParentWindowPositionChanged() }
+        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+}
+
+fn notify_webview_parent_window_position_changed_from_bridge(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<(), WebviewRuntimeError> {
+    let webview = bridge.borrow().webview;
+    let Some(webview) = webview else {
+        return Ok(());
+    };
+    notify_webview_parent_window_position_changed(unsafe { webview.as_ref() })
 }
 
 fn default_windows_show_settings() -> WebviewShowSettings {
@@ -1376,36 +1409,31 @@ fn apply_style_patch(
 
 fn host_surface_kind(background: &WebviewWindowBackground) -> WindowsHostSurfaceKind {
     match background {
-        WebviewWindowBackground::Transparent => WindowsHostSurfaceKind::TransparentNoRedirection,
-        WebviewWindowBackground::Opaque
-        | WebviewWindowBackground::PlatformMaterial { .. }
+        WebviewWindowBackground::Opaque | WebviewWindowBackground::Transparent => {
+            WindowsHostSurfaceKind::TransparentNoRedirection
+        }
+        WebviewWindowBackground::PlatformMaterial { .. }
         | WebviewWindowBackground::Semantic { .. } => WindowsHostSurfaceKind::RedirectionSurface,
     }
 }
 
 fn needs_host_window_rebuild_for_background_transition(
-    previous: &WebviewWindowBackground,
-    next: &WebviewWindowBackground,
+    _previous: &WebviewWindowBackground,
+    _next: &WebviewWindowBackground,
 ) -> bool {
-    host_surface_kind(previous) != host_surface_kind(next)
+    // Windows can switch the host ex-style/backdrop in place. Rebuilding the HWND while a WebView2
+    // child is attached reintroduces the white redirection bitmap that `tauri#10318` exposed.
+    false
 }
 
 fn rebuild_host_window_for_background_transition(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<(), WebviewRuntimeError> {
     let (
-        old_hwnd,
+        hwnd,
         window,
         webview,
         style,
-        content_descriptor,
-        page_source,
-        navigator_window,
-        navigator_screen,
-        navigator_tray,
-        sync_title,
-        sync_icon,
-        native_api_policy,
         title,
         tray_bounds,
     ) = {
@@ -1415,25 +1443,15 @@ fn rebuild_host_window_for_background_transition(
             state.window,
             state.webview,
             state.style.clone(),
-            state.content_descriptor.clone(),
-            state.page_source.clone(),
-            state.navigator_window,
-            state.navigator_screen,
-            state.navigator_tray,
-            state.metadata.sync_title,
-            state.metadata.sync_icon,
-            state.native_api_policy.clone(),
             state.metadata.title.clone(),
             state.tray_bounds,
         )
     };
-    let window = window.ok_or_else(|| {
-        WebviewRuntimeError::Internal("window bridge is not ready for rebuild".into())
-    })?;
-    let webview = webview.ok_or_else(|| {
-        WebviewRuntimeError::Internal("webview bridge is not ready for rebuild".into())
-    })?;
-    let snapshot = snapshot_window_rebuild_state(old_hwnd)?;
+    let window = window
+        .ok_or_else(|| WebviewRuntimeError::Internal("window bridge is not ready".into()))?;
+    let webview = webview
+        .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
+    let snapshot = snapshot_window_host_rebuild_state(hwnd)?;
     let outer_width = (snapshot.rect.right - snapshot.rect.left).max(240);
     let outer_height = (snapshot.rect.bottom - snapshot.rect.top).max(160);
     let rebuilt_window = Box::new(Win32HostWindow::create(
@@ -1445,43 +1463,21 @@ fn rebuild_host_window_for_background_transition(
     )?);
     set_window_position(rebuilt_window.hwnd, snapshot.rect.left, snapshot.rect.top)?;
     set_window_size(rebuilt_window.hwnd, outer_width, outer_height)?;
-    let bounds = client_webview_bounds(rebuilt_window.hwnd).unwrap_or(WryRect {
-        position: PhysicalPosition::new(0, 0).into(),
-        size: PhysicalSize::new(1, 1).into(),
-    });
-    let (html, url) = reload_payload_for_bridge(&content_descriptor, &page_source);
-    let rebuilt_webview = build_webview(
-        rebuilt_window.as_ref(),
-        bridge,
-        navigator_window,
-        navigator_screen,
-        navigator_tray,
-        sync_title,
-        sync_icon,
-        &native_api_policy,
-        bounds,
-        html,
-        url,
-    )?;
-    let was_active = unsafe { GetForegroundWindow() == old_hwnd };
-    let clear_background = wants_clear_background(&style);
     apply_native_window_style(rebuilt_window.hwnd, &style)?;
+    let was_active = unsafe { GetForegroundWindow() == hwnd };
     unsafe {
-        let _old_webview = replace_boxed_value_in_place(webview, rebuilt_webview);
         let old_window = replace_boxed_value_in_place(window, rebuilt_window);
         bridge.borrow_mut().hwnd = window.as_ref().hwnd;
+        webview.as_ref().reparent(window.as_ref().hwnd as isize)
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
         window.as_ref().attach_webview(webview.as_ref());
-        SetWindowLongPtrW(
-            window.as_ref().hwnd,
-            GWLP_USERDATA,
-            webview.as_ptr() as isize,
-        );
-        apply_webview_background_color(Some(webview), clear_background)?;
+        sync_window_proc_state(window.as_ref().hwnd, Some(window), Some(webview), None);
         apply_webview_client_bounds(webview.as_ref(), window.as_ref().hwnd)?;
-        restore_rebuilt_window_state(window.as_ref().hwnd, snapshot, was_active);
+        sync_transparent_host_surface(bridge, &style)?;
+        restore_rebuilt_window_host_state(window.as_ref().hwnd, snapshot, was_active);
         drop(old_window);
     }
-    apply_window_icon_from_bridge(bridge)?;
+    notify_webview_parent_window_position_changed_from_bridge(bridge)?;
     refresh_native_window_surface(bridge.borrow().hwnd)?;
     Ok(())
 }
@@ -1498,7 +1494,6 @@ fn apply_window_style(
         let state = bridge.borrow();
         (state.hwnd, state.webview, state.style.clone())
     };
-    let wants_clear_background = wants_clear_background(&style);
     let was_maximized = is_window_maximized(hwnd);
     let needs_rebuild = previous_background
         .map(|background| {
@@ -1507,17 +1502,23 @@ fn apply_window_style(
         .unwrap_or(false);
 
     if needs_rebuild {
-        // `tauri#10318` / `#8632` class white-block artifacts are host-window substrate issues.
-        // When the background family crosses a host-surface boundary, rebuild the hidden HWND +
-        // WebView pair and then swap it in place instead of stacking repaint hacks.
-        rebuild_host_window_for_background_transition(bridge)?;
-        return Ok(());
+        // Crossing Windows host-surface families requires a fresh host HWND to fully reset DWM
+        // composition state. Reparent the existing WebView child into that new host so page state
+        // survives while the host substrate is rebuilt cleanly.
+        return rebuild_host_window_for_background_transition(bridge);
     }
 
-    // Stable path: background family stayed on the same host substrate, so update backing color,
-    // DWM/window style, and maximized state as one native transaction.
-    apply_webview_background_color(webview, wants_clear_background)?;
+    // Windows transparent white-block artifacts (`tauri#10318` / `#8633`) are host-surface
+    // composition bugs. The durable fix is to keep the same HWND/WebView pair and explicitly
+    // clear the transparent host surface during the native redraw lifecycle, not to rebuild the
+    // host when background families change.
+    // Keep the WebView2 controller alpha-capable at all times. The host background family owns
+    // the visible window substrate on Windows; flipping the controller backing between opaque and
+    // transparent at runtime can leave stale child-surface content behind even when the host is
+    // already correct.
+    apply_webview_background_color(webview, wants_clear_background(&style))?;
     apply_native_window_style(hwnd, &style)?;
+    sync_transparent_host_surface(bridge, &style)?;
 
     if was_maximized {
         unsafe {
@@ -1527,6 +1528,7 @@ fn apply_window_style(
     if let Some(webview) = webview {
         apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd)?;
     }
+    notify_webview_parent_window_position_changed_from_bridge(bridge)?;
     refresh_native_window_surface(hwnd)?;
     Ok(())
 }
@@ -1567,6 +1569,44 @@ fn apply_native_window_style(
     Ok(())
 }
 
+fn sync_transparent_host_surface(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    style: &WindowStyleState,
+) -> Result<(), WebviewRuntimeError> {
+    let window = bridge.borrow().window;
+    let Some(mut window) = window else {
+        return Ok(());
+    };
+    let window = unsafe { window.as_mut() };
+    let host_surface_fill_color = if wants_no_redirection_bitmap(style) {
+        Some(host_surface_fill_color(&style.background))
+    } else {
+        None
+    };
+    if wants_no_redirection_bitmap(style) {
+        window.ensure_transparent_surface()?;
+        window.present_host_surface(host_surface_fill_color.expect("host fill color"))?;
+    } else {
+        window.disable_transparent_surface();
+    }
+    sync_window_proc_state(
+        window.hwnd,
+        Some(NonNull::from(window)),
+        bridge.borrow().webview,
+        host_surface_fill_color,
+    );
+    Ok(())
+}
+
+fn host_surface_fill_color(background: &WebviewWindowBackground) -> u32 {
+    match background {
+        WebviewWindowBackground::Opaque => 0x00FF_FFFF,
+        WebviewWindowBackground::Transparent => 0,
+        WebviewWindowBackground::PlatformMaterial { .. }
+        | WebviewWindowBackground::Semantic { .. } => 0,
+    }
+}
+
 fn apply_webview_background_color(
     webview: Option<NonNull<WebView>>,
     clear: bool,
@@ -1581,6 +1621,40 @@ fn apply_webview_background_color(
             OPAQUE_BACKGROUND
         })
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+}
+
+fn sync_window_proc_state(
+    hwnd: HWND,
+    window: Option<NonNull<Win32HostWindow>>,
+    webview: Option<NonNull<WebView>>,
+    host_surface_fill_color: Option<u32>,
+) {
+    WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        if window.is_none() && webview.is_none() {
+            states.remove(&(hwnd as isize));
+            return;
+        }
+        states.insert(
+            hwnd as isize,
+            WindowProcState {
+                window,
+                webview,
+                host_surface_fill_color,
+            },
+        );
+    });
+}
+
+fn with_window_proc_state<R>(hwnd: HWND, f: impl FnOnce(WindowProcState) -> R) -> R {
+    WINDOW_PROC_STATES.with(|states| {
+        let state = states
+            .borrow()
+            .get(&(hwnd as isize))
+            .copied()
+            .unwrap_or_default();
+        f(state)
+    })
 }
 
 fn window_style_bits(style: &WindowStyleState, current_style: u32) -> u32 {
@@ -1623,6 +1697,10 @@ fn wants_dwm_extended_client_frame(style: &WindowStyleState) -> bool {
 }
 
 fn wants_dwm_transparent_host(style: &WindowStyleState) -> bool {
+    wants_clear_host_background(style)
+}
+
+fn wants_clear_host_background(style: &WindowStyleState) -> bool {
     wants_clear_background(style)
 }
 
@@ -2368,7 +2446,9 @@ fn window_state_json(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
 }
 
-fn snapshot_window_rebuild_state(hwnd: HWND) -> Result<WindowRebuildSnapshot, WebviewRuntimeError> {
+fn snapshot_window_host_rebuild_state(
+    hwnd: HWND,
+) -> Result<WindowHostRebuildSnapshot, WebviewRuntimeError> {
     let mut rect = RECT {
         left: 0,
         top: 0,
@@ -2380,13 +2460,17 @@ fn snapshot_window_rebuild_state(hwnd: HWND) -> Result<WindowRebuildSnapshot, We
             std::io::Error::last_os_error().to_string(),
         ));
     }
-    Ok(WindowRebuildSnapshot {
+    Ok(WindowHostRebuildSnapshot {
         rect,
         state: window_state_snapshot(hwnd),
     })
 }
 
-fn restore_rebuilt_window_state(hwnd: HWND, snapshot: WindowRebuildSnapshot, was_active: bool) {
+fn restore_rebuilt_window_host_state(
+    hwnd: HWND,
+    snapshot: WindowHostRebuildSnapshot,
+    was_active: bool,
+) {
     unsafe {
         match snapshot.state.state {
             WindowStateKind::Minimized => {
@@ -2834,6 +2918,13 @@ impl NavigatorWindowBridge {
 
 struct Win32HostWindow {
     hwnd: HWND,
+    transparent_surface: Option<TransparentHostSurface>,
+}
+
+struct TransparentHostSurface {
+    #[allow(dead_code)]
+    context: SoftbufferContext<WindowsDisplayBridge>,
+    surface: SoftbufferSurface<WindowsDisplayBridge, HwndHostHandle>,
 }
 
 impl Win32HostWindow {
@@ -2855,9 +2946,9 @@ impl Win32HostWindow {
         let class_name = wide_null(CLASS_NAME);
         let title = wide_null(title);
         let (x, y) = initial_window_position(width, height, tray_bounds);
-        // Opt out before first show for plain transparent backgrounds to avoid DWM's opaque
-        // white initial bitmap. Material backgrounds need the redirection surface, so style
-        // changes can remove this ex-style later.
+        // Plain opaque/transparent host backgrounds share the same no-redirection substrate on
+        // Windows. Material backdrops still need the redirection surface so DWM can own the
+        // backdrop composition path.
         let ex_style = if no_redirection_bitmap {
             WS_EX_NOREDIRECTIONBITMAP
         } else {
@@ -2884,7 +2975,16 @@ impl Win32HostWindow {
                 std::io::Error::last_os_error().to_string(),
             ));
         }
-        Ok(Self { hwnd })
+        let mut window = Self {
+            hwnd,
+            transparent_surface: None,
+        };
+        if no_redirection_bitmap {
+            window.ensure_transparent_surface()?;
+            // Start from a known transparent surface before the real style fill is applied.
+            window.present_host_surface(0)?;
+        }
+        Ok(window)
     }
 
     fn show(&self) {
@@ -2934,6 +3034,56 @@ impl Win32HostWindow {
             SetWindowLongPtrW(self.hwnd, GWLP_USERDATA, 0);
         }
     }
+
+    fn ensure_transparent_surface(&mut self) -> Result<(), WebviewRuntimeError> {
+        if self.transparent_surface.is_some() {
+            return Ok(());
+        }
+        let display = WindowsDisplayBridge;
+        let window = HwndHostHandle { hwnd: self.hwnd };
+        let context = SoftbufferContext::new(display)
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+        let surface = SoftbufferSurface::new(&context, window)
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+        self.transparent_surface = Some(TransparentHostSurface { context, surface });
+        Ok(())
+    }
+
+    fn disable_transparent_surface(&mut self) {
+        self.transparent_surface = None;
+    }
+
+    fn present_host_surface(&mut self, fill_color: u32) -> Result<(), WebviewRuntimeError> {
+        let Some(surface) = self.transparent_surface.as_mut() else {
+            return Ok(());
+        };
+        let mut client = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        unsafe {
+            GetClientRect(self.hwnd, &mut client);
+        }
+        let width = (client.right - client.left).max(0) as u32;
+        let height = (client.bottom - client.top).max(0) as u32;
+        let (Some(width), Some(height)) = (NonZeroU32::new(width), NonZeroU32::new(height)) else {
+            return Ok(());
+        };
+        surface
+            .surface
+            .resize(width, height)
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+        let mut buffer = surface
+            .surface
+            .buffer_mut()
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+        buffer.fill(fill_color);
+        buffer
+            .present()
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+    }
 }
 
 impl Drop for Win32HostWindow {
@@ -2967,6 +3117,15 @@ impl HasWindowHandle for HwndHostHandle {
             .ok_or(raw_window_handle::HandleError::Unavailable)?;
         let raw = RawWindowHandle::Win32(Win32WindowHandle::new(hwnd));
         Ok(unsafe { WindowHandle::borrow_raw(raw) })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct WindowsDisplayBridge;
+
+impl HasDisplayHandle for WindowsDisplayBridge {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, raw_window_handle::HandleError> {
+        Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Windows(WindowsDisplayHandle::new())) })
     }
 }
 
@@ -3009,22 +3168,34 @@ unsafe extern "system" fn window_proc(
         }
         WM_SIZE => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
-            apply_attached_webview_client_bounds(hwnd);
+            refresh_attached_window_surface(hwnd);
+            result
+        }
+        WM_PAINT => {
+            let result = DefWindowProcW(hwnd, msg, wparam, lparam);
+            refresh_attached_window_surface(hwnd);
             result
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
 
-fn apply_attached_webview_client_bounds(hwnd: HWND) {
-    let pointer = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-    if pointer == 0 {
-        return;
-    }
-    let webview = unsafe { &*(pointer as *const WebView) };
-    if let Err(error) = apply_webview_client_bounds(webview, hwnd) {
-        eprintln!("opentray-ext-webview failed to resize Windows WebView child: {error}");
-    }
+fn refresh_attached_window_surface(hwnd: HWND) {
+    with_window_proc_state(hwnd, |state| {
+        if let (Some(mut window), Some(fill_color)) = (state.window, state.host_surface_fill_color)
+        {
+            if let Err(error) = unsafe { window.as_mut() }.present_host_surface(fill_color) {
+                eprintln!(
+                    "opentray-ext-webview failed to present Windows host surface: {error}"
+                );
+            }
+        }
+        if let Some(webview) = state.webview {
+            if let Err(error) = apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd) {
+                eprintln!("opentray-ext-webview failed to resize Windows WebView child: {error}");
+            }
+        }
+    });
 }
 
 fn initial_window_position(width: i32, height: i32, tray_bounds: Option<Rect>) -> (i32, i32) {
@@ -3202,12 +3373,12 @@ mod tests {
     }
 
     #[test]
-    fn no_redirection_bitmap_is_only_for_plain_transparency() {
-        let mut style = window_style_from_initial(&crate::WebviewInitialStyle {
-            background: crate::WebviewWindowBackground::Transparent,
-            ..crate::WebviewInitialStyle::default()
-        })
-        .expect("transparent style");
+    fn no_redirection_bitmap_is_used_for_plain_host_backgrounds() {
+        let mut style = window_style_from_initial(&crate::WebviewInitialStyle::default())
+            .expect("opaque style");
+        assert!(wants_no_redirection_bitmap(&style));
+
+        style.background = crate::WebviewWindowBackground::Transparent;
         assert!(wants_no_redirection_bitmap(&style));
 
         style.background = crate::WebviewWindowBackground::PlatformMaterial {
@@ -3218,12 +3389,12 @@ mod tests {
     }
 
     #[test]
-    fn host_surface_rebuild_tracks_background_family_boundaries() {
+    fn host_surface_kind_tracks_background_family_without_runtime_rebuilds() {
         use crate::WebviewWindowBackground::{Opaque, PlatformMaterial, Semantic, Transparent};
 
         assert_eq!(
             host_surface_kind(&Opaque),
-            WindowsHostSurfaceKind::RedirectionSurface
+            WindowsHostSurfaceKind::TransparentNoRedirection
         );
         assert_eq!(
             host_surface_kind(&Transparent),
@@ -3244,10 +3415,6 @@ mod tests {
             WindowsHostSurfaceKind::RedirectionSurface
         );
 
-        assert!(needs_host_window_rebuild_for_background_transition(
-            &Opaque,
-            &Transparent
-        ));
         assert!(!needs_host_window_rebuild_for_background_transition(
             &Opaque,
             &PlatformMaterial {
@@ -3255,7 +3422,11 @@ mod tests {
                 state: WebviewBackgroundEffectState::FollowsWindowActiveState,
             }
         ));
-        assert!(needs_host_window_rebuild_for_background_transition(
+        assert!(!needs_host_window_rebuild_for_background_transition(
+            &Opaque,
+            &Transparent
+        ));
+        assert!(!needs_host_window_rebuild_for_background_transition(
             &Transparent,
             &PlatformMaterial {
                 material: "tabbed".to_string(),
