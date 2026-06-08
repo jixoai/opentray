@@ -1278,22 +1278,25 @@ fn window_style_from_initial(
 fn normalize_windows_background(
     background: &WebviewWindowBackground,
 ) -> Result<WebviewWindowBackground, WebviewRuntimeError> {
-    validate_windows_background(background)?;
     match background {
         WebviewWindowBackground::PlatformMaterial { material, state } => {
             Ok(WebviewWindowBackground::PlatformMaterial {
-                material: normalize_windows_background_material(material)?,
-                state: *state,
+                material: normalize_windows_background_material(material),
+                state: normalize_windows_background_state(*state),
             })
         }
         WebviewWindowBackground::Opaque => Ok(WebviewWindowBackground::Opaque),
         WebviewWindowBackground::Transparent => Ok(WebviewWindowBackground::Transparent),
-        WebviewWindowBackground::Semantic { token, state } => {
-            Ok(WebviewWindowBackground::Semantic {
-                token: token.to_string(),
-                state: *state,
+        WebviewWindowBackground::Semantic { token, state } => match token.as_str() {
+            "blur" => Ok(WebviewWindowBackground::Semantic {
+                token: "blur".to_string(),
+                state: normalize_windows_background_state(*state),
+            }),
+            _ => Ok(WebviewWindowBackground::PlatformMaterial {
+                material: "acrylic".to_string(),
+                state: normalize_windows_background_state(*state),
             })
-        }
+        },
     }
 }
 
@@ -1302,55 +1305,32 @@ fn validate_windows_background(
 ) -> Result<(), WebviewRuntimeError> {
     match background {
         WebviewWindowBackground::Opaque | WebviewWindowBackground::Transparent => Ok(()),
-        WebviewWindowBackground::PlatformMaterial { material, state } => {
-            normalize_windows_background_material(material)?;
-            validate_windows_background_state(*state)
-        }
-        WebviewWindowBackground::Semantic { token, state } => {
-            if token != "blur" {
-                return Err(WebviewRuntimeError::Unsupported(format!(
-                    "background token {token} is not supported on Windows"
-                )));
-            }
-            validate_windows_background_state(*state)
-        }
+        WebviewWindowBackground::PlatformMaterial { .. }
+        | WebviewWindowBackground::Semantic { .. } => Ok(()),
     }
 }
 
-fn validate_windows_background_state(
+fn normalize_windows_background_state(
     state: WebviewBackgroundEffectState,
-) -> Result<(), WebviewRuntimeError> {
-    if matches!(
-        state,
-        WebviewBackgroundEffectState::FollowsWindowActiveState
-    ) {
-        return Ok(());
-    }
-    Err(WebviewRuntimeError::Unsupported(format!(
-        "Windows DWM background state {} is not supported by the current backdrop path",
-        background_effect_state_name(state)
-    )))
-}
-
-fn background_effect_state_name(state: WebviewBackgroundEffectState) -> &'static str {
+) -> WebviewBackgroundEffectState {
     match state {
-        WebviewBackgroundEffectState::FollowsWindowActiveState => "followsWindowActiveState",
-        WebviewBackgroundEffectState::Active => "active",
-        WebviewBackgroundEffectState::Inactive => "inactive",
+        WebviewBackgroundEffectState::FollowsWindowActiveState
+        | WebviewBackgroundEffectState::Active
+        | WebviewBackgroundEffectState::Inactive => {
+            WebviewBackgroundEffectState::FollowsWindowActiveState
+        }
     }
 }
 
-fn normalize_windows_background_material(value: &str) -> Result<String, WebviewRuntimeError> {
+fn normalize_windows_background_material(value: &str) -> String {
     if WINDOWS_BACKGROUND_MATERIALS.contains(&value) {
-        return Ok(value.to_string());
+        return value.to_string();
     }
     match value {
-        "micaAlt" | "tabbedWindow" => Ok("tabbed".to_string()),
-        "mainWindow" => Ok("mica".to_string()),
-        "transientWindow" => Ok("acrylic".to_string()),
-        other => Err(WebviewRuntimeError::Unsupported(format!(
-            "background material {other} is not supported on Windows"
-        ))),
+        "micaAlt" | "tabbedWindow" => "tabbed".to_string(),
+        "mainWindow" => "mica".to_string(),
+        "transientWindow" => "acrylic".to_string(),
+        _ => "acrylic".to_string(),
     }
 }
 
@@ -3268,20 +3248,15 @@ mod tests {
         })
         .expect("windows DWM style should be supported");
 
-        let error = validate_style_request(&SetStylePayload {
+        validate_style_request(&SetStylePayload {
             frameless: None,
             keep_on_top: None,
             background: Some(WebviewBackgroundInput::Keyword("sidebar".to_string())),
             platform: None,
         })
-        .expect_err("unknown Windows material should be rejected");
+        .expect("generic background material should fall back on Windows");
 
-        assert_eq!(
-            error.to_string(),
-            "background material sidebar is not supported on Windows"
-        );
-
-        let error = validate_style_request(&SetStylePayload {
+        validate_style_request(&SetStylePayload {
             frameless: None,
             keep_on_top: None,
             background: Some(WebviewBackgroundInput::Object(
@@ -3294,12 +3269,7 @@ mod tests {
             )),
             platform: None,
         })
-        .expect_err("Windows DWM active state is not supported yet");
-
-        assert_eq!(
-            error.to_string(),
-            "Windows DWM background state active is not supported by the current backdrop path"
-        );
+        .expect("generic background state should fall back on Windows");
     }
 
     #[test]
@@ -3326,6 +3296,19 @@ mod tests {
             state.platform.windows,
             WindowsWindowStyleState {
                 corner_preference: Some("roundSmall".to_string()),
+            }
+        );
+
+        style.background = crate::WebviewWindowBackground::PlatformMaterial {
+            material: "hudWindow".to_string(),
+            state: WebviewBackgroundEffectState::Active,
+        };
+        let state = window_style_from_initial(&style).expect("windows fallback style");
+        assert_eq!(
+            state.background,
+            crate::WebviewWindowBackground::PlatformMaterial {
+                material: "acrylic".to_string(),
+                state: WebviewBackgroundEffectState::FollowsWindowActiveState,
             }
         );
     }
