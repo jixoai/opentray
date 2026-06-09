@@ -209,10 +209,10 @@ The published `opentray` CLI SHALL expose daemon lifecycle and health commands o
 - **WHEN** the developer runs `opentray daemon health`
 - **THEN** the command inspects same-version daemon state without starting a new daemon.
 
-#### Scenario: Smoke is not a public CLI command
+#### Scenario: Product smoke is not a public CLI command
 
 - **GIVEN** a fresh project installed `opentray` from npm
-- **WHEN** the developer runs `opentray smoke daemon-tray`
+- **WHEN** the developer attempts a product-specific visual smoke subcommand
 - **THEN** the CLI rejects the command as unsupported/help
 - **AND** official guidance points visual acceptance to the OpenTray skill or source-tree examples instead of a package-owned smoke subcommand.
 

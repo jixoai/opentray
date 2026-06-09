@@ -91,18 +91,18 @@ Run the facade-only protocol example:
 pnpm --filter @opentray/ext-lynx example:lynx
 ```
 
-Use the installed CLI smoke when you want a real native window:
+Use the source-tree daemon Lynx example when you want a real native window:
 
 ```bash
-pnpm --filter opentray cli -- smoke daemon-lynx
-pnpm --filter opentray cli -- smoke daemon-lynx --features "nativeWindowApi,bindWindowGlobals"
-pnpm --filter opentray cli -- smoke daemon-lynx --features "*,!frameless"
-pnpm --filter opentray cli -- smoke daemon-lynx --features "*,!nativeScreenApi"
+pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
+pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "nativeWindowApi,bindWindowGlobals"
+pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "*,!frameless"
+pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "*,!nativeScreenApi"
 ```
 
-The published `opentray` CLI carries an official Lynx review bundle for final human acceptance. Pass `--bundle <path-to-main.lynx.bundle>` only when you want to override that package-owned audit asset with your own bundle.
+The published `opentray` CLI intentionally stays limited to daemon lifecycle and health. Lynx visual acceptance belongs to source-tree examples or the OpenTray skill workflow. Pass `--bundle <path-to-main.lynx.bundle>` when you want to replace the workspace review bundle with your own payload.
 
-The smoke command now starts with a fixed host shell, sets an initial title/icon, applies an explicit host-feature expression, and exposes tray items for:
+The example starts with a fixed host shell, sets an initial title/icon, applies an explicit host-feature expression, and exposes tray items for:
 
 - `Show Window`
 - `Hide Window`
@@ -125,7 +125,7 @@ For macOS-side runtime diagnostics, keep the default quiet behavior for normal u
 OPENTRAY_LYNX_RUNTIME_STDIO=inherit \
 OPENTRAY_LYNX_DEBUG=host-events,engine-tap \
 OPENTRAY_LYNX_DEBUG_LOG_PATH=/private/tmp/opentray-lynx-runtime.log \
-  pnpm --filter opentray cli -- smoke daemon-lynx \
+  pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle \
   2>&1 | tee /private/tmp/opentray-lynx-smoke.log
 ```
 
