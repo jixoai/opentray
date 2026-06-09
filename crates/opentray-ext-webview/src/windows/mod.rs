@@ -23,6 +23,7 @@ use window_vibrancy::{
     apply_acrylic, apply_mica, apply_tabbed, clear_acrylic, clear_mica, clear_tabbed,
     Error as WindowVibrancyError,
 };
+use windows::Win32::Foundation::{HWND as WebView2Hwnd, RECT as WebView2Rect};
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
     DwmEnableBlurBehindWindow, DwmExtendFrameIntoClientArea, DwmGetWindowAttribute,
@@ -1119,13 +1120,63 @@ fn physical_client_size(hwnd: HWND) -> Option<(i32, i32)> {
 }
 
 fn apply_webview_client_bounds(webview: &WebView, hwnd: HWND) -> Result<(), WebviewRuntimeError> {
-    let Some(bounds) = client_webview_bounds(hwnd) else {
+    let Some((width, height)) = physical_client_size(hwnd) else {
         return Ok(());
     };
-    webview
-        .set_bounds(bounds)
-        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    // The Win32 host client rect is already in physical pixels. Apply it directly to WebView2 and
+    // synchronously resize WRY_WEBVIEW; Wry's public set_bounds path uses an async child HWND move.
+    let bounds = webview_controller_rect(width, height);
+    unsafe {
+        webview
+            .controller()
+            .SetBounds(bounds)
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    }
+    if let Some(child_hwnd) = webview_parent_hwnd(webview) {
+        set_child_window_bounds(child_hwnd, width, height)?;
+    }
     notify_webview_parent_window_position_changed(webview)
+}
+
+fn webview_controller_rect(width: i32, height: i32) -> WebView2Rect {
+    WebView2Rect {
+        left: 0,
+        top: 0,
+        right: width,
+        bottom: height,
+    }
+}
+
+fn webview_parent_hwnd(webview: &WebView) -> Option<HWND> {
+    let mut parent = WebView2Hwnd::default();
+    unsafe {
+        webview.controller().ParentWindow(&mut parent).ok()?;
+    }
+    if parent.0.is_null() {
+        None
+    } else {
+        Some(parent.0.cast())
+    }
+}
+
+fn set_child_window_bounds(hwnd: HWND, width: i32, height: i32) -> Result<(), WebviewRuntimeError> {
+    let ok = unsafe {
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            0,
+            0,
+            width,
+            height,
+            SWP_NOACTIVATE | SWP_NOZORDER,
+        )
+    };
+    if ok == 0 {
+        return Err(WebviewRuntimeError::Internal(
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn apply_webview_client_bounds_from_bridge(
@@ -3779,6 +3830,19 @@ mod tests {
                 y: 0,
                 width: 0,
                 height: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn webview_controller_rect_uses_physical_client_size() {
+        assert_eq!(
+            webview_controller_rect(1440, 960),
+            WebView2Rect {
+                left: 0,
+                top: 0,
+                right: 1440,
+                bottom: 960,
             }
         );
     }
