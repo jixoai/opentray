@@ -569,7 +569,7 @@ The extension SHALL NOT collapse these meanings into one vague `unsupported` sto
 
 #### Scenario: Runtime absence stays separate from family mismatch
 
-- **GIVEN** a Windows or Linux runtime path has not yet landed a visible WebView implementation
+- **GIVEN** a Linux runtime path has not yet landed a visible WebView implementation
 - **WHEN** the caller asks the extension to show a WebView window
 - **THEN** the extension returns a typed runtime-absence unsupported error
 - **AND** that result is documented differently from requesting `platform.windows.*` on the macOS runtime.
@@ -591,17 +591,17 @@ The extension SHALL NOT collapse these meanings into one vague `unsupported` sto
 
 ### Requirement: Webview official guidance SHALL publish maturity truth together with capability truth
 
-The official `@opentray/ext-webview` README, published CLI README, platform package READMEs, and repo skills SHALL describe capability maturity and platform truth together. When a capability is stable only on macOS while Windows and Linux currently expose contract or package-topology-only paths, the guidance SHALL say so directly.
+The official `@opentray/ext-webview` README, published CLI README, platform package READMEs, and repo skills SHALL describe capability maturity and platform truth together. When a capability is stable on macOS and Windows while Linux remains unsupported for WebView, the guidance SHALL say so directly.
 
 This maturity guidance SHALL use the same public vocabulary as the runtime and spec surface. It SHALL avoid implying that a published platform package automatically means a stable visible runtime on that platform.
 
-#### Scenario: Guidance teaches macOS stability without overstating other platforms
+#### Scenario: Guidance teaches stable platform support without overstating Linux
 
 - **GIVEN** a developer reads the official WebView docs and skills
 - **WHEN** they inspect platform support for glass windows, overlay, screen details, or tray panels
-- **THEN** the guidance states that macOS is the current human-visual acceptance path
-- **AND** it states that Windows and Linux remain alpha or package-topology-only until their native runtime atoms land
-- **AND** it does not imply that those platforms already have stable visible UI behavior.
+- **THEN** the guidance states that macOS and Windows are current human-visual acceptance paths
+- **AND** it states that Linux is unsupported for `@opentray/ext-webview` until a real native runtime atom lands
+- **AND** it does not imply that Linux already has stable visible UI behavior.
 
 ### Requirement: Webview SHALL mount as a tray extension capability
 

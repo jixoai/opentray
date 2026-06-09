@@ -256,7 +256,7 @@ Native daemon and WebView extension artifacts SHALL be built on platform-appropr
 #### Scenario: WebView artifacts build on native platform runners
 
 - **GIVEN** the workflow builds `opentray-ext-webview`
-- **WHEN** the target is macOS, Linux, or Windows
+- **WHEN** the target is macOS or Windows
 - **THEN** the build job runs on a matching native OS runner
 - **AND** it installs or uses that platform's native WebView dependencies.
 
@@ -349,14 +349,15 @@ The release workflow SHALL skip native artifact compilation and native package s
 
 ### Requirement: Native artifact build matrix SHALL cover first-stage platform packages
 
-The release workflow SHALL include build jobs for all first-stage platform packages: macOS arm64, macOS x64, Linux arm64, Linux x64, Windows arm64, and Windows x64. A platform target MAY initially publish a structured unsupported runtime if the native GUI capability cannot be validated, but the package and artifact path SHALL exist.
+The release workflow SHALL include daemon build jobs for all first-stage platform packages: macOS arm64, macOS x64, Linux arm64, Linux x64, Windows arm64, and Windows x64. WebView native package jobs SHALL cover only the official WebView runtime targets: macOS arm64, macOS x64, Windows arm64, and Windows x64.
 
 #### Scenario: Matrix maps targets to package directories
 
 - **GIVEN** the release workflow build matrix is inspected
 - **WHEN** targets are enumerated
 - **THEN** each target maps to exactly one daemon package directory
-- **AND** each target maps to exactly one WebView platform package directory.
+- **AND** each macOS/Windows WebView target maps to exactly one WebView platform package directory
+- **AND** Linux targets map only to daemon package directories until a real Linux WebView runtime is supported.
 
 ### Requirement: Changesets SHALL version native platform packages with their facade packages
 
@@ -376,11 +377,11 @@ The release configuration SHALL keep `opentray` and daemon platform packages ver
 - **THEN** `@opentray/ext-webview` and all WebView platform packages publish the same release version
 - **AND** the facade optional dependency ranges resolve to that version when used.
 
-### Requirement: Post-publish npm registry smoke SHALL be the final release gate
+### Requirement: Post-publish npm registry visual acceptance SHALL be the final release gate
 
-After npm publish, maintainers SHALL verify the release from a fresh project that installs packages from the npm registry rather than workspace links. The smoke SHALL prove daemon binary resolution, daemon health, WebView dynamic library resolution, human-visible WebView behavior, Lynx runtime-host resolution, and the human-visible Lynx carrier audit path.
+After npm publish, maintainers SHALL verify the release from a fresh project that installs packages from the npm registry rather than workspace links. The visual acceptance recipe SHALL prove daemon binary resolution, daemon health, WebView dynamic library resolution, human-visible WebView behavior, Lynx runtime-host resolution when Lynx is part of the release, and the human-visible Lynx carrier audit path.
 
-For alpha publishes, the fresh install SHALL use the alpha channel entrypoint such as `npm i opentray@alpha`. The smoke report SHALL keep stable and alpha evidence separate so prerelease acceptance does not get mistaken for stable release acceptance.
+For alpha publishes, the fresh install SHALL use the alpha channel entrypoint such as `npm i opentray@alpha`. The acceptance report SHALL keep stable and alpha evidence separate so prerelease acceptance does not get mistaken for stable release acceptance.
 
 #### Scenario: Fresh npm install proves release
 
@@ -389,23 +390,23 @@ For alpha publishes, the fresh install SHALL use the alpha channel entrypoint su
 - **THEN** `opentray daemon health` can inspect daemon state
 - **AND** the daemon can start from the installed platform binary
 - **AND** WebView can load from the installed platform dynamic library
-- **AND** the visual smoke works or reports a typed unsupported capability error.
+- **AND** the skill-driven visual acceptance recipe works or reports a typed unsupported capability error.
 
 #### Scenario: Fresh alpha npm install proves prerelease channel
 
 - **GIVEN** packages have been published to npm under dist-tag `alpha`
 - **WHEN** a fresh project installs `opentray@alpha`
 - **THEN** the installed packages resolve to the alpha channel versions
-- **AND** the smoke proof records the same runtime/unsupported truth promised by the alpha docs
+- **AND** the acceptance proof records the same runtime/unsupported truth promised by the alpha docs
 - **AND** the result is archived separately from stable release evidence.
 
-#### Scenario: Fresh npm install proves Lynx carrier audit command
+#### Scenario: Fresh npm install proves Lynx carrier through a skill recipe
 
 - **GIVEN** `opentray` and `@opentray/ext-lynx` have been published to npm
-- **WHEN** a fresh project installs the published versions and runs `opentray smoke daemon-lynx`
-- **THEN** the CLI resolves the installed daemon binary and Lynx platform package
-- **AND** it launches the packaged review bundle without requiring a workspace path
-- **AND** maintainers can use that command as the final human-visible audit for the published Lynx carrier path.
+- **WHEN** a fresh project installs the published versions and the maintainer runs the documented OpenTray skill recipe
+- **THEN** the recipe resolves the installed daemon binary and Lynx platform package
+- **AND** it launches an explicit review bundle or source-tree acceptance bundle without requiring a public `opentray smoke` subcommand
+- **AND** maintainers can use that recipe as the final human-visible audit for the published Lynx carrier path.
 
 ### Requirement: Package bootstrap SHALL cover WebView platform atoms
 
@@ -471,21 +472,21 @@ The release pipeline SHALL treat this guidance alignment as part of publish read
 
 #### Scenario: Alpha package and guidance tell the same story
 
-- **GIVEN** `npm i opentray@alpha` installs a build with macOS-stable and Windows/Linux-alpha WebView capability truth
+- **GIVEN** `npm i opentray@alpha` installs a build with a documented prerelease capability truth
 - **WHEN** a developer reads the published README and repo skills
 - **THEN** the guidance uses the same maturity matrix and unsupported taxonomy as the release channel
 - **AND** it does not present the alpha channel as a fully stable cross-platform release.
 
-### Requirement: Published Lynx audit SHALL have a package-owned CLI command
+### Requirement: Published Lynx audit SHALL be skill-driven
 
-After npm publish, maintainers SHALL be able to run a documented CLI command from a fresh install to visually verify the Lynx carrier path without depending on a workspace checkout bundle path. The command MAY still accept an explicit bundle override, but the default audit path SHALL come from a package-owned review bundle.
+After npm publish, maintainers SHALL be able to run a documented skill/workflow recipe from a fresh install to visually verify the Lynx carrier path. The recipe MAY accept an explicit bundle path. The public `opentray` CLI SHALL remain limited to daemon lifecycle and health.
 
-#### Scenario: Fresh install runs the final Lynx audit command
+#### Scenario: Fresh install runs the final Lynx audit recipe
 
 - **GIVEN** `opentray` and `@opentray/ext-lynx` have been installed from npm
-- **WHEN** a maintainer runs `opentray smoke daemon-lynx`
-- **THEN** the command resolves a package-owned review bundle by default
-- **AND** it exercises the installed Lynx runtime host path instead of a workspace-local bundle path.
+- **WHEN** a maintainer runs the documented OpenTray skill recipe
+- **THEN** the recipe resolves the installed daemon and Lynx package path
+- **AND** it exercises the installed Lynx runtime host path without adding a public smoke subcommand to `opentray`.
 
 ### Requirement: OpenTray protocol-line tags SHALL evolve as a same-major compatibility line
 

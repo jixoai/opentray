@@ -114,8 +114,7 @@ OpenTray SHALL keep one authoritative native build graph for target support, art
 
 #### Scenario: Shared target truth covers WebView first-stage targets in both planners
 
-- **GIVEN** the repository currently publishes WebView platform packages for macOS arm64/x64, Linux arm64/x64, and Windows arm64/x64
+- **GIVEN** the repository currently publishes WebView platform packages for macOS arm64/x64 and Windows arm64/x64
 - **WHEN** preview or release planning resolves a WebView build request without explicit target narrowing
 - **THEN** both planners agree on the same first-stage WebView target set
 - **AND** neither planner invents a second target matrix just for its own workflow
-

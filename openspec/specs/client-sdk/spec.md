@@ -199,24 +199,22 @@ The resolver SHALL return a structured error when no platform binary is availabl
 - **THEN** it fails with a typed message naming the missing platform package
 - **AND** it does not fall back to a fake or unrelated daemon.
 
-### Requirement: CLI SHALL provide npm-installable visual smoke
+### Requirement: CLI SHALL stay daemon-lifecycle focused
 
-The published `opentray` package SHALL include public command paths that can exercise daemon startup, tray creation, and official extension commands from a fresh npm install. The smoke path SHALL NOT require workspace source files or `pnpm --filter`.
+The published `opentray` CLI SHALL expose daemon lifecycle and health commands only. It SHALL NOT grow product-specific visual smoke commands. Visual acceptance SHALL be orchestrated by skills, source-tree examples, or explicit SDK scripts so the package CLI remains a small operator surface rather than a demo runner.
 
-#### Scenario: Fresh npm install can run visual smoke
+#### Scenario: Fresh npm install has pure daemon commands
 
-- **GIVEN** a fresh project installed `opentray` and `@opentray/ext-webview` from npm
-- **WHEN** the developer runs the documented smoke command
-- **THEN** it auto-starts the daemon from the installed platform package
-- **AND** it exposes a real tray/WebView flow for human visual verification.
+- **GIVEN** a fresh project installed `opentray` from npm
+- **WHEN** the developer runs `opentray daemon health`
+- **THEN** the command inspects same-version daemon state without starting a new daemon.
 
-#### Scenario: Fresh npm install can run Lynx smoke from a package-owned review bundle
+#### Scenario: Smoke is not a public CLI command
 
-- **GIVEN** a fresh project installed `opentray` and `@opentray/ext-lynx` from npm
-- **WHEN** the developer runs `opentray smoke daemon-lynx`
-- **THEN** it auto-starts the daemon from the installed platform package
-- **AND** it loads `@opentray/ext-lynx` through the generic extension host path
-- **AND** it uses a package-owned Lynx review bundle by default instead of requiring a workspace checkout path.
+- **GIVEN** a fresh project installed `opentray` from npm
+- **WHEN** the developer runs `opentray smoke daemon-tray`
+- **THEN** the CLI rejects the command as unsupported/help
+- **AND** official guidance points visual acceptance to the OpenTray skill or source-tree examples instead of a package-owned smoke subcommand.
 
 ### Requirement: Top-level SDK SHALL expose broker-backed convenience entrypoints
 
