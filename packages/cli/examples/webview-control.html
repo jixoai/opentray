@@ -6,6 +6,7 @@
     <style>
       :root {
         --titlebar-left: 0px;
+        --titlebar-right: 0px;
         --titlebar-height: 44px;
         --text: #152117;
         --muted: #5a665a;
@@ -68,6 +69,8 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
+        padding-left: var(--titlebar-left);
+        padding-right: var(--titlebar-right);
         min-height: var(--titlebar-height);
         border-bottom: 1px solid var(--border);
         background: var(--titlebar-bg);
@@ -80,7 +83,7 @@
         gap: 12px;
         min-width: 0;
         height: 100%;
-        padding-left: max(var(--titlebar-left), 12px);
+        padding-left: 12px;
         padding-right: 12px;
       }
       .titlebar-title {
@@ -639,6 +642,12 @@
           ),
         };
       };
+      const applyOverlayGeometryRect = (rect) => {
+        const rightInset = Math.max(window.innerWidth - rect.x - rect.width, 0);
+        document.documentElement.style.setProperty("--titlebar-left", `${Math.max(rect.x, 0)}px`);
+        document.documentElement.style.setProperty("--titlebar-right", `${rightInset}px`);
+        document.documentElement.style.setProperty("--titlebar-height", `${Math.max(rect.height, 38)}px`);
+      };
       const updateOverlayGeometry = async () => {
         if (!bridge?.overlay) {
           text("overlay-status", bridge ? "overlay: disabled" : "overlay: unavailable");
@@ -652,8 +661,7 @@
         }
         try {
           const rect = await bridge.overlay.getTitlebarAreaRect();
-          document.documentElement.style.setProperty("--titlebar-left", `${rect.x}px`);
-          document.documentElement.style.setProperty("--titlebar-height", `${Math.max(rect.height, 38)}px`);
+          applyOverlayGeometryRect(rect);
           text("overlay-status", `overlay: x=${rect.x} w=${rect.width} h=${rect.height}`);
           text("overlay-rect-status", JSON.stringify(rect, null, 2));
         } catch (error) {
@@ -694,8 +702,7 @@
             appendEvent("overlay.geometrychange", event);
             const rect = event.titlebarAreaRect;
             if (rect) {
-              document.documentElement.style.setProperty("--titlebar-left", `${rect.x}px`);
-              document.documentElement.style.setProperty("--titlebar-height", `${Math.max(rect.height, 38)}px`);
+              applyOverlayGeometryRect(rect);
               text("overlay-status", `overlay: x=${rect.x} w=${rect.width} h=${rect.height}`);
               text("overlay-rect-status", JSON.stringify(rect, null, 2));
             }

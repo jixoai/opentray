@@ -38,7 +38,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 use windows_sys::Win32::UI::Controls::MARGINS;
-use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
@@ -46,12 +46,13 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     LoadCursorW, LoadImageW, RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW,
     SetWindowPos, SetWindowTextW, ShowWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT,
     GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
-    ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WM_CLOSE, WM_ERASEBKGND, WM_NCACTIVATE, WM_NCLBUTTONDOWN,
-    WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-    WS_EX_NOREDIRECTIONBITMAP, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX,
-    WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+    ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SM_CXSIZE,
+    SM_CYSIZE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WM_CLOSE, WM_ERASEBKGND,
+    WM_NCACTIVATE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
+    WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOREDIRECTIONBITMAP,
+    WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    WS_THICKFRAME, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -61,7 +62,9 @@ use wry::{
 mod appwindow;
 mod appwindow_abi;
 
-use self::appwindow::apply_windows_titlebar_overlay;
+use self::appwindow::{
+    apply_windows_titlebar_overlay, titlebar_occlusion_metrics, WindowsTitlebarOcclusionMetrics,
+};
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::{
     parse_background_input, MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings,
@@ -1088,6 +1091,14 @@ fn build_webview(
 }
 
 fn client_webview_bounds(hwnd: HWND) -> Option<WryRect> {
+    let (width, height) = physical_client_size(hwnd)?;
+    Some(WryRect {
+        position: PhysicalPosition::new(0, 0).into(),
+        size: PhysicalSize::new(width, height).into(),
+    })
+}
+
+fn physical_client_size(hwnd: HWND) -> Option<(i32, i32)> {
     let mut client = RECT {
         left: 0,
         top: 0,
@@ -1102,14 +1113,16 @@ fn client_webview_bounds(hwnd: HWND) -> Option<WryRect> {
     if client_width == 0 || client_height == 0 {
         return None;
     }
+    Some((client_width, client_height))
+}
+
+fn logical_client_size(hwnd: HWND) -> Option<(i32, i32)> {
+    let (client_width, client_height) = physical_client_size(hwnd)?;
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let scale = if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 };
     let logical_width = ((client_width as f64) / scale).round().max(1.0) as i32;
     let logical_height = ((client_height as f64) / scale).round().max(1.0) as i32;
-    Some(WryRect {
-        position: PhysicalPosition::new(0, 0).into(),
-        size: PhysicalSize::new(logical_width, logical_height).into(),
-    })
+    Some((logical_width, logical_height))
 }
 
 fn apply_webview_client_bounds(webview: &WebView, hwnd: HWND) -> Result<(), WebviewRuntimeError> {
@@ -2612,26 +2625,55 @@ fn titlebar_area_rect_json(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
 }
 
 fn titlebar_area_rect(hwnd: HWND) -> Rect {
-    let mut client = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
+    let Some((client_width, _)) = logical_client_size(hwnd) else {
+        return Rect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
     };
-    unsafe {
-        GetClientRect(hwnd, &mut client);
-    }
-    let width = (client.right - client.left).max(0) as u32;
+    // AppWindow enables the overlay compositor path, but its occlusion collection can be null on
+    // some Windows App Runtime installs. Geometry remains a layout capability, so fall back to
+    // Win32 caption metrics instead of surfacing this as overlay unsupported.
+    let metrics = titlebar_occlusion_metrics(hwnd, client_width as f64)
+        .ok()
+        .filter(|metrics| metrics.right_inset > 0.0)
+        .unwrap_or_else(|| fallback_titlebar_occlusion_metrics(hwnd));
+    titlebar_area_rect_from_metrics(client_width, metrics)
+}
+
+fn titlebar_area_rect_from_metrics(
+    client_width: i32,
+    metrics: WindowsTitlebarOcclusionMetrics,
+) -> Rect {
+    let width = ((client_width as f64) - metrics.right_inset)
+        .max(0.0)
+        .round() as u32;
     Rect {
         x: 0,
         y: 0,
         width,
-        height: titlebar_area_height(hwnd),
+        height: metrics.height.round().max(1.0) as u32,
     }
 }
 
-fn titlebar_area_height(_hwnd: HWND) -> u32 {
-    40
+fn fallback_titlebar_occlusion_metrics(hwnd: HWND) -> WindowsTitlebarOcclusionMetrics {
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let dpi = if dpi == 0 { 96 } else { dpi };
+    let scale = dpi as f64 / 96.0;
+    WindowsTitlebarOcclusionMetrics {
+        right_inset: logical_system_metric(SM_CXSIZE, dpi, scale) * 3.0,
+        height: logical_system_metric(SM_CYSIZE, dpi, scale).max(40.0),
+    }
+}
+
+fn logical_system_metric(index: i32, dpi: u32, scale: f64) -> f64 {
+    let value = unsafe { GetSystemMetricsForDpi(index, dpi) };
+    if value <= 0 {
+        return 0.0;
+    }
+    (value as f64 / scale).max(0.0)
 }
 
 fn rect_to_opentray_rect(rect: RECT) -> Rect {
@@ -3224,6 +3266,12 @@ unsafe extern "system" fn window_proc(
             });
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
+        WM_WINDOWPOSCHANGED => {
+            refresh_attached_window_surface(hwnd);
+            let result = DefWindowProcW(hwnd, msg, wparam, lparam);
+            refresh_attached_window_surface(hwnd);
+            result
+        }
         WM_SIZE => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
             refresh_attached_window_surface(hwnd);
@@ -3583,6 +3631,48 @@ mod tests {
         assert_eq!(bits & WS_MAXIMIZE, WS_MAXIMIZE);
         assert_eq!(bits & WS_CLIPCHILDREN, WS_CLIPCHILDREN);
         assert_eq!(bits & WS_CLIPSIBLINGS, WS_CLIPSIBLINGS);
+    }
+
+    #[test]
+    fn titlebar_area_rect_reserves_right_caption_control_inset() {
+        let rect = titlebar_area_rect_from_metrics(
+            800,
+            WindowsTitlebarOcclusionMetrics {
+                right_inset: 138.0,
+                height: 42.0,
+            },
+        );
+
+        assert_eq!(
+            rect,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 662,
+                height: 42,
+            }
+        );
+    }
+
+    #[test]
+    fn titlebar_area_rect_clamps_oversized_caption_control_inset() {
+        let rect = titlebar_area_rect_from_metrics(
+            120,
+            WindowsTitlebarOcclusionMetrics {
+                right_inset: 180.0,
+                height: 0.0,
+            },
+        );
+
+        assert_eq!(
+            rect,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 1,
+            }
+        );
     }
 
     #[test]
