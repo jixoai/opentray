@@ -1,5 +1,11 @@
 # @opentray/ext-lynx
 
+## 0.1.3
+
+### Patch Changes
+
+- fe3a3ce: Replace outdated public `opentray smoke daemon-lynx` README guidance with source-tree example and skill-owned visual acceptance guidance.
+
 ## 0.1.2
 
 ### Patch Changes

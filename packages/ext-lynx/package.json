@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-lynx",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Official OpenTray Lynx extension backed by the OpenTray-owned macOS runtime host.",
   "type": "module",
   "license": "MIT",

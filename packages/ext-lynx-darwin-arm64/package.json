@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-lynx-darwin-arm64",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OpenTray Lynx native extension for macOS arm64.",
   "license": "MIT",
   "repository": {
