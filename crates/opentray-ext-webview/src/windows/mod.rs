@@ -1125,6 +1125,9 @@ fn apply_webview_client_bounds(webview: &WebView, hwnd: HWND) -> Result<(), Webv
     };
     // The Win32 host client rect is already in physical pixels. Apply it directly to WebView2 and
     // synchronously resize WRY_WEBVIEW; Wry's public set_bounds path uses an async child HWND move.
+    // Chromium/WebView2 may still visually trail by one compositor frame during live interactive
+    // resize. Treat that as a lower-level composition limitation unless the host switches to a
+    // deeper resize/composition integration.
     let bounds = webview_controller_rect(width, height);
     unsafe {
         webview
