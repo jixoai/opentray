@@ -17,7 +17,7 @@
     "protocol-tags:apply": "bun run scripts/npm/protocol-dist-tags.ts --apply",
     "protocol-tags:dry-run": "bun run scripts/npm/protocol-dist-tags.ts",
     "setup:env": "bun run scripts/npm/setup-env.ts",
-    "test:npm": "bun test scripts/npm",
+    "test:npm": "bun test scripts/npm/*.test.ts",
     "trusted-publish:check": "bun run scripts/npm/configure-trusted-publish.ts --check",
     "trusted-publish:configure": "bun run scripts/npm/configure-trusted-publish.ts",
     "trusted-publish:dry-run": "bun run scripts/npm/configure-trusted-publish.ts --dry-run",
