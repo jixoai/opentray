@@ -1,5 +1,11 @@
 # @opentray/ext-webview-windows-x64
 
+## 0.5.0
+
+### Minor Changes
+
+- cd108fd: Add the Windows WebView2 runtime path with native background materials, overlay titlebar geometry, window control bridge support, and Windows native icon/style projection.
+
 ## 0.4.0
 
 ## 0.3.0
