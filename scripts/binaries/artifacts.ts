@@ -13,9 +13,9 @@ export interface NativeTarget {
   daemonPackageName: string;
   daemonPackageDir: string;
   daemonArtifact: string;
-  webviewPackageName: string;
-  webviewPackageDir: string;
-  webviewArtifact: string;
+  webviewPackageName?: string;
+  webviewPackageDir?: string;
+  webviewArtifact?: string;
   lynxPackageName?: string;
   lynxPackageDir?: string;
   lynxArtifact?: string;
@@ -37,7 +37,10 @@ export function createNativeTarget(
   arch: NativeArch
 ): NativeTarget {
   const daemonPackageDir = `packages/${packageOs}-${arch}`;
-  const webviewPackageDir = `packages/ext-webview-${packageOs}-${arch}`;
+  const webviewPackageDir =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-webview-${packageOs}-${arch}`;
   const lynxPackageDir =
     packageOs === "darwin"
       ? `packages/ext-lynx-${packageOs}-${arch}`
@@ -52,14 +55,17 @@ export function createNativeTarget(
     daemonArtifact: `${daemonPackageDir}/bin/${
       packageOs === "windows" ? "opentray.exe" : "opentray"
     }`,
-    webviewPackageName: `@opentray/ext-webview-${packageOs}-${arch}`,
+    webviewPackageName:
+      webviewPackageDir === undefined
+        ? undefined
+        : `@opentray/ext-webview-${packageOs}-${arch}`,
     webviewPackageDir,
     webviewArtifact:
-      packageOs === "windows"
-        ? `${webviewPackageDir}/bin/opentray_ext_webview.dll`
-        : `${webviewPackageDir}/lib/libopentray_ext_webview.${
-            packageOs === "darwin" ? "dylib" : "so"
-          }`,
+      webviewPackageDir === undefined
+        ? undefined
+        : packageOs === "windows"
+          ? `${webviewPackageDir}/bin/opentray_ext_webview.dll`
+          : `${webviewPackageDir}/lib/libopentray_ext_webview.dylib`,
     lynxPackageName:
       lynxPackageDir === undefined
         ? undefined
@@ -136,6 +142,11 @@ export const resolveStageDestination = (
     case "daemon":
       return target.daemonArtifact;
     case "webview":
+      if (target.webviewArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish a webview native extension`
+        );
+      }
       return target.webviewArtifact;
     case "lynx":
       if (target.lynxArtifact === undefined) {

@@ -10,7 +10,7 @@ Official rich popup extension for OpenTray.
 
 This package is an extension atom. It must not become the owner of core tray lifecycle.
 
-The facade stays platform-neutral. Native libraries are optional platform packages named `@opentray/ext-webview-<os>-<arch>`, and the daemon resolves them through the dynamic extension discovery law when a mounted WebView capability loads `@opentray/ext-webview`.
+The facade stays platform-neutral. Supported native libraries are optional platform packages named `@opentray/ext-webview-<os>-<arch>`, and the daemon resolves them through the dynamic extension discovery law when a mounted WebView capability loads `@opentray/ext-webview`. Official WebView native packages are currently published for macOS and Windows only; Linux is unsupported for this extension.
 
 The platform dylib owns the full WebView protocol and native runtime. `opentray` forwards scoped extension traffic to it, but does not keep a daemon-side WebView parser or native WebView builder.
 
@@ -26,8 +26,8 @@ Read the current platform story as four different truths, not one vague support 
 Current WebView maturity:
 
 - macOS: `stable` for the window capability surface documented below
-- Windows: `alpha` for the first visible WebView2-backed runtime, common window bridge, and lifecycle behavior
-- Linux: `alpha` for the package and contract surface; visible native runtime behavior is still explicitly unsupported
+- Windows: `stable` for the WebView2-backed window capability surface documented below
+- Linux: `unsupported by design`; OpenTray core still supports Linux, but `@opentray/ext-webview` no longer publishes Linux native packages
 - requesting `platform.windows.*` from the macOS runtime, or unknown macOS material/material-state values: `unsupported by design`
 - tray bounds with no authoritative tray anchor in the current session: `unavailable by context`
 
@@ -52,7 +52,7 @@ macOS support includes:
 - tray bounds through `navigator.opentray.tray.getBounds()`
 - source-scoped native capability policy with local-only defaults for remote safety
 
-Windows alpha support includes:
+Windows support includes:
 
 - visible WebView2-backed windows through Wry
 - `show`, `hide`, `destroy`, `setContent`, `navigate`, `evaluate`, and `postMessage`
@@ -66,7 +66,7 @@ Windows alpha support includes:
 - current-monitor screen snapshot through `navigator.screen` / `navigator.opentrayScreen`
 - tray bounds projection through `navigator.opentray.tray.getBounds()`
 
-Full Windows multi-monitor enumeration remains an alpha follow-up; the current screen API is a current-monitor snapshot.
+Full Windows multi-monitor enumeration remains a follow-up; the current screen API is a current-monitor snapshot.
 
 Visual effects stay capability-gated. Unsupported or platform-fragile effects must reject with typed unsupported errors rather than faking success.
 
@@ -89,7 +89,7 @@ Material selection has a second axis: background state. Use `background.state` t
 - `active` requests the vivid active appearance, which is often the right choice for tray panels and accessory-app utility surfaces
 - `inactive` requests the subdued inactive material appearance
 
-macOS maps the state to `NSVisualEffectState`. The current Windows DWM backdrop path exposes only `followsWindowActiveState`; requests for forced `active` or `inactive` return a typed unsupported error until the runtime grows a composition-controller path that can truthfully force input-active state.
+macOS maps the state to `NSVisualEffectState`. Windows maps the state through its DWM backdrop projection and non-client activation handling so `followsWindowActiveState`, `active`, and `inactive` remain part of the same background atom.
 
 If the page paints every pixel itself, the native material is still present, but users will not see it.
 
@@ -244,13 +244,13 @@ Current native support:
 - macOS: tray bounds projection through `navigator.opentray.tray.getBounds()`
 - macOS: transparent background and material effects through `style.background`, including `hudWindow`, `sidebar`, `windowBackground`, `contentBackground`, and `underWindowBackground`
 - macOS: global override binding through `bindWindowGlobals` and `bindScreenGlobals`
-- Windows alpha: visible WebView2-backed windows, lifecycle verbs, content replacement/navigation, `evaluate`, `postMessage`, common window bridge commands, title/icon sync, current-monitor screen snapshot, tray bounds projection, and global override binding through `bindWindowGlobals` / `bindScreenGlobals`
-- Windows alpha: `frameless`, `background`, `keepOnTop`, and `style.platform.windows.cornerPreference`
-- Linux: the native runtime package is currently an alpha distribution atom; unsupported runtime paths must fail explicitly until a visible platform implementation lands
+- Windows: visible WebView2-backed windows, lifecycle verbs, content replacement/navigation, `evaluate`, `postMessage`, common window bridge commands, title/icon sync, current-monitor screen snapshot, tray bounds projection, and global override binding through `bindWindowGlobals` / `bindScreenGlobals`
+- Windows: `frameless`, `background`, `keepOnTop`, and `style.platform.windows.cornerPreference`
+- Linux: no official native WebView runtime package is published. A custom `path` may still be used for private experiments, but the official package treats Linux WebView as unsupported.
 
 Keep the unsupported taxonomy explicit:
 
-- runtime absent: `webview runtime is not implemented for this platform`
+- runtime absent: no official WebView native package exists for the host platform, or a custom `path` could not be resolved
 - platform-family mismatch: a Windows/Linux style family is requested on the macOS runtime, macOS material/corner style is requested on Windows, or a platform-specific family is otherwise requested on the wrong substrate
 - declarative gate: the runtime could provide a capability, but the current WebView session did not enable it, such as overlay geometry without `windowControlsOverlay`
 - context unavailable: the capability exists, but the current session has no authoritative data, such as tray bounds when no tray anchor was injected
@@ -446,4 +446,4 @@ cargo build -p opentray-bin -p opentray-ext-webview
 pnpm --filter opentray example:tray-panel
 ```
 
-Inside the repo, that example automatically points the daemon at the freshly built local WebView dylib when `OPENTRAY_EXT_PATH` is not already set, so manual tray-panel iteration does not depend on staging platform packages first.
+Inside the repo on macOS and Windows, that example automatically points the daemon at the freshly built local WebView dynamic library when `OPENTRAY_EXT_PATH` is not already set, so manual tray-panel iteration does not depend on staging platform packages first.

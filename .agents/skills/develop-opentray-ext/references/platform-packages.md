@@ -7,13 +7,15 @@ Use this reference when creating or updating `packages/ext-<name>-<os>-<arch>` o
 Follow the existing atom pattern:
 
 - Facade package: `@opentray/ext-<name>`
-- Platform packages: `@opentray/ext-<name>-darwin-arm64`, `-darwin-x64`, `-linux-arm64`, `-linux-x64`, `-windows-arm64`, `-windows-x64`
+- Platform packages are capability-specific. Do not assume every extension supports every OpenTray daemon target.
+  - `@opentray/ext-webview` currently publishes `darwin-arm64`, `darwin-x64`, `windows-arm64`, and `windows-x64` native packages only.
+  - `@opentray/ext-lynx` currently publishes macOS native packages only.
+  - The core `opentray` daemon still publishes macOS, Linux, and Windows packages.
 - Native artifact path:
   - macOS: `lib/libopentray_ext_<name>.dylib`
-  - Linux: `lib/libopentray_ext_<name>.so`
   - Windows: `bin/opentray_ext_<name>.dll`
 
-`packages/ext-<name>` should use `optionalDependencies` on the platform atoms and keep public API platform-neutral.
+`packages/ext-<name>` should use `optionalDependencies` only on supported platform atoms and keep public API platform-neutral. Unsupported extension platforms should be explicit capability absence, not placeholder package shells.
 
 ## Source-Control Rule
 

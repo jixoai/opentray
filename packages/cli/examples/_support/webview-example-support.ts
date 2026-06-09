@@ -3,7 +3,7 @@ import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-export { createVisibleTrayIcon } from "../../src/smoke/visible-tray-icon";
+export { createVisibleTrayIcon } from "./visible-tray-icon";
 
 export async function prepareLocalWebviewExtensionPath(importMetaUrl: string): Promise<string | undefined> {
   await prepareLocalWindowsAppRuntimeEnvironment();
@@ -15,6 +15,11 @@ export async function prepareLocalWebviewExtensionPath(importMetaUrl: string): P
 }
 
 async function resolveLocalWebviewExtension(importMetaUrl: string): Promise<string | undefined> {
+  const artifactName = localWebviewArtifactName();
+  if (artifactName === undefined) {
+    return undefined;
+  }
+
   const workspaceCargoToml = fileURLToPath(new URL("../../../Cargo.toml", importMetaUrl));
   try {
     await access(workspaceCargoToml, constants.R_OK);
@@ -23,12 +28,6 @@ async function resolveLocalWebviewExtension(importMetaUrl: string): Promise<stri
     // Not running from the workspace root layout, so skip the source-build path.
   }
 
-  const artifactName =
-    process.platform === "win32"
-      ? "opentray_ext_webview.dll"
-      : process.platform === "darwin"
-        ? "libopentray_ext_webview.dylib"
-        : "libopentray_ext_webview.so";
   const candidates = [
     fileURLToPath(new URL(`../../../target/debug/${artifactName}`, importMetaUrl)),
     fileURLToPath(new URL(`../../../target/release/${artifactName}`, importMetaUrl)),
@@ -61,6 +60,16 @@ function runCargoBuild(workspaceRoot: string): Promise<void> {
       reject(new Error(`cargo build -p opentray-ext-webview failed with code ${code ?? "unknown"}`));
     });
   });
+}
+
+function localWebviewArtifactName(): string | undefined {
+  if (process.platform === "win32") {
+    return "opentray_ext_webview.dll";
+  }
+  if (process.platform === "darwin") {
+    return "libopentray_ext_webview.dylib";
+  }
+  return undefined;
 }
 
 async function prepareLocalWindowsAppRuntimeEnvironment(): Promise<void> {

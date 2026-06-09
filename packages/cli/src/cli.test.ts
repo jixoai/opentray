@@ -30,44 +30,9 @@ describe("opentray CLI", () => {
     });
   });
 
-  it("parses the npm-installable daemon tray smoke command", () => {
+  it("keeps visual smoke outside the public CLI command surface", () => {
     expect(parseCliCommand(["smoke", "daemon-tray"])).toEqual({
-      type: "smoke",
-      name: "daemon-tray",
-    });
-  });
-
-  it("parses the npm-installable daemon lynx smoke command", () => {
-    expect(parseCliCommand(["smoke", "daemon-lynx"])).toEqual({
-      type: "smoke",
-      name: "daemon-lynx",
-    });
-    expect(
-      parseCliCommand([
-        "smoke",
-        "daemon-lynx",
-        "--bundle",
-        "./dist/main.lynx.bundle",
-      ])
-    ).toEqual({
-      type: "smoke",
-      name: "daemon-lynx",
-      bundlePath: "./dist/main.lynx.bundle",
-    });
-    expect(
-      parseCliCommand([
-        "smoke",
-        "daemon-lynx",
-        "--bundle",
-        "./dist/main.lynx.bundle",
-        "--features",
-        "*,!nativeScreenApi",
-      ])
-    ).toEqual({
-      type: "smoke",
-      name: "daemon-lynx",
-      bundlePath: "./dist/main.lynx.bundle",
-      featureExpression: "*,!nativeScreenApi",
+      type: "help",
     });
   });
 

@@ -88,7 +88,7 @@ describe("Feature: npm package bootstrap release law", () => {
   });
 
   test("Scenario: Given a scoped package name When no dir is provided Then workspace path is derived", () => {
-    expect(defaultPackageDir("@opentray/ext-webview-linux-x64")).toBe("packages/ext-webview-linux-x64");
+    expect(defaultPackageDir("@opentray/ext-webview-windows-x64")).toBe("packages/ext-webview-windows-x64");
     expect(defaultPackageDir("opentray")).toBe("packages/opentray");
   });
 });

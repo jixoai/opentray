@@ -203,7 +203,7 @@ When testing primary behavior from source, stale staged daemons can hide native 
 ```bash
 cargo build -p opentray-bin
 OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- daemon restart
-OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- smoke daemon-tray
+OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
 ```
 
 For the pure macOS manual path, the demo tray should declare exactly one menu item:

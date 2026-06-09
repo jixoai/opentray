@@ -23,6 +23,7 @@ After the split, the proof surface became correct:
 - `opentray` shrank sharply.
 - `libopentray_ext_webview.dylib` grew to carry the runtime it actually owns.
 - `otool -L` showed `WebKit.framework` only on the dylib, not on `opentray`.
+- Linux was later removed from the official WebView package topology. OpenTray core still supports Linux, but `@opentray/ext-webview` only publishes native runtime atoms for macOS and Windows until a visible Linux runtime is real.
 
 ## Reusable Lesson
 
@@ -31,4 +32,5 @@ If an extension package is supposed to be an independent native atom, then:
 - the facade should stay typed and thin,
 - the daemon should stay generic,
 - the native runtime should move physically into the extension artifact,
+- the extension should publish only platform atoms with real supported runtime behavior,
 - the proof should be visible in file size and linkage, not only in source code organization.

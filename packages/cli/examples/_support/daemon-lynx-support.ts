@@ -2,8 +2,8 @@ import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createClient } from "../client";
-import { connectLocalBroker } from "../local-broker";
+import { createClient } from "../../src/client";
+import { connectLocalBroker } from "../../src/local-broker";
 
 const menuLabels = new Map<number, string>([
   [1, "Show Window"],

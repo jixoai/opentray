@@ -1,12 +1,12 @@
 ## Lynx Review Bundle
 
-This directory contains the package-owned Lynx review bundle used by the public CLI smoke:
+This directory contains the workspace Lynx review bundle used by contributor visual acceptance:
 
 ```bash
-opentray smoke daemon-lynx
+pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The goal is post-publish human verification. A fresh npm install must be able to open a real Lynx window without depending on a workspace checkout or `research/` paths.
+The goal is human verification without depending on `research/` paths. Public `opentray` CLI commands stay limited to daemon lifecycle and health; smoke orchestration belongs in skills and workspace examples.
 
 TODO:
 

@@ -8,7 +8,7 @@ import {
 } from "./artifacts";
 
 describe("Feature: native binary artifact topology", () => {
-  test("Scenario: Given first-stage platforms When targets are enumerated Then daemon and webview packages map one-to-one", () => {
+  test("Scenario: Given first-stage platforms When targets are enumerated Then daemon packages cover Linux while WebView stays macOS/Windows only", () => {
     expect(nativeTargets).toHaveLength(6);
     expect(nativeTargets.map((target) => target.daemonPackageName)).toEqual([
       "@opentray/darwin-arm64",
@@ -18,11 +18,9 @@ describe("Feature: native binary artifact topology", () => {
       "@opentray/windows-arm64",
       "@opentray/windows-x64",
     ]);
-    expect(nativeTargets.map((target) => target.webviewPackageName)).toEqual([
+    expect(nativeTargets.map((target) => target.webviewPackageName).filter(Boolean)).toEqual([
       "@opentray/ext-webview-darwin-arm64",
       "@opentray/ext-webview-darwin-x64",
-      "@opentray/ext-webview-linux-arm64",
-      "@opentray/ext-webview-linux-x64",
       "@opentray/ext-webview-windows-arm64",
       "@opentray/ext-webview-windows-x64",
     ]);
@@ -49,9 +47,7 @@ describe("Feature: native binary artifact topology", () => {
     expect(darwin.lynxRuntimeArtifact).toBe(
       "packages/ext-lynx-darwin-arm64/runtime/OpenTrayLynxRuntime.app.zip"
     );
-    expect(linux.webviewArtifact).toBe(
-      "packages/ext-webview-linux-x64/lib/libopentray_ext_webview.so"
-    );
+    expect(linux.webviewArtifact).toBeUndefined();
     expect(linux.lynxArtifact).toBeUndefined();
     expect(windows.daemonArtifact).toBe(
       "packages/windows-x64/bin/opentray.exe"
@@ -80,6 +76,14 @@ describe("Feature: native binary artifact topology", () => {
       "packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll"
     );
     expect(target.lynxArtifact).toBeUndefined();
+  });
+
+  test("Scenario: Given a Linux target When WebView staging is requested Then the unsupported package boundary is explicit", () => {
+    const target = resolveNativePackageTarget("linux", "x64");
+
+    expect(() => resolveStageDestination(target, "webview")).toThrow(
+      "target linux-x64 does not publish a webview native extension"
+    );
   });
 
   test("Scenario: Given a staged artifact kind When the destination is resolved Then the package-owned path stays authoritative", () => {

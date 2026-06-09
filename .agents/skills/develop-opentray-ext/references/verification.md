@@ -36,10 +36,12 @@ If the split is correct, main-binary linkage should lose the extension runtime d
 
 ## Human-Visible Gates
 
-If the extension changes visible behavior, run the real smoke path, not only protocol tests:
+If the extension changes visible behavior, run a real source-tree visual acceptance path, not only protocol tests:
 
 ```bash
-pnpm --filter opentray cli -- smoke daemon-tray
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray example:webview-control
+pnpm --filter opentray example:tray-panel
 ```
 
 Use `OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` or an equivalent extension-specific smoke path when the example supports it.
@@ -47,7 +49,7 @@ Use `OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` or an equivalent extension-specific smoke
 For Lynx host-window work, the human-visible path is:
 
 ```bash
-pnpm --filter opentray cli -- smoke daemon-lynx
+pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
 When local Xcode is unavailable, split verification cleanly:

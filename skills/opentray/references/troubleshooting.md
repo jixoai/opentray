@@ -5,12 +5,12 @@ Use this reference when the user can install OpenTray but something local is mis
 ## Health Says Daemon Is Absent
 
 - `opentray daemon health` reporting absence before first use is normal.
-- `opentray smoke daemon-tray` or other real client usage should auto-start the daemon.
+- Real SDK/example usage should auto-start the daemon.
 
 ## WebView Window Does Not Appear
 
 - Confirm the user installed both `opentray` and `@opentray/ext-webview`.
-- Use `opentray smoke daemon-tray` or the workspace smoke path to verify extension loading.
+- Use the visual acceptance recipe or workspace examples to verify extension loading.
 - Capability gaps should fail explicitly; do not describe an invisible or fake window as success.
 
 ## Icon Looks Missing

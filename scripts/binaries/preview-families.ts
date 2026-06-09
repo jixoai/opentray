@@ -7,6 +7,7 @@ import {
   materializeNativeBuildExecutions,
   nativeBuildTargetNames,
   parseNativeBuildTargetName,
+  resolveNativeBuildComponent,
   resolveNativeBuildTarget,
 } from "./native-build-graph";
 
@@ -56,7 +57,7 @@ const previewFamilies: Record<PreviewBuildFamily, PreviewFamilyConfig> = {
     family: "ext-webview-native",
     components: ["daemon", "webview"],
     defaultTargets: ["darwin-arm64"],
-    allowedTargets: nativeBuildTargetNames,
+    allowedTargets: resolveNativeBuildComponent("webview").allowedTargets,
     inferredPackagePrefixes: ["@opentray/ext-webview-"],
     inferredPackages: ["@opentray/ext-webview"],
   },

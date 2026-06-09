@@ -10,6 +10,12 @@ pnpm add opentray
 
 `opentray` resolves the current platform daemon package through optional dependencies. The user installs the top-level package; they do not import platform binary packages directly.
 
+For agent-assisted usage, install the consumer-facing OpenTray skill:
+
+```bash
+npx skills add jixiao/opentray --skill opentray
+```
+
 ## Protocol-Line Installs
 
 `latest` means newest published package version. It is convenient, but it is not a compatibility contract across `opentray`, official extensions, and platform binary atoms.
@@ -61,12 +67,6 @@ pnpm --filter opentray example:basic
 
 This is still useful for learning the request/response flow, but the public consumer path should start from top-level `opentray` exports.
 
-## Real Native Smoke
+## Real Native Acceptance
 
-For a real tray created through the public SDK and local broker:
-
-```bash
-opentray smoke daemon-tray
-```
-
-This is the consumer-facing smoke path.
+For a real tray created through the public SDK and local broker, use the visual acceptance recipe in this skill. The public `opentray` CLI exposes daemon lifecycle and health only; smoke orchestration is a workflow, not a CLI subcommand.

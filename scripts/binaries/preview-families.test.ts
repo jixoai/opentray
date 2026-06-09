@@ -40,4 +40,10 @@ describe("Feature: preview build family graph", () => {
       "preview build family ext-lynx-runtime does not support target linux-x64",
     );
   });
+
+  test("Scenario: Given unsupported target for WebView native When preview targets are resolved Then Linux is rejected", () => {
+    expect(() => resolvePreviewTargetsForFamilies(["ext-webview-native"], ["linux-x64"])).toThrow(
+      "preview build family ext-webview-native does not support target linux-x64",
+    );
+  });
 });

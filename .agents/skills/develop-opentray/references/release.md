@@ -46,7 +46,7 @@ When the user wants `npm i opentray@alpha`, treat that as a real release path, n
 - Keep stable `main` releases on the normal path.
 - Published docs and skills must say what is actually alpha versus stable.
 
-If the current branch only proves macOS visually while Windows/Linux still expose package topology or typed unsupported runtime paths, the alpha channel is the more honest public surface.
+If the current branch only proves part of the declared stable platform set visually while another declared stable platform still exposes package topology or typed unsupported runtime paths, the alpha channel is the more honest public surface.
 
 ## Protocol-Line Dist-Tag Rule
 

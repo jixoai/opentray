@@ -21,11 +21,17 @@ describe("Feature: shared native build graph", () => {
   test("Scenario: Given WebView and daemon atoms When executions are materialized Then cargo packages stay independent", () => {
     const targets = resolveReleaseTargetsForComponents(["daemon", "webview"]);
     const [darwinArm64] = materializeNativeBuildExecutions(["daemon", "webview"], targets);
+    const linuxX64 = materializeNativeBuildExecutions(["daemon", "webview"], targets).find(
+      (execution) => execution.target === "linux-x64",
+    );
 
     expect(targets).toContain("darwin-arm64");
+    expect(targets).toContain("linux-x64");
     expect(darwinArm64.components).toEqual(["daemon", "webview"]);
     expect(darwinArm64.cargoPackages).toEqual(["opentray-bin", "opentray-ext-webview"]);
     expect(darwinArm64.buildsLynxRuntime).toBe(false);
+    expect(linuxX64?.components).toEqual(["daemon"]);
+    expect(linuxX64?.cargoPackages).toEqual(["opentray-bin"]);
   });
 
   test("Scenario: Given WebView-only executions When stage plan is derived Then unrelated Lynx package dirs stay absent", () => {

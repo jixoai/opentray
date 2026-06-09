@@ -15,42 +15,17 @@ import {
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
 import { connectLocalBroker } from "./local-broker";
-import { runDaemonLynxSmoke } from "./smoke/daemon-lynx";
-import { runDaemonTraySmoke } from "./smoke/daemon-tray";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 const cliModulePath = fileURLToPath(import.meta.url);
 
 type CliCommand =
   | { type: "daemon"; action: "start" | "stop" | "restart" | "health" }
-  | { type: "smoke"; name: "daemon-tray" }
-  | {
-      type: "smoke";
-      name: "daemon-lynx";
-      bundlePath?: string;
-      featureExpression?: string;
-    }
   | { type: "help" };
 
 export const parseCliCommand = (argv: string[]): CliCommand => {
-  const [group, action, ...rest] = argv;
+  const [group, action] = argv;
   if (group !== "daemon") {
-    if (group === "smoke" && action === "daemon-tray") {
-      return { type: "smoke", name: "daemon-tray" };
-    }
-    if (group === "smoke" && action === "daemon-lynx") {
-      const smokeOptions = parseSmokeOptions(rest);
-      return {
-        type: "smoke",
-        name: "daemon-lynx",
-        ...(smokeOptions.bundlePath
-          ? { bundlePath: smokeOptions.bundlePath }
-          : {}),
-        ...(smokeOptions.featureExpression
-          ? { featureExpression: smokeOptions.featureExpression }
-          : {}),
-      };
-    }
     return { type: "help" };
   }
   if (
@@ -78,24 +53,6 @@ export const runCli = async (argv: string[]): Promise<number> => {
   if (command.type === "help") {
     printHelp();
     return 1;
-  }
-
-  if (command.type === "smoke") {
-    if (command.name === "daemon-tray") {
-      await runDaemonTraySmoke();
-    } else {
-      await runDaemonLynxSmoke(
-        {
-          ...(command.bundlePath === undefined
-            ? {}
-            : { bundlePath: command.bundlePath }),
-          ...(command.featureExpression === undefined
-            ? {}
-            : { featureExpression: command.featureExpression }),
-        }
-      );
-    }
-    return 0;
   }
 
   const driver = createNodeDaemonDriver(cliModulePath);
@@ -162,11 +119,6 @@ export const runCli = async (argv: string[]): Promise<number> => {
 
 const printHelp = (): void => {
   console.error("Usage: opentray daemon <start|stop|restart|health>");
-  console.error("       opentray smoke daemon-tray");
-  console.error(
-    "       opentray smoke daemon-lynx [--bundle <path-to-main.lynx.bundle>] [--features <baseline|full|*,!feature,...>]"
-  );
-  console.error("       default Lynx smoke uses the packaged review bundle");
 };
 
 export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
@@ -200,27 +152,6 @@ export const isCliEntrypoint = (
     return argvEntryPath === modulePath;
   }
 };
-
-function parseSmokeOptions(argv: string[]): {
-  bundlePath?: string;
-  featureExpression?: string;
-} {
-  let bundlePath: string | undefined;
-  let featureExpression: string | undefined;
-  for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === "--bundle") {
-      bundlePath = argv[index + 1];
-      continue;
-    }
-    if (argv[index] === "--features") {
-      featureExpression = argv[index + 1];
-    }
-  }
-  return {
-    ...(bundlePath === undefined ? {} : { bundlePath }),
-    ...(featureExpression === undefined ? {} : { featureExpression }),
-  };
-}
 
 if (isCliEntrypoint(process.argv[1], cliModulePath)) {
   runCli(process.argv.slice(2)).then((code) => {

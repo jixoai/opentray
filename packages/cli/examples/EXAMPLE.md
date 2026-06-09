@@ -20,8 +20,8 @@ Use these examples to verify the delivered window contract in this branch:
 Current maturity truth for these examples:
 
 - macOS source-tree smoke is the stable human-visible proof path
-- Windows source-tree smoke exercises the alpha WebView2-backed visible runtime and common bridge/window controls
-- Linux platform packages remain alpha runtime territory until a visible native runtime lands
+- Windows source-tree smoke exercises the stable WebView2-backed visible runtime and common bridge/window controls
+- Linux remains a core daemon/platform target, but `@opentray/ext-webview` does not publish Linux native WebView packages
 - typed unsupported errors are acceptable evidence for not-yet-landed platform runtimes
 - tray bounds with no injected anchor should show `kind: "unavailable"` rather than pretending the capability is absent everywhere
 
@@ -78,7 +78,7 @@ Expected checks:
 
 Overlay is a show-time capability gate, not a runtime style. The control demo enables it by default because this is the overlay acceptance surface. You can force it on with `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=1` or force it off with `--no-overlay` / `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=0`.
 
-On Windows alpha, macOS corner controls remain unsupported, while `style.platform.windows.cornerPreference` is the native DWM corner family. Windows DWM material choice now lives in `style.background`.
+On Windows, macOS corner controls remain unsupported, while `style.platform.windows.cornerPreference` is the native DWM corner family. Windows DWM material choice lives in `style.background`.
 
 ## Example 2: Tray Panel
 
@@ -90,7 +90,7 @@ pnpm --filter opentray example:tray-panel
 
 Expected checks:
 
-1. The example auto-discovers the local `libopentray_ext_webview` / `.dll` / `.so` when `OPENTRAY_EXT_PATH` is unset.
+1. On macOS and Windows, the example auto-discovers the local `libopentray_ext_webview` / `.dll` when `OPENTRAY_EXT_PATH` is unset.
 2. The tray exposes exactly one `primaryEvent` item; on macOS, clicking the tray icon direct-triggers the panel instead of opening a native menu.
 3. The panel uses:
    - `frameless: true`

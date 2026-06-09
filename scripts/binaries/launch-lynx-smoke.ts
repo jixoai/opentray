@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   await runAllowFailure(["pnpm", "--filter", "opentray", "cli", "--", "daemon", "stop"], {
     cwd: workspaceRoot,
   });
-  await runAllowFailure(["pkill", "-f", "smoke daemon-lynx"]);
+  await runAllowFailure(["pkill", "-f", "example:daemon-lynx"]);
   await runAllowFailure(["pkill", "-f", "OpenTrayLynxRuntime"]);
   await runAllowFailure(["pkill", "-f", "LynxExplorer"]);
 
@@ -175,9 +175,9 @@ async function main(): Promise<void> {
   const smokeCommand = [
     "bash",
     "-lc",
-    `pnpm --filter opentray cli -- smoke daemon-lynx --bundle "${escapeDoubleQuoted(
+    `pnpm --filter opentray example:daemon-lynx -- --bundle "${escapeDoubleQuoted(
       realpathSync(bundlePath),
-    )}" 2>&1 | tee "${escapeDoubleQuoted(`${logPath}.smoke`)}"`,
+    )}" --features "${escapeDoubleQuoted(featureExpression)}" 2>&1 | tee "${escapeDoubleQuoted(`${logPath}.smoke`)}"`,
   ];
   await run(smokeCommand, { cwd: workspaceRoot, env: smokeEnv });
 }

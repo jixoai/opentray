@@ -47,13 +47,11 @@ jobs:
             job_timeout_minutes: 90
             lynx_timeout_seconds: 4500
             daemon_artifact: opentray
-            webview_artifact: libopentray_ext_webview.so
           - target: linux-x64
             runner: ubuntu-24.04
             job_timeout_minutes: 90
             lynx_timeout_seconds: 4500
             daemon_artifact: opentray
-            webview_artifact: libopentray_ext_webview.so
           - target: windows-arm64
             runner: windows-11-arm
             job_timeout_minutes: 90
@@ -115,14 +113,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          packages=(-p opentray-bin -p opentray-ext-webview)
+          packages=(-p opentray-bin)
+          if [[ "${{ matrix.target }}" != linux-* ]]; then
+            packages+=(-p opentray-ext-webview)
+          fi
           if [[ "${{ matrix.target }}" == darwin-* ]]; then
             packages+=(-p opentray-ext-lynx)
           fi
           cargo build --release "${packages[@]}"
           mkdir -p native-artifacts
           cp "target/release/${{ matrix.daemon_artifact }}" native-artifacts/
-          cp "target/release/${{ matrix.webview_artifact }}" native-artifacts/
+          if [[ "${{ matrix.target }}" != linux-* ]]; then
+            cp "target/release/${{ matrix.webview_artifact }}" native-artifacts/
+          fi
           if [[ "${{ matrix.target }}" == darwin-* ]]; then
             cp "target/release/${{ matrix.lynx_artifact }}" native-artifacts/
           fi
@@ -212,7 +215,6 @@ jobs:
               webview_artifact="libopentray_ext_webview.dylib"
             else
               daemon_artifact="opentray"
-              webview_artifact="libopentray_ext_webview.so"
             fi
 
             bun run scripts/binaries/stage-local.ts \
@@ -220,11 +222,13 @@ jobs:
               --source "native-artifacts/native-${target}/${daemon_artifact}" \
               --package-os "$package_os" \
               --arch "$arch"
-            bun run scripts/binaries/stage-local.ts \
-              --kind webview \
-              --source "native-artifacts/native-${target}/${webview_artifact}" \
-              --package-os "$package_os" \
-              --arch "$arch"
+            if [ "$package_os" != "linux" ]; then
+              bun run scripts/binaries/stage-local.ts \
+                --kind webview \
+                --source "native-artifacts/native-${target}/${webview_artifact}" \
+                --package-os "$package_os" \
+                --arch "$arch"
+            fi
             if [ "$package_os" = "darwin" ]; then
               bun run scripts/binaries/stage-local.ts \
                 --kind lynx \
@@ -246,7 +250,7 @@ jobs:
           for package_dir in \
             packages/cli \
             packages/darwin-arm64 packages/linux-arm64 packages/linux-x64 packages/windows-arm64 packages/windows-x64 \
-            packages/ext-webview-darwin-arm64 packages/ext-webview-linux-arm64 packages/ext-webview-linux-x64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64 \
+            packages/ext-webview-darwin-arm64 packages/ext-webview-windows-arm64 packages/ext-webview-windows-x64 \
             packages/ext-lynx packages/ext-lynx-darwin-arm64
           do
             npm pack --dry-run --json "./${package_dir}" >/dev/null

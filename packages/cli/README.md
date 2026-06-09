@@ -110,21 +110,23 @@ OpenTray uses release channels and capability maturity together. Do not read a p
 Current WebView truth:
 
 - macOS is the current `stable` human-visible acceptance path
-- Windows is `alpha` for the first visible WebView2-backed runtime, common bridge/window controls, background material/corner preferences, and native icon projection
-- Linux is currently `alpha` for the WebView package/contract surface; visible runtime behavior remains explicitly unsupported
+- Windows is the current `stable` WebView2-backed human-visible acceptance path for common bridge/window controls, background material/corner preferences, and native icon projection
+- Linux remains supported by the OpenTray core daemon/packages, but `@opentray/ext-webview` does not publish Linux native WebView packages
 - some requests are `unsupported by design`, such as asking the macOS runtime to apply a Windows-only style family
 - some results are `unavailable by context`, such as tray-bounds projection when the current session has no authoritative tray anchor
 
 When run from the repo worktree, the example automatically discovers `target/debug` or `target/release` `libopentray_ext_webview` and wires it through `OPENTRAY_EXT_PATH` before starting the daemon. The WebView mount still exercises the real generic extension loader, but example users do not author a manual `load-ext` request.
 
-After installing from npm, use the published CLI smoke path instead of workspace scripts:
+The published CLI is intentionally small and only owns daemon lifecycle and health:
 
 ```bash
-opentray smoke daemon-tray
-opentray smoke daemon-lynx
+opentray daemon health
+opentray daemon start
+opentray daemon stop
+opentray daemon restart
 ```
 
-`opentray smoke daemon-lynx` now uses the package-owned review bundle by default so a fresh npm install can perform the final visual audit without a workspace checkout. Keep `--bundle <path-to-main.lynx.bundle>` only when you want to override that official audit asset with a custom bundle.
+Visual smoke is a real runtime activity, not a daemon CLI subcommand. It may auto-start or reuse the same-version daemon, write runtime coordination files under `$OPENTRAY_HOME/.opentray/<package-version>/runtime` or the user's home directory when `OPENTRAY_HOME` is unset, create a visible tray item, load native extension packages, and open real WebView/Lynx windows. Use the `opentray` skill or source-tree examples to orchestrate those checks, and run `opentray daemon stop` if you want immediate daemon cleanup or if a smoke process was interrupted.
 
 This example starts or reuses the same-version daemon automatically, creates a real tray through the public SDK, and prints broker-routed menu events. Use manual lifecycle commands only for operator/debug control:
 
@@ -142,7 +144,7 @@ The host side of that example can call `await tray.getBounds()` to read the curr
 
 The opened WebView also enables the injected page bridge so the rendered page can call `navigator.window` / `navigator.opentrayWindow` and, for the demo only, opt into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides. Use the in-page buttons to verify `getCapabilities`, `getStyle`, `setStyle({ frameless })`, move, resize, close, and tray-bounds behavior visually instead of relying only on terminal logs.
 
-The Lynx smoke path uses the same generic extension loader but launches a real `OpenTrayLynxRuntime.app.zip` sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` in a fixed host shell, sets an initial title and icon, applies an explicit startup feature expression, and exposes `Show Window`, `Hide Window`, and `Quit Smoke` through tray-routed events. Inside the Lynx window, use the rendered controls to verify `getCapabilities`, `getStyle`, `getTitle`, `setTitle`, `getIcon`, `setIcon`, `navigator.screen.getScreenDetails()`, `resizeTo`, `moveTo`, frameless toggling, `window.resizeTo()`, `window.getScreenDetails()`, and close behavior visually. On macOS, the runtime Dock icon should no longer appear blank.
+The Lynx example path uses the same generic extension loader but launches a real `OpenTrayLynxRuntime.app.zip` sidecar from `@opentray/ext-lynx-darwin-*`. It starts the requested `.lynx.bundle` in a fixed host shell, sets an initial title and icon, applies an explicit startup feature expression, and exposes `Show Window`, `Hide Window`, and `Quit Smoke` through tray-routed events. Inside the Lynx window, use the rendered controls to verify `getCapabilities`, `getStyle`, `getTitle`, `setTitle`, `getIcon`, `setIcon`, `navigator.screen.getScreenDetails()`, `resizeTo`, `moveTo`, frameless toggling, `window.resizeTo()`, `window.getScreenDetails()`, and close behavior visually. On macOS, the runtime Dock icon should no longer appear blank.
 
 For Lynx, `frameless` currently means borderless only. It does not imply a full-window drag region, because that would steal clicks from the page content. When isolating host-feature regressions, `--features "*,!frameless"` is the fastest way to keep the bridge on while removing the borderless shell from the test.
 
@@ -154,9 +156,9 @@ pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle packages/cli/asset
 pnpm run smoke:lynx -- --run <github-actions-run-id> --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "*,!nativeScreenApi"
 ```
 
-The package-owned review bundle is the full human acceptance surface. The separate `input-probe.lynx.bundle` is only a low-level diagnostic asset for isolating raw click/scroll/input delivery. The empty feature set is the baseline carrier check. Use it to validate the physical window baseline: click, scroll, input, red/yellow/green controls, and resize/move. Only after that baseline is healthy should you validate explicit startup feature sets on top of the same carrier.
+The workspace review bundle is the full human acceptance surface. The separate `input-probe.lynx.bundle` is only a low-level diagnostic asset for isolating raw click/scroll/input delivery. The empty feature set is the baseline carrier check. Use it to validate the physical window baseline: click, scroll, input, red/yellow/green controls, and resize/move. Only after that baseline is healthy should you validate explicit startup feature sets on top of the same carrier.
 
-First-stage platform packages are published for macOS, Linux, and Windows. macOS is the stable WebView human-visual acceptance path. Windows now has an alpha WebView2-backed visible runtime for common window and bridge commands plus DWM-backed Mica/Acrylic/Tabbed style projection. Linux WebView artifacts are present for package topology validation, but unsupported runtime capability must fail explicitly rather than pretending a visible UI exists. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
+First-stage core daemon platform packages are published for macOS, Linux, and Windows. macOS and Windows are stable WebView human-visual acceptance paths for common window and bridge commands plus native material projection. Linux is not an official `@opentray/ext-webview` runtime target. Lynx is intentionally macOS-first for now and should fail honestly on other platforms instead of pretending the runtime exists.
 
 If you are validating the current prerelease branch before stable publication, install from the alpha channel and treat that as alpha evidence rather than stable evidence:
 
@@ -164,7 +166,7 @@ If you are validating the current prerelease branch before stable publication, i
 npm i opentray@alpha
 ```
 
-For local native smoke before npm publish, stage the current platform artifacts first:
+For local native smoke before npm publish, stage the current platform artifacts first and run source-tree examples:
 
 ```bash
 cargo build -p opentray-bin -p opentray-ext-webview -p opentray-ext-lynx
@@ -173,8 +175,8 @@ bun run scripts/binaries/stage-local.ts --kind webview --source target/debug/lib
 bun run scripts/binaries/stage-local.ts --kind lynx --source target/debug/libopentray_ext_lynx.dylib
 bash scripts/release/build-lynx-runtime.sh /tmp/OpenTrayLynxRuntime.app.zip
 bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/OpenTrayLynxRuntime.app.zip
-OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
-pnpm --filter opentray cli -- smoke daemon-lynx
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
 During source-level daemon work, restart the daemon with the freshly built broker binary before testing tray behavior. Otherwise the CLI may reuse the already staged same-version daemon:
@@ -182,7 +184,7 @@ During source-level daemon work, restart the daemon with the freshly built broke
 ```bash
 cargo build -p opentray-bin
 OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- daemon restart
-OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- smoke daemon-tray
+OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
 ```
 
 The daemon exits automatically after 30 seconds with no connected clients. Set `OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=0` to keep it alive during debugging, or provide another millisecond value for a custom idle release window.

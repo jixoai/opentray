@@ -15,7 +15,7 @@ Use this skill when the work is extension-centric rather than repo-wide. The cor
 2. Keep runtime ownership inside the extension artifact, not in `opentray-core` or the broker binary.
 3. For user-facing WebView window work, read scenario cards first and ask effect-oriented questions before designing API shape.
 4. Wire platform distribution through package atoms, local staging, and CI staging.
-5. Prove the split with tests, smoke commands, and native size/linkage evidence.
+5. Prove the split with tests, source-tree visual acceptance, and native size/linkage evidence.
 
 ## Reference Map
 

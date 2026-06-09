@@ -34,11 +34,10 @@ This repository uses `pnpm` workspaces and Lerna metadata.
 
 OpenTray now has two official native extension families with different maturity levels:
 
-- macOS is the first human-visual acceptance path: daemon transport, tray menu, dynamic WebView loading, postMessage, and evaluate are expected to work.
-- macOS is also the first Lynx acceptance path: `@opentray/ext-lynx-darwin-*` ships both `libopentray_ext_lynx.dylib` and `OpenTrayLynxRuntime.app.zip`, and `opentray smoke daemon-lynx` is the public visual proof.
-- Linux packages build and publish first-stage artifacts, but the current broker backend is capability-limited and the WebView native runtime may report unsupported instead of faking a window.
-- Windows packages build and publish first-stage artifacts, but broker transport is not yet a completed runtime acceptance path.
+- macOS and Windows are stable human-visual WebView acceptance paths for daemon transport, tray menu, dynamic WebView loading, common bridge/window controls, native material projection, postMessage, and evaluate.
+- Linux core daemon packages remain supported, but `@opentray/ext-webview` does not publish Linux native WebView packages and must fail honestly instead of faking a visible runtime.
 - Lynx is intentionally macOS-first. Linux and Windows Lynx packages are not published yet, and the platform must fail honestly rather than pretending the runtime exists.
+- The published `opentray` CLI is a daemon lifecycle tool. Visual smoke orchestration belongs in `skills/opentray` and source-tree examples, not in the public CLI command surface.
 
 ## Examples
 
@@ -115,20 +114,22 @@ Run the daemon-path tray example when you want to see the public TypeScript SDK 
 pnpm --filter opentray example:daemon-tray
 ```
 
-After installing published packages from npm, use the package-owned smoke command instead of workspace scripts:
+After installing published packages from npm, the public CLI remains focused on daemon lifecycle and health:
 
 ```bash
-opentray smoke daemon-tray
-opentray smoke daemon-lynx
+opentray daemon health
+opentray daemon start
+opentray daemon stop
+opentray daemon restart
 ```
 
-The published Lynx smoke uses a package-owned review bundle by default so a fresh npm install can do the final human audit without any workspace path. Use `--bundle <path-to-main.lynx.bundle>` only when you want to override that official review asset.
+For real visual acceptance, install the OpenTray agent skill and let it run a smoke recipe, or use the workspace examples below from a source checkout. Smoke recipes create real tray/window UI and should not be hidden behind a supposedly pure package CLI command.
 
-The daemon tray menu includes standard item/check/radio/submenu entries, a `Quit Demo` item, and a `WebView Commands` submenu. On macOS, `Show HTML` loads `@opentray/ext-webview-darwin-*` as a dynamic library and opens a real native WebView window owned by that library. The page now exposes the extension-owned bridge through `navigator.window` / `navigator.opentrayWindow`, and the demo opts into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides so the in-page buttons can visually validate move, resize, close, and `setStyle({ frameless })`. The other WebView entries exercise navigate, postMessage, evaluate, and hide through the `@opentray/ext-webview` facade.
+The daemon tray example declares one primary `Open WebView` item. On platforms with a primary tray gesture, that item can open the WebView directly while still routing through the normal `menuClick` event. The page exposes the extension-owned bridge through `navigator.window` / `navigator.opentrayWindow`, and the demo opts into `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides so the in-page buttons can visually validate move, resize, close, style, and tray-bounds behavior.
 
-The Lynx smoke path uses the same generic extension loader without importing a Lynx parser into `opentray-core`. It creates a tray, loads `@opentray/ext-lynx`, immediately launches the requested `.lynx.bundle` in fit-content mode, enables `navigator.window`, and exposes `Show Fit Window`, `Show Fixed Window`, `Hide Window`, and `Quit Smoke` through broker-routed tray events. The Lynx page itself contains visual buttons for `getCapabilities`, `getStyle`, `resizeTo`, `moveTo`, frameless toggling, `window.resizeTo()`, and close verification.
+The Lynx example path uses the same generic extension loader without importing a Lynx parser into `opentray-core`. It creates a tray, loads `@opentray/ext-lynx`, immediately launches the requested `.lynx.bundle`, enables selected window features, and exposes `Show Window`, `Hide Window`, and `Quit Smoke` through broker-routed tray events. The Lynx page itself contains visual buttons for `getCapabilities`, `getStyle`, `resizeTo`, `moveTo`, frameless toggling, `window.resizeTo()`, and close verification.
 
-For local workspace smoke before publishing, stage current native artifacts and then run the same public command:
+For local workspace smoke before publishing, stage current native artifacts and then run the source examples:
 
 ```bash
 cargo build -p opentray-bin -p opentray-ext-webview -p opentray-ext-lynx
@@ -138,11 +139,11 @@ bun run scripts/binaries/stage-local.ts --kind lynx --source target/debug/libope
 bash scripts/release/build-lynx-runtime.sh /tmp/OpenTrayLynxRuntime.app.zip
 bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/OpenTrayLynxRuntime.app.zip
 pnpm --filter opentray cli -- daemon stop
-OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray cli -- smoke daemon-tray
-pnpm --filter opentray cli -- smoke daemon-lynx
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-`OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` runs show, postMessage, evaluate, navigate, and hide without menu clicks. `OPENTRAY_EXT_PATH` can point at an explicit extension directory for loader debugging, but the release path is package-adjacent discovery from the requested facade package, such as `@opentray/ext-webview` resolving to `@opentray/ext-webview-<os>-<arch>`.
+`OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` triggers the primary WebView show path without menu clicks. `OPENTRAY_EXT_PATH` can point at an explicit extension directory for loader debugging, but the release path is package-adjacent discovery from the requested facade package, such as `@opentray/ext-webview` resolving to `@opentray/ext-webview-<os>-<arch>`.
 
 The Lynx release path is similar, except the darwin platform package also carries `runtime/OpenTrayLynxRuntime.app.zip`. The extension dylib resolves that sidecar next to itself by default, and `OPENTRAY_LYNX_RUNTIME_ZIP=/absolute/path/to/OpenTrayLynxRuntime.app.zip` is available as a debugging override.
 
@@ -253,19 +254,18 @@ cd "$tmpdir"
 npm init -y
 pnpm add opentray @opentray/ext-webview
 pnpm exec opentray daemon health
-OPENTRAY_DAEMON_IDLE_TIMEOUT_MS=500 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm exec opentray smoke daemon-tray
+npx skills add jixiao/opentray --skill opentray
 ```
 
-The smoke path checks the package-owned daemon binary, same-version daemon auto-start/reuse, and the published WebView extension package instead of any workspace-local build output.
+Use the installed `opentray` skill to run a real visual acceptance recipe against the fresh project. That recipe should check the package-owned daemon binary, same-version daemon auto-start/reuse, and the published WebView extension package instead of any workspace-local build output.
 
-For published Lynx verification:
+For published Lynx verification, use the installed `opentray` skill or a source checkout with the workspace review bundle:
 
 ```bash
 pnpm add opentray @opentray/ext-lynx
-pnpm exec opentray smoke daemon-lynx
 ```
 
-That is the final review command for the published Lynx carrier path. If you want to inspect another bundle instead of the official review bundle shipped with `opentray`, append `--bundle ./main.lynx.bundle`.
+If you want to inspect another bundle, point the skill/workspace recipe at that bundle instead of `packages/cli/assets/lynx-review/main.lynx.bundle`.
 
 For GitHub-hosted native preflight before publish:
 
@@ -277,10 +277,16 @@ Changesets is configured to bump peer dependents only when their peer dependency
 
 ## Agent Skill
 
-The repository includes an OpenTray-specific skill for future agent work:
+Install the consumer-facing OpenTray skill into an agent's local skill registry:
+
+```bash
+npx skills add jixiao/opentray --skill opentray
+```
+
+The source for that package-user skill lives in:
 
 ```text
 skills/opentray/
 ```
 
-Use it when changing the kernel, backend atoms, extension host, official extension packages, release workflow, or human-visible examples. `SKILL.md` is only the navigation entry; extension-specific details live in separate reference articles.
+Use it when consuming OpenTray as a package: install the SDK, create spaces and trays, load official extensions, run visual acceptance recipes, and troubleshoot daemon/runtime behavior. Repo-contributor skills live under `.agents/skills/`; use those when changing the kernel, backend atoms, extension host, official extension packages, release workflow, or human-visible examples.

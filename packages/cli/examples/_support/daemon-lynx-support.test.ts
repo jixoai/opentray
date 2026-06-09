@@ -16,7 +16,7 @@ import {
   resolveBundledReviewBundlePath,
   resolveLynxBundlePath,
   resolveLynxHostFeatures,
-} from "./daemon-lynx";
+} from "./daemon-lynx-support";
 
 describe("daemon lynx smoke helpers", () => {
   afterEach(() => {

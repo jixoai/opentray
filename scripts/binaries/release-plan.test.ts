@@ -41,7 +41,7 @@ describe("Feature: selective native release planner", () => {
 
     expect(plan.enabled).toBe(true);
     expect(plan.components).toEqual(["webview"]);
-    expect(plan.jobs).toHaveLength(6);
+    expect(plan.jobs).toHaveLength(4);
     expect(plan.jobs.every((job) => job.componentsCsv === "webview")).toBe(true);
     const artifactKinds = plan.stageEntries.flatMap((entry) => entry.artifactKinds);
     expect(artifactKinds).not.toContain("lynx");
@@ -49,8 +49,6 @@ describe("Feature: selective native release planner", () => {
     expect(plan.validatePackageDirs).toEqual([
       "packages/ext-webview-darwin-arm64",
       "packages/ext-webview-darwin-x64",
-      "packages/ext-webview-linux-arm64",
-      "packages/ext-webview-linux-x64",
       "packages/ext-webview-windows-arm64",
       "packages/ext-webview-windows-x64",
     ]);

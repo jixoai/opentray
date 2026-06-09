@@ -138,6 +138,12 @@ const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig>
 };
 
 const allNativeBuildTargets = Object.keys(nativeBuildTargets) as NativeBuildTargetName[];
+const webviewNativeBuildTargets: readonly NativeBuildTargetName[] = [
+  "darwin-arm64",
+  "darwin-x64",
+  "windows-arm64",
+  "windows-x64",
+];
 const nativeBuildComponentOrder: readonly NativeBuildComponent[] = [
   "daemon",
   "webview",
@@ -157,8 +163,8 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
   },
   webview: {
     component: "webview",
-    allowedTargets: allNativeBuildTargets,
-    defaultReleaseTargets: allNativeBuildTargets,
+    allowedTargets: webviewNativeBuildTargets,
+    defaultReleaseTargets: webviewNativeBuildTargets,
     cargoPackages: ["opentray-ext-webview"],
     artifactKinds: ["webview"],
     inferredPackages: ["@opentray/ext-webview"],
@@ -374,10 +380,13 @@ export const releaseArtifactName = (
     case "daemon":
       return packageOs === "windows" ? "opentray.exe" : "opentray";
     case "webview":
+      if (packageOs === "linux") {
+        throw new Error("webview native artifacts are not published for linux targets");
+      }
       if (packageOs === "windows") {
         return "opentray_ext_webview.dll";
       }
-      return `libopentray_ext_webview.${packageOs === "darwin" ? "dylib" : "so"}`;
+      return "libopentray_ext_webview.dylib";
     case "lynx":
       return "libopentray_ext_lynx.dylib";
   }
@@ -401,6 +410,9 @@ const resolvePackageDirForComponent = (
     case "daemon":
       return target.daemonPackageDir;
     case "webview":
+      if (target.webviewPackageDir === undefined) {
+        throw new Error(`target ${packageOs}-${arch} does not publish webview package directories`);
+      }
       return target.webviewPackageDir;
     case "lynx":
     case "lynx-runtime":

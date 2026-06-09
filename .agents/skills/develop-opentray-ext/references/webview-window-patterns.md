@@ -31,8 +31,8 @@ Teach four truths explicitly when helping a user design against `@opentray/ext-w
 Current repo truth for window patterns:
 
 - macOS patterns in this file are the current `stable` visible reference path
-- Windows has an `alpha` visible WebView2 runtime for common lifecycle, bridge, window-control behavior, background material/corner preferences, and native icon projection
-- Linux remains `alpha` for package/contract shape while visible runtime behavior is still explicitly unsupported
+- Windows patterns in this file are the current `stable` WebView2 visible reference path for common lifecycle, bridge, window-control behavior, background material/corner preferences, and native icon projection
+- Linux is unsupported for `@opentray/ext-webview`; do not publish or depend on `@opentray/ext-webview-linux-*` packages until a visible native runtime is real
 - do not explain missing platform-specific runtime behavior as "almost stable"; call it alpha, typed unsupported, or unavailable by context
 - do not call tray-bounds `kind: "unavailable"` a platform unsupported error
 
@@ -75,9 +75,8 @@ Do not pre-build `navigator.opentrayWindow.macos26|win11|gtk.*` namespaces only 
 
 When a user asks for a cross-platform effect right now, ask which truth they want:
 
-- "stable now on macOS"
-- "alpha WebView2/common bridge on Windows"
-- "alpha contract only on Linux"
+- "stable now on macOS and Windows"
+- "unsupported by design on Linux"
 - "future substrate plan only"
 
 That keeps the conversation aligned with what the current runtime can actually prove.
@@ -459,7 +458,7 @@ Reference implementation in this repo: `pnpm --filter opentray example:tray-pane
 
 Use `pnpm --filter opentray example:webview-control` as the capability exerciser only. It starts as a normal opaque window and enables overlay probes by default because this is the manual acceptance surface for `windowControlsOverlay`; use `-- --no-overlay` only to test the disabled branch. Do not implement the page switch as a fake runtime style toggle: `windowControlsOverlay` is a show-time bridge gate, so page UI may show the current launch state but cannot truthfully enable the overlay object after bootstrap. For glass-window guidance, prefer `example:tray-panel`, because it keeps the page root transparent and avoids teaching CSS shell decoration as a substitute for native material.
 
-Repo-maintainer note: when this example is run from source, build `opentray` and `opentray-ext-webview` first. The example auto-discovers the local `target/debug|release` WebView dylib and injects it through `OPENTRAY_EXT_PATH`, so developers can stay on the real extension-loading path without manual staging during iteration.
+Repo-maintainer note: when this example is run from source on macOS or Windows, build `opentray` and `opentray-ext-webview` first. The example auto-discovers the local `target/debug|release` WebView dynamic library and injects it through `OPENTRAY_EXT_PATH`, so developers can stay on the real extension-loading path without manual staging during iteration.
 
 Why this example matters for AI guidance:
 

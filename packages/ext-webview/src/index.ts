@@ -361,7 +361,7 @@ export class WebviewExtensionLoadError extends Error {
 
   constructor(context: TrayExtensionContext, cause: unknown) {
     super(
-      `WebView extension "${context.name}" could not be loaded for mount "${context.mountId}". Install the matching @opentray/ext-webview platform package or provide a resolvable extension path.`,
+      `WebView extension "${context.name}" could not be loaded for mount "${context.mountId}". Official @opentray/ext-webview native packages are published for macOS and Windows; Linux is unsupported for this extension. Provide a resolvable extension path only when testing a custom native runtime.`,
     );
     this.name = "WebviewExtensionLoadError";
     this.extensionName = context.name;

@@ -139,12 +139,6 @@ importers:
       '@opentray/ext-webview-darwin-x64':
         specifier: workspace:*
         version: link:../ext-webview-darwin-x64
-      '@opentray/ext-webview-linux-arm64':
-        specifier: workspace:*
-        version: link:../ext-webview-linux-arm64
-      '@opentray/ext-webview-linux-x64':
-        specifier: workspace:*
-        version: link:../ext-webview-linux-x64
       '@opentray/ext-webview-windows-arm64':
         specifier: workspace:*
         version: link:../ext-webview-windows-arm64
@@ -159,18 +153,6 @@ importers:
         version: 0.1.0
 
   packages/ext-webview-darwin-x64:
-    dependencies:
-      opentray:
-        specifier: '>=0.1.0'
-        version: 0.1.0
-
-  packages/ext-webview-linux-arm64:
-    dependencies:
-      opentray:
-        specifier: '>=0.1.0'
-        version: 0.1.0
-
-  packages/ext-webview-linux-x64:
     dependencies:
       opentray:
         specifier: '>=0.1.0'
