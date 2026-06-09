@@ -653,6 +653,15 @@
         document.documentElement.style.setProperty("--titlebar-right", `${rightInset}px`);
         document.documentElement.style.setProperty("--titlebar-height", `${Math.max(rect.height, 38)}px`);
       };
+      const overlayGeometryDiagnostics = (rect) => ({
+        rect,
+        rightInset: Math.max(window.innerWidth - rect.x - rect.width, 0),
+        viewport: {
+          innerWidth: window.innerWidth,
+          outerWidth: window.outerWidth,
+          devicePixelRatio: window.devicePixelRatio,
+        },
+      });
       const updateOverlayGeometry = async () => {
         if (!bridge?.overlay) {
           text("overlay-status", bridge ? "overlay: disabled" : "overlay: unavailable");
@@ -668,7 +677,7 @@
           const rect = await bridge.overlay.getTitlebarAreaRect();
           applyOverlayGeometryRect(rect);
           text("overlay-status", `overlay: x=${rect.x} w=${rect.width} h=${rect.height}`);
-          text("overlay-rect-status", JSON.stringify(rect, null, 2));
+          text("overlay-rect-status", JSON.stringify(overlayGeometryDiagnostics(rect), null, 2));
         } catch (error) {
           text("overlay-status", `overlay: ${formatError(error)}`);
           text("overlay-rect-status", `Failed to load overlay geometry.\n${formatError(error)}`);
@@ -709,7 +718,7 @@
             if (rect) {
               applyOverlayGeometryRect(rect);
               text("overlay-status", `overlay: x=${rect.x} w=${rect.width} h=${rect.height}`);
-              text("overlay-rect-status", JSON.stringify(rect, null, 2));
+              text("overlay-rect-status", JSON.stringify(overlayGeometryDiagnostics(rect), null, 2));
             }
           });
           text("overlay-rect-status", "overlay.geometrychange listener active.");

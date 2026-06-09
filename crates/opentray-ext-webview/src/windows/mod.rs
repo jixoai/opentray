@@ -1118,15 +1118,6 @@ fn physical_client_size(hwnd: HWND) -> Option<(i32, i32)> {
     Some((client_width, client_height))
 }
 
-fn logical_client_size(hwnd: HWND) -> Option<(i32, i32)> {
-    let (client_width, client_height) = physical_client_size(hwnd)?;
-    let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let scale = if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 };
-    let logical_width = ((client_width as f64) / scale).round().max(1.0) as i32;
-    let logical_height = ((client_height as f64) / scale).round().max(1.0) as i32;
-    Some((logical_width, logical_height))
-}
-
 fn apply_webview_client_bounds(webview: &WebView, hwnd: HWND) -> Result<(), WebviewRuntimeError> {
     let Some(bounds) = client_webview_bounds(hwnd) else {
         return Ok(());
@@ -2622,27 +2613,53 @@ fn current_monitor_detail(hwnd: HWND) -> Option<ScreenDetailState> {
 }
 
 fn titlebar_area_rect_json(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
-    serde_json::to_value(titlebar_area_rect(hwnd))
+    serde_json::to_value(titlebar_area_rect_payload(hwnd))
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
 }
 
-fn titlebar_area_rect(hwnd: HWND) -> Rect {
-    let Some((client_width, _)) = logical_client_size(hwnd) else {
-        return Rect {
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowsTitlebarAreaRectPayload {
+    unit: &'static str,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    client_width: u32,
+    client_height: u32,
+}
+
+fn titlebar_area_rect_payload(hwnd: HWND) -> WindowsTitlebarAreaRectPayload {
+    let Some((client_width, client_height)) = physical_client_size(hwnd) else {
+        return WindowsTitlebarAreaRectPayload {
+            unit: "physical",
             x: 0,
             y: 0,
             width: 0,
             height: 0,
+            client_width: 0,
+            client_height: 0,
         };
     };
     // AppWindowTitleBar insets are the official overlay layout contract. DWM caption bounds are a
     // system-derived fallback for runtimes that can extend content but cannot expose AppWindow.
+    // Keep these values physical. The bootstrap script converts them to the page's CSS px after
+    // WebView2, page zoom, DPR, and viewport rules have settled.
     let metrics = appwindow_titlebar_metrics(hwnd)
         .ok()
         .filter(|metrics| metrics.right_inset > 0.0 || metrics.left_inset > 0.0)
         .or_else(|| dwm_caption_button_titlebar_metrics(hwnd, client_width))
         .unwrap_or_else(|| fallback_titlebar_metrics(hwnd));
-    titlebar_area_rect_from_metrics(client_width, metrics)
+    let rect = titlebar_area_rect_from_metrics(client_width, metrics);
+    WindowsTitlebarAreaRectPayload {
+        unit: "physical",
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        client_width: client_width.max(0) as u32,
+        client_height: client_height.max(0) as u32,
+    }
 }
 
 fn titlebar_area_rect_from_metrics(client_width: i32, metrics: WindowsTitlebarMetrics) -> Rect {
@@ -2680,10 +2697,8 @@ fn dwm_caption_button_titlebar_metrics(
         return None;
     }
     let (client_left, client_top) = client_origin_in_window_coordinates(hwnd)?;
-    let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let scale = if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 };
     let (left, top, right, bottom) =
-        logical_rect_from_window_relative_rect(bounds, (client_left, client_top), scale)?;
+        client_rect_from_window_relative_rect(bounds, (client_left, client_top))?;
     if right <= left || bottom <= top {
         return None;
     }
@@ -2694,18 +2709,14 @@ fn dwm_caption_button_titlebar_metrics(
     })
 }
 
-fn logical_rect_from_window_relative_rect(
+fn client_rect_from_window_relative_rect(
     rect: RECT,
     client_origin: (i32, i32),
-    scale: f64,
 ) -> Option<(f64, f64, f64, f64)> {
-    if scale <= 0.0 {
-        return None;
-    }
-    let raw_left = (rect.left - client_origin.0) as f64 / scale;
-    let raw_top = (rect.top - client_origin.1) as f64 / scale;
-    let raw_right = (rect.right - client_origin.0) as f64 / scale;
-    let raw_bottom = (rect.bottom - client_origin.1) as f64 / scale;
+    let raw_left = (rect.left - client_origin.0) as f64;
+    let raw_top = (rect.top - client_origin.1) as f64;
+    let raw_right = (rect.right - client_origin.0) as f64;
+    let raw_bottom = (rect.bottom - client_origin.1) as f64;
     Some((
         raw_left.min(raw_right),
         raw_top.min(raw_bottom),
@@ -2734,20 +2745,19 @@ fn client_origin_in_window_coordinates(hwnd: HWND) -> Option<(i32, i32)> {
 fn fallback_titlebar_metrics(hwnd: HWND) -> WindowsTitlebarMetrics {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let dpi = if dpi == 0 { 96 } else { dpi };
-    let scale = dpi as f64 / 96.0;
     WindowsTitlebarMetrics {
         left_inset: 0.0,
-        right_inset: logical_system_metric(SM_CXSIZE, dpi, scale) * 3.0,
-        height: logical_system_metric(SM_CYSIZE, dpi, scale).max(40.0),
+        right_inset: physical_system_metric(SM_CXSIZE, dpi) * 3.0,
+        height: physical_system_metric(SM_CYSIZE, dpi).max(40.0),
     }
 }
 
-fn logical_system_metric(index: i32, dpi: u32, scale: f64) -> f64 {
+fn physical_system_metric(index: i32, dpi: u32) -> f64 {
     let value = unsafe { GetSystemMetricsForDpi(index, dpi) };
     if value <= 0 {
         return 0.0;
     }
-    (value as f64 / scale).max(0.0)
+    (value as f64).max(0.0)
 }
 
 fn rect_to_opentray_rect(rect: RECT) -> Rect {
@@ -3774,8 +3784,8 @@ mod tests {
     }
 
     #[test]
-    fn window_relative_rect_converts_to_logical_client_rect() {
-        let rect = logical_rect_from_window_relative_rect(
+    fn window_relative_rect_converts_to_physical_client_rect() {
+        let rect = client_rect_from_window_relative_rect(
             RECT {
                 left: 175,
                 top: 14,
@@ -3783,10 +3793,9 @@ mod tests {
                 bottom: 44,
             },
             (10, 8),
-            2.0,
         );
 
-        assert_eq!(rect, Some((82.5, 3.0, 117.5, 18.0)));
+        assert_eq!(rect, Some((165.0, 6.0, 235.0, 36.0)));
     }
 
     #[test]

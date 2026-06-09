@@ -170,6 +170,49 @@ pub(crate) fn navigator_window_bootstrap_script(
     };
     const invoke = (cmd, payload = {}, options) =>
       invokeWithNamespace("opentray.window", cmd, payload, options);
+    const finiteNumber = (value) =>
+      typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    const overlayCssScaleForPhysicalPayload = (rect) => {
+      const clientWidth = finiteNumber(rect?.clientWidth);
+      const innerWidth = finiteNumber(window.innerWidth);
+      if (clientWidth && clientWidth > 0 && innerWidth && innerWidth > 0) {
+        return innerWidth / clientWidth;
+      }
+      const dpr = finiteNumber(window.devicePixelRatio);
+      return dpr && dpr > 0 ? 1 / dpr : 1;
+    };
+    const normalizeOverlayTitlebarAreaRect = (rect) => {
+      if (!rect || typeof rect !== "object" || rect.unit !== "physical") {
+        return rect;
+      }
+      const scale = overlayCssScaleForPhysicalPayload(rect);
+      const rawX = finiteNumber(rect.x) ?? 0;
+      const rawY = finiteNumber(rect.y) ?? 0;
+      const rawWidth = finiteNumber(rect.width) ?? 0;
+      const rawHeight = finiteNumber(rect.height) ?? 0;
+      const x = Math.max(0, Math.ceil(rawX * scale));
+      const y = Math.max(0, Math.floor(rawY * scale));
+      const right = Math.max(x, Math.floor((rawX + rawWidth) * scale));
+      return {
+        x,
+        y,
+        width: Math.max(0, right - x),
+        height: rawHeight > 0 ? Math.max(1, Math.ceil(rawHeight * scale)) : 0
+      };
+    };
+    const normalizeOverlayEventData = (eventData) => {
+      const payload =
+        eventData && typeof eventData === "object" && "payload" in eventData
+          ? eventData.payload
+          : eventData;
+      if (payload && typeof payload === "object" && payload.titlebarAreaRect) {
+        return {
+          ...payload,
+          titlebarAreaRect: normalizeOverlayTitlebarAreaRect(payload.titlebarAreaRect)
+        };
+      }
+      return payload;
+    };
     const createOverlayApi = (windowApi) => {
       const overlayDomListeners = Object.create(null);
       const overlayEventName = (event) => `overlay.${event}`;
@@ -178,14 +221,12 @@ pub(crate) fn navigator_window_bootstrap_script(
           return windowControlsOverlay;
         },
         getTitlebarAreaRect() {
-          return invoke("getTitlebarAreaRect");
+          return invoke("getTitlebarAreaRect").then(normalizeOverlayTitlebarAreaRect);
         },
         async listen(event, handler) {
           return windowApi.listen(overlayEventName(event), (eventData) => {
             if (typeof handler !== "function") return;
-            handler(eventData && typeof eventData === "object" && "payload" in eventData
-              ? eventData.payload
-              : eventData);
+            handler(normalizeOverlayEventData(eventData));
           });
         },
         async once(event, handler) {
@@ -643,5 +684,243 @@ fn native_api_source_token(rule: &WebviewNativeApiSource) -> String {
         WebviewNativeApiSource::Local => "'local'".to_string(),
         WebviewNativeApiSource::Remote => "'remote'".to_string(),
         WebviewNativeApiSource::Origin(origin) => origin.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use serde_json::Value;
+
+    use super::*;
+
+    #[test]
+    fn overlay_rect_normalizes_windows_physical_payload_to_css_px() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const takeMessage = (cmd) => {
+  const index = messages.findIndex((message) => message.cmd === cmd);
+  return messages.splice(index, 1)[0];
+};
+const rectPromise = navigator.opentrayWindow.overlay.getTitlebarAreaRect();
+const rectRequest = takeMessage("getTitlebarAreaRect");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(rectRequest.callback, {
+  unit: "physical",
+  x: 20,
+  y: 0,
+  width: 730,
+  height: 64,
+  clientWidth: 1000,
+  clientHeight: 700
+});
+return {
+  rect: await rectPromise,
+  namespace: rectRequest.namespace
+};
+"#,
+        );
+
+        assert_eq!(
+            runtime["namespace"],
+            Value::String("opentray.window".to_string())
+        );
+        assert_eq!(runtime["rect"]["x"], Value::from(10));
+        assert_eq!(runtime["rect"]["y"], Value::from(0));
+        assert_eq!(runtime["rect"]["width"], Value::from(365));
+        assert_eq!(runtime["rect"]["height"], Value::from(32));
+    }
+
+    #[test]
+    fn overlay_geometry_event_normalizes_windows_physical_payload_to_css_px() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const takeMessage = (cmd) => {
+  const index = messages.findIndex((message) => message.cmd === cmd);
+  return messages.splice(index, 1)[0];
+};
+let eventPayload = null;
+const listenPromise = navigator.opentrayWindow.overlay.listen("geometrychange", (event) => {
+  eventPayload = event;
+});
+const listenRequest = takeMessage("listen");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(listenRequest.callback, { eventId: 7 });
+await listenPromise;
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(listenRequest.payload.handler, {
+  event: "overlay.geometrychange",
+  id: 7,
+  payload: {
+    titlebarAreaRect: {
+      unit: "physical",
+      x: 0,
+      y: 0,
+      width: 800,
+      height: 60,
+      clientWidth: 1000,
+      clientHeight: 700
+    }
+  }
+});
+return eventPayload;
+"#,
+        );
+
+        assert_eq!(runtime["titlebarAreaRect"]["x"], Value::from(0));
+        assert_eq!(runtime["titlebarAreaRect"]["width"], Value::from(400));
+        assert_eq!(runtime["titlebarAreaRect"]["height"], Value::from(30));
+    }
+
+    #[test]
+    fn overlay_rect_keeps_legacy_css_payload_unchanged() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const takeMessage = (cmd) => {
+  const index = messages.findIndex((message) => message.cmd === cmd);
+  return messages.splice(index, 1)[0];
+};
+const rectPromise = navigator.opentrayWindow.overlay.getTitlebarAreaRect();
+const rectRequest = takeMessage("getTitlebarAreaRect");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(rectRequest.callback, {
+  x: 72,
+  y: 0,
+  width: 420,
+  height: 44
+});
+return await rectPromise;
+"#,
+        );
+
+        assert_eq!(runtime["x"], Value::from(72));
+        assert_eq!(runtime["width"], Value::from(420));
+        assert_eq!(runtime["height"], Value::from(44));
+    }
+
+    #[test]
+    fn overlay_rect_keeps_zero_physical_geometry_empty() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const takeMessage = (cmd) => {
+  const index = messages.findIndex((message) => message.cmd === cmd);
+  return messages.splice(index, 1)[0];
+};
+const rectPromise = navigator.opentrayWindow.overlay.getTitlebarAreaRect();
+const rectRequest = takeMessage("getTitlebarAreaRect");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(rectRequest.callback, {
+  unit: "physical",
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+  clientWidth: 0,
+  clientHeight: 0
+});
+return await rectPromise;
+"#,
+        );
+
+        assert_eq!(runtime["width"], Value::from(0));
+        assert_eq!(runtime["height"], Value::from(0));
+    }
+
+    fn overlay_bootstrap_script() -> String {
+        navigator_window_bootstrap_script(
+            NavigatorWindowSettings {
+                enabled: true,
+                bind_window_globals: false,
+                window_controls_overlay: true,
+            },
+            NavigatorScreenSettings::default(),
+            NavigatorTraySettings::default(),
+            MetadataSyncSettings::default(),
+            MetadataSyncSettings::default(),
+            &WebviewNativeApiPolicy::default(),
+        )
+    }
+
+    fn run_node_probe(script: &str, probe: &str) -> Value {
+        let injected_script = serde_json::to_string(script).expect("serialize injected script");
+        let program = format!(
+            r#"
+const messages = [];
+const windowObject = {{
+  innerWidth: 500,
+  innerHeight: 360,
+  devicePixelRatio: 2,
+  close() {{}},
+  moveTo() {{}},
+  resizeTo() {{}},
+  location: {{
+    href: "about:blank"
+  }},
+  ipc: {{
+    postMessage(payload) {{
+      messages.push(JSON.parse(payload));
+    }}
+  }}
+}};
+try {{
+  delete globalThis.navigator;
+}} catch (_error) {{}}
+globalThis.document = {{
+  readyState: "complete",
+  title: "OpenTray",
+  head: {{
+    querySelector() {{
+      return null;
+    }},
+    appendChild() {{}}
+  }},
+  documentElement: {{}},
+  querySelectorAll() {{
+    return [];
+  }},
+  createElement() {{
+    return {{
+      setAttribute() {{}},
+      href: null,
+      getAttribute() {{
+        return null;
+      }}
+    }};
+  }},
+  addEventListener() {{}},
+  removeEventListener() {{}}
+}};
+globalThis.MutationObserver = class {{
+  observe() {{}}
+  disconnect() {{}}
+}};
+Object.defineProperty(globalThis, "navigator", {{
+  value: {{}},
+  configurable: true,
+  writable: true
+}});
+globalThis.window = windowObject;
+globalThis.messages = messages;
+const injectedScript = {injected_script};
+eval(injectedScript);
+const result = await (async () => {{
+{probe}
+}})();
+process.stdout.write(JSON.stringify(result));
+"#,
+        );
+
+        let output = Command::new("node")
+            .arg("--input-type=module")
+            .arg("--eval")
+            .arg(program)
+            .output()
+            .expect("node must be available to validate injected navigator runtime behavior");
+        assert!(
+            output.status.success(),
+            "node probe failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).expect("node probe returned JSON")
     }
 }
