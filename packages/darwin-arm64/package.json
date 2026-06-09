@@ -1,6 +1,6 @@
 {
   "name": "@opentray/darwin-arm64",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "OpenTray broker binary package for macOS Apple Silicon.",
   "license": "MIT",
   "repository": {

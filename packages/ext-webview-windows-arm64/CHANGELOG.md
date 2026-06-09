@@ -1,5 +1,7 @@
 # @opentray/ext-webview-windows-arm64
 
+## 0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

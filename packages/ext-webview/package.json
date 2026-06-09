@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-webview",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Official OpenTray rich popup extension backed by platform WebView engines.",
   "type": "module",
   "license": "MIT",
