@@ -4,15 +4,6 @@ use crate::WebviewRuntimeError;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct WindowsFoundationRect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct WindowsWindowId {
     value: u64,
 }
@@ -135,26 +126,40 @@ impl WindowsAppWindowTitleBar {
         })
     }
 
-    pub(super) fn title_bar_occlusions(
-        &self,
-    ) -> Result<WindowsAppWindowTitleBarOcclusions, WebviewRuntimeError> {
+    pub(super) fn height(&self) -> Result<i32, WebviewRuntimeError> {
         unsafe {
             let mut result = core::mem::zeroed();
-            (Interface::vtable(self).get_title_bar_occlusions)(Interface::as_raw(self), &mut result)
-                .and_then(|| {
-                    if result.is_null() {
-                        Err(windows_core::Error::new(
-                            windows_core::HRESULT(0x80004001_u32 as i32),
-                            "Windows AppWindow titlebar occlusions returned null",
-                        ))
-                    } else {
-                        Ok(WindowsAppWindowTitleBarOcclusions::from_raw(result))
-                    }
-                })
+            (Interface::vtable(self).height)(Interface::as_raw(self), &mut result).map(|| result)
         }
         .map_err(|error| {
             WebviewRuntimeError::Unsupported(format!(
-                "Windows AppWindow titlebar occlusions could not be resolved: {error}"
+                "Windows AppWindow titlebar height could not be resolved: {error}"
+            ))
+        })
+    }
+
+    pub(super) fn left_inset(&self) -> Result<i32, WebviewRuntimeError> {
+        unsafe {
+            let mut result = core::mem::zeroed();
+            (Interface::vtable(self).left_inset)(Interface::as_raw(self), &mut result)
+                .map(|| result)
+        }
+        .map_err(|error| {
+            WebviewRuntimeError::Unsupported(format!(
+                "Windows AppWindow titlebar left inset could not be resolved: {error}"
+            ))
+        })
+    }
+
+    pub(super) fn right_inset(&self) -> Result<i32, WebviewRuntimeError> {
+        unsafe {
+            let mut result = core::mem::zeroed();
+            (Interface::vtable(self).right_inset)(Interface::as_raw(self), &mut result)
+                .map(|| result)
+        }
+        .map_err(|error| {
+            WebviewRuntimeError::Unsupported(format!(
+                "Windows AppWindow titlebar right inset could not be resolved: {error}"
             ))
         })
     }
@@ -162,99 +167,6 @@ impl WindowsAppWindowTitleBar {
 
 unsafe impl Send for WindowsAppWindowTitleBar {}
 unsafe impl Sync for WindowsAppWindowTitleBar {}
-
-#[repr(transparent)]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct WindowsAppWindowTitleBarOcclusions(windows_core::IUnknown);
-
-windows_core::imp::interface_hierarchy!(
-    WindowsAppWindowTitleBarOcclusions,
-    windows_core::IUnknown,
-    windows_core::IInspectable
-);
-
-// The runtime hands us the exact interface pointer here; only the vtable shape matters.
-unsafe impl Interface for WindowsAppWindowTitleBarOcclusions {
-    type Vtable = IWindowsAppWindowTitleBarOcclusions_Vtbl;
-    const IID: windows_core::GUID = windows_core::GUID::from_u128(0);
-}
-
-impl WindowsAppWindowTitleBarOcclusions {
-    pub(super) fn size(&self) -> Result<u32, WebviewRuntimeError> {
-        unsafe {
-            let mut result = core::mem::zeroed();
-            (Interface::vtable(self).size)(Interface::as_raw(self), &mut result).map(|| result)
-        }
-        .map_err(|error| {
-            WebviewRuntimeError::Unsupported(format!(
-                "Windows AppWindow titlebar occlusion list size could not be read: {error}"
-            ))
-        })
-    }
-
-    pub(super) fn get_at(
-        &self,
-        index: u32,
-    ) -> Result<WindowsAppWindowTitleBarOcclusion, WebviewRuntimeError> {
-        unsafe {
-            let mut result = core::mem::zeroed();
-            (Interface::vtable(self).get_at)(Interface::as_raw(self), index, &mut result).and_then(
-                || {
-                    if result.is_null() {
-                        Err(windows_core::Error::new(
-                            windows_core::HRESULT(0x80004001_u32 as i32),
-                            "Windows AppWindow titlebar occlusion entry returned null",
-                        ))
-                    } else {
-                        Ok(WindowsAppWindowTitleBarOcclusion::from_raw(result))
-                    }
-                },
-            )
-        }
-        .map_err(|error| {
-            WebviewRuntimeError::Unsupported(format!(
-                "Windows AppWindow titlebar occlusion entry could not be read: {error}"
-            ))
-        })
-    }
-}
-
-unsafe impl Send for WindowsAppWindowTitleBarOcclusions {}
-unsafe impl Sync for WindowsAppWindowTitleBarOcclusions {}
-
-#[repr(transparent)]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct WindowsAppWindowTitleBarOcclusion(windows_core::IUnknown);
-
-windows_core::imp::interface_hierarchy!(
-    WindowsAppWindowTitleBarOcclusion,
-    windows_core::IUnknown,
-    windows_core::IInspectable
-);
-
-// The runtime hands us the exact interface pointer here; only the vtable shape matters.
-unsafe impl Interface for WindowsAppWindowTitleBarOcclusion {
-    type Vtable = IWindowsAppWindowTitleBarOcclusion_Vtbl;
-    const IID: windows_core::GUID = windows_core::GUID::from_u128(0);
-}
-
-impl WindowsAppWindowTitleBarOcclusion {
-    pub(super) fn occluding_rect(&self) -> Result<WindowsFoundationRect, WebviewRuntimeError> {
-        unsafe {
-            let mut result = core::mem::zeroed();
-            (Interface::vtable(self).occluding_rect)(Interface::as_raw(self), &mut result)
-                .map(|| result)
-        }
-        .map_err(|error| {
-            WebviewRuntimeError::Unsupported(format!(
-                "Windows AppWindow titlebar occluding rect could not be read: {error}"
-            ))
-        })
-    }
-}
-
-unsafe impl Send for WindowsAppWindowTitleBarOcclusion {}
-unsafe impl Sync for WindowsAppWindowTitleBarOcclusion {}
 
 windows_core::imp::define_interface!(
     IWindowsAppWindow,
@@ -350,50 +262,17 @@ pub struct IWindowsAppWindowTitleBar_Vtbl {
         unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
     foreground_color: usize,
     set_foreground_color: usize,
+    height: unsafe extern "system" fn(*mut core::ffi::c_void, *mut i32) -> windows_core::HRESULT,
+    icon_show_options: usize,
+    set_icon_show_options: usize,
     inactive_background_color: usize,
     set_inactive_background_color: usize,
     inactive_foreground_color: usize,
     set_inactive_foreground_color: usize,
-    is_visible:
-        unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
-    get_title_bar_occlusions: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        *mut *mut core::ffi::c_void,
-    ) -> windows_core::HRESULT,
-}
-
-windows_core::imp::define_interface!(
-    IWindowsAppWindowTitleBarOcclusions,
-    IWindowsAppWindowTitleBarOcclusions_Vtbl,
-    0x4cb1a2f6_7d9c_4a5a_95af_0a3fb2d7dcb8
-);
-
-#[repr(C)]
-#[doc(hidden)]
-pub struct IWindowsAppWindowTitleBarOcclusions_Vtbl {
-    base__: windows_core::IInspectable_Vtbl,
-    get_at: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        u32,
-        *mut *mut core::ffi::c_void,
-    ) -> windows_core::HRESULT,
-    size: unsafe extern "system" fn(*mut core::ffi::c_void, *mut u32) -> windows_core::HRESULT,
-    index_of: usize,
-    get_many: usize,
-}
-
-windows_core::imp::define_interface!(
-    IWindowsAppWindowTitleBarOcclusion,
-    IWindowsAppWindowTitleBarOcclusion_Vtbl,
-    0xb8c4e2c1_9be4_4f94_8d1f_4f2db9d7b3a1
-);
-
-#[repr(C)]
-#[doc(hidden)]
-pub struct IWindowsAppWindowTitleBarOcclusion_Vtbl {
-    base__: windows_core::IInspectable_Vtbl,
-    occluding_rect: unsafe extern "system" fn(
-        *mut core::ffi::c_void,
-        *mut WindowsFoundationRect,
-    ) -> windows_core::HRESULT,
+    left_inset:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut i32) -> windows_core::HRESULT,
+    right_inset:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut i32) -> windows_core::HRESULT,
+    reset_to_default: usize,
+    set_drag_rectangles: usize,
 }

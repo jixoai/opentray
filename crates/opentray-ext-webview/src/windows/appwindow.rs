@@ -26,35 +26,22 @@ pub(super) fn apply_windows_titlebar_overlay(
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct WindowsTitlebarOcclusionMetrics {
+pub(super) struct WindowsTitlebarMetrics {
+    pub left_inset: f64,
     pub right_inset: f64,
     pub height: f64,
 }
 
-// AppWindow reports the real caption-control occlusion area in client coordinates.
-// Use that safe area instead of guessing a fixed titlebar band.
-pub(super) fn titlebar_occlusion_metrics(
-    hwnd: HWND,
-    client_width: f64,
-) -> Result<WindowsTitlebarOcclusionMetrics, WebviewRuntimeError> {
+// AppWindow owns the compositor relationship for overlay controls. Its TitleBar insets are the
+// official layout contract; use them before falling back to older Win32/DWM metrics.
+pub(super) fn titlebar_metrics(hwnd: HWND) -> Result<WindowsTitlebarMetrics, WebviewRuntimeError> {
     let app_window = app_window_for_hwnd(hwnd)?;
     let titlebar = app_window.titlebar()?;
-    let occlusions = titlebar.title_bar_occlusions()?;
-    let mut metrics = WindowsTitlebarOcclusionMetrics {
-        right_inset: 0.0,
-        height: 40.0,
-    };
-    let count = occlusions.size()?;
-    for index in 0..count {
-        let rect = occlusions.get_at(index)?.occluding_rect()?;
-        let x = rect.x.max(0.0) as f64;
-        let width = rect.width.max(0.0) as f64;
-        if x >= client_width / 2.0 {
-            metrics.right_inset = metrics.right_inset.max((client_width - x).max(width));
-        }
-        metrics.height = metrics.height.max(rect.height as f64);
-    }
-    Ok(metrics)
+    Ok(WindowsTitlebarMetrics {
+        left_inset: titlebar.left_inset()?.max(0) as f64,
+        right_inset: titlebar.right_inset()?.max(0) as f64,
+        height: titlebar.height()?.max(1) as f64,
+    })
 }
 
 fn app_window_for_hwnd(hwnd: HWND) -> Result<WindowsAppWindow, WebviewRuntimeError> {

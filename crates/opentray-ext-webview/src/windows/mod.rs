@@ -23,17 +23,18 @@ use window_vibrancy::{
     apply_acrylic, apply_mica, apply_tabbed, clear_acrylic, clear_mica, clear_tabbed,
     Error as WindowVibrancyError,
 };
-use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
-    DwmEnableBlurBehindWindow, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_AUTO,
-    DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_HOSTBACKDROPBRUSH,
-    DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT,
-    DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWCP_ROUNDSMALL, DWM_BB_BLURREGION, DWM_BB_ENABLE,
-    DWM_BLURBEHIND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
+    DwmEnableBlurBehindWindow, DwmExtendFrameIntoClientArea, DwmGetWindowAttribute,
+    DwmSetWindowAttribute, DWMSBT_AUTO, DWMSBT_NONE, DWMWA_CAPTION_BUTTON_BOUNDS,
+    DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+    DWMWCP_ROUNDSMALL, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND, DWM_SYSTEMBACKDROP_TYPE,
+    DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateRectRgn, DeleteObject, GetMonitorInfoW, InvalidateRect, MonitorFromWindow, UpdateWindow,
-    MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    ClientToScreen, CreateRectRgn, DeleteObject, GetMonitorInfoW, InvalidateRect,
+    MonitorFromWindow, UpdateWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
@@ -63,7 +64,8 @@ mod appwindow;
 mod appwindow_abi;
 
 use self::appwindow::{
-    apply_windows_titlebar_overlay, titlebar_occlusion_metrics, WindowsTitlebarOcclusionMetrics,
+    apply_windows_titlebar_overlay, titlebar_metrics as appwindow_titlebar_metrics,
+    WindowsTitlebarMetrics,
 };
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::{
@@ -2633,36 +2635,108 @@ fn titlebar_area_rect(hwnd: HWND) -> Rect {
             height: 0,
         };
     };
-    // AppWindow enables the overlay compositor path, but its occlusion collection can be null on
-    // some Windows App Runtime installs. Geometry remains a layout capability, so fall back to
-    // Win32 caption metrics instead of surfacing this as overlay unsupported.
-    let metrics = titlebar_occlusion_metrics(hwnd, client_width as f64)
+    // AppWindowTitleBar insets are the official overlay layout contract. DWM caption bounds are a
+    // system-derived fallback for runtimes that can extend content but cannot expose AppWindow.
+    let metrics = appwindow_titlebar_metrics(hwnd)
         .ok()
-        .filter(|metrics| metrics.right_inset > 0.0)
-        .unwrap_or_else(|| fallback_titlebar_occlusion_metrics(hwnd));
+        .filter(|metrics| metrics.right_inset > 0.0 || metrics.left_inset > 0.0)
+        .or_else(|| dwm_caption_button_titlebar_metrics(hwnd, client_width))
+        .unwrap_or_else(|| fallback_titlebar_metrics(hwnd));
     titlebar_area_rect_from_metrics(client_width, metrics)
 }
 
-fn titlebar_area_rect_from_metrics(
-    client_width: i32,
-    metrics: WindowsTitlebarOcclusionMetrics,
-) -> Rect {
-    let width = ((client_width as f64) - metrics.right_inset)
+fn titlebar_area_rect_from_metrics(client_width: i32, metrics: WindowsTitlebarMetrics) -> Rect {
+    let x = metrics.left_inset.round().max(0.0) as i32;
+    let width = ((client_width as f64) - metrics.left_inset - metrics.right_inset)
         .max(0.0)
         .round() as u32;
     Rect {
-        x: 0,
+        x,
         y: 0,
         width,
         height: metrics.height.round().max(1.0) as u32,
     }
 }
 
-fn fallback_titlebar_occlusion_metrics(hwnd: HWND) -> WindowsTitlebarOcclusionMetrics {
+fn dwm_caption_button_titlebar_metrics(
+    hwnd: HWND,
+    client_width: i32,
+) -> Option<WindowsTitlebarMetrics> {
+    let mut bounds = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    let result = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_BUTTON_BOUNDS as u32,
+            (&mut bounds as *mut RECT).cast(),
+            std::mem::size_of::<RECT>() as u32,
+        )
+    };
+    if hresult_failed(result) {
+        return None;
+    }
+    let (client_left, client_top) = client_origin_in_window_coordinates(hwnd)?;
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    let scale = if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 };
+    let (left, top, right, bottom) =
+        logical_rect_from_window_relative_rect(bounds, (client_left, client_top), scale)?;
+    if right <= left || bottom <= top {
+        return None;
+    }
+    Some(WindowsTitlebarMetrics {
+        left_inset: 0.0,
+        right_inset: ((client_width as f64) - left).max(right - left).max(0.0),
+        height: (bottom - top).max(1.0),
+    })
+}
+
+fn logical_rect_from_window_relative_rect(
+    rect: RECT,
+    client_origin: (i32, i32),
+    scale: f64,
+) -> Option<(f64, f64, f64, f64)> {
+    if scale <= 0.0 {
+        return None;
+    }
+    let raw_left = (rect.left - client_origin.0) as f64 / scale;
+    let raw_top = (rect.top - client_origin.1) as f64 / scale;
+    let raw_right = (rect.right - client_origin.0) as f64 / scale;
+    let raw_bottom = (rect.bottom - client_origin.1) as f64 / scale;
+    Some((
+        raw_left.min(raw_right),
+        raw_top.min(raw_bottom),
+        raw_left.max(raw_right),
+        raw_top.max(raw_bottom),
+    ))
+}
+
+fn client_origin_in_window_coordinates(hwnd: HWND) -> Option<(i32, i32)> {
+    let mut window = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    if unsafe { GetWindowRect(hwnd, &mut window) } == 0 {
+        return None;
+    }
+    let mut client_origin = POINT { x: 0, y: 0 };
+    if unsafe { ClientToScreen(hwnd, &mut client_origin) } == 0 {
+        return None;
+    }
+    Some((client_origin.x - window.left, client_origin.y - window.top))
+}
+
+fn fallback_titlebar_metrics(hwnd: HWND) -> WindowsTitlebarMetrics {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let dpi = if dpi == 0 { 96 } else { dpi };
     let scale = dpi as f64 / 96.0;
-    WindowsTitlebarOcclusionMetrics {
+    WindowsTitlebarMetrics {
+        left_inset: 0.0,
         right_inset: logical_system_metric(SM_CXSIZE, dpi, scale) * 3.0,
         height: logical_system_metric(SM_CYSIZE, dpi, scale).max(40.0),
     }
@@ -3637,7 +3711,8 @@ mod tests {
     fn titlebar_area_rect_reserves_right_caption_control_inset() {
         let rect = titlebar_area_rect_from_metrics(
             800,
-            WindowsTitlebarOcclusionMetrics {
+            WindowsTitlebarMetrics {
+                left_inset: 0.0,
                 right_inset: 138.0,
                 height: 42.0,
             },
@@ -3655,10 +3730,33 @@ mod tests {
     }
 
     #[test]
-    fn titlebar_area_rect_clamps_oversized_caption_control_inset() {
+    fn titlebar_area_rect_reserves_left_and_right_titlebar_insets() {
+        let rect = titlebar_area_rect_from_metrics(
+            800,
+            WindowsTitlebarMetrics {
+                left_inset: 24.0,
+                right_inset: 132.0,
+                height: 40.0,
+            },
+        );
+
+        assert_eq!(
+            rect,
+            Rect {
+                x: 24,
+                y: 0,
+                width: 644,
+                height: 40,
+            }
+        );
+    }
+
+    #[test]
+    fn titlebar_area_rect_clamps_oversized_titlebar_insets() {
         let rect = titlebar_area_rect_from_metrics(
             120,
-            WindowsTitlebarOcclusionMetrics {
+            WindowsTitlebarMetrics {
+                left_inset: 16.0,
                 right_inset: 180.0,
                 height: 0.0,
             },
@@ -3667,12 +3765,28 @@ mod tests {
         assert_eq!(
             rect,
             Rect {
-                x: 0,
+                x: 16,
                 y: 0,
                 width: 0,
                 height: 1,
             }
         );
+    }
+
+    #[test]
+    fn window_relative_rect_converts_to_logical_client_rect() {
+        let rect = logical_rect_from_window_relative_rect(
+            RECT {
+                left: 175,
+                top: 14,
+                right: 245,
+                bottom: 44,
+            },
+            (10, 8),
+            2.0,
+        );
+
+        assert_eq!(rect, Some((82.5, 3.0, 117.5, 18.0)));
     }
 
     #[test]
