@@ -280,6 +280,18 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
+            ClientFrame::SetTrayTitle {
+                request_id,
+                space_id,
+                tray_id,
+                title,
+            } => match self
+                .kernel
+                .set_tray_title(lease_id, &space_id, &tray_id, title)
+            {
+                Ok(()) => vec![ServerFrame::Ack { request_id }],
+                Err(error) => vec![kernel_error(Some(request_id), error)],
+            },
             ClientFrame::ExtCommand {
                 request_id,
                 space_id,
@@ -304,7 +316,10 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     &mut scoped_host,
                 ) {
                     Ok(events) => {
-                        let mut frames = vec![ServerFrame::Ack { request_id }];
+                        let mut frames = vec![ServerFrame::ExtCommandResult {
+                            request_id,
+                            events: events.clone(),
+                        }];
                         frames.extend(extension_events(events));
                         frames
                     }
@@ -366,6 +381,7 @@ fn request_id(frame: &ClientFrame) -> Option<RequestId> {
         | ClientFrame::SetTrayMenu { request_id, .. }
         | ClientFrame::SetTrayIcon { request_id, .. }
         | ClientFrame::SetTrayTooltip { request_id, .. }
+        | ClientFrame::SetTrayTitle { request_id, .. }
         | ClientFrame::LoadExt { request_id, .. }
         | ClientFrame::ExtCommand { request_id, .. }
         | ClientFrame::UnloadExt { request_id, .. }

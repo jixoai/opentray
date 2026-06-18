@@ -8,6 +8,8 @@ import {
   formatBrokerEndpointName,
   PROTOCOL_VERSION,
   type OpenTrayTransport,
+  type OpenTrayConnection,
+  type BrokerEventFrame,
 } from "./index";
 import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 
@@ -59,6 +61,99 @@ describe("opentray client", () => {
         trayId: "tray-1",
       },
     ]);
+  });
+
+  it("updates tray state through tray-scoped protocol requests", async () => {
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(
+      transport,
+      { spaceId: "space-1" },
+      "tray-1",
+      createTestRequestId,
+    );
+
+    await tray.setTitle("Focus");
+    await tray.setMenu({ items: [{ type: "item", id: 1, title: "Open" }] });
+    await tray.setTooltip({ title: "Focus", description: "25 minutes" });
+    await tray.setIcon({ type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 });
+
+    expect(transport.frames).toEqual([
+      {
+        type: "set-tray-title",
+        requestId: "req-test",
+        spaceId: "space-1",
+        trayId: "tray-1",
+        title: "Focus",
+      },
+      {
+        type: "set-tray-menu",
+        requestId: "req-test",
+        spaceId: "space-1",
+        trayId: "tray-1",
+        menu: { items: [{ type: "item", id: 1, title: "Open" }] },
+      },
+      {
+        type: "set-tray-tooltip",
+        requestId: "req-test",
+        spaceId: "space-1",
+        trayId: "tray-1",
+        tooltip: { title: "Focus", description: "25 minutes" },
+      },
+      {
+        type: "set-tray-icon",
+        requestId: "req-test",
+        spaceId: "space-1",
+        trayId: "tray-1",
+        icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+      },
+    ]);
+  });
+
+  it("exposes tray-scoped events only for eventful broker connections", () => {
+    const transport = new EventfulRecordingTransport();
+    const tray = createTrayHandle(
+      transport,
+      { spaceId: "space-1" },
+      "tray-1",
+      createTestRequestId,
+    );
+    const seen: string[] = [];
+
+    const unsubscribeMenu = tray.onMenuClick((event) => {
+      seen.push(`menu:${event.itemId}`);
+    });
+    const unsubscribeClick = tray.onTrayClick((event) => {
+      seen.push(`click:${event.x},${event.y}`);
+    });
+
+    transport.emit({
+      type: "event",
+      event: { type: "menuClick", spaceId: "space-1", trayId: "other", itemId: 1 },
+    });
+    transport.emit({
+      type: "event",
+      event: { type: "menuClick", spaceId: "space-1", trayId: "tray-1", itemId: 2 },
+    });
+    transport.emit({
+      type: "event",
+      event: { type: "trayClick", spaceId: "space-1", trayId: "tray-1", button: "left", x: 4, y: 8 },
+    });
+    transport.emit({
+      type: "ext-event",
+      spaceId: "space-1",
+      trayId: "tray-1",
+      ext: "webview",
+      data: {},
+    });
+
+    unsubscribeMenu();
+    unsubscribeClick();
+    transport.emit({
+      type: "event",
+      event: { type: "menuClick", spaceId: "space-1", trayId: "tray-1", itemId: 3 },
+    });
+
+    expect(seen).toEqual(["menu:2", "click:4,8"]);
   });
 
   it("creates explicit protocol handshake frames", () => {
@@ -146,6 +241,7 @@ class RecordingTransport implements OpenTrayTransport {
           },
         };
       case "destroy-tray":
+        return { type: "ack", requestId: frame.requestId };
       case "get-tray-bounds":
         return {
           type: "tray-bounds",
@@ -161,6 +257,7 @@ class RecordingTransport implements OpenTrayTransport {
       case "set-tray-menu":
       case "set-tray-icon":
       case "set-tray-tooltip":
+      case "set-tray-title":
       case "load-ext":
       case "ext-command":
       case "unload-ext":
@@ -178,6 +275,23 @@ class RecordingTransport implements OpenTrayTransport {
             sessions: [],
           },
         };
+    }
+  }
+}
+
+class EventfulRecordingTransport extends RecordingTransport implements OpenTrayConnection {
+  private readonly listeners = new Set<(frame: BrokerEventFrame) => void>();
+
+  onEvent(listener: (frame: BrokerEventFrame) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  emit(frame: BrokerEventFrame): void {
+    for (const listener of this.listeners) {
+      listener(frame);
     }
   }
 }

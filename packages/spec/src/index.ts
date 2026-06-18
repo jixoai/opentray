@@ -12,7 +12,7 @@ export type SurfaceId = SpaceId;
 export const PROTOCOL_VERSION = 1;
 export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
 export const OPENTRAY_PROTOCOL_LINE_MAJOR = 1;
-export const OPENTRAY_PROTOCOL_LINE_MINOR = 0;
+export const OPENTRAY_PROTOCOL_LINE_MINOR = 1;
 
 export const protocolLineReleaseChannels = ["stable", "alpha"] as const;
 export type ProtocolLineReleaseChannel = (typeof protocolLineReleaseChannels)[number];
@@ -282,8 +282,8 @@ export type MouseButton = "left" | "right" | "middle";
 export type TrayEvent =
   | { type: "ready"; spaceId: SpaceId }
   | { type: "menuClick"; spaceId: SpaceId; trayId: TrayId; itemId: MenuItemId }
-  | { type: "trayClick"; spaceId: SpaceId; button: MouseButton; x: number; y: number }
-  | { type: "trayDoubleClick"; spaceId: SpaceId; button: MouseButton; x: number; y: number };
+  | { type: "trayClick"; spaceId: SpaceId; trayId: TrayId; button: MouseButton; x: number; y: number }
+  | { type: "trayDoubleClick"; spaceId: SpaceId; trayId: TrayId; button: MouseButton; x: number; y: number };
 
 export interface ExtensionScope {
   spaceId: SpaceId;
@@ -325,6 +325,7 @@ export type ClientRequestFrame =
   | { type: "set-tray-menu"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; menu: Menu }
   | { type: "set-tray-icon"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; icon: Icon }
   | { type: "set-tray-tooltip"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; tooltip: Tooltip }
+  | { type: "set-tray-title"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; title: string }
   | { type: "load-ext"; requestId: RequestId; spaceId: SpaceId; name: string; path: string; mountId?: string }
   | { type: "ext-command"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; ext: string; data: unknown }
   | { type: "unload-ext"; requestId: RequestId; spaceId: SpaceId; name: string }
@@ -337,6 +338,7 @@ export type ServerFrame =
   | { type: "tray-created"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId }
   | { type: "tray-bounds"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; bounds: TrayBoundsResult }
   | { type: "ack"; requestId: RequestId }
+  | { type: "ext-command-result"; requestId: RequestId; events: ExtensionEnvelope[] }
   | { type: "daemon-health"; requestId: RequestId; health: DaemonHealth }
   | { type: "event"; event: TrayEvent }
   | { type: "ext-event"; spaceId: SpaceId; trayId: TrayId; ext: string; data: unknown }
@@ -397,6 +399,8 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       );
     case "ack":
       return typeof value.requestId === "string";
+    case "ext-command-result":
+      return typeof value.requestId === "string" && Array.isArray(value.events) && value.events.every(isExtensionEnvelope);
     case "daemon-health":
       return typeof value.requestId === "string" && isDaemonHealth(value.health);
     case "event":
@@ -416,6 +420,19 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
     default:
       return false;
   }
+};
+
+const isExtensionEnvelope = (value: unknown): value is ExtensionEnvelope => {
+  if (!isRecord(value) || !isRecord(value.scope)) {
+    return false;
+  }
+  const scope = value.scope as Record<string, unknown>;
+  return (
+    (typeof scope.spaceId === "string" || typeof scope.surfaceId === "string") &&
+    (scope.trayId === undefined || typeof scope.trayId === "string") &&
+    typeof scope.ext === "string" &&
+    "data" in value
+  );
 };
 
 const isDaemonHealth = (value: unknown): value is DaemonHealth => {
@@ -471,6 +488,7 @@ const isTrayEvent = (value: unknown): value is TrayEvent => {
     case "trayDoubleClick":
       return (
         typeof value.spaceId === "string" &&
+        typeof value.trayId === "string" &&
         isMouseButton(value.button) &&
         typeof value.x === "number" &&
         typeof value.y === "number"

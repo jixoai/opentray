@@ -171,6 +171,19 @@ impl<B: SurfaceBackend> Kernel<B> {
         Ok(())
     }
 
+    pub fn set_tray_title(
+        &mut self,
+        lease_id: &str,
+        space_id: &str,
+        tray_id: &str,
+        title: String,
+    ) -> Result<(), KernelError> {
+        let tray = self.require_owned_tray_mut(lease_id, space_id, tray_id)?;
+        tray.options.title = Some(title);
+        self.sync_surface(space_id)?;
+        Ok(())
+    }
+
     pub fn destroy_tray(
         &mut self,
         lease_id: &str,
@@ -226,6 +239,12 @@ impl<B: SurfaceBackend> Kernel<B> {
                 space_id,
                 tray_id,
                 item_id: _,
+            }
+            | TrayEvent::TrayClick {
+                space_id, tray_id, ..
+            }
+            | TrayEvent::TrayDoubleClick {
+                space_id, tray_id, ..
             } => self
                 .trays
                 .get(&(space_id.clone(), tray_id.clone()))
@@ -233,7 +252,7 @@ impl<B: SurfaceBackend> Kernel<B> {
                     lease_id: tray.lease_id.clone(),
                     event,
                 }),
-            _ => None,
+            TrayEvent::Ready { .. } => None,
         }
     }
 
@@ -495,6 +514,34 @@ mod tests {
     }
 
     #[test]
+    fn set_title_updates_projection() {
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend);
+        let surface = kernel
+            .create_space(SpaceOptions {
+                id: Some("host".to_string()),
+                title: None,
+                icon: None,
+                default: false,
+            })
+            .expect("surface");
+        kernel
+            .create_tray(
+                "lease-a".to_string(),
+                &surface,
+                tray_options("status", "Old"),
+            )
+            .expect("tray");
+
+        kernel
+            .set_tray_title("lease-a", &surface.space_id, "status", "New".to_string())
+            .expect("set title");
+
+        let projection = kernel.projection(&surface.space_id).expect("projection");
+        assert_eq!(projection.trays[0].title, "New");
+    }
+
+    #[test]
     fn projection_isolates_non_owner_trays_by_default() {
         let backend = FakeBackend::new(BackendCapabilities::full());
         let mut kernel = Kernel::new(backend);
@@ -594,11 +641,45 @@ mod tests {
         let kernel = Kernel::new(backend);
         let routed = kernel.route_event(TrayEvent::TrayClick {
             space_id: "unknown".to_string(),
+            tray_id: "unknown".to_string(),
             button: MouseButton::Left,
             x: 0,
             y: 0,
         });
         assert!(routed.is_none());
+    }
+
+    #[test]
+    fn tray_click_event_routes_to_owning_lease() {
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend);
+        let surface = kernel
+            .create_space(SpaceOptions {
+                id: Some("host".to_string()),
+                title: None,
+                icon: None,
+                default: false,
+            })
+            .expect("surface");
+        kernel
+            .create_tray(
+                "lease-a".to_string(),
+                &surface,
+                tray_options("status", "Status"),
+            )
+            .expect("tray");
+
+        let routed = kernel
+            .route_event(TrayEvent::TrayClick {
+                space_id: surface.space_id,
+                tray_id: "status".to_string(),
+                button: MouseButton::Left,
+                x: 4,
+                y: 8,
+            })
+            .expect("routed");
+
+        assert_eq!(routed.lease_id, "lease-a");
     }
 
     #[test]

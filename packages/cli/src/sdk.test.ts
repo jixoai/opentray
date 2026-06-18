@@ -11,7 +11,7 @@ vi.mock("./local-broker", () => ({
 }));
 
 import { createSpace, createSurface, createTray, resolveDefaultSpace } from "./index";
-import type { OpenTrayTransport, TrayExtension } from "./client";
+import type { BrokerEventFrame, OpenTrayConnection, TrayExtension } from "./client";
 
 describe("top-level opentray sdk facade", () => {
   beforeEach(() => {
@@ -129,6 +129,59 @@ describe("top-level opentray sdk facade", () => {
     ]);
   });
 
+  it("exposes dynamic tray state setters from the top-level tray helper", async () => {
+    const transport = new RecordingTransport();
+    connectLocalBroker.mockResolvedValue(transport);
+
+    const tray = await createTray(
+      {
+        trayId: "status",
+        title: "Status",
+        icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+      },
+      { space: { spaceId: "space-explicit" } },
+    );
+
+    await tray.setTitle("Focus");
+
+    expect(transport.frames.at(-1)).toEqual({
+      type: "set-tray-title",
+      requestId: "opentray-2",
+      spaceId: "space-explicit",
+      trayId: "status",
+      title: "Focus",
+    });
+  });
+
+  it("exposes tray-scoped menu events from the top-level tray helper", async () => {
+    const transport = new RecordingTransport();
+    connectLocalBroker.mockResolvedValue(transport);
+
+    const tray = await createTray(
+      {
+        trayId: "status",
+        title: "Status",
+        icon: { type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 },
+      },
+      { space: { spaceId: "space-explicit" } },
+    );
+    const seen: number[] = [];
+
+    tray.onMenuClick((event) => {
+      seen.push(event.itemId);
+    });
+    transport.emit({
+      type: "event",
+      event: { type: "menuClick", spaceId: "space-explicit", trayId: "other", itemId: 1 },
+    });
+    transport.emit({
+      type: "event",
+      event: { type: "menuClick", spaceId: "space-explicit", trayId: "status", itemId: 2 },
+    });
+
+    expect(seen).toEqual([2]);
+  });
+
   it("mounts tray extensions once and routes commands through the mount id", async () => {
     const transport = new RecordingTransport();
     connectLocalBroker.mockResolvedValue(transport);
@@ -199,8 +252,22 @@ describe("top-level opentray sdk facade", () => {
   });
 });
 
-class RecordingTransport implements OpenTrayTransport {
+class RecordingTransport implements OpenTrayConnection {
   readonly frames: ClientRequestFrame[] = [];
+  private readonly listeners = new Set<(frame: BrokerEventFrame) => void>();
+
+  onEvent(listener: (frame: BrokerEventFrame) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  emit(frame: BrokerEventFrame): void {
+    for (const listener of this.listeners) {
+      listener(frame);
+    }
+  }
 
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {
     this.frames.push(frame);
@@ -240,6 +307,7 @@ class RecordingTransport implements OpenTrayTransport {
       case "set-tray-menu":
       case "set-tray-icon":
       case "set-tray-tooltip":
+      case "set-tray-title":
       case "load-ext":
       case "ext-command":
       case "unload-ext":

@@ -2,11 +2,16 @@ import {
   PROTOCOL_VERSION,
   type ClientFrame,
   type ClientRequestFrame,
+  type ExtensionEnvelope,
+  type Icon,
+  type Menu,
   type RequestId,
   type ServerFrame,
   type SpaceOptions,
   type SpaceRef,
+  type Tooltip,
   type TrayBoundsResult,
+  type TrayEvent,
   type TrayId,
   type TrayOptions,
 } from "@opentray/spec";
@@ -14,6 +19,14 @@ import {
 export interface OpenTrayTransport {
   request(frame: ClientRequestFrame): Promise<ServerFrame>;
 }
+
+export type BrokerEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
+
+export interface OpenTrayEventSource {
+  onEvent(listener: (frame: BrokerEventFrame) => void): () => void;
+}
+
+export interface OpenTrayConnection extends OpenTrayTransport, OpenTrayEventSource {}
 
 export interface OpenTrayClient {
   createSpace(options: SpaceOptions): Promise<SpaceHandle>;
@@ -27,6 +40,10 @@ export interface SpaceHandle {
   createTray(options: TrayOptions): Promise<TrayHandle>;
 }
 
+export interface EventfulSpaceHandle extends Omit<SpaceHandle, "createTray"> {
+  createTray(options: TrayOptions): Promise<EventfulTrayHandle>;
+}
+
 /** @deprecated Use `SpaceHandle`. */
 export type SurfaceHandle = SpaceHandle;
 
@@ -34,13 +51,40 @@ export interface TrayHandle {
   space: SpaceRef;
   trayId: TrayId;
   getBounds(): Promise<TrayBoundsResult>;
+  setMenu(menu: Menu): Promise<void>;
+  setTooltip(tooltip: Tooltip): Promise<void>;
+  setIcon(icon: Icon): Promise<void>;
+  setTitle(title: string): Promise<void>;
   loadExtension(options: ExtensionLoadOptions): Promise<void>;
   commandExtension(ext: string, data: unknown): Promise<void>;
+  requestExtension(ext: string, data: unknown): Promise<ExtensionEnvelope[]>;
   extend<TCapability extends object, TOptions = undefined>(
     extension: TrayExtension<TCapability, TOptions>,
     options?: TOptions,
   ): TrayHandle & TCapability;
   destroy(): Promise<void>;
+}
+
+export type TrayScopedEvent = Exclude<TrayEvent, { type: "ready" }>;
+export type TrayEventType = TrayScopedEvent["type"];
+export type TrayEventByType<TEvent extends TrayEventType> = Extract<TrayScopedEvent, { type: TEvent }>;
+
+export interface EventfulTrayHandle extends TrayHandle {
+  extend<TCapability extends object, TOptions = undefined>(
+    extension: TrayExtension<TCapability, TOptions>,
+    options?: TOptions,
+  ): EventfulTrayHandle & TCapability;
+  listenExtension<TData = unknown>(
+    ext: string,
+    handler: (event: ExtensionEnvelope<TData>) => void,
+  ): () => void;
+  listen<TEvent extends TrayEventType>(
+    event: TEvent,
+    handler: (event: TrayEventByType<TEvent>) => void,
+  ): () => void;
+  onMenuClick(handler: (event: TrayEventByType<"menuClick">) => void): () => void;
+  onTrayClick(handler: (event: TrayEventByType<"trayClick">) => void): () => void;
+  onTrayDoubleClick(handler: (event: TrayEventByType<"trayDoubleClick">) => void): () => void;
 }
 
 export interface ExtensionLoadOptions {
@@ -61,6 +105,7 @@ export interface TrayExtensionContext {
   readonly mountId: string;
   ensureLoaded(): Promise<void>;
   command(data: unknown): Promise<void>;
+  request(data: unknown): Promise<ExtensionEnvelope[]>;
 }
 
 export interface TrayExtension<TCapability extends object, TOptions = undefined> {
@@ -80,10 +125,22 @@ export interface CreateClientOptions {
   requestIdPrefix?: string;
 }
 
-export const createClient = (
+export interface OpenTrayEventfulClient extends Omit<OpenTrayClient, "createSpace" | "resolveDefaultSpace" | "createSurface"> {
+  createSpace(options: SpaceOptions): Promise<EventfulSpaceHandle>;
+  resolveDefaultSpace(): Promise<EventfulSpaceHandle>;
+  /** @deprecated Use `createSpace`. */
+  createSurface(options: SpaceOptions): Promise<EventfulSpaceHandle>;
+}
+
+export function createClient(
+  transport: OpenTrayConnection,
+  options?: CreateClientOptions,
+): OpenTrayEventfulClient;
+export function createClient(transport: OpenTrayTransport, options?: CreateClientOptions): OpenTrayClient;
+export function createClient(
   transport: OpenTrayTransport,
   options: CreateClientOptions = {},
-): OpenTrayClient => {
+): OpenTrayClient | OpenTrayEventfulClient {
   const nextRequestId = createRequestIdFactory(options.requestIdPrefix ?? "opentray");
 
   return {
@@ -112,34 +169,58 @@ export const createClient = (
   };
 };
 
-export const createSpaceHandle = (
+export function createSpaceHandle(
+  transport: OpenTrayConnection,
+  space: SpaceRef,
+  nextRequestId?: () => RequestId,
+): EventfulSpaceHandle;
+export function createSpaceHandle(
+  transport: OpenTrayTransport,
+  space: SpaceRef,
+  nextRequestId?: () => RequestId,
+): SpaceHandle;
+export function createSpaceHandle(
   transport: OpenTrayTransport,
   space: SpaceRef,
   nextRequestId: () => RequestId = createRequestIdFactory("opentray"),
-): SpaceHandle => ({
-  space,
-  async createTray(options: TrayOptions): Promise<TrayHandle> {
-    const requestId = nextRequestId();
-    const response = await transport.request({
-      type: "create-tray",
-      requestId,
-      space,
-      tray: options,
-    });
-    const frame = expectResponse(response, requestId, "tray-created");
-    return createTrayHandle(transport, space, frame.trayId, nextRequestId);
-  },
-});
+): SpaceHandle | EventfulSpaceHandle {
+  return {
+    space,
+    async createTray(options: TrayOptions): Promise<TrayHandle | EventfulTrayHandle> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "create-tray",
+        requestId,
+        space,
+        tray: options,
+      });
+      const frame = expectResponse(response, requestId, "tray-created");
+      return createTrayHandle(transport, space, frame.trayId, nextRequestId);
+    },
+  };
+}
 
 /** @deprecated Use `createSpaceHandle`. */
 export const createSurfaceHandle = createSpaceHandle;
 
-export const createTrayHandle = (
+export function createTrayHandle(
+  transport: OpenTrayConnection,
+  space: SpaceRef,
+  trayId: TrayId,
+  nextRequestId?: () => RequestId,
+): EventfulTrayHandle;
+export function createTrayHandle(
+  transport: OpenTrayTransport,
+  space: SpaceRef,
+  trayId: TrayId,
+  nextRequestId?: () => RequestId,
+): TrayHandle;
+export function createTrayHandle(
   transport: OpenTrayTransport,
   space: SpaceRef,
   trayId: TrayId,
   nextRequestId: () => RequestId = createRequestIdFactory("opentray"),
-): TrayHandle => {
+): TrayHandle | EventfulTrayHandle {
   let nextMountOrdinal = 1;
   const nextMountId = (extensionName: string): string => {
     const mountId = `${formatMountIdComponent(extensionName)}.${formatMountIdComponent(trayId)}.${nextMountOrdinal}`;
@@ -159,6 +240,50 @@ export const createTrayHandle = (
       });
       return expectResponse(response, requestId, "tray-bounds").bounds;
     },
+    async setMenu(menu: Menu): Promise<void> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "set-tray-menu",
+        requestId,
+        spaceId: space.spaceId,
+        trayId,
+        menu,
+      });
+      expectResponse(response, requestId, "ack");
+    },
+    async setTooltip(tooltip: Tooltip): Promise<void> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "set-tray-tooltip",
+        requestId,
+        spaceId: space.spaceId,
+        trayId,
+        tooltip,
+      });
+      expectResponse(response, requestId, "ack");
+    },
+    async setIcon(icon: Icon): Promise<void> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "set-tray-icon",
+        requestId,
+        spaceId: space.spaceId,
+        trayId,
+        icon,
+      });
+      expectResponse(response, requestId, "ack");
+    },
+    async setTitle(title: string): Promise<void> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "set-tray-title",
+        requestId,
+        spaceId: space.spaceId,
+        trayId,
+        title,
+      });
+      expectResponse(response, requestId, "ack");
+    },
     async loadExtension(options): Promise<void> {
       const requestId = nextRequestId();
       const response = await transport.request({
@@ -172,6 +297,9 @@ export const createTrayHandle = (
       expectResponse(response, requestId, "ack");
     },
     async commandExtension(ext: string, data: unknown): Promise<void> {
+      await this.requestExtension(ext, data);
+    },
+    async requestExtension(ext: string, data: unknown): Promise<ExtensionEnvelope[]> {
       const requestId = nextRequestId();
       const response = await transport.request({
         type: "ext-command",
@@ -181,7 +309,11 @@ export const createTrayHandle = (
         ext,
         data,
       });
-      expectResponse(response, requestId, "ack");
+      if (response.type === "ack") {
+        expectResponse(response, requestId, "ack");
+        return [];
+      }
+      return expectResponse(response, requestId, "ext-command-result").events;
     },
     extend<TCapability extends object, TOptions = undefined>(
       extension: TrayExtension<TCapability, TOptions>,
@@ -202,8 +334,71 @@ export const createTrayHandle = (
       expectResponse(response, requestId, "ack");
     },
   };
-  return handle;
+  if (!isOpenTrayEventSource(transport)) {
+    return handle;
+  }
+  return attachEventfulTrayHandle(handle, transport, nextMountId);
+}
+
+const attachEventfulTrayHandle = (
+  handle: TrayHandle,
+  source: OpenTrayEventSource,
+  nextMountId: (extensionName: string) => string,
+): EventfulTrayHandle => {
+  const listen: EventfulTrayHandle["listen"] = (event, handler) =>
+    source.onEvent((frame) => {
+      if (frame.type !== "event" || frame.event.type !== event) {
+        return;
+      }
+      if (!isOwnedTrayEvent(frame.event, handle.space.spaceId, handle.trayId)) {
+        return;
+      }
+      handler(frame.event as TrayEventByType<typeof event>);
+    });
+
+  const eventful: EventfulTrayHandle = {
+    ...handle,
+    listenExtension<TData = unknown>(ext: string, handler: (event: ExtensionEnvelope<TData>) => void) {
+      return source.onEvent((frame) => {
+        if (frame.type !== "ext-event" || frame.ext !== ext) {
+          return;
+        }
+        if (frame.spaceId !== handle.space.spaceId || frame.trayId !== handle.trayId) {
+          return;
+        }
+        handler({
+          scope: { spaceId: frame.spaceId, trayId: frame.trayId, ext: frame.ext },
+          data: frame.data as TData,
+        });
+      });
+    },
+    listen,
+    onMenuClick(handler) {
+      return listen("menuClick", handler);
+    },
+    onTrayClick(handler) {
+      return listen("trayClick", handler);
+    },
+    onTrayDoubleClick(handler) {
+      return listen("trayDoubleClick", handler);
+    },
+    extend<TCapability extends object, TOptions = undefined>(
+      extension: TrayExtension<TCapability, TOptions>,
+      options?: TOptions,
+    ): EventfulTrayHandle & TCapability {
+      const context = createTrayExtensionContext(eventful, extension, options, nextMountId);
+      const capability = extension.extend(eventful, context, options);
+      return Object.assign({}, eventful, capability);
+    },
+  };
+  return eventful;
 };
+
+const isOwnedTrayEvent = (event: TrayEvent, spaceId: string, trayId: string): event is TrayScopedEvent =>
+  event.type !== "ready" && event.spaceId === spaceId && event.trayId === trayId;
+
+const isOpenTrayEventSource = (transport: OpenTrayTransport): transport is OpenTrayConnection =>
+  "onEvent" in transport && typeof transport.onEvent === "function";
 
 const createTrayExtensionContext = <TCapability extends object, TOptions>(
   tray: TrayHandle,
@@ -235,6 +430,10 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
     async command(data: unknown): Promise<void> {
       await ensureLoaded();
       await tray.commandExtension(mountId, data);
+    },
+    async request(data: unknown): Promise<ExtensionEnvelope[]> {
+      await ensureLoaded();
+      return tray.requestExtension(mountId, data);
     },
   };
 };
@@ -277,6 +476,7 @@ const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
     case "tray-created":
     case "tray-bounds":
     case "ack":
+    case "ext-command-result":
     case "daemon-health":
       return frame.requestId;
     case "error":

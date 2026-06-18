@@ -1,6 +1,12 @@
 import type { SpaceOptions, SpaceRef, TrayOptions } from "@opentray/spec";
 
-import { createClient, createSpaceHandle, type SpaceHandle, type SurfaceHandle, type TrayHandle } from "./client";
+import {
+  createClient,
+  createSpaceHandle,
+  type EventfulSpaceHandle,
+  type EventfulTrayHandle,
+  type SurfaceHandle,
+} from "./client";
 import { connectLocalBroker } from "./local-broker";
 
 export interface BrokerConnectOptions {
@@ -19,7 +25,7 @@ export interface CreateTrayOptions extends BrokerConnectOptions {
 export const createSpace = async (
   options: SpaceOptions,
   brokerOptions: BrokerConnectOptions = {},
-): Promise<SpaceHandle> => {
+): Promise<EventfulSpaceHandle> => {
   const connection = await connectLocalBroker(brokerOptions);
   return createClient(connection).createSpace(options);
 };
@@ -32,7 +38,7 @@ export const createSurface = async (
 
 export const resolveDefaultSpace = async (
   brokerOptions: BrokerConnectOptions = {},
-): Promise<SpaceHandle> => {
+): Promise<EventfulSpaceHandle> => {
   const connection = await connectLocalBroker(brokerOptions);
   return createClient(connection).resolveDefaultSpace();
 };
@@ -40,7 +46,7 @@ export const resolveDefaultSpace = async (
 export const createTray = async (
   options: TrayOptions,
   brokerOptions: CreateTrayOptions = {},
-): Promise<TrayHandle> => {
+): Promise<EventfulTrayHandle> => {
   const { space, ...connectOptions } = brokerOptions;
   const connection = await connectLocalBroker(connectOptions);
   const spaceHandle = space ? createSpaceHandle(connection, space) : await createClient(connection).resolveDefaultSpace();

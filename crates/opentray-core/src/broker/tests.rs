@@ -229,6 +229,50 @@ fn get_tray_bounds_returns_correlated_bounds_for_owner() {
 }
 
 #[test]
+fn set_tray_title_updates_backend_projection_for_owner() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::new(backend.clone());
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_space(&mut broker, &mut session);
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::CreateTray {
+            request_id: "req-tray".to_string(),
+            space: surface.clone(),
+            tray: tray_options("status"),
+        },
+        "0.1.0",
+    );
+
+    let frames = broker.handle_frame(
+        &mut session,
+        ClientFrame::SetTrayTitle {
+            request_id: "req-title".to_string(),
+            space_id: surface.space_id.clone(),
+            tray_id: "status".to_string(),
+            title: "Focus".to_string(),
+        },
+        "0.1.0",
+    );
+
+    assert!(matches!(
+        &frames[0],
+        ServerFrame::Ack { request_id } if request_id == "req-title"
+    ));
+    let last_projection = backend
+        .operations()
+        .into_iter()
+        .filter_map(|operation| match operation {
+            BackendOperation::SyncSurface(projection) => Some(projection),
+            _ => None,
+        })
+        .last()
+        .expect("projection");
+    assert_eq!(last_projection.trays[0].title, "Focus");
+}
+
+#[test]
 fn get_tray_bounds_rejects_non_owner_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::new(backend);
@@ -414,7 +458,12 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
     ));
     assert!(matches!(
         &command_frames[0],
-        ServerFrame::Ack { request_id } if request_id == "req-ext"
+        ServerFrame::ExtCommandResult { request_id, events }
+            if request_id == "req-ext"
+                && events.len() == 1
+                && events[0].scope.ext == "webview"
+                && events[0].data["type"] == "recorded"
+                && events[0].data["command"]["type"] == "show"
     ));
     assert!(matches!(
         &command_frames[1],

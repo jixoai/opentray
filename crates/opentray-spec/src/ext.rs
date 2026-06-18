@@ -77,6 +77,7 @@ pub struct ExtHostContext {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionScope {
+    #[serde(rename = "spaceId", alias = "surfaceId")]
     pub surface_id: SurfaceId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tray_id: Option<TrayId>,

@@ -133,7 +133,7 @@ describe("@opentray/spec", () => {
 
   it("formats extension-agnostic protocol-line dist-tags", () => {
     expect(OPENTRAY_PROTOCOL_FAMILY).toBe("opentray-protocol");
-    expect(formatOpenTrayProtocolLine(OPENTRAY_PROTOCOL_LINE)).toBe("opentray-protocol/1.0");
+    expect(formatOpenTrayProtocolLine(OPENTRAY_PROTOCOL_LINE)).toBe("opentray-protocol/1.1");
     expect(
       formatOpenTrayProtocolLine({
         family: OPENTRAY_PROTOCOL_FAMILY,
@@ -141,8 +141,8 @@ describe("@opentray/spec", () => {
         minor: 2,
       }),
     ).toBe("opentray-protocol/1.2");
-    expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-0");
-    expect(formatProtocolDistTag({ channel: "alpha" })).toBe("alpha-1-0");
+    expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-1");
+    expect(formatProtocolDistTag({ channel: "alpha" })).toBe("alpha-1-1");
     expect(formatProtocolDistTag({ channel: "stable", major: 1, minor: 2 })).toBe("stable-1-2");
     expect(parseProtocolDistTag("stable-1-0")).toEqual({
       channel: "stable",
@@ -182,7 +182,7 @@ describe("@opentray/spec", () => {
 
   it("keeps runtime protocol version separate from install-time protocol tags", () => {
     expect(PROTOCOL_VERSION).toBe(1);
-    expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-0");
+    expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-1");
     expect(createBrokerEndpointIdentity({ packageVersion: "0.5.1" })).toEqual({
       packageVersion: "0.5.1",
       protocolVersion: 1,
@@ -313,6 +313,37 @@ describe("@opentray/spec", () => {
         itemId: 99,
       },
     });
+  });
+
+  it("requires tray identity on tray click events", () => {
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "event",
+        event: {
+          type: "trayClick",
+          spaceId: "space-1",
+          trayId: "daemon-status",
+          button: "left",
+          x: 10,
+          y: 20,
+        },
+      }),
+    );
+    const missingTray = parseServerFrame(
+      JSON.stringify({
+        type: "event",
+        event: {
+          type: "trayClick",
+          spaceId: "space-1",
+          button: "left",
+          x: 10,
+          y: 20,
+        },
+      }),
+    );
+
+    expect(parsed.ok).toBe(true);
+    expect(missingTray.ok).toBe(false);
   });
 
   it("rejects snake_case tray event frames", () => {

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::ext::ExtensionEnvelope;
 use crate::model::{
     Icon, Menu, Rect, SessionId, SpaceId, SpaceOptions, SpaceRef, Tooltip, TrayEvent, TrayId,
     TrayOptions,
@@ -199,6 +200,15 @@ pub enum ClientFrame {
         tray_id: TrayId,
         tooltip: Tooltip,
     },
+    SetTrayTitle {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(rename = "spaceId")]
+        space_id: SpaceId,
+        #[serde(rename = "trayId")]
+        tray_id: TrayId,
+        title: String,
+    },
     LoadExt {
         #[serde(rename = "requestId")]
         request_id: RequestId,
@@ -276,6 +286,11 @@ pub enum ServerFrame {
     Ack {
         #[serde(rename = "requestId")]
         request_id: RequestId,
+    },
+    ExtCommandResult {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        events: Vec<ExtensionEnvelope>,
     },
     DaemonHealth {
         #[serde(rename = "requestId")]
@@ -575,6 +590,55 @@ mod tests {
                     "trayId": "daemon-status",
                     "itemId": 99
                 }
+            })
+        );
+    }
+
+    #[test]
+    fn tray_click_events_carry_tray_identity() {
+        let frame = ServerFrame::Event {
+            event: TrayEvent::TrayClick {
+                space_id: "space-1".to_string(),
+                tray_id: "daemon-status".to_string(),
+                button: crate::model::MouseButton::Left,
+                x: 10,
+                y: 20,
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(frame).unwrap(),
+            serde_json::json!({
+                "type": "event",
+                "event": {
+                    "type": "trayClick",
+                    "spaceId": "space-1",
+                    "trayId": "daemon-status",
+                    "button": "left",
+                    "x": 10,
+                    "y": 20
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn set_tray_title_serializes_as_tray_scoped_command() {
+        let request = ClientFrame::SetTrayTitle {
+            request_id: "req-title".to_string(),
+            space_id: "space-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            title: "Focus".to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "type": "set-tray-title",
+                "requestId": "req-title",
+                "spaceId": "space-1",
+                "trayId": "tray-1",
+                "title": "Focus"
             })
         );
     }

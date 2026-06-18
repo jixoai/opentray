@@ -173,7 +173,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
   private dispatchLine(line: string): void {
     const parsed = parseServerFrame(line);
     if (!parsed.ok || parsed.frame === undefined) {
-      this.rejectAll(new Error(parsed.error ?? "invalid server frame"));
+      this.rejectAll(new Error(`${parsed.error ?? "invalid server frame"}: ${line}`));
       return;
     }
 
@@ -245,6 +245,7 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
     case "tray-created":
     case "tray-bounds":
     case "ack":
+    case "ext-command-result":
     case "daemon-health":
       return frame.requestId;
     case "ready":

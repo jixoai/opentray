@@ -117,6 +117,9 @@ pub enum Icon {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Logical desktop rectangle used by window, screen, and tray geometry APIs.
+///
+/// Native boundaries convert to or from physical pixels before crossing the ABI.
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -149,12 +152,14 @@ pub enum TrayEvent {
     },
     TrayClick {
         space_id: SpaceId,
+        tray_id: TrayId,
         button: MouseButton,
         x: i32,
         y: i32,
     },
     TrayDoubleClick {
         space_id: SpaceId,
+        tray_id: TrayId,
         button: MouseButton,
         x: i32,
         y: i32,
