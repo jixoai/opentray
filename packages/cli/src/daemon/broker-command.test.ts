@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { resolveBrokerCommand, resolveInstalledBrokerBinary } from "./broker-command";
+import { resolveBrokerCommand, resolveDevBrokerBinaryPath, resolveInstalledBrokerBinary } from "./broker-command";
 import { MissingPlatformBrokerBinaryError, resolveBrokerNativeTarget } from "./native-target";
 import { resolveDaemonPaths } from "./paths";
 
@@ -135,6 +135,12 @@ describe("broker command resolver", () => {
         resolvePackageJson: () => packageJson,
       }),
     ).rejects.toBeInstanceOf(MissingPlatformBrokerBinaryError);
+  });
+
+  it("targets only the workspace debug broker binary for Windows dev rebuild cleanup", () => {
+    expect(resolveDevBrokerBinaryPath("E:/repo/opentray", "win32")).toBe(
+      join("E:/repo/opentray", "target", "debug", "opentray.exe"),
+    );
   });
 });
 
