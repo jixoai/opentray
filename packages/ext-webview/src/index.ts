@@ -19,8 +19,8 @@ export interface WebviewShowCommand {
   type: "show";
   html?: string;
   url?: string;
-  width: number;
-  height: number;
+  width?: number;
+  height?: number;
   fallbackRect?: Rect;
   nativeWindowApi?: boolean;
   bindWindowGlobals?: boolean;
@@ -166,6 +166,10 @@ export interface WebviewWindowState {
   visible: boolean;
 }
 
+export interface WebviewWindowInteractionChange {
+  active: boolean;
+}
+
 export interface WebviewWindowEvent<TPayload = unknown> {
   event: string;
   id: number;
@@ -190,6 +194,15 @@ export interface WebviewWindowSizeChange {
   height: number;
 }
 
+export type WebviewWindowSizeConstraintValue = number | null;
+
+export type WebviewExecCommand = "clearWhiteBlock" | (string & {});
+
+export interface WebviewWindowSizeConstraintPatch {
+  width?: WebviewWindowSizeConstraintValue;
+  height?: WebviewWindowSizeConstraintValue;
+}
+
 export interface WebviewWindowOverlayGeometry {
   titlebarAreaRect: Rect;
 }
@@ -198,6 +211,7 @@ export interface WebviewWindowEventMap {
   closed: { visible: false };
   moved: WebviewWindowPositionChange;
   resized: WebviewWindowSizeChange;
+  windowinteractionchange: WebviewWindowInteractionChange;
   stylechange: WebviewWindowStyle;
   titlechange: WebviewWindowTitleChange;
   iconchange: WebviewWindowIconChange;
@@ -224,6 +238,8 @@ export interface WebviewNavigatorWindow {
   readonly overlay?: WebviewWindowOverlay;
   invoke<TResponse = unknown>(cmd: string, payload?: unknown, options?: unknown): Promise<TResponse>;
   close(): Promise<void>;
+  show(): Promise<WebviewWindowState>;
+  hide(): Promise<WebviewWindowState>;
   minimize(): Promise<WebviewWindowState>;
   maximize(): Promise<WebviewWindowState>;
   restore(): Promise<WebviewWindowState>;
@@ -232,6 +248,13 @@ export interface WebviewNavigatorWindow {
   isMinimized(): Promise<boolean>;
   moveTo(x: number, y: number): Promise<{ x: number; y: number }>;
   resizeTo(width: number, height: number): Promise<{ width: number; height: number }>;
+  getBounds(): Promise<Rect>;
+  setMinimumWidth(width: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMinimumHeight(height: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMinimumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMaximumWidth(width: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMaximumHeight(height: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMaximumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<void>;
   startAppRegionDrag(options?: { x?: number; y?: number; pointerId?: number }): Promise<{ active: boolean }>;
   stopAppRegionDrag(): Promise<{ active: boolean }>;
   getStyle(): Promise<WebviewWindowStyle>;
@@ -306,6 +329,12 @@ export interface WebviewNavigatorNamespace {
   readonly window?: WebviewNavigatorWindow;
   readonly screen?: WebviewNavigatorScreen;
   readonly tray?: WebviewNavigatorTray;
+  readonly ipc?: WebviewNavigatorIpc;
+  execCommand(command: WebviewExecCommand): void;
+}
+
+export interface WebviewNavigatorIpc {
+  postMessage(payload: unknown): Promise<{ queued: true }>;
 }
 
 export type WebviewCommand =
@@ -315,13 +344,30 @@ export type WebviewCommand =
   | WebviewSetContentCommand
   | { type: "navigate"; url: string }
   | { type: "evaluate"; js: string }
-  | { type: "postMessage"; payload: unknown };
+  | { type: "postMessage"; payload: unknown }
+  | { type: "moveTo"; x: number; y: number }
+  | { type: "resizeTo"; width: number; height: number }
+  | { type: "getBounds" }
+  | { type: "getScreenDetails" }
+  | { type: "drainIpcMessages" }
+  | { type: "setStyle"; style: WebviewWindowStylePatch }
+  | { type: "setMinimumSize"; width?: WebviewWindowSizeConstraintValue; height?: WebviewWindowSizeConstraintValue }
+  | { type: "setMaximumSize"; width?: WebviewWindowSizeConstraintValue; height?: WebviewWindowSizeConstraintValue };
 
 export type WebviewEvent =
   | { type: "shown" }
   | { type: "hidden" }
+  | ({ type: "moved" } & WebviewWindowPositionChange)
+  | ({ type: "resized" } & WebviewWindowSizeChange)
+  | { type: "ipcMessages"; messages: WebviewIpcMessage[] }
   | { type: "message"; payload: unknown }
   | { type: "positionFallback"; strategy: "cursor" | "platformDefault" };
+
+export interface WebviewIpcMessage {
+  id: number;
+  source: "page" | "native";
+  payload: unknown;
+}
 
 export interface WebviewHandle {
   show(command: Extract<WebviewCommand, { type: "show" }>): Promise<void>;
@@ -337,15 +383,36 @@ export interface WebviewWindowHandle {
   show(command?: Partial<WebviewWindowOptions>): Promise<void>;
   hide(): Promise<void>;
   destroy(): Promise<void>;
+  moveTo(x: number, y: number): Promise<void>;
+  resizeTo(width: number, height: number): Promise<void>;
+  getBounds(): Promise<Rect>;
+  setMinimumWidth(width: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMinimumHeight(height: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMinimumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMaximumWidth(width: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMaximumHeight(height: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMaximumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<void>;
+  setStyle(style: WebviewWindowStylePatch): Promise<WebviewWindowStyle>;
+  setBackground(
+    background: WebviewWindowBackgroundInput,
+    options?: WebviewBackgroundOptions,
+  ): Promise<WebviewWindowStyle>;
+  listen<TEvent extends keyof WebviewWindowEventMap>(
+    event: TEvent,
+    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void,
+  ): () => void;
+  listen<TPayload = unknown>(event: string, handler: (event: WebviewWindowEvent<TPayload>) => void): () => void;
   setContent(command: Extract<WebviewCommand, { type: "setContent" }>): Promise<void>;
   navigate(url: string): Promise<void>;
   evaluate(js: string): Promise<void>;
   postMessage(payload: unknown): Promise<void>;
+  drainIpcMessages(): Promise<WebviewIpcMessage[]>;
 }
 
 export interface WebviewTrayCapability {
   createWebviewWindow(options: WebviewWindowOptions): WebviewWindowHandle;
   createWebviewHandle(): WebviewHandle;
+  getScreenDetails(): Promise<WebviewScreenDetails>;
 }
 
 export interface WebviewExtensionOptions {
@@ -385,6 +452,9 @@ export const WebviewExt = {
   extend(tray, context) {
     const endpoint = createWebviewEndpoint(tray, context);
     return {
+      getScreenDetails() {
+        return endpoint.command<WebviewScreenDetails>({ type: "getScreenDetails" } satisfies WebviewCommand);
+      },
       createWebviewWindow(options) {
         return createWebviewWindowHandle(endpoint, options);
       },
@@ -404,78 +474,240 @@ export const attachWebview = (tray: TrayHandle, options?: WebviewExtensionOption
     .createWebviewHandle();
 };
 
-const createWebviewEndpoint = (
-  tray: TrayHandle,
-  context: TrayExtensionContext,
-): { command(command: WebviewCommand): Promise<void> } => ({
-  async command(command) {
+interface WebviewEndpoint {
+  command<TResult = unknown>(command: WebviewCommand): Promise<TResult>;
+  listen<TPayload = unknown>(event: string, handler: (event: WebviewWindowEvent<TPayload>) => void): () => void;
+}
+
+type ExtensionEventSourceTray = TrayHandle & {
+  listenExtension<TData = unknown>(
+    ext: string,
+    handler: (event: ExtensionEnvelope<TData>) => void,
+  ): () => void;
+};
+
+const createWebviewEndpoint = (tray: TrayHandle, context: TrayExtensionContext): WebviewEndpoint => ({
+  async command<TResult = unknown>(command: WebviewCommand): Promise<TResult> {
     try {
       await context.ensureLoaded();
     } catch (error) {
       throw new WebviewExtensionLoadError(context, error);
     }
-    await tray.commandExtension(context.mountId, command);
+    const events = await context.request(command);
+    return events[0]?.data as TResult;
+  },
+  listen<TPayload = unknown>(event: string, handler: (event: WebviewWindowEvent<TPayload>) => void): () => void {
+    if (!isExtensionEventSourceTray(tray)) {
+      return () => {};
+    }
+    return tray.listenExtension(context.mountId, (envelope) => {
+      const data = envelope.data;
+      if (!isRecord(data) || data.type !== event) {
+        return;
+      }
+      handler({
+        event,
+        id: 0,
+        payload: eventPayload(data) as Parameters<typeof handler>[0]["payload"],
+      });
+    });
   },
 });
 
 const createLegacyWebviewHandle = (endpoint: {
-  command(command: WebviewCommand): Promise<void>;
+  command<TResult = unknown>(command: WebviewCommand): Promise<TResult>;
 }): WebviewHandle => ({
   show(command) {
-    return endpoint.command(command);
+    return endpoint.command<void>(command);
   },
   hide() {
-    return endpoint.command({ type: "hide" } satisfies WebviewCommand);
+    return endpoint.command<void>({ type: "hide" } satisfies WebviewCommand);
   },
   destroy() {
-    return endpoint.command({ type: "destroy" } satisfies WebviewCommand);
+    return endpoint.command<void>({ type: "destroy" } satisfies WebviewCommand);
   },
   setContent(command) {
-    return endpoint.command(command);
+    return endpoint.command<void>(command);
   },
   navigate(url) {
-    return endpoint.command({ type: "navigate", url } satisfies WebviewCommand);
+    return endpoint.command<void>({ type: "navigate", url } satisfies WebviewCommand);
   },
   evaluate(js) {
-    return endpoint.command({ type: "evaluate", js } satisfies WebviewCommand);
+    return endpoint.command<void>({ type: "evaluate", js } satisfies WebviewCommand);
   },
   postMessage(payload) {
-    return endpoint.command({ type: "postMessage", payload } satisfies WebviewCommand);
+    return endpoint.command<void>({ type: "postMessage", payload } satisfies WebviewCommand);
   },
 });
 
 const createWebviewWindowHandle = (
-  endpoint: { command(command: WebviewCommand): Promise<void> },
+  endpoint: WebviewEndpoint,
   options: WebviewWindowOptions,
-): WebviewWindowHandle => ({
-  show(command = {}) {
-    return endpoint.command({ type: "show", ...options, ...command });
-  },
-  hide() {
-    return endpoint.command({ type: "hide" } satisfies WebviewCommand);
-  },
-  destroy() {
-    return endpoint.command({ type: "destroy" } satisfies WebviewCommand);
-  },
-  setContent(command) {
-    return endpoint.command(command);
-  },
-  navigate(url) {
-    return endpoint.command({ type: "navigate", url } satisfies WebviewCommand);
-  },
-  evaluate(js) {
-    return endpoint.command({ type: "evaluate", js } satisfies WebviewCommand);
-  },
-  postMessage(payload) {
-    return endpoint.command({ type: "postMessage", payload } satisfies WebviewCommand);
-  },
+): WebviewWindowHandle => {
+  let bootstrapped = false;
+  return {
+    async show(command = {}) {
+      const showCommand = {
+        type: "show",
+        ...(bootstrapped ? {} : options),
+        ...command,
+      } satisfies WebviewCommand;
+      await endpoint.command<void>(showCommand);
+      bootstrapped = true;
+    },
+    hide() {
+      return endpoint.command<void>({ type: "hide" } satisfies WebviewCommand);
+    },
+    async destroy() {
+      await endpoint.command<void>({ type: "destroy" } satisfies WebviewCommand);
+      bootstrapped = false;
+    },
+    moveTo(x, y) {
+      return endpoint.command<void>({ type: "moveTo", x, y } satisfies WebviewCommand);
+    },
+    resizeTo(width, height) {
+      return endpoint.command<void>({ type: "resizeTo", width, height } satisfies WebviewCommand);
+    },
+    getBounds() {
+      return endpoint.command<Rect>({ type: "getBounds" } satisfies WebviewCommand);
+    },
+    setMinimumWidth(width) {
+      return endpoint.command<void>({ type: "setMinimumSize", width } satisfies WebviewCommand);
+    },
+    setMinimumHeight(height) {
+      return endpoint.command<void>({ type: "setMinimumSize", height } satisfies WebviewCommand);
+    },
+    setMinimumSize(width, height) {
+      return endpoint.command<void>(createSizeConstraintCommand("setMinimumSize", width, height));
+    },
+    setMaximumWidth(width) {
+      return endpoint.command<void>({ type: "setMaximumSize", width } satisfies WebviewCommand);
+    },
+    setMaximumHeight(height) {
+      return endpoint.command<void>({ type: "setMaximumSize", height } satisfies WebviewCommand);
+    },
+    setMaximumSize(width, height) {
+      return endpoint.command<void>(createSizeConstraintCommand("setMaximumSize", width, height));
+    },
+    setStyle(style) {
+      return endpoint.command<WebviewWindowStyle>({ type: "setStyle", style } satisfies WebviewCommand);
+    },
+    setBackground(background, backgroundOptions) {
+      return endpoint.command<WebviewWindowStyle>({
+        type: "setStyle",
+        style: { background: backgroundInputWithOptions(background, backgroundOptions) },
+      } satisfies WebviewCommand);
+    },
+    listen<TPayload = unknown>(event: string, handler: (event: WebviewWindowEvent<TPayload>) => void): () => void {
+      return endpoint.listen(event, handler);
+    },
+    setContent(command) {
+      return endpoint.command<void>(command);
+    },
+    navigate(url) {
+      return endpoint.command<void>({ type: "navigate", url } satisfies WebviewCommand);
+    },
+    evaluate(js) {
+      return endpoint.command<void>({ type: "evaluate", js } satisfies WebviewCommand);
+    },
+    postMessage(payload) {
+      return endpoint.command<void>({ type: "postMessage", payload } satisfies WebviewCommand);
+    },
+    async drainIpcMessages() {
+      const response = await endpoint.command<Extract<WebviewEvent, { type: "ipcMessages" }>>({
+        type: "drainIpcMessages",
+      } satisfies WebviewCommand);
+      return response.messages;
+    },
+  };
+};
+
+const isExtensionEventSourceTray = (tray: TrayHandle): tray is ExtensionEventSourceTray =>
+  "listenExtension" in tray && typeof tray.listenExtension === "function";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const eventPayload = (data: Record<string, unknown>): unknown => {
+  if ("payload" in data) {
+    return data.payload;
+  }
+  const { type: _type, ...payload } = data;
+  return payload;
+};
+
+const createSizeConstraintCommand = (
+  type: "setMinimumSize" | "setMaximumSize",
+  width: WebviewWindowSizeConstraintValue | undefined,
+  height: WebviewWindowSizeConstraintValue | undefined,
+): Extract<WebviewCommand, { type: "setMinimumSize" | "setMaximumSize" }> => ({
+  type,
+  ...(width === undefined ? {} : { width }),
+  ...(height === undefined ? {} : { height }),
 });
+
+const backgroundInputWithOptions = (
+  background: WebviewWindowBackgroundInput,
+  options: WebviewBackgroundOptions | undefined,
+): WebviewWindowBackgroundInput => {
+  if (options?.state === undefined || typeof background !== "string") {
+    return background;
+  }
+  if (background === "blur") {
+    return { kind: "semantic", token: "blur", state: options.state };
+  }
+  if (background === "mica" || background === "acrylic" || background === "tabbed" || background === "auto") {
+    return { kind: "platformMaterial", material: background, state: options.state };
+  }
+  return background;
+};
 
 export const isWebviewEvent = (event: ExtensionEnvelope): event is ExtensionEnvelope<WebviewEvent> =>
   event.scope.ext === "webview" &&
   typeof event.data === "object" &&
   event.data !== null &&
   "type" in event.data;
+
+export {
+  WebviewPlacementKit,
+  type WebviewPlacement,
+  type WebviewPlacementCursorAuthority,
+  type WebviewPlacementKitDependencies,
+  type WebviewPlacementOptions,
+  type WebviewPlacementPoint,
+  type WebviewPlacementResult,
+  type WebviewPlacementResultKind,
+  type WebviewPlacementScreenAuthority,
+  type WebviewPlacementScreenDetail,
+  type WebviewPlacementScreenDetails,
+  type WebviewPlacementTarget,
+  type WebviewPlacementTrayAuthority,
+} from "./placement";
+
+export {
+  WINDOW_GEOMETRY_UNIT,
+  windowGeometryKit,
+  type WebviewWindowGeometryApplyOptions,
+  type WebviewWindowGeometryPoint,
+  type WebviewWindowGeometryScreenDetail,
+  type WebviewWindowGeometryScreenDetails,
+  type WebviewWindowGeometrySize,
+  type WebviewWindowGeometryTarget,
+} from "./window-geometry";
+
+export {
+  mediaQueryKit,
+  styleKit,
+  type WebviewMediaQuery,
+  type WebviewMediaQueryCallback,
+  type WebviewMediaQueryContext,
+  type WebviewMediaQueryInput,
+  type WebviewMediaQueryRule,
+  type WebviewMediaQueryTarget,
+  type WebviewMediaQueryWatch,
+  type WebviewStyleKitTarget,
+  type WebviewWindowStyleRecipe,
+} from "./responsive";
 
 declare global {
   interface Navigator {

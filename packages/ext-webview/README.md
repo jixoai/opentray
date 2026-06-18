@@ -93,13 +93,7 @@ macOS maps the state to `NSVisualEffectState`. Windows maps the state through it
 
 If the page paints every pixel itself, the native material is still present, but users will not see it.
 
-For tray panels or other glass-like borderless surfaces, keep these as hard rules:
-
-- reset `html, body` margin and padding to `0`
-- keep the native window background transparent
-- do not draw the outer shell in HTML with `box-shadow`, root-level `border-radius`, or fake blur
-- use native window style for outer corners and background material
-- treat the page as content inside the native box, not as the box itself
+For tray panels or other glass-like borderless surfaces, keep the native and page responsibilities separate. The native layer owns the outer material, transparency, and platform corners; the page owns content structure inside that box. Avoid covering the whole native material with opaque page layers or treating page-level shadows, fake blur, and root decoration as a substitute for the native shell. Lightweight panels are closer to cards than documents, so a root-level document scrollbar usually means the window size or card composition needs a product decision.
 
 ## Example
 
@@ -135,7 +129,7 @@ pnpm --filter @opentray/ext-webview example:webview
 Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe.
 The manual walkthrough for all three CLI examples lives in [../cli/examples/EXAMPLE.md](../cli/examples/EXAMPLE.md).
 
-To expose the injected page API, enable it on the window options or a later `show(...)` patch:
+To expose the injected page API, enable it on the window options before the first `show()`:
 
 ```ts
 const webview = tray.createWebviewWindow({
@@ -186,13 +180,15 @@ await webview.show();
 
 Window session law:
 
+- `createWebviewWindow(options)` is the bootstrap declaration for one tray-scoped window session
 - the first `show(...)` for a tray creates the native window session
 - `hide()` only hides that session; it does not destroy the page runtime
-- a repeated compatible `show(...)` reuses the existing page runtime, even if the caller repeats the same `html` or `url`
+- after the first successful show, `show()` restores visibility and does not replay bootstrap width, height, style, content, or native API flags
 - explicit content replacement belongs to `setContent({ type: "setContent", html | url })` or `navigate(url)`
+- explicit size and style changes belong to `resizeTo(...)`, `moveTo(...)`, `setStyle(...)`, `setBackground(...)`, `setMinimumSize(...)`, and `setMaximumSize(...)`
 - explicit session teardown belongs to `destroy()`
 
-This is intentional. `show(...)` is the visibility/bootstrap verb, not the implicit reload verb.
+This is intentional. `show(...)` is the visibility/bootstrap verb, not the implicit reload or reset verb. Tray click handlers should create one handle and call `show()` on that handle repeatedly; do not create a new window, reapply startup style, or resend startup size on every tray activation.
 
 Without `nativeApiPolicy`, page-exposed native capability is local-only by default. Remote URLs do not receive `navigator.window`, `navigator.screen`, global bindings, or page-native sync unless their source is explicitly allowed.
 
@@ -211,6 +207,7 @@ The injected capability follows a typed facade, with a raw `invoke(cmd, payload)
 
 - `await navigator.window.getCapabilities()`
 - `await navigator.window.listen("resized", handler)`
+- `await navigator.window.show()` and `await navigator.window.hide()` to control visibility without replacing content
 - `await navigator.window.resizeTo(520, 320)`
 - `await navigator.window.minimize()`, `maximize()`, and `restore()`
 - `await navigator.window.getWindowState()`, `isMaximized()`, and `isMinimized()`
@@ -227,10 +224,38 @@ The injected capability follows a typed facade, with a raw `invoke(cmd, payload)
 From the host side, keep the lifecycle verbs explicit:
 
 - `await webview.show({ ... })` to create-or-show the tray session
+- `await webview.show()` to restore an already-created session without resetting page, size, style, or native bridge state
 - `await webview.hide()` to hide without destroying the page runtime
 - `await webview.setContent({ type: "setContent", html })` to replace local HTML content explicitly
 - `await webview.navigate("https://example.com/status")` as the URL-focused content replacement alias
+- `await webview.resizeTo(360, 240)` and `await webview.moveTo(10, 20)` for host-owned geometry changes
 - `await webview.destroy()` to destroy the tray-scoped session
+
+For common placement, use `WebviewPlacementKit` rather than a special panel API:
+
+```ts
+import { WebviewExt, WebviewPlacementKit } from "@opentray/ext-webview";
+
+const tray = (await createTray(options)).extend(WebviewExt);
+const panel = tray.createWebviewWindow({
+  html,
+  width: 328,
+  height: 244,
+  nativeWindowApi: true,
+});
+
+await panel.show();
+const placementWatch = await new WebviewPlacementKit({ tray }).watch(panel, {
+  placement: "tray",
+  width: 328,
+  height: 244,
+  placementMargin: 8,
+});
+```
+
+Supported placements include `tray`, `cursor`, `screen-center`, the four screen edges, the four screen corners, and edge-snapping modes such as `edge`, `edge-x`, and `edge-y`. `watch()` keeps placement continuous as tray, screen, target size, or margin inputs change, but it waits for the live bounds to settle before applying a new native placement so user drag/resize wins while interaction is in flight. `applyOnce()` is available for deliberate one-shot placement, while `apply()` aliases the continuous `watch()` path. The result reports `kind` and `source` so callers can distinguish native geometry from a portable fallback.
+
+Window, screen, and tray `Rect` values exposed by OpenTray use desktop logical pixels. `WebviewPlacementKit`, `styleKit`, `mediaQueryKit`, `moveTo`, `resizeTo`, `getBounds`, and `getScreenDetails` all share that coordinate system. Do not apply `devicePixelRatio` correction in host placement code; native runtimes handle physical-pixel conversion at their platform boundary. Overlay titlebar geometry is the separate page-layout API and is converted to CSS pixels by the injected bridge.
 
 Current native support:
 
