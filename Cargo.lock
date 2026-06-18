@@ -2147,6 +2147,7 @@ dependencies = [
  "png 0.17.16",
  "tao",
  "tray-icon",
+ "windows-sys 0.61.2",
  "winit",
  "wry",
 ]

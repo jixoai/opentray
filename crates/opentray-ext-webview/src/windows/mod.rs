@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::io::Cursor;
 use std::num::NonZeroIsize;
@@ -8,6 +8,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::{null, null_mut, NonNull};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use opentray_spec::Rect;
@@ -48,13 +49,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     LoadCursorW, LoadImageW, RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW,
     SetWindowPos, SetWindowTextW, ShowWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT,
     GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
-    ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, SM_CXSIZE,
-    SM_CYSIZE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WM_CLOSE, WM_ERASEBKGND,
-    WM_NCACTIVATE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
-    WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOREDIRECTIONBITMAP,
-    WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP,
-    WS_THICKFRAME, WS_VISIBLE,
+    ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, MINMAXINFO,
+    SM_CXSIZE, SM_CYSIZE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWMINNOACTIVE, SW_SHOWNORMAL,
+    WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE,
+    WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED,
+    WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOREDIRECTIONBITMAP, WS_MAXIMIZE,
+    WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME,
+    WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -63,11 +65,13 @@ use wry::{
 
 mod appwindow;
 mod appwindow_abi;
+mod geometry;
 
 use self::appwindow::{
     apply_windows_titlebar_overlay, titlebar_metrics as appwindow_titlebar_metrics,
     WindowsTitlebarMetrics,
 };
+use self::geometry::WindowsGeometry;
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::{
     parse_background_input, MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings,
@@ -82,6 +86,8 @@ const DEFAULT_TITLE: &str = "OpenTray WebView";
 const WINDOW_NAMESPACE: &str = "opentray.window";
 const SCREEN_NAMESPACE: &str = "opentray.screen";
 const TRAY_NAMESPACE: &str = "opentray.tray";
+const PAGE_IPC_NAMESPACE: &str = "opentray.ipc";
+const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
 const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
 const OPAQUE_BACKGROUND: RGBA = (255, 255, 255, 255);
@@ -89,6 +95,8 @@ const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
 const WINDOWS_BACKGROUND_MATERIALS: &[&str] = &["auto", "mica", "acrylic", "tabbed"];
 const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active", "inactive"];
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
+const WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV: &str = "OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK";
+const WINDOWS_LIVE_RESIZE_ARTIFACT_CLEAR_INTERVAL: Duration = Duration::from_millis(120);
 
 thread_local! {
     static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
@@ -110,10 +118,14 @@ struct WindowsWebviewSlot {
 
 #[derive(Clone, Copy, Default)]
 struct WindowProcState {
+    bridge: Option<NonNull<RefCell<NavigatorWindowBridge>>>,
     window: Option<NonNull<Win32HostWindow>>,
     webview: Option<NonNull<WebView>>,
     host_surface_fill_color: Option<u32>,
     backdrop_state_policy: WindowsBackdropStatePolicy,
+    size_constraints: WindowSizeConstraints,
+    resize_interaction_active: bool,
+    last_resize_artifact_clear_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -124,13 +136,23 @@ enum WindowsBackdropStatePolicy {
     ForceInactive,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct WindowSizeConstraints {
+    min_width: Option<i32>,
+    min_height: Option<i32>,
+    max_width: Option<i32>,
+    max_height: Option<i32>,
+}
+
 struct NavigatorWindowBridge {
     hwnd: HWND,
     window: Option<NonNull<Win32HostWindow>>,
     webview: Option<NonNull<WebView>>,
     content_descriptor: WebviewContentDescriptor,
     listeners: HashMap<String, Vec<NavigatorWindowListener>>,
+    ipc_messages: VecDeque<Value>,
     next_event_id: u32,
+    next_ipc_message_id: u32,
     style: WindowStyleState,
     navigator_window: NavigatorWindowSettings,
     navigator_screen: NavigatorScreenSettings,
@@ -140,6 +162,7 @@ struct NavigatorWindowBridge {
     page_source: PageSourceState,
     page_access: PageCapabilityAccess,
     tray_bounds: Option<Rect>,
+    size_constraints: WindowSizeConstraints,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -264,6 +287,18 @@ struct MovePayload {
 struct ResizePayload {
     width: f64,
     height: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecCommandPayload {
+    command: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SizeConstraintPayload {
+    width: Option<Option<f64>>,
+    height: Option<Option<f64>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -442,8 +477,7 @@ impl WindowsWebviewRuntime {
             }
             WebviewCommand::Evaluate { js } => {
                 let show_settings = self.active_show_settings(tray_id);
-                let slot =
-                    self.ensure_slot(tray_id, None, None, 420.0, 260.0, None, show_settings)?;
+                let slot = self.ensure_script_slot(tray_id, show_settings)?;
                 slot.webview
                     .evaluate_script(&js)
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
@@ -452,8 +486,7 @@ impl WindowsWebviewRuntime {
             }
             WebviewCommand::PostMessage { payload } => {
                 let show_settings = self.active_show_settings(tray_id);
-                let slot =
-                    self.ensure_slot(tray_id, None, None, 420.0, 260.0, None, show_settings)?;
+                let slot = self.ensure_script_slot(tray_id, show_settings)?;
                 let payload_json = serde_json::to_string(&payload)
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
                 slot.webview
@@ -463,6 +496,141 @@ impl WindowsWebviewRuntime {
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
                 self.focus(tray_id)?;
                 Ok(json!({ "type": "message", "payload": payload }))
+            }
+            WebviewCommand::MoveTo { x, y } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "moveTo requires an active WebView window".into(),
+                        )
+                    })?;
+                let x = finite_i32(x, "x")?;
+                let y = finite_i32(y, "y")?;
+                set_window_position(slot.window.hwnd, x, y)?;
+                notify_webview_parent_window_position_changed_from_bridge(&slot.bridge)?;
+                let response = json!({ "x": x, "y": y });
+                emit_window_event(&slot.bridge, "moved", response.clone())?;
+                Ok(response)
+            }
+            WebviewCommand::ResizeTo { width, height } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "resizeTo requires an active WebView window".into(),
+                        )
+                    })?;
+                let width = finite_i32(width, "width")?;
+                let height = finite_i32(height, "height")?;
+                set_window_size(slot.window.hwnd, width, height)?;
+                refresh_after_explicit_resize(&slot.bridge)?;
+                maybe_auto_clear_windows_white_block_artifact(&slot.bridge)?;
+                let response = json!({ "width": width, "height": height });
+                emit_window_event(&slot.bridge, "resized", response.clone())?;
+                emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
+                Ok(response)
+            }
+            WebviewCommand::GetBounds => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "getBounds requires an active WebView window".into(),
+                        )
+                    })?;
+                window_bounds_json(slot.window.hwnd)
+            }
+            WebviewCommand::GetScreenDetails => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "getScreenDetails requires an active WebView window".into(),
+                        )
+                    })?;
+                screen_details_json(slot.window.hwnd)
+            }
+            WebviewCommand::DrainIpcMessages => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "drainIpcMessages requires an active WebView window".into(),
+                        )
+                    })?;
+                let messages: Vec<Value> =
+                    slot.bridge.borrow_mut().ipc_messages.drain(..).collect();
+                Ok(json!({ "type": "ipcMessages", "messages": messages }))
+            }
+            WebviewCommand::SetStyle { style } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "setStyle requires an active WebView window".into(),
+                        )
+                    })?;
+                let payload: SetStylePayload = serde_json::from_value(style).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!("setStyle payload is invalid: {error}"))
+                })?;
+                validate_style_request(&payload)?;
+                let previous_background = slot.bridge.borrow().style.background.clone();
+                let changed = apply_style_patch(&slot.bridge, payload)?;
+                if changed {
+                    apply_window_style(&slot.bridge, Some(&previous_background))?;
+                    apply_webview_client_bounds_from_bridge(&slot.bridge)?;
+                }
+                let response = slot.bridge.borrow().style_json()?;
+                if changed {
+                    emit_window_event(&slot.bridge, "stylechange", response.clone())?;
+                    emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
+                }
+                Ok(response)
+            }
+            WebviewCommand::SetMinimumSize { width, height } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "setMinimumSize requires an active WebView window".into(),
+                        )
+                    })?;
+                apply_window_size_constraint_patch(
+                    &slot.bridge,
+                    SizeConstraintKind::Minimum,
+                    SizeConstraintPayload { width, height },
+                )
+            }
+            WebviewCommand::SetMaximumSize { width, height } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "setMaximumSize requires an active WebView window".into(),
+                        )
+                    })?;
+                apply_window_size_constraint_patch(
+                    &slot.bridge,
+                    SizeConstraintKind::Maximum,
+                    SizeConstraintPayload { width, height },
+                )
             }
         }
     }
@@ -484,13 +652,13 @@ impl WindowsWebviewRuntime {
         tray_id: &str,
         html: Option<String>,
         url: Option<String>,
-        width: f64,
-        height: f64,
+        width: Option<f64>,
+        height: Option<f64>,
         tray_bounds: Option<Rect>,
         show_settings: WebviewShowSettings,
     ) -> Result<&mut WindowsWebviewSlot, WebviewRuntimeError> {
-        let width = width.max(240.0).round() as i32;
-        let height = height.max(160.0).round() as i32;
+        let initial_width = width.unwrap_or(420.0).max(240.0).round() as i32;
+        let initial_height = height.unwrap_or(260.0).max(160.0).round() as i32;
         let requested_content = explicit_content_descriptor(html.as_ref(), url.as_ref());
         let needs_new_slot = self
             .slot
@@ -504,8 +672,8 @@ impl WindowsWebviewRuntime {
                 tray_id.to_string(),
                 html,
                 url,
-                width,
-                height,
+                initial_width,
+                initial_height,
                 tray_bounds,
                 show_settings,
             )?);
@@ -513,21 +681,57 @@ impl WindowsWebviewRuntime {
         }
 
         let slot = self.slot.as_ref().expect("slot exists");
-        ensure_session_reuse_allowed(
-            slot.show_settings.session_bootstrap_settings(),
-            show_settings.session_bootstrap_settings(),
-            &slot.content_descriptor,
-            requested_content.as_ref(),
-        )?;
+        if show_settings.bootstrap_requested {
+            ensure_session_reuse_allowed(
+                slot.show_settings.session_bootstrap_settings(),
+                show_settings.session_bootstrap_settings(),
+                &slot.content_descriptor,
+                requested_content.as_ref(),
+            )?;
+        } else if let Some(requested_content) = requested_content.as_ref() {
+            if &slot.content_descriptor != requested_content {
+                return Err(WebviewRuntimeError::Rejected(
+                    "show cannot replace existing webview content; use setContent, navigate, or destroy then show again".into(),
+                ));
+            }
+        }
 
         let slot = self.slot.as_mut().expect("slot exists");
-        slot.window.resize_to(width, height)?;
+        if let (Some(width), Some(height)) = (width, height) {
+            let width = width.max(240.0).round() as i32;
+            let height = height.max(160.0).round() as i32;
+            slot.window.resize_to(width, height)?;
+            slot.window.position_near_tray(width, height, tray_bounds)?;
+        }
         slot.bridge.borrow_mut().tray_bounds = tray_bounds;
-        slot.window.position_near_tray(width, height, tray_bounds)?;
         apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
         apply_reused_show_updates(slot, &show_settings)?;
         slot.window.show();
         Ok(slot)
+    }
+
+    fn ensure_script_slot(
+        &mut self,
+        tray_id: &str,
+        show_settings: WebviewShowSettings,
+    ) -> Result<&mut WindowsWebviewSlot, WebviewRuntimeError> {
+        let needs_new_slot = self
+            .slot
+            .as_ref()
+            .map(|slot| slot.tray_id != tray_id)
+            .unwrap_or(true);
+        if needs_new_slot {
+            return self.ensure_slot(
+                tray_id,
+                None,
+                None,
+                Some(420.0),
+                Some(260.0),
+                None,
+                show_settings,
+            );
+        }
+        Ok(self.slot.as_mut().expect("slot exists"))
     }
 
     fn create_slot(
@@ -558,7 +762,11 @@ impl WindowsWebviewRuntime {
         let page_access = resolve_page_access(&show_settings, &page_source);
         let webview_bounds = client_webview_bounds(window.hwnd).unwrap_or(WryRect {
             position: PhysicalPosition::new(0, 0).into(),
-            size: PhysicalSize::new(width.max(1), height.max(1)).into(),
+            size: PhysicalSize::new(
+                logical_to_physical_i32(window.hwnd, width.max(1)),
+                logical_to_physical_i32(window.hwnd, height.max(1)),
+            )
+            .into(),
         });
         let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
             hwnd: window.hwnd,
@@ -566,7 +774,9 @@ impl WindowsWebviewRuntime {
             webview: None,
             content_descriptor: content_descriptor.clone(),
             listeners: HashMap::new(),
+            ipc_messages: VecDeque::new(),
             next_event_id: 1,
+            next_ipc_message_id: 1,
             style,
             navigator_window: show_settings.navigator_window,
             navigator_screen: show_settings.navigator_screen,
@@ -586,6 +796,7 @@ impl WindowsWebviewRuntime {
             page_source: page_source.clone(),
             page_access,
             tray_bounds,
+            size_constraints: WindowSizeConstraints::default(),
         }));
 
         let webview = build_webview(
@@ -617,15 +828,18 @@ impl WindowsWebviewRuntime {
         }
         sync_window_proc_state(
             slot.window.hwnd,
+            Some(NonNull::from(slot.bridge.as_ref())),
             Some(NonNull::from(slot.window.as_mut())),
             Some(NonNull::from(slot.webview.as_mut())),
             None,
             backdrop_state_policy(&slot.bridge.borrow().style.background),
+            slot.bridge.borrow().size_constraints,
         );
         apply_window_style(&slot.bridge, None)?;
         apply_window_icon_from_bridge(&slot.bridge)?;
         apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
         slot.window.show();
+        maybe_auto_clear_windows_white_block_artifact(&slot.bridge)?;
 
         Ok(slot)
     }
@@ -693,7 +907,9 @@ impl Drop for WindowsWebviewSlot {
             None,
             None,
             None,
+            None,
             WindowsBackdropStatePolicy::FollowWindowActivation,
+            WindowSizeConstraints::default(),
         );
         self.window.detach_webview();
     }
@@ -709,7 +925,12 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
     };
     if !matches!(
         request.namespace.as_str(),
-        WINDOW_NAMESPACE | SCREEN_NAMESPACE | TRAY_NAMESPACE | PRIVATE_SYNC_NAMESPACE
+        WINDOW_NAMESPACE
+            | SCREEN_NAMESPACE
+            | TRAY_NAMESPACE
+            | PAGE_IPC_NAMESPACE
+            | COMMAND_NAMESPACE
+            | PRIVATE_SYNC_NAMESPACE
     ) {
         return;
     }
@@ -731,6 +952,9 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
         TRAY_NAMESPACE if !access.tray => Err(WebviewRuntimeError::Rejected(
             "navigator.opentray.tray is not enabled for the current page source".into(),
         )),
+        COMMAND_NAMESPACE if !access.window => Err(WebviewRuntimeError::Rejected(
+            "navigator.opentray.execCommand is not enabled for the current page source".into(),
+        )),
         WINDOW_NAMESPACE => dispatch_navigator_window_command(
             bridge,
             &request.cmd,
@@ -739,6 +963,8 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
         ),
         SCREEN_NAMESPACE => dispatch_navigator_screen_command(bridge, &request.cmd),
         TRAY_NAMESPACE => dispatch_navigator_tray_command(bridge, &request.cmd),
+        PAGE_IPC_NAMESPACE => dispatch_page_ipc_command(bridge, &request.cmd, request.payload),
+        COMMAND_NAMESPACE => dispatch_page_exec_command(bridge, &request.cmd, request.payload),
         PRIVATE_SYNC_NAMESPACE => {
             dispatch_private_sync_command(bridge, &request.cmd, request.payload)
         }
@@ -772,6 +998,49 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
                 eprintln!("opentray-ext-webview navigator request failed: {error}");
             }
         }
+    }
+}
+
+fn dispatch_page_ipc_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    cmd: &str,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    match cmd {
+        "postMessage" => {
+            let id = {
+                let mut state = bridge.borrow_mut();
+                let id = state.next_ipc_message_id;
+                state.next_ipc_message_id = state.next_ipc_message_id.saturating_add(1).max(1);
+                state
+                    .ipc_messages
+                    .push_back(json!({ "id": id, "source": "page", "payload": payload }));
+                id
+            };
+            Ok(json!({ "queued": true, "id": id }))
+        }
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported page ipc command: {other}"
+        ))),
+    }
+}
+
+fn dispatch_page_exec_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    cmd: &str,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    match cmd {
+        "execCommand" => {
+            let payload: ExecCommandPayload = serde_json::from_value(payload).map_err(|error| {
+                WebviewRuntimeError::Rejected(format!("execCommand requires command: {error}"))
+            })?;
+            exec_page_command(bridge, payload.command.as_str())?;
+            Ok(Value::Null)
+        }
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported page command: {other}"
+        ))),
     }
 }
 
@@ -810,6 +1079,25 @@ fn dispatch_navigator_window_command(
             }
             Ok(Value::Null)
         }
+        "show" => {
+            let hwnd = bridge.borrow().hwnd;
+            unsafe {
+                ShowWindow(hwnd, SW_SHOW);
+            }
+            let response = window_state_json(hwnd)?;
+            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            emit_overlay_geometry_change_if_enabled(bridge)?;
+            Ok(response)
+        }
+        "hide" => {
+            let hwnd = bridge.borrow().hwnd;
+            unsafe {
+                ShowWindow(hwnd, SW_HIDE);
+            }
+            let response = window_state_json(hwnd)?;
+            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            Ok(response)
+        }
         "minimize" => {
             let hwnd = bridge.borrow().hwnd;
             unsafe {
@@ -844,6 +1132,7 @@ fn dispatch_navigator_window_command(
         "getWindowState" => window_state_json(bridge.borrow().hwnd),
         "isMaximized" => Ok(Value::Bool(unsafe { IsZoomed(bridge.borrow().hwnd) != 0 })),
         "isMinimized" => Ok(Value::Bool(unsafe { IsIconic(bridge.borrow().hwnd) != 0 })),
+        "getBounds" => window_bounds_json(bridge.borrow().hwnd),
         "move" | "moveTo" => {
             let payload: MovePayload = serde_json::from_value(payload).map_err(|error| {
                 WebviewRuntimeError::Rejected(format!("moveTo requires x and y: {error}"))
@@ -865,11 +1154,29 @@ fn dispatch_navigator_window_command(
             let width = finite_i32(payload.width.max(120.0), "width")?;
             let height = finite_i32(payload.height.max(80.0), "height")?;
             set_window_size(bridge.borrow().hwnd, width, height)?;
-            apply_webview_client_bounds_from_bridge(bridge)?;
+            refresh_after_explicit_resize(bridge)?;
             let response = json!({ "width": width, "height": height });
             emit_window_event(bridge, "resized", response.clone())?;
             emit_overlay_geometry_change_if_enabled(bridge)?;
             Ok(response)
+        }
+        "setMinimumSize" => {
+            let payload: SizeConstraintPayload =
+                serde_json::from_value(payload).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "setMinimumSize requires width or height: {error}"
+                    ))
+                })?;
+            apply_window_size_constraint_patch(bridge, SizeConstraintKind::Minimum, payload)
+        }
+        "setMaximumSize" => {
+            let payload: SizeConstraintPayload =
+                serde_json::from_value(payload).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "setMaximumSize requires width or height: {error}"
+                    ))
+                })?;
+            apply_window_size_constraint_patch(bridge, SizeConstraintKind::Maximum, payload)
         }
         "getTitlebarAreaRect" => {
             if !bridge.borrow().navigator_window.window_controls_overlay {
@@ -879,7 +1186,12 @@ fn dispatch_navigator_window_command(
             }
             titlebar_area_rect_json(bridge.borrow().hwnd)
         }
-        "startAppRegionDrag" => start_app_region_drag(bridge.borrow().hwnd),
+        "startAppRegionDrag" => {
+            // SendMessageW enters the native move loop and re-enters WndProc; drop the bridge
+            // borrow first so WM_ENTERSIZEMOVE can queue its interaction event without panicking.
+            let hwnd = { bridge.borrow().hwnd };
+            start_app_region_drag(hwnd)
+        }
         "stopAppRegionDrag" => Ok(json!({ "active": false })),
         "getCapabilities" => bridge.borrow().capabilities_json(),
         "getTitle" => Ok(Value::String(bridge.borrow().metadata.title.clone())),
@@ -1183,7 +1495,7 @@ fn set_child_window_bounds(hwnd: HWND, width: i32, height: i32) -> Result<(), We
 }
 
 fn apply_webview_client_bounds_from_bridge(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    bridge: &RefCell<NavigatorWindowBridge>,
 ) -> Result<(), WebviewRuntimeError> {
     let (hwnd, webview) = {
         let state = bridge.borrow();
@@ -1195,6 +1507,129 @@ fn apply_webview_client_bounds_from_bridge(
     apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd)
 }
 
+fn refresh_after_explicit_resize(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    apply_webview_client_bounds_from_bridge(bridge)?;
+    // Explicit resize commands can expose the same stale host redirection surface family as the
+    // transparent white-block issue (`tauri#10318`). Re-present the host surface in-place and let
+    // WM_PAINT/WM_SIZE reuse the same path; do not hide/show, maximize, or rebuild the WebView.
+    refresh_attached_window_surface(hwnd);
+    refresh_native_window_surface(hwnd)
+}
+
+fn exec_page_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    command: &str,
+) -> Result<(), WebviewRuntimeError> {
+    match command {
+        "clearWhiteBlock"
+        | "clear-white-block"
+        | "clearWindowArtifacts"
+        | "clear-window-artifacts" => clear_windows_white_block_artifact(bridge),
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported page command: {other}"
+        ))),
+    }
+}
+
+fn maybe_auto_clear_windows_white_block_artifact(
+    bridge: &RefCell<NavigatorWindowBridge>,
+) -> Result<(), WebviewRuntimeError> {
+    if !windows_auto_clear_white_block_enabled() {
+        return Ok(());
+    }
+    if !bridge_background_needs_white_block_clear(bridge) {
+        return Ok(());
+    }
+    clear_windows_white_block_artifact(bridge)
+}
+
+fn maybe_auto_clear_windows_white_block_artifact_during_live_resize(
+    hwnd: HWND,
+) -> Result<(), WebviewRuntimeError> {
+    let bridge = WINDOW_PROC_STATES.with(|states| {
+        let now = Instant::now();
+        let mut states = states.borrow_mut();
+        let Some(state) = states.get_mut(&(hwnd as isize)) else {
+            return None;
+        };
+        if !state.resize_interaction_active
+            || !should_run_live_resize_artifact_clear(state.last_resize_artifact_clear_at, now)
+        {
+            return None;
+        }
+        state.last_resize_artifact_clear_at = Some(now);
+        state.bridge
+    });
+    let Some(bridge) = bridge else {
+        return Ok(());
+    };
+    maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
+}
+
+fn should_run_live_resize_artifact_clear(last: Option<Instant>, now: Instant) -> bool {
+    match last {
+        Some(last) => now.duration_since(last) >= WINDOWS_LIVE_RESIZE_ARTIFACT_CLEAR_INTERVAL,
+        None => true,
+    }
+}
+
+fn clear_windows_white_block_artifact(
+    bridge: &RefCell<NavigatorWindowBridge>,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    if is_window_maximized(hwnd) {
+        // Windows DWM keeps the stale redirection artifact in maximized mode even after every
+        // tested shell-state reset probe. The normal-window repair path uses the verified
+        // `SW_SHOWMINNOACTIVE -> SW_RESTORE` reset, but that reset does not clear maximized
+        // artifacts. Do not fight the user with maximize/restore loops here; leave the known
+        // limitation explicit until a deeper DComp/AppWindow fix exists.
+        return Ok(());
+    }
+    show_window_clear_white_block(hwnd, SW_SHOWMINNOACTIVE, SW_RESTORE);
+    finish_shell_state_clear_white_block(bridge)
+}
+
+fn bridge_background_needs_white_block_clear(bridge: &RefCell<NavigatorWindowBridge>) -> bool {
+    let background = bridge.borrow().style.background.clone();
+    background_needs_white_block_clear(&background)
+}
+
+fn background_needs_white_block_clear(background: &WebviewWindowBackground) -> bool {
+    !matches!(background, WebviewWindowBackground::Opaque)
+}
+
+fn windows_auto_clear_white_block_enabled() -> bool {
+    match std::env::var(WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV) {
+        Ok(value) => !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        Err(_) => true,
+    }
+}
+
+fn show_window_clear_white_block(hwnd: HWND, first: i32, second: i32) {
+    unsafe {
+        ShowWindow(hwnd, first);
+        ShowWindow(hwnd, second);
+    }
+}
+
+fn finish_shell_state_clear_white_block(
+    bridge: &RefCell<NavigatorWindowBridge>,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    apply_webview_client_bounds_from_bridge(bridge)?;
+    notify_webview_parent_window_position_changed_from_bridge(bridge)?;
+    let response = window_state_json(hwnd)?;
+    emit_window_event(bridge, "windowstatechange", response)?;
+    emit_overlay_geometry_change_if_enabled(bridge)?;
+    refresh_attached_window_surface(hwnd);
+    refresh_native_window_surface(hwnd)
+}
 fn notify_webview_parent_window_position_changed(
     webview: &WebView,
 ) -> Result<(), WebviewRuntimeError> {
@@ -1203,7 +1638,7 @@ fn notify_webview_parent_window_position_changed(
 }
 
 fn notify_webview_parent_window_position_changed_from_bridge(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    bridge: &RefCell<NavigatorWindowBridge>,
 ) -> Result<(), WebviewRuntimeError> {
     let webview = bridge.borrow().webview;
     let Some(webview) = webview else {
@@ -1266,16 +1701,19 @@ fn apply_reused_show_updates(
         slot.show_settings.window.icon = Some(icon);
     }
 
-    let requested_style = window_style_from_initial(&show_settings.window.style)?;
-    if slot.bridge.borrow().style != requested_style {
-        let previous_background = slot.bridge.borrow().style.background.clone();
-        slot.bridge.borrow_mut().style = requested_style;
-        apply_window_style(&slot.bridge, Some(&previous_background))?;
-        apply_webview_client_bounds_from_bridge(&slot.bridge)?;
-        let response = slot.bridge.borrow().style_json()?;
-        emit_window_event(&slot.bridge, "stylechange", response)?;
-        emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
-        slot.show_settings.window.style = show_settings.window.style.clone();
+    if show_settings.window.style_requested {
+        let requested_style = window_style_from_initial(&show_settings.window.style)?;
+        if slot.bridge.borrow().style != requested_style {
+            let previous_background = slot.bridge.borrow().style.background.clone();
+            slot.bridge.borrow_mut().style = requested_style;
+            apply_window_style(&slot.bridge, Some(&previous_background))?;
+            apply_webview_client_bounds_from_bridge(&slot.bridge)?;
+            let response = slot.bridge.borrow().style_json()?;
+            emit_window_event(&slot.bridge, "stylechange", response)?;
+            emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
+            slot.show_settings.window.style = show_settings.window.style.clone();
+            slot.show_settings.window.style_requested = true;
+        }
     }
 
     Ok(())
@@ -1524,7 +1962,7 @@ fn needs_host_window_rebuild_for_background_transition(
 fn rebuild_host_window_for_background_transition(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (hwnd, window, webview, style, title, tray_bounds) = {
+    let (hwnd, window, webview, style, title, tray_bounds, size_constraints) = {
         let state = bridge.borrow();
         (
             state.hwnd,
@@ -1533,6 +1971,7 @@ fn rebuild_host_window_for_background_transition(
             state.style.clone(),
             state.metadata.title.clone(),
             state.tray_bounds,
+            state.size_constraints,
         )
     };
     let window =
@@ -1542,15 +1981,17 @@ fn rebuild_host_window_for_background_transition(
     let snapshot = snapshot_window_host_rebuild_state(hwnd)?;
     let outer_width = (snapshot.rect.right - snapshot.rect.left).max(240);
     let outer_height = (snapshot.rect.bottom - snapshot.rect.top).max(160);
+    let logical_width = physical_extent_to_logical_u32(hwnd, outer_width) as i32;
+    let logical_height = physical_extent_to_logical_u32(hwnd, outer_height) as i32;
     let rebuilt_window = Box::new(Win32HostWindow::create(
         &title,
-        outer_width,
-        outer_height,
+        logical_width,
+        logical_height,
         tray_bounds,
         wants_no_redirection_bitmap(&style),
     )?);
-    set_window_position(rebuilt_window.hwnd, snapshot.rect.left, snapshot.rect.top)?;
-    set_window_size(rebuilt_window.hwnd, outer_width, outer_height)?;
+    set_window_physical_position(rebuilt_window.hwnd, snapshot.rect.left, snapshot.rect.top)?;
+    set_window_physical_size(rebuilt_window.hwnd, outer_width, outer_height)?;
     apply_native_window_style(rebuilt_window.hwnd, &style)?;
     let was_active = unsafe { GetForegroundWindow() == hwnd };
     unsafe {
@@ -1563,10 +2004,12 @@ fn rebuild_host_window_for_background_transition(
         window.as_ref().attach_webview(webview.as_ref());
         sync_window_proc_state(
             window.as_ref().hwnd,
+            Some(NonNull::from(bridge.as_ref())),
             Some(window),
             Some(webview),
             None,
             backdrop_state_policy(&style.background),
+            size_constraints,
         );
         apply_webview_client_bounds(webview.as_ref(), window.as_ref().hwnd)?;
         sync_transparent_host_surface(bridge, &style)?;
@@ -1694,10 +2137,12 @@ fn sync_transparent_host_surface(
     }
     sync_window_proc_state(
         window.hwnd,
+        Some(NonNull::from(bridge.as_ref())),
         Some(NonNull::from(window)),
         bridge.borrow().webview,
         host_surface_fill_color,
         backdrop_state_policy(&style.background),
+        bridge.borrow().size_constraints,
     );
     Ok(())
 }
@@ -1729,10 +2174,12 @@ fn apply_webview_background_color(
 
 fn sync_window_proc_state(
     hwnd: HWND,
+    bridge: Option<NonNull<RefCell<NavigatorWindowBridge>>>,
     window: Option<NonNull<Win32HostWindow>>,
     webview: Option<NonNull<WebView>>,
     host_surface_fill_color: Option<u32>,
     backdrop_state_policy: WindowsBackdropStatePolicy,
+    size_constraints: WindowSizeConstraints,
 ) {
     WINDOW_PROC_STATES.with(|states| {
         let mut states = states.borrow_mut();
@@ -1740,13 +2187,18 @@ fn sync_window_proc_state(
             states.remove(&(hwnd as isize));
             return;
         }
+        let previous = states.get(&(hwnd as isize)).copied().unwrap_or_default();
         states.insert(
             hwnd as isize,
             WindowProcState {
+                bridge,
                 window,
                 webview,
                 host_surface_fill_color,
                 backdrop_state_policy,
+                size_constraints,
+                resize_interaction_active: previous.resize_interaction_active,
+                last_resize_artifact_clear_at: previous.last_resize_artifact_clear_at,
             },
         );
     });
@@ -1760,6 +2212,145 @@ fn with_window_proc_state<R>(hwnd: HWND, f: impl FnOnce(WindowProcState) -> R) -
             .copied()
             .unwrap_or_default();
         f(state)
+    })
+}
+
+fn sync_window_proc_size_constraints(hwnd: HWND, size_constraints: WindowSizeConstraints) {
+    WINDOW_PROC_STATES.with(|states| {
+        if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
+            state.size_constraints = size_constraints;
+        }
+    });
+}
+
+fn set_window_proc_resize_interaction(hwnd: HWND, active: bool) {
+    WINDOW_PROC_STATES.with(|states| {
+        if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
+            state.resize_interaction_active = active;
+            if active {
+                state.last_resize_artifact_clear_at = None;
+            }
+        }
+    });
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SizeConstraintKind {
+    Minimum,
+    Maximum,
+}
+
+fn apply_window_size_constraint_patch(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    kind: SizeConstraintKind,
+    payload: SizeConstraintPayload,
+) -> Result<Value, WebviewRuntimeError> {
+    if payload.width.is_none() && payload.height.is_none() {
+        return Err(WebviewRuntimeError::Rejected(
+            "size constraint update requires width or height".into(),
+        ));
+    }
+    let hwnd = bridge.borrow().hwnd;
+    let mut state = bridge.borrow_mut();
+    let mut constraints = state.size_constraints;
+    match kind {
+        SizeConstraintKind::Minimum => {
+            if let Some(width) = payload.width {
+                constraints.min_width = positive_constraint_i32(width, "width")?;
+            }
+            if let Some(height) = payload.height {
+                constraints.min_height = positive_constraint_i32(height, "height")?;
+            }
+        }
+        SizeConstraintKind::Maximum => {
+            if let Some(width) = payload.width {
+                constraints.max_width = positive_constraint_i32(width, "width")?;
+            }
+            if let Some(height) = payload.height {
+                constraints.max_height = positive_constraint_i32(height, "height")?;
+            }
+        }
+    }
+    validate_size_constraint_order(constraints)?;
+    state.size_constraints = constraints;
+    drop(state);
+    sync_window_proc_size_constraints(hwnd, constraints);
+    enforce_current_window_size_constraints(bridge, constraints)?;
+    Ok(size_constraints_json(constraints))
+}
+
+fn positive_constraint_i32(
+    value: Option<f64>,
+    field: &str,
+) -> Result<Option<i32>, WebviewRuntimeError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if !value.is_finite() || value <= 0.0 {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{field} must be a finite positive number or null"
+        )));
+    }
+    Ok(Some(value.round().clamp(1.0, i32::MAX as f64) as i32))
+}
+
+fn validate_size_constraint_order(
+    constraints: WindowSizeConstraints,
+) -> Result<(), WebviewRuntimeError> {
+    if let (Some(min_width), Some(max_width)) = (constraints.min_width, constraints.max_width) {
+        if min_width > max_width {
+            return Err(WebviewRuntimeError::Rejected(
+                "minimum width cannot exceed maximum width".into(),
+            ));
+        }
+    }
+    if let (Some(min_height), Some(max_height)) = (constraints.min_height, constraints.max_height) {
+        if min_height > max_height {
+            return Err(WebviewRuntimeError::Rejected(
+                "minimum height cannot exceed maximum height".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn enforce_current_window_size_constraints(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    constraints: WindowSizeConstraints,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    let current = window_bounds(hwnd)?;
+    let width = constrain_dimension(
+        current.width as i32,
+        constraints.min_width,
+        constraints.max_width,
+    );
+    let height = constrain_dimension(
+        current.height as i32,
+        constraints.min_height,
+        constraints.max_height,
+    );
+    if width == current.width as i32 && height == current.height as i32 {
+        return Ok(());
+    }
+    set_window_size(hwnd, width, height)?;
+    refresh_after_explicit_resize(bridge)?;
+    maybe_auto_clear_windows_white_block_artifact(bridge)?;
+    let response = json!({ "width": width, "height": height });
+    emit_window_event(bridge, "resized", response)?;
+    emit_overlay_geometry_change_if_enabled(bridge)
+}
+
+fn constrain_dimension(value: i32, min: Option<i32>, max: Option<i32>) -> i32 {
+    value.clamp(min.unwrap_or(1), max.unwrap_or(i32::MAX))
+}
+
+fn size_constraints_json(constraints: WindowSizeConstraints) -> Value {
+    json!({
+        "minWidth": constraints.min_width,
+        "minHeight": constraints.min_height,
+        "maxWidth": constraints.max_width,
+        "maxHeight": constraints.max_height,
     })
 }
 
@@ -2433,7 +3024,7 @@ fn icon_event_payload(icon: Option<&WebviewWindowIcon>) -> Result<Value, Webview
 }
 
 fn resolve_callback(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    bridge: &RefCell<NavigatorWindowBridge>,
     callback_id: u32,
     payload: Value,
 ) -> Result<(), WebviewRuntimeError> {
@@ -2441,7 +3032,7 @@ fn resolve_callback(
 }
 
 fn reject_callback(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    bridge: &RefCell<NavigatorWindowBridge>,
     callback_id: u32,
     error: &WebviewRuntimeError,
 ) -> Result<(), WebviewRuntimeError> {
@@ -2449,7 +3040,7 @@ fn reject_callback(
 }
 
 fn emit_window_event(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    bridge: &RefCell<NavigatorWindowBridge>,
     event: &str,
     payload: Value,
 ) -> Result<(), WebviewRuntimeError> {
@@ -2467,7 +3058,7 @@ fn emit_window_event(
 }
 
 fn emit_overlay_geometry_change_if_enabled(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    bridge: &RefCell<NavigatorWindowBridge>,
 ) -> Result<(), WebviewRuntimeError> {
     let should_emit = {
         let state = bridge.borrow();
@@ -2523,7 +3114,7 @@ fn listener_event_script(
 }
 
 fn evaluate_bridge_script(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    bridge: &RefCell<NavigatorWindowBridge>,
     script: String,
 ) -> Result<(), WebviewRuntimeError> {
     let webview = bridge
@@ -2550,6 +3141,26 @@ fn webview_debug_enabled() -> bool {
 fn window_state_json(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
     serde_json::to_value(window_state_snapshot(hwnd))
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+}
+
+fn window_bounds_json(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
+    serde_json::to_value(window_bounds(hwnd)?)
+        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+}
+
+fn window_bounds(hwnd: HWND) -> Result<Rect, WebviewRuntimeError> {
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+        return Err(WebviewRuntimeError::Internal(
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(physical_rect_to_public_window_rect(hwnd, rect))
 }
 
 fn snapshot_window_host_rebuild_state(
@@ -2660,9 +3271,9 @@ fn current_monitor_detail(hwnd: HWND) -> Option<ScreenDetailState> {
         id: "screen-0".to_string(),
         label: "Display 1".to_string(),
         is_primary: info.dwFlags & 1 != 0,
-        frame: rect_to_opentray_rect(info.rcMonitor),
-        visible_frame: rect_to_opentray_rect(info.rcWork),
-        scale_factor: 1.0,
+        frame: physical_rect_to_public_window_rect(hwnd, info.rcMonitor),
+        visible_frame: physical_rect_to_public_window_rect(hwnd, info.rcWork),
+        scale_factor: windows_geometry(hwnd).scale_factor(),
     })
 }
 
@@ -2814,15 +3425,6 @@ fn physical_system_metric(index: i32, dpi: u32) -> f64 {
     (value as f64).max(0.0)
 }
 
-fn rect_to_opentray_rect(rect: RECT) -> Rect {
-    Rect {
-        x: rect.left,
-        y: rect.top,
-        width: (rect.right - rect.left).max(0) as u32,
-        height: (rect.bottom - rect.top).max(0) as u32,
-    }
-}
-
 fn start_app_region_drag(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
     unsafe {
         ReleaseCapture();
@@ -2842,24 +3444,23 @@ fn set_window_title(hwnd: HWND, title: &str) -> Result<(), WebviewRuntimeError> 
 }
 
 fn set_window_position(hwnd: HWND, x: i32, y: i32) -> Result<(), WebviewRuntimeError> {
-    if unsafe { SetWindowPos(hwnd, null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER) } == 0 {
-        return Err(WebviewRuntimeError::Internal(
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    Ok(())
+    set_window_physical_position(
+        hwnd,
+        logical_to_physical_i32(hwnd, x),
+        logical_to_physical_i32(hwnd, y),
+    )
 }
 
-fn set_window_size(hwnd: HWND, width: i32, height: i32) -> Result<(), WebviewRuntimeError> {
+fn set_window_physical_position(hwnd: HWND, x: i32, y: i32) -> Result<(), WebviewRuntimeError> {
     if unsafe {
         SetWindowPos(
             hwnd,
             null_mut(),
+            x,
+            y,
             0,
             0,
-            width,
-            height,
-            SWP_NOMOVE | SWP_NOZORDER,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         )
     } == 0
     {
@@ -2868,6 +3469,82 @@ fn set_window_size(hwnd: HWND, width: i32, height: i32) -> Result<(), WebviewRun
         ));
     }
     Ok(())
+}
+
+fn set_window_size(hwnd: HWND, width: i32, height: i32) -> Result<(), WebviewRuntimeError> {
+    set_window_physical_size(
+        hwnd,
+        logical_to_physical_i32(hwnd, width),
+        logical_to_physical_i32(hwnd, height),
+    )
+}
+
+fn set_window_physical_size(
+    hwnd: HWND,
+    width: i32,
+    height: i32,
+) -> Result<(), WebviewRuntimeError> {
+    if unsafe {
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            0,
+            0,
+            width,
+            height,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    } == 0
+    {
+        return Err(WebviewRuntimeError::Internal(
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn window_dpi(hwnd: HWND) -> u32 {
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    if dpi == 0 {
+        96
+    } else {
+        dpi
+    }
+}
+
+fn windows_geometry(hwnd: HWND) -> WindowsGeometry {
+    WindowsGeometry::from_dpi(window_dpi(hwnd))
+}
+
+fn logical_to_physical_i32(hwnd: HWND, value: i32) -> i32 {
+    windows_geometry(hwnd).logical_to_physical_i32(value)
+}
+
+fn physical_to_logical_i32(hwnd: HWND, value: i32) -> i32 {
+    windows_geometry(hwnd).physical_to_logical_i32(value)
+}
+
+fn physical_extent_to_logical_u32(hwnd: HWND, value: i32) -> u32 {
+    physical_to_logical_i32(hwnd, value.max(0)).max(0) as u32
+}
+
+fn physical_rect_to_public_window_rect(hwnd: HWND, rect: RECT) -> Rect {
+    windows_geometry(hwnd).physical_rect_to_logical_rect(rect)
+}
+
+#[cfg(test)]
+fn logical_to_physical_i32_for_dpi(dpi: u32, value: i32) -> i32 {
+    opentray_spec::geometry::logical_to_physical_i32_for_dpi(dpi, value)
+}
+
+#[cfg(test)]
+fn physical_to_logical_i32_for_dpi(dpi: u32, value: i32) -> i32 {
+    opentray_spec::geometry::physical_to_logical_i32_for_dpi(dpi, value)
+}
+
+#[cfg(test)]
+fn physical_rect_to_public_window_rect_for_dpi(dpi: u32, rect: RECT) -> Rect {
+    WindowsGeometry::from_dpi(dpi).physical_rect_to_logical_rect(rect)
 }
 
 fn finite_i32(value: f64, field: &str) -> Result<i32, WebviewRuntimeError> {
@@ -3205,6 +3882,10 @@ impl Win32HostWindow {
                 std::io::Error::last_os_error().to_string(),
             ));
         }
+        set_window_size(hwnd, width, height)?;
+        if tray_bounds.is_some() {
+            set_window_position(hwnd, x, y)?;
+        }
         let mut window = Self {
             hwnd,
             transparent_surface: None,
@@ -3404,6 +4085,31 @@ unsafe extern "system" fn window_proc(
             });
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
+        WM_GETMINMAXINFO => {
+            apply_minmax_info(hwnd, lparam);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_ENTERSIZEMOVE => {
+            set_window_proc_resize_interaction(hwnd, true);
+            emit_window_interaction_change(hwnd, true);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_EXITSIZEMOVE => {
+            set_window_proc_resize_interaction(hwnd, false);
+            emit_window_interaction_change(hwnd, false);
+            with_window_proc_state(hwnd, |state| {
+                if let Some(bridge) = state.bridge {
+                    if let Err(error) =
+                        maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
+                    {
+                        eprintln!(
+                            "opentray-ext-webview failed to auto-clear Windows resize artifact: {error}"
+                        );
+                    }
+                }
+            });
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_WINDOWPOSCHANGED => {
             refresh_attached_window_surface(hwnd);
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -3413,6 +4119,13 @@ unsafe extern "system" fn window_proc(
         WM_SIZE => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
             refresh_attached_window_surface(hwnd);
+            if let Err(error) =
+                maybe_auto_clear_windows_white_block_artifact_during_live_resize(hwnd)
+            {
+                eprintln!(
+                    "opentray-ext-webview failed to auto-clear Windows live resize artifact: {error}"
+                );
+            }
             result
         }
         WM_PAINT => {
@@ -3421,6 +4134,28 @@ unsafe extern "system" fn window_proc(
             result
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+fn apply_minmax_info(hwnd: HWND, lparam: LPARAM) {
+    if lparam == 0 {
+        return;
+    }
+    let constraints = with_window_proc_state(hwnd, |state| state.size_constraints);
+    unsafe {
+        let minmax = &mut *(lparam as *mut MINMAXINFO);
+        if let Some(width) = constraints.min_width {
+            minmax.ptMinTrackSize.x = logical_to_physical_i32(hwnd, width);
+        }
+        if let Some(height) = constraints.min_height {
+            minmax.ptMinTrackSize.y = logical_to_physical_i32(hwnd, height);
+        }
+        if let Some(width) = constraints.max_width {
+            minmax.ptMaxTrackSize.x = logical_to_physical_i32(hwnd, width);
+        }
+        if let Some(height) = constraints.max_height {
+            minmax.ptMaxTrackSize.y = logical_to_physical_i32(hwnd, height);
+        }
     }
 }
 
@@ -3436,6 +4171,22 @@ fn refresh_attached_window_surface(hwnd: HWND) {
             if let Err(error) = apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd) {
                 eprintln!("opentray-ext-webview failed to resize Windows WebView child: {error}");
             }
+        }
+    });
+}
+
+fn emit_window_interaction_change(hwnd: HWND, active: bool) {
+    with_window_proc_state(hwnd, |state| {
+        if let Some(bridge) = state.bridge {
+            let mut bridge_state = unsafe { bridge.as_ref() }.borrow_mut();
+            let id = bridge_state.next_ipc_message_id;
+            bridge_state.next_ipc_message_id =
+                bridge_state.next_ipc_message_id.saturating_add(1).max(1);
+            bridge_state.ipc_messages.push_back(json!({
+                "id": id,
+                "source": "native",
+                "payload": { "type": "windowInteraction", "active": active }
+            }));
         }
     });
 }
@@ -3493,6 +4244,43 @@ fn wide_null(value: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_white_block_auto_clear_only_targets_translucent_backgrounds() {
+        assert!(!background_needs_white_block_clear(
+            &WebviewWindowBackground::Opaque
+        ));
+        assert!(background_needs_white_block_clear(
+            &WebviewWindowBackground::Transparent
+        ));
+        assert!(background_needs_white_block_clear(
+            &WebviewWindowBackground::PlatformMaterial {
+                material: "mica".to_string(),
+                state: WebviewBackgroundEffectState::Active,
+            }
+        ));
+        assert!(background_needs_white_block_clear(
+            &WebviewWindowBackground::Semantic {
+                token: "blur".to_string(),
+                state: WebviewBackgroundEffectState::Active,
+            }
+        ));
+    }
+
+    #[test]
+    fn windows_live_resize_white_block_clear_is_throttled() {
+        let now = Instant::now();
+
+        assert!(should_run_live_resize_artifact_clear(None, now));
+        assert!(!should_run_live_resize_artifact_clear(
+            Some(now - Duration::from_millis(30)),
+            now
+        ));
+        assert!(should_run_live_resize_artifact_clear(
+            Some(now - Duration::from_millis(200)),
+            now
+        ));
+    }
 
     #[test]
     fn validate_style_request_accepts_windows_background_family() {
@@ -3848,6 +4636,37 @@ mod tests {
                 bottom: 960,
             }
         );
+    }
+
+    #[test]
+    fn public_window_geometry_converts_physical_bounds_to_logical_pixels() {
+        let rect = physical_rect_to_public_window_rect_for_dpi(
+            144,
+            RECT {
+                left: 150,
+                top: 90,
+                right: 780,
+                bottom: 540,
+            },
+        );
+
+        assert_eq!(
+            rect,
+            Rect {
+                x: 100,
+                y: 60,
+                width: 420,
+                height: 300,
+            }
+        );
+    }
+
+    #[test]
+    fn public_window_geometry_converts_logical_inputs_to_windows_physical_pixels() {
+        assert_eq!(logical_to_physical_i32_for_dpi(144, 420), 630);
+        assert_eq!(logical_to_physical_i32_for_dpi(144, 300), 450);
+        assert_eq!(physical_to_logical_i32_for_dpi(144, 630), 420);
+        assert_eq!(physical_to_logical_i32_for_dpi(144, 450), 300);
     }
 
     #[test]

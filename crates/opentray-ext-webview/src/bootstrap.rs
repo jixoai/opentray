@@ -294,6 +294,12 @@ pub(crate) fn navigator_window_bootstrap_script(
         close() {
           return invoke("close");
         },
+        show() {
+          return invoke("show");
+        },
+        hide() {
+          return invoke("hide");
+        },
         minimize() {
           return invoke("minimize");
         },
@@ -323,6 +329,33 @@ pub(crate) fn navigator_window_bootstrap_script(
         },
         resizeTo(width, height) {
           return invoke("resizeTo", { width, height });
+        },
+        getBounds() {
+          return invoke("getBounds");
+        },
+        setMinimumWidth(width) {
+          return invoke("setMinimumSize", { width });
+        },
+        setMinimumHeight(height) {
+          return invoke("setMinimumSize", { height });
+        },
+        setMinimumSize(width, height) {
+          const payload = {};
+          if (width !== undefined) payload.width = width;
+          if (height !== undefined) payload.height = height;
+          return invoke("setMinimumSize", payload);
+        },
+        setMaximumWidth(width) {
+          return invoke("setMaximumSize", { width });
+        },
+        setMaximumHeight(height) {
+          return invoke("setMaximumSize", { height });
+        },
+        setMaximumSize(width, height) {
+          const payload = {};
+          if (width !== undefined) payload.width = width;
+          if (height !== undefined) payload.height = height;
+          return invoke("setMaximumSize", payload);
         },
         startAppRegionDrag(options) {
           return invoke("startAppRegionDrag", options ?? {});
@@ -422,6 +455,29 @@ pub(crate) fn navigator_window_bootstrap_script(
         configurable: true
       });
       return api;
+    };
+    const createIpcApi = () => {
+      const api = {
+        postMessage(payload) {
+          return invokeWithNamespace("opentray.ipc", "postMessage", payload ?? null);
+        }
+      };
+      return Object.freeze(api);
+    };
+    const createCommandApi = () => {
+      const execCommand = (command) => {
+        if (typeof command !== "string" || command.length === 0) return;
+        window.ipc.postMessage(
+          JSON.stringify({
+            namespace: "opentray.command",
+            cmd: "execCommand",
+            callback: 0,
+            error: 0,
+            payload: { command }
+          })
+        );
+      };
+      return execCommand;
     };
     const readActiveFaviconHref = () => {
       const links = Array.from(
@@ -579,6 +635,15 @@ pub(crate) fn navigator_window_bootstrap_script(
           configurable: true
         });
       }
+      opentrayApi ??= {};
+      defineBridgeProperty(opentrayApi, "ipc", {
+        value: createIpcApi(),
+        configurable: true
+      });
+      defineBridgeProperty(opentrayApi, "execCommand", {
+        value: createCommandApi(),
+        configurable: true
+      });
       if (opentrayApi) {
         defineBridgeProperty(navigator, "opentray", {
           value: Object.freeze(opentrayApi),
@@ -689,7 +754,9 @@ fn native_api_source_token(rule: &WebviewNativeApiSource) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use serde_json::Value;
 
@@ -910,12 +977,20 @@ process.stdout.write(JSON.stringify(result));
 "#,
         );
 
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let script_path = std::env::temp_dir().join(format!(
+            "opentray-bootstrap-probe-{}-{nonce}.mjs",
+            std::process::id()
+        ));
+        fs::write(&script_path, program).expect("node probe script should be writable");
         let output = Command::new("node")
-            .arg("--input-type=module")
-            .arg("--eval")
-            .arg(program)
+            .arg(&script_path)
             .output()
             .expect("node must be available to validate injected navigator runtime behavior");
+        let _ = fs::remove_file(&script_path);
         assert!(
             output.status.success(),
             "node probe failed: {}",

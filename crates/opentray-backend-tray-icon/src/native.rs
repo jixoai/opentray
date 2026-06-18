@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, convert::TryFrom};
 
 #[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
@@ -7,11 +7,18 @@ use objc2_app_kit::NSEvent;
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSRect;
 use opentray_core::BackendError;
-use opentray_spec::{SurfaceId, TrayEvent};
+use opentray_spec::{geometry::DpiScale, SurfaceId, TrayEvent};
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };
 use tray_icon::{Icon as NativeIcon, TrayIcon, TrayIconBuilder};
+
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::{RECT, S_OK};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Graphics::Gdi::{MonitorFromRect, MONITOR_DEFAULTTONEAREST};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 
 use crate::{
     TrayIconAsset, TrayIconMenuEntry, TrayIconMenuProjection, TrayIconProjection,
@@ -245,12 +252,52 @@ fn native_tray_bounds_from_mouse(icon: &TrayIcon) -> Option<opentray_spec::Rect>
 
 #[cfg(target_os = "windows")]
 fn native_tray_bounds(icon: &TrayIcon) -> Option<opentray_spec::Rect> {
-    icon.rect().map(|rect| opentray_spec::Rect {
-        x: rect.position.x.round() as i32,
-        y: rect.position.y.round() as i32,
-        width: rect.size.width,
-        height: rect.size.height,
+    // Normalize tray geometry to logical desktop pixels before it crosses the backend boundary.
+    // Placement math then sees the same unit system as window and screen snapshots.
+    let rect = icon.rect()?;
+    let dpi = tray_rect_dpi(&rect)?;
+    let scale = DpiScale::from_dpi(dpi);
+    let width = i32::try_from(rect.size.width).unwrap_or(i32::MAX);
+    let height = i32::try_from(rect.size.height).unwrap_or(i32::MAX);
+    Some(opentray_spec::Rect {
+        x: scale.physical_to_logical_i32(rect.position.x.round() as i32),
+        y: scale.physical_to_logical_i32(rect.position.y.round() as i32),
+        width: scale.physical_extent_to_logical_u32(width),
+        height: scale.physical_extent_to_logical_u32(height),
     })
+}
+
+#[cfg(target_os = "windows")]
+fn tray_rect_dpi(rect: &tray_icon::Rect) -> Option<u32> {
+    let width = i32::try_from(rect.size.width).unwrap_or(i32::MAX);
+    let height = i32::try_from(rect.size.height).unwrap_or(i32::MAX);
+    let x = rect
+        .position
+        .x
+        .round()
+        .clamp(i32::MIN as f64, i32::MAX as f64) as i32;
+    let y = rect
+        .position
+        .y
+        .round()
+        .clamp(i32::MIN as f64, i32::MAX as f64) as i32;
+    let physical_rect = RECT {
+        left: x,
+        top: y,
+        right: x.saturating_add(width),
+        bottom: y.saturating_add(height),
+    };
+    let monitor = unsafe { MonitorFromRect(&physical_rect, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return None;
+    }
+    let mut dpi_x = 0u32;
+    let mut dpi_y = 0u32;
+    let result = unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) };
+    if result != S_OK || dpi_x == 0 || dpi_y == 0 {
+        return None;
+    }
+    Some(dpi_x)
 }
 
 #[cfg(target_os = "macos")]

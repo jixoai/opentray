@@ -9,7 +9,12 @@ mod screen;
 mod style;
 mod window_state;
 
-use std::{cell::RefCell, collections::HashMap, ptr::NonNull, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+    ptr::NonNull,
+    rc::Rc,
+};
 
 use objc2::{rc::Retained, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSApplication, NSBackingStoreType, NSResponder, NSScreen, NSView, NSWindow};
@@ -25,7 +30,10 @@ use crate::{
 };
 
 use self::app_menu::ensure_standard_edit_menu;
-use self::bridge::{emit_window_event, handle_navigator_window_request};
+use self::bridge::{
+    apply_window_size_constraint_options, apply_window_style_patch, emit_window_event,
+    handle_navigator_window_request, window_bounds_json, SizeConstraintKind,
+};
 use self::demo_html::default_webview_html;
 use self::drag::AppRegionDragState;
 use self::metadata::{
@@ -35,6 +43,7 @@ use self::metadata::{
 };
 use self::overlay::emit_overlay_geometry_change_if_enabled;
 use self::policy::{resolve_page_access, update_page_access_for_url};
+use self::screen::screen_details_json;
 use self::style::{
     apply_window_style, framed_window_style_mask, supported_background_effects,
     validate_initial_style, WindowStyleState,
@@ -44,6 +53,8 @@ use crate::bootstrap::navigator_window_bootstrap_script;
 const WINDOW_NAMESPACE: &str = "opentray.window";
 const SCREEN_NAMESPACE: &str = "opentray.screen";
 const TRAY_NAMESPACE: &str = "opentray.tray";
+const PAGE_IPC_NAMESPACE: &str = "opentray.ipc";
+const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
 const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
 const OPAQUE_BACKGROUND: RGBA = (255, 255, 255, 255);
@@ -67,7 +78,9 @@ struct NavigatorWindowBridge {
     webview: Option<NonNull<WebView>>,
     content_view: Option<Retained<NSView>>,
     listeners: HashMap<String, Vec<NavigatorWindowListener>>,
+    ipc_messages: VecDeque<Value>,
     next_event_id: u32,
+    next_ipc_message_id: u32,
     style: WindowStyleState,
     navigator_window: NavigatorWindowSettings,
     navigator_screen: NavigatorScreenSettings,
@@ -78,12 +91,21 @@ struct NavigatorWindowBridge {
     page_source: PageSourceState,
     page_access: PageCapabilityAccess,
     tray_bounds: Option<opentray_spec::Rect>,
+    size_constraints: WindowSizeConstraints,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct NavigatorWindowListener {
     event_id: u32,
     handler_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct WindowSizeConstraints {
+    min_width: Option<f64>,
+    min_height: Option<f64>,
+    max_width: Option<f64>,
+    max_height: Option<f64>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -199,8 +221,7 @@ impl MacosWebviewRuntime {
             }
             WebviewCommand::Evaluate { js } => {
                 let show_settings = self.active_show_settings(tray_id);
-                let slot =
-                    self.ensure_slot(tray_id, None, None, 420.0, 260.0, None, show_settings)?;
+                let slot = self.ensure_script_slot(tray_id, show_settings)?;
                 slot.webview
                     .evaluate_script(&js)
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
@@ -209,8 +230,7 @@ impl MacosWebviewRuntime {
             }
             WebviewCommand::PostMessage { payload } => {
                 let show_settings = self.active_show_settings(tray_id);
-                let slot =
-                    self.ensure_slot(tray_id, None, None, 420.0, 260.0, None, show_settings)?;
+                let slot = self.ensure_script_slot(tray_id, show_settings)?;
                 let payload_json = serde_json::to_string(&payload)
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
                 slot.webview
@@ -220,6 +240,129 @@ impl MacosWebviewRuntime {
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
                 self.focus()?;
                 Ok(json!({ "type": "message", "payload": payload }))
+            }
+            WebviewCommand::MoveTo { x, y } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "moveTo requires an active WebView window".into(),
+                        )
+                    })?;
+                slot.window.setFrameOrigin(NSPoint::new(x, y));
+                let response = json!({ "x": x, "y": y });
+                emit_window_event(&slot.bridge, "moved", response.clone())?;
+                Ok(response)
+            }
+            WebviewCommand::ResizeTo { width, height } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "resizeTo requires an active WebView window".into(),
+                        )
+                    })?;
+                slot.window.setContentSize(NSSize::new(width, height));
+                let response = json!({ "width": width, "height": height });
+                emit_window_event(&slot.bridge, "resized", response.clone())?;
+                emit_overlay_geometry_change_if_enabled(&slot.bridge, &slot.window)?;
+                Ok(response)
+            }
+            WebviewCommand::GetBounds => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "getBounds requires an active WebView window".into(),
+                        )
+                    })?;
+                window_bounds_json(&slot.window)
+            }
+            WebviewCommand::GetScreenDetails => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "getScreenDetails requires an active WebView window".into(),
+                        )
+                    })?;
+                screen_details_json(&slot.window)
+            }
+            WebviewCommand::DrainIpcMessages => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "drainIpcMessages requires an active WebView window".into(),
+                        )
+                    })?;
+                let messages: Vec<Value> =
+                    slot.bridge.borrow_mut().ipc_messages.drain(..).collect();
+                Ok(json!({ "type": "ipcMessages", "messages": messages }))
+            }
+            WebviewCommand::SetStyle { style } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "setStyle requires an active WebView window".into(),
+                        )
+                    })?;
+                let payload: self::style::SetStylePayload =
+                    serde_json::from_value(style).map_err(|error| {
+                        WebviewRuntimeError::Rejected(format!(
+                            "setStyle payload is invalid: {error}"
+                        ))
+                    })?;
+                apply_window_style_patch(&slot.bridge, &slot.window, payload)
+            }
+            WebviewCommand::SetMinimumSize { width, height } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "setMinimumSize requires an active WebView window".into(),
+                        )
+                    })?;
+                apply_window_size_constraint_options(
+                    &slot.bridge,
+                    &slot.window,
+                    SizeConstraintKind::Minimum,
+                    width,
+                    height,
+                )
+            }
+            WebviewCommand::SetMaximumSize { width, height } => {
+                let slot = self
+                    .slot
+                    .as_mut()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "setMaximumSize requires an active WebView window".into(),
+                        )
+                    })?;
+                apply_window_size_constraint_options(
+                    &slot.bridge,
+                    &slot.window,
+                    SizeConstraintKind::Maximum,
+                    width,
+                    height,
+                )
             }
         }
     }
@@ -241,13 +384,13 @@ impl MacosWebviewRuntime {
         tray_id: &str,
         html: Option<String>,
         url: Option<String>,
-        width: f64,
-        height: f64,
+        width: Option<f64>,
+        height: Option<f64>,
         tray_bounds: Option<opentray_spec::Rect>,
         show_settings: WebviewShowSettings,
     ) -> Result<&mut WebviewSlot, WebviewRuntimeError> {
-        let width = width.max(240.0);
-        let height = height.max(160.0);
+        let initial_width = width.unwrap_or(420.0).max(240.0);
+        let initial_height = height.unwrap_or(260.0).max(160.0);
         let requested_content = explicit_content_descriptor(html.as_ref(), url.as_ref());
         let needs_new_slot = self
             .slot
@@ -261,8 +404,8 @@ impl MacosWebviewRuntime {
                 tray_id.to_string(),
                 html,
                 url,
-                width,
-                height,
+                initial_width,
+                initial_height,
                 tray_bounds,
                 show_settings,
             )?);
@@ -272,19 +415,57 @@ impl MacosWebviewRuntime {
         let slot = self.slot.as_ref().expect("slot exists");
         // Re-show is a visibility verb. Do not silently replace the live JS/DOM runtime through
         // repeated show calls; force callers onto explicit content or destroy paths instead.
-        ensure_session_reuse_allowed(
-            slot.show_settings.session_bootstrap_settings(),
-            show_settings.session_bootstrap_settings(),
-            &slot.content_descriptor,
-            requested_content.as_ref(),
-        )?;
+        if show_settings.bootstrap_requested {
+            ensure_session_reuse_allowed(
+                slot.show_settings.session_bootstrap_settings(),
+                show_settings.session_bootstrap_settings(),
+                &slot.content_descriptor,
+                requested_content.as_ref(),
+            )?;
+        } else if let Some(requested_content) = requested_content.as_ref() {
+            if &slot.content_descriptor != requested_content {
+                return Err(WebviewRuntimeError::Rejected(
+                    "show cannot replace existing webview content; use setContent, navigate, or destroy then show again".into(),
+                ));
+            }
+        }
 
         let slot = self.slot.as_mut().expect("slot exists");
-        slot.window.setContentSize(NSSize::new(width, height));
+        if let (Some(width), Some(height)) = (width, height) {
+            let width = width.max(240.0);
+            let height = height.max(160.0);
+            slot.window.setContentSize(NSSize::new(width, height));
+        }
         slot.bridge.borrow_mut().tray_bounds = tray_bounds;
-        apply_initial_window_position(&slot.window, tray_bounds);
+        if tray_bounds.is_some() && width.is_some() && height.is_some() {
+            apply_initial_window_position(&slot.window, tray_bounds);
+        }
         apply_reused_show_updates(slot, &show_settings)?;
         Ok(slot)
+    }
+
+    fn ensure_script_slot(
+        &mut self,
+        tray_id: &str,
+        show_settings: WebviewShowSettings,
+    ) -> Result<&mut WebviewSlot, WebviewRuntimeError> {
+        let needs_new_slot = self
+            .slot
+            .as_ref()
+            .map(|slot| slot.tray_id != tray_id)
+            .unwrap_or(true);
+        if needs_new_slot {
+            return self.ensure_slot(
+                tray_id,
+                None,
+                None,
+                Some(420.0),
+                Some(260.0),
+                None,
+                show_settings,
+            );
+        }
+        Ok(self.slot.as_mut().expect("slot exists"))
     }
 
     fn set_content(
@@ -353,7 +534,9 @@ impl MacosWebviewRuntime {
             webview: None,
             content_view: None,
             listeners: HashMap::new(),
+            ipc_messages: VecDeque::new(),
             next_event_id: 1,
+            next_ipc_message_id: 1,
             style: WindowStyleState {
                 frameless: show_settings.window.style.frameless,
                 keep_on_top: show_settings.window.style.keep_on_top,
@@ -382,6 +565,7 @@ impl MacosWebviewRuntime {
             page_source: page_source.clone(),
             page_access: resolve_page_access(&show_settings, &page_source),
             tray_bounds,
+            size_constraints: WindowSizeConstraints::default(),
         }));
 
         let content_view = window.contentView().ok_or_else(|| {
@@ -638,26 +822,29 @@ fn apply_reused_show_updates(
         slot.show_settings.window.icon = Some(icon);
     }
 
-    let requested_style = WindowStyleState {
-        frameless: show_settings.window.style.frameless,
-        keep_on_top: show_settings.window.style.keep_on_top,
-        background: show_settings.window.style.background.clone(),
-        platform: self::style::WindowPlatformStyleState {
-            macos: self::style::MacosWindowStyleState {
-                corner_radius: show_settings.window.style.platform.macos.corner_radius,
+    if show_settings.window.style_requested {
+        let requested_style = WindowStyleState {
+            frameless: show_settings.window.style.frameless,
+            keep_on_top: show_settings.window.style.keep_on_top,
+            background: show_settings.window.style.background.clone(),
+            platform: self::style::WindowPlatformStyleState {
+                macos: self::style::MacosWindowStyleState {
+                    corner_radius: show_settings.window.style.platform.macos.corner_radius,
+                },
             },
-        },
-    };
-    if slot.bridge.borrow().style != requested_style {
-        {
-            let mut bridge = slot.bridge.borrow_mut();
-            bridge.style = requested_style;
+        };
+        if slot.bridge.borrow().style != requested_style {
+            {
+                let mut bridge = slot.bridge.borrow_mut();
+                bridge.style = requested_style;
+            }
+            apply_window_style(&slot.bridge, &slot.window)?;
+            let response = slot.bridge.borrow().style_json()?;
+            emit_window_event(&slot.bridge, "stylechange", response)?;
+            emit_overlay_geometry_change_if_enabled(&slot.bridge, &slot.window)?;
+            slot.show_settings.window.style = show_settings.window.style.clone();
+            slot.show_settings.window.style_requested = true;
         }
-        apply_window_style(&slot.bridge, &slot.window)?;
-        let response = slot.bridge.borrow().style_json()?;
-        emit_window_event(&slot.bridge, "stylechange", response)?;
-        emit_overlay_geometry_change_if_enabled(&slot.bridge, &slot.window)?;
-        slot.show_settings.window.style = show_settings.window.style.clone();
     }
 
     Ok(())

@@ -1,4 +1,5 @@
 pub mod ext;
+pub mod geometry;
 pub mod model;
 pub mod protocol;
 

@@ -4,6 +4,7 @@ use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2_app_kit::NSWindow;
 use objc2_foundation::{NSPoint, NSSize};
+use opentray_spec::Rect;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -17,8 +18,9 @@ use super::{
     screen::screen_details_json,
     style::{apply_window_style, normalize_corner_radius, validate_style_request, SetStylePayload},
     window_state::window_state_json,
-    NavigatorWindowBridge, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE,
-    WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
+    NavigatorWindowBridge, WindowSizeConstraints, COMMAND_NAMESPACE, PAGE_IPC_NAMESPACE,
+    PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE, WINDOW_INTERNALS_GLOBAL,
+    WINDOW_NAMESPACE,
 };
 
 struct MainThreadWebView(usize);
@@ -73,6 +75,18 @@ struct ResizePayload {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SizeConstraintPayload {
+    width: Option<Option<f64>>,
+    height: Option<Option<f64>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecCommandPayload {
+    command: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct TitlePayload {
     title: String,
 }
@@ -92,6 +106,8 @@ pub(super) fn handle_navigator_window_request(
     if request.namespace != WINDOW_NAMESPACE {
         if request.namespace != SCREEN_NAMESPACE
             && request.namespace != TRAY_NAMESPACE
+            && request.namespace != PAGE_IPC_NAMESPACE
+            && request.namespace != COMMAND_NAMESPACE
             && request.namespace != PRIVATE_SYNC_NAMESPACE
         {
             return;
@@ -117,6 +133,9 @@ pub(super) fn handle_navigator_window_request(
         TRAY_NAMESPACE if !access.tray => Err(WebviewRuntimeError::Rejected(
             "navigator.opentray.tray is not enabled for the current page source".into(),
         )),
+        COMMAND_NAMESPACE if !access.window => Err(WebviewRuntimeError::Rejected(
+            "navigator.opentray.execCommand is not enabled for the current page source".into(),
+        )),
         WINDOW_NAMESPACE => dispatch_navigator_window_command(
             bridge,
             window,
@@ -126,6 +145,8 @@ pub(super) fn handle_navigator_window_request(
         ),
         SCREEN_NAMESPACE => dispatch_navigator_screen_command(window, &request.cmd),
         TRAY_NAMESPACE => dispatch_navigator_tray_command(bridge, &request.cmd),
+        PAGE_IPC_NAMESPACE => dispatch_page_ipc_command(bridge, &request.cmd, request.payload),
+        COMMAND_NAMESPACE => dispatch_page_exec_command(&request.cmd, request.payload),
         PRIVATE_SYNC_NAMESPACE => {
             dispatch_private_sync_command(bridge, window, &request.cmd, request.payload)
         }
@@ -159,6 +180,59 @@ pub(super) fn handle_navigator_window_request(
                 );
             }
         }
+    }
+}
+
+fn dispatch_page_exec_command(cmd: &str, payload: Value) -> Result<Value, WebviewRuntimeError> {
+    match cmd {
+        "execCommand" => {
+            let payload: ExecCommandPayload = serde_json::from_value(payload).map_err(|error| {
+                WebviewRuntimeError::Rejected(format!("execCommand requires command: {error}"))
+            })?;
+            exec_page_command(payload.command.as_str())?;
+            Ok(Value::Null)
+        }
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported page command: {other}"
+        ))),
+    }
+}
+
+fn exec_page_command(command: &str) -> Result<(), WebviewRuntimeError> {
+    match command {
+        // Keep the low-level command channel cross-platform even when the repair is a Windows-only
+        // substrate concern. macOS has no known equivalent host redirection artifact to clear.
+        "clearWhiteBlock"
+        | "clear-white-block"
+        | "clearWindowArtifacts"
+        | "clear-window-artifacts" => Ok(()),
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported page command: {other}"
+        ))),
+    }
+}
+
+fn dispatch_page_ipc_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    cmd: &str,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    match cmd {
+        "postMessage" => {
+            let id = {
+                let mut state = bridge.borrow_mut();
+                let id = state.next_ipc_message_id;
+                state.next_ipc_message_id = state.next_ipc_message_id.saturating_add(1).max(1);
+                state
+                    .ipc_messages
+                    .push_back(json!({ "id": id, "source": "page", "payload": payload }));
+                id
+            };
+            Ok(json!({ "queued": true, "id": id }))
+        }
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported page ipc command: {other}"
+        ))),
     }
 }
 
@@ -196,6 +270,19 @@ fn dispatch_navigator_window_command(
             window.orderOut(None);
             Ok(Value::Null)
         }
+        "show" => {
+            window.makeKeyAndOrderFront(None);
+            let response = window_state_json(window)?;
+            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            emit_overlay_geometry_change_if_enabled(bridge, window)?;
+            Ok(response)
+        }
+        "hide" => {
+            window.orderOut(None);
+            let response = window_state_json(window)?;
+            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            Ok(response)
+        }
         "minimize" => {
             window.miniaturize(None);
             let response = window_state_json(window)?;
@@ -226,6 +313,7 @@ fn dispatch_navigator_window_command(
         "getWindowState" => window_state_json(window),
         "isMaximized" => Ok(Value::Bool(window.isZoomed() && !window.isMiniaturized())),
         "isMinimized" => Ok(Value::Bool(window.isMiniaturized())),
+        "getBounds" => window_bounds_json(window),
         "move" | "moveTo" => {
             let payload: MovePayload = serde_json::from_value(payload).map_err(|error| {
                 WebviewRuntimeError::Rejected(format!("moveTo requires x and y: {error}"))
@@ -248,6 +336,34 @@ fn dispatch_navigator_window_command(
             emit_window_event(bridge, "resized", response.clone())?;
             emit_overlay_geometry_change_if_enabled(bridge, window)?;
             Ok(response)
+        }
+        "setMinimumSize" => {
+            let payload: SizeConstraintPayload =
+                serde_json::from_value(payload).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "setMinimumSize requires width or height: {error}"
+                    ))
+                })?;
+            apply_window_size_constraint_payload(
+                bridge,
+                window,
+                SizeConstraintKind::Minimum,
+                payload,
+            )
+        }
+        "setMaximumSize" => {
+            let payload: SizeConstraintPayload =
+                serde_json::from_value(payload).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "setMaximumSize requires width or height: {error}"
+                    ))
+                })?;
+            apply_window_size_constraint_payload(
+                bridge,
+                window,
+                SizeConstraintKind::Maximum,
+                payload,
+            )
         }
         "getTitlebarAreaRect" => {
             if !bridge.borrow().navigator_window.window_controls_overlay {
@@ -279,52 +395,7 @@ fn dispatch_navigator_window_command(
             let payload: SetStylePayload = serde_json::from_value(payload).map_err(|error| {
                 WebviewRuntimeError::Rejected(format!("setStyle payload is invalid: {error}"))
             })?;
-            validate_style_request(&payload)?;
-
-            let mut bridge_state = bridge.borrow_mut();
-            let mut changed = false;
-            if let Some(frameless) = payload.frameless {
-                if bridge_state.style.frameless != frameless {
-                    bridge_state.style.frameless = frameless;
-                    changed = true;
-                }
-            }
-            if let Some(keep_on_top) = payload.keep_on_top {
-                if bridge_state.style.keep_on_top != keep_on_top {
-                    bridge_state.style.keep_on_top = keep_on_top;
-                    changed = true;
-                }
-            }
-            if let Some(background) = payload.background {
-                let background = crate::parse_background_input(background)?;
-                if bridge_state.style.background != background {
-                    bridge_state.style.background = background;
-                    changed = true;
-                }
-            }
-            if let Some(macos_payload) = payload.platform.and_then(|platform| platform.macos) {
-                if let Some(corner_radius) = macos_payload.corner_radius {
-                    let normalized_radius = match corner_radius {
-                        Some(radius) => Some(normalize_corner_radius(radius)?),
-                        None => None,
-                    };
-                    if bridge_state.style.platform.macos.corner_radius != normalized_radius {
-                        bridge_state.style.platform.macos.corner_radius = normalized_radius;
-                        changed = true;
-                    }
-                }
-            }
-            drop(bridge_state);
-
-            if changed {
-                apply_window_style(bridge, window)?;
-            }
-            let response = bridge.borrow().style_json()?;
-            if changed {
-                emit_window_event(bridge, "stylechange", response.clone())?;
-                emit_overlay_geometry_change_if_enabled(bridge, window)?;
-            }
-            Ok(response)
+            apply_window_style_patch(bridge, window, payload)
         }
         other => Err(WebviewRuntimeError::Rejected(format!(
             "unsupported navigator window command: {other}"
@@ -338,6 +409,217 @@ pub(super) fn parse_set_icon_payload(
     serde_json::from_value::<Option<WebviewWindowIcon>>(payload).map_err(|error| {
         WebviewRuntimeError::Rejected(format!("setIcon payload is invalid: {error}"))
     })
+}
+
+pub(super) fn apply_window_style_patch(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    window: &Retained<NSWindow>,
+    payload: SetStylePayload,
+) -> Result<Value, WebviewRuntimeError> {
+    validate_style_request(&payload)?;
+
+    let mut bridge_state = bridge.borrow_mut();
+    let mut changed = false;
+    if let Some(frameless) = payload.frameless {
+        if bridge_state.style.frameless != frameless {
+            bridge_state.style.frameless = frameless;
+            changed = true;
+        }
+    }
+    if let Some(keep_on_top) = payload.keep_on_top {
+        if bridge_state.style.keep_on_top != keep_on_top {
+            bridge_state.style.keep_on_top = keep_on_top;
+            changed = true;
+        }
+    }
+    if let Some(background) = payload.background {
+        let background = crate::parse_background_input(background)?;
+        if bridge_state.style.background != background {
+            bridge_state.style.background = background;
+            changed = true;
+        }
+    }
+    if let Some(macos_payload) = payload.platform.and_then(|platform| platform.macos) {
+        if let Some(corner_radius) = macos_payload.corner_radius {
+            let normalized_radius = match corner_radius {
+                Some(radius) => Some(normalize_corner_radius(radius)?),
+                None => None,
+            };
+            if bridge_state.style.platform.macos.corner_radius != normalized_radius {
+                bridge_state.style.platform.macos.corner_radius = normalized_radius;
+                changed = true;
+            }
+        }
+    }
+    drop(bridge_state);
+
+    if changed {
+        apply_window_style(bridge, window)?;
+    }
+    let response = bridge.borrow().style_json()?;
+    if changed {
+        emit_window_event(bridge, "stylechange", response.clone())?;
+        emit_overlay_geometry_change_if_enabled(bridge, window)?;
+    }
+    Ok(response)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum SizeConstraintKind {
+    Minimum,
+    Maximum,
+}
+
+pub(super) fn apply_window_size_constraint_options(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    window: &Retained<NSWindow>,
+    kind: SizeConstraintKind,
+    width: Option<Option<f64>>,
+    height: Option<Option<f64>>,
+) -> Result<Value, WebviewRuntimeError> {
+    apply_window_size_constraint_payload(
+        bridge,
+        window,
+        kind,
+        SizeConstraintPayload { width, height },
+    )
+}
+
+fn apply_window_size_constraint_payload(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    window: &Retained<NSWindow>,
+    kind: SizeConstraintKind,
+    payload: SizeConstraintPayload,
+) -> Result<Value, WebviewRuntimeError> {
+    if payload.width.is_none() && payload.height.is_none() {
+        return Err(WebviewRuntimeError::Rejected(
+            "size constraint update requires width or height".into(),
+        ));
+    }
+    let mut bridge_state = bridge.borrow_mut();
+    let mut constraints = bridge_state.size_constraints;
+    match kind {
+        SizeConstraintKind::Minimum => {
+            if let Some(width) = payload.width {
+                constraints.min_width = positive_constraint(width, "width")?;
+            }
+            if let Some(height) = payload.height {
+                constraints.min_height = positive_constraint(height, "height")?;
+            }
+        }
+        SizeConstraintKind::Maximum => {
+            if let Some(width) = payload.width {
+                constraints.max_width = positive_constraint(width, "width")?;
+            }
+            if let Some(height) = payload.height {
+                constraints.max_height = positive_constraint(height, "height")?;
+            }
+        }
+    }
+    validate_size_constraint_order(constraints)?;
+    bridge_state.size_constraints = constraints;
+    drop(bridge_state);
+
+    window.setMinSize(NSSize::new(
+        constraints.min_width.unwrap_or(0.0),
+        constraints.min_height.unwrap_or(0.0),
+    ));
+    window.setMaxSize(NSSize::new(
+        constraints.max_width.unwrap_or(1_000_000.0),
+        constraints.max_height.unwrap_or(1_000_000.0),
+    ));
+    enforce_current_window_size_constraints(bridge, window, constraints)?;
+    Ok(size_constraints_json(constraints))
+}
+
+fn positive_constraint(
+    value: Option<f64>,
+    field: &str,
+) -> Result<Option<f64>, WebviewRuntimeError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if !value.is_finite() || value <= 0.0 {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{field} must be a finite positive number or null"
+        )));
+    }
+    Ok(Some(value.round()))
+}
+
+fn validate_size_constraint_order(
+    constraints: WindowSizeConstraints,
+) -> Result<(), WebviewRuntimeError> {
+    if let (Some(min_width), Some(max_width)) = (constraints.min_width, constraints.max_width) {
+        if min_width > max_width {
+            return Err(WebviewRuntimeError::Rejected(
+                "minimum width cannot exceed maximum width".into(),
+            ));
+        }
+    }
+    if let (Some(min_height), Some(max_height)) = (constraints.min_height, constraints.max_height) {
+        if min_height > max_height {
+            return Err(WebviewRuntimeError::Rejected(
+                "minimum height cannot exceed maximum height".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn enforce_current_window_size_constraints(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    window: &Retained<NSWindow>,
+    constraints: WindowSizeConstraints,
+) -> Result<(), WebviewRuntimeError> {
+    let frame = window.frame();
+    let width = constrain_dimension(
+        frame.size.width,
+        constraints.min_width,
+        constraints.max_width,
+    );
+    let height = constrain_dimension(
+        frame.size.height,
+        constraints.min_height,
+        constraints.max_height,
+    );
+    if width == frame.size.width && height == frame.size.height {
+        return Ok(());
+    }
+    window.setContentSize(NSSize::new(width, height));
+    let response = json!({ "width": width, "height": height });
+    emit_window_event(bridge, "resized", response)?;
+    emit_overlay_geometry_change_if_enabled(bridge, window)
+}
+
+fn constrain_dimension(value: f64, min: Option<f64>, max: Option<f64>) -> f64 {
+    value.clamp(min.unwrap_or(1.0), max.unwrap_or(1_000_000.0))
+}
+
+fn size_constraints_json(constraints: WindowSizeConstraints) -> Value {
+    json!({
+        "minWidth": constraints.min_width,
+        "minHeight": constraints.min_height,
+        "maxWidth": constraints.max_width,
+        "maxHeight": constraints.max_height,
+    })
+}
+
+pub(super) fn window_bounds_json(
+    window: &Retained<NSWindow>,
+) -> Result<Value, WebviewRuntimeError> {
+    serde_json::to_value(window_bounds(window))
+        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+}
+
+fn window_bounds(window: &Retained<NSWindow>) -> Rect {
+    let frame = window.frame();
+    Rect {
+        x: frame.origin.x.round() as i32,
+        y: frame.origin.y.round() as i32,
+        width: frame.size.width.max(0.0).round() as u32,
+        height: frame.size.height.max(0.0).round() as u32,
+    }
 }
 
 fn dispatch_navigator_screen_command(

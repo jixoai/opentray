@@ -177,6 +177,8 @@ fn navigator_window_script_exposes_tauri_like_async_methods() {
     assert!(script.contains("async listen(event, handler)"));
     assert!(script.contains("async once(event, handler)"));
     assert!(script.contains("close()"));
+    assert!(script.contains("show()"));
+    assert!(script.contains("hide()"));
     assert!(script.contains("minimize()"));
     assert!(script.contains("maximize()"));
     assert!(script.contains("restore()"));
@@ -376,6 +378,26 @@ const stopRequest = takeMessage("stopAppRegionDrag");
 window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(stopRequest.callback, { active: false });
 await stopPromise;
 
+const showPromise = navigator.opentrayWindow.show();
+const showRequest = takeMessage("show");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(showRequest.callback, {
+  state: "normal",
+  minimized: false,
+  maximized: false,
+  visible: true
+});
+const shown = await showPromise;
+
+const hidePromise = navigator.opentrayWindow.hide();
+const hideRequest = takeMessage("hide");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(hideRequest.callback, {
+  state: "hidden",
+  minimized: false,
+  maximized: false,
+  visible: false
+});
+const hidden = await hidePromise;
+
 const minimizePromise = navigator.opentrayWindow.minimize();
 const minimizeRequest = takeMessage("minimize");
 window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(minimizeRequest.callback, {
@@ -427,6 +449,10 @@ return {
   rectNamespace: rectRequest.namespace,
   dragPayload: dragRequest.payload.pointerId,
   stopCmd: stopRequest.cmd,
+  showCmd: showRequest.cmd,
+  shownVisible: shown.visible,
+  hideCmd: hideRequest.cmd,
+  hiddenVisible: hidden.visible,
   minimizeCmd: minimizeRequest.cmd,
   minimizedState: minimized.state,
   maximizeCmd: maximizeRequest.cmd,
@@ -453,6 +479,10 @@ return {
         runtime["stopCmd"],
         Value::String("stopAppRegionDrag".to_string())
     );
+    assert_eq!(runtime["showCmd"], Value::String("show".to_string()));
+    assert_eq!(runtime["shownVisible"], Value::Bool(true));
+    assert_eq!(runtime["hideCmd"], Value::String("hide".to_string()));
+    assert_eq!(runtime["hiddenVisible"], Value::Bool(false));
     assert_eq!(
         runtime["minimizeCmd"],
         Value::String("minimize".to_string())

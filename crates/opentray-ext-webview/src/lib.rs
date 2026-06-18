@@ -166,6 +166,7 @@ pub(crate) enum WebviewWindowIcon {
 pub(crate) struct WebviewWindowOptions {
     pub title: Option<String>,
     pub icon: Option<WebviewWindowIcon>,
+    pub style_requested: bool,
     pub style: WebviewInitialStyle,
     pub sync: WebviewMetadataSyncSettings,
 }
@@ -177,6 +178,7 @@ pub(crate) struct WebviewShowSettings {
     pub navigator_tray: NavigatorTraySettings,
     pub window: WebviewWindowOptions,
     pub native_api_policy: WebviewNativeApiPolicy,
+    pub bootstrap_requested: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,8 +234,8 @@ enum WebviewCommand {
     Show {
         html: Option<String>,
         url: Option<String>,
-        width: f64,
-        height: f64,
+        width: Option<f64>,
+        height: Option<f64>,
         tray_bounds: Option<Rect>,
         fallback_rect: Option<Rect>,
         show_settings: WebviewShowSettings,
@@ -252,6 +254,28 @@ enum WebviewCommand {
     },
     PostMessage {
         payload: Value,
+    },
+    MoveTo {
+        x: f64,
+        y: f64,
+    },
+    ResizeTo {
+        width: f64,
+        height: f64,
+    },
+    GetBounds,
+    GetScreenDetails,
+    DrainIpcMessages,
+    SetStyle {
+        style: Value,
+    },
+    SetMinimumSize {
+        width: Option<Option<f64>>,
+        height: Option<Option<f64>>,
+    },
+    SetMaximumSize {
+        width: Option<Option<f64>>,
+        height: Option<Option<f64>>,
     },
 }
 
@@ -290,6 +314,27 @@ struct ShowCommandData {
 struct SetContentCommandData {
     html: Option<String>,
     url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MoveCommandData {
+    x: f64,
+    y: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResizeCommandData {
+    width: f64,
+    height: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SizeConstraintCommandData {
+    width: Option<Option<f64>>,
+    height: Option<Option<f64>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -519,6 +564,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                 serde_json::from_value(data.clone()).map_err(|error| {
                     WebviewRuntimeError::Rejected(format!("invalid webview show command: {error}"))
                 })?;
+            let bootstrap_requested = show_bootstrap_requested(data);
             let (html, url) = parse_optional_content_pair(
                 parsed.html,
                 parsed.url,
@@ -534,11 +580,24 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
             let windows_style = style
                 .and_then(|style| style.platform.as_ref())
                 .and_then(|platform| platform.windows.as_ref());
+            let width = parsed
+                .width
+                .map(|width| finite_number(width, "width"))
+                .transpose()?;
+            let height = parsed
+                .height
+                .map(|height| finite_number(height, "height"))
+                .transpose()?;
+            if width.is_some() != height.is_some() {
+                return Err(WebviewRuntimeError::Rejected(
+                    "webview show command accepts width and height together, or neither".into(),
+                ));
+            }
             Ok(WebviewCommand::Show {
                 html,
                 url,
-                width: parsed.width.unwrap_or(420.0),
-                height: parsed.height.unwrap_or(260.0),
+                width,
+                height,
                 tray_bounds: None,
                 fallback_rect: parsed.fallback_rect,
                 show_settings: WebviewShowSettings {
@@ -559,6 +618,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                     window: WebviewWindowOptions {
                         title: parsed.title,
                         icon: parsed.icon,
+                        style_requested: style.is_some(),
                         style: WebviewInitialStyle {
                             frameless: style.and_then(|style| style.frameless).unwrap_or(false),
                             background: style
@@ -588,6 +648,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                         },
                     },
                     native_api_policy: parse_native_api_policy(parsed.native_api_policy)?,
+                    bootstrap_requested,
                 },
             })
         }
@@ -617,10 +678,112 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
         "postMessage" => Ok(WebviewCommand::PostMessage {
             payload: data.get("payload").cloned().unwrap_or(Value::Null),
         }),
+        "move" | "moveTo" => {
+            let parsed: MoveCommandData =
+                serde_json::from_value(data.clone()).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "invalid webview moveTo command: {error}"
+                    ))
+                })?;
+            Ok(WebviewCommand::MoveTo {
+                x: finite_number(parsed.x, "x")?,
+                y: finite_number(parsed.y, "y")?,
+            })
+        }
+        "resize" | "resizeTo" => {
+            let parsed: ResizeCommandData =
+                serde_json::from_value(data.clone()).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "invalid webview resizeTo command: {error}"
+                    ))
+                })?;
+            Ok(WebviewCommand::ResizeTo {
+                width: finite_number(parsed.width.max(120.0), "width")?,
+                height: finite_number(parsed.height.max(80.0), "height")?,
+            })
+        }
+        "getBounds" => Ok(WebviewCommand::GetBounds),
+        "getScreenDetails" => Ok(WebviewCommand::GetScreenDetails),
+        "drainIpcMessages" | "drainPageMessages" => Ok(WebviewCommand::DrainIpcMessages),
+        "setStyle" => {
+            let style = data
+                .get("style")
+                .cloned()
+                .ok_or_else(|| WebviewRuntimeError::Rejected("setStyle requires style".into()))?;
+            Ok(WebviewCommand::SetStyle { style })
+        }
+        "setMinimumSize" => {
+            let parsed: SizeConstraintCommandData =
+                serde_json::from_value(data.clone()).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "invalid webview setMinimumSize command: {error}"
+                    ))
+                })?;
+            validate_size_constraint_patch(parsed.width, parsed.height, "setMinimumSize")?;
+            Ok(WebviewCommand::SetMinimumSize {
+                width: parsed.width,
+                height: parsed.height,
+            })
+        }
+        "setMaximumSize" => {
+            let parsed: SizeConstraintCommandData =
+                serde_json::from_value(data.clone()).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "invalid webview setMaximumSize command: {error}"
+                    ))
+                })?;
+            validate_size_constraint_patch(parsed.width, parsed.height, "setMaximumSize")?;
+            Ok(WebviewCommand::SetMaximumSize {
+                width: parsed.width,
+                height: parsed.height,
+            })
+        }
         other => Err(WebviewRuntimeError::Rejected(format!(
             "unsupported webview command: {other}"
         ))),
     }
+}
+
+fn validate_size_constraint_patch(
+    width: Option<Option<f64>>,
+    height: Option<Option<f64>>,
+    command: &str,
+) -> Result<(), WebviewRuntimeError> {
+    if width.is_none() && height.is_none() {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{command} requires width or height"
+        )));
+    }
+    validate_optional_positive_size(width, "width")?;
+    validate_optional_positive_size(height, "height")?;
+    Ok(())
+}
+
+fn validate_optional_positive_size(
+    value: Option<Option<f64>>,
+    field: &str,
+) -> Result<(), WebviewRuntimeError> {
+    let Some(Some(value)) = value else {
+        return Ok(());
+    };
+    if !value.is_finite() || value <= 0.0 {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{field} must be a finite positive number or null"
+        )));
+    }
+    Ok(())
+}
+
+fn show_bootstrap_requested(data: &Value) -> bool {
+    data.get("nativeWindowApi").is_some()
+        || data.get("bindWindowGlobals").is_some()
+        || data.get("nativeScreenApi").is_some()
+        || data.get("bindScreenGlobals").is_some()
+        || data.get("nativeTrayApi").is_some()
+        || data.get("windowControlsOverlay").is_some()
+        || data.get("titleSync").is_some()
+        || data.get("iconSync").is_some()
+        || data.get("nativeApiPolicy").is_some()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -654,6 +817,15 @@ fn required_string(data: &Value, key: &str) -> Result<String, WebviewRuntimeErro
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
         .ok_or_else(|| WebviewRuntimeError::Rejected(format!("webview command requires {key}")))
+}
+
+fn finite_number(value: f64, name: &str) -> Result<f64, WebviewRuntimeError> {
+    if !value.is_finite() {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{name} must be a finite number"
+        )));
+    }
+    Ok(value)
 }
 
 fn normalize_corner_radius(radius: f64) -> Result<f64, WebviewRuntimeError> {
@@ -945,8 +1117,8 @@ mod tests {
             WebviewCommand::Show {
                 html: Some("<main />".to_string()),
                 url: None,
-                width: 360.0,
-                height: 220.0,
+                width: Some(360.0),
+                height: Some(220.0),
                 tray_bounds: None,
                 fallback_rect: Some(Rect {
                     x: 1,
@@ -1014,8 +1186,8 @@ mod tests {
             WebviewCommand::Show {
                 html: None,
                 url: None,
-                width: 360.0,
-                height: 220.0,
+                width: Some(360.0),
+                height: Some(220.0),
                 tray_bounds: None,
                 fallback_rect: None,
                 show_settings: WebviewShowSettings {
@@ -1034,6 +1206,7 @@ mod tests {
                         icon: Some(WebviewWindowIcon::Href {
                             href: "data:image/png;base64,abc".to_string(),
                         }),
+                        style_requested: true,
                         style: WebviewInitialStyle {
                             frameless: true,
                             keep_on_top: true,
@@ -1074,9 +1247,32 @@ mod tests {
                         )]),
                         icon_sync: Some(vec![WebviewNativeApiSource::Local]),
                     },
+                    bootstrap_requested: true,
                 },
             }
         );
+    }
+
+    #[test]
+    fn parse_empty_show_is_visibility_only_for_existing_sessions() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show"
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show {
+            width,
+            height,
+            show_settings,
+            ..
+        } = command
+        else {
+            panic!("expected show command");
+        };
+
+        assert_eq!(width, None);
+        assert_eq!(height, None);
+        assert!(!show_settings.bootstrap_requested);
     }
 
     #[test]
