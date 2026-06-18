@@ -3,11 +3,12 @@ import { join } from "node:path";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/node";
-import { attachWebview } from "../../ext-webview/src/index";
+import { WebviewExt } from "../../ext-webview/src/index";
 import type { WebviewWindowStylePatch } from "../../ext-webview/src/index";
 import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
 
 const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
+const icon = createVisibleTrayIcon();
 
 const demoHomeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `opentray-tray-panel-${process.pid}`);
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
@@ -32,22 +33,38 @@ const tray = await space.createTray({
     title: "OpenTray",
     description: "Single primary tray action launching a custom WebView tray panel",
   },
-  icon: createVisibleTrayIcon(),
+  icon,
   menu: {
     items: [{ type: "item", id: 1, title: "Open Tray Panel", primaryEvent: true }],
   },
 });
 console.log(`tray: ${tray.trayId}`);
 
-await connection.request({
-  type: "load-ext",
-  requestId: "tray-panel-load-webview",
-  spaceId: space.space.spaceId,
-  name: "webview",
-  path: "@opentray/ext-webview",
+const webviewTray = tray.extend(WebviewExt, {
+  mountId: "tray-panel-webview",
+  ...(localWebviewExtension === undefined ? {} : { path: localWebviewExtension }),
 });
-
-const webview = attachWebview(tray);
+const webview = webviewTray.createWebviewWindow({
+  html: createTrayPanelHtml(),
+  width: 388,
+  height: 286,
+  title: "OpenTray Tray Panel",
+  icon,
+  style: createTrayPanelWindowStyle(),
+  nativeWindowApi: true,
+  bindWindowGlobals: true,
+  nativeScreenApi: true,
+  bindScreenGlobals: true,
+  nativeTrayApi: true,
+  titleSync: {
+    documentToWindow: true,
+    windowToDocument: true,
+  },
+  iconSync: true,
+  nativeApiPolicy: {
+    defaultSrc: ["'local'"],
+  },
+});
 console.log("click the tray icon: platforms with primary tray events should open the WebView panel");
 console.log("press Ctrl-C to exit the tray demo");
 
@@ -59,9 +76,9 @@ const lifecycle = new Promise<void>((resolve) => {
 });
 const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 
-connection.onEvent((frame) => {
-  console.log(`broker -> client ${JSON.stringify(frame)}`);
-  if (frame.type === "event" && frame.event.type === "menuClick" && frame.event.itemId === 1) {
+tray.onMenuClick(({ itemId }) => {
+  console.log(`menu click: ${itemId}`);
+  if (itemId === 1) {
     void openTrayPanel();
   }
 });
@@ -138,28 +155,7 @@ async function openTrayPanel(): Promise<void> {
   console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
 
   await webview.show({
-    type: "show",
-    html: createTrayPanelHtml(),
-    width: 388,
-    height: 286,
-    title: "OpenTray Tray Panel",
     fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
-    style: {
-      ...createTrayPanelWindowStyle(),
-    },
-    nativeWindowApi: true,
-    bindWindowGlobals: true,
-    nativeScreenApi: true,
-    bindScreenGlobals: true,
-    nativeTrayApi: true,
-    titleSync: {
-      documentToWindow: true,
-      windowToDocument: true,
-    },
-    iconSync: true,
-    nativeApiPolicy: {
-      defaultSrc: ["'local'"],
-    },
   });
   console.log("tray panel command: show");
 }
@@ -243,6 +239,7 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
         margin: 0;
         padding: 0;
         width: 100%;
+        height: 100%;
         min-height: 100%;
         background: transparent;
         overflow: hidden;
@@ -250,8 +247,10 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
       .panel {
         position: relative;
         display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
         gap: 10px;
-        width: 388px;
+        width: 100%;
+        height: 100%;
         padding: 14px;
         background: transparent;
       }
@@ -298,6 +297,9 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
       .body {
         display: grid;
         gap: 10px;
+        min-height: 0;
+        overflow: auto;
+        scrollbar-color: canvas transparent;
       }
       .card {
         border-radius: 12px;
@@ -401,7 +403,6 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
       const styleStatus = document.getElementById("style-status");
       const panel = document.querySelector(".panel");
       const dragRegion = document.getElementById("drag-region");
-      let fitted = false;
       const bootId =
         window.__OPENTRAY_TRAY_PANEL_BOOT_ID__ ??
         (window.__OPENTRAY_TRAY_PANEL_BOOT_ID__ = Math.random().toString(36).slice(2, 10));
@@ -427,9 +428,25 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
         };
       }
 
-      async function placePanel() {
+      async function currentWindowSize() {
+        if (!pageWindow?.getBounds) {
+          return measurePanelSize();
+        }
+        try {
+          const bounds = await pageWindow.getBounds();
+          return {
+            width: Math.ceil(bounds.width),
+            height: Math.ceil(bounds.height),
+          };
+        } catch {
+          return measurePanelSize();
+        }
+      }
+
+      async function placePanel(options = {}) {
         if (!pageWindow || !screenApi) return;
-        const size = measurePanelSize();
+        const resizeToContent = options.resizeToContent === true;
+        const size = resizeToContent ? measurePanelSize() : await currentWindowSize();
         const [details, bounds] = await Promise.all([
           screenApi.getScreenDetails(),
           trayApi?.getBounds?.() ?? Promise.resolve(null),
@@ -459,7 +476,9 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
             ),
           ),
         );
-        await pageWindow.resizeTo(width, height);
+        if (resizeToContent) {
+          await pageWindow.resizeTo(width, height);
+        }
         await pageWindow.moveTo(targetX, targetY);
         setText(
           "screen-status",
@@ -572,13 +591,9 @@ function createTrayPanelHtml(mode: "default" | "content-set" = "default"): strin
         });
       }
       requestAnimationFrame(() => {
-        void placePanel().then(() => {
-          fitted = true;
-        });
-      });
-      window.addEventListener("resize", () => {
-        if (!fitted) return;
-        void placePanel();
+        // Fit the tray panel once at bootstrap. After that, user resize owns the
+        // native window size; repositioning preserves the current window bounds.
+        void placePanel({ resizeToContent: true });
       });
     </script>
   </body>

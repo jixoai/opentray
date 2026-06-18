@@ -17,18 +17,7 @@ if (localWebviewExtension !== undefined) {
   console.log(`webview dylib: ${localWebviewExtension}`);
 }
 
-const menuLabels = new Map<number, string>([
-  [1, "Open WebView"],
-]);
 let webview: ReturnType<typeof attachWebview> | undefined;
-
-connection.onEvent((frame) => {
-  console.log(`broker -> client ${JSON.stringify(frame)}`);
-  if (frame.type === "event" && frame.event.type === "menuClick") {
-    console.log(`menu click: ${menuLabels.get(frame.event.itemId) ?? frame.event.itemId}`);
-    void handleMenuClick(frame.event.itemId);
-  }
-});
 
 const space = await client.createSpace({
   id: "com.example.opentray.daemon",
@@ -60,6 +49,10 @@ await connection.request({
   path: "@opentray/ext-webview",
 });
 webview = attachWebview(tray);
+tray.onMenuClick(({ itemId }) => {
+  console.log(`menu click: ${itemId}`);
+  void handleMenuClick(itemId);
+});
 console.log("webview facade attached to the daemon native WebView extension");
 console.log("click the tray icon: platforms with primary tray events should run the WebView action");
 console.log("press Ctrl-C to exit the tray demo");

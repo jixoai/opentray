@@ -387,6 +387,9 @@
               <button id="move-button">Move</button>
             </div>
             <div class="row">
+              <button id="exec-clear-white-block-button">Exec Clear WhiteBlock</button>
+            </div>
+            <div class="row">
               <button id="native-close-button">navigator.window.close()</button>
               <button id="global-close-button" class="secondary">window.close()</button>
             </div>
@@ -981,6 +984,20 @@
           text("window-state-status", `Failed to load window state.\n${formatError(error)}`);
         }
       };
+      const execClearWhiteBlock = () => {
+        const opentray = navigator.opentray;
+        if (!opentray || typeof opentray.execCommand !== "function") {
+          text("style-status", "navigator.opentray.execCommand is unavailable for this page source.");
+          return;
+        }
+        try {
+          opentray.execCommand("clearWhiteBlock");
+          text("style-status", 'Sent navigator.opentray.execCommand("clearWhiteBlock").');
+          appendEvent("execCommand", { command: "clearWhiteBlock" });
+        } catch (error) {
+          text("style-status", `Failed to execute clearWhiteBlock.\n${formatError(error)}`);
+        }
+      };
       const applyTitle = async () => {
         const titleInput = $("title-input");
         const nextTitle = titleInput && typeof titleInput.value === "string"
@@ -1153,6 +1170,9 @@
         } catch (error) {
           text("metadata-status", `Failed to move window.\n${formatError(error)}`);
         }
+      });
+      bindIfPresent("exec-clear-white-block-button", () => {
+        execClearWhiteBlock();
       });
       bindIfPresent("overlay-geometry-button", updateOverlayGeometry);
       bindIfPresent("overlay-listen-button", () => {

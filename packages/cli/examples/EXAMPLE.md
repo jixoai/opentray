@@ -24,6 +24,8 @@ Current maturity truth for these examples:
 - Linux remains a core daemon/platform target, but `@opentray/ext-webview` does not publish Linux native WebView packages
 - typed unsupported errors are acceptable evidence for not-yet-landed platform runtimes
 - tray bounds with no injected anchor should show `kind: "unavailable"` rather than pretending the capability is absent everywhere
+- the placement demo is the focused `WebviewPlacementKit` visual surface
+- the media query demo is the focused `mediaQueryKit` + `styleKit` visual surface
 
 This guide does **not** prove future bootstrap families such as managed `window.open()`, localhost asset origin hosting, profile/partition control, or host/page devtools APIs.
 
@@ -80,7 +82,55 @@ Overlay is a show-time capability gate, not a runtime style. The control demo en
 
 On Windows, macOS corner controls remain unsupported, while `style.platform.windows.cornerPreference` is the native DWM corner family. Windows DWM material choice lives in `style.background`.
 
-## Example 2: Tray Panel
+## Example 2: Placement Kit
+
+Command:
+
+```bash
+pnpm --filter opentray example:placement
+```
+
+Expected checks:
+
+1. The terminal prints the placement trace: `WebviewPlacementKit watch/applyOnce with tray, screen, and edge anchors`.
+2. The tray menu contains `Open Placement Kit` and `Quit Demo`.
+3. Selecting `Open Placement Kit` opens a frameless, blur-active WebView panel.
+4. `Watch` buttons switch continuous placement among tray, screen edge/corner, and edge-snap modes.
+5. `Apply Once` buttons run one-shot placement and then stop the continuous watch.
+6. Dragging the header moves the native window through `startAppRegionDrag()` and pauses the placement watch until the native move loop exits.
+7. The result panel shows `placement`, `kind`, `source`, `anchorRect`, and `rect`.
+8. The example does not demonstrate timer state, dynamic tray menus, or responsive style rules; those are covered by other examples.
+
+For quick smoke:
+
+```bash
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:placement
+```
+
+## Example 3: Media Query Kit
+
+Command:
+
+```bash
+pnpm --filter opentray example:mediaQuery
+```
+
+Expected checks:
+
+1. The terminal prints the media query trace: `styleKit recipes + mediaQueryKit native-bounds callbacks`.
+2. The tray menu contains `Open Media Query Kit` and `Quit Demo`.
+3. Selecting `Open Media Query Kit` opens a frameless, blur-active WebView panel styled by `styleKit.apply(...)`.
+4. Compact, Comfort, Wide, and Tall buttons call backend resize intents; `mediaQueryKit.match(...)` updates matched state from native bounds.
+5. Manual native resize should update the same matched state after the native interaction ends.
+6. The example demonstrates native size constraints and style recipes, not placement anchors.
+
+For quick smoke:
+
+```bash
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:mediaQuery
+```
+
+## Example 4: Tray Panel
 
 Command:
 
@@ -111,7 +161,7 @@ Expected checks:
 
 7. The page status surface shows the same tray result shape instead of assuming `Rect | null`.
 
-## Example 3: Daemon Tray
+## Example 5: Daemon Tray
 
 Command:
 
@@ -132,6 +182,8 @@ These are useful for quick regression passes:
 
 ```bash
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:mediaQuery
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:placement
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show pnpm --filter opentray example:tray-panel
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control -- --overlay

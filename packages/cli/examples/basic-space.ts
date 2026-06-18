@@ -40,6 +40,7 @@ class RecordingTransport implements OpenTrayTransport {
       case "set-tray-menu":
       case "set-tray-icon":
       case "set-tray-tooltip":
+      case "set-tray-title":
       case "load-ext":
       case "ext-command":
       case "unload-ext":

@@ -1,9 +1,142 @@
 import { spawn, spawnSync } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export { createVisibleTrayIcon } from "./visible-tray-icon";
+import type { Menu } from "@opentray/spec";
+
+import type { WebviewIpcMessage, WebviewWindowHandle } from "../../../ext-webview/src/index";
+import { terminateWorkspaceDevBrokerProcess } from "../../src/daemon/broker-command";
+import {
+  createClient,
+  type EventfulSpaceHandle,
+  type EventfulTrayHandle,
+  type OpenTrayEventfulClient,
+} from "../../src/index";
+import { connectLocalBroker, type LocalBrokerClient } from "../../src/node";
+import { createVisibleTrayIcon } from "./visible-tray-icon";
+
+export { createVisibleTrayIcon };
+
+export interface WebviewExampleRuntimeOptions {
+  importMetaUrl: string;
+  requestIdPrefix: string;
+  homePrefix: string;
+  space: {
+    id: string;
+    title: string;
+    default?: boolean;
+  };
+  tray: {
+    trayId: string;
+    title: string;
+    tooltip?: {
+      title: string;
+      description: string;
+    };
+    menu: Menu;
+  };
+}
+
+export interface WebviewExampleRuntime {
+  localWebviewExtension: string | undefined;
+  homeDir: string;
+  connection: LocalBrokerClient;
+  client: OpenTrayEventfulClient;
+  space: EventfulSpaceHandle;
+  tray: EventfulTrayHandle;
+  shutdown(): Promise<void>;
+}
+
+export interface WebviewPageMessageWatch {
+  stop(): void;
+}
+
+export async function createWebviewExampleRuntime(
+  options: WebviewExampleRuntimeOptions,
+): Promise<WebviewExampleRuntime> {
+  const localWebviewExtension = await prepareLocalWebviewExtensionPath(options.importMetaUrl);
+  const homeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `${options.homePrefix}-${process.pid}`);
+  const connection = await connectLocalBroker({ homeDir });
+  const client = createClient(connection, { requestIdPrefix: options.requestIdPrefix });
+
+  console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
+  console.log(`broker home: ${homeDir}`);
+  if (localWebviewExtension !== undefined) {
+    console.log(`webview dylib: ${localWebviewExtension}`);
+  }
+
+  const space = await client.createSpace({
+    id: options.space.id,
+    title: options.space.title,
+    default: options.space.default ?? true,
+  });
+  console.log(`space: ${JSON.stringify(space.space)}`);
+
+  const tray = await space.createTray({
+    trayId: options.tray.trayId,
+    title: options.tray.title,
+    ...(options.tray.tooltip === undefined ? {} : { tooltip: options.tray.tooltip }),
+    icon: createVisibleTrayIcon(),
+    menu: options.tray.menu,
+  });
+  console.log(`tray: ${tray.trayId}`);
+
+  let closed = false;
+  return {
+    localWebviewExtension,
+    homeDir,
+    connection,
+    client,
+    space,
+    tray,
+    async shutdown() {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      await connection.close();
+    },
+  };
+}
+
+export function listenWebviewIpcMessages(
+  window: Pick<WebviewWindowHandle, "drainIpcMessages">,
+  handler: (message: WebviewIpcMessage) => void | Promise<void>,
+  options: { intervalMs?: number } = {},
+): WebviewPageMessageWatch {
+  let active = true;
+  let draining = false;
+  const intervalMs = Math.max(16, Math.round(options.intervalMs ?? 100));
+  const drain = async (): Promise<void> => {
+    if (!active || draining) {
+      return;
+    }
+    draining = true;
+    try {
+      const messages = await window.drainIpcMessages();
+      for (const message of messages) {
+        await handler(message);
+      }
+    } catch {
+      // The window may be closed or hidden while the example is shutting down.
+    } finally {
+      draining = false;
+    }
+  };
+  const timer = setInterval(() => {
+    void drain();
+  }, intervalMs);
+  void drain();
+  return {
+    stop() {
+      active = false;
+      clearInterval(timer);
+    },
+  };
+}
 
 export async function prepareLocalWebviewExtensionPath(importMetaUrl: string): Promise<string | undefined> {
   await prepareLocalWindowsAppRuntimeEnvironment();
@@ -23,10 +156,11 @@ async function resolveLocalWebviewExtension(importMetaUrl: string): Promise<stri
   const workspaceCargoToml = fileURLToPath(new URL("../../../Cargo.toml", importMetaUrl));
   try {
     await access(workspaceCargoToml, constants.R_OK);
-    await runCargoBuild(fileURLToPath(new URL("../../../", importMetaUrl)));
   } catch {
     // Not running from the workspace root layout, so skip the source-build path.
+    return undefined;
   }
+  await runSourceTreeExampleBuild(fileURLToPath(new URL("../../../", importMetaUrl)));
 
   const candidates = [
     fileURLToPath(new URL(`../../../target/debug/${artifactName}`, importMetaUrl)),
@@ -45,9 +179,10 @@ async function resolveLocalWebviewExtension(importMetaUrl: string): Promise<stri
   return undefined;
 }
 
-function runCargoBuild(workspaceRoot: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("cargo", ["build", "-p", "opentray-ext-webview"], {
+async function runSourceTreeExampleBuild(workspaceRoot: string): Promise<void> {
+  await terminateWorkspaceDevBrokerProcess(workspaceRoot);
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("cargo", ["build", "-p", "opentray-bin", "-p", "opentray-ext-webview"], {
       cwd: workspaceRoot,
       stdio: process.env.OPENTRAY_EXT_BUILD_LOGS === "1" ? "inherit" : "ignore",
     });
@@ -57,7 +192,11 @@ function runCargoBuild(workspaceRoot: string): Promise<void> {
         resolve();
         return;
       }
-      reject(new Error(`cargo build -p opentray-ext-webview failed with code ${code ?? "unknown"}`));
+      reject(
+        new Error(
+          `cargo build -p opentray-bin -p opentray-ext-webview failed with code ${code ?? "unknown"}`,
+        ),
+      );
     });
   });
 }

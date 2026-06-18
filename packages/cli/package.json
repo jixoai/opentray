@@ -33,6 +33,8 @@
     "example:basic": "bun run examples/basic-space.ts",
     "example:daemon-lynx": "bun run examples/daemon-lynx.ts",
     "example:daemon-tray": "bun run examples/daemon-tray.ts",
+    "example:mediaQuery": "bun run examples/media-query-panel.ts",
+    "example:placement": "bun run examples/placement-panel.ts",
     "example:tray-panel": "bun run examples/tray-panel.ts",
     "example:webview-control": "bun run examples/webview-control.ts",
     "test": "vitest run",
