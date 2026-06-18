@@ -140,10 +140,14 @@ bash scripts/release/build-lynx-runtime.sh /tmp/OpenTrayLynxRuntime.app.zip
 bun run scripts/binaries/stage-local.ts --kind lynx-runtime --source /tmp/OpenTrayLynxRuntime.app.zip
 pnpm --filter opentray cli -- daemon stop
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:placement
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
 `OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` triggers the primary WebView show path without menu clicks. `OPENTRAY_EXT_PATH` can point at an explicit extension directory for loader debugging, but the release path is package-adjacent discovery from the requested facade package, such as `@opentray/ext-webview` resolving to `@opentray/ext-webview-<os>-<arch>`.
+
+`example:placement` is the focused `WebviewPlacementKit` review path for tray, screen, and edge-aware placement. `example:mediaQuery` is the focused responsive-window review path for `mediaQueryKit` plus `styleKit`. Keep them separate when debugging placement versus native sizing/style behavior.
 
 The Lynx release path is similar, except the darwin platform package also carries `runtime/OpenTrayLynxRuntime.app.zip`. The extension dylib resolves that sidecar next to itself by default, and `OPENTRAY_LYNX_RUNTIME_ZIP=/absolute/path/to/OpenTrayLynxRuntime.app.zip` is available as a debugging override.
 

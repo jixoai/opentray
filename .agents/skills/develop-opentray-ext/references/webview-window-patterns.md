@@ -41,9 +41,12 @@ Current repo truth for window patterns:
 Keep the ownership split explicit when describing or extending the API:
 
 - `TrayHandle.getBounds()` is the trusted backend authority for tray geometry. It is broker-routed and tray-owned.
+- `TrayHandle.onMenuClick()` / `listen(...)` are the trusted SDK-level event helpers for tray-scoped events. Use raw `connection.onEvent(...)` only when testing broker frames or building a custom transport.
 - `navigator.opentray.tray.getBounds()` is the page projection of that same tray capability. Treat it as injected page context, not as a second system authority.
 - `attachWebview(tray)` is the trusted host-side extension facade for `show`, `hide`, `navigate`, `evaluate`, and `postMessage`.
 - `navigator.opentrayWindow` and `navigator.opentrayScreen` are extension-owned page APIs. They are not generic `opentray-core` contracts today.
+- `WebviewPlacementKit`, `styleKit`, and `mediaQueryKit` are backend TypeScript composition helpers. Do not expose those kits as page APIs. If page UI needs to trigger backend placement, sizing, or style behavior, send a small intent through `navigator.opentray.ipc.postMessage(...)` and let backend code drain and handle it.
+- Host-side screen authority belongs to the WebView extension capability (`webviewTray.getScreenDetails()`), not to `WebviewWindowHandle` or `navigator.opentrayWindow`. Page-side screen projection stays `navigator.opentrayScreen.getScreenDetails()`.
 - The facade package should export browser-global typings that match the injected page surface (`navigator.window`, `navigator.opentrayWindow`, `navigator.opentrayScreen`, `navigator.opentray`, and `window.getScreenDetails()`). Do not document runtime properties that the public TypeScript surface cannot express.
 - If we later add a host-side `webview.window` controller, keep it inside the ext package boundary. Do not move WebView window verbs into `opentray-core`.
 - `screen` stays in `@opentray/ext-webview` until a second non-WebView consumer proves a shared backend law for topology snapshots, coordinate space, permission gating, and listener-driven events.
@@ -132,17 +135,29 @@ Windows transparent first-show law: create plain transparent WebView2 host HWNDs
 
 Windows background reset law: treat `style.background` as a host-surface family selector, not a paint-only toggle. The real families are plain opaque/transparent with `WS_EX_NOREDIRECTIONBITMAP` plus a tiny host surface fill, and material/semantic blur with the DWM redirection surface enabled. Runtime changes must be transactional and in-place: clear existing `window-vibrancy` families, clear host backdrop best-effort, set `DWMWA_SYSTEMBACKDROP_TYPE` to `DWMSBT_NONE`, update WebView backing color, apply the target host transparency/material mode, re-fit the WebView child, refresh the native surface, and restore maximized shell state if style/frame changes disturbed it. Do not rebuild the HWND/WebView pair for background changes; rebuilding while WebView2 is attached reintroduces the `tauri#10318` / `#8632` white-block artifact class. That white block is a host-window composition artifact, not a DOM repaint bug.
 
+Windows white-block reset law: do not expose white-block repair as `navigator.opentrayWindow` methods or route it through `navigator.opentray.ipc.postMessage(...)`; IPC remains app message transport. The manual page-side escape hatch is `navigator.opentray.execCommand("clearWhiteBlock")`, a fire-and-forget command channel for low-level runtime commands that do not return values and still requires the page to have window native API access. On Windows, `clearWhiteBlock` uses the proven `SW_SHOWMINNOACTIVE -> SW_RESTORE` shell-state reset, because repaint, hide/show, frame nudges, decoration nudges, and DWM cloak/uncloak did not clear the artifact reliably. The runtime should automatically apply the same reset after first show, during live resize with a short throttle, and after resize completion when auto clear is enabled and the background is transparent, semantic blur, or a platform material; default auto clear is enabled unless `OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK=0|false|off|no`. Do not include Windows energy-saver state in this decision: it is not a stable capability predicate for visual correctness. Maximized windows are a known hard limitation: all tested shell reset variants failed to clear the maximized artifact, so automatic repair must skip maximized state instead of fighting the user with maximize/restore loops.
+
+Cross-platform command law: keep `navigator.opentray.execCommand(...)` protocol-compatible on macOS and Windows. macOS should parse and authorize the same command payloads even when a command is a Windows-only substrate repair and therefore no-ops on macOS. Do not make app IPC carry these commands, and do not expose command-specific methods on `navigator.opentrayWindow`.
+
 Windows native theme law: system backdrop material and HTML color-scheme are separate layers. The runtime should read Windows app theme (`AppsUseLightTheme`) and apply `DWMWA_USE_IMMERSIVE_DARK_MODE` on the native HWND, then pass the same dark/light value into Mica/Tabbed application. Page CSS can follow `prefers-color-scheme`, but it is not a substitute for native HWND theme projection.
 
 Windows overlay law: raw Win32 titlebar tricks are not enough for WebView2. `WM_NCCALCSIZE` / `DwmExtendFrameIntoClientArea` can make content visually reach the titlebar, but a child WebView2 HWND / DComp surface can still sit above native caption buttons for both pixels and input. The durable Windows path is Windows App SDK `AppWindowTitleBar.ExtendsContentIntoTitleBar(true)`: it promotes native caption controls above the child WebView while preserving OS-owned minimize/maximize/close behavior. Keep this substrate dynamically loaded. A static `Microsoft.Internal.FrameworkUdk.dll` import can make the extension DLL fail to load before it can report a typed unsupported error, and the installed framework package may not expose `Microsoft.WindowsAppRuntime.Bootstrap.dll` from the same directory. Until packaging stages the bootstrapper as a sidecar, source smoke may need `OPENTRAY_WINDOWS_APP_RUNTIME_DIR` plus `OPENTRAY_WINDOWS_APP_RUNTIME_BOOTSTRAP_DLL`.
 
 Windows overlay geometry law: `ExtendsContentIntoTitleBar(true)` and `AppWindowTitleBar.TitleBarOcclusions` do not have identical availability. Some Windows App Runtime installations can apply overlay controls while returning null/unsupported occlusion data. Treat `AppWindowTitleBar.LeftInset`, `RightInset`, and `Height` as the precise native geometry source. If those properties are unavailable, use DWM `DWMWA_CAPTION_BUTTON_BOUNDS` as the system fallback before falling back to coarse Win32 caption metrics. Keep Windows native measurements in physical pixels and convert them to page CSS pixels in the injected bootstrap layer using the settled WebView viewport (`window.innerWidth / nativeClientWidth`). `navigator.opentrayWindow.overlay.getTitlebarAreaRect()` is a public page-layout API and must return CSS pixels, not raw native pixels. Do not tune the titlebar safe area by guessing a fixed number of caption buttons or by dividing native metrics by DPI in Rust.
 
-Windows resize sync law: `GetClientRect(HWND)` gives the host client size in physical pixels, and `ICoreWebView2Controller::SetBounds(RECT)` expects physical pixels. Apply host client bounds directly to the WebView2 controller and synchronously resize the controller parent `WRY_WEBVIEW` child HWND, then call `NotifyParentWindowPositionChanged()`. Wry's public `set_bounds` path uses asynchronous child `SetWindowPos`, which is not the right law for polished live resize. Even with the synchronous host path, Chromium/WebView2 can still visually trail by one compositor frame during interactive resize; record that as a lower-level composition limitation unless the implementation moves to a deeper WebView2 composition-controller integration.
+Window geometry unit law: every public host/page window geometry API must declare which parts of the `Rect` it consumes. `show({ width, height })`, `resizeTo`, `setMinimumSize`, `setMaximumSize`, `styleKit`, and `mediaQueryKit` use desktop logical sizes so responsive thresholds match page mental models on high-DPI displays. On Windows, public window, screen, and tray geometry is normalized to logical desktop pixels before it reaches placement or page code; the native boundary converts to physical pixels only when calling Win32 APIs such as `CreateWindowExW`, `SetWindowPos`, `GetWindowRect`, and `WM_GETMINMAXINFO`. That means positions and sizes stay in one logical coordinate space for `Rect` math, while Win32 size/move calls still use the correct physical values underneath. macOS `NSWindow` / `NSScreen` frames are already points/logical sizes. Overlay titlebar geometry is the deliberate exception: it stays physical in native payloads because WebView viewport/CSS zoom/meta-viewport can affect CSS conversion, so bootstrap converts it to CSS px using page state.
+
+Facade law: TypeScript helpers should route all shared window/screen/tray `Rect` operations through `windowGeometryKit` in `@opentray/ext-webview`. Placement and media-query helpers may normalize, clamp, compare, and apply rects there, but they must not divide or multiply by DPI. If a bug looks like "window size is correct but screen placement is wrong", inspect whether some authority supplied physical coordinates into this logical façade or whether native code converted an already-logical rect a second time.
+
+Window session law: `createWebviewWindow(options)` is the bootstrap declaration for one tray-scoped WebView session. The first `show()` may create the native HWND/NSWindow and WebView runtime; later `show()` calls restore visibility and must not replay bootstrap width, height, style, content, or native bridge flags. `hide()` keeps the page runtime alive, while `destroy()` is the explicit session reset. Tray click handlers should keep one `WebviewWindowHandle` and call `show()` on that handle repeatedly. If the product wants real mutation, use the orthogonal verbs: `resizeTo`, `moveTo`, `setStyle`, `setBackground`, `setMinimumSize`, `setMaximumSize`, `setContent`, or `navigate`.
+
+Windows resize sync law: `GetClientRect(HWND)` gives the host client size in physical pixels, and `ICoreWebView2Controller::SetBounds(RECT)` expects physical pixels. Apply host client bounds directly to the WebView2 controller and synchronously resize the controller parent `WRY_WEBVIEW` child HWND, then call `NotifyParentWindowPositionChanged()`. Wry's public `set_bounds` path uses asynchronous child `SetWindowPos`, which is not the right law for polished live resize. Explicit `resizeTo` commands must also reuse the host-surface refresh path that clears transparent white-block artifacts; do not hide/show, maximize, or rebuild WebView to clear resize residue. Even with the synchronous host path, Chromium/WebView2 can still visually trail by one compositor frame during interactive resize; record that as a lower-level composition limitation unless the implementation moves to a deeper WebView2 composition-controller integration.
 
 Second nuance: material kind and material state are different axes inside the same background atom. `background.material: "hudWindow"` chooses the AppKit material family, while `background.state` chooses whether that material follows window activation or stays forced active/inactive. Tray-launched panels in an accessory app often need `state: "active"` because the window may not remain the frontmost regular app surface even though the developer still wants the vivid material appearance.
 
-Hard rule for glass windows: reset `html, body` margin/padding to `0`, keep the native window background transparent, and do not draw the outer shell in HTML with root-level `box-shadow`, fake blur, or root-level `border-radius`. The page renders content inside the native box; the native layer owns the box itself.
+Hard rule for guidance: do not auto-mutate or inject user HTML/CSS to create drag strips, titlebars, root resets, or shell styling. Explain that the native layer owns outer material/corners and that the page owns content structure; then let the user decide how to make the page transparent, draggable, or scrollable.
+
+Glass-window best practice: keep the native window background transparent, avoid covering the whole native material with opaque page layers, and avoid treating root-level page decoration as a substitute for native material/corners. Lightweight tray panels are card-like surfaces; if the whole document scrolls, consider better window sizing or a responsive card composition before accepting a browser-page feel.
 
 `hudWindow` content law on macOS:
 
@@ -388,8 +403,8 @@ const tray = await space.createTray({
   },
 });
 
-client.onFrame((frame) => {
-  if (frame.type === "event" && frame.event.type === "menuClick" && frame.event.itemId === 1) {
+tray.onMenuClick(({ itemId }) => {
+  if (itemId === 1) {
     void webview.show({ type: "show", html, width: 420, height: 260 });
   }
 });
@@ -454,7 +469,11 @@ if (trayBounds.rect) {
 }
 ```
 
-Reference implementation in this repo: `pnpm --filter opentray example:tray-panel`
+For continuous tray/screen/edge placement, use `WebviewPlacementKit.watch()` from `@opentray/ext-webview`. A watch owns continuous position, not continuous size: it should use current window bounds and must not resize the window back to stale `width`/`height` after user resize or backend IPC intent. Keep `applyOnce()` for intentional one-shot placement and do not add a special panel API until multiple scenarios prove a new atom is needed.
+
+Reference implementation in this repo: `pnpm --filter opentray example:placement`
+
+Responsive native-window styling is a neighboring atom, not part of the placement acceptance surface. Use `pnpm --filter opentray example:mediaQuery` when reviewing `styleKit.apply(...)`, `mediaQueryKit.match(...)`, and size constraints.
 
 Use `pnpm --filter opentray example:webview-control` as the capability exerciser only. It starts as a normal opaque window and enables overlay probes by default because this is the manual acceptance surface for `windowControlsOverlay`; use `-- --no-overlay` only to test the disabled branch. Do not implement the page switch as a fake runtime style toggle: `windowControlsOverlay` is a show-time bridge gate, so page UI may show the current launch state but cannot truthfully enable the overlay object after bootstrap. For glass-window guidance, prefer `example:tray-panel`, because it keeps the page root transparent and avoids teaching CSS shell decoration as a substitute for native material.
 
@@ -462,7 +481,7 @@ Repo-maintainer note: when this example is run from source on macOS or Windows, 
 
 Why this example matters for AI guidance:
 
-- It demonstrates the full composition users actually ask for, not just one atom in isolation.
+- It demonstrates the placement atom without mixing in responsive style callbacks.
 - It teaches that backend `tray.getBounds()` and page `navigator.opentray.tray.getBounds()` can coexist in one product flow without creating two authorities.
 - It shows where `screen.getScreenDetails()` fits: not as a competing source of truth for the tray anchor, but as the constraint system for clamping the panel onto the visible monitor frame.
 - It gives future agents a concrete prompt pattern: "Do you want a normal native menu, a tray-launched custom panel, or a fully WebView-owned tray menu surface?"

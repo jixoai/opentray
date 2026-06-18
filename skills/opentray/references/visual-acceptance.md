@@ -32,9 +32,15 @@ When the user is inside the OpenTray repo, prefer workspace examples:
 
 ```bash
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray example:placement
+pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:webview-control
 pnpm --filter opentray example:tray-panel
 ```
+
+Use `example:placement` when reviewing tray-anchored, screen-aware, and edge-aware placement. It focuses on `WebviewPlacementKit.watch()`, `applyOnce()`, result provenance, and page-owned frameless drag behavior.
+
+Use `example:mediaQuery` when reviewing responsive native-window behavior. It focuses on `styleKit.apply(...)`, `mediaQueryKit.match(...)`, size constraints, and user resize/move quiescence.
 
 For Lynx contributor acceptance:
 

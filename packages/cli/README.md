@@ -31,10 +31,18 @@ The top-level SDK now exposes the mainline broker-backed path directly:
 import { createSpace, createTray, resolveDefaultSpace } from "opentray";
 
 const space = await createSpace({ id: "com.example.status", default: true });
-await space.createTray({
+const tray = await space.createTray({
   trayId: "status",
   title: "Status",
   icon: { type: "file", path: "./assets/tray-icon.png" },
+  menu: { items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }] },
+});
+
+await tray.setTitle("Status: ready");
+tray.onMenuClick(({ itemId }) => {
+  if (itemId === 1) {
+    // Open a native menu action or a WebView surface.
+  }
 });
 
 const defaultSpace = await resolveDefaultSpace();
@@ -87,6 +95,26 @@ const panel = tray.createWebviewWindow({
 
 await panel.show();
 ```
+
+For tray-anchored or screen-aware surfaces, use `WebviewPlacementKit` from `@opentray/ext-webview` instead of hand-authoring raw broker frames or creating a one-off panel abstraction.
+
+Run the placement demo when you want to review tray, screen, and edge-aware placement:
+
+```bash
+cargo build -p opentray-bin -p opentray-ext-webview
+pnpm --filter opentray example:placement
+```
+
+This demo follows the `skills/opentray` placement law: extension-owned WebView mounting, continuous `WebviewPlacementKit.watch()`, `applyOnce()`, tray/screen/edge anchors, and a page-owned frameless drag region.
+
+Run the media query demo when you want to review responsive native window style and constraints:
+
+```bash
+cargo build -p opentray-bin -p opentray-ext-webview
+pnpm --filter opentray example:mediaQuery
+```
+
+This demo focuses on `styleKit.apply(...)` and `mediaQueryKit.match(...)`. Keep it separate from placement debugging so size/style callbacks do not obscure placement behavior.
 
 Run the dedicated tray-panel demo:
 
