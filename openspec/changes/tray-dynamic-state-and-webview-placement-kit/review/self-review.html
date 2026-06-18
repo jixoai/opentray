@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Tray SDK + WebView Placement Review</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 32px;
+        line-height: 1.5;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #d0d7de;
+        padding: 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      code {
+        background: #f6f8fa;
+        padding: 2px 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>OpenTray Tray SDK + WebView Placement Review</h1>
+    <p>
+      This review covers API, protocol, facade, skill, and placement demo changes. The source-tree
+      demo smoke opens the WebView placement panel briefly and exits automatically.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Area</th>
+          <th>Evidence</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Protocol and kernel</td>
+          <td>Protocol and kernel tests were covered by the previous iteration; this iteration focused on WebView placement and demo behavior.</td>
+          <td>Carried forward</td>
+        </tr>
+        <tr>
+          <td>TypeScript SDK</td>
+          <td><code>pnpm --filter opentray test</code>, <code>pnpm --filter opentray typecheck</code></td>
+          <td>Passed</td>
+        </tr>
+        <tr>
+          <td>WebView facade</td>
+          <td><code>pnpm --filter @opentray/ext-webview test</code>, <code>cargo test -p opentray-ext-webview</code></td>
+          <td>Passed</td>
+        </tr>
+        <tr>
+          <td>OpenSpec</td>
+          <td><code>bun run openspec:vision -- validate tray-dynamic-state-and-webview-placement-kit</code>, <code>bun run openspec:vision -- check tray-dynamic-state-and-webview-placement-kit</code></td>
+          <td>Passed</td>
+        </tr>
+        <tr>
+          <td>Targeted gates</td>
+          <td><code>cargo build -p opentray-bin -p opentray-ext-webview</code>, <code>git diff --check</code></td>
+          <td>Passed</td>
+        </tr>
+        <tr>
+          <td>Release contract</td>
+          <td><code>.changeset/tray-dynamic-state-webview-placement.md</code> covers the public SDK, protocol, and WebView facade changes.</td>
+          <td>Recorded</td>
+        </tr>
+        <tr>
+          <td>Consumer examples</td>
+          <td><code>daemon-tray.ts</code> and <code>tray-panel.ts</code> use tray-scoped event helpers instead of raw broker frame filtering.</td>
+          <td>Aligned</td>
+        </tr>
+        <tr>
+          <td>Placement review demo</td>
+          <td><code>OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:placement</code> composes the scenario cards into a tray-launched WebView panel.</td>
+          <td>Passed</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Run full workspace verification again before release packaging.</p>
+  </body>
+</html>
