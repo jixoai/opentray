@@ -3,9 +3,9 @@
 ## Review State
 
 - Change: tray-dynamic-state-and-webview-placement-kit
-- Iteration: 2
+- Iteration: 3
 - Recurring issue counts: none
-- Exit-condition judgment: normal code-review exit after targeted SDK, WebView facade, Rust, OpenSpec, and placement demo smoke pass
+- Exit-condition judgment: normal code-review exit after targeted SDK, WebView facade, Rust, OpenSpec, and placement demo smoke pass, followed by macOS native parity gate repair
 - Next loop action: no review loop needed; archive decision can happen after user accepts the implementation batch
 
 ## Intent Alignment
@@ -19,7 +19,7 @@
 | Edge placement should be modeled as anchor + window + viewport | `edge`, `edge-x`, `edge-y`, and fixed-edge variants resolve from current window bounds against the visible viewport; code carries a `positionTry` TODO at the algorithm point | aligned |
 | Page window visibility should be reversible | `navigator.opentrayWindow.show()` / `hide()` are injected and wired on macOS and Windows; TS global typing and Rust bootstrap tests cover the bridge surface | aligned |
 | Windows resize residue should reuse the white-block cleanup path | explicit Windows `resizeTo` now calls the host-surface refresh helper after synchronous WebView bounds application | aligned |
-| macOS and Windows page window APIs should stay shape-aligned | shared bootstrap exposes the same page verbs; macOS bridge now parses and authorizes `execCommand` payloads even when Windows-only repair commands no-op on macOS | aligned by static review |
+| macOS and Windows page window APIs should stay shape-aligned | shared bootstrap exposes the same page verbs; macOS bridge parses and authorizes `execCommand` payloads even when Windows-only repair commands no-op on macOS; `cargo test -p opentray-ext-webview` now covers the macOS command and AppKit logical-point placement path | aligned |
 | Portable helpers should fallback with provenance | placement result includes `kind`, `source`, `anchorRect`; fallback test from unavailable tray to screen center | aligned |
 | Skills should avoid hidden HTML/CSS mutation | `skills/opentray/references/scenarios.md`; WebView skill guidance says not to auto-inject drag strips/titlebars/CSS | aligned |
 | Consumer examples should prefer tray-scoped helpers | `daemon-tray.ts` and `tray-panel.ts` use `tray.onMenuClick`; raw event streams remain only in debug/smoke support code | aligned |
@@ -45,6 +45,7 @@
   - `pnpm --filter @opentray/ext-webview typecheck`
   - `pnpm --filter opentray typecheck`
   - `cargo test -p opentray-ext-webview --lib`
+  - `cargo test -p opentray-ext-webview` (49 tests after macOS fixture repair)
   - `bun run openspec:vision -- validate tray-dynamic-state-and-webview-placement-kit`
   - `bun run openspec:vision -- check tray-dynamic-state-and-webview-placement-kit`
   - `cargo build -p opentray-bin -p opentray-ext-webview`
@@ -53,7 +54,7 @@
   - `git diff --check`
 - Release note: `.changeset/tray-dynamic-state-webview-placement.md` records minor bumps for `opentray`, `@opentray/spec`, and `@opentray/ext-webview`.
 - Validation note: this iteration used targeted verification because the user asked for a reviewable demo. Run full repo `pnpm run verify` before release packaging.
-- macOS handoff note: local Windows development should not claim macOS visual/runtime acceptance. A macOS host should still smoke `example:placement`, `example:tray-panel`, and `example:webview-control` with the current shared page API surface before release.
+- macOS handoff note: native unit coverage now passes for the shared bridge shape and AppKit logical-point placement. Visual/runtime acceptance should still smoke `example:placement`, `example:tray-panel`, and `example:webview-control` before release because unit tests do not prove the visible WebKit/AppKit window path.
 - Git commits reviewed: none in this working context
 - Uncommitted paths: expected implementation, OpenSpec, docs, and skill files for this change
 - Task checkboxes updated by this working context: yes; only tasks completed and verified in this context were marked complete
