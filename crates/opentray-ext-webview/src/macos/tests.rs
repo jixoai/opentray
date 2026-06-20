@@ -1,5 +1,6 @@
 use super::bridge::{
-    callback_script, error_callback_script, parse_set_icon_payload, NavigatorWindowRequest,
+    callback_script, error_callback_script, exec_page_command, parse_set_icon_payload,
+    NavigatorWindowRequest,
 };
 use super::style::{
     validate_style_request, MacosWindowStyleState, SetStyleMacosPayload, SetStylePayload,
@@ -1056,6 +1057,20 @@ fn navigator_window_request_shape_parses_inside_extension_runtime() {
 }
 
 #[test]
+fn macos_exec_command_accepts_windows_artifact_command_as_noop() {
+    exec_page_command("clearWhiteBlock")
+        .expect("macOS should accept the cross-platform low-level command channel");
+    exec_page_command("clear-window-artifacts")
+        .expect("macOS should accept command aliases used by the shared page bridge");
+
+    let error = exec_page_command("unknownCommand").expect_err("unknown commands stay rejected");
+    assert_eq!(
+        error.to_string(),
+        "unsupported page command: unknownCommand"
+    );
+}
+
+#[test]
 fn navigator_window_callback_scripts_use_private_run_callback() {
     let success = callback_script(7, &json!({ "ok": true })).expect("success callback");
     assert_eq!(
@@ -1178,7 +1193,9 @@ fn navigator_window_bridge_tracks_listener_ids() {
         webview: None,
         content_view: None,
         listeners: HashMap::new(),
+        ipc_messages: VecDeque::new(),
         next_event_id: 1,
+        next_ipc_message_id: 1,
         style: WindowStyleState {
             frameless: false,
             keep_on_top: false,
@@ -1207,6 +1224,7 @@ fn navigator_window_bridge_tracks_listener_ids() {
         page_source: PageSourceState::default(),
         page_access: PageCapabilityAccess::default(),
         tray_bounds: None,
+        size_constraints: WindowSizeConstraints::default(),
     };
 
     let event_id = bridge.add_listener("resized".to_string(), 42);
@@ -1218,6 +1236,27 @@ fn navigator_window_bridge_tracks_listener_ids() {
     bridge.remove_listener("resized", event_id);
     assert!(bridge.listeners_for("resized").is_empty());
     assert!(!bridge.has_listener("resized"));
+}
+
+#[test]
+fn macos_initial_window_origin_uses_appkit_logical_points_directly() {
+    let origin = initial_window_origin(
+        NSSize::new(360.0, 240.0),
+        opentray_spec::Rect {
+            x: 320,
+            y: 840,
+            width: 40,
+            height: 24,
+        },
+        &[ScreenPlacement {
+            frame: NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1440.0, 900.0)),
+            visible_frame: NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1440.0, 876.0)),
+        }],
+    )
+    .expect("origin should resolve");
+
+    assert_eq!(origin.x, 160.0);
+    assert_eq!(origin.y, 592.0);
 }
 
 #[test]

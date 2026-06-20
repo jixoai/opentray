@@ -238,7 +238,7 @@ mod tests {
         };
         let envelope = serde_json::json!({
             "scope": {
-                "surfaceId": "space-1",
+                "spaceId": "space-1",
                 "trayId": "tray-1",
                 "ext": "lynx"
             },
@@ -262,7 +262,7 @@ mod tests {
         let json = unsafe { CStr::from_ptr(out.ptr) }.to_str().expect("utf8");
         assert_eq!(
             json,
-            r#"[{"scope":{"surfaceId":"space-1","trayId":"tray-1","ext":"lynx"},"data":{"type":"hidden"}}]"#
+            r#"[{"scope":{"spaceId":"space-1","trayId":"tray-1","ext":"lynx"},"data":{"type":"hidden"}}]"#
         );
         unsafe { opentray_ext_free_string(out) };
         unsafe { opentray_ext_deinit(instance) };

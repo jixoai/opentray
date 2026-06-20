@@ -198,7 +198,7 @@ fn dispatch_page_exec_command(cmd: &str, payload: Value) -> Result<Value, Webvie
     }
 }
 
-fn exec_page_command(command: &str) -> Result<(), WebviewRuntimeError> {
+pub(super) fn exec_page_command(command: &str) -> Result<(), WebviewRuntimeError> {
     match command {
         // Keep the low-level command channel cross-platform even when the repair is a Windows-only
         // substrate concern. macOS has no known equivalent host redirection artifact to clear.

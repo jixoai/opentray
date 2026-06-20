@@ -27,18 +27,18 @@ describe("Feature: protocol-line npm dist-tag planner", () => {
     });
 
     expect(plan.dryRun).toBe(true);
-    expect(plan.protocolLine).toBe("opentray-protocol/1.0");
-    expect(plan.tag).toBe("stable-1-0");
+    expect(plan.protocolLine).toBe("opentray-protocol/1.1");
+    expect(plan.tag).toBe("stable-1-1");
     expect(plan.entries.map((entry) => entry.packageName)).toEqual([
       "@opentray/ext-lynx",
       "@opentray/ext-webview",
       "opentray",
     ]);
-    expect(plan.entries.every((entry) => entry.tag === "stable-1-0")).toBe(true);
+    expect(plan.entries.every((entry) => entry.tag === "stable-1-1")).toBe(true);
     expect(plan.entries.map((entry) => entry.command.join(" "))).toEqual([
-      "npm dist-tag add @opentray/ext-lynx@0.1.2 stable-1-0",
-      "npm dist-tag add @opentray/ext-webview@0.4.0 stable-1-0",
-      "npm dist-tag add opentray@0.5.1 stable-1-0",
+      "npm dist-tag add @opentray/ext-lynx@0.1.2 stable-1-1",
+      "npm dist-tag add @opentray/ext-webview@0.4.0 stable-1-1",
+      "npm dist-tag add opentray@0.5.1 stable-1-1",
     ]);
   });
 
@@ -55,15 +55,15 @@ describe("Feature: protocol-line npm dist-tag planner", () => {
     });
 
     expect(plan.channel).toBe("alpha");
-    expect(plan.protocolLine).toBe("opentray-protocol/1.0");
-    expect(plan.tag).toBe("alpha-1-0");
+    expect(plan.protocolLine).toBe("opentray-protocol/1.1");
+    expect(plan.tag).toBe("alpha-1-1");
     expect(plan.entries).toHaveLength(1);
     expect(plan.entries[0]?.command).toEqual([
       "npm",
       "dist-tag",
       "add",
       "opentray@0.5.1",
-      "alpha-1-0",
+      "alpha-1-1",
     ]);
   });
 
