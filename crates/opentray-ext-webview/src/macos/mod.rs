@@ -608,17 +608,11 @@ impl MacosWebviewRuntime {
                         eprintln!("opentray-ext-webview metadata sync failed: {error}");
                     }
                 }
-            });
-        let builder = if matches!(
-            &show_settings.window.style.background,
-            crate::WebviewWindowBackground::Transparent
-                | crate::WebviewWindowBackground::PlatformMaterial { .. }
-                | crate::WebviewWindowBackground::Semantic { .. }
-        ) {
-            builder.with_transparent(true)
-        } else {
-            builder
-        };
+            })
+            // `style.background` is mutable after the WebView is created. Keep WKWebView
+            // alpha-capable from creation time, then let `apply_window_style` choose the
+            // actual opaque or clear backing color for the current style.
+            .with_transparent(true);
         let builder = if let Some(url) = url {
             builder.with_url(url)
         } else {
