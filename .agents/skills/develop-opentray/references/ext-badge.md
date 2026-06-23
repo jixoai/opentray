@@ -8,9 +8,9 @@ Badge is an optional capability atom for platform status overlays such as badge 
 
 ## Current State
 
-- Package placeholder: `packages/ext-badge`.
-- No stable runtime API has been committed.
-- The package README defines the intended role only.
+- `packages/ext-badge` now ships a typed facade and shared contract helpers.
+- `crates/opentray-ext-badge` exists as the native runtime atom.
+- `packages/cli/examples/badge-panel.ts` provides a repo-local WebView IPC debug panel.
 
 ## Design Rules
 
@@ -19,6 +19,8 @@ Badge is an optional capability atom for platform status overlays such as badge 
 - Keep platform-specific implementation behind native extension or backend capability boundaries.
 - Avoid coupling badge semantics to WebView or island semantics.
 
-## First Implementation Shape
+## Verified Surface
 
-The first real API should likely define typed commands such as `setBadge`, `setProgress`, `setOverlayIcon`, and `clearBadge`, but only after platform evidence confirms the cross-platform capability shape.
+- Public facade operations: `setBadge`, `clearBadge`, `setProgress`, `setProgressState`, `setOverlayIcon`, `setAttention`, `getCapabilities`, `reset`.
+- Debug panel proof surface: `pnpm --filter opentray example:badge`.
+- Honest support model: macOS, Windows, and Linux all report capability truth rather than fake parity.

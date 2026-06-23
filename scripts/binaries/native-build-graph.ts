@@ -6,6 +6,7 @@ import {
   type NativeArch,
   type NativeStageKind,
   type PackageOs,
+  badgeDockHelperArtifactName,
   normalizeArch,
   resolveNativePackageTarget,
 } from "./artifacts";
@@ -18,7 +19,7 @@ export type NativeBuildTargetName =
   | "windows-arm64"
   | "windows-x64";
 
-export type NativeBuildComponent = "daemon" | "webview" | "lynx" | "lynx-runtime";
+export type NativeBuildComponent = "daemon" | "webview" | "badge" | "lynx" | "lynx-runtime";
 export type NativeArtifactKind = NativeStageKind;
 export const lynxRuntimeArtifactName = "OpenTrayLynxRuntime.app.zip";
 
@@ -147,6 +148,7 @@ const webviewNativeBuildTargets: readonly NativeBuildTargetName[] = [
 const nativeBuildComponentOrder: readonly NativeBuildComponent[] = [
   "daemon",
   "webview",
+  "badge",
   "lynx",
   "lynx-runtime",
 ];
@@ -169,6 +171,15 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
     artifactKinds: ["webview"],
     inferredPackages: ["@opentray/ext-webview"],
     inferredPackagePrefixes: ["@opentray/ext-webview-"],
+  },
+  badge: {
+    component: "badge",
+    allowedTargets: ["darwin-arm64", "darwin-x64"],
+    defaultReleaseTargets: ["darwin-arm64", "darwin-x64"],
+    cargoPackages: [],
+    artifactKinds: ["badge"],
+    inferredPackages: ["@opentray/ext-badge"],
+    inferredPackagePrefixes: ["@opentray/ext-badge-darwin-"],
   },
   lynx: {
     component: "lynx",
@@ -221,6 +232,10 @@ export const inferNativeBuildComponentsFromReleasePackages = (
   for (const releasePackage of releasePackages) {
     if (matchesReleasePackage("webview", releasePackage)) {
       inferred.add("webview");
+      continue;
+    }
+    if (matchesReleasePackage("badge", releasePackage)) {
+      inferred.add("badge");
       continue;
     }
     if (matchesReleasePackage("lynx", releasePackage)) {
@@ -340,6 +355,13 @@ export const executeNativeBuildExecution = async (
       continue;
     }
 
+    if (kind === "badge") {
+      const badgeOutput = join(outputDir, badgeDockHelperArtifactName);
+      await runCommand("bash", ["scripts/release/build-badge-dock-helper.sh", badgeOutput], workspaceRoot);
+      copiedFiles.push(badgeOutput);
+      continue;
+    }
+
     const source = join(workspaceRoot, "target", "release", releaseArtifactName(kind, nativeTarget.packageOs));
     const destination = join(outputDir, basename(source));
     await copyFile(source, destination);
@@ -387,6 +409,11 @@ export const releaseArtifactName = (
         return "opentray_ext_webview.dll";
       }
       return "libopentray_ext_webview.dylib";
+    case "badge":
+      if (packageOs !== "darwin") {
+        throw new Error("badge dock helper artifacts are only published for darwin targets");
+      }
+      return badgeDockHelperArtifactName;
     case "lynx":
       return "libopentray_ext_lynx.dylib";
   }
@@ -414,6 +441,11 @@ const resolvePackageDirForComponent = (
         throw new Error(`target ${packageOs}-${arch} does not publish webview package directories`);
       }
       return target.webviewPackageDir;
+    case "badge":
+      if (target.badgePackageDir === undefined) {
+        throw new Error(`target ${packageOs}-${arch} does not publish badge package directories`);
+      }
+      return target.badgePackageDir;
     case "lynx":
     case "lynx-runtime":
       if (target.lynxPackageDir === undefined) {

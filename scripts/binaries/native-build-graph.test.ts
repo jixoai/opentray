@@ -18,6 +18,15 @@ describe("Feature: shared native build graph", () => {
     ).toEqual(["webview"]);
   });
 
+  test("Scenario: Given badge release packages When components are inferred Then the macOS dock helper atom is selected", () => {
+    expect(
+      inferNativeBuildComponentsFromReleasePackages([
+        "@opentray/ext-badge",
+        "@opentray/ext-badge-darwin-x64",
+      ]),
+    ).toEqual(["badge"]);
+  });
+
   test("Scenario: Given WebView and daemon atoms When executions are materialized Then cargo packages stay independent", () => {
     const targets = resolveReleaseTargetsForComponents(["daemon", "webview"]);
     const [darwinArm64] = materializeNativeBuildExecutions(["daemon", "webview"], targets);
@@ -45,6 +54,19 @@ describe("Feature: shared native build graph", () => {
       },
     ]);
     expect(plan.validatePackageDirs).toEqual(["packages/ext-webview-darwin-arm64"]);
+  });
+
+  test("Scenario: Given badge-only executions When stage plan is derived Then the helper package dir is selected", () => {
+    const executions = materializeNativeBuildExecutions(["badge"], ["darwin-arm64"]);
+    const plan = describeReleaseStagePlan(executions);
+
+    expect(plan.stageEntries).toEqual([
+      {
+        target: "darwin-arm64",
+        artifactKinds: ["badge"],
+      },
+    ]);
+    expect(plan.validatePackageDirs).toEqual(["packages/ext-badge-darwin-arm64"]);
   });
 
   test("Scenario: Given Lynx runtime build and staging When artifact names are resolved Then the OpenTray host carrier name is shared", () => {

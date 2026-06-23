@@ -91,7 +91,13 @@ function parseStagePlan(value: string): StagePlanEntry[] {
 }
 
 function parseArtifactKind(value: string): NativeArtifactKind {
-  if (value === "daemon" || value === "webview" || value === "lynx" || value === "lynx-runtime") {
+  if (
+    value === "daemon" ||
+    value === "webview" ||
+    value === "badge" ||
+    value === "lynx" ||
+    value === "lynx-runtime"
+  ) {
     return value;
   }
   throw new Error(`unsupported native artifact kind: ${value}`);

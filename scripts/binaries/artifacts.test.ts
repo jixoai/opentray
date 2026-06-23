@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  badgeDockHelperArtifactName,
   nativeTargets,
   resolveNativePackageTarget,
   resolveNativeTarget,
@@ -24,6 +25,10 @@ describe("Feature: native binary artifact topology", () => {
       "@opentray/ext-webview-windows-arm64",
       "@opentray/ext-webview-windows-x64",
     ]);
+    expect(nativeTargets.map((target) => target.badgePackageName).filter(Boolean)).toEqual([
+      "@opentray/ext-badge-darwin-arm64",
+      "@opentray/ext-badge-darwin-x64",
+    ]);
     expect(
       nativeTargets.map((target) => target.lynxPackageName).filter(Boolean)
     ).toEqual([
@@ -40,6 +45,9 @@ describe("Feature: native binary artifact topology", () => {
     expect(darwin.daemonArtifact).toBe("packages/darwin-arm64/bin/opentray");
     expect(darwin.webviewArtifact).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
+    );
+    expect(darwin.badgeArtifact).toBe(
+      "packages/ext-badge-darwin-arm64/app/OpenTrayBadgeHelper.app.zip"
     );
     expect(darwin.lynxArtifact).toBe(
       "packages/ext-lynx-darwin-arm64/lib/libopentray_ext_lynx.dylib"
@@ -95,8 +103,19 @@ describe("Feature: native binary artifact topology", () => {
     expect(resolveStageDestination(target, "webview")).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
     );
+    expect(resolveStageDestination(target, "badge")).toBe(
+      `packages/ext-badge-darwin-arm64/app/${badgeDockHelperArtifactName}`
+    );
     expect(resolveStageDestination(target, "lynx-runtime")).toBe(
       "packages/ext-lynx-darwin-arm64/runtime/OpenTrayLynxRuntime.app.zip"
+    );
+  });
+
+  test("Scenario: Given badge release artifacts When the release name is resolved Then the macOS helper zip stays stable", () => {
+    const target = resolveNativePackageTarget("darwin", "x64");
+
+    expect(target.badgeArtifact).toBe(
+      `packages/ext-badge-darwin-x64/app/${badgeDockHelperArtifactName}`
     );
   });
 });

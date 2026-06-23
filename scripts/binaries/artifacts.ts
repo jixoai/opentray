@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 export type PackageOs = "darwin" | "linux" | "windows";
 export type NpmOs = "darwin" | "linux" | "win32";
 export type NativeArch = "arm64" | "x64";
-export type NativeStageKind = "daemon" | "webview" | "lynx" | "lynx-runtime";
+export type NativeStageKind = "daemon" | "webview" | "lynx" | "lynx-runtime" | "badge";
+export const badgeDockHelperArtifactName = "OpenTrayBadgeHelper.app.zip";
 
 export interface NativeTarget {
   packageOs: PackageOs;
@@ -16,6 +17,9 @@ export interface NativeTarget {
   webviewPackageName?: string;
   webviewPackageDir?: string;
   webviewArtifact?: string;
+  badgePackageName?: string;
+  badgePackageDir?: string;
+  badgeArtifact?: string;
   lynxPackageName?: string;
   lynxPackageDir?: string;
   lynxArtifact?: string;
@@ -41,6 +45,10 @@ export function createNativeTarget(
     packageOs === "linux"
       ? undefined
       : `packages/ext-webview-${packageOs}-${arch}`;
+  const badgePackageDir =
+    packageOs === "darwin"
+      ? `packages/ext-badge-darwin-${arch}`
+      : undefined;
   const lynxPackageDir =
     packageOs === "darwin"
       ? `packages/ext-lynx-${packageOs}-${arch}`
@@ -66,6 +74,15 @@ export function createNativeTarget(
         : packageOs === "windows"
           ? `${webviewPackageDir}/bin/opentray_ext_webview.dll`
           : `${webviewPackageDir}/lib/libopentray_ext_webview.dylib`,
+    badgePackageName:
+      badgePackageDir === undefined
+        ? undefined
+        : `@opentray/ext-badge-darwin-${arch}`,
+    badgePackageDir,
+    badgeArtifact:
+      badgePackageDir === undefined
+        ? undefined
+        : `${badgePackageDir}/app/${badgeDockHelperArtifactName}`,
     lynxPackageName:
       lynxPackageDir === undefined
         ? undefined
@@ -148,6 +165,13 @@ export const resolveStageDestination = (
         );
       }
       return target.webviewArtifact;
+    case "badge":
+      if (target.badgeArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish a badge dock helper`
+        );
+      }
+      return target.badgeArtifact;
     case "lynx":
       if (target.lynxArtifact === undefined) {
         throw new Error(
