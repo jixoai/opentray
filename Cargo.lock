@@ -2177,6 +2177,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentray-ext-badge"
+version = "0.0.0"
+dependencies = [
+ "opentray-spec",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "opentray-ext-lynx"
 version = "0.0.0"
 dependencies = [

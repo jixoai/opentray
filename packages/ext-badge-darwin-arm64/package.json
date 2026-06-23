@@ -1,0 +1,23 @@
+{
+  "name": "@opentray/ext-badge-darwin-arm64",
+  "version": "0.0.0",
+  "description": "OpenTray badge Dock helper app for macOS arm64.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
+  "files": [
+    "README.md",
+    "app"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "peerDependencies": {
+    "opentray": ">=0.0.0"
+  }
+}

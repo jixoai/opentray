@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,7 +58,7 @@ export async function createWebviewExampleRuntime(
   options: WebviewExampleRuntimeOptions,
 ): Promise<WebviewExampleRuntime> {
   const localWebviewExtension = await prepareLocalWebviewExtensionPath(options.importMetaUrl);
-  const homeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `${options.homePrefix}-${process.pid}`);
+  const homeDir = process.env.OPENTRAY_HOME ?? createShortExampleHome(options.homePrefix);
   const connection = await connectLocalBroker({ homeDir });
   const client = createClient(connection, { requestIdPrefix: options.requestIdPrefix });
 
@@ -100,6 +100,16 @@ export async function createWebviewExampleRuntime(
       await connection.close();
     },
   };
+}
+
+function createShortExampleHome(homePrefix: string): string {
+  const candidateRoots = ["/tmp", join(homedir(), ".opentray"), tmpdir()];
+  for (const root of candidateRoots) {
+    if (root.length <= 16) {
+      return join(root, `${homePrefix}-${process.pid}`);
+    }
+  }
+  return join("/tmp", `${homePrefix}-${process.pid}`);
 }
 
 export function listenWebviewIpcMessages(
@@ -145,6 +155,14 @@ export async function prepareLocalWebviewExtensionPath(importMetaUrl: string): P
     process.env.OPENTRAY_EXT_PATH = localWebviewExtension;
   }
   return localWebviewExtension;
+}
+
+export async function prepareLocalBadgeExtensionPath(importMetaUrl: string): Promise<string | undefined> {
+  const localBadgeExtension = await resolveLocalBadgeExtension(importMetaUrl);
+  if (process.env.OPENTRAY_BADGE_EXT_PATH === undefined && localBadgeExtension !== undefined) {
+    process.env.OPENTRAY_BADGE_EXT_PATH = localBadgeExtension;
+  }
+  return localBadgeExtension;
 }
 
 async function resolveLocalWebviewExtension(importMetaUrl: string): Promise<string | undefined> {
@@ -201,12 +219,72 @@ async function runSourceTreeExampleBuild(workspaceRoot: string): Promise<void> {
   });
 }
 
+async function resolveLocalBadgeExtension(importMetaUrl: string): Promise<string | undefined> {
+  const artifactName = localBadgeArtifactName();
+  if (artifactName === undefined) {
+    return undefined;
+  }
+
+  const workspaceCargoToml = fileURLToPath(new URL("../../../Cargo.toml", importMetaUrl));
+  try {
+    await access(workspaceCargoToml, constants.R_OK);
+  } catch {
+    return undefined;
+  }
+  await runSourceTreeBadgeBuild(fileURLToPath(new URL("../../../", importMetaUrl)));
+
+  const candidates = [
+    fileURLToPath(new URL(`../../../target/debug/${artifactName}`, importMetaUrl)),
+    fileURLToPath(new URL(`../../../target/release/${artifactName}`, importMetaUrl)),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.R_OK);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+async function runSourceTreeBadgeBuild(workspaceRoot: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("cargo", ["build", "-p", "opentray-bin", "-p", "opentray-ext-badge"], {
+      cwd: workspaceRoot,
+      stdio: process.env.OPENTRAY_EXT_BUILD_LOGS === "1" ? "inherit" : "ignore",
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `cargo build -p opentray-bin -p opentray-ext-badge failed with code ${code ?? "unknown"}`,
+        ),
+      );
+    });
+  });
+}
+
 function localWebviewArtifactName(): string | undefined {
   if (process.platform === "win32") {
     return "opentray_ext_webview.dll";
   }
   if (process.platform === "darwin") {
     return "libopentray_ext_webview.dylib";
+  }
+  return undefined;
+}
+
+function localBadgeArtifactName(): string | undefined {
+  if (process.platform === "win32") {
+    return "opentray_ext_badge.dll";
+  }
+  if (process.platform === "darwin") {
+    return "libopentray_ext_badge.dylib";
   }
   return undefined;
 }

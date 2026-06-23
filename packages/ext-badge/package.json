@@ -1,7 +1,7 @@
 {
   "name": "@opentray/ext-badge",
   "version": "0.0.0",
-  "description": "Official OpenTray platform badge, progress, and overlay API extension.",
+  "description": "Official OpenTray status extension backed by the OpenTray extension ABI.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -10,21 +10,33 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     },
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    "platforms",
     "README.md"
   ],
   "sideEffects": false,
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
   "peerDependencies": {
     "opentray": ">=0.0.0"
   },
+  "optionalDependencies": {
+    "@opentray/ext-badge-darwin-arm64": "workspace:*",
+    "@opentray/ext-badge-darwin-x64": "workspace:*"
+  },
   "devDependencies": {
-    "opentray": "workspace:*"
+    "@opentray/spec": "workspace:*",
+    "opentray": "workspace:*",
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }
