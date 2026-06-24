@@ -2,7 +2,7 @@
 
 ## MODIFIED Requirements
 
-### Requirement: Broker daemon SHALL be scoped by version and caller identity
+### Requirement: Broker daemon SHALL be version-scoped
 
 The broker daemon SHALL store runtime state under `~/.opentray/<packageVersion>/<callerLabel>/runtime/` and SHALL operate only on the endpoint identity for the current package or binary version, protocol version, AND caller label. It SHALL NOT discover, stop, restart, or reuse daemons from another package version or another caller label. Two different callers of the same package version SHALL resolve to different runtime directories and different broker endpoints.
 
@@ -29,7 +29,7 @@ The broker daemon SHALL store runtime state under `~/.opentray/<packageVersion>/
 - **THEN** it stops only the `myapp` broker
 - **AND** it does not touch the `cli-tool` runtime directory.
 
-### Requirement: Broker daemon SHALL bind only the current caller endpoint
+### Requirement: Broker daemon SHALL bind only the current versioned endpoint
 
 The running broker SHALL bind the endpoint derived from the current package version, protocol version, and caller label. It SHALL write readiness metadata under the current caller runtime directory and SHALL NOT scan or reuse another package version's or another caller's daemon state. The endpoint identity SHALL incorporate a normalized caller label so that concurrent callers of the same OpenTray version cannot collide on one socket or named pipe.
 
@@ -49,7 +49,7 @@ The running broker SHALL bind the endpoint derived from the current package vers
 - **THEN** each broker owns a different state root and endpoint
 - **AND** neither broker dispatches client frames from the other caller's endpoint.
 
-### Requirement: Broker daemon SHALL clean the single session's state on disconnect
+### Requirement: Broker daemon SHALL clean session-owned state on disconnect
 
 Because a broker is pinned to exactly one caller session for normal operation, when that client transport disconnects or exits the broker SHALL close the session through the kernel and remove all trays and extension state owned by that session. There is no second session on the same broker whose state must be preserved.
 
@@ -61,7 +61,7 @@ Because a broker is pinned to exactly one caller session for normal operation, w
 - **AND** removes the session's trays and extension state
 - **AND** resyncs the backend to an empty state or proceeds toward idle shutdown.
 
-### Requirement: Broker daemon SHALL exit after an idle period with the single session gone
+### Requirement: Broker daemon SHALL exit after an idle period with no sessions
 
 The broker daemon SHALL release itself after a configurable idle timeout when its single caller session is not connected. Idle shutdown SHALL be owned by the broker composition layer that owns process and event-loop lifecycle. `opentray-core` SHALL NOT own process timers, and TypeScript clients SHALL NOT kill the daemon directly on normal close.
 

@@ -2,7 +2,7 @@
 
 ## MODIFIED Requirements
 
-### Requirement: TypeScript SDK SHALL connect to the caller-scoped local broker
+### Requirement: TypeScript SDK SHALL connect to the versioned local broker
 
 The `opentray` TypeScript package SHALL provide a local broker client that resolves the current package version, protocol version, and caller label, connects to the derived per-caller daemon endpoint, sends `init`, and exposes broker-created space and tray handles. The client SHALL NOT return placeholder `pending:*` identities after a successful broker response path exists.
 
@@ -29,7 +29,7 @@ The endpoint SHALL incorporate the caller label so that two host applications us
 - **THEN** each resolves a different daemon endpoint
 - **AND** each session is served by its own broker process.
 
-### Requirement: TypeScript SDK SHALL auto-start the caller-scoped local daemon by default
+### Requirement: TypeScript SDK SHALL auto-start the local same-version daemon by default
 
 The local broker client SHALL start or reuse the daemon for the current package version, protocol version, and caller label before connecting to the derived per-caller endpoint. Manual `opentray daemon start|stop|restart` commands SHALL remain available for operator and debugging workflows, but human examples and normal SDK usage SHALL NOT require the developer to start the daemon by hand.
 
