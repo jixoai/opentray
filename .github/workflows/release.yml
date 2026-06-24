@@ -281,13 +281,13 @@ jobs:
             --package-dirs-json '${{ needs.plan-native.outputs.validate-package-dirs }}'
 
       - name: Publish packages
-        if: steps.release-channel.outputs.channel == 'stable'
+        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'
         run: pnpm run release
 
       - name: Publish alpha packages
-        if: steps.release-channel.outputs.channel == 'alpha'
+        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'alpha'
         run: pnpm run release:alpha
 
       - name: Push release tags
-        if: steps.release-channel.outputs.channel == 'stable'
+        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'
         run: git push origin --tags

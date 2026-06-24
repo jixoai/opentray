@@ -48,6 +48,9 @@ describe("Feature: release native binary CI law", () => {
     expect(workflow).toContain("Upload Lynx build logs");
     expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("git push origin --tags");
+    expect(releaseJob).toContain(
+      "steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'"
+    );
     expect(releaseJob).not.toContain("git push --follow-tags");
     expect(releaseJob).not.toContain("--source target/release");
     expect(releaseJob).not.toContain("stage-local.ts");
