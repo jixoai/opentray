@@ -28,6 +28,8 @@ describe("Feature: native binary artifact topology", () => {
     expect(nativeTargets.map((target) => target.badgePackageName).filter(Boolean)).toEqual([
       "@opentray/ext-badge-darwin-arm64",
       "@opentray/ext-badge-darwin-x64",
+      "@opentray/ext-badge-windows-arm64",
+      "@opentray/ext-badge-windows-x64",
     ]);
     expect(
       nativeTargets.map((target) => target.lynxPackageName).filter(Boolean)
@@ -63,6 +65,9 @@ describe("Feature: native binary artifact topology", () => {
     expect(windows.webviewArtifact).toBe(
       "packages/ext-webview-windows-x64/bin/opentray_ext_webview.dll"
     );
+    expect(windows.badgeArtifact).toBe(
+      "packages/ext-badge-windows-x64/bin/opentray_ext_badge.dll"
+    );
   });
 
   test("Scenario: Given unsupported host When target is resolved Then the error is explicit", () => {
@@ -82,6 +87,9 @@ describe("Feature: native binary artifact topology", () => {
     );
     expect(target.webviewArtifact).toBe(
       "packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll"
+    );
+    expect(target.badgeArtifact).toBe(
+      "packages/ext-badge-windows-arm64/bin/opentray_ext_badge.dll"
     );
     expect(target.lynxArtifact).toBeUndefined();
   });
@@ -116,6 +124,14 @@ describe("Feature: native binary artifact topology", () => {
 
     expect(target.badgeArtifact).toBe(
       `packages/ext-badge-darwin-x64/app/${badgeDockHelperArtifactName}`
+    );
+  });
+
+  test("Scenario: Given a Windows badge target When the destination is resolved Then the native DLL stays package-owned", () => {
+    const target = resolveNativePackageTarget("windows", "x64");
+
+    expect(resolveStageDestination(target, "badge")).toBe(
+      "packages/ext-badge-windows-x64/bin/opentray_ext_badge.dll"
     );
   });
 });

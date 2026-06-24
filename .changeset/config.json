@@ -22,7 +22,9 @@
     [
       "@opentray/ext-badge",
       "@opentray/ext-badge-darwin-arm64",
-      "@opentray/ext-badge-darwin-x64"
+      "@opentray/ext-badge-darwin-x64",
+      "@opentray/ext-badge-windows-arm64",
+      "@opentray/ext-badge-windows-x64"
     ],
     [
       "@opentray/ext-lynx",

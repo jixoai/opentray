@@ -145,6 +145,12 @@ const webviewNativeBuildTargets: readonly NativeBuildTargetName[] = [
   "windows-arm64",
   "windows-x64",
 ];
+const badgeNativeBuildTargets: readonly NativeBuildTargetName[] = [
+  "darwin-arm64",
+  "darwin-x64",
+  "windows-arm64",
+  "windows-x64",
+];
 const nativeBuildComponentOrder: readonly NativeBuildComponent[] = [
   "daemon",
   "webview",
@@ -174,12 +180,12 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
   },
   badge: {
     component: "badge",
-    allowedTargets: ["darwin-arm64", "darwin-x64"],
-    defaultReleaseTargets: ["darwin-arm64", "darwin-x64"],
-    cargoPackages: [],
+    allowedTargets: badgeNativeBuildTargets,
+    defaultReleaseTargets: badgeNativeBuildTargets,
+    cargoPackages: ["opentray-ext-badge"],
     artifactKinds: ["badge"],
     inferredPackages: ["@opentray/ext-badge"],
-    inferredPackagePrefixes: ["@opentray/ext-badge-darwin-"],
+    inferredPackagePrefixes: ["@opentray/ext-badge-"],
   },
   lynx: {
     component: "lynx",
@@ -356,9 +362,20 @@ export const executeNativeBuildExecution = async (
     }
 
     if (kind === "badge") {
-      const badgeOutput = join(outputDir, badgeDockHelperArtifactName);
-      await runCommand("bash", ["scripts/release/build-badge-dock-helper.sh", badgeOutput], workspaceRoot);
-      copiedFiles.push(badgeOutput);
+      if (target.packageOs === "darwin") {
+        const badgeOutput = join(outputDir, badgeDockHelperArtifactName);
+        await runCommand("bash", ["scripts/release/build-badge-dock-helper.sh", badgeOutput], workspaceRoot);
+        copiedFiles.push(badgeOutput);
+        continue;
+      }
+
+      const source = join(workspaceRoot, "target", "release", releaseArtifactName(kind, nativeTarget.packageOs));
+      const destination = join(outputDir, basename(source));
+      await copyFile(source, destination);
+      if (!destination.endsWith(".dll")) {
+        await chmod(destination, 0o755);
+      }
+      copiedFiles.push(destination);
       continue;
     }
 
@@ -410,10 +427,13 @@ export const releaseArtifactName = (
       }
       return "libopentray_ext_webview.dylib";
     case "badge":
-      if (packageOs !== "darwin") {
-        throw new Error("badge dock helper artifacts are only published for darwin targets");
+      if (packageOs === "windows") {
+        return "opentray_ext_badge.dll";
       }
-      return badgeDockHelperArtifactName;
+      if (packageOs === "darwin") {
+        return badgeDockHelperArtifactName;
+      }
+      throw new Error("badge native artifacts are not published for linux targets");
     case "lynx":
       return "libopentray_ext_lynx.dylib";
   }

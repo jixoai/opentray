@@ -36,8 +36,8 @@ const { values } = parseArgs({
 if (values.source === undefined || values.source.length === 0) {
   throw new Error("--source is required");
 }
-if (!["daemon", "webview", "lynx", "lynx-runtime"].includes(values.kind)) {
-  throw new Error("--kind must be daemon, webview, lynx, or lynx-runtime");
+if (!["daemon", "webview", "badge", "lynx", "lynx-runtime"].includes(values.kind)) {
+  throw new Error("--kind must be daemon, webview, badge, lynx, or lynx-runtime");
 }
 if ((values["package-os"] === undefined) !== (values.arch === undefined)) {
   throw new Error("--package-os and --arch must be provided together");

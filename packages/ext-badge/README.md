@@ -8,7 +8,7 @@ Official status extension for OpenTray.
 - Keep badge truth capability-gated and honest.
 - Route badge commands through the normal tray extension ABI.
 
-Linux support is intentionally reduced until a real native projection exists. Unsupported families reject explicitly.
+Windows and Linux support is intentionally reduced until a real native projection exists. Unsupported families reject explicitly.
 On the current macOS Dock proof surface, progress and progress state are explicitly unsupported and should not be treated as a working Dock projection.
 
 ## Debug Panel

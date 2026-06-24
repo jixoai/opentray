@@ -17,7 +17,7 @@
 
 - [ ] 3.1 Run `bun run openspec:vision -- commit-check implement-ext-badge-status-surface --phase apply` before product-code work starts and commit ready OpenSpec artifacts.
 - [x] 3.2 Extend `@opentray/ext-badge` public types and exports with the honest capability-gated status contract.
-- [ ] 3.3 Implement or wire the native badge projection adapters for macOS, Windows, and Linux with explicit unsupported results for missing primitives.
+- [x] 3.3 Implement or wire the native badge projection adapters for macOS, Windows, and Linux with explicit unsupported results for missing primitives.
 - [x] 3.4 Add the macOS badge debug panel through `@opentray/ext-webview` IPC and make it display capability metadata plus operation results.
 - [x] 3.5 Add concise intent comments at the native capability boundary and the debug-panel IPC boundary.
 - [x] 3.6 Update package docs and examples so the capability matrix and honest Linux reduced support are visible.
@@ -29,14 +29,14 @@
 - [x] 4.2 Run the macOS badge debug panel path through `pnpm --filter opentray example:webview-control` or the new badge-focused debug entrypoint once added.
 - [ ] 4.3 Run platform-specific native tests for the badge runtime atoms on macOS, Windows, and Linux.
 - [x] 4.4 Run `bun run openspec:vision -- validate implement-ext-badge-status-surface`.
-- [ ] 4.5 Run `bun run openspec:vision -- commit-check implement-ext-badge-status-surface --phase self-review` before writing final review evidence.
+- [x] 4.5 Run `bun run openspec:vision -- commit-check implement-ext-badge-status-surface --phase self-review` before writing final review evidence.
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
-- [ ] 5.2 Generate `review/self-review.html` as the screenshot / interaction / structured evidence presentation for the macOS debug panel.
+- [x] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
+- [x] 5.2 Generate `review/self-review.html` as the screenshot / interaction / structured evidence presentation for the macOS debug panel.
 - [ ] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
 - [ ] 5.4 If the review enters a real loop, persist iteration state with the OpenSpec workflow command before continuing.
 - [ ] 5.5 If review cannot exit normally, run `bun run openspec:vision -- handoff implement-ext-badge-status-surface` and commit the handoff evidence before returning to user discussion.
 - [ ] 5.6 If review exits normally, run `openspec archive implement-ext-badge-status-surface` and commit the archive result.
-- [ ] 5.7 Run `bun run openspec:vision -- check implement-ext-badge-status-surface` and decide whether to exit or return to `research-plan` with a backed-up plan revision.
+- [x] 5.7 Run `bun run openspec:vision -- check implement-ext-badge-status-surface` and decide whether to exit or return to `research-plan` with a backed-up plan revision.

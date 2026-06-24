@@ -46,9 +46,19 @@ export function createNativeTarget(
       ? undefined
       : `packages/ext-webview-${packageOs}-${arch}`;
   const badgePackageDir =
-    packageOs === "darwin"
-      ? `packages/ext-badge-darwin-${arch}`
-      : undefined;
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-badge-${packageOs}-${arch}`;
+  const badgeArtifact =
+    badgePackageDir === undefined
+      ? undefined
+      : packageOs === "windows"
+        ? `${badgePackageDir}/bin/opentray_ext_badge.dll`
+        : `${badgePackageDir}/app/${badgeDockHelperArtifactName}`;
+  const badgePackageName =
+    badgePackageDir === undefined
+      ? undefined
+      : `@opentray/ext-badge-${packageOs}-${arch}`;
   const lynxPackageDir =
     packageOs === "darwin"
       ? `packages/ext-lynx-${packageOs}-${arch}`
@@ -74,15 +84,9 @@ export function createNativeTarget(
         : packageOs === "windows"
           ? `${webviewPackageDir}/bin/opentray_ext_webview.dll`
           : `${webviewPackageDir}/lib/libopentray_ext_webview.dylib`,
-    badgePackageName:
-      badgePackageDir === undefined
-        ? undefined
-        : `@opentray/ext-badge-darwin-${arch}`,
+    badgePackageName,
     badgePackageDir,
-    badgeArtifact:
-      badgePackageDir === undefined
-        ? undefined
-        : `${badgePackageDir}/app/${badgeDockHelperArtifactName}`,
+    badgeArtifact,
     lynxPackageName:
       lynxPackageDir === undefined
         ? undefined
@@ -168,7 +172,7 @@ export const resolveStageDestination = (
     case "badge":
       if (target.badgeArtifact === undefined) {
         throw new Error(
-          `target ${target.packageOs}-${target.arch} does not publish a badge dock helper`
+          `target ${target.packageOs}-${target.arch} does not publish a badge native artifact`
         );
       }
       return target.badgeArtifact;

@@ -30,7 +30,9 @@
   },
   "optionalDependencies": {
     "@opentray/ext-badge-darwin-arm64": "workspace:*",
-    "@opentray/ext-badge-darwin-x64": "workspace:*"
+    "@opentray/ext-badge-darwin-x64": "workspace:*",
+    "@opentray/ext-badge-windows-arm64": "workspace:*",
+    "@opentray/ext-badge-windows-x64": "workspace:*"
   },
   "devDependencies": {
     "@opentray/spec": "workspace:*",

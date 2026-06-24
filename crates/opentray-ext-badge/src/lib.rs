@@ -314,3 +314,69 @@ fn write_owned_events(out: *mut ExtOwnedBytes, events: &[ExtensionEnvelope]) -> 
     };
     write_owned_json(out, &json)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_capabilities_are_reduced_and_truthful_for_windows() {
+        let capabilities = default_capabilities(BadgePlatform::Win32);
+
+        assert_eq!(capabilities.platform, BadgePlatform::Win32);
+        assert_eq!(capabilities.mode, "reduced");
+        assert_eq!(capabilities.capabilities.badge_text, "reduced");
+        assert_eq!(capabilities.capabilities.progress, "unsupported");
+        assert_eq!(capabilities.capabilities.overlay_icon, "reduced");
+        assert_eq!(capabilities.capabilities.attention, "reduced");
+        assert!(capabilities.reason.is_some());
+    }
+
+    #[test]
+    fn progress_commands_reject_instead_of_persisting_fake_projection() {
+        let mut extension = BadgeExtension {
+            state: default_capabilities(BadgePlatform::Win32),
+        };
+
+        let error = extension
+            .handle(
+                "tray-1",
+                BadgeCommand::SetProgress {
+                    value: 50,
+                    max: Some(100),
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(error.code(), EXT_ERR_UNSUPPORTED);
+        assert!(error.to_string().contains("progress is unsupported"));
+        assert_eq!(extension.state.state.progress_value, 0);
+        assert_eq!(extension.state.state.progress_max, 100);
+        assert_eq!(extension.state.state.progress_state, "none");
+    }
+
+    #[test]
+    fn badge_commands_update_source_state_and_emit_result_events() {
+        let mut extension = BadgeExtension {
+            state: default_capabilities(BadgePlatform::Win32),
+        };
+
+        let events = extension
+            .handle(
+                "tray-1",
+                BadgeCommand::SetBadge {
+                    value: " 42 ".to_string(),
+                },
+            )
+            .expect("badge command should succeed");
+
+        assert_eq!(extension.state.state.badge_text, "42");
+        assert_eq!(extension.state.state.badge_count, Some(42));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].scope.tray_id.as_deref(), Some("tray-1"));
+        assert_eq!(events[0].scope.ext, "badge");
+        assert_eq!(events[0].data["type"], "result");
+        assert_eq!(events[0].data["op"], "setBadge");
+        assert_eq!(events[0].data["ok"], true);
+    }
+}

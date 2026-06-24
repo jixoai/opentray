@@ -75,7 +75,7 @@ describe("Feature: selective native release planner", () => {
     ]);
   });
 
-  test("Scenario: Given badge pending changesets When the planner runs Then only badge package dirs are validated", async () => {
+  test("Scenario: Given badge pending changesets When the planner runs Then macOS and Windows badge package dirs are validated", async () => {
     const root = await createTempChangeset(
       "badge.md",
       `---
@@ -88,10 +88,17 @@ describe("Feature: selective native release planner", () => {
 
     expect(plan.enabled).toBe(true);
     expect(plan.components).toEqual(["badge"]);
-    expect(plan.jobs.map((job) => job.target)).toEqual(["darwin-arm64", "darwin-x64"]);
+    expect(plan.jobs.map((job) => job.target)).toEqual([
+      "darwin-arm64",
+      "darwin-x64",
+      "windows-arm64",
+      "windows-x64",
+    ]);
     expect(plan.validatePackageDirs).toEqual([
       "packages/ext-badge-darwin-arm64",
       "packages/ext-badge-darwin-x64",
+      "packages/ext-badge-windows-arm64",
+      "packages/ext-badge-windows-x64",
     ]);
   });
 });

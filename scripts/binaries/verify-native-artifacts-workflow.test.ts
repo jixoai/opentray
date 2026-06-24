@@ -19,6 +19,12 @@ describe("Feature: native artifact verification workflow", () => {
     expect(workflow).toContain(
       'bash scripts/release/build-lynx-runtime.sh "native-artifacts/OpenTrayLynxRuntime.app.zip"'
     );
+    expect(workflow).toContain(
+      'bash scripts/release/build-badge-dock-helper.sh "native-artifacts/${{ matrix.badge_artifact }}"'
+    );
+    expect(workflow).toContain("opentray_ext_badge.dll");
+    expect(workflow).toContain("--kind badge");
+    expect(workflow).toContain("packages/ext-badge-windows-x64");
     expect(workflow).toContain("native/lynx-patches/**");
     expect(workflow).toContain("native/lynx-runtime-macos/**");
     expect(workflow).toContain("name: Stage and pack native npm packages");
