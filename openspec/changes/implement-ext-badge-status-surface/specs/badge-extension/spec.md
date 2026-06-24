@@ -45,7 +45,7 @@ The extension SHALL not rewrite a visible projection back into badge source data
 The badge extension SHALL support the following substrate truth:
 
 - macOS SHALL support badge text/count natively and MAY support additional projection through a native Dock surface when available.
-- Windows SHALL support progress and overlay icon projection through the taskbar substrate, and MAY support badge-adjacent status projection where the native shell allows it.
+- Windows SHALL ship as a reduced native extension package atom until a real taskbar substrate lands. During this reduced phase it SHALL report capability truth and reject unsupported progress, overlay, or badge-adjacent projections explicitly.
 - Linux SHALL expose only the status families that the active desktop shell can actually project through the current backend. If a requested badge family has no native substrate, the extension SHALL reject it as unsupported or reduced.
 
 The extension SHALL not claim Linux parity for badge/progress/overlay behavior unless the backend proves it through a real desktop substrate.
@@ -56,6 +56,13 @@ The extension SHALL not claim Linux parity for badge/progress/overlay behavior u
 - **WHEN** the client requests that unsupported family
 - **THEN** the extension returns a typed unsupported result
 - **AND** it does not fake a native badge or progress surface.
+
+#### Scenario: Windows reduced runtime stays honest before taskbar projection lands
+
+- **GIVEN** the Windows badge package is installed
+- **WHEN** the current runtime cannot project progress or overlay state through a real taskbar substrate
+- **THEN** the extension reports reduced or unsupported capability metadata
+- **AND** unsupported operations reject explicitly instead of no-oping as success.
 
 ### Requirement: Badge operations SHALL be asynchronous and capability-gated
 

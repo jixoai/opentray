@@ -3,8 +3,8 @@
 ## Current Round
 
 - Round: 1
-- Status: apply
-- Previous plan backup: `plans/plan-v1.md`
+- Status: research-plan
+- Previous plan backup: none
 
 ## Workflow Command Surface
 
@@ -30,7 +30,6 @@
 | ---- | ------- | ---------------- | ---------------- |
 | 1 | User | Wants `ext-badge` to stay honest and practical, and asks to start the OpenSpec change. | This change must define capability-gated badge semantics, not fake cross-platform parity. |
 | 2 | User | Requests implementation for three platforms and full macOS development/testing, using `ext-webview` IPC to build a debug panel. | The change must include a macOS-visible debug surface and a platform matrix that distinguishes full support from reduced support. |
-| 3 | User | Confirms Windows should proceed at Reduced depth for this round. | Windows gets package/runtime/distribution atoms and explicit unsupported behavior now; native taskbar projection remains future work. |
 
 ### Evidence Read
 
@@ -99,7 +98,7 @@ The user wants a status extension that behaves like a real platform atom: capabi
 
 ### Final Visible Effect
 
-An operator can inspect `ext-badge` capability support, set badge/progress/overlay/attention state where the platform allows it, and see the macOS proof surface through a WebView debug panel. Windows and Linux will not lie about unsupported badge semantics; they will report reduced capabilities and reject unsupported requests honestly until native substrates land.
+An operator can inspect `ext-badge` capability support, set badge/progress/overlay/attention state where the platform allows it, and see the macOS proof surface through a WebView debug panel. Linux will not lie about unsupported badge semantics; it will report reduced capabilities and reject unsupported requests honestly.
 
 ## Platform Diagnosis
 
@@ -121,7 +120,7 @@ The badge extension should expose a small typed surface: `setBadge`, `clearBadge
 
 ### Data Shape
 
-Durable facts are badge count/text, progress value and state, overlay icon, and attention flag. Projections are tray icon badges, future taskbar overlays, Dock badge labels, and debug-panel state. The API must not confuse a visible projection with a source fact, and it must not store fake platform support in the projection layer.
+Durable facts are badge count/text, progress value and state, overlay icon, and attention flag. Projections are tray icon badges, taskbar overlays, Dock badge labels, and debug-panel state. The API must not confuse a visible projection with a source fact, and it must not store fake platform support in the projection layer.
 
 ### Architecture Shape
 
@@ -131,8 +130,7 @@ Durable facts are badge count/text, progress value and state, overlay icon, and 
 
 | Gate | Why confirmation is required | Default until user answers |
 | ---- | ---------------------------- | -------------------------- |
-| Windows scope | Native taskbar projection is not being completed in this round. | Reduced Windows package/runtime support with explicit unsupported errors. |
-| Linux parity scope | Linux badge/progress primitives are not native-parity-class the way macOS and Windows eventually may be. | Reduced capability-gated support with explicit unsupported errors. |
+| Linux parity scope | Linux badge/progress primitives are not native-parity-class the way macOS and Windows are. | Reduced capability-gated support with explicit unsupported errors. |
 | Debug panel packaging scope | A panel can be proof tooling or published product surface. | Keep it as a repo-visible macOS test/debug surface first. |
 
 ## Intent-Driven Plan
@@ -163,4 +161,4 @@ Durable facts are badge count/text, progress value and state, overlay icon, and 
 
 - Default max review iterations: 2
 - Issue recurrence threshold: 2
-- Custom exit condition from intent: macOS debug panel proves the badge flow through `ext-webview` IPC, Windows packages and reduced runtime are present, Linux reports reduced capability truthfully, and the contract makes unsupported behavior explicit instead of fake-successful.
+- Custom exit condition from intent: macOS debug panel proves the full badge flow through `ext-webview` IPC, Windows projects its supported status family, Linux reports reduced capability truthfully, and the contract makes unsupported behavior explicit instead of fake-successful.
