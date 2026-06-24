@@ -29,7 +29,7 @@ pub struct TrayProjection {
     pub tray_id: TrayId,
     pub title: String,
     pub tooltip: Option<Tooltip>,
-    pub icon: Icon,
+    pub icon: Option<Icon>,
     pub menu: Option<Menu>,
 }
 

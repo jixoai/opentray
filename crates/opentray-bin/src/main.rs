@@ -1,4 +1,5 @@
 mod dynamic_extension;
+mod frame_error;
 #[cfg(unix)]
 mod unix_transport;
 #[cfg(target_os = "windows")]

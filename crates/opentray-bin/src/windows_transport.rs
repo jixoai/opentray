@@ -10,6 +10,8 @@ use std::sync::{
     Arc,
 };
 use std::thread::{self, JoinHandle};
+
+use crate::frame_error::extract_request_id;
 use std::time::Duration;
 
 use opentray_core::BrokerSession;
@@ -256,10 +258,11 @@ fn read_available_frames(
                 send(TransportEvent::Frame { id, frame });
             }
             Err(error) => {
+                let request_id = extract_request_id(line);
                 write_frame_to_pipe(
                     stream,
                     &ServerFrame::Error {
-                        request_id: None,
+                        request_id,
                         code: "invalid-frame".to_string(),
                         message: error.to_string(),
                     },

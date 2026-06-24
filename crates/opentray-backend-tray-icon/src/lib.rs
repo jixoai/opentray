@@ -248,11 +248,11 @@ mod tests {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
                 tooltip: None,
-                icon: Icon::Rgba {
+                icon: Some(Icon::Rgba {
                     data: vec![0, 0, 0, 0],
                     width: 1,
                     height: 1,
-                },
+                }),
                 menu: Some(Menu {
                     items: vec![MenuItem::Item {
                         id: 7,

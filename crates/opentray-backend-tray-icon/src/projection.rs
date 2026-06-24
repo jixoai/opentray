@@ -51,7 +51,7 @@ pub struct TrayIconTrayProjection {
     pub tray_id: TrayId,
     pub title: String,
     pub tooltip: Option<Tooltip>,
-    pub icon: TrayIconAsset,
+    pub icon: Option<TrayIconAsset>,
     pub menu: TrayIconMenuProjection,
 }
 
@@ -73,7 +73,10 @@ impl TrayIconTrayProjection {
             tray_id: tray.tray_id.clone(),
             title: tray.title.clone(),
             tooltip: tray.tooltip.clone(),
-            icon: TrayIconAsset::from_icon(&tray.icon)?,
+            icon: match tray.icon.as_ref() {
+                Some(icon) => Some(TrayIconAsset::from_icon(icon)?),
+                None => None,
+            },
             menu,
         })
     }
@@ -543,12 +546,12 @@ mod tests {
 
     use super::*;
 
-    fn icon() -> Icon {
-        Icon::Rgba {
+    fn icon() -> Option<Icon> {
+        Some(Icon::Rgba {
             data: vec![0, 0, 0, 0],
             width: 1,
             height: 1,
-        }
+        })
     }
 
     #[test]
@@ -737,11 +740,11 @@ mod tests {
 
         assert_eq!(
             projection.trays[0].icon,
-            TrayIconAsset::Rgba {
+            Some(TrayIconAsset::Rgba {
                 data: vec![13, 37, 91, 255],
                 width: 1,
                 height: 1,
-            }
+            })
         );
     }
 
@@ -759,11 +762,11 @@ mod tests {
         let _ = fs::remove_file(&path);
         assert_eq!(
             projection.trays[0].icon,
-            TrayIconAsset::Rgba {
+            Some(TrayIconAsset::Rgba {
                 data: vec![21, 42, 84, 255],
                 width: 1,
                 height: 1,
-            }
+            })
         );
     }
 
@@ -822,7 +825,7 @@ mod tests {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
                 tooltip: None,
-                icon,
+                icon: Some(icon),
                 menu: None,
             }],
         }

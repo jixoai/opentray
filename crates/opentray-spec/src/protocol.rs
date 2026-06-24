@@ -635,6 +635,30 @@ mod tests {
     }
 
     #[test]
+    fn create_tray_frame_deserializes_without_icon() {
+        // Regression for issue #3: a create-tray frame omitting the icon must
+        // deserialize successfully (icon is optional), so the broker responds
+        // instead of failing to parse and hanging the client.
+        let raw = serde_json::json!({
+            "type": "create-tray",
+            "requestId": "req-3",
+            "space": { "spaceId": "space-1" },
+            "tray": {
+                "trayId": "tray-1",
+                "title": "repro"
+            }
+        });
+
+        let frame: ClientFrame = serde_json::from_value(raw).expect("create-tray parses without icon");
+        match frame {
+            ClientFrame::CreateTray { tray, .. } => {
+                assert_eq!(tray.icon, None);
+            }
+            other => panic!("expected CreateTray, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn event_frames_use_camel_case_tray_event_fields() {
         let frame = ServerFrame::Event {
             event: TrayEvent::MenuClick {

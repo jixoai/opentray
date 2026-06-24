@@ -76,6 +76,31 @@ describe("top-level opentray sdk facade", () => {
     ]);
   });
 
+  it("creates a tray without an icon (regression for issue #3)", async () => {
+    // The issue reporter's createTray({ trayId, title }) omitted the icon, which
+    // the broker rejected as a malformed frame and then failed to correlate,
+    // hanging the promise forever. icon is now optional.
+    const transport = new RecordingTransport();
+    connectLocalBroker.mockResolvedValue(transport);
+
+    const tray = await createTray({
+      trayId: "repro",
+      title: "repro",
+    });
+
+    expect(tray.trayId).toBe("repro");
+    const createTrayFrame = transport.frames[1];
+    expect(createTrayFrame).toEqual({
+      type: "create-tray",
+      requestId: "opentray-2",
+      space: { spaceId: "space-default" },
+      tray: {
+        trayId: "repro",
+        title: "repro",
+      },
+    });
+  });
+
   it("skips default-space lookup when createTray receives an explicit space", async () => {
     const transport = new RecordingTransport();
     connectLocalBroker.mockResolvedValue(transport);

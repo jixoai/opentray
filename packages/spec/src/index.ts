@@ -255,7 +255,7 @@ export interface TrayOptions {
   appId?: string;
   title?: string;
   tooltip?: Tooltip;
-  icon: Icon;
+  icon?: Icon;
   menu?: Menu;
 }
 

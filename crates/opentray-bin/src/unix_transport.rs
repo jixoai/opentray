@@ -10,6 +10,8 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
+
+use crate::frame_error::extract_request_id;
 #[cfg(not(target_os = "macos"))]
 use std::time::Instant;
 
@@ -251,10 +253,13 @@ fn spawn_reader(id: u64, stream: UnixStream, writer: Writer, send: EventSender) 
                 Ok(line) => match serde_json::from_str::<ClientFrame>(&line) {
                     Ok(frame) => send(TransportEvent::Frame { id, frame }),
                     Err(error) => {
+                        // Correlate the error with the originating request when possible
+                        // so the client rejects instead of hanging on an uncorrelated error.
+                        let request_id = extract_request_id(&line);
                         let _ = write_frame(
                             &writer,
                             &ServerFrame::Error {
-                                request_id: None,
+                                request_id,
                                 code: "invalid-frame".to_string(),
                                 message: error.to_string(),
                             },

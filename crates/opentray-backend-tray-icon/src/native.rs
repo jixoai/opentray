@@ -67,7 +67,7 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
 
         for tray in trays {
             let tray_icon_id = tray.tray_icon_id.clone();
-            let icon = native_icon(&tray.icon)?;
+            let icon = native_icon(tray.icon.as_ref())?;
             let menu_policy = native_menu_policy(&tray.menu);
             let menu = if menu_policy.attach_menu {
                 Some(native_menu(&tray.menu)?)
@@ -88,8 +88,10 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
             let mut builder = TrayIconBuilder::new()
                 .with_id(tray_icon_id.clone())
                 .with_tooltip(tooltip)
-                .with_title(tray.title)
-                .with_icon(icon);
+                .with_title(tray.title);
+            if let Some(icon) = icon {
+                builder = builder.with_icon(icon);
+            }
             if let Some(menu) = menu {
                 builder = builder.with_menu(Box::new(menu));
             }
@@ -208,7 +210,11 @@ fn native_menu_policy(menu: &TrayIconMenuProjection) -> NativeMenuPolicy {
     }
 }
 
-fn native_icon(asset: &TrayIconAsset) -> Result<NativeIcon, BackendError> {
+fn native_icon(asset: Option<&TrayIconAsset>) -> Result<Option<NativeIcon>, BackendError> {
+    let asset = match asset {
+        Some(asset) => asset,
+        None => return Ok(None),
+    };
     match asset {
         // The projection layer already normalized every icon source into RGBA.
         TrayIconAsset::Rgba {
@@ -216,6 +222,7 @@ fn native_icon(asset: &TrayIconAsset) -> Result<NativeIcon, BackendError> {
             width,
             height,
         } => NativeIcon::from_rgba(data.clone(), *width, *height)
+            .map(Some)
             .map_err(|error| BackendError::Failure(error.to_string())),
     }
 }

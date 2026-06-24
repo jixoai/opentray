@@ -41,7 +41,8 @@ pub struct TrayOptions {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<Tooltip>,
-    pub icon: Icon,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Icon>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub menu: Option<Menu>,
 }

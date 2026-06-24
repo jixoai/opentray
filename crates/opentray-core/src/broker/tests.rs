@@ -10,12 +10,12 @@ use crate::{
     RECORDING_EXTENSION_PATH,
 };
 
-fn icon() -> Icon {
-    Icon::Rgba {
+fn icon() -> Option<Icon> {
+    Some(Icon::Rgba {
         data: vec![0, 0, 0, 0],
         width: 1,
         height: 1,
-    }
+    })
 }
 
 fn tray_options(tray_id: &str) -> TrayOptions {

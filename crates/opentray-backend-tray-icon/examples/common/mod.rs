@@ -19,11 +19,11 @@ pub fn surface_projection() -> SurfaceProjection {
                 title: "Injected runtime".to_string(),
                 description: "Applied by the example runtime atom".to_string(),
             }),
-            icon: Icon::Rgba {
+            icon: Some(Icon::Rgba {
                 data: visible_icon_rgba(),
                 width: 32,
                 height: 32,
-            },
+            }),
             menu: Some(Menu {
                 items: vec![
                     MenuItem::Item {

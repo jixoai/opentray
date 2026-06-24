@@ -203,8 +203,16 @@ class LocalBrokerConnection implements LocalBrokerClient {
         this.pending.delete(frame.requestId);
         return;
       }
-      this.ready?.reject(error);
-      this.ready = undefined;
+      // An error with no requestId could not be correlated to a specific request.
+      // If the handshake is still pending, reject it; otherwise reject every
+      // pending request so callers fail loudly instead of hanging indefinitely.
+      // (See issue #3: createTray never resolves on a malformed frame.)
+      if (this.ready) {
+        this.ready.reject(error);
+        this.ready = undefined;
+        return;
+      }
+      this.rejectAll(error);
       return;
     }
 

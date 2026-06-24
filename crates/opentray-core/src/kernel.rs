@@ -157,7 +157,7 @@ impl<B: SurfaceBackend> Kernel<B> {
         icon: Icon,
     ) -> Result<(), KernelError> {
         let tray = self.require_owned_tray_mut(lease_id, space_id, tray_id)?;
-        tray.options.icon = icon;
+        tray.options.icon = Some(icon);
         self.sync_surface(space_id)?;
         Ok(())
     }
@@ -396,12 +396,12 @@ mod tests {
     use super::*;
     use crate::{BackendCapabilities, BackendOperation, FakeBackend, RecordingExtension};
 
-    fn icon() -> Icon {
-        Icon::Rgba {
+    fn icon() -> Option<Icon> {
+        Some(Icon::Rgba {
             data: vec![0, 0, 0, 0],
             width: 1,
             height: 1,
-        }
+        })
     }
 
     fn tray_options(tray_id: &str, title: &str) -> TrayOptions {
