@@ -160,15 +160,24 @@ const parseManifest = (content: string, path: string): PackageManifest => {
   };
 };
 
-const discoverPackages = async (projectRoot: string): Promise<string[]> => {
+export const discoverPackages = async (projectRoot: string): Promise<string[]> => {
   const packagesRoot = join(projectRoot, "packages");
   const entries = await readdir(packagesRoot, { withFileTypes: true });
   const names: string[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const manifestPath = join(packagesRoot, entry.name, "package.json");
+    let manifestContent: string;
+    try {
+      manifestContent = await readFile(manifestPath, "utf8");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
     const manifest = parseManifest(
-      await readFile(manifestPath, "utf8"),
+      manifestContent,
       manifestPath
     );
     if (!manifest.private) {
@@ -537,9 +546,11 @@ const main = async (): Promise<void> => {
   }
 };
 
-try {
-  await main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }
