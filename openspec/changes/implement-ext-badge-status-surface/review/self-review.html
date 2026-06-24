@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>implement-ext-badge-status-surface self-review</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7f8;
+        --panel: #ffffff;
+        --text: #202124;
+        --muted: #5f6368;
+        --line: #d9dee3;
+        --ok: #146c43;
+        --warn: #9a6700;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 32px 24px 56px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: 30px;
+      }
+      h2 {
+        font-size: 18px;
+        margin-top: 28px;
+      }
+      p,
+      li {
+        line-height: 1.55;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+        margin-top: 16px;
+      }
+      .meta {
+        display: grid;
+        gap: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+      }
+      th {
+        width: 24%;
+        background: #fafbfc;
+        font-weight: 600;
+      }
+      tr:last-child th,
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      code {
+        background: #eef1f4;
+        border-radius: 5px;
+        padding: 0.1rem 0.35rem;
+      }
+      .ok {
+        color: var(--ok);
+        font-weight: 600;
+      }
+      .warn {
+        color: var(--warn);
+        font-weight: 600;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      ul {
+        margin: 8px 0 0 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Vision-Driven Self Review</h1>
+      <div class="panel meta">
+        <div><strong>Change:</strong> <code>implement-ext-badge-status-surface</code></div>
+        <div><strong>Iteration:</strong> 1</div>
+        <div><strong>Recurring issue counts:</strong> none</div>
+        <div><strong>Exit-condition judgment:</strong> Windows Reduced implementation handoff is possible</div>
+        <div><strong>Next loop action:</strong> no apply loop required for the current scope</div>
+      </div>
+
+      <h2>Intent Alignment</h2>
+      <table>
+        <tr>
+          <th>Intent point</th>
+          <th>Evidence</th>
+          <th>Verdict</th>
+        </tr>
+        <tr>
+          <td><code>ext-badge</code> stays outside core.</td>
+          <td>Package shells, artifact graph, CI staging, and runtime tests changed without badge branches in core or loader code.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+        <tr>
+          <td>Windows Reduced depth.</td>
+          <td>Windows arm64/x64 package atoms now exist, and the native runtime reports reduced capability truth with unsupported progress behavior.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+        <tr>
+          <td>Binary-free source tree.</td>
+          <td>Generated DLLs are ignored and staged into <code>packages/ext-badge-windows-*/bin/</code> by local/CI artifact tooling.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+        <tr>
+          <td>Shared release law.</td>
+          <td>Badge jobs and package validation are inferred by the shared native build graph for macOS and Windows.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+        <tr>
+          <td>Release helper discovery stays package-truth-driven.</td>
+          <td><code>configure-trusted-publish</code> skips local package subdirectories without manifests and has a direct Bun test.</td>
+          <td class="ok">Aligned</td>
+        </tr>
+      </table>
+
+      <h2>Deviations</h2>
+      <div class="panel">
+        <ul>
+          <li>Full Windows taskbar projection is deferred by the user-confirmed Reduced decision.</li>
+          <li>macOS Dock helper visual smoke and Linux platform behavior were not rerun locally in this Windows x64 context.</li>
+          <li>The facade still uses the existing v1 local capability snapshot model; native event consumption is a future protocol refinement.</li>
+        </ul>
+      </div>
+
+      <h2>Evidence</h2>
+      <div class="panel">
+        <ul>
+          <li><code>cargo test -p opentray-ext-badge</code></li>
+          <li><code>pnpm --filter @opentray/ext-badge test</code>, <code>typecheck</code>, and <code>build</code></li>
+          <li><code>bun test scripts/binaries/artifacts.test.ts scripts/binaries/native-build-graph.test.ts scripts/binaries/release-plan.test.ts scripts/binaries/release-workflow.test.ts scripts/binaries/verify-native-artifacts-workflow.test.ts</code></li>
+          <li><code>cargo build -p opentray-ext-badge --release</code></li>
+          <li><code>pnpm install --frozen-lockfile</code></li>
+          <li><code>pnpm run test:npm</code></li>
+          <li><code>bun test scripts/binaries</code></li>
+          <li><code>bun run scripts/binaries/release-plan.ts --root .</code></li>
+          <li><code>pnpm run verify</code></li>
+          <li><code>bun run openspec:vision -- validate implement-ext-badge-status-surface</code></li>
+          <li><code>bun run openspec:vision -- check implement-ext-badge-status-surface</code></li>
+          <li><code>git diff --check</code></li>
+        </ul>
+      </div>
+
+      <h2>Exit Handling</h2>
+      <div class="panel">
+        <p class="warn">Archive is intentionally left for maintainer acceptance or a follow-up archive request.</p>
+        <p class="muted">No new screenshot is attached because this round's deliverable is Windows Reduced packaging and native runtime distribution, not a new visible projection.</p>
+      </div>
+    </main>
+  </body>
+</html>
