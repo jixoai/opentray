@@ -77,6 +77,8 @@ const commandForBinary = (binary: string, paths: DaemonPaths, cwd?: string): Bro
       paths.packageVersion,
       "--protocol-version",
       `${paths.protocolVersion}`,
+      "--caller-label",
+      paths.callerLabel,
     ],
   };
   if (cwd !== undefined) {

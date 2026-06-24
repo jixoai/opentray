@@ -30,14 +30,40 @@ pub struct DaemonHealth {
     pub package_version: String,
     pub protocol_version: u32,
     pub endpoint: String,
+    pub caller_label: String,
     pub session_count: usize,
     pub sessions: Vec<DaemonSessionHealth>,
+}
+
+/// Neutral caller label used when no usable caller identity can be derived.
+pub const DEFAULT_CALLER_LABEL: &str = "opentray";
+
+/// Maximum length of a sanitized caller label.
+pub const CALLER_LABEL_MAX_LENGTH: usize = 48;
+
+/// Sanitizes a caller label into a filesystem- and process-safe component:
+/// lowercase alphanumerics and hyphens only, length-capped, with the neutral
+/// fallback when nothing usable remains. Two distinct unsafe inputs do not
+/// collapse onto the same label unless they are genuinely equivalent.
+pub fn sanitize_caller_label(value: &str) -> String {
+    let lowered = value.to_ascii_lowercase();
+    let joined = lowered
+        .split(|c: char| !c.is_ascii_lowercase() && !c.is_ascii_digit())
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let trimmed = joined.trim_matches('-');
+    if trimmed.is_empty() {
+        return DEFAULT_CALLER_LABEL.to_string();
+    }
+    trimmed.chars().take(CALLER_LABEL_MAX_LENGTH).collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrokerEndpointIdentity {
     package_version: String,
     protocol_version: u32,
+    caller_label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +96,7 @@ impl BrokerEndpointIdentity {
     pub fn new(
         package_version: impl Into<String>,
         protocol_version: u32,
+        caller_label: impl Into<String>,
     ) -> Result<Self, BrokerEndpointIdentityError> {
         let package_version = package_version.into();
         if package_version.is_empty() {
@@ -85,10 +112,17 @@ impl BrokerEndpointIdentity {
                 protocol_version,
             ));
         }
+        let caller_label_raw = caller_label.into();
+        let caller_label = if caller_label_raw.is_empty() {
+            DEFAULT_CALLER_LABEL.to_string()
+        } else {
+            sanitize_caller_label(&caller_label_raw)
+        };
 
         Ok(Self {
             package_version,
             protocol_version,
+            caller_label,
         })
     }
 
@@ -100,15 +134,20 @@ impl BrokerEndpointIdentity {
         self.protocol_version
     }
 
+    pub fn caller_label(&self) -> &str {
+        &self.caller_label
+    }
+
     pub fn endpoint_name(&self) -> String {
         format!(
-            "opentray-{}-p{}",
-            self.package_version, self.protocol_version
+            "opentray-{}-p{}-{}",
+            self.package_version, self.protocol_version, self.caller_label
         )
     }
 
-    pub fn state_dir_name(&self) -> &str {
-        &self.package_version
+    /// Relative state directory path under the OpenTray home: `<pkg>/<caller>`.
+    pub fn state_dir_name(&self) -> String {
+        format!("{}/{}", self.package_version, self.caller_label)
     }
 
     pub fn unix_socket_file_name(&self) -> String {
@@ -117,6 +156,11 @@ impl BrokerEndpointIdentity {
 
     pub fn windows_pipe_name(&self) -> String {
         format!(r"\\.\pipe\{}", self.endpoint_name())
+    }
+
+    /// Human-readable process title so task managers show the owning application.
+    pub fn process_title(&self) -> String {
+        format!("opentray · {}", self.caller_label)
     }
 }
 
@@ -337,18 +381,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn endpoint_identity_includes_package_and_protocol_versions() {
-        let identity = BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION).unwrap();
+    fn endpoint_identity_includes_package_protocol_and_caller_label() {
+        let identity =
+            BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "myapp").unwrap();
 
-        assert_eq!(identity.endpoint_name(), "opentray-0.1.0-p1");
-        assert_eq!(identity.state_dir_name(), "0.1.0");
+        assert_eq!(identity.caller_label(), "myapp");
+        assert_eq!(identity.endpoint_name(), "opentray-0.1.0-p1-myapp");
+        assert_eq!(identity.state_dir_name(), "0.1.0/myapp");
         assert_eq!(identity.unix_socket_file_name(), "opentray-p1.sock");
-        assert_eq!(identity.windows_pipe_name(), r"\\.\pipe\opentray-0.1.0-p1");
+        assert_eq!(identity.windows_pipe_name(), r"\\.\pipe\opentray-0.1.0-p1-myapp");
+        assert_eq!(identity.process_title(), "opentray · myapp");
+    }
+
+    #[test]
+    fn endpoint_identity_falls_back_to_neutral_caller_label() {
+        let identity = BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "").unwrap();
+
+        assert_eq!(identity.caller_label(), "opentray");
+    }
+
+    #[test]
+    fn endpoint_identity_sanitizes_unsafe_caller_labels() {
+        let identity =
+            BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "My App!!!").unwrap();
+
+        assert_eq!(identity.caller_label(), "my-app");
     }
 
     #[test]
     fn endpoint_identity_rejects_path_like_versions() {
-        let error = BrokerEndpointIdentity::new("../0.1.0", PROTOCOL_VERSION).unwrap_err();
+        let error = BrokerEndpointIdentity::new("../0.1.0", PROTOCOL_VERSION, "myapp").unwrap_err();
 
         assert_eq!(
             error,
@@ -487,6 +549,7 @@ mod tests {
                 package_version: "0.1.0".to_string(),
                 protocol_version: PROTOCOL_VERSION,
                 endpoint: "/tmp/opentray.sock".to_string(),
+                caller_label: "myapp".to_string(),
                 session_count: 2,
                 sessions: vec![
                     DaemonSessionHealth {
@@ -520,6 +583,7 @@ mod tests {
                     "packageVersion": "0.1.0",
                     "protocolVersion": 1,
                     "endpoint": "/tmp/opentray.sock",
+                    "callerLabel": "myapp",
                     "sessionCount": 2,
                     "sessions": [
                         {

@@ -17,6 +17,27 @@ pnpm add opentray
 
 `packages/cli` is the only unscoped npm package in this monorepo.
 
+## Caller identity and per-caller isolation
+
+Each host application gets its own broker process. OpenTray does not aggregate
+multiple callers onto one shared tray; a broker is pinned to exactly one caller
+session so its process is identifiable in the task manager and killing it only
+affects that one application.
+
+The SDK derives a caller label with this precedence:
+
+1. An explicit label: `connectLocalBroker({ callerLabel: "myapp" })`.
+2. `npm_package_name` when present.
+3. The basename of the running script.
+4. The neutral fallback `opentray` when nothing usable is available.
+
+The label is sanitized to a filesystem- and process-safe component and scopes
+the broker endpoint, runtime directory, ready file, and the process name, so two
+host applications using the same OpenTray version resolve distinct brokers and
+endpoints. A broker rejects a second incoming connection with a typed
+`OPENTRAY_BROKER_SINGLE_SESSION` error rather than silently sharing state.
+
+
 ## Example
 
 Run a protocol-only example that creates a space, creates a tray, dispatches an extension command, and prints each client frame:

@@ -139,6 +139,23 @@ where
     while let Some(event) = receive_next_event(&receiver, options.idle_timeout, idle_since) {
         match event {
             TransportEvent::Connected { id, writer } => {
+                // A broker is pinned to exactly one caller session. Reject a second
+                // connection defensively instead of silently aggregating sessions.
+                let already_serving = sessions
+                    .values()
+                    .any(|session| session.broker.lease_id().is_some());
+                if already_serving {
+                    let mut session = TransportSession {
+                        writer,
+                        broker: BrokerSession::new(),
+                    };
+                    session.write_frame(ServerFrame::Error {
+                        request_id: None,
+                        code: "OPENTRAY_BROKER_SINGLE_SESSION".to_string(),
+                        message: "broker already serves one caller session".to_string(),
+                    });
+                    continue;
+                }
                 sessions.insert(
                     id,
                     TransportSession {
@@ -197,6 +214,7 @@ pub fn build_daemon_health(
         package_version: options.package_version.clone(),
         protocol_version: options.protocol_version,
         endpoint: options.endpoint.to_string_lossy().to_string(),
+        caller_label: options.caller_label().to_string(),
         session_count: sessions.len(),
         sessions,
     }
@@ -280,6 +298,7 @@ fn write_ready_file(options: &BrokerOptions) -> std::io::Result<()> {
         "endpoint": options.endpoint.to_string_lossy(),
         "packageVersion": options.package_version,
         "protocolVersion": options.protocol_version,
+        "callerLabel": options.caller_label(),
     });
     let mut file = File::create(&options.ready_file)?;
     serde_json::to_writer_pretty(&mut file, &ready)?;

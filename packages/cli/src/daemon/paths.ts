@@ -3,12 +3,14 @@ import { createBrokerEndpointIdentity, formatUnixSocketPath, formatWindowsPipeNa
 export interface DaemonPathOptions {
   homeDir: string;
   packageVersion: string;
+  callerLabel?: string;
   platform?: NodeJS.Platform;
 }
 
 export interface DaemonPaths {
   homeDir: string;
   packageVersion: string;
+  callerLabel: string;
   protocolVersion: number;
   stateRoot: string;
   runtimeDir: string;
@@ -21,11 +23,14 @@ export interface DaemonPaths {
 export const resolveDaemonPaths = ({
   homeDir,
   packageVersion,
+  callerLabel,
   platform = process.platform,
 }: DaemonPathOptions): DaemonPaths => {
-  const identity = createBrokerEndpointIdentity({ packageVersion });
+  const identity = createBrokerEndpointIdentity(
+    callerLabel === undefined ? { packageVersion } : { packageVersion, callerLabel },
+  );
   const normalizedHome = homeDir.replace(/[\\/]+$/u, "");
-  const stateRoot = `${normalizedHome}/.opentray/${identity.packageVersion}`;
+  const stateRoot = `${normalizedHome}/.opentray/${identity.packageVersion}/${identity.callerLabel}`;
   const runtimeDir = `${stateRoot}/runtime`;
   const endpoint =
     platform === "win32" ? formatWindowsPipeName(identity) : formatUnixSocketPath(normalizedHome, identity);
@@ -33,6 +38,7 @@ export const resolveDaemonPaths = ({
   return {
     homeDir: normalizedHome,
     packageVersion: identity.packageVersion,
+    callerLabel: identity.callerLabel,
     protocolVersion: identity.protocolVersion,
     stateRoot,
     runtimeDir,

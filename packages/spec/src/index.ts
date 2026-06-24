@@ -104,19 +104,54 @@ export const parseProtocolDistTag = (tag: string): ProtocolDistTag => {
   return { channel, major, minor };
 };
 
+/**
+ * Neutral caller label used when no usable caller identity can be derived.
+ * Keeps the broker honest instead of impersonating an unrelated application.
+ */
+export const DEFAULT_CALLER_LABEL = "opentray";
+
+/**
+ * Maximum length of a sanitized caller label. Keeps socket paths, runtime
+ * directory names, and process titles within platform limits.
+ */
+export const CALLER_LABEL_MAX_LENGTH = 48;
+
+const callerLabelAllowedPattern = /[a-z0-9-]+/g;
+
 export interface BrokerEndpointIdentity {
   packageVersion: string;
   protocolVersion: number;
+  callerLabel: string;
 }
 
 export interface BrokerEndpointIdentityOptions {
   packageVersion: string;
   protocolVersion?: number;
+  callerLabel?: string;
 }
+
+export const sanitizeCallerLabel = (value: string | undefined): string => {
+  if (value !== undefined && typeof value !== "string") {
+    throw new Error(`callerLabel must be a string: ${String(value)}`);
+  }
+  const raw = value ?? "";
+  const lowered = raw.toLowerCase();
+  const segments = lowered.match(callerLabelAllowedPattern);
+  if (segments === null || segments.length === 0) {
+    return DEFAULT_CALLER_LABEL;
+  }
+  const joined = segments.join("-");
+  const trimmed = joined.replace(/^-+|-+$/gu, "");
+  if (trimmed.length === 0) {
+    return DEFAULT_CALLER_LABEL;
+  }
+  return trimmed.slice(0, CALLER_LABEL_MAX_LENGTH);
+};
 
 export const createBrokerEndpointIdentity = ({
   packageVersion,
   protocolVersion = PROTOCOL_VERSION,
+  callerLabel,
 }: BrokerEndpointIdentityOptions): BrokerEndpointIdentity => {
   assertEndpointComponent(packageVersion, "packageVersion");
   if (!Number.isInteger(protocolVersion) || protocolVersion <= 0) {
@@ -126,6 +161,7 @@ export const createBrokerEndpointIdentity = ({
   return {
     packageVersion,
     protocolVersion,
+    callerLabel: sanitizeCallerLabel(callerLabel),
   };
 };
 
@@ -134,7 +170,7 @@ export const isSupportedProtocolVersion = (protocolVersion: number): boolean =>
 
 export const formatBrokerEndpointName = (identity: BrokerEndpointIdentity): string => {
   assertEndpointIdentity(identity);
-  return `opentray-${identity.packageVersion}-p${identity.protocolVersion}`;
+  return `opentray-${identity.packageVersion}-p${identity.protocolVersion}-${identity.callerLabel}`;
 };
 
 export const formatBrokerStateRoot = (homeDir: string, identity: BrokerEndpointIdentity): string => {
@@ -144,7 +180,7 @@ export const formatBrokerStateRoot = (homeDir: string, identity: BrokerEndpointI
   }
 
   const normalizedHome = homeDir.replace(/[\\/]+$/u, "");
-  return `${normalizedHome}/.opentray/${identity.packageVersion}`;
+  return `${normalizedHome}/.opentray/${identity.packageVersion}/${identity.callerLabel}`;
 };
 
 export const formatUnixSocketPath = (homeDir: string, identity: BrokerEndpointIdentity): string =>
@@ -152,6 +188,15 @@ export const formatUnixSocketPath = (homeDir: string, identity: BrokerEndpointId
 
 export const formatWindowsPipeName = (identity: BrokerEndpointIdentity): string =>
   `\\\\.\\pipe\\${formatBrokerEndpointName(identity)}`;
+
+/**
+ * Human-readable process title for a broker pinned to a caller. Used by the SDK
+ * spawn path so task managers show the owning application, not a generic name.
+ */
+export const formatBrokerProcessTitle = (identity: BrokerEndpointIdentity): string => {
+  assertEndpointIdentity(identity);
+  return `opentray · ${identity.callerLabel}`;
+};
 
 const endpointComponentPattern = /^[0-9A-Za-z._+-]+$/u;
 

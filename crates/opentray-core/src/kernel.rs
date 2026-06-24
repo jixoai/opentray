@@ -49,7 +49,11 @@ struct TrayState {
     options: TrayOptions,
 }
 
-/// Kernel owns identity, lease, projection, and dispatch laws. Backends and extensions stay atoms.
+/// Kernel owns identity, session, projection, and dispatch laws for a broker
+/// pinned to exactly one caller session. The broker transport enforces that
+/// only one caller connects, so the kernel's projection is an honest
+/// pass-through of that single session's trays — there is no cross-session
+/// aggregation step. Backends and extensions stay atoms.
 pub struct Kernel<B: SurfaceBackend> {
     backend: B,
     extensions: ExtensionRegistry,

@@ -148,6 +148,7 @@ pub fn build_daemon_health(
         package_version: options.package_version.clone(),
         protocol_version: options.protocol_version,
         endpoint: options.endpoint.to_string_lossy().to_string(),
+        caller_label: options.caller_label().to_string(),
         session_count: sessions.len(),
         sessions,
     }
@@ -345,6 +346,7 @@ fn write_ready_file(options: &BrokerOptions) -> std::io::Result<()> {
         "endpoint": options.endpoint.to_string_lossy(),
         "packageVersion": options.package_version,
         "protocolVersion": options.protocol_version,
+        "callerLabel": options.caller_label(),
     });
     let mut file = File::create(&options.ready_file)?;
     serde_json::to_writer_pretty(&mut file, &ready)?;

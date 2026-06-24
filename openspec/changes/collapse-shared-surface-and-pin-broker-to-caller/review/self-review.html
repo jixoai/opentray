@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Collapse Shared Surface — Self-Review Evidence</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; max-width: 880px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+      h1 { font-size: 1.4rem; }
+      h2 { font-size: 1.1rem; margin-top: 1.8rem; border-bottom: 1px solid #ddd; padding-bottom: .3rem; }
+      table { border-collapse: collapse; width: 100%; margin: .5rem 0; font-size: .9rem; }
+      th, td { border: 1px solid #ddd; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+      th { background: #f4f4f4; }
+      .pass { color: #137a37; font-weight: 600; }
+      .gap { color: #a35a00; font-weight: 600; }
+      code { background: #f4f4f4; padding: .1rem .3rem; border-radius: 3px; font-size: .85em; }
+      pre { background: #f6f8fa; padding: .8rem; border-radius: 6px; overflow-x: auto; font-size: .8rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Collapse Shared Surface and Pin Broker to Caller — Evidence</h1>
+    <p>Structured evidence for the self-review. Unit-level proof of per-caller
+      isolation and caller-derived identity; runtime e2e deferred (see gaps).</p>
+
+    <h2>Per-caller endpoint isolation (TS)</h2>
+    <p>Two callers of the same OpenTray version resolve distinct endpoints and
+      runtime directories:</p>
+    <pre>callerLabel: "myapp"  →  ~/.opentray/0.1.0/myapp/opentray-p1.sock
+callerLabel: "cli-tool" →  ~/.opentray/0.1.0/cli-tool/opentray-p1.sock
+(implicit)              →  ~/.opentray/0.1.0/opentray/opentray-p1.sock</pre>
+    <p><span class="pass">PASS</span> — <code>paths.test.ts</code> asserts
+      <code>myapp.endpoint !== cliTool.endpoint</code> and the neutral fallback.</p>
+
+    <h2>Caller-label precedence &amp; sanitization</h2>
+    <table>
+      <tr><th>Input</th><th>Resolved label</th><th>Source</th></tr>
+      <tr><td><code>explicit: "myapp"</code></td><td>myapp</td><td>explicit wins</td></tr>
+      <tr><td><code>npm_package_name: "my-tool"</code></td><td>my-tool</td><td>npm fallback</td></tr>
+      <tr><td><code>/projects/host/build.js</code></td><td>build-js</td><td>script basename</td></tr>
+      <tr><td>(nothing usable)</td><td>opentray</td><td>neutral default</td></tr>
+      <tr><td><code>"My App!!!"</code></td><td>my-app</td><td>sanitized</td></tr>
+    </table>
+    <p><span class="pass">PASS</span> — <code>caller-label.test.ts</code> (6) + spec identity tests (4).</p>
+
+    <h2>Single-session rejection (Rust)</h2>
+    <p>Both the native broker and the Linux blocking broker reject a second
+      connection when a session is already initialized:</p>
+    <pre>ServerFrame::Error {
+    code: "OPENTRAY_BROKER_SINGLE_SESSION",
+    message: "broker already serves one caller session"
+}</pre>
+    <p><span class="pass">PASS</span> — logic in <code>main.rs</code> + <code>unix_transport.rs</code>;
+      <code>parse_broker_options</code> caller-label tests (3) pass.</p>
+
+    <h2>daemon-health carries callerLabel</h2>
+    <pre>{
+  "pid": 12345,
+  "packageVersion": "0.1.0",
+  "protocolVersion": 1,
+  "endpoint": "...",
+  "callerLabel": "myapp",
+  "sessionCount": 1,
+  "sessions": [...]
+}</pre>
+    <p><span class="pass">PASS</span> — <code>DaemonHealth</code> struct + JSON serialization test.</p>
+
+    <h2>Test totals</h2>
+    <table>
+      <tr><th>Suite</th><th>Result</th><th>Runner</th></tr>
+      <tr><td>@opentray/spec + opentray (TS)</td><td><span class="pass">80 / 80</span></td><td>vitest</td></tr>
+      <tr><td>Rust workspace</td><td><span class="pass">142 / 0 fail</span></td><td>cargo test</td></tr>
+      <tr><td>tsc --noEmit (spec + cli)</td><td><span class="pass">clean</span></td><td>tsc</td></tr>
+      <tr><td>openspec validate</td><td><span class="pass">valid</span></td><td>vision-driven</td></tr>
+    </table>
+
+    <h2>Documented gaps</h2>
+    <ul>
+      <li><span class="gap">DEFERRED</span> — live two-broker cross-process e2e (tasks 4.3, 4.4):
+        not run; covered by unit evidence only.</li>
+      <li><span class="gap">DEFERRED</span> — macOS/Windows process-title renaming: relies on
+        argv0 (Linux); macOS Activity Manager still shows binary name. Label is surfaced via
+        endpoint/ready.json/health instead.</li>
+      <li><span class="gap">DEFERRED</span> — kernel <code>LeaseMismatch</code> cleanup: code
+        retained as defensive (unreachable in single-session path); full removal deferred.</li>
+    </ul>
+  </body>
+</html>

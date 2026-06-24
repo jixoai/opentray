@@ -47,6 +47,9 @@ export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => (
   },
   async spawnBroker(paths) {
     const broker = await resolveBrokerCommand(paths);
+    // The caller label flows to the broker via both a CLI flag and an env var.
+    // The broker uses it to bind the per-caller endpoint and to set its own
+    // process title so task managers show the owning application.
     const child = spawn(broker.command, broker.args, {
       cwd: broker.cwd,
       detached: true,
@@ -55,6 +58,7 @@ export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => (
         OPENTRAY_DAEMON_HOME: paths.homeDir,
         OPENTRAY_DAEMON_PACKAGE_VERSION: paths.packageVersion,
         OPENTRAY_DAEMON_CLI_ENTRYPOINT: cliEntrypoint,
+        OPENTRAY_DAEMON_CALLER_LABEL: paths.callerLabel,
       },
       stdio: resolveBrokerStdio(process.env[DAEMON_STDIO_ENV]),
     });

@@ -6,7 +6,7 @@ mod windows_transport;
 
 use std::{env, error::Error, path::PathBuf, time::Duration};
 
-use opentray_spec::PROTOCOL_VERSION;
+use opentray_spec::{sanitize_caller_label, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION};
 
 #[derive(Debug, Clone)]
 pub struct BrokerOptions {
@@ -14,7 +14,30 @@ pub struct BrokerOptions {
     ready_file: PathBuf,
     package_version: String,
     protocol_version: u32,
+    caller_label: String,
     idle_timeout: Option<Duration>,
+}
+
+impl BrokerOptions {
+    pub fn caller_label(&self) -> &str {
+        &self.caller_label
+    }
+
+    pub fn endpoint(&self) -> &std::path::Path {
+        &self.endpoint
+    }
+
+    pub fn ready_file(&self) -> &std::path::Path {
+        &self.ready_file
+    }
+
+    pub fn package_version(&self) -> &str {
+        &self.package_version
+    }
+
+    pub fn protocol_version(&self) -> u32 {
+        self.protocol_version
+    }
 }
 
 const DEFAULT_DAEMON_IDLE_TIMEOUT_MS: u64 = 30_000;
@@ -53,6 +76,7 @@ fn parse_broker_options(
     let mut ready_file = None;
     let mut package_version = None;
     let mut protocol_version = None;
+    let mut caller_label = None;
     let mut args = args.peekable();
 
     while let Some(flag) = args.next() {
@@ -66,6 +90,7 @@ fn parse_broker_options(
             "--protocol-version" => {
                 protocol_version = Some(value.parse::<u32>()?);
             }
+            "--caller-label" => caller_label = Some(value),
             _ => return Err(format!("unknown broker option: {flag}").into()),
         }
     }
@@ -78,11 +103,25 @@ fn parse_broker_options(
         .into());
     }
 
+    // Caller label precedence: explicit flag > OPENTRAY_DAEMON_CALLER_LABEL env > neutral default.
+    let raw_caller_label = caller_label.or_else(|| env::var("OPENTRAY_DAEMON_CALLER_LABEL").ok());
+    let caller_label = match raw_caller_label {
+        Some(value) if !value.trim().is_empty() => sanitize_caller_label(&value),
+        _ => DEFAULT_CALLER_LABEL.to_string(),
+    };
+
+    // The visible process name is carried by the spawned argv[0] on platforms
+    // whose task manager reflects it (e.g. Linux `ps`/`comm`). The label also
+    // scopes the endpoint, runtime directory, ready.json, and daemon-health so
+    // the owning application is identifiable without inspecting the binary.
+    eprintln!("opentray broker starting for caller: {caller_label}");
+
     Ok(BrokerOptions {
         endpoint: endpoint.ok_or("missing --endpoint")?,
         ready_file: ready_file.ok_or("missing --ready-file")?,
         package_version: package_version.ok_or("missing --package-version")?,
         protocol_version,
+        caller_label,
         idle_timeout: daemon_idle_timeout()?,
     })
 }
@@ -239,6 +278,26 @@ mod native_broker {
         fn handle_transport(&mut self, event: broker_transport::TransportEvent) {
             match event {
                 broker_transport::TransportEvent::Connected { id, writer } => {
+                    // A broker is pinned to exactly one caller session. With per-caller
+                    // endpoints two callers cannot normally reach the same broker, but a
+                    // second connection is rejected defensively with a typed error rather
+                    // than silently aggregating sessions.
+                    let already_serving = self
+                        .sessions
+                        .values()
+                        .any(|session| session.broker.lease_id().is_some());
+                    if already_serving {
+                        let mut session = broker_transport::TransportSession {
+                            writer,
+                            broker: BrokerSession::new(),
+                        };
+                        session.write_frame(ServerFrame::Error {
+                            request_id: None,
+                            code: "OPENTRAY_BROKER_SINGLE_SESSION".to_string(),
+                            message: "broker already serves one caller session".to_string(),
+                        });
+                        return;
+                    }
                     self.bump_idle_generation();
                     self.sessions.insert(
                         id,
@@ -354,7 +413,7 @@ mod native_broker {
 mod tests {
     use std::time::Duration;
 
-    use super::{parse_daemon_idle_timeout, DEFAULT_DAEMON_IDLE_TIMEOUT_MS};
+    use super::{parse_broker_options, parse_daemon_idle_timeout, DEFAULT_DAEMON_IDLE_TIMEOUT_MS};
 
     #[test]
     fn daemon_idle_timeout_defaults_to_short_release_window() {
@@ -375,5 +434,48 @@ mod tests {
             parse_daemon_idle_timeout(Some("500")).unwrap(),
             Some(Duration::from_millis(500))
         );
+    }
+
+    fn broker_args() -> Vec<String> {
+        [
+            "--endpoint",
+            "/tmp/opentray.sock",
+            "--ready-file",
+            "/tmp/ready.json",
+            "--package-version",
+            "0.1.0",
+            "--protocol-version",
+            "1",
+        ]
+        .iter()
+        .map(|value| value.to_string())
+        .collect()
+    }
+
+    #[test]
+    fn broker_options_parse_caller_label() {
+        let mut args = broker_args();
+        args.push("--caller-label".to_string());
+        args.push("myapp".to_string());
+
+        let options = parse_broker_options(args.into_iter()).expect("broker options");
+        assert_eq!(options.caller_label(), "myapp");
+    }
+
+    #[test]
+    fn broker_options_fall_back_to_neutral_caller_label() {
+        let options =
+            parse_broker_options(broker_args().into_iter()).expect("broker options");
+        assert_eq!(options.caller_label(), "opentray");
+    }
+
+    #[test]
+    fn broker_options_sanitize_unsafe_caller_label() {
+        let mut args = broker_args();
+        args.push("--caller-label".to_string());
+        args.push("My App!!!".to_string());
+
+        let options = parse_broker_options(args.into_iter()).expect("broker options");
+        assert_eq!(options.caller_label(), "my-app");
     }
 }

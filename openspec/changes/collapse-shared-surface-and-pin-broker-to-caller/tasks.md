@@ -6,36 +6,36 @@
 
 ## 2. BDD Contract
 
-- [ ] 2.1 Scenario: Given two host applications use the same OpenTray version When each starts its daemon Then each resolves a different runtime directory and endpoint and neither broker serves the other caller's session.
-- [ ] 2.2 Scenario: Given a broker is already serving one caller session When a second caller connects to the same endpoint Then the broker rejects the second connection with a typed protocol error and the first session is unaffected.
-- [ ] 2.3 Scenario: Given a host application starts a broker with caller label `myapp` When the operator inspects the process list Then the broker process name reflects `myapp` and is distinguishable from a generic `opentray` process.
-- [ ] 2.4 Scenario: Given the single caller session has mounted trays When that caller disconnects Then the broker closes the session, removes its trays, and proceeds toward idle shutdown.
-- [ ] 2.5 Scenario: Given a developer constructs `new Client({ label: "myapp" })` When precedence, `npm_package_name`, and script basename all differ Then the SDK uses the explicit `myapp` label.
-- [ ] 2.6 Scenario: Given a derived label contains unsafe characters When the SDK sanitizes it Then the resulting component is safe for socket paths and process names and does not impersonate another application.
-- [ ] 2.7 Scenario: Given the kernel previously rebuilt cross-session projections When backend synchronization runs under the new model Then the backend receives only the single session's trays and no aggregation or non-owner isolation logic runs.
-- [ ] 2.8 Confirm each task checkbox will be updated only by the agent that completed and verified that task in the current working context.
+- [x] 2.1 Scenario: Given two host applications use the same OpenTray version When each starts its daemon Then each resolves a different runtime directory and endpoint and neither broker serves the other caller's session.
+- [x] 2.2 Scenario: Given a broker is already serving one caller session When a second caller connects to the same endpoint Then the broker rejects the second connection with a typed protocol error and the first session is unaffected.
+- [x] 2.3 Scenario: Given a host application starts a broker with caller label `myapp` When the operator inspects the process list Then the broker process name reflects `myapp` and is distinguishable from a generic `opentray` process.
+- [x] 2.4 Scenario: Given the single caller session has mounted trays When that caller disconnects Then the broker closes the session, removes its trays, and proceeds toward idle shutdown.
+- [x] 2.5 Scenario: Given a developer constructs `new Client({ label: "myapp" })` When precedence, `npm_package_name`, and script basename all differ Then the SDK uses the explicit `myapp` label.
+- [x] 2.6 Scenario: Given a derived label contains unsafe characters When the SDK sanitizes it Then the resulting component is safe for socket paths and process names and does not impersonate another application.
+- [x] 2.7 Scenario: Given the kernel previously rebuilt cross-session projections When backend synchronization runs under the new model Then the backend receives only the single session's trays and no aggregation or non-owner isolation logic runs.
+- [x] 2.8 Confirm each task checkbox will be updated only by the agent that completed and verified that task in the current working context.
 
 ## 3. Implementation
 
-- [ ] 3.1 Run `bun run openspec:vision -- commit-check collapse-shared-surface-and-pin-broker-to-caller --phase apply` before product-code work starts and commit ready OpenSpec artifacts.
-- [ ] 3.2 Extend `@opentray/spec` endpoint identity and `formatUnixSocketPath` / `formatWindowsPipeName` to carry a normalized caller-label component alongside package and protocol version.
-- [ ] 3.3 Update `packages/cli/src/daemon/paths.ts` `resolveDaemonPaths` to thread the caller label through `stateRoot`, `runtimeDir`, `endpoint`, `pidFile`, `lockFile`, and `readyFile`.
-- [ ] 3.4 Implement SDK caller-label precedence and sanitization in the client construction path (`packages/cli/src` SDK layer), with explicit > `npm_package_name` > script basename > neutral default.
-- [ ] 3.5 Update `packages/cli/src/daemon/lifecycle.ts` `spawnBroker` to inject the caller label into the broker environment/arguments and to set the caller-derived process name via the per-platform primary mechanism (argv0 on Linux; renamed/copied executable image on macOS/Windows).
-- [ ] 3.6 Collapse `crates/opentray-core` ownership from `(session, spaceId, trayId)` multi-session aggregation to a single caller session; remove the projection-rebuild and non-owner isolation code paths.
-- [ ] 3.7 Update `crates/opentray-bin` to accept exactly one caller session, reject a second connection with a typed protocol error, and scope the idle timeout to the single caller session.
-- [ ] 3.8 Surface `callerLabel` in the `daemon-health` response and keep `sessionCount` at most 1.
-- [ ] 3.9 Add concise intent comments at the caller-label injection boundary, the single-session acceptance boundary, and the removed aggregation boundary.
-- [ ] 3.10 Update package docs, examples, and READMEs so per-caller isolation, the caller-label option, and the removal of shared surface are visible and honest.
+- [x] 3.1 Run `bun run openspec:vision -- commit-check collapse-shared-surface-and-pin-broker-to-caller --phase apply` before product-code work starts and commit ready OpenSpec artifacts.
+- [x] 3.2 Extend `@opentray/spec` endpoint identity and `formatUnixSocketPath` / `formatWindowsPipeName` to carry a normalized caller-label component alongside package and protocol version.
+- [x] 3.3 Update `packages/cli/src/daemon/paths.ts` `resolveDaemonPaths` to thread the caller label through `stateRoot`, `runtimeDir`, `endpoint`, `pidFile`, `lockFile`, and `readyFile`.
+- [x] 3.4 Implement SDK caller-label precedence and sanitization in the client construction path (`packages/cli/src` SDK layer), with explicit > `npm_package_name` > script basename > neutral default.
+- [x] 3.5 Update `packages/cli/src/daemon/lifecycle.ts` `spawnBroker` to inject the caller label into the broker environment/arguments and to set the caller-derived process name via the per-platform primary mechanism (argv0 on Linux; renamed/copied executable image on macOS/Windows).
+- [x] 3.6 Collapse `crates/opentray-core` ownership from `(session, spaceId, trayId)` multi-session aggregation to a single caller session; remove the projection-rebuild and non-owner isolation code paths.
+- [x] 3.7 Update `crates/opentray-bin` to accept exactly one caller session, reject a second connection with a typed protocol error, and scope the idle timeout to the single caller session.
+- [x] 3.8 Surface `callerLabel` in the `daemon-health` response and keep `sessionCount` at most 1.
+- [x] 3.9 Add concise intent comments at the caller-label injection boundary, the single-session acceptance boundary, and the removed aggregation boundary.
+- [x] 3.10 Update package docs, examples, and READMEs so per-caller isolation, the caller-label option, and the removal of shared surface are visible and honest.
 
 ## 4. Verification
 
-- [ ] 4.1 Run targeted `@opentray/spec` tests covering the caller-scoped endpoint identity and sanitization.
-- [ ] 4.2 Run the CLI daemon lifecycle tests for per-caller runtime directories, endpoints, and single-session rejection.
+- [x] 4.1 Run targeted `@opentray/spec` tests covering the caller-scoped endpoint identity and sanitization.
+- [x] 4.2 Run the CLI daemon lifecycle tests for per-caller runtime directories, endpoints, and single-session rejection.
 - [ ] 4.3 Run a cross-process evidence check that two concurrent callers of the same version get distinct brokers and that killing one does not affect the other.
 - [ ] 4.4 Run a process-name evidence check on at least Linux (argv0) confirming the broker is listed under a caller-derived name.
-- [ ] 4.5 Run `bun run openspec:vision -- validate collapse-shared-surface-and-pin-broker-to-caller`.
-- [ ] 4.6 Run `bun run openspec:vision -- commit-check collapse-shared-surface-and-pin-broker-to-caller --phase self-review` before writing final review evidence.
+- [x] 4.5 Run `bun run openspec:vision -- validate collapse-shared-surface-and-pin-broker-to-caller`.
+- [x] 4.6 Run `bun run openspec:vision -- commit-check collapse-shared-surface-and-pin-broker-to-caller --phase self-review` before writing final review evidence.
 
 ## 5. Self-Review Loop
 

@@ -12,6 +12,7 @@ import {
 } from "@opentray/spec";
 
 import type { OpenTrayTransport } from "./client";
+import { resolveCallerLabel } from "./daemon/caller-label";
 import { createNodeDaemonDriver, startDaemon, type DaemonDriver } from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
@@ -22,6 +23,7 @@ export type BrokerEventFrame = Extract<ServerFrame, { type: "event" | "ext-event
 
 export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
+  readonly callerLabel: string;
   readonly sessionId: string;
   /** @deprecated Use `sessionId`. */
   readonly leaseId: string;
@@ -36,6 +38,7 @@ export interface ConnectLocalBrokerOptions extends Partial<BrokerEndpointIdentit
   autoStart?: boolean;
   daemonDriver?: DaemonDriver;
   cliEntrypoint?: string;
+  callerLabel?: string;
 }
 
 interface PendingRequest {
@@ -60,9 +63,12 @@ export const connectLocalBroker = async (
 ): Promise<LocalBrokerClient> => {
   const packageVersion = options.packageVersion ?? (await readPackageVersion(packageJsonUrl));
   const clientVersion = options.clientVersion ?? packageVersion;
+  const callerLabel =
+    options.callerLabel ?? resolveCallerLabel();
   const paths = resolveDaemonPaths({
     homeDir: options.homeDir ?? process.env.OPENTRAY_HOME ?? homedir(),
     packageVersion,
+    callerLabel,
   });
   const endpoint = options.endpoint ?? paths.endpoint;
   const autoStart = options.autoStart ?? endpoint === paths.endpoint;
@@ -75,7 +81,7 @@ export const connectLocalBroker = async (
     await startDaemon({ paths, driver });
   }
   const socket = await connectSocket(endpoint);
-  const connection = new LocalBrokerConnection(socket, endpoint);
+  const connection = new LocalBrokerConnection(socket, endpoint, callerLabel);
 
   await connection.init(clientVersion, options.protocolVersion ?? PROTOCOL_VERSION);
   return connection;
@@ -83,6 +89,7 @@ export const connectLocalBroker = async (
 
 class LocalBrokerConnection implements LocalBrokerClient {
   readonly endpoint: string;
+  readonly callerLabel: string;
   sessionId = "";
   /** @deprecated Use `sessionId`. */
   leaseId = "";
@@ -100,8 +107,10 @@ class LocalBrokerConnection implements LocalBrokerClient {
   constructor(
     private readonly socket: BrokerSocket,
     endpoint: string,
+    callerLabel: string,
   ) {
     this.endpoint = endpoint;
+    this.callerLabel = callerLabel;
     socket.setEncoding("utf8");
     socket.on("data", (chunk: Buffer | string) => {
       this.consume(String(chunk));

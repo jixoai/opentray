@@ -207,7 +207,7 @@ describe("opentray client", () => {
   it("exposes versioned broker endpoint identity helpers", () => {
     const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
 
-    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1");
+    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1-opentray");
   });
 });
 

@@ -120,15 +120,34 @@ describe("@opentray/spec", () => {
     });
   });
 
-  it("formats endpoint identity with package and protocol versions", () => {
-    const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
+  it("formats endpoint identity with package, protocol versions, and caller label", () => {
+    const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0", callerLabel: "myapp" });
 
-    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1");
-    expect(formatBrokerStateRoot("/Users/example", identity)).toBe("/Users/example/.opentray/0.1.0");
-    expect(formatUnixSocketPath("/Users/example", identity)).toBe(
-      "/Users/example/.opentray/0.1.0/opentray-p1.sock",
+    expect(identity.callerLabel).toBe("myapp");
+    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1-myapp");
+    expect(formatBrokerStateRoot("/Users/example", identity)).toBe(
+      "/Users/example/.opentray/0.1.0/myapp",
     );
-    expect(formatWindowsPipeName(identity)).toBe("\\\\.\\pipe\\opentray-0.1.0-p1");
+    expect(formatUnixSocketPath("/Users/example", identity)).toBe(
+      "/Users/example/.opentray/0.1.0/myapp/opentray-p1.sock",
+    );
+    expect(formatWindowsPipeName(identity)).toBe("\\\\.\\pipe\\opentray-0.1.0-p1-myapp");
+  });
+
+  it("falls back to the neutral caller label and keeps identities distinct per caller", () => {
+    const implicit = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
+    const explicit = createBrokerEndpointIdentity({ packageVersion: "0.1.0", callerLabel: "myapp" });
+
+    expect(implicit.callerLabel).toBe("opentray");
+    expect(formatBrokerEndpointName(implicit)).not.toBe(formatBrokerEndpointName(explicit));
+  });
+
+  it("sanitizes unsafe caller labels without collapsing distinct inputs", () => {
+    const safe = createBrokerEndpointIdentity({ packageVersion: "0.1.0", callerLabel: "My App!" });
+    const empty = createBrokerEndpointIdentity({ packageVersion: "0.1.0", callerLabel: "!!!" });
+
+    expect(safe.callerLabel).toBe("my-app");
+    expect(empty.callerLabel).toBe("opentray");
   });
 
   it("formats extension-agnostic protocol-line dist-tags", () => {
@@ -186,6 +205,7 @@ describe("@opentray/spec", () => {
     expect(createBrokerEndpointIdentity({ packageVersion: "0.5.1" })).toEqual({
       packageVersion: "0.5.1",
       protocolVersion: 1,
+      callerLabel: "opentray",
     });
   });
 
