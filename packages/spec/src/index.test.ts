@@ -346,6 +346,8 @@ describe("@opentray/spec", () => {
           packageVersion: "0.1.0",
           protocolVersion: PROTOCOL_VERSION,
           endpoint: "/tmp/opentray.sock",
+          appId: "com.example.build",
+          appName: "Build",
           callerLabel: "myapp",
           sessionCount: 2,
           sessions: [
@@ -365,6 +367,8 @@ describe("@opentray/spec", () => {
         packageVersion: "0.1.0",
         protocolVersion: PROTOCOL_VERSION,
         endpoint: "/tmp/opentray.sock",
+        appId: "com.example.build",
+        appName: "Build",
         callerLabel: "myapp",
         sessionCount: 2,
         sessions: [

@@ -16,6 +16,8 @@ describe("Feature: SDK runtime selection", () => {
         runtime: "headless-binding",
         binding,
         packageVersion: "0.9.0",
+        appId: "com.example.build",
+        appName: "Build",
       }
     );
 
@@ -49,7 +51,7 @@ const createRecordingBinding = (frames: unknown[]): OpenTrayRuntimeBinding => ({
     kind: "opentray-node-runtime",
     protocolVersion: 1,
   }),
-  createHeadlessRuntime: () => ({
+  createHeadlessRuntime: (packageVersion, appId, appName) => ({
     request(frameJson: string): string[] {
       const frame = JSON.parse(frameJson) as {
         type: string;
@@ -58,6 +60,9 @@ const createRecordingBinding = (frames: unknown[]): OpenTrayRuntimeBinding => ({
       frames.push(frame);
       switch (frame.type) {
         case "init":
+          expect(packageVersion).toBe("0.9.0");
+          expect(appId).toBe("com.example.build");
+          expect(appName).toBe("Build");
           return [
             JSON.stringify({
               type: "ready",

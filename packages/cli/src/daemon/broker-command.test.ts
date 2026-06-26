@@ -27,6 +27,10 @@ describe("broker command resolver", () => {
 
     expect(command.command).toBe("/custom/opentray");
     expect(command.cwd).toBeUndefined();
+    expect(command.args).toContain("--app-id");
+    expect(command.args).toContain(paths.appId);
+    expect(command.args).toContain("--app-name");
+    expect(command.args).toContain(paths.appName);
   });
 
   it("prefers the workspace broker build over an installed platform package when running from source", async () => {

@@ -12,7 +12,7 @@ pub struct AppOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<AppId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+    pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<Icon>,
     #[serde(default)]
@@ -23,6 +23,13 @@ pub struct AppOptions {
 #[serde(rename_all = "camelCase")]
 pub struct AppRef {
     pub app_id: AppId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppIdentity {
+    pub app_id: AppId,
+    pub app_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

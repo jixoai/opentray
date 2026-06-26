@@ -66,4 +66,4 @@
 - [x] 9.7 Remove public-facing daemon CLI diagnostics and `opentray/node` local-broker exports while keeping the source-tree debug runtime internal.
 - [ ] 9.8 Replace the default `createTray()` transport with the in-process Node runtime binding after a host-main-loop integration contract owns the native visible tray backend and event routing on supported platforms.
 - [x] 9.9 Rename the remaining protocol/runtime health vocabulary from daemon-shaped names to runtime-host names.
-- [ ] 9.10 Add app identity metadata to `runtime-host-health` after the runtime host/session model retains the app identity and human-facing app name.
+- [x] 9.10 Add app identity metadata to `runtime-host-health` after the runtime host/session model retains the app identity and human-facing app name.

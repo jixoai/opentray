@@ -41,7 +41,9 @@ export interface InspectDaemonOptions {
   driver: DaemonDriver;
 }
 
-export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => ({
+export const createNodeDaemonDriver = (
+  cliEntrypoint: string
+): DaemonDriver => ({
   async isAlive(pid) {
     return isProcessAlive(pid);
   },
@@ -58,6 +60,8 @@ export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => (
         OPENTRAY_DAEMON_HOME: paths.homeDir,
         OPENTRAY_DAEMON_PACKAGE_VERSION: paths.packageVersion,
         OPENTRAY_DAEMON_CLI_ENTRYPOINT: cliEntrypoint,
+        OPENTRAY_DAEMON_APP_ID: paths.appId,
+        OPENTRAY_DAEMON_APP_NAME: paths.appName,
         OPENTRAY_DAEMON_CALLER_LABEL: paths.callerLabel,
       },
       stdio: resolveBrokerStdio(process.env[DAEMON_STDIO_ENV]),
@@ -72,7 +76,7 @@ export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => (
 });
 
 export const resolveBrokerStdio = (
-  value: string | undefined,
+  value: string | undefined
 ): "ignore" | "inherit" => {
   return value === "inherit" ? "inherit" : "ignore";
 };
@@ -104,7 +108,10 @@ export const startDaemon = async ({
   }
 };
 
-export const stopDaemon = async ({ paths, driver }: StopDaemonOptions): Promise<DaemonStopResult> => {
+export const stopDaemon = async ({
+  paths,
+  driver,
+}: StopDaemonOptions): Promise<DaemonStopResult> => {
   const pid = await readPid(paths.pidFile);
   if (pid === undefined || !(await driver.isAlive(pid))) {
     await cleanupRuntimeFiles(paths);
@@ -117,12 +124,17 @@ export const stopDaemon = async ({ paths, driver }: StopDaemonOptions): Promise<
   return { status: "stopped", pid, paths };
 };
 
-export const restartDaemon = async (options: StartDaemonOptions): Promise<DaemonStartResult> => {
+export const restartDaemon = async (
+  options: StartDaemonOptions
+): Promise<DaemonStartResult> => {
   await stopDaemon({ paths: options.paths, driver: options.driver });
   return startDaemon(options);
 };
 
-export const inspectDaemon = async ({ paths, driver }: InspectDaemonOptions): Promise<DaemonInspectResult> => {
+export const inspectDaemon = async ({
+  paths,
+  driver,
+}: InspectDaemonOptions): Promise<DaemonInspectResult> => {
   const pid = await readPid(paths.pidFile);
   if (pid !== undefined && (await driver.isAlive(pid))) {
     return { status: "running", pid, paths };
@@ -155,7 +167,10 @@ const cleanupRuntimeFiles = async (paths: DaemonPaths): Promise<void> => {
   }
 };
 
-const waitUntilStopped = async (driver: DaemonDriver, pid: number): Promise<void> => {
+const waitUntilStopped = async (
+  driver: DaemonDriver,
+  pid: number
+): Promise<void> => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (!(await driver.isAlive(pid))) {
       return;
@@ -167,7 +182,7 @@ const waitUntilStopped = async (driver: DaemonDriver, pid: number): Promise<void
 const waitForReadyFile = async (
   readyFile: string,
   driver: DaemonDriver,
-  pid: number,
+  pid: number
 ): Promise<void> => {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
@@ -179,7 +194,7 @@ const waitForReadyFile = async (
       }
       if (!(await driver.isAlive(pid))) {
         throw new Error(
-          `daemon broker exited before readiness: pid=${pid}; readyFile=${readyFile}; set ${DAEMON_STDIO_ENV}=inherit to inspect broker stderr`,
+          `daemon broker exited before readiness: pid=${pid}; readyFile=${readyFile}; set ${DAEMON_STDIO_ENV}=inherit to inspect broker stderr`
         );
       }
       await sleep(50);
@@ -191,14 +206,17 @@ const waitForReadyFile = async (
 
 const acquireLock = async (
   lockFile: string,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<{
   release(): Promise<void>;
 }> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() <= deadline) {
     try {
-      const handle = await open(lockFile, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY);
+      const handle = await open(
+        lockFile,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY
+      );
       await handle.writeFile(`${process.pid}\n`, "utf8");
       return {
         async release() {
@@ -231,7 +249,8 @@ const isProcessAlive = (pid: number): boolean => {
   }
 };
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;

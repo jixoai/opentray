@@ -14,6 +14,8 @@ export interface OpenTrayRuntimeOptions {
   packageVersion?: string;
   protocolVersion?: number;
   clientVersion?: string;
+  appId?: string;
+  appName?: string;
   autoStart?: boolean;
   binding?: OpenTrayRuntimeBinding;
 }
@@ -35,6 +37,12 @@ export const createTray = async (
     ...(runtimeOptions.protocolVersion === undefined
       ? {}
       : { protocolVersion: runtimeOptions.protocolVersion }),
+    ...(runtimeOptions.appId === undefined
+      ? {}
+      : { appId: runtimeOptions.appId }),
+    ...(runtimeOptions.appName === undefined
+      ? {}
+      : { appName: runtimeOptions.appName }),
   };
   const connection =
     runtimeOptions.runtime === "headless-binding"

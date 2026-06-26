@@ -12,7 +12,11 @@ export interface OpenTrayRuntimeBindingInfo {
 
 export interface OpenTrayRuntimeBinding {
   runtimeBindingInfo(): OpenTrayRuntimeBindingInfo;
-  createHeadlessRuntime?(packageVersion?: string): OpenTrayHeadlessRuntime;
+  createHeadlessRuntime?(
+    packageVersion?: string,
+    appId?: string,
+    appName?: string
+  ): OpenTrayHeadlessRuntime;
 }
 
 export interface OpenTrayHeadlessRuntime {

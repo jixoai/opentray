@@ -40,6 +40,8 @@ export interface ConnectLocalBrokerOptions
   extends Partial<BrokerEndpointIdentityOptions> {
   endpoint?: string;
   homeDir?: string;
+  appId?: string;
+  appName?: string;
   clientVersion?: string;
   autoStart?: boolean;
   daemonDriver?: DaemonDriver;
@@ -70,11 +72,16 @@ export const connectLocalBroker = async (
   const packageVersion =
     options.packageVersion ?? (await readPackageVersion(packageJsonUrl));
   const clientVersion = options.clientVersion ?? packageVersion;
-  const callerLabel = options.callerLabel ?? resolveCallerLabel();
+  const appId = normalizeAppIdentityField(options.appId);
+  const appName = normalizeAppIdentityField(options.appName);
+  const callerLabel =
+    options.callerLabel ?? appName ?? appId ?? resolveCallerLabel();
   const paths = resolveDaemonPaths({
     homeDir: options.homeDir ?? process.env.OPENTRAY_HOME ?? homedir(),
     packageVersion,
     callerLabel,
+    ...(appId === undefined ? {} : { appId }),
+    ...(appName === undefined ? {} : { appName }),
   });
   const endpoint = options.endpoint ?? paths.endpoint;
   const autoStart = options.autoStart ?? endpoint === paths.endpoint;
@@ -97,6 +104,13 @@ export const connectLocalBroker = async (
     options.protocolVersion ?? PROTOCOL_VERSION
   );
   return connection;
+};
+
+const normalizeAppIdentityField = (
+  value: string | undefined
+): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 };
 
 class LocalBrokerConnection implements LocalBrokerClient {

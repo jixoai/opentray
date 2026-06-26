@@ -91,7 +91,7 @@ fn command_before_init_is_rejected_without_backend_mutation() {
             request_id: "req-1".to_string(),
             options: AppOptions {
                 id: Some("app".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: true,
             },
@@ -123,7 +123,7 @@ fn create_app_returns_correlated_broker_identity() {
             request_id: "req-1".to_string(),
             options: AppOptions {
                 id: Some("app".to_string()),
-                title: Some("App".to_string()),
+                name: Some("App".to_string()),
                 icon: None,
                 default: true,
             },
@@ -542,7 +542,7 @@ fn create_app<L: ExtensionLoader>(
             request_id: "req-surface".to_string(),
             options: AppOptions {
                 id: Some("app".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: true,
             },

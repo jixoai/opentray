@@ -264,13 +264,18 @@ const assertEndpointComponent = (value: string, name: string): void => {
 
 export interface AppOptions {
   id?: AppId;
-  title?: string;
+  name?: string;
   icon?: Icon;
   default?: boolean;
 }
 
 export interface AppRef {
   appId: AppId;
+}
+
+export interface AppIdentity {
+  appId: AppId;
+  appName: string;
 }
 
 export interface TrayOptions {
@@ -399,6 +404,8 @@ export interface RuntimeHostHealth {
   packageVersion: string;
   protocolVersion: number;
   endpoint: string;
+  appId: AppId;
+  appName: string;
   callerLabel: string;
   sessionCount: number;
   sessions: RuntimeHostSessionHealth[];
@@ -611,6 +618,8 @@ const isRuntimeHostHealth = (value: unknown): value is RuntimeHostHealth => {
     typeof value.packageVersion === "string" &&
     typeof value.protocolVersion === "number" &&
     typeof value.endpoint === "string" &&
+    typeof value.appId === "string" &&
+    typeof value.appName === "string" &&
     typeof value.callerLabel === "string" &&
     typeof value.sessionCount === "number" &&
     Array.isArray(value.sessions) &&

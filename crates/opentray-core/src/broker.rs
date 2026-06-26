@@ -1,6 +1,6 @@
 use opentray_spec::{
-    is_supported_protocol_version, AppOptions, AppRef, ClientFrame, ExtensionEnvelope, Rect,
-    RequestId, ServerFrame, SessionId, TrayBoundsKind, TrayBoundsResult, TrayEvent,
+    is_supported_protocol_version, AppIdentity, AppOptions, AppRef, ClientFrame, ExtensionEnvelope,
+    Rect, RequestId, ServerFrame, SessionId, TrayBoundsKind, TrayBoundsResult, TrayEvent,
     PROTOCOL_VERSION,
 };
 
@@ -12,6 +12,7 @@ use crate::{
 #[derive(Debug, Clone, Default)]
 pub struct BrokerSession {
     session_id: Option<SessionId>,
+    app_identity: Option<AppIdentity>,
 }
 
 impl BrokerSession {
@@ -23,8 +24,22 @@ impl BrokerSession {
         self.session_id.as_deref()
     }
 
+    pub fn app_identity(&self) -> Option<&AppIdentity> {
+        self.app_identity.as_ref()
+    }
+
     fn accept(&mut self, session_id: SessionId) {
         self.session_id = Some(session_id);
+    }
+
+    fn pin_app_identity(&mut self, app: &AppRef, options: &AppOptions) {
+        if self.app_identity.is_some() {
+            return;
+        }
+        self.app_identity = Some(AppIdentity {
+            app_id: app.app_id.clone(),
+            app_name: app_name(options.name.as_deref(), &app.app_id),
+        });
     }
 }
 
@@ -34,6 +49,7 @@ pub struct BrokerKernel<B: AppBackend, L: ExtensionLoader = UnsupportedExtension
     extension_loader: L,
     next_session: u64,
     default_app: Option<AppRef>,
+    default_app_options: AppOptions,
 }
 
 struct ScopedExtensionHost<'a> {
@@ -67,11 +83,20 @@ impl<B: AppBackend> BrokerKernel<B, UnsupportedExtensionLoader> {
 
 impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
     pub fn with_extension_loader(backend: B, extension_loader: L) -> Self {
+        Self::with_default_app_options(backend, extension_loader, default_app_options())
+    }
+
+    pub fn with_default_app_options(
+        backend: B,
+        extension_loader: L,
+        default_app_options: AppOptions,
+    ) -> Self {
         Self {
             kernel: Kernel::new(backend),
             extension_loader,
             next_session: 1,
             default_app: None,
+            default_app_options,
         }
     }
 
@@ -132,7 +157,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                         "init must be accepted before broker commands",
                     )];
                 };
-                self.handle_initialized_frame(&session_id, frame, host)
+                self.handle_initialized_frame(session, &session_id, frame, host)
             }
         }
     }
@@ -164,6 +189,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
 
     fn handle_initialized_frame(
         &mut self,
+        session: &mut BrokerSession,
         session_id: &str,
         frame: ClientFrame,
         host: &mut dyn ExtensionHostContext,
@@ -174,6 +200,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 options,
             } => match self.kernel.create_app(options.clone()) {
                 Ok(app) => {
+                    session.pin_app_identity(&app, &options);
                     if options.default || self.default_app.is_none() {
                         self.default_app = Some(app.clone());
                     }
@@ -184,16 +211,14 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
             ClientFrame::ResolveDefaultApp { request_id } => {
                 let app = match self.default_app.clone() {
                     Some(app) => Ok(app),
-                    None => self.kernel.create_app(AppOptions {
-                        id: Some("opentray.default".to_string()),
-                        title: Some("OpenTray".to_string()),
-                        icon: None,
-                        default: true,
-                    }),
+                    None => self.kernel.create_app(self.default_app_options.clone()),
                 };
 
                 match app {
                     Ok(app) => {
+                        if let Ok(identity) = self.kernel.app_identity(&app.app_id) {
+                            session.app_identity = Some(identity);
+                        }
                         self.default_app = Some(app.clone());
                         vec![ServerFrame::DefaultApp { request_id, app }]
                     }
@@ -357,6 +382,22 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         session.accept(session_id.clone());
         session_id
     }
+}
+
+fn default_app_options() -> AppOptions {
+    AppOptions {
+        id: Some("opentray.default".to_string()),
+        name: Some("opentray".to_string()),
+        icon: None,
+        default: true,
+    }
+}
+
+fn app_name(name: Option<&str>, fallback: &str) -> String {
+    name.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 fn request_id(frame: &ClientFrame) -> Option<RequestId> {

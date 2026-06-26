@@ -56,6 +56,17 @@ Node platform packages carry the host-loadable runtime artifact at `runtime/open
 
 For protocol/session diagnostics, `createTray(options, { runtime: "headless-binding" })` routes through the Node binding without a local broker socket. This is not a visual tray acceptance path yet; it proves binding-owned kernel/session behavior while the native event-loop-backed runtime host is still under construction.
 
+Runtime options may also carry app identity facts:
+
+```ts
+await createTray(options, {
+  appId: "com.example.status",
+  appName: "Status",
+});
+```
+
+The runtime host reports those facts as `appId` and `appName` in `runtime-host-health`; tray icon text, menu labels, and tooltip text remain projection data.
+
 The `opentray/node` subpath exposes binding-resolution and binding-transport helpers only. Source-tree diagnostics may still use the internal local broker transport, but that transport is not exported as a package contract.
 
 ## Examples

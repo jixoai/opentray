@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use opentray_spec::{
-    AppId, AppOptions, AppRef, ExtensionEnvelope, Icon, Menu, Rect, SessionId, Tooltip, TrayEvent,
-    TrayId, TrayOptions,
+    AppId, AppIdentity, AppOptions, AppRef, ExtensionEnvelope, Icon, Menu, Rect, SessionId,
+    Tooltip, TrayEvent, TrayId, TrayOptions,
 };
 use serde_json::Value;
 
@@ -281,10 +281,25 @@ impl<B: AppBackend> Kernel<B> {
         trays.sort_by(|left, right| left.tray_id.cmp(&right.tray_id));
         Ok(AppProjection {
             app: app.app.clone(),
-            title: app.options.title.clone(),
+            title: app.options.name.clone(),
             tooltip: None,
             icon: app.options.icon.clone(),
             trays,
+        })
+    }
+
+    pub fn app_identity(&self, app_id: &str) -> Result<AppIdentity, KernelError> {
+        let app = self.require_app(app_id)?;
+        Ok(AppIdentity {
+            app_id: app.app.app_id.clone(),
+            app_name: app
+                .options
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(&app.app.app_id)
+                .to_string(),
         })
     }
 
@@ -392,7 +407,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: Some("Host".to_string()),
+                name: Some("Host".to_string()),
                 icon: None,
                 default: true,
             })
@@ -426,7 +441,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: false,
             })
@@ -457,7 +472,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: false,
             })
@@ -494,7 +509,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: Some("Host".to_string()),
+                name: Some("Host".to_string()),
                 icon: None,
                 default: false,
             })
@@ -519,7 +534,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: Some("Host".to_string()),
+                name: Some("Host".to_string()),
                 icon: None,
                 default: false,
             })
@@ -545,7 +560,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: false,
             })
@@ -610,7 +625,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: false,
             })
@@ -643,7 +658,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: false,
             })
@@ -678,7 +693,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: false,
             })
@@ -705,7 +720,7 @@ mod tests {
         let surface = kernel
             .create_app(AppOptions {
                 id: Some("host".to_string()),
-                title: None,
+                name: None,
                 icon: None,
                 default: false,
             })

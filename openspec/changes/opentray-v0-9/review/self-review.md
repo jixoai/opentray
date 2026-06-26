@@ -5,7 +5,7 @@
 - Change: `opentray-v0-9`
 - Iteration: 1
 - Recurring issue counts: none
-- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset, the first packaging-plugin contract and Vite adapter, the session-boundary cleanup, the Node runtime-binding distribution slice, the first binding-owned headless protocol/session runtime, the removal of public daemon CLI diagnostics, and the `runtime-host-health` protocol vocabulary rename. Platform packages publish `runtime/opentray_runtime.node`; the remaining runtime-distribution work is to move the default `createTray()` path onto a native visible host-main-loop binding and add app identity metadata to runtime host health.
+- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset, the first packaging-plugin contract and Vite adapter, the session-boundary cleanup, the Node runtime-binding distribution slice, the first binding-owned headless protocol/session runtime, the removal of public daemon CLI diagnostics, the `runtime-host-health` protocol vocabulary rename, and app identity health metadata. Platform packages publish `runtime/opentray_runtime.node`; the remaining runtime-distribution work is to move the default `createTray()` path onto a native visible host-main-loop binding.
 - Next loop action: design and implement the native visible host-main-loop Node runtime binding without archiving `opentray-v0-9`.
 
 ## Intent Alignment
@@ -29,12 +29,12 @@
 
 1. The binding now owns a headless direct protocol/session path, but default `createTray()` still uses the internal transitional local runtime because the binding does not yet own a native visible host-main-loop contract.
 2. The public CLI no longer exposes `opentray daemon <start|stop|restart|health>`, and `opentray/node` no longer exports `connectLocalBroker()`. Internal source-tree modules still use daemon/local-broker implementation names for the debug runtime path.
-3. `runtime-host-health` now uses runtime-host vocabulary and carries `callerLabel`, but it does not yet include `appId` / `appName` because the current session/app model does not retain the human-facing app name.
+3. `runtime-host-health` now uses runtime-host vocabulary and carries `appId`, `appName`, and `callerLabel`. `appId` / `appName` are retained as session/runtime identity facts; `callerLabel` remains the sanitized runtime routing slug.
 
 ## New Questions For User
 
 1. Should the native visible binding host use a platform-specific main-thread bootstrap contract for macOS, or keep macOS on a contributor debug host until that can be proven visually?
-2. Should the internal debug runtime modules be renamed away from daemon/local-broker in the same loop as app identity health metadata, or kept as contributor-only implementation vocabulary until visible binding replaces them?
+2. Should the internal debug runtime modules be renamed away from daemon/local-broker before visible binding replaces them, or kept as contributor-only implementation vocabulary until that replacement lands?
 
 ## Evidence
 
@@ -65,6 +65,14 @@
   - `cargo test -p opentray-ext-lynx --lib`
   - `cargo test -p opentray-ext-badge --lib`
   - `cargo test -p opentray-runtime-node --lib --quiet`
+  - `cargo test -p opentray-spec --lib --quiet`
+  - `cargo test -p opentray-core --lib --quiet`
+  - `cargo test -p opentray-bin --quiet`
+  - `cargo test -p opentray-runtime-node --lib --quiet`
+  - `pnpm --filter @opentray/spec typecheck`
+  - `pnpm --filter @opentray/spec test`
+  - `pnpm --filter opentray typecheck`
+  - `pnpm --filter opentray test`
   - `cargo test -p opentray-runtime-node --quiet`
   - `cargo build -p opentray-runtime-node --release` plus Node `require()` smoke for copied `opentray_runtime.node`
   - Node `createHeadlessRuntime().request(...)` smoke for `init`, `resolve-default-app`, and `create-tray`

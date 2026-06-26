@@ -2,8 +2,13 @@ use std::sync::Mutex;
 
 use napi::{Error, Status};
 use napi_derive::napi;
-use opentray_core::{BackendCapabilities, BrokerKernel, BrokerSession, FakeBackend};
-use opentray_spec::{ClientFrame, PROTOCOL_VERSION};
+use opentray_core::{
+    BackendCapabilities, BrokerKernel, BrokerSession, FakeBackend, UnsupportedExtensionLoader,
+};
+use opentray_spec::{
+    AppIdentity, AppOptions, ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame,
+    PROTOCOL_VERSION,
+};
 
 #[napi(object)]
 pub struct RuntimeBindingInfo {
@@ -24,6 +29,7 @@ pub struct HeadlessRuntime {
     broker: Mutex<BrokerKernel<FakeBackend>>,
     session: Mutex<BrokerSession>,
     package_version: String,
+    app: AppIdentity,
 }
 
 #[napi]
@@ -36,6 +42,16 @@ impl HeadlessRuntime {
                 format!("invalid OpenTray client frame JSON: {error}"),
             )
         })?;
+        if let ClientFrame::Health { request_id } = frame {
+            let session = self
+                .session
+                .lock()
+                .map_err(|_| Error::new(Status::GenericFailure, "runtime session lock poisoned"))?;
+            return serialize_frames(vec![ServerFrame::RuntimeHostHealth {
+                request_id,
+                health: self.health(&session),
+            }]);
+        }
         let mut broker = self
             .broker
             .lock()
@@ -45,17 +61,7 @@ impl HeadlessRuntime {
             .lock()
             .map_err(|_| Error::new(Status::GenericFailure, "runtime session lock poisoned"))?;
         let frames = broker.handle_frame(&mut session, frame, &self.package_version);
-        frames
-            .into_iter()
-            .map(|frame| {
-                serde_json::to_string(&frame).map_err(|error| {
-                    Error::new(
-                        Status::GenericFailure,
-                        format!("failed to serialize OpenTray server frame: {error}"),
-                    )
-                })
-            })
-            .collect()
+        serialize_frames(frames)
     }
 
     #[napi]
@@ -69,29 +75,81 @@ impl HeadlessRuntime {
             .lock()
             .map_err(|_| Error::new(Status::GenericFailure, "runtime session lock poisoned"))?;
         let frames = broker.close_session(&mut session);
-        frames
-            .into_iter()
-            .map(|frame| {
-                serde_json::to_string(&frame).map_err(|error| {
-                    Error::new(
-                        Status::GenericFailure,
-                        format!("failed to serialize OpenTray server frame: {error}"),
-                    )
-                })
-            })
-            .collect()
+        serialize_frames(frames)
+    }
+
+    fn health(&self, session: &BrokerSession) -> RuntimeHostHealth {
+        let session_health = session
+            .session_id()
+            .map(|session_id| RuntimeHostSessionHealth {
+                session_id: 1,
+                internal_session_id: Some(session_id.to_string()),
+                initialized: true,
+            });
+        RuntimeHostHealth {
+            pid: std::process::id(),
+            package_version: self.package_version.clone(),
+            protocol_version: PROTOCOL_VERSION,
+            endpoint: "in-process://opentray-runtime-node/headless".to_string(),
+            app: session
+                .app_identity()
+                .cloned()
+                .unwrap_or_else(|| self.app.clone()),
+            caller_label: opentray_spec::sanitize_caller_label(&self.app.app_name),
+            session_count: usize::from(session_health.is_some()),
+            sessions: session_health.into_iter().collect(),
+        }
     }
 }
 
 #[napi]
-pub fn create_headless_runtime(package_version: Option<String>) -> HeadlessRuntime {
+pub fn create_headless_runtime(
+    package_version: Option<String>,
+    app_id: Option<String>,
+    app_name: Option<String>,
+) -> HeadlessRuntime {
+    let app = runtime_app_identity(app_id, app_name);
     HeadlessRuntime {
-        broker: Mutex::new(BrokerKernel::new(FakeBackend::new(
-            BackendCapabilities::full(),
-        ))),
+        broker: Mutex::new(BrokerKernel::with_default_app_options(
+            FakeBackend::new(BackendCapabilities::full()),
+            UnsupportedExtensionLoader,
+            AppOptions {
+                id: Some(app.app_id.clone()),
+                name: Some(app.app_name.clone()),
+                icon: None,
+                default: true,
+            },
+        )),
         session: Mutex::new(BrokerSession::new()),
         package_version: package_version.unwrap_or_else(|| "0.0.0".to_string()),
+        app,
     }
+}
+
+fn runtime_app_identity(app_id: Option<String>, app_name: Option<String>) -> AppIdentity {
+    let app_id = non_empty(app_id).unwrap_or_else(|| "opentray".to_string());
+    let app_name = non_empty(app_name).unwrap_or_else(|| app_id.clone());
+    AppIdentity { app_id, app_name }
+}
+
+fn non_empty(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn serialize_frames(frames: Vec<ServerFrame>) -> napi::Result<Vec<String>> {
+    frames
+        .into_iter()
+        .map(|frame| {
+            serde_json::to_string(&frame).map_err(|error| {
+                Error::new(
+                    Status::GenericFailure,
+                    format!("failed to serialize OpenTray server frame: {error}"),
+                )
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -102,7 +160,11 @@ mod tests {
 
     #[test]
     fn headless_runtime_owns_protocol_session_operations() {
-        let runtime = create_headless_runtime(Some("0.9.0".to_string()));
+        let runtime = create_headless_runtime(
+            Some("0.9.0".to_string()),
+            Some("com.example.build".to_string()),
+            Some("Build".to_string()),
+        );
 
         let ready = request_one(
             &runtime,
@@ -137,6 +199,19 @@ mod tests {
         );
         assert_eq!(tray_created["type"], "tray-created");
         assert_eq!(tray_created["trayId"], "status");
+
+        let health = request_one(
+            &runtime,
+            json!({
+                "type": "health",
+                "requestId": "req-health"
+            }),
+        );
+        assert_eq!(health["type"], "runtime-host-health");
+        assert_eq!(health["health"]["appId"], "com.example.build");
+        assert_eq!(health["health"]["appName"], "Build");
+        assert_eq!(health["health"]["callerLabel"], "build");
+        assert_eq!(health["health"]["sessionCount"], 1);
     }
 
     fn request_one(runtime: &super::HeadlessRuntime, frame: Value) -> Value {

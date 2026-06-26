@@ -12,10 +12,20 @@ describe("daemon paths", () => {
     });
 
     expect(paths.callerLabel).toBe("myapp");
-    expect(paths.runtimeDir).toBe("/tmp/opentray-home/.opentray/0.1.0/myapp/runtime");
-    expect(paths.pidFile).toBe("/tmp/opentray-home/.opentray/0.1.0/myapp/runtime/broker.pid");
-    expect(paths.lockFile).toBe("/tmp/opentray-home/.opentray/0.1.0/myapp/runtime/broker.lock");
-    expect(paths.endpoint).toBe("/tmp/opentray-home/.opentray/0.1.0/myapp/opentray-p1.sock");
+    expect(paths.appId).toBe("myapp");
+    expect(paths.appName).toBe("myapp");
+    expect(paths.runtimeDir).toBe(
+      "/tmp/opentray-home/.opentray/0.1.0/myapp/runtime"
+    );
+    expect(paths.pidFile).toBe(
+      "/tmp/opentray-home/.opentray/0.1.0/myapp/runtime/broker.pid"
+    );
+    expect(paths.lockFile).toBe(
+      "/tmp/opentray-home/.opentray/0.1.0/myapp/runtime/broker.lock"
+    );
+    expect(paths.endpoint).toBe(
+      "/tmp/opentray-home/.opentray/0.1.0/myapp/opentray-p1.sock"
+    );
   });
 
   it("falls back to the neutral caller label when none is provided", () => {
@@ -26,8 +36,14 @@ describe("daemon paths", () => {
     });
 
     expect(paths.callerLabel).toBe("opentray");
-    expect(paths.runtimeDir).toBe("/tmp/opentray-home/.opentray/0.1.0/opentray/runtime");
-    expect(paths.endpoint).toBe("/tmp/opentray-home/.opentray/0.1.0/opentray/opentray-p1.sock");
+    expect(paths.appId).toBe("opentray");
+    expect(paths.appName).toBe("opentray");
+    expect(paths.runtimeDir).toBe(
+      "/tmp/opentray-home/.opentray/0.1.0/opentray/runtime"
+    );
+    expect(paths.endpoint).toBe(
+      "/tmp/opentray-home/.opentray/0.1.0/opentray/opentray-p1.sock"
+    );
   });
 
   it("isolates two callers of the same version to distinct endpoints", () => {
@@ -56,7 +72,27 @@ describe("daemon paths", () => {
       platform: "win32",
     });
 
-    expect(paths.runtimeDir).toBe("C:/Users/example/.opentray/0.2.0/myapp/runtime");
+    expect(paths.runtimeDir).toBe(
+      "C:/Users/example/.opentray/0.2.0/myapp/runtime"
+    );
     expect(paths.endpoint).toBe("\\\\.\\pipe\\opentray-0.2.0-p1-myapp");
+  });
+
+  it("preserves explicit app identity separately from caller label", () => {
+    const paths = resolveDaemonPaths({
+      homeDir: "/tmp/opentray-home",
+      packageVersion: "0.1.0",
+      callerLabel: "build-tool",
+      appId: "com.example.build",
+      appName: "Example Build",
+      platform: "darwin",
+    });
+
+    expect(paths.callerLabel).toBe("build-tool");
+    expect(paths.appId).toBe("com.example.build");
+    expect(paths.appName).toBe("Example Build");
+    expect(paths.endpoint).toBe(
+      "/tmp/opentray-home/.opentray/0.1.0/build-tool/opentray-p1.sock"
+    );
   });
 });

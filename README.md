@@ -51,6 +51,15 @@ const tray = await createTray({
 ```
 
 Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`), not a top-level tray `title`.
+Runtime identity is separate from tray projection. When a host needs explicit
+diagnostic identity, pass it through runtime options:
+
+```ts
+await createTray(options, {
+  appId: "com.example.build",
+  appName: "Build",
+});
+```
 
 ## Packaging
 

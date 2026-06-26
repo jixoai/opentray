@@ -17,6 +17,8 @@ export interface CreateRuntimeBindingTransportOptions {
   readonly packageVersion?: string;
   readonly clientVersion?: string;
   readonly protocolVersion?: number;
+  readonly appId?: string;
+  readonly appName?: string;
 }
 
 export const createRuntimeBindingTransport = async ({
@@ -24,6 +26,8 @@ export const createRuntimeBindingTransport = async ({
   packageVersion = "0.0.0",
   clientVersion = packageVersion,
   protocolVersion = PROTOCOL_VERSION,
+  appId,
+  appName,
 }: CreateRuntimeBindingTransportOptions = {}): Promise<OpenTrayConnection> => {
   const resolvedBinding = binding ?? (await loadOpenTrayRuntimeBinding());
   if (resolvedBinding.createHeadlessRuntime === undefined) {
@@ -31,7 +35,11 @@ export const createRuntimeBindingTransport = async ({
       "OpenTray runtime binding does not expose createHeadlessRuntime()"
     );
   }
-  const runtime = resolvedBinding.createHeadlessRuntime(packageVersion);
+  const runtime = resolvedBinding.createHeadlessRuntime(
+    packageVersion,
+    appId,
+    appName
+  );
   const transport = new RuntimeBindingTransport(runtime);
   await transport.init(clientVersion, protocolVersion);
   return transport;

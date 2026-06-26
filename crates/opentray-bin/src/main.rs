@@ -7,7 +7,7 @@ mod windows_transport;
 
 use std::{env, error::Error, path::PathBuf, time::Duration};
 
-use opentray_spec::{sanitize_caller_label, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION};
+use opentray_spec::{sanitize_caller_label, AppOptions, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION};
 
 #[derive(Debug, Clone)]
 pub struct BrokerOptions {
@@ -15,6 +15,8 @@ pub struct BrokerOptions {
     ready_file: PathBuf,
     package_version: String,
     protocol_version: u32,
+    app_id: String,
+    app_name: String,
     caller_label: String,
     idle_timeout: Option<Duration>,
 }
@@ -38,6 +40,23 @@ impl BrokerOptions {
 
     pub fn protocol_version(&self) -> u32 {
         self.protocol_version
+    }
+
+    pub fn app_id(&self) -> &str {
+        &self.app_id
+    }
+
+    pub fn app_name(&self) -> &str {
+        &self.app_name
+    }
+
+    pub fn default_app_options(&self) -> AppOptions {
+        AppOptions {
+            id: Some(self.app_id.clone()),
+            name: Some(self.app_name.clone()),
+            icon: None,
+            default: true,
+        }
     }
 }
 
@@ -77,6 +96,8 @@ fn parse_broker_options(
     let mut ready_file = None;
     let mut package_version = None;
     let mut protocol_version = None;
+    let mut app_id = None;
+    let mut app_name = None;
     let mut caller_label = None;
     let mut args = args.peekable();
 
@@ -91,6 +112,8 @@ fn parse_broker_options(
             "--protocol-version" => {
                 protocol_version = Some(value.parse::<u32>()?);
             }
+            "--app-id" => app_id = Some(value),
+            "--app-name" => app_name = Some(value),
             "--caller-label" => caller_label = Some(value),
             _ => return Err(format!("unknown broker option: {flag}").into()),
         }
@@ -110,6 +133,14 @@ fn parse_broker_options(
         Some(value) if !value.trim().is_empty() => sanitize_caller_label(&value),
         _ => DEFAULT_CALLER_LABEL.to_string(),
     };
+    let app_id = resolve_non_empty(
+        app_id.or_else(|| env::var("OPENTRAY_DAEMON_APP_ID").ok()),
+        &caller_label,
+    );
+    let app_name = resolve_non_empty(
+        app_name.or_else(|| env::var("OPENTRAY_DAEMON_APP_NAME").ok()),
+        &caller_label,
+    );
 
     // The visible process name is carried by the spawned argv[0] on platforms
     // whose task manager reflects it (e.g. Linux `ps`/`comm`). The label also
@@ -122,9 +153,18 @@ fn parse_broker_options(
         ready_file: ready_file.ok_or("missing --ready-file")?,
         package_version: package_version.ok_or("missing --package-version")?,
         protocol_version,
+        app_id,
+        app_name,
         caller_label,
         idle_timeout: daemon_idle_timeout()?,
     })
+}
+
+fn resolve_non_empty(value: Option<String>, fallback: &str) -> String {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn daemon_idle_timeout() -> Result<Option<Duration>, Box<dyn Error>> {
@@ -194,9 +234,10 @@ mod native_broker {
         }));
 
         let mut app = NativeBrokerApp {
-            broker: BrokerKernel::with_extension_loader(
+            broker: BrokerKernel::with_default_app_options(
                 TrayIconBackend::with_runtime(NativeTrayIconRuntime::new()),
                 DynamicExtensionLoader::from_env()?,
+                options.default_app_options(),
             ),
             sessions: HashMap::new(),
             broker_version: options.package_version.clone(),
@@ -464,6 +505,8 @@ mod tests {
 
         let options = parse_broker_options(args.into_iter()).expect("broker options");
         assert_eq!(options.caller_label(), "myapp");
+        assert_eq!(options.app_id(), "myapp");
+        assert_eq!(options.app_name(), "myapp");
     }
 
     #[test]
@@ -480,5 +523,31 @@ mod tests {
 
         let options = parse_broker_options(args.into_iter()).expect("broker options");
         assert_eq!(options.caller_label(), "my-app");
+    }
+
+    #[test]
+    fn broker_options_preserve_app_identity_metadata() {
+        let mut args = broker_args();
+        args.extend(
+            [
+                "--caller-label",
+                "build-tool",
+                "--app-id",
+                "com.example.build",
+                "--app-name",
+                "Example Build",
+            ]
+            .iter()
+            .map(|value| value.to_string()),
+        );
+
+        let options = parse_broker_options(args.into_iter()).expect("broker options");
+        assert_eq!(options.caller_label(), "build-tool");
+        assert_eq!(options.app_id(), "com.example.build");
+        assert_eq!(options.app_name(), "Example Build");
+        assert_eq!(
+            options.default_app_options().name.as_deref(),
+            Some("Example Build")
+        );
     }
 }

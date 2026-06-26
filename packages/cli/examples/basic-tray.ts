@@ -55,6 +55,8 @@ class RecordingTransport implements OpenTrayTransport {
             endpoint: "recorded",
             packageVersion: "0.1.0",
             protocolVersion: 1,
+            appId: "com.example.opentray",
+            appName: "OpenTray Example",
             callerLabel: "recorded",
             sessionCount: 0,
             sessions: [],

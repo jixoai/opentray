@@ -135,6 +135,13 @@ pub fn build_runtime_host_health(
     options: &BrokerOptions,
     sessions: &HashMap<u64, TransportSession>,
 ) -> RuntimeHostHealth {
+    let app = sessions
+        .values()
+        .find_map(|session| session.broker.app_identity().cloned())
+        .unwrap_or_else(|| opentray_spec::AppIdentity {
+            app_id: options.app_id().to_string(),
+            app_name: options.app_name().to_string(),
+        });
     let mut sessions = sessions
         .iter()
         .map(|(session_id, session)| RuntimeHostSessionHealth {
@@ -150,6 +157,7 @@ pub fn build_runtime_host_health(
         package_version: options.package_version.clone(),
         protocol_version: options.protocol_version,
         endpoint: options.endpoint.to_string_lossy().to_string(),
+        app,
         caller_label: options.caller_label().to_string(),
         session_count: sessions.len(),
         sessions,
@@ -349,6 +357,8 @@ fn write_ready_file(options: &BrokerOptions) -> std::io::Result<()> {
         "endpoint": options.endpoint.to_string_lossy(),
         "packageVersion": options.package_version,
         "protocolVersion": options.protocol_version,
+        "appId": options.app_id(),
+        "appName": options.app_name(),
         "callerLabel": options.caller_label(),
     });
     let mut file = File::create(&options.ready_file)?;

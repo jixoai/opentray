@@ -3,7 +3,8 @@ use serde_json::Value;
 
 use crate::ext::ExtensionEnvelope;
 use crate::model::{
-    AppId, AppOptions, AppRef, Icon, Menu, Rect, SessionId, Tooltip, TrayEvent, TrayId, TrayOptions,
+    AppId, AppIdentity, AppOptions, AppRef, Icon, Menu, Rect, SessionId, Tooltip, TrayEvent,
+    TrayId, TrayOptions,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -29,6 +30,8 @@ pub struct RuntimeHostHealth {
     pub package_version: String,
     pub protocol_version: u32,
     pub endpoint: String,
+    #[serde(flatten)]
+    pub app: AppIdentity,
     pub caller_label: String,
     pub session_count: usize,
     pub sessions: Vec<RuntimeHostSessionHealth>,
@@ -536,6 +539,10 @@ mod tests {
                 package_version: "0.1.0".to_string(),
                 protocol_version: PROTOCOL_VERSION,
                 endpoint: "/tmp/opentray.sock".to_string(),
+                app: AppIdentity {
+                    app_id: "com.example.build".to_string(),
+                    app_name: "Build".to_string(),
+                },
                 caller_label: "myapp".to_string(),
                 session_count: 2,
                 sessions: vec![
@@ -570,6 +577,8 @@ mod tests {
                     "packageVersion": "0.1.0",
                     "protocolVersion": 1,
                     "endpoint": "/tmp/opentray.sock",
+                    "appId": "com.example.build",
+                    "appName": "Build",
                     "callerLabel": "myapp",
                     "sessionCount": 2,
                     "sessions": [

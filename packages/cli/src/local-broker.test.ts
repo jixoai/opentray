@@ -3,7 +3,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { PROTOCOL_VERSION, type ClientFrame, type ServerFrame } from "@opentray/spec";
+import {
+  PROTOCOL_VERSION,
+  type ClientFrame,
+  type ServerFrame,
+} from "@opentray/spec";
 
 import { connectLocalBroker } from "./local-broker";
 import type { DaemonDriver } from "./daemon/lifecycle";
@@ -15,7 +19,9 @@ const cleanup: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((close) => close()));
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true }))
+  );
 });
 
 describe("local broker client", () => {
@@ -37,6 +43,28 @@ describe("local broker client", () => {
     await connection.close();
   });
 
+  it("passes explicit app identity to the spawned debug runtime", async () => {
+    const homeDir = await makeTempHome();
+    const driver = createSocketBrokerDriver();
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      appId: "com.example.build",
+      appName: "Example Build",
+      daemonDriver: driver,
+    });
+
+    expect(driver.spawnedPaths[0]).toMatchObject({
+      callerLabel: "example-build",
+      appId: "com.example.build",
+      appName: "Example Build",
+    });
+
+    await connection.close();
+  });
+
   it("does not auto-start when explicit endpoint opts out", async () => {
     const homeDir = await makeTempHome();
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
@@ -49,7 +77,7 @@ describe("local broker client", () => {
         endpoint: paths.endpoint,
         autoStart: false,
         daemonDriver: driver,
-      }),
+      })
     ).rejects.toThrow();
 
     expect(driver.spawned).toBe(0);
@@ -70,7 +98,7 @@ describe("local broker client", () => {
               source: "backend.nativeTrayBounds",
               rect: { x: 10, y: 20, width: 24, height: 24 },
             },
-          })}\n`,
+          })}\n`
         );
       }
     });
@@ -105,24 +133,28 @@ const makeTempHome = async (): Promise<string> => {
 };
 
 const createSocketBrokerDriver = (
-  onFrame?: (frame: ClientFrame, socket: Socket) => void,
+  onFrame?: (frame: ClientFrame, socket: Socket) => void
 ): DaemonDriver & {
   readonly spawned: number;
+  readonly spawnedPaths: DaemonPaths[];
   close(): Promise<void>;
 } => {
   const pid = 20_000;
   let spawned = 0;
+  const spawnedPaths: DaemonPaths[] = [];
   let server: Server | undefined;
 
   return {
     get spawned() {
       return spawned;
     },
+    spawnedPaths,
     async isAlive(checkPid) {
       return checkPid === pid && server !== undefined;
     },
     async spawnBroker(paths) {
       spawned += 1;
+      spawnedPaths.push(paths);
       server = createReadyServer(paths, onFrame);
       await listen(server, paths.endpoint);
       await writeFile(paths.readyFile, `${JSON.stringify({ pid })}\n`, "utf8");
@@ -139,7 +171,9 @@ const createSocketBrokerDriver = (
   };
 };
 
-const createCountingDriver = (): DaemonDriver & { readonly spawned: number } => {
+const createCountingDriver = (): DaemonDriver & {
+  readonly spawned: number;
+} => {
   let spawned = 0;
 
   return {
@@ -151,7 +185,11 @@ const createCountingDriver = (): DaemonDriver & { readonly spawned: number } => 
     },
     async spawnBroker(paths) {
       spawned += 1;
-      await writeFile(paths.readyFile, `${JSON.stringify({ pid: 30_000 })}\n`, "utf8");
+      await writeFile(
+        paths.readyFile,
+        `${JSON.stringify({ pid: 30_000 })}\n`,
+        "utf8"
+      );
       return 30_000;
     },
     async stop() {},
@@ -160,7 +198,7 @@ const createCountingDriver = (): DaemonDriver & { readonly spawned: number } => 
 
 const createReadyServer = (
   paths: DaemonPaths,
-  onFrame?: (frame: ClientFrame, socket: Socket) => void,
+  onFrame?: (frame: ClientFrame, socket: Socket) => void
 ): Server =>
   createServer((socket) => {
     socket.setEncoding("utf8");
@@ -196,7 +234,7 @@ const writeReadyFrame = (socket: Socket, paths: DaemonPaths): void => {
       protocolVersion: PROTOCOL_VERSION,
       brokerVersion: paths.packageVersion,
       sessionId: "session-test",
-    })}\n`,
+    })}\n`
   );
 };
 
