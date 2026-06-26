@@ -2313,7 +2313,9 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "opentray-core",
  "opentray-spec",
+ "serde_json",
 ]
 
 [[package]]

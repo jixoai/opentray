@@ -61,5 +61,6 @@
 - [x] 9.2 Change `@opentray/<os>-<arch>` platform packages to publish `runtime/opentray_runtime.node` instead of `bin/opentray`.
 - [x] 9.3 Update the native artifact graph, local staging, release staging, preview family graph, and native-artifact verification workflow to build/stage the `runtime` component from `opentray-runtime-node`.
 - [x] 9.4 Add `opentray/node` runtime binding resolution APIs and focused tests for missing package, missing artifact, unsupported target, and malformed binding behavior.
-- [ ] 9.5 Replace the transitional `connectLocalBroker()` tray transport with the in-process Node runtime binding API once the binding owns tray/session operations directly.
-- [ ] 9.6 Rename or remove public-facing daemon CLI diagnostics after the in-process runtime path fully replaces the debug broker transport.
+- [x] 9.5 Add a binding-owned headless direct runtime transport and SDK opt-in path that handles protocol/session operations without `connectLocalBroker()`.
+- [ ] 9.6 Replace the default `createTray()` transport with the in-process Node runtime binding once the binding owns the native visible tray event-loop host.
+- [ ] 9.7 Rename or remove public-facing daemon CLI diagnostics after the in-process runtime path fully replaces the debug broker transport.

@@ -80,6 +80,8 @@ Platform runtime packages such as `@opentray/darwin-arm64` carry
 truth; it does not own tray lifecycle, session authority, backend selection, or
 extension dispatch.
 
+The Node binding currently includes an explicit headless runtime path for protocol/session diagnostics. Visible tray completion still requires the native event-loop-backed runtime host; headless binding checks are not visual acceptance evidence.
+
 ## Development Checks
 
 Use focused checks first, then broader gates:

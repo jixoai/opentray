@@ -54,6 +54,8 @@ OpenTray does not ask developers to create a public broker object. The applicati
 
 Node platform packages carry the host-loadable runtime artifact at `runtime/opentray_runtime.node`. `opentray/node` exposes `loadOpenTrayRuntimeBinding()` and `resolveInstalledRuntimeBindingPath()` for Node-specific runtime diagnostics and packaging checks.
 
+For protocol/session diagnostics, `createTray(options, { runtime: "headless-binding" })` routes through the Node binding without a local broker socket. This is not a visual tray acceptance path yet; it proves binding-owned kernel/session behavior while the native event-loop-backed runtime host is still under construction.
+
 Lower-level node helpers such as `connectLocalBroker()` remain available from `opentray/node` for source-tree diagnostics and transitional runtime wiring. They are not the main public ontology.
 
 ## Examples

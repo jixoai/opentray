@@ -74,9 +74,10 @@
           were destructively renamed to Session vocabulary.
         </p>
         <p>
-          Direct tray/session operations still use transitional local-broker transport. The binding is loadable and
-          reports runtime/protocol identity; moving <code>createTray()</code> onto an in-process N-API tray API remains
-          tracked runtime-distribution work.
+          The binding now also owns a headless direct protocol/session runtime. It can handle
+          <code>init</code>, <code>resolve-default-app</code>, and <code>create-tray</code> without a local broker
+          socket. The default visible <code>createTray()</code> path still uses transitional local-broker transport
+          until the binding owns the native event-loop-backed tray host.
         </p>
       </section>
       <section>
@@ -116,11 +117,12 @@
               <td class="pass">Pass</td>
             </tr>
             <tr>
-              <td>Node runtime binding distribution</td>
+              <td>Node runtime binding distribution and headless runtime</td>
               <td>
                 <code>cargo test -p opentray-runtime-node --lib --quiet</code>,
                 <code>cargo build -p opentray-runtime-node --release</code> plus Node <code>require()</code> smoke,
-                native build graph tests, release planner output selecting <code>runtime</code>
+                Node <code>createHeadlessRuntime().request(...)</code> smoke, native build graph tests, release planner
+                output selecting <code>runtime</code>
               </td>
               <td class="pass">Pass</td>
             </tr>
@@ -145,7 +147,7 @@
       <section>
         <h2>Open Questions</h2>
         <ul>
-          <li>Whether the next runtime loop should prioritize direct <code>createTray()</code> over N-API first.</li>
+          <li>Whether macOS native binding host should require a platform-specific main-thread bootstrap contract.</li>
           <li>Whether transitional daemon/local-broker command names should be renamed or kept as contributor-only diagnostics.</li>
         </ul>
       </section>

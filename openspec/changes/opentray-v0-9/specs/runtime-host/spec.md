@@ -44,6 +44,26 @@ Contributor-only debug executables MAY remain in the source tree for smoke tests
 - **THEN** it selects the `runtime` component
 - **AND** it builds `opentray-runtime-node` rather than `opentray-bin`.
 
+### Requirement: Node runtime binding SHALL own protocol/session operations before native visibility is claimed
+
+The Node runtime binding SHALL expose a direct in-process runtime path that owns protocol/session operations without spawning or connecting to the transitional local broker. This direct path MAY be headless while the native visible tray event-loop host is under construction, but it SHALL still use the same `BrokerKernel` session law as the visible runtime path.
+
+The SDK MAY expose this headless binding route only as an explicit diagnostic or test mode. The default `createTray()` path SHALL NOT switch to the binding until the binding owns the native visible tray backend and event routing on supported platforms.
+
+#### Scenario: Headless binding creates a tray through kernel session law
+
+- **GIVEN** the Node binding creates a headless runtime
+- **WHEN** the SDK sends `init`, `resolve-default-app`, and `create-tray` frames through that binding
+- **THEN** the binding returns `ready`, `default-app`, and `tray-created` frames
+- **AND** no local broker socket or broker executable is required.
+
+#### Scenario: Headless binding is not visual acceptance
+
+- **GIVEN** a headless binding runtime accepts a tray creation request
+- **WHEN** the operator inspects the desktop tray
+- **THEN** no visible tray claim is made by that headless proof
+- **AND** visual completion still requires a native event-loop-backed runtime host.
+
 ### Requirement: Runtime host SHALL accept exactly one caller session for one app identity
 
 A runtime host SHALL accept exactly one caller session for normal operation. The session is pinned to one app identity, one caller label, and one runtime host endpoint. A second connection attempt to a host that is already serving a session SHALL be rejected with a typed protocol error and SHALL NOT cause the host to aggregate or share state across callers.

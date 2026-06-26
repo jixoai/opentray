@@ -12,6 +12,12 @@ export interface OpenTrayRuntimeBindingInfo {
 
 export interface OpenTrayRuntimeBinding {
   runtimeBindingInfo(): OpenTrayRuntimeBindingInfo;
+  createHeadlessRuntime?(packageVersion?: string): OpenTrayHeadlessRuntime;
+}
+
+export interface OpenTrayHeadlessRuntime {
+  request(frameJson: string): string[] | Promise<string[]>;
+  close(): string[] | Promise<string[]>;
 }
 
 export interface RuntimeNativeTarget {
