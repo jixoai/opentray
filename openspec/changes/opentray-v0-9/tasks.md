@@ -64,6 +64,6 @@
 - [x] 9.5 Add a binding-owned headless direct runtime transport and SDK opt-in path that handles protocol/session operations without `connectLocalBroker()`.
 - [x] 9.6 Record the native host-main-loop boundary for visible binding ownership, including the macOS main-thread event-loop constraint, so the default SDK path cannot be switched based on headless proof alone.
 - [x] 9.7 Remove public-facing daemon CLI diagnostics and `opentray/node` local-broker exports while keeping the source-tree debug runtime internal.
-- [ ] 9.8 Replace the default `createTray()` transport with the in-process Node runtime binding after a host-main-loop integration contract owns the native visible tray backend and event routing on supported platforms.
+- [x] 9.8 Replace the default `createTray()` transport with the in-process Node runtime binding after a host-main-loop integration contract owns the native visible tray backend and event routing on supported platforms.
 - [x] 9.9 Rename the remaining protocol/runtime health vocabulary from daemon-shaped names to runtime-host names.
 - [x] 9.10 Add app identity metadata to `runtime-host-health` after the runtime host/session model retains the app identity and human-facing app name.

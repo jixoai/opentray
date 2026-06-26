@@ -12,9 +12,12 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi4"] }
 napi-derive = "2"
+opentray-backend-tray-icon.workspace = true
 opentray-core.workspace = true
 opentray-spec.workspace = true
 serde_json.workspace = true
+tray-icon.workspace = true
+winit = "0.30"
 
 [build-dependencies]
 napi-build = "2"

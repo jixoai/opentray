@@ -5,7 +5,10 @@ import { connectLocalBroker } from "./local-broker";
 import type { OpenTrayRuntimeBinding } from "./native-runtime";
 import { createRuntimeBindingTransport } from "./runtime-binding-transport";
 
-export type OpenTrayRuntimeMode = "local-broker" | "headless-binding";
+export type OpenTrayRuntimeMode =
+  | "visible-binding"
+  | "local-broker"
+  | "headless-binding";
 
 export interface OpenTrayRuntimeOptions {
   runtime?: OpenTrayRuntimeMode;
@@ -44,9 +47,13 @@ export const createTray = async (
       ? {}
       : { appName: runtimeOptions.appName }),
   };
+  const runtime = runtimeOptions.runtime ?? "visible-binding";
   const connection =
-    runtimeOptions.runtime === "headless-binding"
-      ? await createRuntimeBindingTransport(bindingTransportOptions)
-      : await connectLocalBroker(runtimeOptions);
+    runtime === "local-broker"
+      ? await connectLocalBroker(runtimeOptions)
+      : await createRuntimeBindingTransport({
+          ...bindingTransportOptions,
+          kind: runtime === "headless-binding" ? "headless" : "visible",
+        });
   return createClient(connection).createTray(options);
 };

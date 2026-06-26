@@ -10,6 +10,16 @@ use opentray_spec::{
     PROTOCOL_VERSION,
 };
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod visible;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+mod visible_unsupported;
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub use visible::*;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub use visible_unsupported::*;
+
 #[napi(object)]
 pub struct RuntimeBindingInfo {
     pub kind: String,

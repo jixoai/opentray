@@ -2313,9 +2313,12 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "opentray-backend-tray-icon",
  "opentray-core",
  "opentray-spec",
  "serde_json",
+ "tray-icon",
+ "winit",
 ]
 
 [[package]]

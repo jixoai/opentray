@@ -9,10 +9,15 @@ import {
 import type { OpenTrayConnection, OpenTrayEventFrame } from "./client";
 import {
   loadOpenTrayRuntimeBinding,
+  type OpenTrayRuntimeHost,
   type OpenTrayRuntimeBinding,
+  type OpenTrayVisibleRuntime,
 } from "./native-runtime";
 
+export type RuntimeBindingTransportKind = "visible" | "headless";
+
 export interface CreateRuntimeBindingTransportOptions {
+  readonly kind?: RuntimeBindingTransportKind;
   readonly binding?: OpenTrayRuntimeBinding;
   readonly packageVersion?: string;
   readonly clientVersion?: string;
@@ -28,34 +33,67 @@ export const createRuntimeBindingTransport = async ({
   protocolVersion = PROTOCOL_VERSION,
   appId,
   appName,
+  kind = "visible",
 }: CreateRuntimeBindingTransportOptions = {}): Promise<OpenTrayConnection> => {
   const resolvedBinding = binding ?? (await loadOpenTrayRuntimeBinding());
-  if (resolvedBinding.createHeadlessRuntime === undefined) {
-    throw new Error(
-      "OpenTray runtime binding does not expose createHeadlessRuntime()"
-    );
-  }
-  const runtime = resolvedBinding.createHeadlessRuntime(
-    packageVersion,
-    appId,
-    appName
-  );
+  const runtime =
+    kind === "headless"
+      ? createHeadlessRuntime(resolvedBinding, packageVersion, appId, appName)
+      : createVisibleRuntime(resolvedBinding);
   const transport = new RuntimeBindingTransport(runtime);
   await transport.init(clientVersion, protocolVersion);
   return transport;
 };
 
+const createVisibleRuntime = (
+  binding: OpenTrayRuntimeBinding
+): OpenTrayVisibleRuntime => {
+  if (binding.createVisibleRuntime === undefined) {
+    throw new Error(
+      "OpenTray runtime binding does not expose createVisibleRuntime()"
+    );
+  }
+  return binding.createVisibleRuntime();
+};
+
+const createHeadlessRuntime = (
+  binding: OpenTrayRuntimeBinding,
+  packageVersion: string,
+  appId: string | undefined,
+  appName: string | undefined
+): OpenTrayRuntimeHost => {
+  if (binding.createHeadlessRuntime === undefined) {
+    throw new Error(
+      "OpenTray runtime binding does not expose createHeadlessRuntime()"
+    );
+  }
+  return binding.createHeadlessRuntime(packageVersion, appId, appName);
+};
+
 type RuntimeFrameInvoker = (frameJson: string) => string[] | Promise<string[]>;
 
-interface RuntimeBindingHost {
+interface RuntimeBindingHost extends OpenTrayRuntimeHost {
   request: RuntimeFrameInvoker;
-  close(): string[] | Promise<string[]>;
+  pollEvents?(): string[] | Promise<string[]>;
 }
 
 class RuntimeBindingTransport implements OpenTrayConnection {
   private readonly listeners = new Set<(frame: OpenTrayEventFrame) => void>();
+  private readonly runtime: RuntimeBindingHost;
+  private readonly pollInterval: NodeJS.Timeout | undefined;
 
-  constructor(private readonly runtime: RuntimeBindingHost) {}
+  constructor(runtime: RuntimeBindingHost) {
+    this.runtime = runtime;
+    this.pollInterval =
+      runtime.pollEvents === undefined
+        ? undefined
+        : setInterval(() => {
+            void this.pollRuntimeEvents().catch(() => {
+              // Polling is an event ingress path. Request and close failures still surface to callers.
+            });
+          }, 50);
+    this.pollInterval?.unref();
+  }
 
   async init(clientVersion: string, protocolVersion: number): Promise<void> {
     const frames = await this.invoke({
@@ -93,6 +131,9 @@ class RuntimeBindingTransport implements OpenTrayConnection {
   }
 
   async close(): Promise<void> {
+    if (this.pollInterval !== undefined) {
+      clearInterval(this.pollInterval);
+    }
     const frames = await this.parseFrames(await this.runtime.close());
     this.dispatchEvents(frames);
   }
@@ -127,6 +168,15 @@ class RuntimeBindingTransport implements OpenTrayConnection {
         listener(frame);
       }
     }
+  }
+
+  private async pollRuntimeEvents(): Promise<void> {
+    const pollEvents = this.runtime.pollEvents;
+    if (pollEvents === undefined) {
+      return;
+    }
+    const frames = await this.parseFrames(await pollEvents.call(this.runtime));
+    this.dispatchEvents(frames);
   }
 }
 

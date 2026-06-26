@@ -15,3 +15,5 @@ Remove public daemon lifecycle commands from the `opentray` CLI and stop exporti
 Rename the health response protocol frame from `daemon-health` to `runtime-host-health` and expose the shared health model as `RuntimeHostHealth`.
 
 Add explicit app identity metadata to runtime host health. Runtime hosts now retain app identity as `appId` / `appName` and keep `callerLabel` as the sanitized runtime routing slug.
+
+Add the visible Node runtime binding host for macOS and Windows. The default `createTray()` path now targets the in-process visible binding, while `runVisibleRuntimeHost()` in `opentray/node` owns the native host main loop and routes menu/tray events back only to the live caller session. The headless binding and source-tree local broker remain explicit diagnostic modes.

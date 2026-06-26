@@ -89,7 +89,23 @@ Platform runtime packages such as `@opentray/darwin-arm64` carry
 truth; it does not own tray lifecycle, session authority, backend selection, or
 extension dispatch.
 
-The Node binding currently includes an explicit headless runtime path for protocol/session diagnostics. Visible tray completion still requires a host-main-loop integration contract for native event-loop ownership, especially on macOS where tray creation must run on the application main thread. Headless binding checks are not visual acceptance evidence.
+The default Node `createTray()` transport now targets the in-process visible
+runtime binding on supported tray-icon platforms. The native host loop is
+explicit: call `runVisibleRuntimeHost()` from `opentray/node` on the host main
+thread after starting the app worker that will call `createTray()`. On macOS
+this preserves AppKit's main-thread law; on Windows it keeps the event loop
+app-owned and session-bound. Linux remains unsupported for visible binding until
+the KSNI backend grows an honest visible runtime contract.
+
+The explicit headless runtime path remains available for protocol/session
+diagnostics:
+
+```ts
+await createTray(options, { runtime: "headless-binding" });
+```
+
+Source-tree debug examples may still opt into `{ runtime: "local-broker" }`.
+That path is contributor diagnostics, not the default package runtime.
 
 ## Development Checks
 

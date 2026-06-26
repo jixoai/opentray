@@ -52,9 +52,11 @@ Visible tray text belongs to `icon.text`, `icon["text-only"]`, or `icon["icon-te
 
 OpenTray does not ask developers to create a public broker object. The application process or an application-owned background service imports `opentray`, calls `createTray()`, owns event handlers, and releases the tray when that process exits.
 
-Node platform packages carry the host-loadable runtime artifact at `runtime/opentray_runtime.node`. `opentray/node` exposes `loadOpenTrayRuntimeBinding()` and `resolveInstalledRuntimeBindingPath()` for Node-specific runtime diagnostics and packaging checks.
+Node platform packages carry the host-loadable runtime artifact at `runtime/opentray_runtime.node`. `opentray/node` exposes `runVisibleRuntimeHost()`, `loadOpenTrayRuntimeBinding()`, and `resolveInstalledRuntimeBindingPath()` for Node-specific host-loop ownership, runtime diagnostics, and packaging checks.
 
-For protocol/session diagnostics, `createTray(options, { runtime: "headless-binding" })` routes through the Node binding without a local broker socket. This is not a visual tray acceptance path yet; it proves binding-owned kernel/session behavior while the native event-loop-backed runtime host is still under construction.
+By default, `createTray()` routes through the visible Node runtime binding. The host main thread must run `runVisibleRuntimeHost()` while app logic runs in a worker or another app-owned execution source. This is a platform law, not a convenience wrapper: on macOS native tray creation must happen on the application main thread, and all native menu/tray events route back only to the live session that owns the tray.
+
+For protocol/session diagnostics, `createTray(options, { runtime: "headless-binding" })` routes through the Node binding without visible native state. Source-tree diagnostics may use `{ runtime: "local-broker" }`, but that transport is not the default package runtime.
 
 Runtime options may also carry app identity facts:
 
@@ -67,7 +69,7 @@ await createTray(options, {
 
 The runtime host reports those facts as `appId` and `appName` in `runtime-host-health`; tray icon text, menu labels, and tooltip text remain projection data.
 
-The `opentray/node` subpath exposes binding-resolution and binding-transport helpers only. Source-tree diagnostics may still use the internal local broker transport, but that transport is not exported as a package contract.
+The `opentray/node` subpath exposes binding-resolution, visible host-loop, and binding-transport helpers. Source-tree diagnostics may still use the internal local broker transport, but that transport is not exported as a package contract.
 
 ## Examples
 
@@ -80,6 +82,11 @@ pnpm --filter opentray example:basic
 Run human-visible tray and extension examples from a source checkout:
 
 ```bash
+cargo build -p opentray-runtime-node
+pnpm --filter opentray build
+bun run scripts/binaries/stage-local.ts --kind runtime --source target/debug/libopentray_runtime_node.dylib
+OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:visible-binding
+
 pnpm --filter opentray example:debug-runtime-tray
 pnpm --filter opentray example:webview-control
 pnpm --filter opentray example:tray-panel
@@ -88,4 +95,4 @@ pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The debug-runtime examples exercise the current source-tree visible transport while the default SDK path is being moved behind the Node runtime binding. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.
+The visible-binding example exercises the default package runtime on macOS and Windows. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

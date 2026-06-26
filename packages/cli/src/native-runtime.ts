@@ -12,6 +12,8 @@ export interface OpenTrayRuntimeBindingInfo {
 
 export interface OpenTrayRuntimeBinding {
   runtimeBindingInfo(): OpenTrayRuntimeBindingInfo;
+  runVisibleRuntimeHost?(options?: OpenTrayVisibleRuntimeHostOptions): void;
+  createVisibleRuntime?(): OpenTrayVisibleRuntime;
   createHeadlessRuntime?(
     packageVersion?: string,
     appId?: string,
@@ -19,10 +21,23 @@ export interface OpenTrayRuntimeBinding {
   ): OpenTrayHeadlessRuntime;
 }
 
-export interface OpenTrayHeadlessRuntime {
+export interface OpenTrayVisibleRuntimeHostOptions {
+  readonly packageVersion?: string;
+  readonly appId?: string;
+  readonly appName?: string;
+  readonly autoExitAfterMs?: number;
+}
+
+export interface OpenTrayRuntimeHost {
   request(frameJson: string): string[] | Promise<string[]>;
   close(): string[] | Promise<string[]>;
 }
+
+export interface OpenTrayVisibleRuntime extends OpenTrayRuntimeHost {
+  pollEvents(): string[] | Promise<string[]>;
+}
+
+export type OpenTrayHeadlessRuntime = OpenTrayRuntimeHost;
 
 export interface RuntimeNativeTarget {
   readonly packageName: string;

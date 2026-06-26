@@ -4,9 +4,47 @@ import { createTray } from "./sdk";
 import type { OpenTrayRuntimeBinding } from "./native-runtime";
 
 describe("Feature: SDK runtime selection", () => {
+  it("Scenario: Given no runtime override When createTray runs Then the default transport uses the visible binding", async () => {
+    const frames: unknown[] = [];
+    const binding = createRecordingBinding(frames, "visible");
+
+    const tray = await createTray(
+      {
+        id: "status",
+      },
+      {
+        binding,
+        packageVersion: "0.9.0",
+      }
+    );
+
+    expect(tray.trayId).toBe("status");
+    expect(frames).toEqual([
+      {
+        type: "init",
+        protocolVersion: 1,
+        clientVersion: "0.9.0",
+      },
+      {
+        type: "resolve-default-app",
+        requestId: "opentray-1",
+      },
+      {
+        type: "create-tray",
+        requestId: "opentray-2",
+        app: {
+          appId: "app-default",
+        },
+        tray: {
+          id: "status",
+        },
+      },
+    ]);
+  });
+
   it("Scenario: Given headless binding mode When createTray runs Then tray creation uses the binding-owned runtime", async () => {
     const frames: unknown[] = [];
-    const binding = createRecordingBinding(frames);
+    const binding = createRecordingBinding(frames, "headless");
 
     const tray = await createTray(
       {
@@ -46,13 +84,22 @@ describe("Feature: SDK runtime selection", () => {
   });
 });
 
-const createRecordingBinding = (frames: unknown[]): OpenTrayRuntimeBinding => ({
+const createRecordingBinding = (
+  frames: unknown[],
+  expectedRuntime: "visible" | "headless"
+): OpenTrayRuntimeBinding => ({
   runtimeBindingInfo: () => ({
     kind: "opentray-node-runtime",
     protocolVersion: 1,
   }),
+  createVisibleRuntime: () => {
+    expect(expectedRuntime).toBe("visible");
+    return createRecordingRuntime(frames);
+  },
   createHeadlessRuntime: (packageVersion, appId, appName) => ({
+    ...createRecordingRuntime(frames),
     request(frameJson: string): string[] {
+      expect(expectedRuntime).toBe("headless");
       const frame = JSON.parse(frameJson) as {
         type: string;
         requestId?: string;
@@ -103,4 +150,55 @@ const createRecordingBinding = (frames: unknown[]): OpenTrayRuntimeBinding => ({
     },
     close: () => [],
   }),
+});
+
+const createRecordingRuntime = (frames: unknown[]) => ({
+  request(frameJson: string): string[] {
+    const frame = JSON.parse(frameJson) as {
+      type: string;
+      requestId?: string;
+    };
+    frames.push(frame);
+    switch (frame.type) {
+      case "init":
+        return [
+          JSON.stringify({
+            type: "ready",
+            protocolVersion: 1,
+            brokerVersion: "0.9.0",
+            sessionId: "session-1",
+          }),
+        ];
+      case "resolve-default-app":
+        return [
+          JSON.stringify({
+            type: "default-app",
+            requestId: frame.requestId,
+            app: {
+              appId: "app-default",
+            },
+          }),
+        ];
+      case "create-tray":
+        return [
+          JSON.stringify({
+            type: "tray-created",
+            requestId: frame.requestId,
+            appId: "app-default",
+            trayId: "status",
+          }),
+        ];
+      default:
+        return [
+          JSON.stringify({
+            type: "error",
+            requestId: frame.requestId,
+            code: "unsupported",
+            message: frame.type,
+          }),
+        ];
+    }
+  },
+  pollEvents: () => [],
+  close: () => [],
 });
