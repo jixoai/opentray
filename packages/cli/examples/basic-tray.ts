@@ -1,13 +1,17 @@
 import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 
-import { createClient, createInitFrame, type OpenTrayTransport } from "../src/index";
+import {
+  createClient,
+  createInitFrame,
+  type OpenTrayTransport,
+} from "../src/index";
 
 class RecordingTransport implements OpenTrayTransport {
   readonly frames: ClientRequestFrame[] = [];
 
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {
     this.frames.push(frame);
-    console.log(`client -> broker ${JSON.stringify(frame)}`);
+    console.log(`client -> runtime ${JSON.stringify(frame)}`);
     switch (frame.type) {
       case "create-tray":
         return {
@@ -37,7 +41,11 @@ class RecordingTransport implements OpenTrayTransport {
       case "unload-ext":
         return { type: "ack", requestId: frame.requestId };
       case "resolve-default-app":
-        return { type: "default-app", requestId: frame.requestId, app: { appId: "app-recorded" } };
+        return {
+          type: "default-app",
+          requestId: frame.requestId,
+          app: { appId: "app-recorded" },
+        };
       case "health":
         return {
           type: "daemon-health",
@@ -52,13 +60,18 @@ class RecordingTransport implements OpenTrayTransport {
           },
         };
       default:
-        return { type: "error", requestId: frame.requestId, code: "unsupported", message: frame.type };
+        return {
+          type: "error",
+          requestId: frame.requestId,
+          code: "unsupported",
+          message: frame.type,
+        };
     }
   }
 }
 
 const transport = new RecordingTransport();
-console.log(`client -> broker ${JSON.stringify(createInitFrame("0.1.0"))}`);
+console.log(`client -> runtime ${JSON.stringify(createInitFrame("0.1.0"))}`);
 
 const client = createClient(transport);
 
@@ -85,7 +98,7 @@ const tray = await client.createTray({
 
 await tray.commandExtension("example-status", {
   type: "refresh",
-  source: "examples/basic-space.ts",
+  source: "examples/basic-tray.ts",
 });
 await tray.destroy();
 

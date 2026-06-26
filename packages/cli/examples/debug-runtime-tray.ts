@@ -2,17 +2,28 @@
 import { join } from "node:path";
 
 import { createClient } from "../src/index";
-import { connectLocalBroker } from "../src/node";
+import { connectLocalBroker } from "../src/local-broker";
 import { attachWebview } from "../../ext-webview/src/index";
-import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
+import {
+  createVisibleTrayIcon,
+  prepareLocalWebviewExtensionPath,
+} from "./_support/webview-example-support";
 
-const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
+const localWebviewExtension = await prepareLocalWebviewExtensionPath(
+  import.meta.url
+);
 
-const demoHomeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `opentray-daemon-tray-${process.pid}`);
+const demoHomeDir =
+  process.env.OPENTRAY_HOME ??
+  join(tmpdir(), `opentray-debug-runtime-tray-${process.pid}`);
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
-const client = createClient(connection, { requestIdPrefix: "daemon-example" });
-console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
-console.log(`broker home: ${demoHomeDir}`);
+const client = createClient(connection, {
+  requestIdPrefix: "debug-runtime-example",
+});
+console.log(
+  `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
+);
+console.log(`runtime home: ${demoHomeDir}`);
 if (localWebviewExtension !== undefined) {
   console.log(`webview dylib: ${localWebviewExtension}`);
 }
@@ -20,16 +31,15 @@ if (localWebviewExtension !== undefined) {
 let webview: ReturnType<typeof attachWebview> | undefined;
 
 const tray = await client.createTray({
-  id: "com.example.opentray.daemon",
+  id: "com.example.opentray.debug-runtime",
   tooltip: {
     title: "OpenTray",
-    description: "Single primary tray action; macOS direct-triggers without opening a menu",
+    description:
+      "Single primary tray action; macOS direct-triggers without opening a menu",
   },
   icon: createVisibleTrayIcon(),
   menu: {
-    items: [
-      { type: "item", id: 1, title: "Open WebView", primaryEvent: true },
-    ],
+    items: [{ type: "item", id: 1, title: "Open WebView", primaryEvent: true }],
   },
 });
 console.log(`tray: ${tray.trayId}`);
@@ -42,8 +52,12 @@ tray.onMenuClick(({ itemId }) => {
   console.log(`menu click: ${itemId}`);
   void handleMenuClick(itemId);
 });
-console.log("webview facade attached to the daemon native WebView extension");
-console.log("click the tray icon: platforms with primary tray events should run the WebView action");
+console.log(
+  "webview facade attached to the debug runtime native WebView extension"
+);
+console.log(
+  "click the tray icon: platforms with primary tray events should run the WebView action"
+);
 console.log("press Ctrl-C to exit the tray demo");
 
 let closed = false;
@@ -117,7 +131,6 @@ async function handleMenuClick(itemId: number): Promise<void> {
     return;
   }
 }
-
 
 function createWebviewDemoHtml(): string {
   return `<!doctype html>

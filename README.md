@@ -80,7 +80,7 @@ Platform runtime packages such as `@opentray/darwin-arm64` carry
 truth; it does not own tray lifecycle, session authority, backend selection, or
 extension dispatch.
 
-The Node binding currently includes an explicit headless runtime path for protocol/session diagnostics. Visible tray completion still requires the native event-loop-backed runtime host; headless binding checks are not visual acceptance evidence.
+The Node binding currently includes an explicit headless runtime path for protocol/session diagnostics. Visible tray completion still requires a host-main-loop integration contract for native event-loop ownership, especially on macOS where tray creation must run on the application main thread. Headless binding checks are not visual acceptance evidence.
 
 ## Development Checks
 

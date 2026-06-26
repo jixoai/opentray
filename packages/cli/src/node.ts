@@ -1,10 +1,4 @@
 export {
-  connectLocalBroker,
-  type ConnectLocalBrokerOptions,
-  type LocalBrokerClient,
-  type LocalRuntimeEventFrame,
-} from "./local-broker";
-export {
   MissingPlatformRuntimeBindingError,
   loadOpenTrayRuntimeBinding,
   resolveInstalledRuntimeBindingPath,

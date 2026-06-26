@@ -3,10 +3,10 @@
 This directory contains the workspace Lynx review bundle used by contributor visual acceptance:
 
 ```bash
-pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
+pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The goal is human verification without depending on `research/` paths. Public `opentray` CLI commands stay limited to daemon lifecycle and health; smoke orchestration belongs in skills and workspace examples.
+The goal is human verification without depending on `research/` paths. The public `opentray` CLI no longer owns daemon lifecycle; smoke orchestration belongs in skills and workspace examples.
 
 TODO:
 

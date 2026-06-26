@@ -7,8 +7,8 @@
 
 ## 2. Tray-First Example Migration
 
-- [x] 2.1 Rewrite `packages/cli/examples/basic-space.ts`, `packages/cli/examples/daemon-tray.ts`, `packages/cli/examples/tray-panel.ts`, `packages/cli/examples/webview-control.ts`, `packages/cli/examples/badge-panel.ts`, `packages/cli/examples/media-query-panel.ts`, and `packages/cli/examples/placement-panel.ts` to call `createTray(...)` directly.
-- [x] 2.2 Update `packages/cli/examples/_support/webview-example-support.ts` and `packages/cli/examples/_support/daemon-lynx-support.ts` so they return tray handles only and stop exposing `space`.
+- [x] 2.1 Rewrite `packages/cli/examples/basic-tray.ts`, `packages/cli/examples/debug-runtime-tray.ts`, `packages/cli/examples/tray-panel.ts`, `packages/cli/examples/webview-control.ts`, `packages/cli/examples/badge-panel.ts`, `packages/cli/examples/media-query-panel.ts`, and `packages/cli/examples/placement-panel.ts` to call `createTray(...)` directly.
+- [x] 2.2 Update `packages/cli/examples/_support/webview-example-support.ts` and `packages/cli/examples/_support/debug-runtime-lynx-support.ts` so they return tray handles only and stop exposing `space`.
 - [x] 2.3 Remove remaining `spaceId` / `space.createTray` assumptions from the CLI example path.
 
 ## 3. Protocol Mirror Cleanup
@@ -62,5 +62,7 @@
 - [x] 9.3 Update the native artifact graph, local staging, release staging, preview family graph, and native-artifact verification workflow to build/stage the `runtime` component from `opentray-runtime-node`.
 - [x] 9.4 Add `opentray/node` runtime binding resolution APIs and focused tests for missing package, missing artifact, unsupported target, and malformed binding behavior.
 - [x] 9.5 Add a binding-owned headless direct runtime transport and SDK opt-in path that handles protocol/session operations without `connectLocalBroker()`.
-- [ ] 9.6 Replace the default `createTray()` transport with the in-process Node runtime binding once the binding owns the native visible tray event-loop host.
-- [ ] 9.7 Rename or remove public-facing daemon CLI diagnostics after the in-process runtime path fully replaces the debug broker transport.
+- [x] 9.6 Record the native host-main-loop boundary for visible binding ownership, including the macOS main-thread event-loop constraint, so the default SDK path cannot be switched based on headless proof alone.
+- [x] 9.7 Remove public-facing daemon CLI diagnostics and `opentray/node` local-broker exports while keeping the source-tree debug runtime internal.
+- [ ] 9.8 Replace the default `createTray()` transport with the in-process Node runtime binding after a host-main-loop integration contract owns the native visible tray backend and event routing on supported platforms.
+- [ ] 9.9 Rename the remaining protocol/runtime health vocabulary from daemon-shaped names to runtime-host names.

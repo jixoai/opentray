@@ -59,7 +59,7 @@ The injected capability follows the same public vocabulary as `@opentray/ext-web
 - `await navigator.window.setStyle({ frameless: true })`
 - `await navigator.screen.getScreenDetails()`
 
-OpenTray keeps the public surface aligned, but the transport is Lynx-native: Native Modules, runtime-attached bootstrap, and `GlobalEventEmitter`. The daemon does not keep a Lynx-specific controller.
+OpenTray keeps the public surface aligned, but the transport is Lynx-native: Native Modules, runtime-attached bootstrap, and `GlobalEventEmitter`. The runtime host does not keep a Lynx-specific controller.
 
 Unlike `ext-webview`, the dedicated Lynx runtime is its own macOS app process. That means `title` and `icon` updates may safely project to both the window and the runtime app identity inside that process.
 
@@ -91,16 +91,16 @@ Run the facade-only protocol example:
 pnpm --filter @opentray/ext-lynx example:lynx
 ```
 
-Use the source-tree daemon Lynx example when you want a real native window:
+Use the source-tree debug runtime Lynx example when you want a real native window:
 
 ```bash
-pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
-pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "nativeWindowApi,bindWindowGlobals"
-pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "*,!frameless"
-pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "*,!nativeScreenApi"
+pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
+pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "nativeWindowApi,bindWindowGlobals"
+pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "*,!frameless"
+pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle --features "*,!nativeScreenApi"
 ```
 
-The published `opentray` CLI intentionally stays limited to daemon lifecycle and health. Lynx visual acceptance belongs to source-tree examples or the OpenTray skill workflow. Pass `--bundle <path-to-main.lynx.bundle>` when you want to replace the workspace review bundle with your own payload.
+The published `opentray` CLI intentionally does not own daemon lifecycle. Lynx visual acceptance belongs to source-tree examples or the OpenTray skill workflow. Pass `--bundle <path-to-main.lynx.bundle>` when you want to replace the workspace review bundle with your own payload.
 
 The example starts with a fixed host shell, sets an initial title/icon, applies an explicit host-feature expression, and exposes tray items for:
 
@@ -125,7 +125,7 @@ For macOS-side runtime diagnostics, keep the default quiet behavior for normal u
 OPENTRAY_LYNX_RUNTIME_STDIO=inherit \
 OPENTRAY_LYNX_DEBUG=host-events,engine-tap \
 OPENTRAY_LYNX_DEBUG_LOG_PATH=/private/tmp/opentray-lynx-runtime.log \
-  pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle \
+  pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle \
   2>&1 | tee /private/tmp/opentray-lynx-smoke.log
 ```
 

@@ -3,25 +3,39 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createClient } from "../src/index";
-import { connectLocalBroker } from "../src/node";
-import { attachWebview, type WebviewShowCommand } from "../../ext-webview/src/index";
-import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
+import { connectLocalBroker } from "../src/local-broker";
+import {
+  attachWebview,
+  type WebviewShowCommand,
+} from "../../ext-webview/src/index";
+import {
+  createVisibleTrayIcon,
+  prepareLocalWebviewExtensionPath,
+} from "./_support/webview-example-support";
 
 const controlPageUrl = new URL("./webview-control.html", import.meta.url);
 const controlPageHtml = await readFile(controlPageUrl, "utf8");
 
-const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
-const demoHomeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `opentray-webview-control-${process.pid}`);
+const localWebviewExtension = await prepareLocalWebviewExtensionPath(
+  import.meta.url
+);
+const demoHomeDir =
+  process.env.OPENTRAY_HOME ??
+  join(tmpdir(), `opentray-webview-control-${process.pid}`);
 // windowControlsOverlay is a show-time bridge gate; the page can test it, not enable it later.
 const overlayEnabled = resolveOverlayEnabled(
   process.argv.slice(2),
-  process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY,
+  process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY
 );
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
 const client = createClient(connection, { requestIdPrefix: "webview-control" });
-console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
-console.log(`broker home: ${demoHomeDir}`);
-console.log(`windowControlsOverlay: ${overlayEnabled ? "enabled" : "disabled"}`);
+console.log(
+  `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
+);
+console.log(`runtime home: ${demoHomeDir}`);
+console.log(
+  `windowControlsOverlay: ${overlayEnabled ? "enabled" : "disabled"}`
+);
 if (localWebviewExtension !== undefined) {
   console.log(`webview dylib: ${localWebviewExtension}`);
 }
@@ -88,7 +102,7 @@ await webview.show(showCommand);
 
 console.log(`control page source: ${controlPageUrl.href}`);
 console.log(
-  "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, screen, and navigation behavior.",
+  "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, screen, and navigation behavior."
 );
 
 if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
@@ -174,7 +188,11 @@ for (const signal of shutdownSignals) {
 }
 
 connection.onEvent((frame) => {
-  if (frame.type === "event" && frame.event.type === "menuClick" && frame.event.itemId === 99) {
+  if (
+    frame.type === "event" &&
+    frame.event.type === "menuClick" &&
+    frame.event.itemId === 99
+  ) {
     void shutdown();
   }
 });
@@ -193,12 +211,18 @@ async function shutdown(): Promise<void> {
 
 await lifecycle;
 
-function resolveOverlayEnabled(args: readonly string[], envValue: string | undefined): boolean {
+function resolveOverlayEnabled(
+  args: readonly string[],
+  envValue: string | undefined
+): boolean {
   let enabled = parseBooleanEnv(envValue) ?? true;
   for (const arg of args) {
     if (arg === "--overlay" || arg === "--window-controls-overlay") {
       enabled = true;
-    } else if (arg === "--no-overlay" || arg === "--no-window-controls-overlay") {
+    } else if (
+      arg === "--no-overlay" ||
+      arg === "--no-window-controls-overlay"
+    ) {
       enabled = false;
     }
   }

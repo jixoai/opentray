@@ -4,78 +4,64 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  formatDaemonHealthOutput,
-  isCliEntrypoint,
-  parseCliCommand,
-} from "./cli";
+import { isCliEntrypoint, parseCliCommand, runCli } from "./cli";
 
 describe("opentray CLI", () => {
-  it("parses daemon lifecycle commands", () => {
+  it("keeps daemon lifecycle outside the public command surface", () => {
     expect(parseCliCommand(["daemon", "start"])).toEqual({
-      type: "daemon",
-      action: "start",
-    });
-    expect(parseCliCommand(["daemon", "stop"])).toEqual({
-      type: "daemon",
-      action: "stop",
-    });
-    expect(parseCliCommand(["daemon", "restart"])).toEqual({
-      type: "daemon",
-      action: "restart",
-    });
-    expect(parseCliCommand(["daemon", "health"])).toEqual({
-      type: "daemon",
-      action: "health",
+      type: "unsupported",
+      command: "daemon",
     });
   });
 
   it("keeps visual smoke outside the public CLI command surface", () => {
-    expect(parseCliCommand(["smoke", "daemon-tray"])).toEqual({
-      type: "help",
+    expect(parseCliCommand(["smoke", "debug-runtime-tray"])).toEqual({
+      type: "unsupported",
+      command: "smoke",
     });
   });
 
   it("does not treat the deamon typo as canonical", () => {
-    expect(parseCliCommand(["deamon", "start"])).toEqual({ type: "help" });
+    expect(parseCliCommand(["deamon", "start"])).toEqual({
+      type: "unsupported",
+      command: "deamon",
+    });
+  });
+
+  it("prints v0.9 usage guidance without advertising daemon commands", async () => {
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (message?: unknown) => {
+      errors.push(String(message));
+    };
+    try {
+      await expect(runCli(["--help"])).resolves.toBe(0);
+    } finally {
+      console.error = originalError;
+    }
+
+    const output = errors.join("\n");
+    expect(output).toContain("does not expose daemon lifecycle commands");
+    expect(output).toContain('import { createTray } from "opentray";');
+    expect(output).not.toContain("daemon <start|stop|restart|health>");
   });
 
   const itWithFileSymlink = process.platform === "win32" ? it.skip : it;
 
-  itWithFileSymlink("recognizes the npm .bin symlink as the CLI entrypoint", () => {
-    const dir = mkdtempSync(join(tmpdir(), "opentray-cli-entry-"));
-    try {
-      const target = join(dir, "cli.mjs");
-      const symlink = join(dir, "opentray");
-      writeFileSync(target, "");
-      symlinkSync(target, symlink);
+  itWithFileSymlink(
+    "recognizes the npm .bin symlink as the CLI entrypoint",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "opentray-cli-entry-"));
+      try {
+        const target = join(dir, "cli.mjs");
+        const symlink = join(dir, "opentray");
+        writeFileSync(target, "");
+        symlinkSync(target, symlink);
 
-      expect(isCliEntrypoint(symlink, target)).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
+        expect(isCliEntrypoint(symlink, target)).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
-  });
-
-  it("formats daemon health output for human inspection", () => {
-    expect(
-      formatDaemonHealthOutput({
-        pid: 12345,
-        endpoint: "/tmp/opentray.sock",
-        packageVersion: "0.1.0",
-        protocolVersion: 1,
-        sessionCount: 2,
-        sessions: [
-          { sessionId: 1, initialized: true, internalSessionId: "session-1" },
-          { sessionId: 2, initialized: false },
-        ],
-      })
-    ).toBe(`opentray daemon running
-pid: 12345
-endpoint: /tmp/opentray.sock
-packageVersion: 0.1.0
-protocolVersion: 1
-sessions: 2
-- sessionId=1 initialized=true internalSessionId=session-1
-- sessionId=2 initialized=false internalSessionId=(pending)`);
-  });
+  );
 });

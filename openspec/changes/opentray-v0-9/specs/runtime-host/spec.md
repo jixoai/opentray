@@ -64,6 +64,29 @@ The SDK MAY expose this headless binding route only as an explicit diagnostic or
 - **THEN** no visible tray claim is made by that headless proof
 - **AND** visual completion still requires a native event-loop-backed runtime host.
 
+### Requirement: Visible Node runtime binding SHALL declare host-main-loop ownership before becoming the default
+
+The visible Node runtime binding SHALL NOT create native tray state by hiding an OpenTray-owned broker process behind the binding API. It SHALL either run inside a host-owned native main loop or expose an explicit host-main-loop integration contract that the owning application starts before visible tray creation.
+
+On macOS, the visible tray backend SHALL respect AppKit's main-thread event-loop law: the native event loop and tray creation must run on the application main thread. A background Rust thread or detached helper spawned by the binding SHALL NOT be treated as equivalent visible-binding ownership on macOS. On Windows and other supported platforms, any background event-loop thread used by the binding SHALL still be app-owned, session-bound, and closed when the caller authority is lost.
+
+The default SDK `createTray()` transport SHALL remain on the transitional source-tree debug runtime until this host-main-loop contract has a human-visible smoke path for the supported platform. Headless binding tests, package artifact checks, and JSON frame smokes SHALL NOT satisfy this requirement.
+
+#### Scenario: macOS binding requires host-main-loop ownership
+
+- **GIVEN** a Node process loads `runtime/opentray_runtime.node` on macOS
+- **WHEN** the binding is asked to create a visible tray
+- **THEN** it requires a host-main-loop integration path that runs native tray creation on the application main thread
+- **AND** it does not satisfy the requirement by spawning a detached OpenTray broker process.
+
+#### Scenario: default transport waits for visible proof
+
+- **GIVEN** the binding can create a headless runtime
+- **AND** no supported-platform visible host-main-loop smoke has passed
+- **WHEN** application code calls `createTray()` without diagnostic runtime options
+- **THEN** the SDK does not switch the default transport to the binding
+- **AND** the remaining visible-runtime work stays tracked explicitly.
+
 ### Requirement: Runtime host SHALL accept exactly one caller session for one app identity
 
 A runtime host SHALL accept exactly one caller session for normal operation. The session is pinned to one app identity, one caller label, and one runtime host endpoint. A second connection attempt to a host that is already serving a session SHALL be rejected with a typed protocol error and SHALL NOT cause the host to aggregate or share state across callers.

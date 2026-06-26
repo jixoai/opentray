@@ -53,13 +53,13 @@ interface LynxSmokeShowCommand {
   };
 }
 
-export interface DaemonLynxSmokeOptions {
+export interface DebugRuntimeLynxSmokeOptions {
   bundlePath?: string;
   featureExpression?: string;
 }
 
-export const runDaemonLynxSmoke = async (
-  options: DaemonLynxSmokeOptions = {},
+export const runDebugRuntimeLynxSmoke = async (
+  options: DebugRuntimeLynxSmokeOptions = {}
 ): Promise<void> => {
   const bundlePath = resolveLynxBundlePath(options.bundlePath);
   const hostFeatures = resolveLynxHostFeatures(options.featureExpression);
@@ -68,22 +68,24 @@ export const runDaemonLynxSmoke = async (
   }
   if (process.env[DEFAULT_LYNX_HOST_FEATURES_ENV]) {
     console.log(
-      `lynx host features: ${process.env[DEFAULT_LYNX_HOST_FEATURES_ENV]}`,
+      `lynx host features: ${process.env[DEFAULT_LYNX_HOST_FEATURES_ENV]}`
     );
   }
   if (process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH) {
     console.log(
-      `lynx debug log path: ${process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH}`,
+      `lynx debug log path: ${process.env.OPENTRAY_LYNX_DEBUG_LOG_PATH}`
     );
   }
   const connection = await connectLocalBroker();
-  const client = createClient(connection, { requestIdPrefix: "daemon-lynx" });
+  const client = createClient(connection, {
+    requestIdPrefix: "debug-runtime-lynx",
+  });
   console.log(
-    `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`,
+    `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
   );
 
   const tray = await client.createTray({
-    id: "com.example.opentray.daemon-lynx",
+    id: "com.example.opentray.debug-runtime-lynx",
     tooltip: {
       title: "OpenTray Lynx",
       description: "Generic extension smoke for a real Lynx runtime window",
@@ -102,7 +104,7 @@ export const runDaemonLynxSmoke = async (
 
   await connection.request({
     type: "load-ext",
-    requestId: "daemon-lynx-load",
+    requestId: "debug-runtime-lynx-load",
     appId: "space-recorded",
     name: "lynx",
     path: "@opentray/ext-lynx",
@@ -121,8 +123,8 @@ export const runDaemonLynxSmoke = async (
     await tray.commandExtension("lynx", command);
     console.log(
       `lynx command: show features=${describeLynxHostFeatures(
-        hostFeatures,
-      )} bundle=${bundlePath}`,
+        hostFeatures
+      )} bundle=${bundlePath}`
     );
   };
 
@@ -168,10 +170,12 @@ export const runDaemonLynxSmoke = async (
   };
 
   connection.onEvent((frame) => {
-    console.log(`broker -> client ${JSON.stringify(frame)}`);
+    console.log(`runtime -> client ${JSON.stringify(frame)}`);
     if (frame.type === "event" && frame.event.type === "menuClick") {
       console.log(
-        `menu click: ${menuLabels.get(frame.event.itemId) ?? frame.event.itemId}`,
+        `menu click: ${
+          menuLabels.get(frame.event.itemId) ?? frame.event.itemId
+        }`
       );
       void handleMenuClick(frame.event.itemId);
       return;
@@ -201,8 +205,8 @@ export const runDaemonLynxSmoke = async (
     await show();
     console.log(
       `use the tray menu to re-show or hide the window, or press Ctrl+C to exit; features=${describeLynxHostFeatures(
-        hostFeatures,
-      )}`,
+        hostFeatures
+      )}`
     );
   } catch (error) {
     await connection.close();
@@ -222,7 +226,7 @@ export const resolveLynxBundlePath = (value?: string): string => {
     const bundledReviewBundle = resolveBundledReviewBundlePath();
     if (!existsSync(bundledReviewBundle)) {
       throw new Error(
-        `lynx smoke requires --bundle <path>, ${DEFAULT_LYNX_BUNDLE_ENV}=<path-to-main.lynx.bundle>, or a packaged review bundle at ${bundledReviewBundle}`,
+        `lynx smoke requires --bundle <path>, ${DEFAULT_LYNX_BUNDLE_ENV}=<path-to-main.lynx.bundle>, or a packaged review bundle at ${bundledReviewBundle}`
       );
     }
     return realpathSync(bundledReviewBundle);
@@ -236,7 +240,7 @@ export const resolveLynxBundlePath = (value?: string): string => {
 };
 
 export const resolveLynxHostFeatures = (
-  expression = process.env[DEFAULT_LYNX_HOST_FEATURES_ENV] ?? "",
+  expression = process.env[DEFAULT_LYNX_HOST_FEATURES_ENV] ?? ""
 ): LynxHostFeatureState => {
   const features = createEmptyLynxHostFeatures();
   for (const rawToken of expression.split(",")) {
@@ -279,14 +283,14 @@ export const createLynxShowCommand = ({
 };
 
 export const describeLynxHostFeatures = (
-  features: LynxHostFeatureState,
+  features: LynxHostFeatureState
 ): string => {
   const enabled = LYNX_HOST_FEATURES.filter((feature) => features[feature]);
   return enabled.length === 0 ? "baseline" : enabled.join(",");
 };
 
 export const resolveBundledReviewBundlePath = (
-  moduleUrl = import.meta.url,
+  moduleUrl = import.meta.url
 ): string => {
   let currentDir = dirname(fileURLToPath(moduleUrl));
 
@@ -298,7 +302,9 @@ export const resolveBundledReviewBundlePath = (
 
     const parent = dirname(currentDir);
     if (parent === currentDir) {
-      throw new Error(`failed to resolve opentray package root from ${moduleUrl}`);
+      throw new Error(
+        `failed to resolve opentray package root from ${moduleUrl}`
+      );
     }
     currentDir = parent;
   }
@@ -316,7 +322,7 @@ function createEmptyLynxHostFeatures(): LynxHostFeatureState {
 
 function applyLynxHostFeatureToken(
   features: LynxHostFeatureState,
-  rawToken: string,
+  rawToken: string
 ): void {
   const disabled = rawToken.startsWith("!");
   const token = disabled ? rawToken.slice(1) : rawToken;
@@ -336,8 +342,8 @@ function applyLynxHostFeatureToken(
   if (!isLynxHostFeature(token)) {
     throw new Error(
       `unsupported Lynx host feature token: ${rawToken}; supported tokens: baseline, full, *, !<feature>, ${LYNX_HOST_FEATURES.join(
-        ", ",
-      )}`,
+        ", "
+      )}`
     );
   }
   features[token] = !disabled;

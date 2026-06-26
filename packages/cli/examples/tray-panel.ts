@@ -2,19 +2,28 @@
 import { join } from "node:path";
 
 import { createClient } from "../src/index";
-import { connectLocalBroker } from "../src/node";
+import { connectLocalBroker } from "../src/local-broker";
 import { WebviewExt } from "../../ext-webview/src/index";
 import type { WebviewWindowStylePatch } from "../../ext-webview/src/index";
-import { createVisibleTrayIcon, prepareLocalWebviewExtensionPath } from "./_support/webview-example-support";
+import {
+  createVisibleTrayIcon,
+  prepareLocalWebviewExtensionPath,
+} from "./_support/webview-example-support";
 
-const localWebviewExtension = await prepareLocalWebviewExtensionPath(import.meta.url);
+const localWebviewExtension = await prepareLocalWebviewExtensionPath(
+  import.meta.url
+);
 const icon = createVisibleTrayIcon();
 
-const demoHomeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `opentray-tray-panel-${process.pid}`);
+const demoHomeDir =
+  process.env.OPENTRAY_HOME ??
+  join(tmpdir(), `opentray-tray-panel-${process.pid}`);
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
 const client = createClient(connection, { requestIdPrefix: "tray-panel" });
-console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
-console.log(`broker home: ${demoHomeDir}`);
+console.log(
+  `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
+);
+console.log(`runtime home: ${demoHomeDir}`);
 if (localWebviewExtension !== undefined) {
   console.log(`webview dylib: ${localWebviewExtension}`);
 }
@@ -23,18 +32,23 @@ const tray = await client.createTray({
   id: "com.example.opentray.tray-panel",
   tooltip: {
     title: "OpenTray",
-    description: "Single primary tray action launching a custom WebView tray panel",
+    description:
+      "Single primary tray action launching a custom WebView tray panel",
   },
   icon,
   menu: {
-    items: [{ type: "item", id: 1, title: "Open Tray Panel", primaryEvent: true }],
+    items: [
+      { type: "item", id: 1, title: "Open Tray Panel", primaryEvent: true },
+    ],
   },
 });
 console.log(`tray: ${tray.trayId}`);
 
 const webviewTray = tray.extend(WebviewExt, {
   mountId: "tray-panel-webview",
-  ...(localWebviewExtension === undefined ? {} : { path: localWebviewExtension }),
+  ...(localWebviewExtension === undefined
+    ? {}
+    : { path: localWebviewExtension }),
 });
 const webview = webviewTray.createWebviewWindow({
   html: createTrayPanelHtml(),
@@ -57,7 +71,9 @@ const webview = webviewTray.createWebviewWindow({
     defaultSrc: ["'local'"],
   },
 });
-console.log("click the tray icon: platforms with primary tray events should open the WebView panel");
+console.log(
+  "click the tray icon: platforms with primary tray events should open the WebView panel"
+);
 console.log("press Ctrl-C to exit the tray demo");
 
 let closed = false;
@@ -166,7 +182,6 @@ async function shutdown(): Promise<void> {
 
 await lifecycle;
 
-
 function createTrayPanelWindowStyle(): WebviewWindowStylePatch {
   const common = {
     frameless: true,
@@ -207,7 +222,9 @@ function createTrayPanelWindowStyle(): WebviewWindowStylePatch {
   };
 }
 
-function createTrayPanelHtml(mode: "default" | "content-set" = "default"): string {
+function createTrayPanelHtml(
+  mode: "default" | "content-set" = "default"
+): string {
   return `<!doctype html>
 <html lang="en">
   <head>

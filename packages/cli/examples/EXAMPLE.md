@@ -21,7 +21,7 @@ Current maturity truth for these examples:
 
 - macOS source-tree smoke is the stable human-visible proof path
 - Windows source-tree smoke exercises the stable WebView2-backed visible runtime and common bridge/window controls
-- Linux remains a core daemon/platform target, but `@opentray/ext-webview` does not publish Linux native WebView packages
+- Linux remains a core runtime/platform target, but `@opentray/ext-webview` does not publish Linux native WebView packages
 - typed unsupported errors are acceptable evidence for not-yet-landed platform runtimes
 - tray bounds with no injected anchor should show `kind: "unavailable"` rather than pretending the capability is absent everywhere
 - the placement demo is the focused `WebviewPlacementKit` visual surface
@@ -161,18 +161,18 @@ Expected checks:
 
 7. The page status surface shows the same tray result shape instead of assuming `Rect | null`.
 
-## Example 5: Daemon Tray
+## Example 5: Debug Runtime Tray
 
 Command:
 
 ```bash
-pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray example:debug-runtime-tray
 ```
 
 Expected checks:
 
 1. The tray exposes a single `primaryEvent` launcher item.
-2. The broker logs show `menuClick` when the primary action is triggered.
+2. The runtime logs show `menuClick` when the primary action is triggered.
 3. The opened WebView uses `tray.getBounds().rect` for `fallbackRect`.
 4. The page projection `navigator.opentray.tray.getBounds()` returns the same provenance-bearing result family.
 
@@ -181,7 +181,7 @@ Expected checks:
 These are useful for quick regression passes:
 
 ```bash
-OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:debug-runtime-tray
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:mediaQuery
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:placement
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show pnpm --filter opentray example:tray-panel
@@ -194,18 +194,19 @@ OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=2500 pnpm
 ## Failure Hints
 
 - If an example cannot find the native library, confirm `cargo build -p opentray-ext-webview` succeeded and `target/debug` contains the platform artifact.
-- If the broker returns a generic `unsupported` or `internal` error, rerun with:
+- If the debug runtime returns a generic `unsupported` or `internal` error, rerun with:
 
 ```bash
 export OPENTRAY_DAEMON_STDIO=inherit
 export OPENTRAY_WEBVIEW_DEBUG=1
 ```
 
-  This lets the background broker print the native ext-webview error message directly into the example terminal.
-- If tray behavior looks stale, restart the daemon with the freshly built broker:
+This lets the debug runtime print the native ext-webview error message directly into the example terminal.
+
+- If tray behavior looks stale, point the source-tree transport at the freshly built debug runtime binary:
 
 ```bash
-OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- daemon restart
+OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray example:debug-runtime-tray
 ```
 
 - If glass looks opaque, inspect both native style and page content:

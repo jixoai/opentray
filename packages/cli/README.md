@@ -56,7 +56,7 @@ Node platform packages carry the host-loadable runtime artifact at `runtime/open
 
 For protocol/session diagnostics, `createTray(options, { runtime: "headless-binding" })` routes through the Node binding without a local broker socket. This is not a visual tray acceptance path yet; it proves binding-owned kernel/session behavior while the native event-loop-backed runtime host is still under construction.
 
-Lower-level node helpers such as `connectLocalBroker()` remain available from `opentray/node` for source-tree diagnostics and transitional runtime wiring. They are not the main public ontology.
+The `opentray/node` subpath exposes binding-resolution and binding-transport helpers only. Source-tree diagnostics may still use the internal local broker transport, but that transport is not exported as a package contract.
 
 ## Examples
 
@@ -69,12 +69,12 @@ pnpm --filter opentray example:basic
 Run human-visible tray and extension examples from a source checkout:
 
 ```bash
-pnpm --filter opentray example:daemon-tray
+pnpm --filter opentray example:debug-runtime-tray
 pnpm --filter opentray example:webview-control
 pnpm --filter opentray example:tray-panel
 pnpm --filter opentray example:placement
 pnpm --filter opentray example:mediaQuery
-pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
+pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The example names still contain `daemon` where they exercise the current runtime transport. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.
+The debug-runtime examples exercise the current source-tree visible transport while the default SDK path is being moved behind the Node runtime binding. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

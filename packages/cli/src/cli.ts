@@ -1,144 +1,42 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import type { DaemonHealth } from "@opentray/spec";
-
-import {
-  createNodeDaemonDriver,
-  inspectDaemon,
-  restartDaemon,
-  startDaemon,
-  stopDaemon,
-} from "./daemon/lifecycle";
-import { readPackageVersion } from "./daemon/package-version";
-import { resolveDaemonPaths } from "./daemon/paths";
-import { connectLocalBroker } from "./local-broker";
-
-const packageJsonUrl = new URL("../package.json", import.meta.url);
 const cliModulePath = fileURLToPath(import.meta.url);
 
 type CliCommand =
-  | { type: "daemon"; action: "start" | "stop" | "restart" | "health" }
-  | { type: "help" };
+  | { type: "help"; exitCode: 0 }
+  | { type: "unsupported"; command: string | undefined };
 
 export const parseCliCommand = (argv: string[]): CliCommand => {
-  const [group, action] = argv;
-  if (group !== "daemon") {
-    return { type: "help" };
+  const [command] = argv;
+  if (command === undefined || command === "--help" || command === "-h") {
+    return { type: "help", exitCode: 0 };
   }
-  if (
-    action === "start" ||
-    action === "stop" ||
-    action === "restart" ||
-    action === "health"
-  ) {
-    return { type: "daemon", action };
-  }
-
-  return { type: "help" };
+  return { type: "unsupported", command };
 };
 
 export const runCli = async (argv: string[]): Promise<number> => {
   const command = parseCliCommand(argv);
-  const packageVersion =
-    process.env.OPENTRAY_DAEMON_PACKAGE_VERSION ??
-    (await readPackageVersion(packageJsonUrl));
-  const paths = resolveDaemonPaths({
-    homeDir: process.env.OPENTRAY_HOME ?? homedir(),
-    packageVersion,
-  });
-
-  if (command.type === "help") {
-    printHelp();
-    return 1;
-  }
-
-  const driver = createNodeDaemonDriver(cliModulePath);
-
-  if (command.action === "start") {
-    const result = await startDaemon({ paths, driver });
-    console.log(
-      `opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`
-    );
-    return 0;
-  }
-
-  if (command.action === "stop") {
-    const result = await stopDaemon({ paths, driver });
-    console.log(
-      result.status === "stopped"
-        ? `opentray daemon stopped: pid=${result.pid}`
-        : "opentray daemon not running"
-    );
-    return 0;
-  }
-
-  if (command.action === "restart") {
-    const result = await restartDaemon({ paths, driver });
-    console.log(
-      `opentray daemon ${result.status}: pid=${result.pid} endpoint=${result.paths.endpoint}`
-    );
-    return 0;
-  }
-
-  if (command.action === "health") {
-    const inspected = await inspectDaemon({ paths, driver });
-    if (inspected.status === "not-running") {
-      console.log("opentray daemon not running");
-      return 0;
-    }
-
-    const connection = await connectLocalBroker({
-      autoStart: false,
-      endpoint: paths.endpoint,
-      homeDir: paths.homeDir,
-      packageVersion,
-    });
-    try {
-      const response = await connection.request({
-        type: "health",
-        requestId: "opentray-daemon-health",
-      });
-      if (response.type !== "daemon-health") {
-        throw new Error(
-          `expected daemon-health response, received ${response.type}`
-        );
-      }
-      console.log(formatDaemonHealthOutput(response.health));
-    } finally {
-      await connection.close();
-    }
-    return 0;
-  }
-
-  printHelp();
-  return 1;
+  printHelp(command.type === "unsupported" ? command.command : undefined);
+  return command.type === "help" ? command.exitCode : 1;
 };
 
-const printHelp = (): void => {
-  console.error("Usage: opentray daemon <start|stop|restart|health>");
-};
-
-export const formatDaemonHealthOutput = (health: DaemonHealth): string => {
-  const lines = [
-    "opentray daemon running",
-    `pid: ${health.pid}`,
-    `endpoint: ${health.endpoint}`,
-    `packageVersion: ${health.packageVersion}`,
-    `protocolVersion: ${health.protocolVersion}`,
-    `sessions: ${health.sessionCount}`,
-  ];
-
-  for (const session of health.sessions) {
-    const internalSession = session.internalSessionId ?? "(pending)";
-    lines.push(
-      `- sessionId=${session.sessionId} initialized=${session.initialized} internalSessionId=${internalSession}`
-    );
+const printHelp = (unsupportedCommand?: string): void => {
+  if (unsupportedCommand !== undefined) {
+    console.error(`Unsupported opentray command: ${unsupportedCommand}`);
   }
-
-  return lines.join("\n");
+  console.error(
+    [
+      "OpenTray v0.9 does not expose daemon lifecycle commands.",
+      "Create trays from an app-owned process with:",
+      "",
+      '  import { createTray } from "opentray";',
+      "",
+      "Node runtime diagnostics live under the opentray/node binding helpers.",
+      "Source-tree visual diagnostics live in packages/cli/examples.",
+    ].join("\n")
+  );
 };
 
 export const isCliEntrypoint = (

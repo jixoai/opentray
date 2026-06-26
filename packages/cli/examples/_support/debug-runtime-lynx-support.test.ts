@@ -16,9 +16,9 @@ import {
   resolveBundledReviewBundlePath,
   resolveLynxBundlePath,
   resolveLynxHostFeatures,
-} from "./daemon-lynx-support";
+} from "./debug-runtime-lynx-support";
 
-describe("daemon lynx smoke helpers", () => {
+describe("debug runtime lynx smoke helpers", () => {
   afterEach(() => {
     delete process.env.INIT_CWD;
     delete process.env.OPENTRAY_LYNX_BUNDLE;
@@ -33,7 +33,7 @@ describe("daemon lynx smoke helpers", () => {
       process.env.INIT_CWD = dir;
 
       expect(resolveLynxBundlePath("./main.lynx.bundle")).toBe(
-        realpathSync(bundle),
+        realpathSync(bundle)
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -56,7 +56,7 @@ describe("daemon lynx smoke helpers", () => {
       frameless: false,
     });
     expect(describeLynxHostFeatures(resolveLynxHostFeatures())).toBe(
-      "baseline",
+      "baseline"
     );
   });
 
@@ -71,27 +71,27 @@ describe("daemon lynx smoke helpers", () => {
       frameless: true,
     });
     expect(describeLynxHostFeatures(features)).toBe(
-      "nativeWindowApi,bindWindowGlobals,frameless",
+      "nativeWindowApi,bindWindowGlobals,frameless"
     );
   });
 
   it("normalizes binding features to their parent host apis", () => {
-    expect(resolveLynxHostFeatures("bindWindowGlobals,bindScreenGlobals")).toEqual(
-      {
-        nativeWindowApi: true,
-        bindWindowGlobals: true,
-        nativeScreenApi: true,
-        bindScreenGlobals: true,
-        frameless: false,
-      },
-    );
+    expect(
+      resolveLynxHostFeatures("bindWindowGlobals,bindScreenGlobals")
+    ).toEqual({
+      nativeWindowApi: true,
+      bindWindowGlobals: true,
+      nativeScreenApi: true,
+      bindScreenGlobals: true,
+      frameless: false,
+    });
   });
 
   it("creates a fixed-size smoke command from explicit host features", () => {
     const command = createLynxShowCommand({
       bundlePath: "/tmp/demo.lynx.bundle",
       hostFeatures: resolveLynxHostFeatures(
-        "nativeWindowApi,bindWindowGlobals,frameless",
+        "nativeWindowApi,bindWindowGlobals,frameless"
       ),
     });
 
@@ -103,7 +103,7 @@ describe("daemon lynx smoke helpers", () => {
     expect(command.bindScreenGlobals).toBe(false);
     expect(command.style).toEqual({ frameless: true });
     expect(command.title).toBe(
-      "OpenTray Lynx Smoke (nativeWindowApi,bindWindowGlobals,frameless)",
+      "OpenTray Lynx Smoke (nativeWindowApi,bindWindowGlobals,frameless)"
     );
   });
 });

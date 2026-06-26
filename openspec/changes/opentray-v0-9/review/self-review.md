@@ -5,8 +5,8 @@
 - Change: `opentray-v0-9`
 - Iteration: 1
 - Recurring issue counts: none
-- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset, the first packaging-plugin contract and Vite adapter, the session-boundary cleanup, the Node runtime-binding distribution slice, and the first binding-owned headless protocol/session runtime. Platform packages publish `runtime/opentray_runtime.node`; the remaining runtime-distribution work is to move the default `createTray()` path onto a native visible event-loop-backed binding host and then retire daemon diagnostics.
-- Next loop action: design and implement the native visible event-loop-backed Node runtime host without archiving `opentray-v0-9`.
+- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset, the first packaging-plugin contract and Vite adapter, the session-boundary cleanup, the Node runtime-binding distribution slice, the first binding-owned headless protocol/session runtime, and the removal of public daemon CLI diagnostics. Platform packages publish `runtime/opentray_runtime.node`; the remaining runtime-distribution work is to move the default `createTray()` path onto a native visible host-main-loop binding and rename the remaining daemon-shaped protocol health vocabulary.
+- Next loop action: design and implement the native visible host-main-loop Node runtime binding without archiving `opentray-v0-9`.
 
 ## Intent Alignment
 
@@ -27,13 +27,14 @@
 
 ## Deviations From Intent
 
-1. The binding now owns a headless direct protocol/session path, but default `createTray()` still uses transitional `connectLocalBroker()` because the binding does not yet own the native visible tray event-loop host.
-2. Transitional files and commands still contain implementation terms such as daemon/local broker for lower-level runtime wiring. They are no longer the top-level SDK ontology, but they have not been renamed across the entire repo.
+1. The binding now owns a headless direct protocol/session path, but default `createTray()` still uses the internal transitional local runtime because the binding does not yet own a native visible host-main-loop contract.
+2. The public CLI no longer exposes `opentray daemon <start|stop|restart|health>`, and `opentray/node` no longer exports `connectLocalBroker()`. Internal source-tree modules still use daemon/local-broker implementation names for the debug runtime path.
+3. The protocol still exposes daemon-shaped health vocabulary and needs a focused runtime-host-health rename before the change can be closed.
 
 ## New Questions For User
 
 1. Should the native visible binding host use a platform-specific main-thread bootstrap contract for macOS, or keep macOS on a contributor debug host until that can be proven visually?
-2. Should transitional CLI command names such as `daemon-tray` and internal `connectLocalBroker` be renamed in that runtime-distribution loop, or kept as contributor-only diagnostics?
+2. Should the internal debug runtime modules be renamed away from daemon/local-broker in the same loop as the `runtime-host-health` protocol rename, or kept as contributor-only implementation vocabulary until visible binding replaces them?
 
 ## Evidence
 
