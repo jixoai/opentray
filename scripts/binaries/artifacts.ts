@@ -4,16 +4,22 @@ import { dirname, join } from "node:path";
 export type PackageOs = "darwin" | "linux" | "windows";
 export type NpmOs = "darwin" | "linux" | "win32";
 export type NativeArch = "arm64" | "x64";
-export type NativeStageKind = "daemon" | "webview" | "lynx" | "lynx-runtime" | "badge";
+export type NativeStageKind =
+  | "runtime"
+  | "webview"
+  | "lynx"
+  | "lynx-runtime"
+  | "badge";
 export const badgeDockHelperArtifactName = "OpenTrayBadgeHelper.app.zip";
+export const runtimeBindingArtifactName = "opentray_runtime.node";
 
 export interface NativeTarget {
   packageOs: PackageOs;
   npmOs: NpmOs;
   arch: NativeArch;
-  daemonPackageName: string;
-  daemonPackageDir: string;
-  daemonArtifact: string;
+  runtimePackageName: string;
+  runtimePackageDir: string;
+  runtimeArtifact: string;
   webviewPackageName?: string;
   webviewPackageDir?: string;
   webviewArtifact?: string;
@@ -40,7 +46,7 @@ export function createNativeTarget(
   npmOs: NpmOs,
   arch: NativeArch
 ): NativeTarget {
-  const daemonPackageDir = `packages/${packageOs}-${arch}`;
+  const runtimePackageDir = `packages/${packageOs}-${arch}`;
   const webviewPackageDir =
     packageOs === "linux"
       ? undefined
@@ -53,8 +59,8 @@ export function createNativeTarget(
     badgePackageDir === undefined
       ? undefined
       : packageOs === "windows"
-        ? `${badgePackageDir}/bin/opentray_ext_badge.dll`
-        : `${badgePackageDir}/app/${badgeDockHelperArtifactName}`;
+      ? `${badgePackageDir}/bin/opentray_ext_badge.dll`
+      : `${badgePackageDir}/app/${badgeDockHelperArtifactName}`;
   const badgePackageName =
     badgePackageDir === undefined
       ? undefined
@@ -68,11 +74,9 @@ export function createNativeTarget(
     packageOs,
     npmOs,
     arch,
-    daemonPackageName: `@opentray/${packageOs}-${arch}`,
-    daemonPackageDir,
-    daemonArtifact: `${daemonPackageDir}/bin/${
-      packageOs === "windows" ? "opentray.exe" : "opentray"
-    }`,
+    runtimePackageName: `@opentray/${packageOs}-${arch}`,
+    runtimePackageDir,
+    runtimeArtifact: `${runtimePackageDir}/runtime/${runtimeBindingArtifactName}`,
     webviewPackageName:
       webviewPackageDir === undefined
         ? undefined
@@ -82,8 +86,8 @@ export function createNativeTarget(
       webviewPackageDir === undefined
         ? undefined
         : packageOs === "windows"
-          ? `${webviewPackageDir}/bin/opentray_ext_webview.dll`
-          : `${webviewPackageDir}/lib/libopentray_ext_webview.dylib`,
+        ? `${webviewPackageDir}/bin/opentray_ext_webview.dll`
+        : `${webviewPackageDir}/lib/libopentray_ext_webview.dylib`,
     badgePackageName,
     badgePackageDir,
     badgeArtifact,
@@ -157,11 +161,11 @@ export const normalizeArch = (arch: string): NativeArch => {
 
 export const resolveStageDestination = (
   target: NativeTarget,
-  kind: NativeStageKind,
+  kind: NativeStageKind
 ): string => {
   switch (kind) {
-    case "daemon":
-      return target.daemonArtifact;
+    case "runtime":
+      return target.runtimeArtifact;
     case "webview":
       if (target.webviewArtifact === undefined) {
         throw new Error(

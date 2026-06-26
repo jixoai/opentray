@@ -54,3 +54,12 @@
 - [x] 8.2 Rename core ownership APIs, routed events, dynamic extension cleanup, and official extension ABI symbols from lease cleanup to session cleanup.
 - [x] 8.3 Rename daemon health diagnostics from `internalLeaseId` to `internalSessionId`.
 - [x] 8.4 Run focused TS and Rust tests for spec, CLI, core, broker runtime, and official extension crates.
+
+## 9. Node Runtime Binding Distribution
+
+- [x] 9.1 Add `crates/opentray-runtime-node` as the host-loadable Node runtime binding crate and expose a minimal `runtimeBindingInfo()` contract.
+- [x] 9.2 Change `@opentray/<os>-<arch>` platform packages to publish `runtime/opentray_runtime.node` instead of `bin/opentray`.
+- [x] 9.3 Update the native artifact graph, local staging, release staging, preview family graph, and native-artifact verification workflow to build/stage the `runtime` component from `opentray-runtime-node`.
+- [x] 9.4 Add `opentray/node` runtime binding resolution APIs and focused tests for missing package, missing artifact, unsupported target, and malformed binding behavior.
+- [ ] 9.5 Replace the transitional `connectLocalBroker()` tray transport with the in-process Node runtime binding API once the binding owns tray/session operations directly.
+- [ ] 9.6 Rename or remove public-facing daemon CLI diagnostics after the in-process runtime path fully replaces the debug broker transport.

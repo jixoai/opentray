@@ -36,10 +36,16 @@ const { values } = parseArgs({
   },
 });
 
-if (values["artifact-root"] === undefined || values["artifact-root"].trim().length === 0) {
+if (
+  values["artifact-root"] === undefined ||
+  values["artifact-root"].trim().length === 0
+) {
   throw new Error("--artifact-root is required");
 }
-if (values["stage-plan-json"] === undefined || values["stage-plan-json"].trim().length === 0) {
+if (
+  values["stage-plan-json"] === undefined ||
+  values["stage-plan-json"].trim().length === 0
+) {
   throw new Error("--stage-plan-json is required");
 }
 
@@ -47,13 +53,21 @@ const stagePlan = parseStagePlan(values["stage-plan-json"]);
 for (const entry of stagePlan) {
   const targetName = parseNativeBuildTargetName(entry.target);
   const target = resolveNativeBuildTarget(targetName);
-  const packageTarget = resolveNativePackageTarget(target.packageOs, target.arch);
-  const artifactDirectory = join(values["artifact-root"].trim(), `native-${targetName}`);
+  const packageTarget = resolveNativePackageTarget(
+    target.packageOs,
+    target.arch
+  );
+  const artifactDirectory = join(
+    values["artifact-root"].trim(),
+    `native-${targetName}`
+  );
 
   for (const rawKind of entry.artifactKinds) {
     const kind = parseArtifactKind(rawKind);
     const fileName =
-      kind === "lynx-runtime" ? lynxRuntimeArtifactName : releaseArtifactName(kind, target.packageOs);
+      kind === "lynx-runtime"
+        ? lynxRuntimeArtifactName
+        : releaseArtifactName(kind, target.packageOs);
     const source = join(artifactDirectory, fileName);
     const destination = resolveStageDestination(packageTarget, kind);
     await stageArtifact(values.root ?? process.cwd(), source, destination);
@@ -81,7 +95,9 @@ function parseStagePlan(value: string): StagePlanEntry[] {
       !Array.isArray(entry.artifactKinds) ||
       entry.artifactKinds.some((kind) => typeof kind !== "string")
     ) {
-      throw new Error("--stage-plan-json entries must contain string target and artifactKinds[]");
+      throw new Error(
+        "--stage-plan-json entries must contain string target and artifactKinds[]"
+      );
     }
     return {
       target: entry.target,
@@ -92,7 +108,7 @@ function parseStagePlan(value: string): StagePlanEntry[] {
 
 function parseArtifactKind(value: string): NativeArtifactKind {
   if (
-    value === "daemon" ||
+    value === "runtime" ||
     value === "webview" ||
     value === "badge" ||
     value === "lynx" ||

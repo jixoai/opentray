@@ -7,6 +7,7 @@ members = [
   "crates/opentray-ext-badge",
   "crates/opentray-ext-lynx",
   "crates/opentray-ext-webview",
+  "crates/opentray-runtime-node",
   "crates/opentray-spec",
 ]
 resolver = "2"
@@ -25,6 +26,7 @@ opentray-core = { path = "crates/opentray-core", version = "0.0.0" }
 opentray-ext-badge = { path = "crates/opentray-ext-badge", version = "0.0.0" }
 opentray-ext-lynx = { path = "crates/opentray-ext-lynx", version = "0.0.0" }
 opentray-ext-webview = { path = "crates/opentray-ext-webview", version = "0.0.0" }
+opentray-runtime-node = { path = "crates/opentray-runtime-node", version = "0.0.0" }
 opentray-spec = { path = "crates/opentray-spec", version = "0.0.0" }
 ksni = "0.3.4"
 libloading = "0.8"

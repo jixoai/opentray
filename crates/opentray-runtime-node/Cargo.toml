@@ -1,0 +1,18 @@
+[package]
+name = "opentray-runtime-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi4"] }
+napi-derive = "2"
+opentray-spec.workspace = true
+
+[build-dependencies]
+napi-build = "2"

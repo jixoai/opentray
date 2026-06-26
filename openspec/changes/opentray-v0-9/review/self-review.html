@@ -67,9 +67,16 @@
           absence when the native backend cannot render it.
         </p>
         <p>
-          The implementation also adds a bundler-neutral packaging contract and the first Vite adapter. Final .node
-          native-binding replacement remains a separate runtime-distribution break. Remaining public Lease aliases,
-          health fields, and extension ABI cleanup symbols were destructively renamed to Session vocabulary.
+          The implementation also adds a bundler-neutral packaging contract, the first Vite adapter, and the first
+          Node runtime-binding distribution slice. Platform runtime packages now stage
+          <code>runtime/opentray_runtime.node</code> from <code>opentray-runtime-node</code> instead of publishing a
+          standalone broker executable. Remaining public Lease aliases, health fields, and extension ABI cleanup symbols
+          were destructively renamed to Session vocabulary.
+        </p>
+        <p>
+          Direct tray/session operations still use transitional local-broker transport. The binding is loadable and
+          reports runtime/protocol identity; moving <code>createTray()</code> onto an in-process N-API tray API remains
+          tracked runtime-distribution work.
         </p>
       </section>
       <section>
@@ -109,8 +116,17 @@
               <td class="pass">Pass</td>
             </tr>
             <tr>
+              <td>Node runtime binding distribution</td>
+              <td>
+                <code>cargo test -p opentray-runtime-node --lib --quiet</code>,
+                <code>cargo build -p opentray-runtime-node --release</code> plus Node <code>require()</code> smoke,
+                native build graph tests, release planner output selecting <code>runtime</code>
+              </td>
+              <td class="pass">Pass</td>
+            </tr>
+            <tr>
               <td>OpenSpec</td>
-              <td><code>bun run openspec:vision -- validate opentray-v0-9</code></td>
+              <td><code>bun run openspec:vision -- validate opentray-v0-9</code>, <code>bun run openspec:vision -- check opentray-v0-9</code></td>
               <td class="pass">Pass</td>
             </tr>
             <tr>
@@ -129,8 +145,8 @@
       <section>
         <h2>Open Questions</h2>
         <ul>
-          <li>Whether final .node native-binding distribution should replace platform runtime packages in a dedicated follow-up change.</li>
-          <li>Whether transitional daemon/local-broker command names should be renamed in that runtime-distribution loop.</li>
+          <li>Whether the next runtime loop should prioritize direct <code>createTray()</code> over N-API first.</li>
+          <li>Whether transitional daemon/local-broker command names should be renamed or kept as contributor-only diagnostics.</li>
         </ul>
       </section>
     </main>

@@ -3,13 +3,17 @@ import { join } from "node:path";
 
 import type { PackageJson, PackageKind } from "./types";
 
-export const createPackageManifest = (packageName: string, version: string, kind: PackageKind): PackageJson => {
+export const createPackageManifest = (
+  packageName: string,
+  version: string,
+  kind: PackageKind
+): PackageJson => {
   const files =
     kind === "platform"
-      ? ["bin", "README.md"]
+      ? ["runtime", "README.md"]
       : kind === "extension-platform"
-        ? ["dist", "platforms", "README.md"]
-        : ["README.md"];
+      ? ["dist", "platforms", "README.md"]
+      : ["README.md"];
   const manifest: PackageJson = {
     name: packageName,
     version,
@@ -38,13 +42,19 @@ export const parsePackageJson = (content: string): PackageJson => {
 export const readManifest = async (dir: string): Promise<PackageJson> =>
   parsePackageJson(await readFile(join(dir, "package.json"), "utf8"));
 
-export const validateManifest = (manifest: PackageJson, packageName: string): void => {
-  if (manifest.name !== packageName) throw new Error(`package.json name must be ${packageName}.`);
+export const validateManifest = (
+  manifest: PackageJson,
+  packageName: string
+): void => {
+  if (manifest.name !== packageName)
+    throw new Error(`package.json name must be ${packageName}.`);
   if (manifest.private) throw new Error("package.json must not be private.");
   if (!manifest.version) throw new Error("package.json version is required.");
   const repository = manifest.repository;
   const url = typeof repository === "string" ? repository : repository?.url;
   if (url !== "https://github.com/jixoai/opentray") {
-    throw new Error('package.json repository.url must be "https://github.com/jixoai/opentray".');
+    throw new Error(
+      'package.json repository.url must be "https://github.com/jixoai/opentray".'
+    );
   }
 };

@@ -13,8 +13,8 @@ afterEach(async () => {
       rm(dir, {
         force: true,
         recursive: true,
-      }),
-    ),
+      })
+    )
   );
 });
 
@@ -34,7 +34,7 @@ describe("Feature: selective native release planner", () => {
       `---
 "@opentray/ext-webview": patch
 ---
-`,
+`
     );
 
     const plan = await resolveReleaseNativePlan(root);
@@ -42,8 +42,12 @@ describe("Feature: selective native release planner", () => {
     expect(plan.enabled).toBe(true);
     expect(plan.components).toEqual(["webview"]);
     expect(plan.jobs).toHaveLength(4);
-    expect(plan.jobs.every((job) => job.componentsCsv === "webview")).toBe(true);
-    const artifactKinds = plan.stageEntries.flatMap((entry) => entry.artifactKinds);
+    expect(plan.jobs.every((job) => job.componentsCsv === "webview")).toBe(
+      true
+    );
+    const artifactKinds = plan.stageEntries.flatMap(
+      (entry) => entry.artifactKinds
+    );
     expect(artifactKinds).not.toContain("lynx");
     expect(artifactKinds).not.toContain("lynx-runtime");
     expect(plan.validatePackageDirs).toEqual([
@@ -54,20 +58,55 @@ describe("Feature: selective native release planner", () => {
     ]);
   });
 
+  test("Scenario: Given core runtime pending changesets When the planner runs Then Node runtime bindings are selected", async () => {
+    const root = await createTempChangeset(
+      "runtime.md",
+      `---
+"opentray": patch
+---
+`
+    );
+
+    const plan = await resolveReleaseNativePlan(root);
+
+    expect(plan.enabled).toBe(true);
+    expect(plan.components).toEqual(["runtime"]);
+    expect(plan.jobs).toHaveLength(6);
+    expect(plan.jobs.every((job) => job.componentsCsv === "runtime")).toBe(
+      true
+    );
+    expect(
+      plan.stageEntries.every((entry) =>
+        entry.artifactKinds.includes("runtime")
+      )
+    ).toBe(true);
+    expect(plan.validatePackageDirs).toEqual([
+      "packages/darwin-arm64",
+      "packages/darwin-x64",
+      "packages/linux-arm64",
+      "packages/linux-x64",
+      "packages/windows-arm64",
+      "packages/windows-x64",
+    ]);
+  });
+
   test("Scenario: Given Lynx pending changesets When the planner runs Then only darwin native and runtime jobs remain", async () => {
     const root = await createTempChangeset(
       "lynx.md",
       `---
 "@opentray/ext-lynx": patch
 ---
-`,
+`
     );
 
     const plan = await resolveReleaseNativePlan(root);
 
     expect(plan.enabled).toBe(true);
     expect(plan.components).toEqual(["lynx", "lynx-runtime"]);
-    expect(plan.jobs.map((job) => job.target)).toEqual(["darwin-arm64", "darwin-x64"]);
+    expect(plan.jobs.map((job) => job.target)).toEqual([
+      "darwin-arm64",
+      "darwin-x64",
+    ]);
     expect(plan.jobs.every((job) => job.buildsLynxRuntime)).toBe(true);
     expect(plan.validatePackageDirs).toEqual([
       "packages/ext-lynx-darwin-arm64",
@@ -81,7 +120,7 @@ describe("Feature: selective native release planner", () => {
       `---
 "@opentray/ext-badge": patch
 ---
-`,
+`
     );
 
     const plan = await resolveReleaseNativePlan(root);
@@ -110,7 +149,10 @@ async function createTempChangesetDir(): Promise<string> {
   return root;
 }
 
-async function createTempChangeset(fileName: string, content: string): Promise<string> {
+async function createTempChangeset(
+  fileName: string,
+  content: string
+): Promise<string> {
   const root = await createTempChangesetDir();
   await writeFile(join(root, ".changeset", fileName), content, "utf8");
   return root;

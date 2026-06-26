@@ -1,12 +1,14 @@
-import { access, chmod } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import type { DaemonPaths } from "./paths";
-import { MissingPlatformBrokerBinaryError, resolveBrokerNativeTarget } from "./native-target";
+import {
+  MissingPlatformBrokerBinaryError,
+  resolveBrokerNativeTarget,
+} from "./native-target";
 
 export interface BrokerCommand {
   command: string;
@@ -15,21 +17,19 @@ export interface BrokerCommand {
 }
 
 const sourceUrl = import.meta.url;
-const requireFromSource = createRequire(sourceUrl);
 
 export interface ResolveBrokerCommandOptions {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   arch?: string;
   sourceDir?: string;
-  resolvePackageJson?: (packageName: string) => string | undefined;
   findWorkspaceRoot?: (start: string) => Promise<string | undefined>;
   ensureDevBrokerBinary?: (workspaceRoot: string) => Promise<string>;
 }
 
 export const resolveBrokerCommand = async (
   paths: DaemonPaths,
-  options: ResolveBrokerCommandOptions = {},
+  options: ResolveBrokerCommandOptions = {}
 ): Promise<BrokerCommand> => {
   const env = options.env ?? process.env;
   const explicit = env.OPENTRAY_BROKER_BIN;
@@ -38,33 +38,32 @@ export const resolveBrokerCommand = async (
   }
 
   const sourceDir = options.sourceDir ?? dirname(fileURLToPath(sourceUrl));
-  const workspaceRoot = await (options.findWorkspaceRoot ?? findWorkspaceRoot)(sourceDir);
+  const workspaceRoot = await (options.findWorkspaceRoot ?? findWorkspaceRoot)(
+    sourceDir
+  );
   if (workspaceRoot !== undefined) {
-    const binary = await (options.ensureDevBrokerBinary ?? ensureDevBrokerBinary)(workspaceRoot);
+    const binary = await (
+      options.ensureDevBrokerBinary ?? ensureDevBrokerBinary
+    )(workspaceRoot);
     return commandForBinary(binary, paths, workspaceRoot);
   }
 
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
-  const installedBinary = await resolveInstalledBrokerBinary({
-    platform,
-    arch,
-    resolvePackageJson: options.resolvePackageJson ?? resolvePackageJson,
-  });
-  if (installedBinary !== undefined) {
-    return commandForBinary(installedBinary, paths);
-  }
-
   const target = resolveBrokerNativeTarget(platform, arch);
   throw new MissingPlatformBrokerBinaryError(
-    `unable to resolve OpenTray broker binary for ${platform}/${arch}; install ${target.packageName} or set OPENTRAY_BROKER_BIN`,
+    `unable to resolve OpenTray debug broker binary for ${platform}/${arch}; run from the source workspace or set OPENTRAY_BROKER_BIN`,
     platform,
     arch,
-    { packageName: target.packageName },
+    { packageName: target.packageName }
   );
 };
 
-const commandForBinary = (binary: string, paths: DaemonPaths, cwd?: string): BrokerCommand => {
+const commandForBinary = (
+  binary: string,
+  paths: DaemonPaths,
+  cwd?: string
+): BrokerCommand => {
   const command: BrokerCommand = {
     command: binary,
     args: [
@@ -87,55 +86,9 @@ const commandForBinary = (binary: string, paths: DaemonPaths, cwd?: string): Bro
   return command;
 };
 
-interface ResolveInstalledBrokerBinaryOptions {
-  platform: NodeJS.Platform;
-  arch: string;
-  resolvePackageJson: (packageName: string) => string | undefined;
-}
-
-export const resolveInstalledBrokerBinary = async ({
-  platform,
-  arch,
-  resolvePackageJson,
-}: ResolveInstalledBrokerBinaryOptions): Promise<string | undefined> => {
-  const target = resolveBrokerNativeTarget(platform, arch);
-  const packageJsonPath = resolvePackageJson(target.packageName);
-  if (packageJsonPath === undefined) {
-    return undefined;
-  }
-
-  const binary = join(dirname(packageJsonPath), target.binaryRelativePath);
-  if (!(await exists(binary))) {
-    throw new MissingPlatformBrokerBinaryError(
-      `OpenTray broker package ${target.packageName} is installed but missing ${target.binaryRelativePath}`,
-      platform,
-      arch,
-      {
-        packageName: target.packageName,
-        binaryPath: binary,
-      },
-    );
-  }
-
-  if (platform !== "win32") {
-    await chmod(binary, 0o755);
-  }
-
-  return binary;
-};
-
-const resolvePackageJson = (packageName: string): string | undefined => {
-  try {
-    return requireFromSource.resolve(`${packageName}/package.json`);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "MODULE_NOT_FOUND") {
-      return undefined;
-    }
-    throw error;
-  }
-};
-
-const findWorkspaceRoot = async (start: string): Promise<string | undefined> => {
+const findWorkspaceRoot = async (
+  start: string
+): Promise<string | undefined> => {
   let current = start;
   while (true) {
     if (await exists(join(current, "Cargo.toml"))) {
@@ -154,21 +107,30 @@ const findWorkspaceRoot = async (start: string): Promise<string | undefined> => 
 
 export const resolveDevBrokerBinaryPath = (
   workspaceRoot: string,
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform = process.platform
 ): string =>
-  join(workspaceRoot, "target", "debug", platform === "win32" ? "opentray.exe" : "opentray");
+  join(
+    workspaceRoot,
+    "target",
+    "debug",
+    platform === "win32" ? "opentray.exe" : "opentray"
+  );
 
 export const terminateWorkspaceDevBrokerProcess = async (
   workspaceRoot: string,
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform = process.platform
 ): Promise<void> => {
   if (platform !== "win32") {
     return;
   }
-  await terminateWindowsProcessByExecutable(resolveDevBrokerBinaryPath(workspaceRoot, platform));
+  await terminateWindowsProcessByExecutable(
+    resolveDevBrokerBinaryPath(workspaceRoot, platform)
+  );
 };
 
-const ensureDevBrokerBinary = async (workspaceRoot: string): Promise<string> => {
+const ensureDevBrokerBinary = async (
+  workspaceRoot: string
+): Promise<string> => {
   const binary = resolveDevBrokerBinaryPath(workspaceRoot);
   await terminateWorkspaceDevBrokerProcess(workspaceRoot);
   await runCargoBuild(workspaceRoot);
@@ -179,7 +141,8 @@ const runCargoBuild = (workspaceRoot: string): Promise<void> =>
   new Promise((resolve, reject) => {
     const child = spawn("cargo", ["build", "-p", "opentray-bin"], {
       cwd: workspaceRoot,
-      stdio: process.env.OPENTRAY_BROKER_BUILD_LOGS === "1" ? "inherit" : "ignore",
+      stdio:
+        process.env.OPENTRAY_BROKER_BUILD_LOGS === "1" ? "inherit" : "ignore",
     });
     child.once("error", reject);
     child.once("exit", (code) => {
@@ -187,7 +150,11 @@ const runCargoBuild = (workspaceRoot: string): Promise<void> =>
         resolve();
         return;
       }
-      reject(new Error(`cargo build -p opentray-bin failed with code ${code ?? "unknown"}`));
+      reject(
+        new Error(
+          `cargo build -p opentray-bin failed with code ${code ?? "unknown"}`
+        )
+      );
     });
   });
 
@@ -217,8 +184,15 @@ foreach ($process in $processes) {
 `;
     const child = spawn(
       "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-      { stdio: ["ignore", "ignore", "pipe"] },
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] }
     );
     let stderr = "";
     child.stderr?.on("data", (chunk: Buffer | string) => {
@@ -230,11 +204,18 @@ foreach ($process in $processes) {
         resolve();
         return;
       }
-      reject(new Error(`failed to stop running dev broker before cargo build: ${stderr.trim() || code}`));
+      reject(
+        new Error(
+          `failed to stop running dev broker before cargo build: ${
+            stderr.trim() || code
+          }`
+        )
+      );
     });
   });
 
-const powerShellString = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+const powerShellString = (value: string): string =>
+  `'${value.replace(/'/g, "''")}'`;
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;

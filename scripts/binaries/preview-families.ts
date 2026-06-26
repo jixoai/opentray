@@ -12,7 +12,7 @@ import {
 } from "./native-build-graph";
 
 export type PreviewBuildFamily =
-  | "core-broker"
+  | "core-runtime"
   | "ext-webview-native"
   | "ext-lynx-native"
   | "ext-lynx-runtime";
@@ -45,17 +45,21 @@ export interface PreviewBuildManifest extends NativeBuildManifest {
 }
 
 const previewFamilies: Record<PreviewBuildFamily, PreviewFamilyConfig> = {
-  "core-broker": {
-    family: "core-broker",
-    components: ["daemon"],
+  "core-runtime": {
+    family: "core-runtime",
+    components: ["runtime"],
     defaultTargets: ["darwin-arm64"],
     allowedTargets: nativeBuildTargetNames,
-    inferredPackagePrefixes: ["@opentray/darwin-", "@opentray/linux-", "@opentray/windows-"],
+    inferredPackagePrefixes: [
+      "@opentray/darwin-",
+      "@opentray/linux-",
+      "@opentray/windows-",
+    ],
     inferredPackages: ["opentray"],
   },
   "ext-webview-native": {
     family: "ext-webview-native",
-    components: ["daemon", "webview"],
+    components: ["runtime", "webview"],
     defaultTargets: ["darwin-arm64"],
     allowedTargets: resolveNativeBuildComponent("webview").allowedTargets,
     inferredPackagePrefixes: ["@opentray/ext-webview-"],
@@ -63,7 +67,7 @@ const previewFamilies: Record<PreviewBuildFamily, PreviewFamilyConfig> = {
   },
   "ext-lynx-native": {
     family: "ext-lynx-native",
-    components: ["daemon", "lynx"],
+    components: ["runtime", "lynx"],
     defaultTargets: ["darwin-arm64"],
     allowedTargets: ["darwin-arm64", "darwin-x64"],
     inferredPackagePrefixes: ["@opentray/ext-lynx-"],
@@ -79,14 +83,22 @@ const previewFamilies: Record<PreviewBuildFamily, PreviewFamilyConfig> = {
   },
 };
 
-export const previewBuildFamilies = Object.keys(previewFamilies) as PreviewBuildFamily[];
+export const previewBuildFamilies = Object.keys(
+  previewFamilies
+) as PreviewBuildFamily[];
 export const previewBuildTargetNames = nativeBuildTargetNames;
 
-export const isPreviewBuildFamily = (value: string): value is PreviewBuildFamily => value in previewFamilies;
-export const isPreviewTargetName = (value: string): value is PreviewTargetName =>
+export const isPreviewBuildFamily = (
+  value: string
+): value is PreviewBuildFamily => value in previewFamilies;
+export const isPreviewTargetName = (
+  value: string
+): value is PreviewTargetName =>
   previewBuildTargetNames.includes(value as PreviewTargetName);
 
-export const resolvePreviewFamily = (family: PreviewBuildFamily): PreviewFamilyConfig => {
+export const resolvePreviewFamily = (
+  family: PreviewBuildFamily
+): PreviewFamilyConfig => {
   const resolved = previewFamilies[family];
   if (resolved === undefined) {
     throw new Error(`unsupported preview build family: ${family}`);
@@ -94,10 +106,11 @@ export const resolvePreviewFamily = (family: PreviewBuildFamily): PreviewFamilyC
   return resolved;
 };
 
-export const resolvePreviewTarget = (target: PreviewTargetName) => resolveNativeBuildTarget(target);
+export const resolvePreviewTarget = (target: PreviewTargetName) =>
+  resolveNativeBuildTarget(target);
 
 export const inferPreviewFamiliesFromReleasePackages = (
-  releasePackages: readonly string[],
+  releasePackages: readonly string[]
 ): PreviewBuildFamily[] => {
   const inferred = new Set<PreviewBuildFamily>();
   for (const releasePackage of releasePackages) {
@@ -110,26 +123,28 @@ export const inferPreviewFamiliesFromReleasePackages = (
       inferred.add("ext-lynx-runtime");
       continue;
     }
-    if (matchesFamilyReleasePackage("core-broker", releasePackage)) {
-      inferred.add("core-broker");
+    if (matchesFamilyReleasePackage("core-runtime", releasePackage)) {
+      inferred.add("core-runtime");
     }
   }
   if (inferred.has("ext-webview-native") || inferred.has("ext-lynx-native")) {
-    inferred.delete("core-broker");
+    inferred.delete("core-runtime");
   }
   return [...inferred];
 };
 
 export const resolvePreviewTargetsForFamilies = (
   families: readonly PreviewBuildFamily[],
-  explicitTargets: readonly PreviewTargetName[] | undefined,
+  explicitTargets: readonly PreviewTargetName[] | undefined
 ): PreviewTargetName[] => {
   if (explicitTargets !== undefined && explicitTargets.length > 0) {
     for (const family of families) {
       const config = resolvePreviewFamily(family);
       for (const target of explicitTargets) {
         if (!config.allowedTargets.includes(target)) {
-          throw new Error(`preview build family ${family} does not support target ${target}`);
+          throw new Error(
+            `preview build family ${family} does not support target ${target}`
+          );
         }
       }
     }
@@ -148,16 +163,21 @@ export const resolvePreviewTargetsForFamilies = (
 export const materializePreviewBuildJobs = (
   alias: string,
   families: readonly PreviewBuildFamily[],
-  targets: readonly PreviewTargetName[],
+  targets: readonly PreviewTargetName[]
 ): PreviewBuildJob[] => {
   const jobs: PreviewBuildJob[] = [];
   for (const family of families) {
     const familyConfig = resolvePreviewFamily(family);
     for (const target of targets) {
       if (!familyConfig.allowedTargets.includes(target)) {
-        throw new Error(`preview build family ${family} does not support target ${target}`);
+        throw new Error(
+          `preview build family ${family} does not support target ${target}`
+        );
       }
-      const execution = materializeNativeBuildExecutions(familyConfig.components, [target])[0];
+      const execution = materializeNativeBuildExecutions(
+        familyConfig.components,
+        [target]
+      )[0];
       jobs.push({
         alias,
         family,
@@ -175,11 +195,17 @@ export const materializePreviewBuildJobs = (
 export const executePreviewBuildJob = async (
   workspaceRoot: string,
   job: PreviewBuildJob,
-  outputDir: string,
+  outputDir: string
 ): Promise<PreviewBuildManifest> => {
   const family = resolvePreviewFamily(job.family);
-  const execution = materializeNativeBuildExecutions(family.components, [job.target])[0];
-  const manifest = await executeNativeBuildExecution(workspaceRoot, execution, outputDir);
+  const execution = materializeNativeBuildExecutions(family.components, [
+    job.target,
+  ])[0];
+  const manifest = await executeNativeBuildExecution(
+    workspaceRoot,
+    execution,
+    outputDir
+  );
   return {
     ...manifest,
     alias: job.alias,
@@ -189,13 +215,15 @@ export const executePreviewBuildJob = async (
 
 const matchesFamilyReleasePackage = (
   family: PreviewBuildFamily,
-  releasePackage: string,
+  releasePackage: string
 ): boolean => {
   const config = resolvePreviewFamily(family);
   if (config.inferredPackages.includes(releasePackage)) {
     return true;
   }
-  return config.inferredPackagePrefixes.some((prefix) => releasePackage.startsWith(prefix));
+  return config.inferredPackagePrefixes.some((prefix) =>
+    releasePackage.startsWith(prefix)
+  );
 };
 
 export const parsePreviewTargetName = (value: string): PreviewTargetName =>

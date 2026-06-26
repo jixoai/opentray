@@ -52,6 +52,8 @@ Visible tray text belongs to `icon.text`, `icon["text-only"]`, or `icon["icon-te
 
 OpenTray does not ask developers to create a public broker object. The application process or an application-owned background service imports `opentray`, calls `createTray()`, owns event handlers, and releases the tray when that process exits.
 
+Node platform packages carry the host-loadable runtime artifact at `runtime/opentray_runtime.node`. `opentray/node` exposes `loadOpenTrayRuntimeBinding()` and `resolveInstalledRuntimeBindingPath()` for Node-specific runtime diagnostics and packaging checks.
+
 Lower-level node helpers such as `connectLocalBroker()` remain available from `opentray/node` for source-tree diagnostics and transitional runtime wiring. They are not the main public ontology.
 
 ## Examples

@@ -39,7 +39,7 @@ jobs:
             runner: macos-15
             job_timeout_minutes: 90
             lynx_timeout_seconds: 4500
-            daemon_artifact: opentray
+            runtime_artifact: libopentray_runtime_node.dylib
             webview_artifact: libopentray_ext_webview.dylib
             lynx_artifact: libopentray_ext_lynx.dylib
             badge_artifact: OpenTrayBadgeHelper.app.zip
@@ -47,24 +47,24 @@ jobs:
             runner: ubuntu-24.04-arm
             job_timeout_minutes: 90
             lynx_timeout_seconds: 4500
-            daemon_artifact: opentray
+            runtime_artifact: libopentray_runtime_node.so
           - target: linux-x64
             runner: ubuntu-24.04
             job_timeout_minutes: 90
             lynx_timeout_seconds: 4500
-            daemon_artifact: opentray
+            runtime_artifact: libopentray_runtime_node.so
           - target: windows-arm64
             runner: windows-11-arm
             job_timeout_minutes: 90
             lynx_timeout_seconds: 4500
-            daemon_artifact: opentray.exe
+            runtime_artifact: opentray_runtime_node.dll
             webview_artifact: opentray_ext_webview.dll
             badge_artifact: opentray_ext_badge.dll
           - target: windows-x64
             runner: windows-2025
             job_timeout_minutes: 90
             lynx_timeout_seconds: 4500
-            daemon_artifact: opentray.exe
+            runtime_artifact: opentray_runtime_node.dll
             webview_artifact: opentray_ext_webview.dll
             badge_artifact: opentray_ext_badge.dll
     steps:
@@ -116,7 +116,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          packages=(-p opentray-bin)
+          packages=(-p opentray-runtime-node)
           if [[ "${{ matrix.target }}" != linux-* ]]; then
             packages+=(-p opentray-ext-webview)
           fi
@@ -128,7 +128,7 @@ jobs:
           fi
           cargo build --release "${packages[@]}"
           mkdir -p native-artifacts
-          cp "target/release/${{ matrix.daemon_artifact }}" native-artifacts/
+          cp "target/release/${{ matrix.runtime_artifact }}" native-artifacts/
           if [[ "${{ matrix.target }}" != linux-* ]]; then
             cp "target/release/${{ matrix.webview_artifact }}" native-artifacts/
           fi
@@ -223,20 +223,20 @@ jobs:
             package_os="${target%-*}"
             arch="${target##*-}"
             if [ "$package_os" = "windows" ]; then
-              daemon_artifact="opentray.exe"
+              runtime_artifact="opentray_runtime_node.dll"
               webview_artifact="opentray_ext_webview.dll"
               badge_artifact="opentray_ext_badge.dll"
             elif [ "$package_os" = "darwin" ]; then
-              daemon_artifact="opentray"
+              runtime_artifact="libopentray_runtime_node.dylib"
               webview_artifact="libopentray_ext_webview.dylib"
               badge_artifact="OpenTrayBadgeHelper.app.zip"
             else
-              daemon_artifact="opentray"
+              runtime_artifact="libopentray_runtime_node.so"
             fi
 
             bun run scripts/binaries/stage-local.ts \
-              --kind daemon \
-              --source "native-artifacts/native-${target}/${daemon_artifact}" \
+              --kind runtime \
+              --source "native-artifacts/native-${target}/${runtime_artifact}" \
               --package-os "$package_os" \
               --arch "$arch"
             if [ "$package_os" != "linux" ]; then

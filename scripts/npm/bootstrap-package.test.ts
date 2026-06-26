@@ -34,36 +34,69 @@ describe("Feature: npm package bootstrap release law", () => {
   });
 
   test("Scenario: Given package kinds When manifests are generated Then package-specific product branches are unnecessary", () => {
-    const platform = createPackageManifest("@opentray/darwin-arm64", "0.0.0", "platform");
-    const extensionPlatform = createPackageManifest("@opentray/ext-webview-darwin-arm64", "0.0.0", "extension-platform");
+    const platform = createPackageManifest(
+      "@opentray/darwin-arm64",
+      "0.0.0",
+      "platform"
+    );
+    const extensionPlatform = createPackageManifest(
+      "@opentray/ext-webview-darwin-arm64",
+      "0.0.0",
+      "extension-platform"
+    );
 
-    expect(platform.files).toEqual(["bin", "README.md"]);
-    expect(platform.repository).toEqual({ type: "git", url: "https://github.com/jixoai/opentray" });
+    expect(platform.files).toEqual(["runtime", "README.md"]);
+    expect(platform.repository).toEqual({
+      type: "git",
+      url: "https://github.com/jixoai/opentray",
+    });
     expect(platform.publishConfig).toEqual({ access: "public" });
     expect(extensionPlatform.files).toEqual(["dist", "platforms", "README.md"]);
     expect(extensionPlatform.peerDependencies).toEqual({ opentray: ">=0.0.0" });
   });
 
   test("Scenario: Given npm view output When registry state is classified Then 404 is separate from hard errors", () => {
-    expect(classifyRegistryResult({ exitCode: 0, stdout: '"0.0.0"', stderr: "" })).toEqual({
+    expect(
+      classifyRegistryResult({ exitCode: 0, stdout: '"0.0.0"', stderr: "" })
+    ).toEqual({
       type: "exists",
       version: "0.0.0",
     });
-    expect(classifyRegistryResult({ exitCode: 1, stdout: "", stderr: "npm error code E404" })).toEqual({
+    expect(
+      classifyRegistryResult({
+        exitCode: 1,
+        stdout: "",
+        stderr: "npm error code E404",
+      })
+    ).toEqual({
       type: "missing",
     });
-    expect(classifyRegistryResult({ exitCode: 1, stdout: "", stderr: "npm error code E403" })).toEqual({
+    expect(
+      classifyRegistryResult({
+        exitCode: 1,
+        stdout: "",
+        stderr: "npm error code E403",
+      })
+    ).toEqual({
       type: "error",
       message: "npm error code E403",
     });
   });
 
   test("Scenario: Given npm dist-tags output When latest exists Then publication can continue before packument cache settles", () => {
-    expect(classifyDistTagResult({ exitCode: 0, stdout: "latest: 0.1.0", stderr: "" })).toEqual({
+    expect(
+      classifyDistTagResult({
+        exitCode: 0,
+        stdout: "latest: 0.1.0",
+        stderr: "",
+      })
+    ).toEqual({
       type: "exists",
       version: "0.1.0",
     });
-    expect(classifyDistTagResult({ exitCode: 0, stdout: "", stderr: "" })).toEqual({ type: "missing" });
+    expect(
+      classifyDistTagResult({ exitCode: 0, stdout: "", stderr: "" })
+    ).toEqual({ type: "missing" });
   });
 
   test("Scenario: Given a trusted publisher response When claims match Then trust can be skipped", () => {
@@ -75,20 +108,35 @@ describe("Feature: npm package bootstrap release law", () => {
       permissions: ["createPackage", "createStagedPackage"],
     });
 
-    expect(trustMatches(raw, { repo: "jixoai/opentray", file: "release.yml", environment: "npm-release" })).toBe(true);
-    expect(trustMatches(raw, { repo: "jixoai/opentray", file: "other.yml", environment: "npm-release" })).toBe(false);
+    expect(
+      trustMatches(raw, {
+        repo: "jixoai/opentray",
+        file: "release.yml",
+        environment: "npm-release",
+      })
+    ).toBe(true);
+    expect(
+      trustMatches(raw, {
+        repo: "jixoai/opentray",
+        file: "other.yml",
+        environment: "npm-release",
+      })
+    ).toBe(false);
   });
 
   test("Scenario: Given command output contains secrets When redacted Then no token password or OTP leaks", () => {
-    const output = "token npm_abc123 password hunter2 otp 123456 authId=97b62083-645c-4ebf-93bd-1b77296cdbcf";
+    const output =
+      "token npm_abc123 password hunter2 otp 123456 authId=97b62083-645c-4ebf-93bd-1b77296cdbcf";
 
     expect(redact(output, ["hunter2"])).toBe(
-      "token npm_<redacted> password <secret> otp <OTP> authId=<redacted>",
+      "token npm_<redacted> password <secret> otp <OTP> authId=<redacted>"
     );
   });
 
   test("Scenario: Given a scoped package name When no dir is provided Then workspace path is derived", () => {
-    expect(defaultPackageDir("@opentray/ext-webview-windows-x64")).toBe("packages/ext-webview-windows-x64");
+    expect(defaultPackageDir("@opentray/ext-webview-windows-x64")).toBe(
+      "packages/ext-webview-windows-x64"
+    );
     expect(defaultPackageDir("opentray")).toBe("packages/opentray");
   });
 });

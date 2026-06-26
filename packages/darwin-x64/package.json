@@ -14,7 +14,7 @@
     "x64"
   ],
   "files": [
-    "bin",
+    "runtime",
     "README.md"
   ]
 }

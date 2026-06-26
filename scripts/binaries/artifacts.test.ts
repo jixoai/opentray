@@ -8,10 +8,10 @@ import {
   resolveStageDestination,
 } from "./artifacts";
 
-describe("Feature: native binary artifact topology", () => {
-  test("Scenario: Given first-stage platforms When targets are enumerated Then daemon packages cover Linux while WebView stays macOS/Windows only", () => {
+describe("Feature: native runtime artifact topology", () => {
+  test("Scenario: Given first-stage platforms When targets are enumerated Then runtime packages cover Linux while WebView stays macOS/Windows only", () => {
     expect(nativeTargets).toHaveLength(6);
-    expect(nativeTargets.map((target) => target.daemonPackageName)).toEqual([
+    expect(nativeTargets.map((target) => target.runtimePackageName)).toEqual([
       "@opentray/darwin-arm64",
       "@opentray/darwin-x64",
       "@opentray/linux-arm64",
@@ -19,13 +19,17 @@ describe("Feature: native binary artifact topology", () => {
       "@opentray/windows-arm64",
       "@opentray/windows-x64",
     ]);
-    expect(nativeTargets.map((target) => target.webviewPackageName).filter(Boolean)).toEqual([
+    expect(
+      nativeTargets.map((target) => target.webviewPackageName).filter(Boolean)
+    ).toEqual([
       "@opentray/ext-webview-darwin-arm64",
       "@opentray/ext-webview-darwin-x64",
       "@opentray/ext-webview-windows-arm64",
       "@opentray/ext-webview-windows-x64",
     ]);
-    expect(nativeTargets.map((target) => target.badgePackageName).filter(Boolean)).toEqual([
+    expect(
+      nativeTargets.map((target) => target.badgePackageName).filter(Boolean)
+    ).toEqual([
       "@opentray/ext-badge-darwin-arm64",
       "@opentray/ext-badge-darwin-x64",
       "@opentray/ext-badge-windows-arm64",
@@ -44,7 +48,9 @@ describe("Feature: native binary artifact topology", () => {
     const linux = resolveNativeTarget("linux", "x64");
     const windows = resolveNativeTarget("win32", "x64");
 
-    expect(darwin.daemonArtifact).toBe("packages/darwin-arm64/bin/opentray");
+    expect(darwin.runtimeArtifact).toBe(
+      "packages/darwin-arm64/runtime/opentray_runtime.node"
+    );
     expect(darwin.webviewArtifact).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
     );
@@ -59,8 +65,8 @@ describe("Feature: native binary artifact topology", () => {
     );
     expect(linux.webviewArtifact).toBeUndefined();
     expect(linux.lynxArtifact).toBeUndefined();
-    expect(windows.daemonArtifact).toBe(
-      "packages/windows-x64/bin/opentray.exe"
+    expect(windows.runtimeArtifact).toBe(
+      "packages/windows-x64/runtime/opentray_runtime.node"
     );
     expect(windows.webviewArtifact).toBe(
       "packages/ext-webview-windows-x64/bin/opentray_ext_webview.dll"
@@ -82,8 +88,8 @@ describe("Feature: native binary artifact topology", () => {
   test("Scenario: Given CI stages foreign artifacts When package target is explicit Then host platform is irrelevant", () => {
     const target = resolveNativePackageTarget("windows", "arm64");
 
-    expect(target.daemonArtifact).toBe(
-      "packages/windows-arm64/bin/opentray.exe"
+    expect(target.runtimeArtifact).toBe(
+      "packages/windows-arm64/runtime/opentray_runtime.node"
     );
     expect(target.webviewArtifact).toBe(
       "packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll"
@@ -105,8 +111,8 @@ describe("Feature: native binary artifact topology", () => {
   test("Scenario: Given a staged artifact kind When the destination is resolved Then the package-owned path stays authoritative", () => {
     const target = resolveNativePackageTarget("darwin", "arm64");
 
-    expect(resolveStageDestination(target, "daemon")).toBe(
-      "packages/darwin-arm64/bin/opentray"
+    expect(resolveStageDestination(target, "runtime")).toBe(
+      "packages/darwin-arm64/runtime/opentray_runtime.node"
     );
     expect(resolveStageDestination(target, "webview")).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"

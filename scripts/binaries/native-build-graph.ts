@@ -9,6 +9,7 @@ import {
   badgeDockHelperArtifactName,
   normalizeArch,
   resolveNativePackageTarget,
+  runtimeBindingArtifactName,
 } from "./artifacts";
 
 export type NativeBuildTargetName =
@@ -19,7 +20,12 @@ export type NativeBuildTargetName =
   | "windows-arm64"
   | "windows-x64";
 
-export type NativeBuildComponent = "daemon" | "webview" | "badge" | "lynx" | "lynx-runtime";
+export type NativeBuildComponent =
+  | "runtime"
+  | "webview"
+  | "badge"
+  | "lynx"
+  | "lynx-runtime";
 export type NativeArtifactKind = NativeStageKind;
 export const lynxRuntimeArtifactName = "OpenTrayLynxRuntime.app.zip";
 
@@ -69,7 +75,10 @@ export interface ReleaseStageEntry {
   readonly artifactKinds: readonly NativeArtifactKind[];
 }
 
-const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig> = {
+const nativeBuildTargets: Record<
+  NativeBuildTargetName,
+  NativeBuildTargetConfig
+> = {
   "darwin-arm64": {
     id: "darwin-arm64",
     packageOs: "darwin",
@@ -138,7 +147,9 @@ const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig>
   },
 };
 
-const allNativeBuildTargets = Object.keys(nativeBuildTargets) as NativeBuildTargetName[];
+const allNativeBuildTargets = Object.keys(
+  nativeBuildTargets
+) as NativeBuildTargetName[];
 const webviewNativeBuildTargets: readonly NativeBuildTargetName[] = [
   "darwin-arm64",
   "darwin-x64",
@@ -152,22 +163,29 @@ const badgeNativeBuildTargets: readonly NativeBuildTargetName[] = [
   "windows-x64",
 ];
 const nativeBuildComponentOrder: readonly NativeBuildComponent[] = [
-  "daemon",
+  "runtime",
   "webview",
   "badge",
   "lynx",
   "lynx-runtime",
 ];
 
-const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentConfig> = {
-  daemon: {
-    component: "daemon",
+const nativeBuildComponents: Record<
+  NativeBuildComponent,
+  NativeBuildComponentConfig
+> = {
+  runtime: {
+    component: "runtime",
     allowedTargets: allNativeBuildTargets,
     defaultReleaseTargets: allNativeBuildTargets,
-    cargoPackages: ["opentray-bin"],
-    artifactKinds: ["daemon"],
+    cargoPackages: ["opentray-runtime-node"],
+    artifactKinds: ["runtime"],
     inferredPackages: ["opentray"],
-    inferredPackagePrefixes: ["@opentray/darwin-", "@opentray/linux-", "@opentray/windows-"],
+    inferredPackagePrefixes: [
+      "@opentray/darwin-",
+      "@opentray/linux-",
+      "@opentray/windows-",
+    ],
   },
   webview: {
     component: "webview",
@@ -208,12 +226,16 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
 };
 
 export const nativeBuildTargetNames = allNativeBuildTargets;
-export const isNativeBuildTargetName = (value: string): value is NativeBuildTargetName =>
-  value in nativeBuildTargets;
-export const isNativeBuildComponent = (value: string): value is NativeBuildComponent =>
-  value in nativeBuildComponents;
+export const isNativeBuildTargetName = (
+  value: string
+): value is NativeBuildTargetName => value in nativeBuildTargets;
+export const isNativeBuildComponent = (
+  value: string
+): value is NativeBuildComponent => value in nativeBuildComponents;
 
-export const resolveNativeBuildTarget = (target: NativeBuildTargetName): NativeBuildTargetConfig => {
+export const resolveNativeBuildTarget = (
+  target: NativeBuildTargetName
+): NativeBuildTargetConfig => {
   const resolved = nativeBuildTargets[target];
   if (resolved === undefined) {
     throw new Error(`unsupported native build target: ${target}`);
@@ -222,7 +244,7 @@ export const resolveNativeBuildTarget = (target: NativeBuildTargetName): NativeB
 };
 
 export const resolveNativeBuildComponent = (
-  component: NativeBuildComponent,
+  component: NativeBuildComponent
 ): NativeBuildComponentConfig => {
   const resolved = nativeBuildComponents[component];
   if (resolved === undefined) {
@@ -232,7 +254,7 @@ export const resolveNativeBuildComponent = (
 };
 
 export const inferNativeBuildComponentsFromReleasePackages = (
-  releasePackages: readonly string[],
+  releasePackages: readonly string[]
 ): NativeBuildComponent[] => {
   const inferred = new Set<NativeBuildComponent>();
   for (const releasePackage of releasePackages) {
@@ -249,19 +271,22 @@ export const inferNativeBuildComponentsFromReleasePackages = (
       inferred.add("lynx-runtime");
       continue;
     }
-    if (matchesReleasePackage("daemon", releasePackage)) {
-      inferred.add("daemon");
+    if (matchesReleasePackage("runtime", releasePackage)) {
+      inferred.add("runtime");
     }
   }
-  return nativeBuildComponentOrder.filter((component) => inferred.has(component));
+  return nativeBuildComponentOrder.filter((component) =>
+    inferred.has(component)
+  );
 };
 
 export const resolveReleaseTargetsForComponents = (
-  components: readonly NativeBuildComponent[],
+  components: readonly NativeBuildComponent[]
 ): NativeBuildTargetName[] => {
   const targets = new Set<NativeBuildTargetName>();
   for (const component of components) {
-    for (const target of resolveNativeBuildComponent(component).defaultReleaseTargets) {
+    for (const target of resolveNativeBuildComponent(component)
+      .defaultReleaseTargets) {
       targets.add(target);
     }
   }
@@ -270,13 +295,13 @@ export const resolveReleaseTargetsForComponents = (
 
 export const materializeNativeBuildExecutions = (
   components: readonly NativeBuildComponent[],
-  targets: readonly NativeBuildTargetName[],
+  targets: readonly NativeBuildTargetName[]
 ): NativeBuildExecution[] => {
   const dedupedComponents = [...new Set(components)];
   return targets.map((target) => {
     const targetConfig = resolveNativeBuildTarget(target);
     const selectedComponents = dedupedComponents.filter((component) =>
-      resolveNativeBuildComponent(component).allowedTargets.includes(target),
+      resolveNativeBuildComponent(component).allowedTargets.includes(target)
     );
     if (selectedComponents.length === 0) {
       throw new Error(`no native build components support target ${target}`);
@@ -312,7 +337,7 @@ export const materializeNativeBuildExecutions = (
 };
 
 export const describeReleaseStagePlan = (
-  executions: readonly NativeBuildExecution[],
+  executions: readonly NativeBuildExecution[]
 ): {
   readonly stageEntries: readonly ReleaseStageEntry[];
   readonly validatePackageDirs: readonly string[];
@@ -321,7 +346,9 @@ export const describeReleaseStagePlan = (
   const stageEntries = executions.map((execution) => {
     const target = resolveNativeBuildTarget(execution.target);
     for (const component of execution.components) {
-      packageDirs.add(resolvePackageDirForComponent(component, target.packageOs, target.arch));
+      packageDirs.add(
+        resolvePackageDirForComponent(component, target.packageOs, target.arch)
+      );
     }
     return {
       target: execution.target,
@@ -337,16 +364,23 @@ export const describeReleaseStagePlan = (
 export const executeNativeBuildExecution = async (
   workspaceRoot: string,
   execution: NativeBuildExecution,
-  outputDir: string,
+  outputDir: string
 ): Promise<NativeBuildManifest> => {
   const target = resolveNativeBuildTarget(execution.target);
-  const nativeTarget = resolveNativePackageTarget(target.packageOs, target.arch);
+  const nativeTarget = resolveNativePackageTarget(
+    target.packageOs,
+    target.arch
+  );
 
   if (execution.cargoPackages.length > 0) {
     await runCommand(
       "cargo",
-      ["build", "--release", ...execution.cargoPackages.flatMap((pkg) => ["-p", pkg])],
-      workspaceRoot,
+      [
+        "build",
+        "--release",
+        ...execution.cargoPackages.flatMap((pkg) => ["-p", pkg]),
+      ],
+      workspaceRoot
     );
   }
 
@@ -356,7 +390,11 @@ export const executeNativeBuildExecution = async (
   for (const kind of execution.artifactKinds) {
     if (kind === "lynx-runtime") {
       const runtimeOutput = join(outputDir, lynxRuntimeArtifactName);
-      await runCommand("bash", ["scripts/release/build-lynx-runtime.sh", runtimeOutput], workspaceRoot);
+      await runCommand(
+        "bash",
+        ["scripts/release/build-lynx-runtime.sh", runtimeOutput],
+        workspaceRoot
+      );
       copiedFiles.push(runtimeOutput);
       continue;
     }
@@ -364,12 +402,21 @@ export const executeNativeBuildExecution = async (
     if (kind === "badge") {
       if (target.packageOs === "darwin") {
         const badgeOutput = join(outputDir, badgeDockHelperArtifactName);
-        await runCommand("bash", ["scripts/release/build-badge-dock-helper.sh", badgeOutput], workspaceRoot);
+        await runCommand(
+          "bash",
+          ["scripts/release/build-badge-dock-helper.sh", badgeOutput],
+          workspaceRoot
+        );
         copiedFiles.push(badgeOutput);
         continue;
       }
 
-      const source = join(workspaceRoot, "target", "release", releaseArtifactName(kind, nativeTarget.packageOs));
+      const source = join(
+        workspaceRoot,
+        "target",
+        "release",
+        releaseArtifactName(kind, nativeTarget.packageOs)
+      );
       const destination = join(outputDir, basename(source));
       await copyFile(source, destination);
       if (!destination.endsWith(".dll")) {
@@ -379,7 +426,12 @@ export const executeNativeBuildExecution = async (
       continue;
     }
 
-    const source = join(workspaceRoot, "target", "release", releaseArtifactName(kind, nativeTarget.packageOs));
+    const source = join(
+      workspaceRoot,
+      "target",
+      "release",
+      releaseArtifactName(kind, nativeTarget.packageOs)
+    );
     const destination = join(outputDir, basename(source));
     await copyFile(source, destination);
     if (!destination.endsWith(".dll")) {
@@ -394,11 +446,17 @@ export const executeNativeBuildExecution = async (
     artifactKinds: execution.artifactKinds,
     files: copiedFiles,
   };
-  await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await writeFile(
+    join(outputDir, "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8"
+  );
   return manifest;
 };
 
-export const parseNativeBuildTargetName = (value: string): NativeBuildTargetName => {
+export const parseNativeBuildTargetName = (
+  value: string
+): NativeBuildTargetName => {
   if (isNativeBuildTargetName(value)) {
     return value;
   }
@@ -413,14 +471,16 @@ export const parseNativeBuildTargetName = (value: string): NativeBuildTargetName
 
 export const releaseArtifactName = (
   kind: Exclude<NativeArtifactKind, "lynx-runtime">,
-  packageOs: PackageOs,
+  packageOs: PackageOs
 ): string => {
   switch (kind) {
-    case "daemon":
-      return packageOs === "windows" ? "opentray.exe" : "opentray";
+    case "runtime":
+      return runtimeLibraryName(packageOs);
     case "webview":
       if (packageOs === "linux") {
-        throw new Error("webview native artifacts are not published for linux targets");
+        throw new Error(
+          "webview native artifacts are not published for linux targets"
+        );
       }
       if (packageOs === "windows") {
         return "opentray_ext_webview.dll";
@@ -433,49 +493,77 @@ export const releaseArtifactName = (
       if (packageOs === "darwin") {
         return badgeDockHelperArtifactName;
       }
-      throw new Error("badge native artifacts are not published for linux targets");
+      throw new Error(
+        "badge native artifacts are not published for linux targets"
+      );
     case "lynx":
       return "libopentray_ext_lynx.dylib";
   }
 };
 
-const matchesReleasePackage = (component: NativeBuildComponent, releasePackage: string): boolean => {
+const matchesReleasePackage = (
+  component: NativeBuildComponent,
+  releasePackage: string
+): boolean => {
   const config = resolveNativeBuildComponent(component);
   if (config.inferredPackages.includes(releasePackage)) {
     return true;
   }
-  return config.inferredPackagePrefixes.some((prefix) => releasePackage.startsWith(prefix));
+  return config.inferredPackagePrefixes.some((prefix) =>
+    releasePackage.startsWith(prefix)
+  );
 };
 
 const resolvePackageDirForComponent = (
   component: NativeBuildComponent,
   packageOs: PackageOs,
-  arch: NativeArch,
+  arch: NativeArch
 ): string => {
   const target = resolveNativePackageTarget(packageOs, arch);
   switch (component) {
-    case "daemon":
-      return target.daemonPackageDir;
+    case "runtime":
+      return target.runtimePackageDir;
     case "webview":
       if (target.webviewPackageDir === undefined) {
-        throw new Error(`target ${packageOs}-${arch} does not publish webview package directories`);
+        throw new Error(
+          `target ${packageOs}-${arch} does not publish webview package directories`
+        );
       }
       return target.webviewPackageDir;
     case "badge":
       if (target.badgePackageDir === undefined) {
-        throw new Error(`target ${packageOs}-${arch} does not publish badge package directories`);
+        throw new Error(
+          `target ${packageOs}-${arch} does not publish badge package directories`
+        );
       }
       return target.badgePackageDir;
     case "lynx":
     case "lynx-runtime":
       if (target.lynxPackageDir === undefined) {
-        throw new Error(`target ${packageOs}-${arch} does not publish lynx package directories`);
+        throw new Error(
+          `target ${packageOs}-${arch} does not publish lynx package directories`
+        );
       }
       return target.lynxPackageDir;
   }
 };
 
-const runCommand = (command: string, args: readonly string[], cwd: string): Promise<void> =>
+const runtimeLibraryName = (packageOs: PackageOs): string => {
+  switch (packageOs) {
+    case "windows":
+      return "opentray_runtime_node.dll";
+    case "darwin":
+      return "libopentray_runtime_node.dylib";
+    case "linux":
+      return "libopentray_runtime_node.so";
+  }
+};
+
+const runCommand = (
+  command: string,
+  args: readonly string[],
+  cwd: string
+): Promise<void> =>
   new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
       cwd,
@@ -487,6 +575,10 @@ const runCommand = (command: string, args: readonly string[], cwd: string): Prom
         resolve();
         return;
       }
-      reject(new Error(`${command} ${args.join(" ")} failed with code ${code ?? "unknown"}`));
+      reject(
+        new Error(
+          `${command} ${args.join(" ")} failed with code ${code ?? "unknown"}`
+        )
+      );
     });
   });

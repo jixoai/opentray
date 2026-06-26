@@ -15,7 +15,7 @@ const { values } = parseArgs({
   options: {
     kind: {
       type: "string",
-      default: "daemon",
+      default: "runtime",
     },
     source: {
       type: "string",
@@ -36,8 +36,12 @@ const { values } = parseArgs({
 if (values.source === undefined || values.source.length === 0) {
   throw new Error("--source is required");
 }
-if (!["daemon", "webview", "badge", "lynx", "lynx-runtime"].includes(values.kind)) {
-  throw new Error("--kind must be daemon, webview, badge, lynx, or lynx-runtime");
+if (
+  !["runtime", "webview", "badge", "lynx", "lynx-runtime"].includes(values.kind)
+) {
+  throw new Error(
+    "--kind must be runtime, webview, badge, lynx, or lynx-runtime"
+  );
 }
 if ((values["package-os"] === undefined) !== (values.arch === undefined)) {
   throw new Error("--package-os and --arch must be provided together");
@@ -48,7 +52,7 @@ const target =
     ? resolveNativeTarget()
     : resolveNativePackageTarget(
         platformToPackageOs(values["package-os"]),
-        normalizeArch(values.arch),
+        normalizeArch(values.arch)
       );
 const destination = resolveStageDestination(target, values.kind);
 await stageArtifact(values.root ?? process.cwd(), values.source, destination);

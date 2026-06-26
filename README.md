@@ -54,7 +54,7 @@ Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, 
 
 ## Packaging
 
-`@opentray/packaging` stages runtime host artifacts, native sidecars, and
+`@opentray/packaging` stages runtime binding artifacts, native sidecars, and
 companion assets into app-id-derived output paths and writes an
 `opentray-app-manifest.json` manifest. `@opentray/vite-plugin` is the first
 adapter over that shared contract.
@@ -66,13 +66,17 @@ export default {
   plugins: [
     openTrayVitePlugin({
       app: { id: "com.example.build", name: "Build" },
-      runtimeHost: { source: "target/release/build-tray-host" },
+      runtimeHost: {
+        source:
+          "node_modules/@opentray/darwin-arm64/runtime/opentray_runtime.node",
+      },
     }),
   ],
 };
 ```
 
-Packaging remains a build-layer concern. It stages artifacts and emits manifest
+Platform runtime packages such as `@opentray/darwin-arm64` carry
+`runtime/opentray_runtime.node`. Packaging remains a build-layer concern. It stages artifacts and emits manifest
 truth; it does not own tray lifecycle, session authority, backend selection, or
 extension dispatch.
 

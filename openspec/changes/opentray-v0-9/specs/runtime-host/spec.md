@@ -24,6 +24,26 @@ The runtime host SHALL store runtime state under `~/.opentray/<packageVersion>/<
 
 ## ADDED Requirements
 
+### Requirement: Node runtime distribution SHALL use host-loadable native bindings
+
+For Node-first distribution, platform runtime packages SHALL carry a host-loadable native binding artifact at `runtime/opentray_runtime.node`. They SHALL NOT publish a standalone `bin/opentray` broker executable as the normal app runtime artifact. The binding artifact MAY internally expose only a small contract while runtime APIs are incrementally moved in-process, but package and release truth SHALL identify it as the app-owned runtime binding rather than an OpenTray-owned background process.
+
+Contributor-only debug executables MAY remain in the source tree for smoke tests and transport diagnostics. They SHALL NOT be the release artifact inferred when publishing `opentray` or `@opentray/<os>-<arch>` platform packages.
+
+#### Scenario: Platform package carries a native binding
+
+- **GIVEN** `@opentray/darwin-arm64` is staged for publish
+- **WHEN** package contents are inspected
+- **THEN** the core runtime artifact is `runtime/opentray_runtime.node`
+- **AND** no `bin/opentray` broker executable is required for the normal package runtime path.
+
+#### Scenario: Release graph builds runtime instead of debug broker
+
+- **GIVEN** a changeset releases `opentray`
+- **WHEN** the native release planner infers required native work
+- **THEN** it selects the `runtime` component
+- **AND** it builds `opentray-runtime-node` rather than `opentray-bin`.
+
 ### Requirement: Runtime host SHALL accept exactly one caller session for one app identity
 
 A runtime host SHALL accept exactly one caller session for normal operation. The session is pinned to one app identity, one caller label, and one runtime host endpoint. A second connection attempt to a host that is already serving a session SHALL be rejected with a typed protocol error and SHALL NOT cause the host to aggregate or share state across callers.
