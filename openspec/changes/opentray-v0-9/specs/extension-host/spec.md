@@ -6,6 +6,8 @@
 
 The kernel SHALL provide an extension host contract that loads, registers, commands, and unloads extension instances scoped to a tray and the owning app runtime. Extension instances SHALL communicate with the kernel only through host callbacks and extension command/event payloads keyed by app runtime identity and tray identity. `Space`, `surface`, and `Lease` SHALL not cross the public extension boundary as new concepts.
 
+Dynamic extension cleanup SHALL use session vocabulary at the host contract and ABI symbol boundary. Official extensions SHALL export `opentray_ext_session_closed`, not a lease-named cleanup symbol.
+
 #### Scenario: Extension message stays tray scoped
 
 - **GIVEN** an extension instance is attached to a tray

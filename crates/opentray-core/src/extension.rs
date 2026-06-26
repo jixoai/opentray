@@ -46,9 +46,9 @@ pub trait ExtensionInstance: Send {
         envelope: ExtensionEnvelope,
         host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError>;
-    fn lease_closed(
+    fn session_closed(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError>;
 }
@@ -154,14 +154,14 @@ impl ExtensionRegistry {
         )
     }
 
-    pub fn lease_closed(
+    pub fn session_closed(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
         let mut events = Vec::new();
         for instance in self.instances.values_mut() {
-            events.extend(instance.lease_closed(lease_id, host)?);
+            events.extend(instance.session_closed(session_id, host)?);
         }
         Ok(events)
     }
@@ -199,18 +199,18 @@ impl ExtensionInstance for RecordingExtension {
         }])
     }
 
-    fn lease_closed(
+    fn session_closed(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         _host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
         Ok(vec![ExtensionEnvelope {
             scope: ExtensionScope {
-                app_id: "lease-cleanup".to_string(),
+                app_id: "session-cleanup".to_string(),
                 tray_id: None,
                 ext: self.name.clone(),
             },
-            data: serde_json::json!({ "type": "leaseClosed", "leaseId": lease_id }),
+            data: serde_json::json!({ "type": "sessionClosed", "sessionId": session_id }),
         }])
     }
 }

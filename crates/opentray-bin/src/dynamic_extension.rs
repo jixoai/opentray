@@ -17,7 +17,7 @@ use opentray_spec::{
     ExtBytes, ExtContext, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
     ExtensionScope, Rect, EXT_ABI_VERSION, EXT_API_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED,
     EXT_ERR_UNSUPPORTED, EXT_OK, EXT_SYMBOL_ABI_VERSION, EXT_SYMBOL_COMMAND, EXT_SYMBOL_DEINIT,
-    EXT_SYMBOL_FREE_STRING, EXT_SYMBOL_INIT, EXT_SYMBOL_LEASE_CLOSED,
+    EXT_SYMBOL_FREE_STRING, EXT_SYMBOL_INIT, EXT_SYMBOL_SESSION_CLOSED,
 };
 
 type ExtAbiVersionFn = unsafe extern "C" fn() -> u32;
@@ -31,10 +31,10 @@ type ExtCommandFn = unsafe extern "C" fn(
     envelope_json: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode;
-type ExtLeaseClosedFn = unsafe extern "C" fn(
+type ExtSessionClosedFn = unsafe extern "C" fn(
     instance: *mut c_void,
     context: *const ExtHostContext,
-    lease_id: ExtBytes,
+    session_id: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode;
 type ExtDeinitFn = unsafe extern "C" fn(instance: *mut c_void);
@@ -263,7 +263,7 @@ struct DynamicExtensionInstance {
     name: String,
     instance: *mut c_void,
     command: ExtCommandFn,
-    lease_closed: ExtLeaseClosedFn,
+    session_closed: ExtSessionClosedFn,
     deinit: ExtDeinitFn,
     free_string: ExtFreeStringFn,
     _library: Library,
@@ -295,8 +295,8 @@ impl DynamicExtensionInstance {
 
         let init = unsafe { get_symbol::<ExtInitFn>(&library, EXT_SYMBOL_INIT)? };
         let command = unsafe { get_symbol::<ExtCommandFn>(&library, EXT_SYMBOL_COMMAND)? };
-        let lease_closed =
-            unsafe { get_symbol::<ExtLeaseClosedFn>(&library, EXT_SYMBOL_LEASE_CLOSED)? };
+        let session_closed =
+            unsafe { get_symbol::<ExtSessionClosedFn>(&library, EXT_SYMBOL_SESSION_CLOSED)? };
         let deinit = unsafe { get_symbol::<ExtDeinitFn>(&library, EXT_SYMBOL_DEINIT)? };
         let free_string =
             unsafe { get_symbol::<ExtFreeStringFn>(&library, EXT_SYMBOL_FREE_STRING)? };
@@ -323,7 +323,7 @@ impl DynamicExtensionInstance {
             name: request.instance_name().to_string(),
             instance,
             command,
-            lease_closed,
+            session_closed,
             deinit,
             free_string,
             _library: library,
@@ -400,14 +400,14 @@ impl ExtensionInstance for DynamicExtensionInstance {
         self.read_events(output, Some(scope))
     }
 
-    fn lease_closed(
+    fn session_closed(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         host: &mut dyn CoreExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
-        let lease_id = CString::new(lease_id).map_err(|error| {
+        let session_id = CString::new(session_id).map_err(|error| {
             ExtensionError::Rejected(format!(
-                "extension {} lease id contains nul byte: {error}",
+                "extension {} session id contains nul byte: {error}",
                 self.name
             ))
         })?;
@@ -418,10 +418,10 @@ impl ExtensionInstance for DynamicExtensionInstance {
         let mut host_context = HostCallContext { host };
         let ffi_host_context = host_context.as_ffi();
         let result = unsafe {
-            (self.lease_closed)(
+            (self.session_closed)(
                 self.instance,
                 &ffi_host_context,
-                borrowed_bytes(&lease_id),
+                borrowed_bytes(&session_id),
                 &mut output,
             )
         };
@@ -793,7 +793,7 @@ mod tests {
         ])
         .unwrap_err();
 
-        assert!(missing.contains(&EXT_SYMBOL_LEASE_CLOSED));
+        assert!(missing.contains(&EXT_SYMBOL_SESSION_CLOSED));
         assert!(missing.contains(&EXT_SYMBOL_DEINIT));
     }
 

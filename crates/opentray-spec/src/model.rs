@@ -3,7 +3,6 @@ use serde_json::{Map, Value};
 
 pub type SessionId = String;
 pub type AppId = String;
-pub type LeaseId = SessionId;
 pub type TrayId = String;
 pub type MenuItemId = u32;
 

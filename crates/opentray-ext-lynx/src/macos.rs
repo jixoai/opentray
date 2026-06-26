@@ -68,7 +68,7 @@ impl MacosLynxRuntime {
         }
     }
 
-    pub(crate) fn lease_closed(&mut self, _lease_id: &str) {
+    pub(crate) fn session_closed(&mut self, _session_id: &str) {
         self.close_all();
     }
 
@@ -565,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn lease_cleanup_closes_all_slots() {
+    fn session_cleanup_closes_all_slots() {
         let mut runtime = MacosLynxRuntime::default();
         for tray_id in ["tray-1", "tray-2"] {
             let launch_root = test_dir(tray_id);
@@ -583,7 +583,7 @@ mod tests {
             );
         }
 
-        runtime.lease_closed("lease-1");
+        runtime.session_closed("session-1");
 
         assert!(runtime.slots.is_empty());
     }

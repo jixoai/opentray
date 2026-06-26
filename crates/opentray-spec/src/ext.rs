@@ -17,7 +17,7 @@ pub const EXT_ERR_INTERNAL: ExtResultCode = 3;
 pub const EXT_SYMBOL_ABI_VERSION: &str = "opentray_ext_abi_version";
 pub const EXT_SYMBOL_INIT: &str = "opentray_ext_init";
 pub const EXT_SYMBOL_COMMAND: &str = "opentray_ext_command";
-pub const EXT_SYMBOL_LEASE_CLOSED: &str = "opentray_ext_lease_closed";
+pub const EXT_SYMBOL_SESSION_CLOSED: &str = "opentray_ext_session_closed";
 pub const EXT_SYMBOL_DEINIT: &str = "opentray_ext_deinit";
 pub const EXT_SYMBOL_FREE_STRING: &str = "opentray_ext_free_string";
 
@@ -25,7 +25,7 @@ pub const REQUIRED_EXTENSION_SYMBOLS: &[&str] = &[
     EXT_SYMBOL_ABI_VERSION,
     EXT_SYMBOL_INIT,
     EXT_SYMBOL_COMMAND,
-    EXT_SYMBOL_LEASE_CLOSED,
+    EXT_SYMBOL_SESSION_CLOSED,
     EXT_SYMBOL_DEINIT,
     EXT_SYMBOL_FREE_STRING,
 ];

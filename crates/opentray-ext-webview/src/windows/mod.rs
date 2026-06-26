@@ -42,7 +42,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::ResessionCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
     GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible, IsZoomed,
@@ -635,7 +635,7 @@ impl WindowsWebviewRuntime {
         }
     }
 
-    pub(crate) fn lease_closed(&mut self, _lease_id: &str) {
+    pub(crate) fn session_closed(&mut self, _session_id: &str) {
         self.close();
     }
 
@@ -3427,7 +3427,7 @@ fn physical_system_metric(index: i32, dpi: u32) -> f64 {
 
 fn start_app_region_drag(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
     unsafe {
-        ReleaseCapture();
+        ResessionCapture();
         SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION as WPARAM, 0);
     }
     Ok(json!({ "active": true }))

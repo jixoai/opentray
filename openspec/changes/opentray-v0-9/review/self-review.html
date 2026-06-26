@@ -68,7 +68,8 @@
         </p>
         <p>
           The implementation also adds a bundler-neutral packaging contract and the first Vite adapter. Final .node
-          native-binding replacement remains a separate runtime-distribution break.
+          native-binding replacement remains a separate runtime-distribution break. Remaining public Lease aliases,
+          health fields, and extension ABI cleanup symbols were destructively renamed to Session vocabulary.
         </p>
       </section>
       <section>
@@ -100,6 +101,11 @@
             <tr>
               <td>Official native extensions</td>
               <td><code>cargo test -p opentray-ext-webview --lib</code>, <code>cargo test -p opentray-ext-lynx --lib</code>, <code>cargo test -p opentray-ext-badge --lib</code></td>
+              <td class="pass">Pass</td>
+            </tr>
+            <tr>
+              <td>Session boundary cleanup</td>
+              <td>removed-identifier residue scan, focused TS/Rust protocol and extension tests</td>
               <td class="pass">Pass</td>
             </tr>
             <tr>

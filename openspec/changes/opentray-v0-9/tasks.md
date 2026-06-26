@@ -47,3 +47,10 @@
 - [x] 7.3 Add focused tests for missing app identity, deterministic app-derived artifact naming, manifest emission, path collision failure, Vite entry resolution, and adapter metadata.
 - [x] 7.4 Add README/example coverage for the packaging contract and Vite adapter.
 - [x] 7.5 Run package-level build/typecheck/test gates and then the repo-level verification gates.
+
+## 8. Session Boundary Cleanup
+
+- [x] 8.1 Remove remaining public `LeaseId` / `leaseId` compatibility aliases from the TypeScript and Rust protocol surfaces.
+- [x] 8.2 Rename core ownership APIs, routed events, dynamic extension cleanup, and official extension ABI symbols from lease cleanup to session cleanup.
+- [x] 8.3 Rename daemon health diagnostics from `internalLeaseId` to `internalSessionId`.
+- [x] 8.4 Run focused TS and Rust tests for spec, CLI, core, broker runtime, and official extension crates.

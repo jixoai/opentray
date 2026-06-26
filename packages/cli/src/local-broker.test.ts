@@ -33,7 +33,6 @@ describe("local broker client", () => {
 
     expect(driver.spawned).toBe(1);
     expect(connection.sessionId).toBe("session-test");
-    expect(connection.leaseId).toBe("session-test");
 
     await connection.close();
   });

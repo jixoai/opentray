@@ -1,6 +1,7 @@
 use opentray_spec::{
-    is_supported_protocol_version, AppOptions, AppRef, ClientFrame, ExtensionEnvelope, LeaseId,
-    Rect, RequestId, ServerFrame, TrayBoundsKind, TrayBoundsResult, TrayEvent, PROTOCOL_VERSION,
+    is_supported_protocol_version, AppOptions, AppRef, ClientFrame, ExtensionEnvelope, Rect,
+    RequestId, ServerFrame, SessionId, TrayBoundsKind, TrayBoundsResult, TrayEvent,
+    PROTOCOL_VERSION,
 };
 
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
 
 #[derive(Debug, Clone, Default)]
 pub struct BrokerSession {
-    lease_id: Option<LeaseId>,
+    session_id: Option<SessionId>,
 }
 
 impl BrokerSession {
@@ -18,12 +19,12 @@ impl BrokerSession {
         Self::default()
     }
 
-    pub fn lease_id(&self) -> Option<&str> {
-        self.lease_id.as_deref()
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
     }
 
-    fn accept(&mut self, lease_id: LeaseId) {
-        self.lease_id = Some(lease_id);
+    fn accept(&mut self, session_id: SessionId) {
+        self.session_id = Some(session_id);
     }
 }
 
@@ -31,7 +32,7 @@ impl BrokerSession {
 pub struct BrokerKernel<B: AppBackend, L: ExtensionLoader = UnsupportedExtensionLoader> {
     kernel: Kernel<B>,
     extension_loader: L,
-    next_lease: u64,
+    next_session: u64,
     default_app: Option<AppRef>,
 }
 
@@ -69,7 +70,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         Self {
             kernel: Kernel::new(backend),
             extension_loader,
-            next_lease: 1,
+            next_session: 1,
             default_app: None,
         }
     }
@@ -110,28 +111,28 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     )];
                 }
 
-                let lease_id = session
-                    .lease_id
+                let session_id = session
+                    .session_id
                     .clone()
-                    .unwrap_or_else(|| self.allocate_lease(session));
+                    .unwrap_or_else(|| self.allocate_session(session));
                 vec![ServerFrame::Ready {
                     protocol_version: PROTOCOL_VERSION,
                     broker_version: broker_version.to_string(),
-                    session_id: lease_id,
+                    session_id: session_id,
                 }]
             }
             ClientFrame::Exit => self.close_session_with_extension_host(session, host),
             frame => {
                 let request_id = request_id(&frame);
-                // Public API calls this a session; internal lease ids remain the kernel authority token.
-                let Some(lease_id) = session.lease_id().map(ToOwned::to_owned) else {
+                // Public API calls this a session; internal session ids remain the kernel authority token.
+                let Some(session_id) = session.session_id().map(ToOwned::to_owned) else {
                     return vec![protocol_error(
                         request_id,
                         "not-initialized",
                         "init must be accepted before broker commands",
                     )];
                 };
-                self.handle_initialized_frame(&lease_id, frame, host)
+                self.handle_initialized_frame(&session_id, frame, host)
             }
         }
     }
@@ -146,12 +147,12 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         session: &mut BrokerSession,
         host: &mut dyn ExtensionHostContext,
     ) -> Vec<ServerFrame> {
-        let Some(lease_id) = session.lease_id.take() else {
+        let Some(session_id) = session.session_id.take() else {
             return Vec::new();
         };
 
-        // Disconnect cleanup must flow through the kernel so only lease-owned state is removed.
-        match self.kernel.close_lease_with_host(&lease_id, host) {
+        // Disconnect cleanup must flow through the kernel so only session-owned state is removed.
+        match self.kernel.close_session_with_host(&session_id, host) {
             Ok(events) => extension_events(events),
             Err(error) => vec![kernel_error(None, error)],
         }
@@ -163,7 +164,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
 
     fn handle_initialized_frame(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         frame: ClientFrame,
         host: &mut dyn ExtensionHostContext,
     ) -> Vec<ServerFrame> {
@@ -203,7 +204,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 request_id,
                 app,
                 tray,
-            } => match self.kernel.create_tray(lease_id.to_string(), &app, tray) {
+            } => match self.kernel.create_tray(session_id.to_string(), &app, tray) {
                 Ok(tray_id) => vec![ServerFrame::TrayCreated {
                     request_id,
                     app_id: app.app_id,
@@ -215,7 +216,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 request_id,
                 app_id,
                 tray_id,
-            } => match self.kernel.destroy_tray(lease_id, &app_id, &tray_id) {
+            } => match self.kernel.destroy_tray(session_id, &app_id, &tray_id) {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
@@ -223,7 +224,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 request_id,
                 app_id,
                 tray_id,
-            } => match self.kernel.tray_bounds(lease_id, &app_id, &tray_id) {
+            } => match self.kernel.tray_bounds(session_id, &app_id, &tray_id) {
                 Ok(bounds) => vec![ServerFrame::TrayBounds {
                     request_id,
                     app_id,
@@ -248,7 +249,10 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 app_id,
                 tray_id,
                 menu,
-            } => match self.kernel.set_tray_menu(lease_id, &app_id, &tray_id, menu) {
+            } => match self
+                .kernel
+                .set_tray_menu(session_id, &app_id, &tray_id, menu)
+            {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
@@ -257,7 +261,10 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 app_id,
                 tray_id,
                 icon,
-            } => match self.kernel.set_tray_icon(lease_id, &app_id, &tray_id, icon) {
+            } => match self
+                .kernel
+                .set_tray_icon(session_id, &app_id, &tray_id, icon)
+            {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
@@ -268,7 +275,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 tooltip,
             } => match self
                 .kernel
-                .set_tray_tooltip(lease_id, &app_id, &tray_id, tooltip)
+                .set_tray_tooltip(session_id, &app_id, &tray_id, tooltip)
             {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
@@ -282,7 +289,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
             } => {
                 let tray_bounds = self
                     .kernel
-                    .tray_bounds(lease_id, &app_id, &tray_id)
+                    .tray_bounds(session_id, &app_id, &tray_id)
                     .ok()
                     .flatten();
                 let mut scoped_host = ScopedExtensionHost {
@@ -344,11 +351,11 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         }
     }
 
-    fn allocate_lease(&mut self, session: &mut BrokerSession) -> LeaseId {
-        let lease_id = format!("lease-{}", self.next_lease);
-        self.next_lease += 1;
-        session.accept(lease_id.clone());
-        lease_id
+    fn allocate_session(&mut self, session: &mut BrokerSession) -> SessionId {
+        let session_id = format!("session-{}", self.next_session);
+        self.next_session += 1;
+        session.accept(session_id.clone());
+        session_id
     }
 }
 

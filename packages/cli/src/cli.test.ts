@@ -65,7 +65,7 @@ describe("opentray CLI", () => {
         protocolVersion: 1,
         sessionCount: 2,
         sessions: [
-          { sessionId: 1, initialized: true, internalLeaseId: "lease-1" },
+          { sessionId: 1, initialized: true, internalSessionId: "session-1" },
           { sessionId: 2, initialized: false },
         ],
       })
@@ -75,7 +75,7 @@ endpoint: /tmp/opentray.sock
 packageVersion: 0.1.0
 protocolVersion: 1
 sessions: 2
-- sessionId=1 initialized=true internalLeaseId=lease-1
-- sessionId=2 initialized=false internalLeaseId=(pending)`);
+- sessionId=1 initialized=true internalSessionId=session-1
+- sessionId=2 initialized=false internalSessionId=(pending)`);
   });
 });

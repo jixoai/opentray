@@ -4,9 +4,6 @@ export type AppId = string;
 export type TrayId = string;
 export type MenuItemId = number;
 
-/** @deprecated Use `SessionId`. */
-export type LeaseId = SessionId;
-
 export const PROTOCOL_VERSION = 1;
 export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
 export const OPENTRAY_PROTOCOL_LINE_MAJOR = 1;
@@ -345,7 +342,7 @@ export interface ExtensionEnvelope<TData = unknown> {
 
 export interface DaemonSessionHealth {
   sessionId: number;
-  internalLeaseId?: SessionId;
+  internalSessionId?: SessionId;
   initialized: boolean;
 }
 
@@ -500,7 +497,7 @@ const isDaemonHealth = (value: unknown): value is DaemonHealth => {
 const isDaemonSessionHealth = (value: unknown): value is DaemonSessionHealth =>
   isRecord(value) &&
   typeof value.sessionId === "number" &&
-  (value.internalLeaseId === undefined || typeof value.internalLeaseId === "string") &&
+  (value.internalSessionId === undefined || typeof value.internalSessionId === "string") &&
   typeof value.initialized === "boolean";
 
 const isRect = (value: unknown): value is Rect =>

@@ -367,7 +367,7 @@ impl MacosWebviewRuntime {
         }
     }
 
-    pub(crate) fn lease_closed(&mut self, _lease_id: &str) {
+    pub(crate) fn session_closed(&mut self, _session_id: &str) {
         self.close();
     }
 

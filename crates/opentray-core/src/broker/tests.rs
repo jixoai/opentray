@@ -39,26 +39,26 @@ fn init() -> ClientFrame {
 }
 
 #[test]
-fn compatible_init_accepts_session_lease() {
+fn compatible_init_accepts_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::new(backend);
     let mut session = BrokerSession::new();
 
     let frames = broker.handle_frame(&mut session, init(), "0.1.0");
 
-    assert_eq!(session.lease_id(), Some("lease-1"));
+    assert_eq!(session.session_id(), Some("session-1"));
     assert!(matches!(
         &frames[0],
         ServerFrame::Ready {
             session_id,
             protocol_version: PROTOCOL_VERSION,
             ..
-        } if session_id == "lease-1"
+        } if session_id == "session-1"
     ));
 }
 
 #[test]
-fn incompatible_init_does_not_create_lease() {
+fn incompatible_init_does_not_create_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::new(backend);
     let mut session = BrokerSession::new();
@@ -72,7 +72,7 @@ fn incompatible_init_does_not_create_lease() {
         "0.1.0",
     );
 
-    assert_eq!(session.lease_id(), None);
+    assert_eq!(session.session_id(), None);
     assert!(matches!(
         &frames[0],
         ServerFrame::Error { code, .. } if code == "incompatible-protocol"
@@ -262,7 +262,7 @@ fn get_tray_bounds_rejects_non_owner_session() {
 }
 
 #[test]
-fn disconnect_cleans_only_session_lease() {
+fn disconnect_cleans_only_current_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::new(backend.clone());
     let mut first = BrokerSession::new();
@@ -305,7 +305,7 @@ fn disconnect_cleans_only_session_lease() {
 }
 
 #[test]
-fn backend_event_routes_to_owning_lease() {
+fn backend_event_routes_to_owning_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::new(backend);
     let mut session = BrokerSession::new();
@@ -329,7 +329,7 @@ fn backend_event_routes_to_owning_lease() {
         })
         .expect("routed");
 
-    assert_eq!(routed.lease_id, "lease-1");
+    assert_eq!(routed.session_id, "session-1");
 }
 
 #[test]
@@ -503,7 +503,7 @@ fn load_ext_mount_id_isolates_instances_with_the_same_extension_name() {
 }
 
 #[test]
-fn explicit_exit_uses_extension_host_for_lease_cleanup() {
+fn explicit_exit_uses_extension_host_for_session_cleanup() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::with_extension_loader(backend, HostProbeLoader);
     let mut session = BrokerSession::new();
@@ -599,12 +599,12 @@ impl ExtensionInstance for HostProbeExtension {
         Ok(vec![envelope])
     }
 
-    fn lease_closed(
+    fn session_closed(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<opentray_spec::ExtensionEnvelope>, ExtensionError> {
-        host.invoke_host("probe", lease_id.as_bytes())?;
+        host.invoke_host("probe", session_id.as_bytes())?;
         Ok(Vec::new())
     }
 }

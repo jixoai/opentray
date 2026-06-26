@@ -304,7 +304,7 @@ describe("@opentray/spec", () => {
           endpoint: "/tmp/opentray.sock",
           sessionCount: 2,
           sessions: [
-            { sessionId: 1, internalLeaseId: "lease-1", initialized: true },
+            { sessionId: 1, internalSessionId: "session-1", initialized: true },
             { sessionId: 2, initialized: false },
           ],
         },
@@ -322,7 +322,7 @@ describe("@opentray/spec", () => {
         endpoint: "/tmp/opentray.sock",
         sessionCount: 2,
         sessions: [
-          { sessionId: 1, internalLeaseId: "lease-1", initialized: true },
+          { sessionId: 1, internalSessionId: "session-1", initialized: true },
           { sessionId: 2, initialized: false },
         ],
       },

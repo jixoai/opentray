@@ -157,10 +157,10 @@ pub unsafe extern "C" fn opentray_ext_command(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn opentray_ext_lease_closed(
+pub unsafe extern "C" fn opentray_ext_session_closed(
     _instance: *mut c_void,
     _context: *const ExtHostContext,
-    _lease_id: ExtBytes,
+    _session_id: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
     write_owned_json(out_events_json, "[]")

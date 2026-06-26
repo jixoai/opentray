@@ -48,7 +48,7 @@ New public examples and public APIs SHALL use `app`, `tray`, and `session` frame
 
 ### Requirement: Kernel SHALL route tray commands without a shared app projection step
 
-The kernel SHALL translate accepted client command frames into `opentray-core::Kernel` operations without deriving a multi-session projection. Tray creation, tray mutation, tray destruction, lease cleanup, extension commands, and backend-originated events SHALL use kernel ownership checks keyed by session authority and tray identity rather than reimplementing policy in the transport layer.
+The kernel SHALL translate accepted client command frames into `opentray-core::Kernel` operations without deriving a multi-session projection. Tray creation, tray mutation, tray destruction, session cleanup, extension commands, and backend-originated events SHALL use kernel ownership checks keyed by session authority and tray identity rather than reimplementing policy in the transport layer.
 
 #### Scenario: Create tray dispatches without shared projection
 

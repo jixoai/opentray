@@ -25,8 +25,6 @@ export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
   readonly callerLabel: string;
   readonly sessionId: string;
-  /** @deprecated Use `sessionId`. */
-  readonly leaseId: string;
   onEvent(listener: (frame: LocalRuntimeEventFrame) => void): () => void;
   close(): Promise<void>;
 }
@@ -91,8 +89,6 @@ class LocalBrokerConnection implements LocalBrokerClient {
   readonly endpoint: string;
   readonly callerLabel: string;
   sessionId = "";
-  /** @deprecated Use `sessionId`. */
-  leaseId = "";
 
   private buffer = "";
   private readonly listeners = new Set<(frame: LocalRuntimeEventFrame) => void>();
@@ -134,7 +130,6 @@ class LocalBrokerConnection implements LocalBrokerClient {
     });
     const frame = await ready;
     this.sessionId = frame.sessionId;
-    this.leaseId = frame.sessionId;
   }
 
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {

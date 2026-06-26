@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use opentray_spec::{
-    AppId, AppOptions, AppRef, ExtensionEnvelope, Icon, LeaseId, Menu, Rect, Tooltip, TrayEvent,
+    AppId, AppOptions, AppRef, ExtensionEnvelope, Icon, Menu, Rect, SessionId, Tooltip, TrayEvent,
     TrayId, TrayOptions,
 };
 use serde_json::Value;
@@ -17,9 +17,9 @@ pub enum KernelError {
     AppNotFound(AppId),
     #[error("tray not found: {app_id}/{tray_id}")]
     TrayNotFound { app_id: AppId, tray_id: TrayId },
-    #[error("lease does not own tray: {lease_id} {app_id}/{tray_id}")]
-    LeaseMismatch {
-        lease_id: LeaseId,
+    #[error("session does not own tray: {session_id} {app_id}/{tray_id}")]
+    SessionMismatch {
+        session_id: SessionId,
         app_id: AppId,
         tray_id: TrayId,
     },
@@ -31,7 +31,7 @@ pub enum KernelError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutedEvent {
-    pub lease_id: LeaseId,
+    pub session_id: SessionId,
     pub event: TrayEvent,
 }
 
@@ -43,7 +43,7 @@ struct AppState {
 
 #[derive(Debug, Clone)]
 struct TrayState {
-    lease_id: LeaseId,
+    session_id: SessionId,
     app_id: AppId,
     tray_id: TrayId,
     options: TrayOptions,
@@ -108,7 +108,7 @@ impl<B: AppBackend> Kernel<B> {
 
     pub fn create_tray(
         &mut self,
-        lease_id: LeaseId,
+        session_id: SessionId,
         app: &AppRef,
         options: TrayOptions,
     ) -> Result<TrayId, KernelError> {
@@ -117,7 +117,7 @@ impl<B: AppBackend> Kernel<B> {
         self.trays.insert(
             (app.app_id.clone(), tray_id.clone()),
             TrayState {
-                lease_id,
+                session_id,
                 app_id: app.app_id.clone(),
                 tray_id: tray_id.clone(),
                 options,
@@ -129,12 +129,12 @@ impl<B: AppBackend> Kernel<B> {
 
     pub fn set_tray_menu(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         app_id: &str,
         tray_id: &str,
         menu: Menu,
     ) -> Result<(), KernelError> {
-        let tray = self.require_owned_tray_mut(lease_id, app_id, tray_id)?;
+        let tray = self.require_owned_tray_mut(session_id, app_id, tray_id)?;
         tray.options.menu = Some(menu);
         self.sync_app(app_id)?;
         Ok(())
@@ -142,12 +142,12 @@ impl<B: AppBackend> Kernel<B> {
 
     pub fn set_tray_icon(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         app_id: &str,
         tray_id: &str,
         icon: Icon,
     ) -> Result<(), KernelError> {
-        let tray = self.require_owned_tray_mut(lease_id, app_id, tray_id)?;
+        let tray = self.require_owned_tray_mut(session_id, app_id, tray_id)?;
         tray.options.icon = Some(icon);
         self.sync_app(app_id)?;
         Ok(())
@@ -155,12 +155,12 @@ impl<B: AppBackend> Kernel<B> {
 
     pub fn set_tray_tooltip(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         app_id: &str,
         tray_id: &str,
         tooltip: Tooltip,
     ) -> Result<(), KernelError> {
-        let tray = self.require_owned_tray_mut(lease_id, app_id, tray_id)?;
+        let tray = self.require_owned_tray_mut(session_id, app_id, tray_id)?;
         tray.options.tooltip = Some(tooltip);
         self.sync_app(app_id)?;
         Ok(())
@@ -168,11 +168,11 @@ impl<B: AppBackend> Kernel<B> {
 
     pub fn destroy_tray(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         app_id: &str,
         tray_id: &str,
     ) -> Result<(), KernelError> {
-        self.require_owned_tray_mut(lease_id, app_id, tray_id)?;
+        self.require_owned_tray_mut(session_id, app_id, tray_id)?;
         self.trays
             .remove(&(app_id.to_string(), tray_id.to_string()));
         self.sync_app(app_id)?;
@@ -182,37 +182,40 @@ impl<B: AppBackend> Kernel<B> {
     /// Tray bounds are routed by tray identity instead of by one ambiguous space-wide rect.
     pub fn tray_bounds(
         &self,
-        lease_id: &str,
+        session_id: &str,
         app_id: &str,
         tray_id: &str,
     ) -> Result<Option<Rect>, KernelError> {
-        self.require_owned_tray(lease_id, app_id, tray_id)?;
+        self.require_owned_tray(session_id, app_id, tray_id)?;
         self.backend
             .tray_bounds(&app_id.to_string(), &tray_id.to_string())
             .map_err(|error| KernelError::Backend(error.to_string()))
     }
 
-    pub fn close_lease(&mut self, lease_id: &str) -> Result<Vec<ExtensionEnvelope>, KernelError> {
+    pub fn close_session(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
         let mut host = UnsupportedExtensionHostContext;
-        self.close_lease_with_host(lease_id, &mut host)
+        self.close_session_with_host(session_id, &mut host)
     }
 
-    pub fn close_lease_with_host(
+    pub fn close_session_with_host(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
         let affected: Vec<_> = self
             .trays
             .values()
-            .filter(|tray| tray.lease_id == lease_id)
+            .filter(|tray| tray.session_id == session_id)
             .map(|tray| tray.app_id.clone())
             .collect();
-        self.trays.retain(|_, tray| tray.lease_id != lease_id);
+        self.trays.retain(|_, tray| tray.session_id != session_id);
         for app_id in affected {
             self.sync_app(&app_id)?;
         }
-        Ok(self.extensions.lease_closed(lease_id, host)?)
+        Ok(self.extensions.session_closed(session_id, host)?)
     }
 
     pub fn route_event(&self, event: TrayEvent) -> Option<RoutedEvent> {
@@ -231,7 +234,7 @@ impl<B: AppBackend> Kernel<B> {
                 .trays
                 .get(&(app_id.clone(), tray_id.clone()))
                 .map(|tray| RoutedEvent {
-                    lease_id: tray.lease_id.clone(),
+                    session_id: tray.session_id.clone(),
                     event,
                 }),
             TrayEvent::Ready { .. } => None,
@@ -309,14 +312,14 @@ impl<B: AppBackend> Kernel<B> {
 
     fn require_owned_tray(
         &self,
-        lease_id: &str,
+        session_id: &str,
         app_id: &str,
         tray_id: &str,
     ) -> Result<&TrayState, KernelError> {
         let tray = self.require_tray(app_id, tray_id)?;
-        if tray.lease_id != lease_id {
-            return Err(KernelError::LeaseMismatch {
-                lease_id: lease_id.to_string(),
+        if tray.session_id != session_id {
+            return Err(KernelError::SessionMismatch {
+                session_id: session_id.to_string(),
                 app_id: app_id.to_string(),
                 tray_id: tray_id.to_string(),
             });
@@ -326,7 +329,7 @@ impl<B: AppBackend> Kernel<B> {
 
     fn require_owned_tray_mut(
         &mut self,
-        lease_id: &str,
+        session_id: &str,
         app_id: &str,
         tray_id: &str,
     ) -> Result<&mut TrayState, KernelError> {
@@ -337,9 +340,9 @@ impl<B: AppBackend> Kernel<B> {
                 app_id: app_id.to_string(),
                 tray_id: tray_id.to_string(),
             })?;
-        if tray.lease_id != lease_id {
-            return Err(KernelError::LeaseMismatch {
-                lease_id: lease_id.to_string(),
+        if tray.session_id != session_id {
+            return Err(KernelError::SessionMismatch {
+                session_id: session_id.to_string(),
                 app_id: app_id.to_string(),
                 tray_id: tray_id.to_string(),
             });
@@ -383,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn lease_close_removes_only_owned_trays() {
+    fn session_close_removes_only_owned_trays() {
         let backend = FakeBackend::new(BackendCapabilities::full());
         let mut kernel = Kernel::new(backend.clone());
         let surface = kernel
@@ -395,13 +398,21 @@ mod tests {
             })
             .expect("surface");
         kernel
-            .create_tray("lease-a".to_string(), &surface, tray_options("tray-a", "A"))
+            .create_tray(
+                "session-a".to_string(),
+                &surface,
+                tray_options("tray-a", "A"),
+            )
             .expect("tray a");
         kernel
-            .create_tray("lease-b".to_string(), &surface, tray_options("tray-b", "B"))
+            .create_tray(
+                "session-b".to_string(),
+                &surface,
+                tray_options("tray-b", "B"),
+            )
             .expect("tray b");
 
-        kernel.close_lease("lease-a").expect("close lease");
+        kernel.close_session("session-a").expect("close session");
 
         let projection = kernel.projection(&surface.app_id).expect("projection");
         assert_eq!(projection.trays.len(), 1);
@@ -409,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_event_routes_to_owning_lease() {
+    fn menu_event_routes_to_owning_session() {
         let backend = FakeBackend::new(BackendCapabilities::full());
         let mut kernel = Kernel::new(backend);
         let surface = kernel
@@ -422,7 +433,7 @@ mod tests {
             .expect("surface");
         kernel
             .create_tray(
-                "lease-a".to_string(),
+                "session-a".to_string(),
                 &surface,
                 tray_options("same-item", "A"),
             )
@@ -436,7 +447,7 @@ mod tests {
             })
             .expect("routed");
 
-        assert_eq!(routed.lease_id, "lease-a");
+        assert_eq!(routed.session_id, "session-a");
     }
 
     #[test]
@@ -462,7 +473,7 @@ mod tests {
             }],
         });
         kernel
-            .create_tray("lease-a".to_string(), &surface, options)
+            .create_tray("session-a".to_string(), &surface, options)
             .expect("tray");
 
         let projection = kernel.projection(&surface.app_id).expect("projection");
@@ -490,7 +501,7 @@ mod tests {
             .expect("surface");
         kernel
             .create_tray(
-                "plugin-lease".to_string(),
+                "plugin-session".to_string(),
                 &surface,
                 tray_options("plugin", "Plugin"),
             )
@@ -514,7 +525,11 @@ mod tests {
             })
             .expect("surface");
         kernel
-            .create_tray("lease".to_string(), &surface, tray_options("tray", "Tray"))
+            .create_tray(
+                "session".to_string(),
+                &surface,
+                tray_options("tray", "Tray"),
+            )
             .expect("tray");
 
         assert!(backend
@@ -536,7 +551,11 @@ mod tests {
             })
             .expect("surface");
         kernel
-            .create_tray("lease".to_string(), &surface, tray_options("tray", "Tray"))
+            .create_tray(
+                "session".to_string(),
+                &surface,
+                tray_options("tray", "Tray"),
+            )
             .expect("tray");
         kernel.extensions_mut().register(
             surface.app_id.clone(),
@@ -571,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn non_menu_events_are_not_routed_to_arbitrary_leases() {
+    fn non_menu_events_are_not_routed_to_arbitrary_sessions() {
         let backend = FakeBackend::new(BackendCapabilities::full());
         let kernel = Kernel::new(backend);
         let routed = kernel.route_event(TrayEvent::TrayClick {
@@ -585,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn tray_click_event_routes_to_owning_lease() {
+    fn tray_click_event_routes_to_owning_session() {
         let backend = FakeBackend::new(BackendCapabilities::full());
         let mut kernel = Kernel::new(backend);
         let surface = kernel
@@ -598,7 +617,7 @@ mod tests {
             .expect("surface");
         kernel
             .create_tray(
-                "lease-a".to_string(),
+                "session-a".to_string(),
                 &surface,
                 tray_options("status", "Status"),
             )
@@ -614,11 +633,11 @@ mod tests {
             })
             .expect("routed");
 
-        assert_eq!(routed.lease_id, "lease-a");
+        assert_eq!(routed.session_id, "session-a");
     }
 
     #[test]
-    fn destroy_tray_requires_owning_lease() {
+    fn destroy_tray_requires_owning_session() {
         let backend = FakeBackend::new(BackendCapabilities::full());
         let mut kernel = Kernel::new(backend);
         let surface = kernel
@@ -631,17 +650,17 @@ mod tests {
             .expect("surface");
         kernel
             .create_tray(
-                "lease-a".to_string(),
+                "session-a".to_string(),
                 &surface,
                 tray_options("tray", "Tray"),
             )
             .expect("tray");
 
         let error = kernel
-            .destroy_tray("lease-b", &surface.app_id, "tray")
-            .expect_err("wrong lease rejected");
+            .destroy_tray("session-b", &surface.app_id, "tray")
+            .expect_err("wrong session rejected");
 
-        assert!(matches!(error, KernelError::LeaseMismatch { .. }));
+        assert!(matches!(error, KernelError::SessionMismatch { .. }));
         assert_eq!(
             kernel
                 .projection(&surface.app_id)
@@ -653,7 +672,7 @@ mod tests {
     }
 
     #[test]
-    fn tray_bounds_require_owning_lease() {
+    fn tray_bounds_require_owning_session() {
         let backend = FakeBackend::new(BackendCapabilities::full());
         let mut kernel = Kernel::new(backend);
         let surface = kernel
@@ -666,17 +685,17 @@ mod tests {
             .expect("surface");
         kernel
             .create_tray(
-                "lease-a".to_string(),
+                "session-a".to_string(),
                 &surface,
                 tray_options("tray", "Tray"),
             )
             .expect("tray");
 
         let error = kernel
-            .tray_bounds("lease-b", &surface.app_id, "tray")
-            .expect_err("wrong lease rejected");
+            .tray_bounds("session-b", &surface.app_id, "tray")
+            .expect_err("wrong session rejected");
 
-        assert!(matches!(error, KernelError::LeaseMismatch { .. }));
+        assert!(matches!(error, KernelError::SessionMismatch { .. }));
     }
 
     #[test]
@@ -693,14 +712,14 @@ mod tests {
             .expect("surface");
         kernel
             .create_tray(
-                "lease-a".to_string(),
+                "session-a".to_string(),
                 &surface,
                 tray_options("tray", "Tray"),
             )
             .expect("tray");
 
         let bounds = kernel
-            .tray_bounds("lease-a", &surface.app_id, "tray")
+            .tray_bounds("session-a", &surface.app_id, "tray")
             .expect("tray bounds");
 
         assert_eq!(

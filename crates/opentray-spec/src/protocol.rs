@@ -14,11 +14,11 @@ pub type RequestId = String;
 pub struct DaemonSessionHealth {
     pub session_id: u64,
     #[serde(
-        rename = "internalLeaseId",
+        rename = "internalSessionId",
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub internal_lease_id: Option<SessionId>,
+    pub internal_session_id: Option<SessionId>,
     pub initialized: bool,
 }
 
@@ -541,12 +541,12 @@ mod tests {
                 sessions: vec![
                     DaemonSessionHealth {
                         session_id: 1,
-                        internal_lease_id: Some("lease-1".to_string()),
+                        internal_session_id: Some("session-1".to_string()),
                         initialized: true,
                     },
                     DaemonSessionHealth {
                         session_id: 2,
-                        internal_lease_id: None,
+                        internal_session_id: None,
                         initialized: false,
                     },
                 ],
@@ -575,7 +575,7 @@ mod tests {
                     "sessions": [
                         {
                             "sessionId": 1,
-                            "internalLeaseId": "lease-1",
+                            "internalSessionId": "session-1",
                             "initialized": true
                         },
                         {

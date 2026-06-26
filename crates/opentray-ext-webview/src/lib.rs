@@ -226,7 +226,7 @@ impl UnsupportedWebviewRuntime {
         ))
     }
 
-    fn lease_closed(&mut self, _lease_id: &str) {}
+    fn session_closed(&mut self, _session_id: &str) {}
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -521,20 +521,20 @@ pub unsafe extern "C" fn opentray_ext_command(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn opentray_ext_lease_closed(
+pub unsafe extern "C" fn opentray_ext_session_closed(
     instance: *mut c_void,
     _context: *const ExtHostContext,
-    lease_id: ExtBytes,
+    session_id: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
     if instance.is_null() {
         return EXT_ERR_REJECTED;
     }
-    let Some(lease_id) = (unsafe { read_ext_string(lease_id) }) else {
+    let Some(session_id) = (unsafe { read_ext_string(session_id) }) else {
         return EXT_ERR_REJECTED;
     };
     let extension = unsafe { &mut *instance.cast::<WebviewExtension>() };
-    extension.runtime.lease_closed(&lease_id);
+    extension.runtime.session_closed(&session_id);
     write_owned_json(out_events_json, "[]")
 }
 
@@ -1447,7 +1447,7 @@ mod tests {
     }
 
     #[test]
-    fn lease_closed_returns_empty_event_array() {
+    fn session_closed_returns_empty_event_array() {
         let instance = Box::into_raw(Box::new(WebviewExtension {
             app_id: "surface-1".to_string(),
             runtime: WebviewRuntime::default(),
@@ -1459,12 +1459,12 @@ mod tests {
         };
 
         let result = unsafe {
-            opentray_ext_lease_closed(
+            opentray_ext_session_closed(
                 instance,
                 &unsupported_host_context(),
                 ExtBytes {
-                    ptr: c"lease-1".as_ptr(),
-                    len: "lease-1".len(),
+                    ptr: c"session-1".as_ptr(),
+                    len: "session-1".len(),
                 },
                 &mut output,
             )

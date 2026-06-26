@@ -5,8 +5,8 @@
 - Change: `opentray-v0-9`
 - Iteration: 1
 - Recurring issue counts: none
-- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset plus the first packaging-plugin contract and Vite adapter. Final `.node` native-binding replacement remains a future runtime-distribution change, but v0.9 now has the required app-manifest staging law and first bundler adapter.
-- Next loop action: run `openspec:vision -- check`, final whitespace/status review, then commit if no new issue appears.
+- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset, the first packaging-plugin contract and Vite adapter, and the session-boundary cleanup that removes remaining public `Lease` aliases/ABI names. Final `.node` native-binding replacement remains a future runtime-distribution change, but v0.9 now has the required app-manifest staging law and first bundler adapter.
+- Next loop action: run `openspec:vision -- check`, final whitespace/status review, then commit the session-boundary cleanup if no new issue appears.
 
 ## Intent Alignment
 
@@ -19,6 +19,7 @@
 | Model responsive icon projection in one `icon` field | `packages/spec/src/index.ts`, `packages/spec/src/index.test.ts`, `crates/opentray-spec/src/model.rs`, `crates/opentray-backend-tray-icon/src/projection.rs`, `pnpm --filter @opentray/spec test`, `cargo test -p opentray-spec --lib`, `cargo test -p opentray-backend-tray-icon --lib` | Aligned |
 | Rename internal backend law from surface projection to app projection | `crates/opentray-core/src/backend.rs`, `crates/opentray-backend-tray-icon/src/projection.rs`, `cargo test -p opentray-backend-tray-icon --lib` | Aligned |
 | Align official extension scope with app/tray identity | `crates/opentray-spec/src/ext.rs`, `crates/opentray-ext-webview/src/lib.rs`, `crates/opentray-ext-lynx/src/lib.rs`, `crates/opentray-ext-badge/src/lib.rs`; focused extension tests | Aligned |
+| Remove remaining public Lease aliases and ABI names | `packages/spec/src/index.ts`, `crates/opentray-spec/src/model.rs`, `crates/opentray-core/src/kernel.rs`, `crates/opentray-core/src/extension.rs`, `crates/opentray-bin/src/dynamic_extension.rs`, focused TS/Rust tests | Aligned |
 | Update docs and OpenSpec task ledger | `README.md`, package READMEs, `openspec/changes/opentray-v0-9/tasks.md`, `plans/plan.md` | Aligned |
 | Define packaging contract and first Vite adapter | `packages/packaging/src/index.ts`, `packages/vite-plugin/src/index.ts`, package READMEs/examples, `pnpm --filter @opentray/packaging test`, `pnpm --filter @opentray/vite-plugin test`, `pnpm run verify` | Aligned |
 
@@ -48,6 +49,10 @@
   - `pnpm --filter @opentray/vite-plugin build`
   - `pnpm --filter @opentray/vite-plugin typecheck`
   - `pnpm --filter @opentray/vite-plugin test`
+  - `pnpm --filter @opentray/spec typecheck`
+  - `pnpm --filter @opentray/spec test`
+  - `pnpm --filter opentray typecheck`
+  - `pnpm --filter opentray test`
   - `cargo test -p opentray-spec --lib`
   - `cargo test -p opentray-core --lib`
   - `cargo test -p opentray-backend-tray-icon --lib`

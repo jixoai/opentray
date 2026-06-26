@@ -41,7 +41,7 @@ impl UnsupportedLynxRuntime {
         }
     }
 
-    fn lease_closed(&mut self, _lease_id: &str) {}
+    fn session_closed(&mut self, _session_id: &str) {}
 }
 
 #[derive(Debug)]
@@ -142,20 +142,20 @@ pub unsafe extern "C" fn opentray_ext_command(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn opentray_ext_lease_closed(
+pub unsafe extern "C" fn opentray_ext_session_closed(
     instance: *mut c_void,
     _context: *const ExtHostContext,
-    lease_id: ExtBytes,
+    session_id: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
     if instance.is_null() {
         return EXT_ERR_REJECTED;
     }
-    let Some(lease_id) = (unsafe { read_ext_string(lease_id) }) else {
+    let Some(session_id) = (unsafe { read_ext_string(session_id) }) else {
         return EXT_ERR_REJECTED;
     };
     let extension = unsafe { &mut *instance.cast::<LynxExtension>() };
-    extension.runtime.lease_closed(&lease_id);
+    extension.runtime.session_closed(&session_id);
     write_owned_json(out_events_json, "[]")
 }
 

@@ -286,7 +286,7 @@ mod native_broker {
                     let already_serving = self
                         .sessions
                         .values()
-                        .any(|session| session.broker.lease_id().is_some());
+                        .any(|session| session.broker.session_id().is_some());
                     if already_serving {
                         let mut session = broker_transport::TransportSession {
                             writer,
@@ -369,7 +369,7 @@ mod native_broker {
                 return;
             };
             for session in self.sessions.values_mut() {
-                if session.broker.lease_id() == Some(routed.lease_id.as_str()) {
+                if session.broker.session_id() == Some(routed.session_id.as_str()) {
                     session.write_frame(ServerFrame::Event {
                         event: routed.event.clone(),
                     });
