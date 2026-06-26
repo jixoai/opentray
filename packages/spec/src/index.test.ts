@@ -69,7 +69,7 @@ describe("@opentray/spec", () => {
           source: "backend.nativeTrayBounds",
           rect: { x: 10, y: 20, width: 24, height: 24 },
         },
-      }),
+      })
     );
 
     expect(request.trayId).toBe("tray-1");
@@ -89,7 +89,9 @@ describe("@opentray/spec", () => {
 
   it("accepts primary-event menu items without changing menuClick events", () => {
     const menu: Menu = {
-      items: [{ type: "item", id: 8, title: "Show Window", primaryEvent: true }],
+      items: [
+        { type: "item", id: 8, title: "Show Window", primaryEvent: true },
+      ],
     };
     const parsed = parseServerFrame(
       JSON.stringify({
@@ -100,7 +102,7 @@ describe("@opentray/spec", () => {
           trayId: "daemon-status",
           itemId: 8,
         },
-      }),
+      })
     );
 
     expect(menu.items[0]).toEqual({
@@ -140,30 +142,46 @@ describe("@opentray/spec", () => {
   });
 
   it("formats endpoint identity with package, protocol versions, and caller label", () => {
-    const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0", callerLabel: "myapp" });
+    const identity = createBrokerEndpointIdentity({
+      packageVersion: "0.1.0",
+      callerLabel: "myapp",
+    });
 
     expect(identity.callerLabel).toBe("myapp");
     expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1-myapp");
     expect(formatBrokerStateRoot("/Users/example", identity)).toBe(
-      "/Users/example/.opentray/0.1.0/myapp",
+      "/Users/example/.opentray/0.1.0/myapp"
     );
     expect(formatUnixSocketPath("/Users/example", identity)).toBe(
-      "/Users/example/.opentray/0.1.0/myapp/opentray-p1.sock",
+      "/Users/example/.opentray/0.1.0/myapp/opentray-p1.sock"
     );
-    expect(formatWindowsPipeName(identity)).toBe("\\\\.\\pipe\\opentray-0.1.0-p1-myapp");
+    expect(formatWindowsPipeName(identity)).toBe(
+      "\\\\.\\pipe\\opentray-0.1.0-p1-myapp"
+    );
   });
 
   it("falls back to the neutral caller label and keeps identities distinct per caller", () => {
     const implicit = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
-    const explicit = createBrokerEndpointIdentity({ packageVersion: "0.1.0", callerLabel: "myapp" });
+    const explicit = createBrokerEndpointIdentity({
+      packageVersion: "0.1.0",
+      callerLabel: "myapp",
+    });
 
     expect(implicit.callerLabel).toBe("opentray");
-    expect(formatBrokerEndpointName(implicit)).not.toBe(formatBrokerEndpointName(explicit));
+    expect(formatBrokerEndpointName(implicit)).not.toBe(
+      formatBrokerEndpointName(explicit)
+    );
   });
 
   it("sanitizes unsafe caller labels without collapsing distinct inputs", () => {
-    const safe = createBrokerEndpointIdentity({ packageVersion: "0.1.0", callerLabel: "My App!" });
-    const empty = createBrokerEndpointIdentity({ packageVersion: "0.1.0", callerLabel: "!!!" });
+    const safe = createBrokerEndpointIdentity({
+      packageVersion: "0.1.0",
+      callerLabel: "My App!",
+    });
+    const empty = createBrokerEndpointIdentity({
+      packageVersion: "0.1.0",
+      callerLabel: "!!!",
+    });
 
     expect(safe.callerLabel).toBe("my-app");
     expect(empty.callerLabel).toBe("opentray");
@@ -171,17 +189,21 @@ describe("@opentray/spec", () => {
 
   it("formats extension-agnostic protocol-line dist-tags", () => {
     expect(OPENTRAY_PROTOCOL_FAMILY).toBe("opentray-protocol");
-    expect(formatOpenTrayProtocolLine(OPENTRAY_PROTOCOL_LINE)).toBe("opentray-protocol/1.1");
+    expect(formatOpenTrayProtocolLine(OPENTRAY_PROTOCOL_LINE)).toBe(
+      "opentray-protocol/1.1"
+    );
     expect(
       formatOpenTrayProtocolLine({
         family: OPENTRAY_PROTOCOL_FAMILY,
         major: 1,
         minor: 2,
-      }),
+      })
     ).toBe("opentray-protocol/1.2");
     expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-1");
     expect(formatProtocolDistTag({ channel: "alpha" })).toBe("alpha-1-1");
-    expect(formatProtocolDistTag({ channel: "stable", major: 1, minor: 2 })).toBe("stable-1-2");
+    expect(
+      formatProtocolDistTag({ channel: "stable", major: 1, minor: 2 })
+    ).toBe("stable-1-2");
     expect(parseProtocolDistTag("stable-1-0")).toEqual({
       channel: "stable",
       major: 1,
@@ -195,10 +217,26 @@ describe("@opentray/spec", () => {
   });
 
   it("treats newer minor lines as backward-compatible within the same major", () => {
-    const stable12 = { family: OPENTRAY_PROTOCOL_FAMILY, major: 1, minor: 2 } as const;
-    const stable11 = { family: OPENTRAY_PROTOCOL_FAMILY, major: 1, minor: 1 } as const;
-    const stable10 = { family: OPENTRAY_PROTOCOL_FAMILY, major: 1, minor: 0 } as const;
-    const stable20 = { family: OPENTRAY_PROTOCOL_FAMILY, major: 2, minor: 0 } as const;
+    const stable12 = {
+      family: OPENTRAY_PROTOCOL_FAMILY,
+      major: 1,
+      minor: 2,
+    } as const;
+    const stable11 = {
+      family: OPENTRAY_PROTOCOL_FAMILY,
+      major: 1,
+      minor: 1,
+    } as const;
+    const stable10 = {
+      family: OPENTRAY_PROTOCOL_FAMILY,
+      major: 1,
+      minor: 0,
+    } as const;
+    const stable20 = {
+      family: OPENTRAY_PROTOCOL_FAMILY,
+      major: 2,
+      minor: 0,
+    } as const;
 
     expect(compareOpenTrayProtocolLine(stable12, stable11)).toBeGreaterThan(0);
     expect(compareOpenTrayProtocolLine(stable11, stable12)).toBeLessThan(0);
@@ -211,10 +249,10 @@ describe("@opentray/spec", () => {
 
   it("rejects extension-specific protocol-line dist-tags", () => {
     expect(() => parseProtocolDistTag("stable-webview-1-0")).toThrow(
-      "invalid OpenTray protocol dist-tag",
+      "invalid OpenTray protocol dist-tag"
     );
     expect(() => parseProtocolDistTag("alpha-lynx-1-0")).toThrow(
-      "invalid OpenTray protocol dist-tag",
+      "invalid OpenTray protocol dist-tag"
     );
   });
 
@@ -229,14 +267,20 @@ describe("@opentray/spec", () => {
   });
 
   it("rejects ready frames without explicit protocol metadata", () => {
-    const parsed = parseServerFrame(JSON.stringify({ type: "ready", version: PROTOCOL_VERSION }));
+    const parsed = parseServerFrame(
+      JSON.stringify({ type: "ready", version: PROTOCOL_VERSION })
+    );
 
     expect(parsed.ok).toBe(false);
   });
 
   it("requires session metadata in ready frames", () => {
     const parsed = parseServerFrame(
-      JSON.stringify({ type: "ready", protocolVersion: PROTOCOL_VERSION, brokerVersion: "0.1.0" }),
+      JSON.stringify({
+        type: "ready",
+        protocolVersion: PROTOCOL_VERSION,
+        brokerVersion: "0.1.0",
+      })
     );
 
     expect(parsed.ok).toBe(false);
@@ -258,7 +302,7 @@ describe("@opentray/spec", () => {
         type: "surface-created",
         requestId: "req-legacy",
         surface: { surfaceId: "surface-legacy", appId: "app" },
-      }),
+      })
     );
 
     expect(legacy.ok).toBe(false);
@@ -268,7 +312,7 @@ describe("@opentray/spec", () => {
         type: "app-created",
         requestId: "req-1",
         app: { appId: "app-1" },
-      }),
+      })
     );
 
     expect(parsed.ok).toBe(true);
@@ -286,40 +330,42 @@ describe("@opentray/spec", () => {
         requestId: "req-1",
         code: "not-initialized",
         message: "init required",
-      }),
+      })
     );
 
     expect(parsed.ok).toBe(true);
   });
 
-  it("parses daemon health responses", () => {
+  it("parses runtime host health responses", () => {
     const parsed = parseServerFrame(
       JSON.stringify({
-        type: "daemon-health",
+        type: "runtime-host-health",
         requestId: "req-health",
         health: {
           pid: 12345,
           packageVersion: "0.1.0",
           protocolVersion: PROTOCOL_VERSION,
           endpoint: "/tmp/opentray.sock",
+          callerLabel: "myapp",
           sessionCount: 2,
           sessions: [
             { sessionId: 1, internalSessionId: "session-1", initialized: true },
             { sessionId: 2, initialized: false },
           ],
         },
-      }),
+      })
     );
 
     expect(parsed.ok).toBe(true);
     expect(parsed.frame).toEqual({
-      type: "daemon-health",
+      type: "runtime-host-health",
       requestId: "req-health",
       health: {
         pid: 12345,
         packageVersion: "0.1.0",
         protocolVersion: PROTOCOL_VERSION,
         endpoint: "/tmp/opentray.sock",
+        callerLabel: "myapp",
         sessionCount: 2,
         sessions: [
           { sessionId: 1, internalSessionId: "session-1", initialized: true },
@@ -339,7 +385,7 @@ describe("@opentray/spec", () => {
           trayId: "daemon-status",
           itemId: 99,
         },
-      }),
+      })
     );
 
     expect(parsed.ok).toBe(true);
@@ -366,7 +412,7 @@ describe("@opentray/spec", () => {
           x: 10,
           y: 20,
         },
-      }),
+      })
     );
     const missingTray = parseServerFrame(
       JSON.stringify({
@@ -378,7 +424,7 @@ describe("@opentray/spec", () => {
           x: 10,
           y: 20,
         },
-      }),
+      })
     );
 
     expect(parsed.ok).toBe(true);
@@ -395,7 +441,7 @@ describe("@opentray/spec", () => {
           tray_id: "daemon-status",
           item_id: 99,
         },
-      }),
+      })
     );
 
     expect(parsed.ok).toBe(false);

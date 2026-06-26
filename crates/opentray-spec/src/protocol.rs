@@ -11,7 +11,7 @@ pub type RequestId = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DaemonSessionHealth {
+pub struct RuntimeHostSessionHealth {
     pub session_id: u64,
     #[serde(
         rename = "internalSessionId",
@@ -24,14 +24,14 @@ pub struct DaemonSessionHealth {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DaemonHealth {
+pub struct RuntimeHostHealth {
     pub pid: u32,
     pub package_version: String,
     pub protocol_version: u32,
     pub endpoint: String,
     pub caller_label: String,
     pub session_count: usize,
-    pub sessions: Vec<DaemonSessionHealth>,
+    pub sessions: Vec<RuntimeHostSessionHealth>,
 }
 
 /// Neutral caller label used when no usable caller identity can be derived.
@@ -322,10 +322,10 @@ pub enum ServerFrame {
         request_id: RequestId,
         events: Vec<ExtensionEnvelope>,
     },
-    DaemonHealth {
+    RuntimeHostHealth {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        health: DaemonHealth,
+        health: RuntimeHostHealth,
     },
     Event {
         event: TrayEvent,
@@ -529,9 +529,9 @@ mod tests {
         let request = ClientFrame::Health {
             request_id: "req-health".to_string(),
         };
-        let response = ServerFrame::DaemonHealth {
+        let response = ServerFrame::RuntimeHostHealth {
             request_id: "req-health".to_string(),
-            health: DaemonHealth {
+            health: RuntimeHostHealth {
                 pid: 12345,
                 package_version: "0.1.0".to_string(),
                 protocol_version: PROTOCOL_VERSION,
@@ -539,12 +539,12 @@ mod tests {
                 caller_label: "myapp".to_string(),
                 session_count: 2,
                 sessions: vec![
-                    DaemonSessionHealth {
+                    RuntimeHostSessionHealth {
                         session_id: 1,
                         internal_session_id: Some("session-1".to_string()),
                         initialized: true,
                     },
-                    DaemonSessionHealth {
+                    RuntimeHostSessionHealth {
                         session_id: 2,
                         internal_session_id: None,
                         initialized: false,
@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(response).unwrap(),
             serde_json::json!({
-                "type": "daemon-health",
+                "type": "runtime-host-health",
                 "requestId": "req-health",
                 "health": {
                     "pid": 12345,

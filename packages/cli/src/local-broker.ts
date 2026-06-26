@@ -13,13 +13,20 @@ import {
 
 import type { OpenTrayTransport } from "./client";
 import { resolveCallerLabel } from "./daemon/caller-label";
-import { createNodeDaemonDriver, startDaemon, type DaemonDriver } from "./daemon/lifecycle";
+import {
+  createNodeDaemonDriver,
+  startDaemon,
+  type DaemonDriver,
+} from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 
-export type LocalRuntimeEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
+export type LocalRuntimeEventFrame = Extract<
+  ServerFrame,
+  { type: "event" | "ext-event" }
+>;
 
 export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
@@ -29,7 +36,8 @@ export interface LocalBrokerClient extends OpenTrayTransport {
   close(): Promise<void>;
 }
 
-export interface ConnectLocalBrokerOptions extends Partial<BrokerEndpointIdentityOptions> {
+export interface ConnectLocalBrokerOptions
+  extends Partial<BrokerEndpointIdentityOptions> {
   endpoint?: string;
   homeDir?: string;
   clientVersion?: string;
@@ -57,12 +65,12 @@ interface BrokerSocket {
 }
 
 export const connectLocalBroker = async (
-  options: ConnectLocalBrokerOptions = {},
+  options: ConnectLocalBrokerOptions = {}
 ): Promise<LocalBrokerClient> => {
-  const packageVersion = options.packageVersion ?? (await readPackageVersion(packageJsonUrl));
+  const packageVersion =
+    options.packageVersion ?? (await readPackageVersion(packageJsonUrl));
   const clientVersion = options.clientVersion ?? packageVersion;
-  const callerLabel =
-    options.callerLabel ?? resolveCallerLabel();
+  const callerLabel = options.callerLabel ?? resolveCallerLabel();
   const paths = resolveDaemonPaths({
     homeDir: options.homeDir ?? process.env.OPENTRAY_HOME ?? homedir(),
     packageVersion,
@@ -71,17 +79,23 @@ export const connectLocalBroker = async (
   const endpoint = options.endpoint ?? paths.endpoint;
   const autoStart = options.autoStart ?? endpoint === paths.endpoint;
   if (autoStart && endpoint !== paths.endpoint) {
-    throw new Error("local broker autoStart requires the derived same-version endpoint");
+    throw new Error(
+      "local broker autoStart requires the derived same-version endpoint"
+    );
   }
   if (autoStart) {
     const cliEntrypoint = options.cliEntrypoint ?? resolveCliEntrypoint();
-    const driver = options.daemonDriver ?? createNodeDaemonDriver(cliEntrypoint);
+    const driver =
+      options.daemonDriver ?? createNodeDaemonDriver(cliEntrypoint);
     await startDaemon({ paths, driver });
   }
   const socket = await connectSocket(endpoint);
   const connection = new LocalBrokerConnection(socket, endpoint, callerLabel);
 
-  await connection.init(clientVersion, options.protocolVersion ?? PROTOCOL_VERSION);
+  await connection.init(
+    clientVersion,
+    options.protocolVersion ?? PROTOCOL_VERSION
+  );
   return connection;
 };
 
@@ -91,7 +105,9 @@ class LocalBrokerConnection implements LocalBrokerClient {
   sessionId = "";
 
   private buffer = "";
-  private readonly listeners = new Set<(frame: LocalRuntimeEventFrame) => void>();
+  private readonly listeners = new Set<
+    (frame: LocalRuntimeEventFrame) => void
+  >();
   private readonly pending = new Map<RequestId, PendingRequest>();
   private ready:
     | {
@@ -103,7 +119,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
   constructor(
     private readonly socket: BrokerSocket,
     endpoint: string,
-    callerLabel: string,
+    callerLabel: string
   ) {
     this.endpoint = endpoint;
     this.callerLabel = callerLabel;
@@ -120,9 +136,11 @@ class LocalBrokerConnection implements LocalBrokerClient {
   }
 
   async init(clientVersion: string, protocolVersion: number): Promise<void> {
-    const ready = new Promise<Extract<ServerFrame, { type: "ready" }>>((resolve, reject) => {
-      this.ready = { resolve, reject };
-    });
+    const ready = new Promise<Extract<ServerFrame, { type: "ready" }>>(
+      (resolve, reject) => {
+        this.ready = { resolve, reject };
+      }
+    );
     this.write({
       type: "init",
       protocolVersion,
@@ -177,7 +195,9 @@ class LocalBrokerConnection implements LocalBrokerClient {
   private dispatchLine(line: string): void {
     const parsed = parseServerFrame(line);
     if (!parsed.ok || parsed.frame === undefined) {
-      this.rejectAll(new Error(`${parsed.error ?? "invalid server frame"}: ${line}`));
+      this.rejectAll(
+        new Error(`${parsed.error ?? "invalid server frame"}: ${line}`)
+      );
       return;
     }
 
@@ -258,7 +278,7 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
     case "tray-bounds":
     case "ack":
     case "ext-command-result":
-    case "daemon-health":
+    case "runtime-host-health":
       return frame.requestId;
     case "ready":
     case "event":
@@ -269,6 +289,8 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
 };
 
 const resolveCliEntrypoint = (): string => {
-  const suffix = fileURLToPath(import.meta.url).endsWith(".ts") ? "cli.ts" : "cli.mjs";
+  const suffix = fileURLToPath(import.meta.url).endsWith(".ts")
+    ? "cli.ts"
+    : "cli.mjs";
   return fileURLToPath(new URL(`./${suffix}`, import.meta.url));
 };

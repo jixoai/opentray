@@ -18,7 +18,7 @@ use std::time::Instant;
 use opentray_core::BrokerSession;
 #[cfg(not(target_os = "macos"))]
 use opentray_core::{AppBackend, BrokerKernel};
-use opentray_spec::{ClientFrame, DaemonHealth, DaemonSessionHealth, ServerFrame};
+use opentray_spec::{ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame};
 use serde_json::json;
 
 #[cfg(not(target_os = "macos"))]
@@ -169,9 +169,9 @@ where
             }
             TransportEvent::Frame { id, frame } => {
                 if let ClientFrame::Health { request_id } = frame {
-                    let health = build_daemon_health(&options, &sessions);
+                    let health = build_runtime_host_health(&options, &sessions);
                     if let Some(session) = sessions.get_mut(&id) {
-                        session.write_frame(ServerFrame::DaemonHealth { request_id, health });
+                        session.write_frame(ServerFrame::RuntimeHostHealth { request_id, health });
                     }
                     continue;
                 }
@@ -197,13 +197,13 @@ where
     Ok(())
 }
 
-pub fn build_daemon_health(
+pub fn build_runtime_host_health(
     options: &BrokerOptions,
     sessions: &HashMap<u64, TransportSession>,
-) -> DaemonHealth {
+) -> RuntimeHostHealth {
     let mut sessions = sessions
         .iter()
-        .map(|(session_id, session)| DaemonSessionHealth {
+        .map(|(session_id, session)| RuntimeHostSessionHealth {
             session_id: *session_id,
             internal_session_id: session.broker.session_id().map(ToOwned::to_owned),
             initialized: session.broker.session_id().is_some(),
@@ -211,7 +211,7 @@ pub fn build_daemon_health(
         .collect::<Vec<_>>();
     sessions.sort_by_key(|session| session.session_id);
 
-    DaemonHealth {
+    RuntimeHostHealth {
         pid: std::process::id(),
         package_version: options.package_version.clone(),
         protocol_version: options.protocol_version,

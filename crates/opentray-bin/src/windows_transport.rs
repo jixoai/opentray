@@ -15,7 +15,7 @@ use crate::frame_error::extract_request_id;
 use std::time::Duration;
 
 use opentray_core::BrokerSession;
-use opentray_spec::{ClientFrame, DaemonHealth, DaemonSessionHealth, ServerFrame};
+use opentray_spec::{ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame};
 use serde_json::json;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
@@ -131,13 +131,13 @@ pub fn spawn_listener(
     })
 }
 
-pub fn build_daemon_health(
+pub fn build_runtime_host_health(
     options: &BrokerOptions,
     sessions: &HashMap<u64, TransportSession>,
-) -> DaemonHealth {
+) -> RuntimeHostHealth {
     let mut sessions = sessions
         .iter()
-        .map(|(session_id, session)| DaemonSessionHealth {
+        .map(|(session_id, session)| RuntimeHostSessionHealth {
             session_id: *session_id,
             internal_session_id: session.broker.session_id().map(ToOwned::to_owned),
             initialized: session.broker.session_id().is_some(),
@@ -145,7 +145,7 @@ pub fn build_daemon_health(
         .collect::<Vec<_>>();
     sessions.sort_by_key(|session| session.session_id);
 
-    DaemonHealth {
+    RuntimeHostHealth {
         pid: std::process::id(),
         package_version: options.package_version.clone(),
         protocol_version: options.protocol_version,

@@ -5,7 +5,7 @@
 - Change: `opentray-v0-9`
 - Iteration: 1
 - Recurring issue counts: none
-- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset, the first packaging-plugin contract and Vite adapter, the session-boundary cleanup, the Node runtime-binding distribution slice, the first binding-owned headless protocol/session runtime, and the removal of public daemon CLI diagnostics. Platform packages publish `runtime/opentray_runtime.node`; the remaining runtime-distribution work is to move the default `createTray()` path onto a native visible host-main-loop binding and rename the remaining daemon-shaped protocol health vocabulary.
+- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset, the first packaging-plugin contract and Vite adapter, the session-boundary cleanup, the Node runtime-binding distribution slice, the first binding-owned headless protocol/session runtime, the removal of public daemon CLI diagnostics, and the `runtime-host-health` protocol vocabulary rename. Platform packages publish `runtime/opentray_runtime.node`; the remaining runtime-distribution work is to move the default `createTray()` path onto a native visible host-main-loop binding and add app identity metadata to runtime host health.
 - Next loop action: design and implement the native visible host-main-loop Node runtime binding without archiving `opentray-v0-9`.
 
 ## Intent Alignment
@@ -29,12 +29,12 @@
 
 1. The binding now owns a headless direct protocol/session path, but default `createTray()` still uses the internal transitional local runtime because the binding does not yet own a native visible host-main-loop contract.
 2. The public CLI no longer exposes `opentray daemon <start|stop|restart|health>`, and `opentray/node` no longer exports `connectLocalBroker()`. Internal source-tree modules still use daemon/local-broker implementation names for the debug runtime path.
-3. The protocol still exposes daemon-shaped health vocabulary and needs a focused runtime-host-health rename before the change can be closed.
+3. `runtime-host-health` now uses runtime-host vocabulary and carries `callerLabel`, but it does not yet include `appId` / `appName` because the current session/app model does not retain the human-facing app name.
 
 ## New Questions For User
 
 1. Should the native visible binding host use a platform-specific main-thread bootstrap contract for macOS, or keep macOS on a contributor debug host until that can be proven visually?
-2. Should the internal debug runtime modules be renamed away from daemon/local-broker in the same loop as the `runtime-host-health` protocol rename, or kept as contributor-only implementation vocabulary until visible binding replaces them?
+2. Should the internal debug runtime modules be renamed away from daemon/local-broker in the same loop as app identity health metadata, or kept as contributor-only implementation vocabulary until visible binding replaces them?
 
 ## Evidence
 

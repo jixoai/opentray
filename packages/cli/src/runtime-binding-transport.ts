@@ -130,7 +130,7 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
     case "tray-bounds":
     case "ack":
     case "ext-command-result":
-    case "daemon-health":
+    case "runtime-host-health":
       return frame.requestId;
     case "ready":
     case "event":

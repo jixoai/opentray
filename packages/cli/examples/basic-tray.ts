@@ -48,13 +48,14 @@ class RecordingTransport implements OpenTrayTransport {
         };
       case "health":
         return {
-          type: "daemon-health",
+          type: "runtime-host-health",
           requestId: frame.requestId,
           health: {
             pid: process.pid,
             endpoint: "recorded",
             packageVersion: "0.1.0",
             protocolVersion: 1,
+            callerLabel: "recorded",
             sessionCount: 0,
             sessions: [],
           },

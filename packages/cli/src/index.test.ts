@@ -20,10 +20,14 @@ describe("opentray client", () => {
       transport,
       "app-1",
       "tray-1",
-      createTestRequestId,
+      createTestRequestId
     );
 
-    await tray.commandExtension("webview", { type: "show", width: 320, height: 240 });
+    await tray.commandExtension("webview", {
+      type: "show",
+      width: 320,
+      height: 240,
+    });
 
     expect(transport.frames).toEqual([
       {
@@ -43,7 +47,7 @@ describe("opentray client", () => {
       transport,
       "app-1",
       "tray-1",
-      createTestRequestId,
+      createTestRequestId
     );
 
     const bounds = await tray.getBounds();
@@ -69,12 +73,17 @@ describe("opentray client", () => {
       transport,
       "app-1",
       "tray-1",
-      createTestRequestId,
+      createTestRequestId
     );
 
     await tray.setMenu({ items: [{ type: "item", id: 1, title: "Open" }] });
     await tray.setTooltip({ title: "Focus", description: "25 minutes" });
-    await tray.setIcon({ type: "rgba", data: [0, 0, 0, 0], width: 1, height: 1 });
+    await tray.setIcon({
+      type: "rgba",
+      data: [0, 0, 0, 0],
+      width: 1,
+      height: 1,
+    });
 
     expect(transport.frames).toEqual([
       {
@@ -107,7 +116,7 @@ describe("opentray client", () => {
       transport,
       "app-1",
       "tray-1",
-      createTestRequestId,
+      createTestRequestId
     );
     const seen: string[] = [];
 
@@ -128,7 +137,14 @@ describe("opentray client", () => {
     });
     transport.emit({
       type: "event",
-      event: { type: "trayClick", appId: "app-1", trayId: "tray-1", button: "left", x: 4, y: 8 },
+      event: {
+        type: "trayClick",
+        appId: "app-1",
+        trayId: "tray-1",
+        button: "left",
+        x: 4,
+        y: 8,
+      },
     });
     transport.emit({
       type: "ext-event",
@@ -166,7 +182,10 @@ describe("opentray client", () => {
     });
 
     expect(tray.trayId).toBe("status");
-    expect(transport.frames.map((frame) => frame.requestId)).toEqual(["test-1", "test-2"]);
+    expect(transport.frames.map((frame) => frame.requestId)).toEqual([
+      "test-1",
+      "test-2",
+    ]);
   });
 
   it("creates a tray through the client default app lookup", async () => {
@@ -190,7 +209,9 @@ describe("opentray client", () => {
   it("exposes versioned broker endpoint identity helpers", () => {
     const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
 
-    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1-opentray");
+    expect(formatBrokerEndpointName(identity)).toBe(
+      "opentray-0.1.0-p1-opentray"
+    );
   });
 });
 
@@ -238,24 +259,33 @@ class RecordingTransport implements OpenTrayTransport {
         return { type: "ack", requestId: frame.requestId };
       case "health":
         return {
-          type: "daemon-health",
+          type: "runtime-host-health",
           requestId: frame.requestId,
           health: {
             pid: 12345,
             endpoint: "recorded",
             packageVersion: "0.1.0",
             protocolVersion: PROTOCOL_VERSION,
+            callerLabel: "test-runtime",
             sessionCount: 0,
             sessions: [],
           },
         };
       default:
-        return { type: "error", requestId: frame.requestId, code: "unsupported", message: frame.type };
+        return {
+          type: "error",
+          requestId: frame.requestId,
+          code: "unsupported",
+          message: frame.type,
+        };
     }
   }
 }
 
-class EventfulRecordingTransport extends RecordingTransport implements OpenTrayConnection {
+class EventfulRecordingTransport
+  extends RecordingTransport
+  implements OpenTrayConnection
+{
   private readonly listeners = new Set<(frame: OpenTrayEventFrame) => void>();
 
   onEvent(listener: (frame: OpenTrayEventFrame) => void): () => void {

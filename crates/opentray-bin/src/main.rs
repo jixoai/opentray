@@ -113,7 +113,7 @@ fn parse_broker_options(
 
     // The visible process name is carried by the spawned argv[0] on platforms
     // whose task manager reflects it (e.g. Linux `ps`/`comm`). The label also
-    // scopes the endpoint, runtime directory, ready.json, and daemon-health so
+    // scopes the endpoint, runtime directory, ready.json, and runtime-host-health so
     // the owning application is identifiable without inspecting the binary.
     eprintln!("opentray broker starting for caller: {caller_label}");
 
@@ -310,10 +310,13 @@ mod native_broker {
                 }
                 broker_transport::TransportEvent::Frame { id, frame } => {
                     if let ClientFrame::Health { request_id } = frame {
-                        let health =
-                            broker_transport::build_daemon_health(&self.options, &self.sessions);
+                        let health = broker_transport::build_runtime_host_health(
+                            &self.options,
+                            &self.sessions,
+                        );
                         if let Some(session) = self.sessions.get_mut(&id) {
-                            session.write_frame(ServerFrame::DaemonHealth { request_id, health });
+                            session
+                                .write_frame(ServerFrame::RuntimeHostHealth { request_id, health });
                         }
                         return;
                     }

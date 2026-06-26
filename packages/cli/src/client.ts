@@ -18,13 +18,18 @@ export interface OpenTrayTransport {
   request(frame: ClientRequestFrame): Promise<ServerFrame>;
 }
 
-export type OpenTrayEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
+export type OpenTrayEventFrame = Extract<
+  ServerFrame,
+  { type: "event" | "ext-event" }
+>;
 
 export interface OpenTrayEventSource {
   onEvent(listener: (frame: OpenTrayEventFrame) => void): () => void;
 }
 
-export interface OpenTrayConnection extends OpenTrayTransport, OpenTrayEventSource {}
+export interface OpenTrayConnection
+  extends OpenTrayTransport,
+    OpenTrayEventSource {}
 
 export interface OpenTrayClient {
   createTray(options: TrayOptions): Promise<TrayHandle>;
@@ -45,31 +50,40 @@ export interface TrayHandle {
   requestExtension(ext: string, data: unknown): Promise<ExtensionEnvelope[]>;
   extend<TCapability extends object, TOptions = undefined>(
     extension: TrayExtension<TCapability, TOptions>,
-    options?: TOptions,
+    options?: TOptions
   ): TrayHandle & TCapability;
   destroy(): Promise<void>;
 }
 
 export type TrayScopedEvent = Exclude<TrayEvent, { type: "ready" }>;
 export type TrayEventType = TrayScopedEvent["type"];
-export type TrayEventByType<TEvent extends TrayEventType> = Extract<TrayScopedEvent, { type: TEvent }>;
+export type TrayEventByType<TEvent extends TrayEventType> = Extract<
+  TrayScopedEvent,
+  { type: TEvent }
+>;
 
 export interface EventfulTrayHandle extends TrayHandle {
   extend<TCapability extends object, TOptions = undefined>(
     extension: TrayExtension<TCapability, TOptions>,
-    options?: TOptions,
+    options?: TOptions
   ): EventfulTrayHandle & TCapability;
   listenExtension<TData = unknown>(
     ext: string,
-    handler: (event: ExtensionEnvelope<TData>) => void,
+    handler: (event: ExtensionEnvelope<TData>) => void
   ): () => void;
   listen<TEvent extends TrayEventType>(
     event: TEvent,
-    handler: (event: TrayEventByType<TEvent>) => void,
+    handler: (event: TrayEventByType<TEvent>) => void
   ): () => void;
-  onMenuClick(handler: (event: TrayEventByType<"menuClick">) => void): () => void;
-  onTrayClick(handler: (event: TrayEventByType<"trayClick">) => void): () => void;
-  onTrayDoubleClick(handler: (event: TrayEventByType<"trayDoubleClick">) => void): () => void;
+  onMenuClick(
+    handler: (event: TrayEventByType<"menuClick">) => void
+  ): () => void;
+  onTrayClick(
+    handler: (event: TrayEventByType<"trayClick">) => void
+  ): () => void;
+  onTrayDoubleClick(
+    handler: (event: TrayEventByType<"trayDoubleClick">) => void
+  ): () => void;
 }
 
 export interface ExtensionLoadOptions {
@@ -93,11 +107,18 @@ export interface TrayExtensionContext {
   request(data: unknown): Promise<ExtensionEnvelope[]>;
 }
 
-export interface TrayExtension<TCapability extends object, TOptions = undefined> {
+export interface TrayExtension<
+  TCapability extends object,
+  TOptions = undefined
+> {
   readonly name: string;
   readonly path: string;
   resolveMount?(options: TOptions | undefined): TrayExtensionMountSpec;
-  extend(tray: TrayHandle, context: TrayExtensionContext, options: TOptions | undefined): TCapability;
+  extend(
+    tray: TrayHandle,
+    context: TrayExtensionContext,
+    options: TOptions | undefined
+  ): TCapability;
 }
 
 export const createInitFrame = (clientVersion: string): ClientFrame => ({
@@ -112,14 +133,19 @@ export interface CreateClientOptions {
 
 export function createClient(
   transport: OpenTrayConnection,
-  options?: CreateClientOptions,
+  options?: CreateClientOptions
 ): OpenTrayEventfulClient;
-export function createClient(transport: OpenTrayTransport, options?: CreateClientOptions): OpenTrayClient;
 export function createClient(
   transport: OpenTrayTransport,
-  options: CreateClientOptions = {},
+  options?: CreateClientOptions
+): OpenTrayClient;
+export function createClient(
+  transport: OpenTrayTransport,
+  options: CreateClientOptions = {}
 ): OpenTrayClient | OpenTrayEventfulClient {
-  const nextRequestId = createRequestIdFactory(options.requestIdPrefix ?? "opentray");
+  const nextRequestId = createRequestIdFactory(
+    options.requestIdPrefix ?? "opentray"
+  );
 
   return {
     async createTray(options: TrayOptions): Promise<TrayHandle> {
@@ -132,32 +158,39 @@ export function createClient(
         tray: options,
       });
       const frame = expectResponse(response, requestId, "tray-created");
-      return createTrayHandle(transport, app.appId, frame.trayId ?? options.id, nextRequestId);
+      return createTrayHandle(
+        transport,
+        app.appId,
+        frame.trayId ?? options.id,
+        nextRequestId
+      );
     },
   };
-};
+}
 
 export function createTrayHandle(
   transport: OpenTrayConnection,
   appId: string,
   trayId: TrayId,
-  nextRequestId?: () => RequestId,
+  nextRequestId?: () => RequestId
 ): EventfulTrayHandle;
 export function createTrayHandle(
   transport: OpenTrayTransport,
   appId: string,
   trayId: TrayId,
-  nextRequestId?: () => RequestId,
+  nextRequestId?: () => RequestId
 ): TrayHandle;
 export function createTrayHandle(
   transport: OpenTrayTransport,
   appId: string,
   trayId: TrayId,
-  nextRequestId: () => RequestId = createRequestIdFactory("opentray"),
+  nextRequestId: () => RequestId = createRequestIdFactory("opentray")
 ): TrayHandle | EventfulTrayHandle {
   let nextMountOrdinal = 1;
   const nextMountId = (extensionName: string): string => {
-    const mountId = `${formatMountIdComponent(extensionName)}.${formatMountIdComponent(trayId)}.${nextMountOrdinal}`;
+    const mountId = `${formatMountIdComponent(
+      extensionName
+    )}.${formatMountIdComponent(trayId)}.${nextMountOrdinal}`;
     nextMountOrdinal += 1;
     return mountId;
   };
@@ -221,7 +254,10 @@ export function createTrayHandle(
     async commandExtension(ext: string, data: unknown): Promise<void> {
       await this.requestExtension(ext, data);
     },
-    async requestExtension(ext: string, data: unknown): Promise<ExtensionEnvelope[]> {
+    async requestExtension(
+      ext: string,
+      data: unknown
+    ): Promise<ExtensionEnvelope[]> {
       const requestId = nextRequestId();
       const response = await transport.request({
         type: "ext-command",
@@ -239,9 +275,14 @@ export function createTrayHandle(
     },
     extend<TCapability extends object, TOptions = undefined>(
       extension: TrayExtension<TCapability, TOptions>,
-      options?: TOptions,
+      options?: TOptions
     ): TrayHandle & TCapability {
-      const context = createTrayExtensionContext(handle, extension, options, nextMountId);
+      const context = createTrayExtensionContext(
+        handle,
+        extension,
+        options,
+        nextMountId
+      );
       const capability = extension.extend(handle, context, options);
       return Object.assign({}, handle, capability);
     },
@@ -266,7 +307,7 @@ const attachEventfulTrayHandle = (
   handle: TrayHandle,
   source: OpenTrayEventSource,
   appId: string,
-  nextMountId: (extensionName: string) => string,
+  nextMountId: (extensionName: string) => string
 ): EventfulTrayHandle => {
   const listen: EventfulTrayHandle["listen"] = (event, handler) =>
     source.onEvent((frame) => {
@@ -281,7 +322,10 @@ const attachEventfulTrayHandle = (
 
   const eventful: EventfulTrayHandle = {
     ...handle,
-    listenExtension<TData = unknown>(ext: string, handler: (event: ExtensionEnvelope<TData>) => void) {
+    listenExtension<TData = unknown>(
+      ext: string,
+      handler: (event: ExtensionEnvelope<TData>) => void
+    ) {
       return source.onEvent((frame) => {
         if (frame.type !== "ext-event" || frame.ext !== ext) {
           return;
@@ -307,9 +351,14 @@ const attachEventfulTrayHandle = (
     },
     extend<TCapability extends object, TOptions = undefined>(
       extension: TrayExtension<TCapability, TOptions>,
-      options?: TOptions,
+      options?: TOptions
     ): EventfulTrayHandle & TCapability {
-      const context = createTrayExtensionContext(eventful, extension, options, nextMountId);
+      const context = createTrayExtensionContext(
+        eventful,
+        extension,
+        options,
+        nextMountId
+      );
       const capability = extension.extend(eventful, context, options);
       return Object.assign({}, eventful, capability);
     },
@@ -317,15 +366,21 @@ const attachEventfulTrayHandle = (
   return eventful;
 };
 
-const isOwnedTrayEvent = (event: TrayEvent, appId: string, trayId: string): event is TrayScopedEvent =>
+const isOwnedTrayEvent = (
+  event: TrayEvent,
+  appId: string,
+  trayId: string
+): event is TrayScopedEvent =>
   event.type !== "ready" && event.appId === appId && event.trayId === trayId;
 
-const isOpenTrayEventSource = (transport: OpenTrayTransport): transport is OpenTrayConnection =>
+const isOpenTrayEventSource = (
+  transport: OpenTrayTransport
+): transport is OpenTrayConnection =>
   "onEvent" in transport && typeof transport.onEvent === "function";
 
 const resolveDefaultAppRef = async (
   transport: OpenTrayTransport,
-  nextRequestId: () => RequestId,
+  nextRequestId: () => RequestId
 ): Promise<{ appId: string }> => {
   const requestId = nextRequestId();
   const response = await transport.request({
@@ -339,7 +394,7 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
   tray: TrayHandle,
   extension: TrayExtension<TCapability, TOptions>,
   options: TOptions | undefined,
-  nextMountId: (extensionName: string) => string,
+  nextMountId: (extensionName: string) => string
 ): TrayExtensionContext => {
   const mount = extension.resolveMount?.(options) ?? {};
   const name = mount.name ?? extension.name;
@@ -349,10 +404,12 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
 
   const ensureLoaded = async (): Promise<void> => {
     if (loadPromise === undefined) {
-      loadPromise = tray.loadExtension({ name, path, mountId }).catch((error: unknown) => {
-        loadPromise = undefined;
-        throw error;
-      });
+      loadPromise = tray
+        .loadExtension({ name, path, mountId })
+        .catch((error: unknown) => {
+          loadPromise = undefined;
+          throw error;
+        });
     }
     await loadPromise;
   };
@@ -390,16 +447,22 @@ const createRequestIdFactory = (prefix: string): (() => RequestId) => {
 const expectResponse = <TType extends ServerFrame["type"]>(
   frame: ServerFrame,
   requestId: RequestId,
-  type: TType,
+  type: TType
 ): Extract<ServerFrame, { type: TType }> => {
   if (frame.type === "error") {
     throw new Error(`${frame.code}: ${frame.message}`);
   }
   if (frame.type !== type) {
-    throw new Error(`expected ${type} for ${requestId}, received ${frame.type}`);
+    throw new Error(
+      `expected ${type} for ${requestId}, received ${frame.type}`
+    );
   }
   if (requestIdOf(frame) !== requestId) {
-    throw new Error(`expected response for ${requestId}, received ${requestIdOf(frame) ?? "none"}`);
+    throw new Error(
+      `expected response for ${requestId}, received ${
+        requestIdOf(frame) ?? "none"
+      }`
+    );
   }
   return frame as Extract<ServerFrame, { type: TType }>;
 };
@@ -412,7 +475,7 @@ const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
     case "tray-bounds":
     case "ack":
     case "ext-command-result":
-    case "daemon-health":
+    case "runtime-host-health":
       return frame.requestId;
     case "error":
       return frame.requestId;
