@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use opentray_spec::{Icon, Menu, Rect, SurfaceId, SurfaceRef, Tooltip, TrayEvent, TrayId};
+use opentray_spec::{AppId, AppRef, Icon, Menu, Rect, Tooltip, TrayEvent, TrayId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendCapabilities {
@@ -34,23 +34,19 @@ pub struct TrayProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SurfaceProjection {
-    pub surface: SurfaceRef,
+pub struct AppProjection {
+    pub app: AppRef,
     pub title: Option<String>,
     pub tooltip: Option<Tooltip>,
     pub icon: Option<Icon>,
     pub trays: Vec<TrayProjection>,
 }
 
-pub trait SurfaceBackend {
+pub trait AppBackend {
     fn capabilities(&self) -> BackendCapabilities;
-    fn sync_surface(&self, projection: SurfaceProjection) -> Result<(), BackendError>;
-    fn tray_bounds(
-        &self,
-        space_id: &SurfaceId,
-        tray_id: &TrayId,
-    ) -> Result<Option<Rect>, BackendError>;
-    fn show_menu(&self, surface_id: &SurfaceId) -> Result<(), BackendError>;
+    fn sync_app(&self, projection: AppProjection) -> Result<(), BackendError>;
+    fn tray_bounds(&self, app_id: &AppId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError>;
+    fn show_menu(&self, app_id: &AppId) -> Result<(), BackendError>;
     fn emit_event(&self, event: TrayEvent) -> Result<(), BackendError>;
 }
 
@@ -64,9 +60,9 @@ pub enum BackendError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendOperation {
-    SyncSurface(SurfaceProjection),
-    TrayBounds(SurfaceId, TrayId),
-    ShowMenu(SurfaceId),
+    SyncApp(AppProjection),
+    TrayBounds(AppId, TrayId),
+    ShowMenu(AppId),
     EmitEvent(TrayEvent),
 }
 
@@ -96,23 +92,19 @@ impl FakeBackend {
     }
 }
 
-impl SurfaceBackend for FakeBackend {
+impl AppBackend for FakeBackend {
     fn capabilities(&self) -> BackendCapabilities {
         self.capabilities.clone()
     }
 
-    fn sync_surface(&self, projection: SurfaceProjection) -> Result<(), BackendError> {
-        self.push(BackendOperation::SyncSurface(projection));
+    fn sync_app(&self, projection: AppProjection) -> Result<(), BackendError> {
+        self.push(BackendOperation::SyncApp(projection));
         Ok(())
     }
 
-    fn tray_bounds(
-        &self,
-        space_id: &SurfaceId,
-        tray_id: &TrayId,
-    ) -> Result<Option<Rect>, BackendError> {
+    fn tray_bounds(&self, app_id: &AppId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError> {
         self.push(BackendOperation::TrayBounds(
-            space_id.clone(),
+            app_id.clone(),
             tray_id.clone(),
         ));
         if !self.capabilities.tray_bounds {
@@ -126,8 +118,8 @@ impl SurfaceBackend for FakeBackend {
         }))
     }
 
-    fn show_menu(&self, surface_id: &SurfaceId) -> Result<(), BackendError> {
-        self.push(BackendOperation::ShowMenu(surface_id.clone()));
+    fn show_menu(&self, app_id: &AppId) -> Result<(), BackendError> {
+        self.push(BackendOperation::ShowMenu(app_id.clone()));
         if !self.capabilities.show_menu {
             return Err(BackendError::Unsupported("show_menu"));
         }

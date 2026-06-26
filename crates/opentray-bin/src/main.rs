@@ -465,8 +465,7 @@ mod tests {
 
     #[test]
     fn broker_options_fall_back_to_neutral_caller_label() {
-        let options =
-            parse_broker_options(broker_args().into_iter()).expect("broker options");
+        let options = parse_broker_options(broker_args().into_iter()).expect("broker options");
         assert_eq!(options.caller_label(), "opentray");
     }
 

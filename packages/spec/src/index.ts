@@ -1,13 +1,11 @@
 export type SessionId = string;
 export type RequestId = string;
-export type SpaceId = string;
+export type AppId = string;
 export type TrayId = string;
 export type MenuItemId = number;
 
 /** @deprecated Use `SessionId`. */
 export type LeaseId = SessionId;
-/** @deprecated Use `SpaceId`. */
-export type SurfaceId = SpaceId;
 
 export const PROTOCOL_VERSION = 1;
 export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
@@ -233,27 +231,19 @@ const assertEndpointComponent = (value: string, name: string): void => {
   }
 };
 
-export interface SpaceOptions {
-  id?: SpaceId;
+export interface AppOptions {
+  id?: AppId;
   title?: string;
   icon?: Icon;
   default?: boolean;
 }
 
-/** @deprecated Use `SpaceOptions`. */
-export type SurfaceOptions = SpaceOptions;
-
-export interface SpaceRef {
-  spaceId: SpaceId;
+export interface AppRef {
+  appId: AppId;
 }
 
-/** @deprecated Use `SpaceRef`. */
-export type SurfaceRef = SpaceRef;
-
 export interface TrayOptions {
-  trayId?: TrayId;
-  appId?: string;
-  title?: string;
+  id: string;
   tooltip?: Tooltip;
   icon?: Icon;
   menu?: Menu;
@@ -302,10 +292,22 @@ export type MenuItem =
       items: MenuItem[];
     };
 
-export type Icon =
+export type IconImage =
   | { type: "rgba"; data: Uint8Array | number[]; width: number; height: number }
   | { type: "encoded"; data: Uint8Array | number[] }
   | { type: "file"; path: string };
+
+export type SimpleIcon = IconImage & { text?: string };
+
+export type IconText = IconImage & { text: string };
+
+export interface IconCandidates {
+  "icon-only"?: IconImage;
+  "text-only"?: string;
+  "icon-text"?: IconText;
+}
+
+export type Icon = IconCandidates & Partial<SimpleIcon>;
 
 export interface Rect {
   x: number;
@@ -325,13 +327,13 @@ export interface TrayBoundsResult {
 export type MouseButton = "left" | "right" | "middle";
 
 export type TrayEvent =
-  | { type: "ready"; spaceId: SpaceId }
-  | { type: "menuClick"; spaceId: SpaceId; trayId: TrayId; itemId: MenuItemId }
-  | { type: "trayClick"; spaceId: SpaceId; trayId: TrayId; button: MouseButton; x: number; y: number }
-  | { type: "trayDoubleClick"; spaceId: SpaceId; trayId: TrayId; button: MouseButton; x: number; y: number };
+  | { type: "ready"; appId: AppId }
+  | { type: "menuClick"; appId: AppId; trayId: TrayId; itemId: MenuItemId }
+  | { type: "trayClick"; appId: AppId; trayId: TrayId; button: MouseButton; x: number; y: number }
+  | { type: "trayDoubleClick"; appId: AppId; trayId: TrayId; button: MouseButton; x: number; y: number };
 
 export interface ExtensionScope {
-  spaceId: SpaceId;
+  appId: AppId;
   trayId?: TrayId;
   ext: string;
 }
@@ -362,31 +364,30 @@ export type ClientFrame =
   | { type: "exit" };
 
 export type ClientRequestFrame =
-  | ({ type: "create-space"; requestId: RequestId } & SpaceOptions)
-  | { type: "resolve-default-space"; requestId: RequestId }
-  | { type: "create-tray"; requestId: RequestId; space: SpaceRef; tray: TrayOptions }
-  | { type: "destroy-tray"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId }
-  | { type: "get-tray-bounds"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId }
-  | { type: "set-tray-menu"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; menu: Menu }
-  | { type: "set-tray-icon"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; icon: Icon }
-  | { type: "set-tray-tooltip"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; tooltip: Tooltip }
-  | { type: "set-tray-title"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; title: string }
-  | { type: "load-ext"; requestId: RequestId; spaceId: SpaceId; name: string; path: string; mountId?: string }
-  | { type: "ext-command"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; ext: string; data: unknown }
-  | { type: "unload-ext"; requestId: RequestId; spaceId: SpaceId; name: string }
+  | ({ type: "create-app"; requestId: RequestId } & AppOptions)
+  | { type: "resolve-default-app"; requestId: RequestId }
+  | { type: "create-tray"; requestId: RequestId; app: AppRef; tray: TrayOptions }
+  | { type: "destroy-tray"; requestId: RequestId; appId: AppId; trayId: TrayId }
+  | { type: "get-tray-bounds"; requestId: RequestId; appId: AppId; trayId: TrayId }
+  | { type: "set-tray-menu"; requestId: RequestId; appId: AppId; trayId: TrayId; menu: Menu }
+  | { type: "set-tray-icon"; requestId: RequestId; appId: AppId; trayId: TrayId; icon: Icon }
+  | { type: "set-tray-tooltip"; requestId: RequestId; appId: AppId; trayId: TrayId; tooltip: Tooltip }
+  | { type: "load-ext"; requestId: RequestId; appId: AppId; name: string; path: string; mountId?: string }
+  | { type: "ext-command"; requestId: RequestId; appId: AppId; trayId: TrayId; ext: string; data: unknown }
+  | { type: "unload-ext"; requestId: RequestId; appId: AppId; name: string }
   | { type: "health"; requestId: RequestId };
 
 export type ServerFrame =
   | { type: "ready"; protocolVersion: number; brokerVersion: string; sessionId: SessionId }
-  | { type: "space-created"; requestId: RequestId; space: SpaceRef }
-  | { type: "default-space"; requestId: RequestId; space: SpaceRef }
-  | { type: "tray-created"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId }
-  | { type: "tray-bounds"; requestId: RequestId; spaceId: SpaceId; trayId: TrayId; bounds: TrayBoundsResult }
+  | { type: "app-created"; requestId: RequestId; app: AppRef }
+  | { type: "default-app"; requestId: RequestId; app: AppRef }
+  | { type: "tray-created"; requestId: RequestId; appId: AppId; trayId: TrayId }
+  | { type: "tray-bounds"; requestId: RequestId; appId: AppId; trayId: TrayId; bounds: TrayBoundsResult }
   | { type: "ack"; requestId: RequestId }
   | { type: "ext-command-result"; requestId: RequestId; events: ExtensionEnvelope[] }
   | { type: "daemon-health"; requestId: RequestId; health: DaemonHealth }
   | { type: "event"; event: TrayEvent }
-  | { type: "ext-event"; spaceId: SpaceId; trayId: TrayId; ext: string; data: unknown }
+  | { type: "ext-event"; appId: AppId; trayId: TrayId; ext: string; data: unknown }
   | { type: "error"; requestId?: RequestId; code: string; message: string };
 
 export interface ParseResult<T> {
@@ -425,20 +426,20 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
         typeof value.brokerVersion === "string" &&
         typeof value.sessionId === "string"
       );
-    case "space-created":
-      return typeof value.requestId === "string" && isRecord(value.space);
-    case "default-space":
-      return typeof value.requestId === "string" && isRecord(value.space);
+    case "app-created":
+      return typeof value.requestId === "string" && isRecord(value.app);
+    case "default-app":
+      return typeof value.requestId === "string" && isRecord(value.app);
     case "tray-created":
       return (
         typeof value.requestId === "string" &&
-        typeof value.spaceId === "string" &&
+        typeof value.appId === "string" &&
         typeof value.trayId === "string"
       );
     case "tray-bounds":
       return (
         typeof value.requestId === "string" &&
-        typeof value.spaceId === "string" &&
+        typeof value.appId === "string" &&
         typeof value.trayId === "string" &&
         isTrayBoundsResult(value.bounds)
       );
@@ -452,7 +453,7 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return isTrayEvent(value.event);
     case "ext-event":
       return (
-        typeof value.spaceId === "string" &&
+        typeof value.appId === "string" &&
         typeof value.trayId === "string" &&
         typeof value.ext === "string"
       );
@@ -473,7 +474,7 @@ const isExtensionEnvelope = (value: unknown): value is ExtensionEnvelope => {
   }
   const scope = value.scope as Record<string, unknown>;
   return (
-    (typeof scope.spaceId === "string" || typeof scope.surfaceId === "string") &&
+    typeof scope.appId === "string" &&
     (scope.trayId === undefined || typeof scope.trayId === "string") &&
     typeof scope.ext === "string" &&
     "data" in value
@@ -522,17 +523,17 @@ const isTrayEvent = (value: unknown): value is TrayEvent => {
 
   switch (value.type) {
     case "ready":
-      return typeof value.spaceId === "string";
+      return typeof value.appId === "string";
     case "menuClick":
       return (
-        typeof value.spaceId === "string" &&
+        typeof value.appId === "string" &&
         typeof value.trayId === "string" &&
         typeof value.itemId === "number"
       );
     case "trayClick":
     case "trayDoubleClick":
       return (
-        typeof value.spaceId === "string" &&
+        typeof value.appId === "string" &&
         typeof value.trayId === "string" &&
         isMouseButton(value.button) &&
         typeof value.x === "number" &&

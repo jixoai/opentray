@@ -6,7 +6,7 @@ mod visual {
     use std::time::Duration;
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
-    use opentray_core::SurfaceBackend;
+    use opentray_core::AppBackend;
     use tao::dpi::LogicalSize;
     use tao::event::{Event, StartCause, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopWindowTarget};
@@ -98,7 +98,7 @@ mod visual {
             &mut self,
             target: &EventLoopWindowTarget<UserEvent>,
         ) -> Result<(), Box<dyn std::error::Error>> {
-            self.backend.sync_surface(common::surface_projection())?;
+            self.backend.sync_app(common::surface_projection())?;
 
             let window = WindowBuilder::new()
                 .with_title("OpenTray Visual WebView Example")

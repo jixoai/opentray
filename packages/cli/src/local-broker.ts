@@ -19,7 +19,7 @@ import { resolveDaemonPaths } from "./daemon/paths";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 
-export type BrokerEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
+export type LocalRuntimeEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
 
 export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
@@ -27,7 +27,7 @@ export interface LocalBrokerClient extends OpenTrayTransport {
   readonly sessionId: string;
   /** @deprecated Use `sessionId`. */
   readonly leaseId: string;
-  onEvent(listener: (frame: BrokerEventFrame) => void): () => void;
+  onEvent(listener: (frame: LocalRuntimeEventFrame) => void): () => void;
   close(): Promise<void>;
 }
 
@@ -95,7 +95,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
   leaseId = "";
 
   private buffer = "";
-  private readonly listeners = new Set<(frame: BrokerEventFrame) => void>();
+  private readonly listeners = new Set<(frame: LocalRuntimeEventFrame) => void>();
   private readonly pending = new Map<RequestId, PendingRequest>();
   private ready:
     | {
@@ -149,7 +149,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
     return response;
   }
 
-  onEvent(listener: (frame: BrokerEventFrame) => void): () => void {
+  onEvent(listener: (frame: LocalRuntimeEventFrame) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -257,8 +257,8 @@ const connectSocket = (endpoint: string): Promise<BrokerSocket> =>
 
 const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
   switch (frame.type) {
-    case "space-created":
-    case "default-space":
+    case "app-created":
+    case "default-app":
     case "tray-created":
     case "tray-bounds":
     case "ack":

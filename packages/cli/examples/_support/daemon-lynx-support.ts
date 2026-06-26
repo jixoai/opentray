@@ -82,16 +82,8 @@ export const runDaemonLynxSmoke = async (
     `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`,
   );
 
-  const space = await client.createSpace({
+  const tray = await client.createTray({
     id: "com.example.opentray.daemon-lynx",
-    title: "OpenTray Lynx Smoke",
-    default: true,
-  });
-  console.log(`space: ${JSON.stringify(space.space)}`);
-
-  const tray = await space.createTray({
-    trayId: "daemon-lynx-status",
-    title: "OpenTray Lynx",
     tooltip: {
       title: "OpenTray Lynx",
       description: "Generic extension smoke for a real Lynx runtime window",
@@ -111,7 +103,7 @@ export const runDaemonLynxSmoke = async (
   await connection.request({
     type: "load-ext",
     requestId: "daemon-lynx-load",
-    spaceId: space.space.spaceId,
+    appId: "space-recorded",
     name: "lynx",
     path: "@opentray/ext-lynx",
   });

@@ -4,25 +4,25 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use opentray_backend_tray_icon::{TrayIconBackend, TrayIconProjection, TrayIconRuntime};
-use opentray_core::{BackendError, SurfaceBackend};
+use opentray_core::{AppBackend, BackendError};
 
 fn main() -> Result<(), BackendError> {
     let runtime = RecordingRuntime::default();
     let projections = runtime.projections();
     let backend = TrayIconBackend::with_runtime(runtime);
 
-    backend.sync_surface(common::surface_projection())?;
+    backend.sync_app(common::surface_projection())?;
 
     let projections = projections.borrow();
     let projection = projections.last().expect("projection applied");
     println!("applied projections: {}", projections.len());
-    println!("space: {}", projection.space_id);
+    println!("app: {}", projection.app_id);
 
     for tray in &projection.trays {
         println!(
             "tray: {} title={} menu_entries={}",
             tray.tray_id,
-            tray.title,
+            tray.title.as_deref().unwrap_or("<none>"),
             tray.menu.entries.len()
         );
     }

@@ -64,7 +64,7 @@ describe("local broker client", () => {
           `${JSON.stringify({
             type: "tray-bounds",
             requestId: frame.requestId,
-            spaceId: frame.spaceId,
+            appId: frame.appId,
             trayId: frame.trayId,
             bounds: {
               kind: "native",
@@ -86,7 +86,7 @@ describe("local broker client", () => {
     const frame = (await connection.request({
       type: "get-tray-bounds",
       requestId: "bounds-1",
-      spaceId: "space-a",
+      appId: "space-a",
       trayId: "tray-a",
     })) as Extract<ServerFrame, { type: "tray-bounds" }>;
 

@@ -8,8 +8,8 @@ pub use native::*;
 pub use projection::*;
 pub use runtime::*;
 
-use opentray_core::{BackendCapabilities, BackendError, SurfaceBackend, SurfaceProjection};
-use opentray_spec::{Rect, SurfaceId, TrayEvent, TrayId};
+use opentray_core::{AppBackend, AppProjection, BackendCapabilities, BackendError};
+use opentray_spec::{AppId, Rect, TrayEvent, TrayId};
 
 #[derive(Debug, Default)]
 pub struct TrayIconBackend<R = UnboundTrayIconRuntime> {
@@ -40,7 +40,7 @@ impl<R: TrayIconRuntime> TrayIconBackend<R> {
     }
 }
 
-impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
+impl<R: TrayIconRuntime> AppBackend for TrayIconBackend<R> {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
             tray_bounds: cfg!(not(target_os = "linux")),
@@ -48,25 +48,21 @@ impl<R: TrayIconRuntime> SurfaceBackend for TrayIconBackend<R> {
         }
     }
 
-    fn sync_surface(&self, projection: SurfaceProjection) -> Result<(), BackendError> {
+    fn sync_app(&self, projection: AppProjection) -> Result<(), BackendError> {
         self.runtime
-            .apply_projection(TrayIconProjection::from_surface_projection(&projection)?)
+            .apply_projection(TrayIconProjection::from_app_projection(&projection)?)
     }
 
-    fn tray_bounds(
-        &self,
-        space_id: &SurfaceId,
-        tray_id: &TrayId,
-    ) -> Result<Option<Rect>, BackendError> {
+    fn tray_bounds(&self, app_id: &AppId, tray_id: &TrayId) -> Result<Option<Rect>, BackendError> {
         if !self.capabilities().tray_bounds {
             return Ok(None);
         }
         self.runtime
-            .tray_bounds(&stable_tray_icon_id(space_id, tray_id))
+            .tray_bounds(&stable_tray_icon_id(app_id, tray_id))
     }
 
-    fn show_menu(&self, space_id: &SurfaceId) -> Result<(), BackendError> {
-        self.runtime.show_menu(space_id)
+    fn show_menu(&self, app_id: &AppId) -> Result<(), BackendError> {
+        self.runtime.show_menu(app_id)
     }
 
     fn emit_event(&self, event: TrayEvent) -> Result<(), BackendError> {
@@ -80,11 +76,11 @@ mod tests {
     use std::rc::Rc;
 
     use opentray_core::TrayProjection;
-    use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef, TrayEvent};
+    use opentray_spec::{AppRef, Icon, Menu, MenuItem, TrayEvent};
 
     use super::*;
 
-    fn assert_backend<T: SurfaceBackend>() {}
+    fn assert_backend<T: AppBackend>() {}
 
     #[test]
     fn implements_surface_backend_contract() {
@@ -97,11 +93,11 @@ mod tests {
         let calls = runtime.calls();
         let backend = TrayIconBackend::with_runtime(runtime);
         backend
-            .sync_surface(surface_projection())
+            .sync_app(surface_projection())
             .expect("projection apply");
 
         let projection = calls.borrow().last().expect("projection").clone();
-        assert_eq!(projection.space_id, "surface-1");
+        assert_eq!(projection.app_id, "surface-1");
         assert_eq!(projection.trays[0].menu.entries.len(), 1);
         assert!(projection
             .routes
@@ -113,7 +109,7 @@ mod tests {
     fn default_runtime_is_explicitly_unbound() {
         let backend = TrayIconBackend::new();
         let error = backend
-            .sync_surface(surface_projection())
+            .sync_app(surface_projection())
             .expect_err("default runtime is not native");
 
         assert!(matches!(
@@ -129,7 +125,7 @@ mod tests {
         assert_eq!(
             backend.menu_event("native-menu-id"),
             Some(TrayEvent::MenuClick {
-                space_id: "surface-1".to_string(),
+                app_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 7,
             })
@@ -144,7 +140,7 @@ mod tests {
         assert_eq!(
             backend.primary_event("native-tray-id"),
             Some(TrayEvent::MenuClick {
-                space_id: "surface-1".to_string(),
+                app_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 7,
             })
@@ -221,7 +217,7 @@ mod tests {
 
         fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
             (menu_id == "native-menu-id").then(|| TrayEvent::MenuClick {
-                space_id: "surface-1".to_string(),
+                app_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 7,
             })
@@ -229,17 +225,17 @@ mod tests {
 
         fn primary_event(&self, tray_icon_id: &str) -> Option<TrayEvent> {
             (tray_icon_id == "native-tray-id").then(|| TrayEvent::MenuClick {
-                space_id: "surface-1".to_string(),
+                app_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 7,
             })
         }
     }
 
-    fn surface_projection() -> SurfaceProjection {
-        SurfaceProjection {
-            surface: SurfaceRef {
-                space_id: "surface-1".to_string(),
+    fn surface_projection() -> AppProjection {
+        AppProjection {
+            app: AppRef {
+                app_id: "surface-1".to_string(),
             },
             title: Some("Host".to_string()),
             tooltip: None,
@@ -248,11 +244,7 @@ mod tests {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
                 tooltip: None,
-                icon: Some(Icon::Rgba {
-                    data: vec![0, 0, 0, 0],
-                    width: 1,
-                    height: 1,
-                }),
+                icon: Some(Icon::rgba(vec![0, 0, 0, 0], 1, 1)),
                 menu: Some(Menu {
                     items: vec![MenuItem::Item {
                         id: 7,

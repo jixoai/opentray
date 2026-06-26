@@ -11,9 +11,7 @@ import type { WebviewIpcMessage, WebviewWindowHandle } from "../../../ext-webvie
 import { terminateWorkspaceDevBrokerProcess } from "../../src/daemon/broker-command";
 import {
   createClient,
-  type EventfulSpaceHandle,
   type EventfulTrayHandle,
-  type OpenTrayEventfulClient,
 } from "../../src/index";
 import { connectLocalBroker, type LocalBrokerClient } from "../../src/node";
 import { createVisibleTrayIcon } from "./visible-tray-icon";
@@ -24,14 +22,8 @@ export interface WebviewExampleRuntimeOptions {
   importMetaUrl: string;
   requestIdPrefix: string;
   homePrefix: string;
-  space: {
-    id: string;
-    title: string;
-    default?: boolean;
-  };
   tray: {
-    trayId: string;
-    title: string;
+    id: string;
     tooltip?: {
       title: string;
       description: string;
@@ -44,8 +36,6 @@ export interface WebviewExampleRuntime {
   localWebviewExtension: string | undefined;
   homeDir: string;
   connection: LocalBrokerClient;
-  client: OpenTrayEventfulClient;
-  space: EventfulSpaceHandle;
   tray: EventfulTrayHandle;
   shutdown(): Promise<void>;
 }
@@ -68,16 +58,8 @@ export async function createWebviewExampleRuntime(
     console.log(`webview dylib: ${localWebviewExtension}`);
   }
 
-  const space = await client.createSpace({
-    id: options.space.id,
-    title: options.space.title,
-    default: options.space.default ?? true,
-  });
-  console.log(`space: ${JSON.stringify(space.space)}`);
-
-  const tray = await space.createTray({
-    trayId: options.tray.trayId,
-    title: options.tray.title,
+  const tray = await client.createTray({
+    id: options.tray.id,
     ...(options.tray.tooltip === undefined ? {} : { tooltip: options.tray.tooltip }),
     icon: createVisibleTrayIcon(),
     menu: options.tray.menu,
@@ -89,8 +71,6 @@ export async function createWebviewExampleRuntime(
     localWebviewExtension,
     homeDir,
     connection,
-    client,
-    space,
     tray,
     async shutdown() {
       if (closed) {

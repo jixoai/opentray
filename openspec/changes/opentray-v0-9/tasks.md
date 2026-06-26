@@ -1,0 +1,41 @@
+## 1. CLI Public Surface Reset
+
+- [x] 1.1 Remove `createSpace`, `createSurface`, `resolveDefaultSpace`, `SpaceHandle`, `EventfulSpaceHandle`, `SurfaceHandle`, and any related public aliases from `packages/cli/src/index.ts`, `packages/cli/src/client.ts`, and `packages/cli/src/sdk.ts`.
+- [x] 1.2 Keep `createTray` as the only public creation entrypoint in the CLI SDK surface.
+- [x] 1.3 Rework `packages/cli/src/index.test.ts` so it proves the tray-first public API instead of alias behavior.
+- [x] 1.4 Delete `packages/cli/src/sdk.test.ts` once its compatibility coverage is no longer meaningful.
+
+## 2. Tray-First Example Migration
+
+- [x] 2.1 Rewrite `packages/cli/examples/basic-space.ts`, `packages/cli/examples/daemon-tray.ts`, `packages/cli/examples/tray-panel.ts`, `packages/cli/examples/webview-control.ts`, `packages/cli/examples/badge-panel.ts`, `packages/cli/examples/media-query-panel.ts`, and `packages/cli/examples/placement-panel.ts` to call `createTray(...)` directly.
+- [x] 2.2 Update `packages/cli/examples/_support/webview-example-support.ts` and `packages/cli/examples/_support/daemon-lynx-support.ts` so they return tray handles only and stop exposing `space`.
+- [x] 2.3 Remove remaining `spaceId` / `space.createTray` assumptions from the CLI example path.
+
+## 3. Protocol Mirror Cleanup
+
+- [x] 3.1 Remove public `SpaceOptions`, `SpaceRef`, `SurfaceOptions`, `SurfaceRef`, and public `spaceId`-based creation from `packages/spec/src/index.ts`.
+- [x] 3.2 Update `packages/spec/src/index.test.ts` to cover the tray-first protocol shapes instead of the removed `Space` contract.
+- [x] 3.3 Mirror the same contract break in `crates/opentray-spec/src/model.rs` and `crates/opentray-spec/src/protocol.rs`.
+- [x] 3.4 Keep request/response/event framing intact while removing public `Space` / `Surface` / `spaceId` names from the protocol.
+
+## 4. Kernel, Backend, and Extension Host Cleanup
+
+- [x] 4.1 Update `crates/opentray-core/src/kernel.rs`, `crates/opentray-core/src/backend.rs`, `crates/opentray-core/src/extension.rs`, and `crates/opentray-core/src/broker.rs` to keep the tray-first runtime law consistent after removing public `Space` / broker ontology.
+- [x] 4.2 Fix `crates/opentray-core/src/broker/tests.rs` and any stale Rust coverage that still references `SpaceCreated`, `CreateSpace`, or `space` vocabulary.
+- [x] 4.3 Align `crates/opentray-backend-tray-icon/src/lib.rs`, `crates/opentray-backend-tray-icon/src/projection.rs`, `crates/opentray-backend-tray-icon/src/native.rs`, and `crates/opentray-backend-tray-icon/src/runtime.rs` with the new app-scoped tray projection law.
+- [x] 4.4 Remove remaining `spaceId`-based assumptions from `packages/ext-badge/src/index.ts` and `packages/ext-badge/src/index.test.ts`.
+- [x] 4.5 Update `packages/ext-webview/examples/webview-command.ts`, `packages/ext-webview/src/index.test.ts`, `packages/ext-lynx/src/index.test.ts`, `crates/opentray-ext-lynx/src/lib.rs`, `crates/opentray-bin/src/frame_error.rs`, and remaining example support code that still speaks the old space contract.
+
+## 5. OpenSpec And Docs Alignment
+
+- [x] 5.1 Update `openspec/changes/opentray-v0-9/specs/client-sdk/spec.md` and `openspec/changes/opentray-v0-9/specs/kernel-runtime/spec.md` so they match the tray-first API and the removed `Space` / public broker story.
+- [x] 5.2 Reconcile `openspec/changes/opentray-v0-9/specs/backend-adapters/spec.md`, `openspec/changes/opentray-v0-9/specs/extension-host/spec.md`, `openspec/changes/opentray-v0-9/specs/runtime-host/spec.md`, and `openspec/changes/opentray-v0-9/specs/packaging-plugin/spec.md` with the same contract break.
+- [x] 5.3 Update `README.md`, `packages/cli/README.md`, `packages/spec/README.md`, `packages/ext-webview/README.md`, `packages/ext-lynx/README.md`, and the platform package READMEs to remove the old `createSpace` / shared broker story.
+- [x] 5.4 Keep the implementation file map in `openspec/changes/opentray-v0-9/plans/plan.md` synchronized with the real touched files.
+
+## 6. Validation
+
+- [x] 6.1 Run the narrowest package tests that prove the CLI and protocol changes.
+- [x] 6.2 Run `cargo test -p opentray-spec --lib` and `cargo test -p opentray-core --lib` after the Rust mirror cleanup lands.
+- [x] 6.3 Run the repo-level verification gates once the mirror and example updates land.
+- [x] 6.4 Run `git diff --check` and a final status review before calling the change done.

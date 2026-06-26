@@ -26,16 +26,8 @@ if (localWebviewExtension !== undefined) {
   console.log(`webview dylib: ${localWebviewExtension}`);
 }
 
-const space = await client.createSpace({
+const tray = await client.createTray({
   id: "com.example.opentray.webview-control",
-  title: "OpenTray WebView Control Demo",
-  default: true,
-});
-console.log(`space: ${JSON.stringify(space.space)}`);
-
-const tray = await space.createTray({
-  trayId: "webview-control",
-  title: "OpenTray",
   tooltip: {
     title: "OpenTray",
     description: "Native WebView control demo launched directly from the page",
@@ -47,10 +39,7 @@ const tray = await space.createTray({
 });
 console.log(`tray: ${tray.trayId}`);
 
-await connection.request({
-  type: "load-ext",
-  requestId: "webview-control-load-webview",
-  spaceId: space.space.spaceId,
+await tray.loadExtension({
   name: "webview",
   path: "@opentray/ext-webview",
 });

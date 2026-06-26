@@ -4,27 +4,33 @@ Shared TypeScript protocol and contract package for OpenTray.
 
 ## Role
 
-- Define JSON-RPC payload shapes.
-- Define broker protocol version and endpoint identity helpers.
-- Define public `Space`, `Tray`, `Session`, and extension contract types.
-- Keep protocol types reusable by the `opentray` package and official extensions.
+- Define newline-delimited JSON protocol payload shapes.
+- Define protocol version and endpoint identity helpers.
+- Define public `App`, `Tray`, `Session`, icon projection, menu, tooltip, and extension contract types.
+- Keep protocol types reusable by `opentray` and official extensions.
 
-This package must stay platform-neutral and must not import native implementation packages.
+This package is platform-neutral and must not import native implementation packages.
 
-## Example
+## Tray Contract
 
-Run a protocol parser example that shows successful server-frame parsing and malformed-frame rejection:
-
-```bash
-pnpm --filter @opentray/spec example:parse
-```
-
-Endpoint identity is version-scoped during the current unstable broker stage:
+`TrayOptions` uses `id` as the tray atom identity. Visible tray text belongs to the unified `icon` field:
 
 ```ts
-import { createBrokerEndpointIdentity, formatUnixSocketPath } from "@opentray/spec";
+import type { Icon, TrayOptions } from "@opentray/spec";
 
-const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
-console.log(formatUnixSocketPath("~", identity));
-// ~/.opentray/0.1.0/opentray-p1.sock
+const icon: Icon = {
+  type: "file",
+  path: "./status.png",
+  text: "Status",
+  "icon-only": { type: "file", path: "./status-small.png" },
+  "text-only": "Status",
+  "icon-text": { type: "file", path: "./status.png", text: "Status" },
+};
+
+const tray: TrayOptions = {
+  id: "com.example.status",
+  icon,
+};
 ```
+
+`Space`, `Surface`, `spaceId`, `create-space`, and top-level tray `title` are removed public vocabulary for v0.9.

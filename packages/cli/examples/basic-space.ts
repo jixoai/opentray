@@ -9,26 +9,18 @@ class RecordingTransport implements OpenTrayTransport {
     this.frames.push(frame);
     console.log(`client -> broker ${JSON.stringify(frame)}`);
     switch (frame.type) {
-      case "create-space":
-        return {
-          type: "space-created",
-          requestId: frame.requestId,
-          space: {
-            spaceId: `recorded:${frame.id ?? "default"}`,
-          },
-        };
       case "create-tray":
         return {
           type: "tray-created",
           requestId: frame.requestId,
-          spaceId: frame.space.spaceId,
-          trayId: frame.tray.trayId ?? "recorded-tray",
+          appId: "app-recorded",
+          trayId: frame.tray.id,
         };
       case "get-tray-bounds":
         return {
           type: "tray-bounds",
           requestId: frame.requestId,
-          spaceId: frame.spaceId,
+          appId: "app-recorded",
           trayId: frame.trayId,
           bounds: {
             kind: "unavailable",
@@ -40,12 +32,12 @@ class RecordingTransport implements OpenTrayTransport {
       case "set-tray-menu":
       case "set-tray-icon":
       case "set-tray-tooltip":
-      case "set-tray-title":
       case "load-ext":
       case "ext-command":
       case "unload-ext":
-      case "resolve-default-space":
         return { type: "ack", requestId: frame.requestId };
+      case "resolve-default-app":
+        return { type: "default-app", requestId: frame.requestId, app: { appId: "app-recorded" } };
       case "health":
         return {
           type: "daemon-health",
@@ -59,6 +51,8 @@ class RecordingTransport implements OpenTrayTransport {
             sessions: [],
           },
         };
+      default:
+        return { type: "error", requestId: frame.requestId, code: "unsupported", message: frame.type };
     }
   }
 }
@@ -68,15 +62,8 @@ console.log(`client -> broker ${JSON.stringify(createInitFrame("0.1.0"))}`);
 
 const client = createClient(transport);
 
-const space = await client.createSpace({
+const tray = await client.createTray({
   id: "com.example.opentray",
-  title: "OpenTray Example",
-  default: true,
-});
-
-const tray = await space.createTray({
-  trayId: "build-status",
-  title: "Build Status",
   tooltip: {
     title: "OpenTray",
     description: "Protocol-only human example",

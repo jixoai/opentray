@@ -1,12 +1,14 @@
 use std::{collections::HashMap, io::Cursor};
 
-use opentray_core::{SurfaceProjection, TrayProjection};
-use opentray_spec::{Icon, Menu, MenuItem, MenuItemId, SurfaceId, Tooltip, TrayEvent, TrayId};
+use opentray_core::{AppProjection, TrayProjection};
+use opentray_spec::{
+    AppId, Icon, IconImage, Menu, MenuItem, MenuItemId, Tooltip, TrayEvent, TrayId,
+};
 use png::{ColorType, Decoder, Transformations};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayIconProjection {
-    pub space_id: SurfaceId,
+    pub app_id: AppId,
     pub title: Option<String>,
     pub tooltip: Option<Tooltip>,
     pub icon: Option<TrayIconAsset>,
@@ -15,8 +17,8 @@ pub struct TrayIconProjection {
 }
 
 impl TrayIconProjection {
-    pub fn from_surface_projection(
-        projection: &SurfaceProjection,
+    pub fn from_app_projection(
+        projection: &AppProjection,
     ) -> Result<Self, opentray_core::BackendError> {
         let mut routes = TrayIconRouteTable::default();
         let trays = projection
@@ -24,7 +26,7 @@ impl TrayIconProjection {
             .iter()
             .map(|tray| {
                 TrayIconTrayProjection::from_tray_projection(
-                    &projection.surface.space_id,
+                    &projection.app.app_id,
                     tray,
                     &mut routes,
                 )
@@ -32,13 +34,15 @@ impl TrayIconProjection {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
-            space_id: projection.surface.space_id.clone(),
+            app_id: projection.app.app_id.clone(),
             title: projection.title.clone(),
             tooltip: projection.tooltip.clone(),
-            icon: match projection.icon.as_ref() {
-                Some(icon) => Some(TrayIconAsset::from_icon(icon)?),
-                None => None,
-            },
+            icon: projection
+                .icon
+                .as_ref()
+                .and_then(TrayIconSelection::from_icon)
+                .map(|selection| TrayIconAsset::from_icon_image(selection.image))
+                .transpose()?,
             trays,
             routes,
         })
@@ -49,7 +53,7 @@ impl TrayIconProjection {
 pub struct TrayIconTrayProjection {
     pub tray_icon_id: String,
     pub tray_id: TrayId,
-    pub title: String,
+    pub title: Option<String>,
     pub tooltip: Option<Tooltip>,
     pub icon: Option<TrayIconAsset>,
     pub menu: TrayIconMenuProjection,
@@ -57,13 +61,13 @@ pub struct TrayIconTrayProjection {
 
 impl TrayIconTrayProjection {
     fn from_tray_projection(
-        space_id: &str,
+        app_id: &str,
         tray: &TrayProjection,
         routes: &mut TrayIconRouteTable,
     ) -> Result<Self, opentray_core::BackendError> {
-        let tray_icon_id = stable_tray_icon_id(space_id, &tray.tray_id);
+        let tray_icon_id = stable_tray_icon_id(app_id, &tray.tray_id);
         let menu =
-            TrayIconMenuProjection::from_menu(space_id, &tray.tray_id, tray.menu.as_ref(), routes);
+            TrayIconMenuProjection::from_menu(app_id, &tray.tray_id, tray.menu.as_ref(), routes);
         if let Some(primary_menu_id) = menu.primary_menu_id.clone() {
             routes.insert_primary_event(&tray_icon_id, primary_menu_id);
         }
@@ -71,13 +75,45 @@ impl TrayIconTrayProjection {
         Ok(Self {
             tray_icon_id,
             tray_id: tray.tray_id.clone(),
-            title: tray.title.clone(),
+            title: tray
+                .icon
+                .as_ref()
+                .and_then(TrayIconSelection::from_icon)
+                .and_then(|selection| selection.text.cloned()),
             tooltip: tray.tooltip.clone(),
-            icon: match tray.icon.as_ref() {
-                Some(icon) => Some(TrayIconAsset::from_icon(icon)?),
-                None => None,
-            },
+            icon: tray
+                .icon
+                .as_ref()
+                .and_then(TrayIconSelection::from_icon)
+                .map(|selection| TrayIconAsset::from_icon_image(selection.image))
+                .transpose()?,
             menu,
+        })
+    }
+}
+
+struct TrayIconSelection<'a> {
+    image: &'a IconImage,
+    text: Option<&'a String>,
+}
+
+impl<'a> TrayIconSelection<'a> {
+    fn from_icon(icon: &'a Icon) -> Option<Self> {
+        if let Some(image) = &icon.icon_only {
+            return Some(Self { image, text: None });
+        }
+        if icon.text_only.is_some() {
+            return None;
+        }
+        if let Some(icon_text) = &icon.icon_text {
+            return Some(Self {
+                image: &icon_text.image,
+                text: Some(&icon_text.text),
+            });
+        }
+        icon.fallback.as_ref().map(|fallback| Self {
+            image: &fallback.image,
+            text: fallback.text.as_ref(),
         })
     }
 }
@@ -92,19 +128,19 @@ pub enum TrayIconAsset {
 }
 
 impl TrayIconAsset {
-    fn from_icon(icon: &Icon) -> Result<Self, opentray_core::BackendError> {
-        match icon {
-            Icon::Rgba {
+    fn from_icon_image(image: &IconImage) -> Result<Self, opentray_core::BackendError> {
+        match image {
+            IconImage::Rgba {
                 data,
                 width,
                 height,
             } => Self::from_rgba(data, *width, *height),
-            Icon::Encoded { data } => decode_png_bytes(
+            IconImage::Encoded { data } => decode_png_bytes(
                 data,
                 "encoded tray icon bytes",
                 "tray_icon_encoded_decode_failed",
             ),
-            Icon::File { path } => decode_png_file(path),
+            IconImage::File { path } => decode_png_file(path),
         }
     }
 
@@ -142,7 +178,7 @@ pub struct TrayIconMenuProjection {
 
 impl TrayIconMenuProjection {
     fn from_menu(
-        space_id: &str,
+        app_id: &str,
         tray_id: &str,
         menu: Option<&Menu>,
         routes: &mut TrayIconRouteTable,
@@ -155,7 +191,7 @@ impl TrayIconMenuProjection {
                     .iter()
                     .map(|item| {
                         menu_entry(
-                            space_id,
+                            app_id,
                             tray_id,
                             item,
                             routes,
@@ -214,7 +250,7 @@ pub enum TrayIconMenuEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayIconMenuRoute {
-    pub space_id: SurfaceId,
+    pub app_id: AppId,
     pub tray_id: TrayId,
     pub item_id: MenuItemId,
 }
@@ -228,7 +264,7 @@ pub struct TrayIconRouteTable {
 impl TrayIconRouteTable {
     pub fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
         self.routes.get(menu_id).map(|route| TrayEvent::MenuClick {
-            space_id: route.space_id.clone(),
+            app_id: route.app_id.clone(),
             tray_id: route.tray_id.clone(),
             item_id: route.item_id,
         })
@@ -240,12 +276,12 @@ impl TrayIconRouteTable {
             .and_then(|menu_id| self.menu_event(menu_id))
     }
 
-    fn insert(&mut self, space_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
-        let menu_id = stable_menu_id(space_id, tray_id, item_id);
+    fn insert(&mut self, app_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
+        let menu_id = stable_menu_id(app_id, tray_id, item_id);
         self.routes.insert(
             menu_id.clone(),
             TrayIconMenuRoute {
-                space_id: space_id.to_string(),
+                app_id: app_id.to_string(),
                 tray_id: tray_id.to_string(),
                 item_id,
             },
@@ -261,7 +297,7 @@ impl TrayIconRouteTable {
 }
 
 fn menu_entry(
-    space_id: &str,
+    app_id: &str,
     tray_id: &str,
     item: &MenuItem,
     routes: &mut TrayIconRouteTable,
@@ -277,7 +313,7 @@ fn menu_entry(
             shortcut,
         } => {
             *click_item_count += 1;
-            let menu_id = routes.insert(space_id, tray_id, *id);
+            let menu_id = routes.insert(app_id, tray_id, *id);
             if *primary_event && *enabled && primary_menu_id.is_none() {
                 *primary_menu_id = Some(menu_id.clone());
             }
@@ -296,7 +332,7 @@ fn menu_entry(
         } => {
             *click_item_count += 1;
             TrayIconMenuEntry::Check {
-                menu_id: routes.insert(space_id, tray_id, *id),
+                menu_id: routes.insert(app_id, tray_id, *id),
                 title: title.clone(),
                 enabled: *enabled,
                 checked: *checked,
@@ -311,7 +347,7 @@ fn menu_entry(
         } => {
             *click_item_count += 1;
             TrayIconMenuEntry::Radio {
-                menu_id: routes.insert(space_id, tray_id, *id),
+                menu_id: routes.insert(app_id, tray_id, *id),
                 title: title.clone(),
                 enabled: *enabled,
                 checked: *checked,
@@ -330,7 +366,7 @@ fn menu_entry(
                 .iter()
                 .map(|item| {
                     menu_entry(
-                        space_id,
+                        app_id,
                         tray_id,
                         item,
                         routes,
@@ -343,18 +379,18 @@ fn menu_entry(
     }
 }
 
-pub(crate) fn stable_tray_icon_id(space_id: &str, tray_id: &str) -> String {
+pub(crate) fn stable_tray_icon_id(app_id: &str, tray_id: &str) -> String {
     format!(
         "opentray-tray:{}:{}",
-        encode_component(space_id),
+        encode_component(app_id),
         encode_component(tray_id)
     )
 }
 
-fn stable_menu_id(space_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
+fn stable_menu_id(app_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
     format!(
         "opentray:{}:{}:{}",
-        encode_component(space_id),
+        encode_component(app_id),
         encode_component(tray_id),
         item_id
     )
@@ -541,24 +577,20 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef};
+    use opentray_spec::{AppRef, Icon, IconImage, IconText, Menu, MenuItem, SimpleIcon};
     use png::Encoder;
 
     use super::*;
 
     fn icon() -> Option<Icon> {
-        Some(Icon::Rgba {
-            data: vec![0, 0, 0, 0],
-            width: 1,
-            height: 1,
-        })
+        Some(Icon::rgba(vec![0, 0, 0, 0], 1, 1))
     }
 
     #[test]
     fn menu_ids_preserve_full_route_context() {
-        let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
-            surface: SurfaceRef {
-                space_id: "surface:1".to_string(),
+        let projection = TrayIconProjection::from_app_projection(&AppProjection {
+            app: AppRef {
+                app_id: "surface:1".to_string(),
             },
             title: Some("Host".to_string()),
             tooltip: None,
@@ -589,7 +621,7 @@ mod tests {
         assert_eq!(
             projection.routes.menu_event(&left),
             Some(TrayEvent::MenuClick {
-                space_id: "surface:1".to_string(),
+                app_id: "surface:1".to_string(),
                 tray_id: "tray/a".to_string(),
                 item_id: 1,
             })
@@ -598,9 +630,9 @@ mod tests {
 
     #[test]
     fn submenu_routes_nested_items() {
-        let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
-            surface: SurfaceRef {
-                space_id: "surface-1".to_string(),
+        let projection = TrayIconProjection::from_app_projection(&AppProjection {
+            app: AppRef {
+                app_id: "surface-1".to_string(),
             },
             title: None,
             tooltip: None,
@@ -634,9 +666,9 @@ mod tests {
 
     #[test]
     fn primary_event_routes_to_same_menu_click() {
-        let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
-            surface: SurfaceRef {
-                space_id: "surface-1".to_string(),
+        let projection = TrayIconProjection::from_app_projection(&AppProjection {
+            app: AppRef {
+                app_id: "surface-1".to_string(),
             },
             title: None,
             tooltip: None,
@@ -660,7 +692,7 @@ mod tests {
         assert_eq!(
             projection.routes.primary_event(&tray.tray_icon_id),
             Some(TrayEvent::MenuClick {
-                space_id: "surface-1".to_string(),
+                app_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 8,
             })
@@ -669,9 +701,9 @@ mod tests {
 
     #[test]
     fn disabled_primary_event_is_not_direct_target() {
-        let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
-            surface: SurfaceRef {
-                space_id: "surface-1".to_string(),
+        let projection = TrayIconProjection::from_app_projection(&AppProjection {
+            app: AppRef {
+                app_id: "surface-1".to_string(),
             },
             title: None,
             tooltip: None,
@@ -695,9 +727,9 @@ mod tests {
 
     #[test]
     fn duplicate_primary_events_use_first_enabled_item() {
-        let projection = TrayIconProjection::from_surface_projection(&SurfaceProjection {
-            surface: SurfaceRef {
-                space_id: "surface-1".to_string(),
+        let projection = TrayIconProjection::from_app_projection(&AppProjection {
+            app: AppRef {
+                app_id: "surface-1".to_string(),
             },
             title: None,
             tooltip: None,
@@ -723,7 +755,7 @@ mod tests {
         assert_eq!(
             projection.routes.primary_event(&tray.tray_icon_id),
             Some(TrayEvent::MenuClick {
-                space_id: "surface-1".to_string(),
+                app_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 8,
             })
@@ -732,11 +764,10 @@ mod tests {
 
     #[test]
     fn encoded_png_icon_is_normalized_to_rgba() {
-        let projection =
-            TrayIconProjection::from_surface_projection(&projection_with_icon(Icon::Encoded {
-                data: rgba_png_bytes(&[13, 37, 91, 255], 1, 1),
-            }))
-            .expect("projection");
+        let projection = TrayIconProjection::from_app_projection(&projection_with_icon(
+            Icon::encoded(rgba_png_bytes(&[13, 37, 91, 255], 1, 1)),
+        ))
+        .expect("projection");
 
         assert_eq!(
             projection.trays[0].icon,
@@ -753,11 +784,10 @@ mod tests {
         let path = temp_png_path("file_png_icon_is_normalized_to_rgba");
         fs::write(&path, rgba_png_bytes(&[21, 42, 84, 255], 1, 1)).expect("write png");
 
-        let projection =
-            TrayIconProjection::from_surface_projection(&projection_with_icon(Icon::File {
-                path: path.to_string_lossy().into_owned(),
-            }))
-            .expect("projection");
+        let projection = TrayIconProjection::from_app_projection(&projection_with_icon(
+            Icon::file(path.to_string_lossy().into_owned()),
+        ))
+        .expect("projection");
 
         let _ = fs::remove_file(&path);
         assert_eq!(
@@ -773,15 +803,110 @@ mod tests {
     #[test]
     fn invalid_png_icon_reports_typed_failure() {
         let error =
-            TrayIconProjection::from_surface_projection(&projection_with_icon(Icon::Encoded {
-                data: vec![0, 1, 2],
-            }))
+            TrayIconProjection::from_app_projection(&projection_with_icon(Icon::encoded(vec![
+                0, 1, 2,
+            ])))
             .expect_err("projection");
 
         assert!(matches!(
             error,
             opentray_core::BackendError::Failure(message) if message.contains("tray_icon_encoded_decode_failed")
         ));
+    }
+
+    #[test]
+    fn responsive_icon_prefers_icon_only_candidate() {
+        let projection = TrayIconProjection::from_app_projection(&projection_with_icon(Icon {
+            icon_only: Some(IconImage::Rgba {
+                data: vec![1, 2, 3, 4],
+                width: 1,
+                height: 1,
+            }),
+            text_only: None,
+            icon_text: Some(IconText {
+                image: IconImage::Rgba {
+                    data: vec![5, 6, 7, 8],
+                    width: 1,
+                    height: 1,
+                },
+                text: "Visible".to_string(),
+            }),
+            fallback: Some(SimpleIcon {
+                image: IconImage::Rgba {
+                    data: vec![9, 10, 11, 12],
+                    width: 1,
+                    height: 1,
+                },
+                text: Some("Fallback".to_string()),
+            }),
+        }))
+        .expect("projection");
+
+        assert_eq!(
+            projection.trays[0].icon,
+            Some(TrayIconAsset::Rgba {
+                data: vec![1, 2, 3, 4],
+                width: 1,
+                height: 1,
+            })
+        );
+        assert_eq!(projection.trays[0].title, None);
+    }
+
+    #[test]
+    fn text_only_icon_preserves_unsupported_image_absence() {
+        let projection = TrayIconProjection::from_app_projection(&projection_with_icon(Icon {
+            icon_only: None,
+            text_only: Some("Build".to_string()),
+            icon_text: Some(IconText {
+                image: IconImage::Rgba {
+                    data: vec![5, 6, 7, 8],
+                    width: 1,
+                    height: 1,
+                },
+                text: "Build".to_string(),
+            }),
+            fallback: Some(SimpleIcon {
+                image: IconImage::Rgba {
+                    data: vec![9, 10, 11, 12],
+                    width: 1,
+                    height: 1,
+                },
+                text: Some("Fallback".to_string()),
+            }),
+        }))
+        .expect("projection");
+
+        assert_eq!(projection.trays[0].icon, None);
+        assert_eq!(projection.trays[0].title, None);
+    }
+
+    #[test]
+    fn icon_text_candidate_supplies_visible_text_when_image_supported() {
+        let projection = TrayIconProjection::from_app_projection(&projection_with_icon(Icon {
+            icon_only: None,
+            text_only: None,
+            icon_text: Some(IconText {
+                image: IconImage::Rgba {
+                    data: vec![5, 6, 7, 8],
+                    width: 1,
+                    height: 1,
+                },
+                text: "Build".to_string(),
+            }),
+            fallback: None,
+        }))
+        .expect("projection");
+
+        assert_eq!(
+            projection.trays[0].icon,
+            Some(TrayIconAsset::Rgba {
+                data: vec![5, 6, 7, 8],
+                width: 1,
+                height: 1,
+            })
+        );
+        assert_eq!(projection.trays[0].title.as_deref(), Some("Build"));
     }
 
     fn menu(id: MenuItemId) -> Menu {
@@ -813,10 +938,10 @@ mod tests {
         }
     }
 
-    fn projection_with_icon(icon: Icon) -> SurfaceProjection {
-        SurfaceProjection {
-            surface: SurfaceRef {
-                space_id: "surface-1".to_string(),
+    fn projection_with_icon(icon: Icon) -> AppProjection {
+        AppProjection {
+            app: AppRef {
+                app_id: "surface-1".to_string(),
             },
             title: None,
             tooltip: None,

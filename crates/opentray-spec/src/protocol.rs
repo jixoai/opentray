@@ -3,8 +3,7 @@ use serde_json::Value;
 
 use crate::ext::ExtensionEnvelope;
 use crate::model::{
-    Icon, Menu, Rect, SessionId, SpaceId, SpaceOptions, SpaceRef, Tooltip, TrayEvent, TrayId,
-    TrayOptions,
+    AppId, AppOptions, AppRef, Icon, Menu, Rect, SessionId, Tooltip, TrayEvent, TrayId, TrayOptions,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -183,45 +182,43 @@ pub enum ClientFrame {
         #[serde(rename = "clientVersion")]
         client_version: String,
     },
-    #[serde(alias = "create-surface")]
-    CreateSpace {
+    CreateApp {
         #[serde(rename = "requestId")]
         request_id: RequestId,
         #[serde(flatten)]
-        options: SpaceOptions,
+        options: AppOptions,
     },
-    #[serde(alias = "resolve-default-surface")]
-    ResolveDefaultSpace {
+    ResolveDefaultApp {
         #[serde(rename = "requestId")]
         request_id: RequestId,
     },
     CreateTray {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        space: SpaceRef,
+        app: AppRef,
         tray: TrayOptions,
     },
     DestroyTray {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
     },
     GetTrayBounds {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
     },
     SetTrayMenu {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         menu: Menu,
@@ -229,8 +226,8 @@ pub enum ClientFrame {
     SetTrayIcon {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         icon: Icon,
@@ -238,26 +235,17 @@ pub enum ClientFrame {
     SetTrayTooltip {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         tooltip: Tooltip,
     },
-    SetTrayTitle {
-        #[serde(rename = "requestId")]
-        request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
-        #[serde(rename = "trayId")]
-        tray_id: TrayId,
-        title: String,
-    },
     LoadExt {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         name: String,
         path: String,
         #[serde(default, rename = "mountId", skip_serializing_if = "Option::is_none")]
@@ -266,8 +254,8 @@ pub enum ClientFrame {
     ExtCommand {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         ext: String,
@@ -276,8 +264,8 @@ pub enum ClientFrame {
     UnloadExt {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         name: String,
     },
     Health {
@@ -298,31 +286,29 @@ pub enum ServerFrame {
         #[serde(rename = "sessionId")]
         session_id: SessionId,
     },
-    #[serde(alias = "surface-created")]
-    SpaceCreated {
+    AppCreated {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        space: SpaceRef,
+        app: AppRef,
     },
-    #[serde(alias = "default-surface")]
-    DefaultSpace {
+    DefaultApp {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        space: SpaceRef,
+        app: AppRef,
     },
     TrayCreated {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
     },
     TrayBounds {
         #[serde(rename = "requestId")]
         request_id: RequestId,
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         bounds: TrayBoundsResult,
@@ -345,8 +331,8 @@ pub enum ServerFrame {
         event: TrayEvent,
     },
     ExtEvent {
-        #[serde(rename = "spaceId")]
-        space_id: SpaceId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
         #[serde(rename = "trayId")]
         tray_id: TrayId,
         ext: String,
@@ -382,14 +368,16 @@ mod tests {
 
     #[test]
     fn endpoint_identity_includes_package_protocol_and_caller_label() {
-        let identity =
-            BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "myapp").unwrap();
+        let identity = BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "myapp").unwrap();
 
         assert_eq!(identity.caller_label(), "myapp");
         assert_eq!(identity.endpoint_name(), "opentray-0.1.0-p1-myapp");
         assert_eq!(identity.state_dir_name(), "0.1.0/myapp");
         assert_eq!(identity.unix_socket_file_name(), "opentray-p1.sock");
-        assert_eq!(identity.windows_pipe_name(), r"\\.\pipe\opentray-0.1.0-p1-myapp");
+        assert_eq!(
+            identity.windows_pipe_name(),
+            r"\\.\pipe\opentray-0.1.0-p1-myapp"
+        );
         assert_eq!(identity.process_title(), "opentray · myapp");
     }
 
@@ -402,8 +390,7 @@ mod tests {
 
     #[test]
     fn endpoint_identity_sanitizes_unsafe_caller_labels() {
-        let identity =
-            BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "My App!!!").unwrap();
+        let identity = BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "My App!!!").unwrap();
 
         assert_eq!(identity.caller_label(), "my-app");
     }
@@ -504,10 +491,10 @@ mod tests {
 
     #[test]
     fn command_responses_carry_request_ids() {
-        let frame = ServerFrame::SpaceCreated {
+        let frame = ServerFrame::AppCreated {
             request_id: "req-1".to_string(),
-            space: SpaceRef {
-                space_id: "space-1".to_string(),
+            app: AppRef {
+                app_id: "app-1".to_string(),
             },
         };
         let error = ServerFrame::Error {
@@ -519,10 +506,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(frame).unwrap(),
             serde_json::json!({
-                "type": "space-created",
+                "type": "app-created",
                 "requestId": "req-1",
-                "space": {
-                    "spaceId": "space-1"
+                "app": {
+                    "appId": "app-1"
                 }
             })
         );
@@ -605,12 +592,12 @@ mod tests {
     fn protocol_uses_camel_case_identity_fields() {
         let frame = ServerFrame::TrayCreated {
             request_id: "req-1".to_string(),
-            space_id: "space-1".to_string(),
+            app_id: "app-1".to_string(),
             tray_id: "tray-1".to_string(),
         };
         let command = ClientFrame::DestroyTray {
             request_id: "req-2".to_string(),
-            space_id: "space-1".to_string(),
+            app_id: "app-1".to_string(),
             tray_id: "tray-1".to_string(),
         };
 
@@ -619,7 +606,7 @@ mod tests {
             serde_json::json!({
                 "type": "tray-created",
                 "requestId": "req-1",
-                "spaceId": "space-1",
+                "appId": "app-1",
                 "trayId": "tray-1"
             })
         );
@@ -628,7 +615,7 @@ mod tests {
             serde_json::json!({
                 "type": "destroy-tray",
                 "requestId": "req-2",
-                "spaceId": "space-1",
+                "appId": "app-1",
                 "trayId": "tray-1"
             })
         );
@@ -642,14 +629,14 @@ mod tests {
         let raw = serde_json::json!({
             "type": "create-tray",
             "requestId": "req-3",
-            "space": { "spaceId": "space-1" },
+            "app": { "appId": "app-1" },
             "tray": {
-                "trayId": "tray-1",
-                "title": "repro"
+                "id": "tray-1"
             }
         });
 
-        let frame: ClientFrame = serde_json::from_value(raw).expect("create-tray parses without icon");
+        let frame: ClientFrame =
+            serde_json::from_value(raw).expect("create-tray parses without icon");
         match frame {
             ClientFrame::CreateTray { tray, .. } => {
                 assert_eq!(tray.icon, None);
@@ -662,7 +649,7 @@ mod tests {
     fn event_frames_use_camel_case_tray_event_fields() {
         let frame = ServerFrame::Event {
             event: TrayEvent::MenuClick {
-                space_id: "space-1".to_string(),
+                app_id: "app-1".to_string(),
                 tray_id: "daemon-status".to_string(),
                 item_id: 99,
             },
@@ -674,7 +661,7 @@ mod tests {
                 "type": "event",
                 "event": {
                     "type": "menuClick",
-                    "spaceId": "space-1",
+                    "appId": "app-1",
                     "trayId": "daemon-status",
                     "itemId": 99
                 }
@@ -686,7 +673,7 @@ mod tests {
     fn tray_click_events_carry_tray_identity() {
         let frame = ServerFrame::Event {
             event: TrayEvent::TrayClick {
-                space_id: "space-1".to_string(),
+                app_id: "app-1".to_string(),
                 tray_id: "daemon-status".to_string(),
                 button: crate::model::MouseButton::Left,
                 x: 10,
@@ -700,7 +687,7 @@ mod tests {
                 "type": "event",
                 "event": {
                     "type": "trayClick",
-                    "spaceId": "space-1",
+                    "appId": "app-1",
                     "trayId": "daemon-status",
                     "button": "left",
                     "x": 10,
@@ -711,36 +698,15 @@ mod tests {
     }
 
     #[test]
-    fn set_tray_title_serializes_as_tray_scoped_command() {
-        let request = ClientFrame::SetTrayTitle {
-            request_id: "req-title".to_string(),
-            space_id: "space-1".to_string(),
-            tray_id: "tray-1".to_string(),
-            title: "Focus".to_string(),
-        };
-
-        assert_eq!(
-            serde_json::to_value(request).unwrap(),
-            serde_json::json!({
-                "type": "set-tray-title",
-                "requestId": "req-title",
-                "spaceId": "space-1",
-                "trayId": "tray-1",
-                "title": "Focus"
-            })
-        );
-    }
-
-    #[test]
     fn tray_bounds_frames_serialize_as_additive_protocol_shapes() {
         let request = ClientFrame::GetTrayBounds {
             request_id: "req-bounds".to_string(),
-            space_id: "space-1".to_string(),
+            app_id: "app-1".to_string(),
             tray_id: "tray-1".to_string(),
         };
         let response = ServerFrame::TrayBounds {
             request_id: "req-bounds".to_string(),
-            space_id: "space-1".to_string(),
+            app_id: "app-1".to_string(),
             tray_id: "tray-1".to_string(),
             bounds: TrayBoundsResult {
                 kind: TrayBoundsKind::Native,
@@ -759,7 +725,7 @@ mod tests {
             serde_json::json!({
                 "type": "get-tray-bounds",
                 "requestId": "req-bounds",
-                "spaceId": "space-1",
+                "appId": "app-1",
                 "trayId": "tray-1"
             })
         );
@@ -768,7 +734,7 @@ mod tests {
             serde_json::json!({
                 "type": "tray-bounds",
                 "requestId": "req-bounds",
-                "spaceId": "space-1",
+                "appId": "app-1",
                 "trayId": "tray-1",
                 "bounds": {
                     "kind": "native",

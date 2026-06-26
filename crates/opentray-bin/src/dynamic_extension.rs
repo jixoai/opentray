@@ -301,14 +301,14 @@ impl DynamicExtensionInstance {
         let free_string =
             unsafe { get_symbol::<ExtFreeStringFn>(&library, EXT_SYMBOL_FREE_STRING)? };
 
-        let surface_id = CString::new(request.surface_id.as_str()).map_err(|error| {
-            ExtensionError::Unsupported(format!("extension surface id contains nul byte: {error}"))
+        let app_id = CString::new(request.app_id.as_str()).map_err(|error| {
+            ExtensionError::Unsupported(format!("extension app id contains nul byte: {error}"))
         })?;
         // Init context is stable metadata only; host capabilities are per-call so
         // daemon-owned UI authority never escapes as a long-lived raw pointer.
         let context = ExtContext {
             api_version: EXT_API_VERSION,
-            surface_id: borrowed_bytes(&surface_id),
+            app_id: borrowed_bytes(&app_id),
         };
         let mut instance = ptr::null_mut();
         let result = unsafe { init(&context, &mut instance) };
@@ -805,7 +805,7 @@ mod tests {
             Vec::new(),
         );
         let request = ExtensionLoadRequest {
-            surface_id: "surface-1".to_string(),
+            app_id: "app-1".to_string(),
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
             mount_id: None,
@@ -836,7 +836,7 @@ mod tests {
             ],
         );
         let request = ExtensionLoadRequest {
-            surface_id: "surface-1".to_string(),
+            app_id: "app-1".to_string(),
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
             mount_id: None,
@@ -887,7 +887,7 @@ mod tests {
             vec![PathBuf::from("/extensions"), PathBuf::from("/repo/exts")],
         );
         let request = ExtensionLoadRequest {
-            surface_id: "surface-1".to_string(),
+            app_id: "app-1".to_string(),
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
             mount_id: None,

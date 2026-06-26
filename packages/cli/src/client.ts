@@ -7,8 +7,6 @@ import {
   type Menu,
   type RequestId,
   type ServerFrame,
-  type SpaceOptions,
-  type SpaceRef,
   type Tooltip,
   type TrayBoundsResult,
   type TrayEvent,
@@ -20,41 +18,28 @@ export interface OpenTrayTransport {
   request(frame: ClientRequestFrame): Promise<ServerFrame>;
 }
 
-export type BrokerEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
+export type OpenTrayEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
 
 export interface OpenTrayEventSource {
-  onEvent(listener: (frame: BrokerEventFrame) => void): () => void;
+  onEvent(listener: (frame: OpenTrayEventFrame) => void): () => void;
 }
 
 export interface OpenTrayConnection extends OpenTrayTransport, OpenTrayEventSource {}
 
 export interface OpenTrayClient {
-  createSpace(options: SpaceOptions): Promise<SpaceHandle>;
-  resolveDefaultSpace(): Promise<SpaceHandle>;
-  /** @deprecated Use `createSpace`. */
-  createSurface(options: SpaceOptions): Promise<SpaceHandle>;
-}
-
-export interface SpaceHandle {
-  space: SpaceRef;
   createTray(options: TrayOptions): Promise<TrayHandle>;
 }
 
-export interface EventfulSpaceHandle extends Omit<SpaceHandle, "createTray"> {
+export interface OpenTrayEventfulClient extends OpenTrayClient {
   createTray(options: TrayOptions): Promise<EventfulTrayHandle>;
 }
 
-/** @deprecated Use `SpaceHandle`. */
-export type SurfaceHandle = SpaceHandle;
-
 export interface TrayHandle {
-  space: SpaceRef;
   trayId: TrayId;
   getBounds(): Promise<TrayBoundsResult>;
   setMenu(menu: Menu): Promise<void>;
   setTooltip(tooltip: Tooltip): Promise<void>;
   setIcon(icon: Icon): Promise<void>;
-  setTitle(title: string): Promise<void>;
   loadExtension(options: ExtensionLoadOptions): Promise<void>;
   commandExtension(ext: string, data: unknown): Promise<void>;
   requestExtension(ext: string, data: unknown): Promise<ExtensionEnvelope[]>;
@@ -125,13 +110,6 @@ export interface CreateClientOptions {
   requestIdPrefix?: string;
 }
 
-export interface OpenTrayEventfulClient extends Omit<OpenTrayClient, "createSpace" | "resolveDefaultSpace" | "createSurface"> {
-  createSpace(options: SpaceOptions): Promise<EventfulSpaceHandle>;
-  resolveDefaultSpace(): Promise<EventfulSpaceHandle>;
-  /** @deprecated Use `createSpace`. */
-  createSurface(options: SpaceOptions): Promise<EventfulSpaceHandle>;
-}
-
 export function createClient(
   transport: OpenTrayConnection,
   options?: CreateClientOptions,
@@ -144,80 +122,36 @@ export function createClient(
   const nextRequestId = createRequestIdFactory(options.requestIdPrefix ?? "opentray");
 
   return {
-    async createSpace(spaceOptions): Promise<SpaceHandle> {
-      const requestId = nextRequestId();
-      const response = await transport.request({
-        type: "create-space",
-        requestId,
-        ...spaceOptions,
-      });
-      const space = expectResponse(response, requestId, "space-created").space;
-      return createSpaceHandle(transport, space, nextRequestId);
-    },
-    async resolveDefaultSpace(): Promise<SpaceHandle> {
-      const requestId = nextRequestId();
-      const response = await transport.request({
-        type: "resolve-default-space",
-        requestId,
-      });
-      const space = expectResponse(response, requestId, "default-space").space;
-      return createSpaceHandle(transport, space, nextRequestId);
-    },
-    async createSurface(spaceOptions): Promise<SpaceHandle> {
-      return this.createSpace(spaceOptions);
-    },
-  };
-};
-
-export function createSpaceHandle(
-  transport: OpenTrayConnection,
-  space: SpaceRef,
-  nextRequestId?: () => RequestId,
-): EventfulSpaceHandle;
-export function createSpaceHandle(
-  transport: OpenTrayTransport,
-  space: SpaceRef,
-  nextRequestId?: () => RequestId,
-): SpaceHandle;
-export function createSpaceHandle(
-  transport: OpenTrayTransport,
-  space: SpaceRef,
-  nextRequestId: () => RequestId = createRequestIdFactory("opentray"),
-): SpaceHandle | EventfulSpaceHandle {
-  return {
-    space,
-    async createTray(options: TrayOptions): Promise<TrayHandle | EventfulTrayHandle> {
+    async createTray(options: TrayOptions): Promise<TrayHandle> {
+      const app = await resolveDefaultAppRef(transport, nextRequestId);
       const requestId = nextRequestId();
       const response = await transport.request({
         type: "create-tray",
         requestId,
-        space,
+        app,
         tray: options,
       });
       const frame = expectResponse(response, requestId, "tray-created");
-      return createTrayHandle(transport, space, frame.trayId, nextRequestId);
+      return createTrayHandle(transport, app.appId, frame.trayId ?? options.id, nextRequestId);
     },
   };
-}
-
-/** @deprecated Use `createSpaceHandle`. */
-export const createSurfaceHandle = createSpaceHandle;
+};
 
 export function createTrayHandle(
   transport: OpenTrayConnection,
-  space: SpaceRef,
+  appId: string,
   trayId: TrayId,
   nextRequestId?: () => RequestId,
 ): EventfulTrayHandle;
 export function createTrayHandle(
   transport: OpenTrayTransport,
-  space: SpaceRef,
+  appId: string,
   trayId: TrayId,
   nextRequestId?: () => RequestId,
 ): TrayHandle;
 export function createTrayHandle(
   transport: OpenTrayTransport,
-  space: SpaceRef,
+  appId: string,
   trayId: TrayId,
   nextRequestId: () => RequestId = createRequestIdFactory("opentray"),
 ): TrayHandle | EventfulTrayHandle {
@@ -228,14 +162,13 @@ export function createTrayHandle(
     return mountId;
   };
   const handle: TrayHandle = {
-    space,
     trayId,
     async getBounds(): Promise<TrayBoundsResult> {
       const requestId = nextRequestId();
       const response = await transport.request({
         type: "get-tray-bounds",
         requestId,
-        spaceId: space.spaceId,
+        appId,
         trayId,
       });
       return expectResponse(response, requestId, "tray-bounds").bounds;
@@ -245,7 +178,7 @@ export function createTrayHandle(
       const response = await transport.request({
         type: "set-tray-menu",
         requestId,
-        spaceId: space.spaceId,
+        appId,
         trayId,
         menu,
       });
@@ -256,7 +189,7 @@ export function createTrayHandle(
       const response = await transport.request({
         type: "set-tray-tooltip",
         requestId,
-        spaceId: space.spaceId,
+        appId,
         trayId,
         tooltip,
       });
@@ -267,20 +200,9 @@ export function createTrayHandle(
       const response = await transport.request({
         type: "set-tray-icon",
         requestId,
-        spaceId: space.spaceId,
+        appId,
         trayId,
         icon,
-      });
-      expectResponse(response, requestId, "ack");
-    },
-    async setTitle(title: string): Promise<void> {
-      const requestId = nextRequestId();
-      const response = await transport.request({
-        type: "set-tray-title",
-        requestId,
-        spaceId: space.spaceId,
-        trayId,
-        title,
       });
       expectResponse(response, requestId, "ack");
     },
@@ -289,7 +211,7 @@ export function createTrayHandle(
       const response = await transport.request({
         type: "load-ext",
         requestId,
-        spaceId: space.spaceId,
+        appId,
         name: options.name,
         path: options.path,
         ...(options.mountId === undefined ? {} : { mountId: options.mountId }),
@@ -304,7 +226,7 @@ export function createTrayHandle(
       const response = await transport.request({
         type: "ext-command",
         requestId,
-        spaceId: space.spaceId,
+        appId,
         trayId,
         ext,
         data,
@@ -328,7 +250,7 @@ export function createTrayHandle(
       const response = await transport.request({
         type: "destroy-tray",
         requestId,
-        spaceId: space.spaceId,
+        appId,
         trayId,
       });
       expectResponse(response, requestId, "ack");
@@ -337,12 +259,13 @@ export function createTrayHandle(
   if (!isOpenTrayEventSource(transport)) {
     return handle;
   }
-  return attachEventfulTrayHandle(handle, transport, nextMountId);
+  return attachEventfulTrayHandle(handle, transport, appId, nextMountId);
 }
 
 const attachEventfulTrayHandle = (
   handle: TrayHandle,
   source: OpenTrayEventSource,
+  appId: string,
   nextMountId: (extensionName: string) => string,
 ): EventfulTrayHandle => {
   const listen: EventfulTrayHandle["listen"] = (event, handler) =>
@@ -350,7 +273,7 @@ const attachEventfulTrayHandle = (
       if (frame.type !== "event" || frame.event.type !== event) {
         return;
       }
-      if (!isOwnedTrayEvent(frame.event, handle.space.spaceId, handle.trayId)) {
+      if (!isOwnedTrayEvent(frame.event, appId, handle.trayId)) {
         return;
       }
       handler(frame.event as TrayEventByType<typeof event>);
@@ -363,11 +286,11 @@ const attachEventfulTrayHandle = (
         if (frame.type !== "ext-event" || frame.ext !== ext) {
           return;
         }
-        if (frame.spaceId !== handle.space.spaceId || frame.trayId !== handle.trayId) {
+        if (frame.appId !== appId || frame.trayId !== handle.trayId) {
           return;
         }
         handler({
-          scope: { spaceId: frame.spaceId, trayId: frame.trayId, ext: frame.ext },
+          scope: { appId: frame.appId, trayId: frame.trayId, ext: frame.ext },
           data: frame.data as TData,
         });
       });
@@ -394,11 +317,23 @@ const attachEventfulTrayHandle = (
   return eventful;
 };
 
-const isOwnedTrayEvent = (event: TrayEvent, spaceId: string, trayId: string): event is TrayScopedEvent =>
-  event.type !== "ready" && event.spaceId === spaceId && event.trayId === trayId;
+const isOwnedTrayEvent = (event: TrayEvent, appId: string, trayId: string): event is TrayScopedEvent =>
+  event.type !== "ready" && event.appId === appId && event.trayId === trayId;
 
 const isOpenTrayEventSource = (transport: OpenTrayTransport): transport is OpenTrayConnection =>
   "onEvent" in transport && typeof transport.onEvent === "function";
+
+const resolveDefaultAppRef = async (
+  transport: OpenTrayTransport,
+  nextRequestId: () => RequestId,
+): Promise<{ appId: string }> => {
+  const requestId = nextRequestId();
+  const response = await transport.request({
+    type: "resolve-default-app",
+    requestId,
+  });
+  return expectResponse(response, requestId, "default-app").app;
+};
 
 const createTrayExtensionContext = <TCapability extends object, TOptions>(
   tray: TrayHandle,
@@ -471,8 +406,8 @@ const expectResponse = <TType extends ServerFrame["type"]>(
 
 const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
   switch (frame.type) {
-    case "space-created":
-    case "default-space":
+    case "app-created":
+    case "default-app":
     case "tray-created":
     case "tray-bounds":
     case "ack":

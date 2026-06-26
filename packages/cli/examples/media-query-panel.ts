@@ -24,13 +24,8 @@ const runtime = await createWebviewExampleRuntime({
   importMetaUrl: import.meta.url,
   requestIdPrefix: "media-query-demo",
   homePrefix: "opentray-media-query",
-  space: {
-    id: "com.example.opentray.media-query",
-    title: "OpenTray Media Query Demo",
-  },
   tray: {
-    trayId: "media-query-demo",
-    title: "Media Query",
+    id: "com.example.opentray.media-query",
     tooltip: {
       title: "OpenTray Media Query Demo",
       description: "mediaQueryKit + styleKit native window recipes",

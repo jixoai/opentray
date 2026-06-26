@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, convert::TryFrom};
+use std::{cell::RefCell, collections::HashMap};
 
 #[cfg(target_os = "macos")]
 use objc2::MainThreadMarker;
@@ -7,7 +7,7 @@ use objc2_app_kit::NSEvent;
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSRect;
 use opentray_core::BackendError;
-use opentray_spec::{geometry::DpiScale, SurfaceId, TrayEvent};
+use opentray_spec::{AppId, TrayEvent};
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };
@@ -33,7 +33,7 @@ use crate::{
 /// event loop. On macOS, that means the main thread after event-loop startup.
 #[derive(Default)]
 pub struct NativeTrayIconRuntime {
-    surfaces: RefCell<HashMap<SurfaceId, NativeSurfaceState>>,
+    surfaces: RefCell<HashMap<AppId, NativeAppState>>,
     #[cfg(target_os = "macos")]
     last_interaction_bounds: RefCell<HashMap<String, opentray_spec::Rect>>,
 }
@@ -57,7 +57,7 @@ impl NativeTrayIconRuntime {
 impl TrayIconRuntime for NativeTrayIconRuntime {
     fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
         let TrayIconProjection {
-            space_id,
+            app_id,
             trays,
             routes,
             ..
@@ -78,17 +78,20 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
                 .tooltip
                 .as_ref()
                 .map(|tooltip| format!("{}: {}", tooltip.title, tooltip.description))
-                .unwrap_or_else(|| tray.title.clone());
+                .or_else(|| tray.title.clone());
             if menu_policy.direct_primary {
                 if let Some(primary_menu_id) = tray.menu.primary_menu_id.clone() {
                     direct_primary_routes.insert(tray_icon_id.clone(), primary_menu_id);
                 }
             }
 
-            let mut builder = TrayIconBuilder::new()
-                .with_id(tray_icon_id.clone())
-                .with_tooltip(tooltip)
-                .with_title(tray.title);
+            let mut builder = TrayIconBuilder::new().with_id(tray_icon_id.clone());
+            if let Some(tooltip) = tooltip {
+                builder = builder.with_tooltip(tooltip);
+            }
+            if let Some(title) = tray.title {
+                builder = builder.with_title(title);
+            }
             if let Some(icon) = icon {
                 builder = builder.with_icon(icon);
             }
@@ -107,11 +110,11 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
 
         let mut surfaces = self.surfaces.borrow_mut();
         if icons.is_empty() {
-            surfaces.remove(&space_id);
+            surfaces.remove(&app_id);
         } else {
             surfaces.insert(
-                space_id,
-                NativeSurfaceState {
+                app_id,
+                NativeAppState {
                     icons,
                     routes,
                     direct_primary_routes,
@@ -171,7 +174,7 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
     }
 }
 
-struct NativeSurfaceState {
+struct NativeAppState {
     icons: HashMap<String, TrayIcon>,
     routes: TrayIconRouteTable,
     direct_primary_routes: HashMap<String, String>,

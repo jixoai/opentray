@@ -6,7 +6,7 @@ mod native_tray {
     use std::time::Duration;
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
-    use opentray_core::SurfaceBackend;
+    use opentray_core::AppBackend;
     use winit::application::ApplicationHandler;
     use winit::event::{StartCause, WindowEvent};
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -59,7 +59,7 @@ mod native_tray {
                 return;
             }
 
-            if let Err(error) = self.backend.sync_surface(common::surface_projection()) {
+            if let Err(error) = self.backend.sync_app(common::surface_projection()) {
                 eprintln!("failed to create native tray example: {error}");
                 event_loop.exit();
                 return;

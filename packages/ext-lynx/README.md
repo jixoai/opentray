@@ -7,13 +7,13 @@ Official macOS-first Lynx window extension for OpenTray.
 - Launch a real OpenTray-owned Lynx runtime host from the generic OpenTray extension host path.
 - Expose native window controls through the Lynx host bridge when enabled.
 - Keep Lynx bundle loading, runtime extraction, process lifecycle, and sizing policy inside the extension artifact.
-- Treat `.lynx.bundle` files as client-owned payloads scoped to the owning `spaceId` / `trayId`.
+- Treat `.lynx.bundle` files as client-owned payloads scoped to the owning `appId` / `trayId`.
 
-This package is an extension atom. It must not become the owner of core tray lifecycle or daemon policy.
+This package is an extension atom. It must not become the owner of core tray lifecycle or app background-service policy.
 
-The facade stays platform-neutral. Native libraries are optional platform packages named `@opentray/ext-lynx-<os>-<arch>`, and the daemon resolves them through the dynamic extension discovery law when `load-ext` requests `@opentray/ext-lynx`.
+The facade stays platform-neutral. Native libraries are optional platform packages named `@opentray/ext-lynx-<os>-<arch>`, and the runtime host resolves them through the dynamic extension discovery law when `load-ext` requests `@opentray/ext-lynx`.
 
-The macOS native dylib owns the Lynx command protocol and the runtime sidecar contract. `opentray` forwards scoped extension traffic to it, but does not keep a daemon-side Lynx parser or a daemon-owned Lynx runtime.
+The macOS native dylib owns the Lynx command protocol and the runtime sidecar contract. `opentray` forwards scoped extension traffic to it, but does not keep a core-side Lynx parser or a core-owned Lynx runtime.
 
 ## Command Surface
 

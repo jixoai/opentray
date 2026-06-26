@@ -46,13 +46,8 @@ const runtime = await createWebviewExampleRuntime({
   importMetaUrl: import.meta.url,
   requestIdPrefix: "placement-demo",
   homePrefix: "opentray-placement",
-  space: {
-    id: "com.example.opentray.placement",
-    title: "OpenTray Placement Demo",
-  },
   tray: {
-    trayId: "placement-demo",
-    title: "Placement",
+    id: "com.example.opentray.placement",
     tooltip: {
       title: "OpenTray Placement Demo",
       description: "WebviewPlacementKit tray, screen, and edge anchors",

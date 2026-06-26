@@ -1,12 +1,11 @@
 use opentray_spec::{
-    is_supported_protocol_version, ClientFrame, ExtensionEnvelope, LeaseId, Rect, RequestId,
-    ServerFrame, SpaceOptions, SpaceRef, TrayBoundsKind, TrayBoundsResult, TrayEvent,
-    PROTOCOL_VERSION,
+    is_supported_protocol_version, AppOptions, AppRef, ClientFrame, ExtensionEnvelope, LeaseId,
+    Rect, RequestId, ServerFrame, TrayBoundsKind, TrayBoundsResult, TrayEvent, PROTOCOL_VERSION,
 };
 
 use crate::{
-    ExtensionHostContext, ExtensionLoadRequest, ExtensionLoader, Kernel, KernelError, RoutedEvent,
-    SurfaceBackend, UnsupportedExtensionHostContext, UnsupportedExtensionLoader,
+    AppBackend, ExtensionHostContext, ExtensionLoadRequest, ExtensionLoader, Kernel, KernelError,
+    RoutedEvent, UnsupportedExtensionHostContext, UnsupportedExtensionLoader,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -29,11 +28,11 @@ impl BrokerSession {
 }
 
 /// Request/session dispatch law between local transports and the kernel.
-pub struct BrokerKernel<B: SurfaceBackend, L: ExtensionLoader = UnsupportedExtensionLoader> {
+pub struct BrokerKernel<B: AppBackend, L: ExtensionLoader = UnsupportedExtensionLoader> {
     kernel: Kernel<B>,
     extension_loader: L,
     next_lease: u64,
-    default_space: Option<SpaceRef>,
+    default_app: Option<AppRef>,
 }
 
 struct ScopedExtensionHost<'a> {
@@ -59,19 +58,19 @@ impl ExtensionHostContext for ScopedExtensionHost<'_> {
     }
 }
 
-impl<B: SurfaceBackend> BrokerKernel<B, UnsupportedExtensionLoader> {
+impl<B: AppBackend> BrokerKernel<B, UnsupportedExtensionLoader> {
     pub fn new(backend: B) -> Self {
         Self::with_extension_loader(backend, UnsupportedExtensionLoader)
     }
 }
 
-impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
+impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
     pub fn with_extension_loader(backend: B, extension_loader: L) -> Self {
         Self {
             kernel: Kernel::new(backend),
             extension_loader,
             next_lease: 1,
-            default_space: None,
+            default_app: None,
         }
     }
 
@@ -169,22 +168,22 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         host: &mut dyn ExtensionHostContext,
     ) -> Vec<ServerFrame> {
         match frame {
-            ClientFrame::CreateSpace {
+            ClientFrame::CreateApp {
                 request_id,
                 options,
-            } => match self.kernel.create_space(options.clone()) {
-                Ok(space) => {
-                    if options.default || self.default_space.is_none() {
-                        self.default_space = Some(space.clone());
+            } => match self.kernel.create_app(options.clone()) {
+                Ok(app) => {
+                    if options.default || self.default_app.is_none() {
+                        self.default_app = Some(app.clone());
                     }
-                    vec![ServerFrame::SpaceCreated { request_id, space }]
+                    vec![ServerFrame::AppCreated { request_id, app }]
                 }
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
-            ClientFrame::ResolveDefaultSpace { request_id } => {
-                let space = match self.default_space.clone() {
-                    Some(space) => Ok(space),
-                    None => self.kernel.create_space(SpaceOptions {
+            ClientFrame::ResolveDefaultApp { request_id } => {
+                let app = match self.default_app.clone() {
+                    Some(app) => Ok(app),
+                    None => self.kernel.create_app(AppOptions {
                         id: Some("opentray.default".to_string()),
                         title: Some("OpenTray".to_string()),
                         icon: None,
@@ -192,42 +191,42 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     }),
                 };
 
-                match space {
-                    Ok(space) => {
-                        self.default_space = Some(space.clone());
-                        vec![ServerFrame::DefaultSpace { request_id, space }]
+                match app {
+                    Ok(app) => {
+                        self.default_app = Some(app.clone());
+                        vec![ServerFrame::DefaultApp { request_id, app }]
                     }
                     Err(error) => vec![kernel_error(Some(request_id), error)],
                 }
             }
             ClientFrame::CreateTray {
                 request_id,
-                space,
+                app,
                 tray,
-            } => match self.kernel.create_tray(lease_id.to_string(), &space, tray) {
+            } => match self.kernel.create_tray(lease_id.to_string(), &app, tray) {
                 Ok(tray_id) => vec![ServerFrame::TrayCreated {
                     request_id,
-                    space_id: space.space_id,
+                    app_id: app.app_id,
                     tray_id,
                 }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
             ClientFrame::DestroyTray {
                 request_id,
-                space_id,
+                app_id,
                 tray_id,
-            } => match self.kernel.destroy_tray(lease_id, &space_id, &tray_id) {
+            } => match self.kernel.destroy_tray(lease_id, &app_id, &tray_id) {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
             ClientFrame::GetTrayBounds {
                 request_id,
-                space_id,
+                app_id,
                 tray_id,
-            } => match self.kernel.tray_bounds(lease_id, &space_id, &tray_id) {
+            } => match self.kernel.tray_bounds(lease_id, &app_id, &tray_id) {
                 Ok(bounds) => vec![ServerFrame::TrayBounds {
                     request_id,
-                    space_id,
+                    app_id,
                     tray_id,
                     bounds: match bounds {
                         Some(rect) => TrayBoundsResult {
@@ -246,62 +245,44 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
             },
             ClientFrame::SetTrayMenu {
                 request_id,
-                space_id,
+                app_id,
                 tray_id,
                 menu,
-            } => match self
-                .kernel
-                .set_tray_menu(lease_id, &space_id, &tray_id, menu)
-            {
+            } => match self.kernel.set_tray_menu(lease_id, &app_id, &tray_id, menu) {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
             ClientFrame::SetTrayIcon {
                 request_id,
-                space_id,
+                app_id,
                 tray_id,
                 icon,
-            } => match self
-                .kernel
-                .set_tray_icon(lease_id, &space_id, &tray_id, icon)
-            {
+            } => match self.kernel.set_tray_icon(lease_id, &app_id, &tray_id, icon) {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
             ClientFrame::SetTrayTooltip {
                 request_id,
-                space_id,
+                app_id,
                 tray_id,
                 tooltip,
             } => match self
                 .kernel
-                .set_tray_tooltip(lease_id, &space_id, &tray_id, tooltip)
-            {
-                Ok(()) => vec![ServerFrame::Ack { request_id }],
-                Err(error) => vec![kernel_error(Some(request_id), error)],
-            },
-            ClientFrame::SetTrayTitle {
-                request_id,
-                space_id,
-                tray_id,
-                title,
-            } => match self
-                .kernel
-                .set_tray_title(lease_id, &space_id, &tray_id, title)
+                .set_tray_tooltip(lease_id, &app_id, &tray_id, tooltip)
             {
                 Ok(()) => vec![ServerFrame::Ack { request_id }],
                 Err(error) => vec![kernel_error(Some(request_id), error)],
             },
             ClientFrame::ExtCommand {
                 request_id,
-                space_id,
+                app_id,
                 tray_id,
                 ext,
                 data,
             } => {
                 let tray_bounds = self
                     .kernel
-                    .tray_bounds(lease_id, &space_id, &tray_id)
+                    .tray_bounds(lease_id, &app_id, &tray_id)
                     .ok()
                     .flatten();
                 let mut scoped_host = ScopedExtensionHost {
@@ -309,7 +290,7 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     tray_bounds,
                 };
                 match self.kernel.ext_command_with_host(
-                    space_id,
+                    app_id,
                     tray_id,
                     ext,
                     data,
@@ -328,13 +309,13 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
             }
             ClientFrame::LoadExt {
                 request_id,
-                space_id,
+                app_id,
                 name,
                 path,
                 mount_id,
             } => {
                 let request = ExtensionLoadRequest {
-                    surface_id: space_id.clone(),
+                    app_id: app_id.clone(),
                     name,
                     path,
                     mount_id,
@@ -343,7 +324,7 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     .extension_loader
                     .load(&request)
                     .map_err(KernelError::from)
-                    .and_then(|instance| self.kernel.register_extension(space_id, instance))
+                    .and_then(|instance| self.kernel.register_extension(app_id, instance))
                 {
                     Ok(()) => vec![ServerFrame::Ack { request_id }],
                     Err(error) => vec![kernel_error(Some(request_id), error)],
@@ -373,15 +354,14 @@ impl<B: SurfaceBackend, L: ExtensionLoader> BrokerKernel<B, L> {
 
 fn request_id(frame: &ClientFrame) -> Option<RequestId> {
     match frame {
-        ClientFrame::CreateSpace { request_id, .. }
-        | ClientFrame::ResolveDefaultSpace { request_id }
+        ClientFrame::CreateApp { request_id, .. }
+        | ClientFrame::ResolveDefaultApp { request_id }
         | ClientFrame::CreateTray { request_id, .. }
         | ClientFrame::DestroyTray { request_id, .. }
         | ClientFrame::GetTrayBounds { request_id, .. }
         | ClientFrame::SetTrayMenu { request_id, .. }
         | ClientFrame::SetTrayIcon { request_id, .. }
         | ClientFrame::SetTrayTooltip { request_id, .. }
-        | ClientFrame::SetTrayTitle { request_id, .. }
         | ClientFrame::LoadExt { request_id, .. }
         | ClientFrame::ExtCommand { request_id, .. }
         | ClientFrame::UnloadExt { request_id, .. }
@@ -395,7 +375,7 @@ fn extension_events(events: Vec<ExtensionEnvelope>) -> Vec<ServerFrame> {
         .into_iter()
         .filter_map(|event| {
             event.scope.tray_id.map(|tray_id| ServerFrame::ExtEvent {
-                space_id: event.scope.surface_id,
+                app_id: event.scope.app_id,
                 tray_id,
                 ext: event.scope.ext,
                 data: event.data,

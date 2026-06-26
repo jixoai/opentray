@@ -203,7 +203,7 @@ impl WebviewShowSettings {
 }
 
 struct WebviewExtension {
-    surface_id: String,
+    app_id: String,
     runtime: WebviewRuntime,
 }
 
@@ -462,12 +462,12 @@ pub unsafe extern "C" fn opentray_ext_init(
         return EXT_ERR_REJECTED;
     }
 
-    let surface_id = match unsafe { read_ext_string((*context).surface_id) } {
+    let app_id = match unsafe { read_ext_string((*context).app_id) } {
         Some(value) => value,
         None => return EXT_ERR_REJECTED,
     };
     let instance = Box::new(WebviewExtension {
-        surface_id,
+        app_id,
         runtime: WebviewRuntime::default(),
     });
     unsafe {
@@ -494,7 +494,7 @@ pub unsafe extern "C" fn opentray_ext_command(
     };
 
     let extension = unsafe { &mut *instance.cast::<WebviewExtension>() };
-    if envelope.scope.surface_id != extension.surface_id {
+    if envelope.scope.app_id != extension.app_id {
         return EXT_ERR_REJECTED;
     }
     let Some(tray_id) = envelope.scope.tray_id.as_deref() else {
@@ -1449,7 +1449,7 @@ mod tests {
     #[test]
     fn lease_closed_returns_empty_event_array() {
         let instance = Box::into_raw(Box::new(WebviewExtension {
-            surface_id: "surface-1".to_string(),
+            app_id: "surface-1".to_string(),
             runtime: WebviewRuntime::default(),
         }))
         .cast::<c_void>();
@@ -1482,14 +1482,14 @@ mod tests {
     #[test]
     fn hide_command_returns_platform_specific_result() {
         let instance = Box::into_raw(Box::new(WebviewExtension {
-            surface_id: "surface-1".to_string(),
+            app_id: "surface-1".to_string(),
             runtime: WebviewRuntime::default(),
         }))
         .cast::<c_void>();
         let envelope = CString::new(
             serde_json::to_string(&ExtensionEnvelope {
                 scope: opentray_spec::ExtensionScope {
-                    surface_id: "surface-1".to_string(),
+                    app_id: "surface-1".to_string(),
                     tray_id: Some("tray-1".to_string()),
                     ext: "webview".to_string(),
                 },

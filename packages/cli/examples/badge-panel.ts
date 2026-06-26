@@ -24,13 +24,8 @@ const runtime = await createWebviewExampleRuntime({
   importMetaUrl: import.meta.url,
   requestIdPrefix: "badge-panel-demo",
   homePrefix: "opentray-badge-panel",
-  space: {
-    id: "com.example.opentray.badge-panel",
-    title: "OpenTray Badge Debug Panel",
-  },
   tray: {
-    trayId: "badge-panel",
-    title: "Badge Debug",
+    id: "com.example.opentray.badge-panel",
     tooltip: {
       title: "OpenTray Badge Debug Panel",
       description: "Badge status debugger driven through ext-webview IPC",

@@ -14,13 +14,7 @@ class RecordingTransport implements OpenTrayTransport {
 }
 
 const transport = new RecordingTransport();
-const tray = createTrayHandle(
-  transport,
-  {
-    spaceId: "example-space",
-  },
-  "lynx-tray"
-);
+const tray = createTrayHandle(transport, "example-app", "lynx-tray");
 const lynx = attachLynx(tray);
 
 await lynx.show({

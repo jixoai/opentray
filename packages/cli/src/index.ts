@@ -1,21 +1,15 @@
 export {
   createClient,
   createInitFrame,
-  createSpaceHandle,
-  createSurfaceHandle,
   createTrayHandle,
-  type BrokerEventFrame,
+  type OpenTrayEventFrame,
   type CreateClientOptions,
-  type EventfulSpaceHandle,
   type EventfulTrayHandle,
   type ExtensionLoadOptions,
   type OpenTrayConnection,
   type OpenTrayClient,
   type OpenTrayEventSource,
-  type OpenTrayEventfulClient,
   type OpenTrayTransport,
-  type SpaceHandle,
-  type SurfaceHandle,
   type TrayEventByType,
   type TrayEventType,
   type TrayExtension,
@@ -23,7 +17,7 @@ export {
   type TrayExtensionMountSpec,
   type TrayHandle,
 } from "./client";
-export { createSpace, createSurface, createTray, resolveDefaultSpace, type BrokerConnectOptions, type CreateTrayOptions } from "./sdk";
+export { createTray, type OpenTrayRuntimeOptions } from "./sdk";
 export {
   createBrokerEndpointIdentity,
   formatBrokerEndpointName,

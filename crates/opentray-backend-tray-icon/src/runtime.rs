@@ -1,5 +1,5 @@
 use opentray_core::BackendError;
-use opentray_spec::{Rect, SurfaceId, TrayEvent};
+use opentray_spec::{AppId, Rect, TrayEvent};
 
 use crate::TrayIconProjection;
 
@@ -20,7 +20,7 @@ pub trait TrayIconRuntime {
 
     fn record_tray_interaction(&self, _tray_icon_id: &str) {}
 
-    fn show_menu(&self, _surface_id: &SurfaceId) -> Result<(), BackendError> {
+    fn show_menu(&self, _app_id: &AppId) -> Result<(), BackendError> {
         Err(BackendError::Unsupported("tray_icon_show_menu_unbound"))
     }
 

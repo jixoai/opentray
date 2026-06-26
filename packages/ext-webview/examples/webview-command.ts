@@ -14,13 +14,9 @@ class RecordingTransport implements OpenTrayTransport {
 }
 
 const transport = new RecordingTransport();
-const tray = createTrayHandle(
-  transport,
-  {
-    spaceId: "example-space",
-  },
-  "webview-tray",
-).extend(WebviewExt, { mountId: "webview.example" });
+const tray = createTrayHandle(transport, "example-app", "webview-tray").extend(WebviewExt, {
+  mountId: "webview.example",
+});
 const webview = tray.createWebviewWindow({
   html: "<main><h1>OpenTray WebView</h1><p>Extension atom example.</p></main>",
   width: 360,

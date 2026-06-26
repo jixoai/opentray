@@ -233,7 +233,7 @@ impl BadgeExtension {
 
         Ok(vec![ExtensionEnvelope {
             scope: opentray_spec::ExtensionScope {
-                surface_id: "badge".to_string(),
+                app_id: "badge".to_string(),
                 tray_id: Some(tray_id.to_string()),
                 ext: "badge".to_string(),
             },

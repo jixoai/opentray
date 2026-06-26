@@ -7,7 +7,7 @@ import { attachBadge, BadgeExt, isBadgeEvent } from "./index";
 describe("@opentray/ext-badge", () => {
   it("emits badge commands through the normal tray extension channel", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
 
     const badge = attachBadge(tray, { mountId: "badge.tray-1" });
     await badge.setBadge("18");
@@ -17,7 +17,7 @@ describe("@opentray/ext-badge", () => {
       {
         type: "load-ext",
         requestId: "opentray-1",
-        spaceId: "space-1",
+        appId: "app-1",
         name: "badge",
         path: "@opentray/ext-badge",
         mountId: "badge.tray-1",
@@ -25,7 +25,7 @@ describe("@opentray/ext-badge", () => {
       {
         type: "ext-command",
         requestId: "opentray-2",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "badge.tray-1",
         data: { type: "setBadge", value: "18" },
@@ -33,7 +33,7 @@ describe("@opentray/ext-badge", () => {
       {
         type: "ext-command",
         requestId: "opentray-3",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "badge.tray-1",
         data: { type: "setAttention", value: true },
@@ -43,7 +43,7 @@ describe("@opentray/ext-badge", () => {
 
   it("rejects progress operations when the host marks them unsupported", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
 
     const badge = attachBadge(tray, { mountId: "badge.tray-1" });
     await expect(badge.setProgress(50, 100)).rejects.toThrow(/unsupported/);
@@ -51,17 +51,17 @@ describe("@opentray/ext-badge", () => {
   });
 
   it("keeps the badge event guard aligned with the extension name", () => {
-    expect(isBadgeEvent({ scope: { spaceId: "space", ext: "badge" }, data: { type: "result" } } as never)).toBe(
+    expect(isBadgeEvent({ scope: { appId: "app", ext: "badge" }, data: { type: "result" } } as never)).toBe(
       true,
     );
     expect(
-      isBadgeEvent({ scope: { spaceId: "space", ext: "webview" }, data: { type: "result" } } as never),
+      isBadgeEvent({ scope: { appId: "app", ext: "webview" }, data: { type: "result" } } as never),
     ).toBe(false);
   });
 
   it("respects an explicit platform override when capability snapshots are seeded", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
 
     const badge = attachBadge(tray, { mountId: "badge.tray-1", platform: "linux" });
     const capabilities = await badge.getCapabilities();

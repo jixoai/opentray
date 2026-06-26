@@ -25,7 +25,7 @@ import type {
 describe("@opentray/ext-webview", () => {
   it("extends a tray with an isolated WebView window mount", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
     const webviewTray = tray.extend(WebviewExt, { mountId: "webview.tray-1" });
     const webviewWindow = webviewTray.createWebviewWindow({
       html: "<main />",
@@ -39,7 +39,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "load-ext",
         requestId: "opentray-1",
-        spaceId: "space-1",
+        appId: "app-1",
         name: "webview",
         path: "@opentray/ext-webview",
         mountId: "webview.tray-1",
@@ -47,7 +47,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-2",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: {
@@ -62,7 +62,7 @@ describe("@opentray/ext-webview", () => {
 
   it("treats repeated window show as visibility restore instead of bootstrap replay", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
     const webviewWindow = tray.extend(WebviewExt, { mountId: "webview.tray-1" }).createWebviewWindow({
       html: "<main />",
       width: 300,
@@ -81,7 +81,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-2",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: {
@@ -96,7 +96,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-3",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: { type: "resizeTo", width: 360, height: 240 },
@@ -104,7 +104,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-4",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: { type: "show" },
@@ -112,7 +112,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-5",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: { type: "destroy" },
@@ -120,7 +120,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-6",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: {
@@ -137,7 +137,7 @@ describe("@opentray/ext-webview", () => {
 
   it("keeps attachWebview on the legacy webview mount and auto-loads once", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
 
     await attachWebview(tray).show({
       type: "show",
@@ -185,7 +185,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "load-ext",
         requestId: "opentray-1",
-        spaceId: "space-1",
+        appId: "app-1",
         name: "webview",
         path: "@opentray/ext-webview",
         mountId: "webview",
@@ -193,7 +193,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-2",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview",
         data: {
@@ -243,7 +243,7 @@ describe("@opentray/ext-webview", () => {
 
   it("exposes explicit lifecycle verbs instead of overloading repeated show", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
 
     const webview = attachWebview(tray);
     await webview.setContent({
@@ -257,7 +257,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "load-ext",
         requestId: "opentray-1",
-        spaceId: "space-1",
+        appId: "app-1",
         name: "webview",
         path: "@opentray/ext-webview",
         mountId: "webview",
@@ -265,7 +265,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-2",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview",
         data: {
@@ -276,7 +276,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-3",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview",
         data: {
@@ -287,7 +287,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-4",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview",
         data: {
@@ -299,7 +299,7 @@ describe("@opentray/ext-webview", () => {
 
   it("exposes host-side geometry verbs through the WebView command path", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
     const webviewWindow = tray.extend(WebviewExt, { mountId: "webview.tray-1" }).createWebviewWindow({
       html: "<main />",
       width: 300,
@@ -313,7 +313,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "load-ext",
         requestId: "opentray-1",
-        spaceId: "space-1",
+        appId: "app-1",
         name: "webview",
         path: "@opentray/ext-webview",
         mountId: "webview.tray-1",
@@ -321,7 +321,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-2",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: { type: "resizeTo", width: 360, height: 240 },
@@ -329,7 +329,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-3",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: { type: "moveTo", x: 10, y: 20 },
@@ -347,7 +347,7 @@ describe("@opentray/ext-webview", () => {
           }
         : { type: "ok" },
     );
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
     const webviewTray = tray.extend(WebviewExt, { mountId: "webview.tray-1" });
 
     await expect(webviewTray.getScreenDetails()).resolves.toEqual({
@@ -370,7 +370,7 @@ describe("@opentray/ext-webview", () => {
           }
         : { type: "ok" },
     );
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
     const webviewWindow = tray.extend(WebviewExt, { mountId: "webview.tray-1" }).createWebviewWindow({
       html: "<main />",
       width: 300,
@@ -402,7 +402,7 @@ describe("@opentray/ext-webview", () => {
       }
       return { type: "ok" };
     });
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
     const webviewWindow = tray.extend(WebviewExt, { mountId: "webview.tray-1" }).createWebviewWindow({
       html: "<main />",
       width: 300,
@@ -420,7 +420,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-2",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: { type: "getBounds" },
@@ -428,7 +428,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-3",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: { type: "setMinimumSize", width: 260, height: null },
@@ -436,7 +436,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-4",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: { type: "setMaximumSize", width: null },
@@ -444,7 +444,7 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-5",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
         data: {
@@ -1293,7 +1293,7 @@ describe("@opentray/ext-webview", () => {
 
   it("wraps automatic load failures with an actionable WebView error", async () => {
     const transport = new FailingLoadTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
 
     await expect(
       attachWebview(tray).show({
@@ -1341,7 +1341,7 @@ class RecordingTransport implements OpenTrayTransport {
       return {
         type: "tray-bounds",
         requestId: frame.requestId,
-        spaceId: frame.spaceId,
+        appId: frame.appId,
         trayId: frame.trayId,
         bounds: {
           kind: "unavailable",
@@ -1370,7 +1370,7 @@ class WebviewResultTransport extends RecordingTransport {
         requestId: frame.requestId,
         events: [
           {
-            scope: { spaceId: frame.spaceId, trayId: frame.trayId, ext: frame.ext },
+            scope: { appId: frame.appId, trayId: frame.trayId, ext: frame.ext },
             data: this.#resolveData(frame.data),
           },
         ],

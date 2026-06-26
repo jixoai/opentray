@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use opentray_core::BrokerSession;
 #[cfg(not(target_os = "macos"))]
-use opentray_core::{BrokerKernel, SurfaceBackend};
+use opentray_core::{AppBackend, BrokerKernel};
 use opentray_spec::{ClientFrame, DaemonHealth, DaemonSessionHealth, ServerFrame};
 use serde_json::json;
 
@@ -127,7 +127,7 @@ pub fn run_blocking_broker<B>(
     backend: B,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    B: SurfaceBackend + 'static,
+    B: AppBackend + 'static,
 {
     let (sender, receiver) = std::sync::mpsc::channel::<TransportEvent>();
     let listener = spawn_listener(options.clone(), move |event| {

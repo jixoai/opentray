@@ -13,9 +13,7 @@ pub fn extract_request_id(line: &str) -> Option<RequestId> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let request_id = value.get("requestId")?;
     match request_id {
-        serde_json::Value::String(request_id) if !request_id.is_empty() => {
-            Some(request_id.clone())
-        }
+        serde_json::Value::String(request_id) if !request_id.is_empty() => Some(request_id.clone()),
         _ => None,
     }
 }
@@ -28,7 +26,7 @@ mod tests {
     fn extracts_request_id_from_malformed_frame() {
         // A create-tray frame missing the required `icon` field would fail typed
         // deserialization, but its requestId must still be recoverable.
-        let line = r#"{"type":"create-tray","requestId":"opentray-3","space":{"spaceId":"s1"},"tray":{"trayId":"t1","title":"t"}}"#;
+        let line = r#"{"type":"create-tray","requestId":"opentray-3","app":{"appId":"app-1"},"tray":{"trayId":"t1","title":"t"}}"#;
         assert_eq!(extract_request_id(line), Some("opentray-3".to_string()));
     }
 

@@ -19,16 +19,8 @@ if (localWebviewExtension !== undefined) {
 
 let webview: ReturnType<typeof attachWebview> | undefined;
 
-const space = await client.createSpace({
+const tray = await client.createTray({
   id: "com.example.opentray.daemon",
-  title: "OpenTray Daemon Example",
-  default: true,
-});
-console.log(`space: ${JSON.stringify(space.space)}`);
-
-const tray = await space.createTray({
-  trayId: "daemon-status",
-  title: "OpenTray",
   tooltip: {
     title: "OpenTray",
     description: "Single primary tray action; macOS direct-triggers without opening a menu",
@@ -41,10 +33,7 @@ const tray = await space.createTray({
   },
 });
 console.log(`tray: ${tray.trayId}`);
-await connection.request({
-  type: "load-ext",
-  requestId: "daemon-example-load-webview",
-  spaceId: space.space.spaceId,
+await tray.loadExtension({
   name: "webview",
   path: "@opentray/ext-webview",
 });

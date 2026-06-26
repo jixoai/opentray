@@ -22,7 +22,7 @@ type LynxRuntime = macos::MacosLynxRuntime;
 type LynxRuntime = UnsupportedLynxRuntime;
 
 struct LynxExtension {
-    surface_id: String,
+    app_id: String,
     runtime: LynxRuntime,
 }
 
@@ -85,12 +85,12 @@ pub unsafe extern "C" fn opentray_ext_init(
         return EXT_ERR_REJECTED;
     }
 
-    let surface_id = match unsafe { read_ext_string((*context).surface_id) } {
+    let app_id = match unsafe { read_ext_string((*context).app_id) } {
         Some(value) => value,
         None => return EXT_ERR_REJECTED,
     };
     let instance = Box::new(LynxExtension {
-        surface_id,
+        app_id,
         runtime: LynxRuntime::default(),
     });
     unsafe {
@@ -117,7 +117,7 @@ pub unsafe extern "C" fn opentray_ext_command(
     };
 
     let extension = unsafe { &mut *instance.cast::<LynxExtension>() };
-    if envelope.scope.surface_id != extension.surface_id {
+    if envelope.scope.app_id != extension.app_id {
         return EXT_ERR_REJECTED;
     }
     let Some(tray_id) = envelope.scope.tray_id.as_deref() else {
@@ -223,9 +223,9 @@ mod tests {
     fn command_round_trip_uses_extension_owned_json() {
         let context = ExtContext {
             api_version: 1,
-            surface_id: ExtBytes {
-                ptr: c"space-1".as_ptr(),
-                len: "space-1".len(),
+            app_id: ExtBytes {
+                ptr: c"app-1".as_ptr(),
+                len: "app-1".len(),
             },
         };
         let mut instance = ptr::null_mut();
@@ -238,7 +238,7 @@ mod tests {
         };
         let envelope = serde_json::json!({
             "scope": {
-                "spaceId": "space-1",
+                "appId": "app-1",
                 "trayId": "tray-1",
                 "ext": "lynx"
             },
@@ -262,7 +262,7 @@ mod tests {
         let json = unsafe { CStr::from_ptr(out.ptr) }.to_str().expect("utf8");
         assert_eq!(
             json,
-            r#"[{"scope":{"spaceId":"space-1","trayId":"tray-1","ext":"lynx"},"data":{"type":"hidden"}}]"#
+            r#"[{"scope":{"appId":"app-1","trayId":"tray-1","ext":"lynx"},"data":{"type":"hidden"}}]"#
         );
         unsafe { opentray_ext_free_string(out) };
         unsafe { opentray_ext_deinit(instance) };

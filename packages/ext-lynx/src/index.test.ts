@@ -7,7 +7,7 @@ import { attachLynx } from "./index";
 describe("@opentray/ext-lynx", () => {
   it("emits lynx as a normal extension command", async () => {
     const transport = new RecordingTransport();
-    const tray = createTrayHandle(transport, { spaceId: "space-1" }, "tray-1");
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
 
     await attachLynx(tray).show({
       type: "show",
@@ -31,7 +31,7 @@ describe("@opentray/ext-lynx", () => {
       {
         type: "ext-command",
         requestId: "opentray-1",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         ext: "lynx",
         data: {

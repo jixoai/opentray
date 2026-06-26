@@ -1,6 +1,6 @@
 export {
   connectLocalBroker,
-  type BrokerEventFrame,
   type ConnectLocalBrokerOptions,
   type LocalBrokerClient,
+  type LocalRuntimeEventFrame,
 } from "./local-broker";

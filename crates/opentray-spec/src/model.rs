@@ -1,17 +1,17 @@
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::{Map, Value};
 
 pub type SessionId = String;
-pub type SpaceId = String;
+pub type AppId = String;
 pub type LeaseId = SessionId;
-pub type SurfaceId = SpaceId;
 pub type TrayId = String;
 pub type MenuItemId = u32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SpaceOptions {
+pub struct AppOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<SpaceId>,
+    pub id: Option<AppId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -20,25 +20,16 @@ pub struct SpaceOptions {
     pub default: bool,
 }
 
-pub type SurfaceOptions = SpaceOptions;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SpaceRef {
-    pub space_id: SpaceId,
+pub struct AppRef {
+    pub app_id: AppId,
 }
-
-pub type SurfaceRef = SpaceRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrayOptions {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tray_id: Option<TrayId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub app_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+    pub id: TrayId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<Tooltip>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,9 +90,116 @@ pub enum MenuItem {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Icon {
+    pub icon_only: Option<IconImage>,
+    pub text_only: Option<String>,
+    pub icon_text: Option<IconText>,
+    pub fallback: Option<SimpleIcon>,
+}
+
+impl Icon {
+    pub fn rgba(data: Vec<u8>, width: u32, height: u32) -> Self {
+        Self::simple(IconImage::Rgba {
+            data,
+            width,
+            height,
+        })
+    }
+
+    pub fn encoded(data: Vec<u8>) -> Self {
+        Self::simple(IconImage::Encoded { data })
+    }
+
+    pub fn file(path: impl Into<String>) -> Self {
+        Self::simple(IconImage::File { path: path.into() })
+    }
+
+    pub fn simple(image: IconImage) -> Self {
+        Self {
+            icon_only: None,
+            text_only: None,
+            icon_text: None,
+            fallback: Some(SimpleIcon { image, text: None }),
+        }
+    }
+}
+
+impl Serialize for Icon {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut object = Map::new();
+        if let Some(fallback) = &self.fallback {
+            merge_object(&mut object, fallback).map_err(serde::ser::Error::custom)?;
+        }
+        if let Some(icon_only) = &self.icon_only {
+            object.insert(
+                "icon-only".to_string(),
+                serde_json::to_value(icon_only).map_err(serde::ser::Error::custom)?,
+            );
+        }
+        if let Some(text_only) = &self.text_only {
+            object.insert("text-only".to_string(), Value::String(text_only.clone()));
+        }
+        if let Some(icon_text) = &self.icon_text {
+            object.insert(
+                "icon-text".to_string(),
+                serde_json::to_value(icon_text).map_err(serde::ser::Error::custom)?,
+            );
+        }
+        object.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Icon {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| de::Error::custom("icon must be an object"))?;
+        let icon_only = object
+            .get("icon-only")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(de::Error::custom)?;
+        let text_only = object
+            .get("text-only")
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| de::Error::custom("icon text-only must be a string"))
+            })
+            .transpose()?;
+        let icon_text = object
+            .get("icon-text")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(de::Error::custom)?;
+        let fallback = if object.contains_key("type") {
+            Some(serde_json::from_value(value).map_err(de::Error::custom)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            icon_only,
+            text_only,
+            icon_text,
+            fallback,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
-pub enum Icon {
+pub enum IconImage {
     Rgba {
         data: Vec<u8>,
         width: u32,
@@ -113,6 +211,171 @@ pub enum Icon {
     File {
         path: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleIcon {
+    pub image: IconImage,
+    pub text: Option<String>,
+}
+
+impl Serialize for SimpleIcon {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut object = image_object(&self.image).map_err(serde::ser::Error::custom)?;
+        if let Some(text) = &self.text {
+            object.insert("text".to_string(), Value::String(text.clone()));
+        }
+        object.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SimpleIcon {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| de::Error::custom("simple icon must be an object"))?;
+        let image = serde_json::from_value(value.clone()).map_err(de::Error::custom)?;
+        let text = object
+            .get("text")
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| de::Error::custom("simple icon text must be a string"))
+            })
+            .transpose()?;
+        Ok(Self { image, text })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconText {
+    pub image: IconImage,
+    pub text: String,
+}
+
+impl Serialize for IconText {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut object = image_object(&self.image).map_err(serde::ser::Error::custom)?;
+        object.insert("text".to_string(), Value::String(self.text.clone()));
+        object.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for IconText {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let simple = SimpleIcon::deserialize(deserializer)?;
+        let text = simple
+            .text
+            .ok_or_else(|| de::Error::custom("icon-text candidate requires text"))?;
+        Ok(Self {
+            image: simple.image,
+            text,
+        })
+    }
+}
+
+fn image_object(image: &IconImage) -> Result<Map<String, Value>, serde_json::Error> {
+    match serde_json::to_value(image)? {
+        Value::Object(object) => Ok(object),
+        _ => unreachable!("IconImage serializes as an object"),
+    }
+}
+
+fn merge_object<T: Serialize>(
+    target: &mut Map<String, Value>,
+    value: &T,
+) -> Result<(), serde_json::Error> {
+    match serde_json::to_value(value)? {
+        Value::Object(object) => {
+            target.extend(object);
+            Ok(())
+        }
+        _ => unreachable!("icon component serializes as an object"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn responsive_icon_candidates_roundtrip() {
+        let icon: Icon = serde_json::from_value(json!({
+            "type": "file",
+            "path": "fallback.png",
+            "text": "Fallback",
+            "icon-only": { "type": "encoded", "data": [1, 2, 3] },
+            "text-only": "Build",
+            "icon-text": {
+                "type": "rgba",
+                "data": [0, 0, 0, 0],
+                "width": 1,
+                "height": 1,
+                "text": "Build"
+            }
+        }))
+        .expect("icon");
+
+        assert_eq!(
+            icon.icon_only,
+            Some(IconImage::Encoded {
+                data: vec![1, 2, 3]
+            })
+        );
+        assert_eq!(icon.text_only.as_deref(), Some("Build"));
+        assert_eq!(
+            icon.icon_text,
+            Some(IconText {
+                image: IconImage::Rgba {
+                    data: vec![0, 0, 0, 0],
+                    width: 1,
+                    height: 1,
+                },
+                text: "Build".to_string(),
+            })
+        );
+        assert_eq!(
+            icon.fallback,
+            Some(SimpleIcon {
+                image: IconImage::File {
+                    path: "fallback.png".to_string(),
+                },
+                text: Some("Fallback".to_string()),
+            })
+        );
+
+        let encoded = serde_json::to_value(icon).expect("serialized icon");
+        assert_eq!(encoded["type"], "file");
+        assert_eq!(encoded["icon-text"]["text"], "Build");
+    }
+
+    #[test]
+    fn icon_text_requires_text() {
+        let error = serde_json::from_value::<Icon>(json!({
+            "icon-text": { "type": "file", "path": "missing-text.png" }
+        }))
+        .expect_err("missing text");
+
+        assert!(error
+            .to_string()
+            .contains("icon-text candidate requires text"));
+    }
 }
 
 #[repr(C)]
@@ -144,22 +407,22 @@ pub enum MouseButton {
 )]
 pub enum TrayEvent {
     Ready {
-        space_id: SpaceId,
+        app_id: AppId,
     },
     MenuClick {
-        space_id: SpaceId,
+        app_id: AppId,
         tray_id: TrayId,
         item_id: MenuItemId,
     },
     TrayClick {
-        space_id: SpaceId,
+        app_id: AppId,
         tray_id: TrayId,
         button: MouseButton,
         x: i32,
         y: i32,
     },
     TrayDoubleClick {
-        space_id: SpaceId,
+        app_id: AppId,
         tray_id: TrayId,
         button: MouseButton,
         x: i32,

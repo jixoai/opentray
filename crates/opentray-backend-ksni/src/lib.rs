@@ -1,5 +1,5 @@
-use opentray_core::{BackendCapabilities, BackendError, SurfaceBackend, SurfaceProjection};
-use opentray_spec::{Rect, SurfaceId, TrayEvent, TrayId};
+use opentray_core::{AppBackend, AppProjection, BackendCapabilities, BackendError};
+use opentray_spec::{AppId, Rect, TrayEvent, TrayId};
 
 #[derive(Debug, Default)]
 pub struct KsniBackend {
@@ -12,7 +12,7 @@ impl KsniBackend {
     }
 }
 
-impl SurfaceBackend for KsniBackend {
+impl AppBackend for KsniBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
             tray_bounds: false,
@@ -20,19 +20,19 @@ impl SurfaceBackend for KsniBackend {
         }
     }
 
-    fn sync_surface(&self, _projection: SurfaceProjection) -> Result<(), BackendError> {
+    fn sync_app(&self, _projection: AppProjection) -> Result<(), BackendError> {
         Ok(())
     }
 
     fn tray_bounds(
         &self,
-        _surface_id: &SurfaceId,
+        _app_id: &AppId,
         _tray_id: &TrayId,
     ) -> Result<Option<Rect>, BackendError> {
         Ok(None)
     }
 
-    fn show_menu(&self, _surface_id: &SurfaceId) -> Result<(), BackendError> {
+    fn show_menu(&self, _app_id: &AppId) -> Result<(), BackendError> {
         Err(BackendError::Unsupported("ksni_show_menu"))
     }
 
@@ -45,10 +45,10 @@ impl SurfaceBackend for KsniBackend {
 mod tests {
     use super::*;
 
-    fn assert_backend<T: SurfaceBackend>() {}
+    fn assert_backend<T: AppBackend>() {}
 
     #[test]
-    fn implements_surface_backend_contract() {
+    fn implements_app_backend_contract() {
         assert_backend::<KsniBackend>();
     }
 

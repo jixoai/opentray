@@ -1,10 +1,10 @@
-use opentray_core::{SurfaceProjection, TrayProjection};
-use opentray_spec::{Icon, Menu, MenuItem, SurfaceRef, Tooltip};
+use opentray_core::{AppProjection, TrayProjection};
+use opentray_spec::{AppRef, Icon, Menu, MenuItem, Tooltip};
 
-pub fn surface_projection() -> SurfaceProjection {
-    SurfaceProjection {
-        surface: SurfaceRef {
-            space_id: "human-check".to_string(),
+pub fn surface_projection() -> AppProjection {
+    AppProjection {
+        app: AppRef {
+            app_id: "human-check".to_string(),
         },
         title: Some("OpenTray Human Check".to_string()),
         tooltip: Some(Tooltip {
@@ -19,11 +19,7 @@ pub fn surface_projection() -> SurfaceProjection {
                 title: "Injected runtime".to_string(),
                 description: "Applied by the example runtime atom".to_string(),
             }),
-            icon: Some(Icon::Rgba {
-                data: visible_icon_rgba(),
-                width: 32,
-                height: 32,
-            }),
+            icon: Some(Icon::rgba(visible_icon_rgba(), 32, 32)),
             menu: Some(Menu {
                 items: vec![
                     MenuItem::Item {

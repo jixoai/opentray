@@ -17,6 +17,7 @@ import {
   parseServerFrame,
   PROTOCOL_VERSION,
   type ClientFrame,
+  type Icon,
   type Menu,
 } from "./index";
 
@@ -32,7 +33,7 @@ describe("@opentray/spec", () => {
     const frame: ClientFrame = {
       type: "ext-command",
       requestId: "req-1",
-      spaceId: "space-1",
+      appId: "app-1",
       trayId: "tray-1",
       ext: "webview",
       data: { type: "show" },
@@ -54,14 +55,14 @@ describe("@opentray/spec", () => {
     const request: ClientFrame = {
       type: "get-tray-bounds",
       requestId: "req-bounds",
-      spaceId: "space-1",
+      appId: "app-1",
       trayId: "tray-1",
     };
     const parsed = parseServerFrame(
       JSON.stringify({
         type: "tray-bounds",
         requestId: "req-bounds",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "tray-1",
         bounds: {
           kind: "native",
@@ -76,7 +77,7 @@ describe("@opentray/spec", () => {
     expect(parsed.frame).toEqual({
       type: "tray-bounds",
       requestId: "req-bounds",
-      spaceId: "space-1",
+      appId: "app-1",
       trayId: "tray-1",
       bounds: {
         kind: "native",
@@ -95,7 +96,7 @@ describe("@opentray/spec", () => {
         type: "event",
         event: {
           type: "menuClick",
-          spaceId: "space-1",
+          appId: "app-1",
           trayId: "daemon-status",
           itemId: 8,
         },
@@ -113,11 +114,29 @@ describe("@opentray/spec", () => {
       type: "event",
       event: {
         type: "menuClick",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "daemon-status",
         itemId: 8,
       },
     });
+  });
+
+  it("models responsive icon candidates in one icon field", () => {
+    const icon: Icon = {
+      type: "file",
+      path: "./fallback.png",
+      text: "Build",
+      "icon-only": { type: "file", path: "./icon-only.png" },
+      "text-only": "Build",
+      "icon-text": { type: "file", path: "./icon-text.png", text: "Build" },
+    };
+
+    const textOnlyIcon: Icon = {
+      "text-only": "Build",
+    };
+
+    expect(icon["icon-text"]?.text).toBe("Build");
+    expect(textOnlyIcon["text-only"]).toBe("Build");
   });
 
   it("formats endpoint identity with package, protocol versions, and caller label", () => {
@@ -246,17 +265,17 @@ describe("@opentray/spec", () => {
 
     const parsed = parseServerFrame(
       JSON.stringify({
-        type: "space-created",
+        type: "app-created",
         requestId: "req-1",
-        space: { spaceId: "space-1" },
+        app: { appId: "app-1" },
       }),
     );
 
     expect(parsed.ok).toBe(true);
     expect(parsed.frame).toEqual({
-      type: "space-created",
+      type: "app-created",
       requestId: "req-1",
-      space: { spaceId: "space-1" },
+      app: { appId: "app-1" },
     });
   });
 
@@ -316,7 +335,7 @@ describe("@opentray/spec", () => {
         type: "event",
         event: {
           type: "menuClick",
-          spaceId: "space-1",
+          appId: "app-1",
           trayId: "daemon-status",
           itemId: 99,
         },
@@ -328,7 +347,7 @@ describe("@opentray/spec", () => {
       type: "event",
       event: {
         type: "menuClick",
-        spaceId: "space-1",
+        appId: "app-1",
         trayId: "daemon-status",
         itemId: 99,
       },
@@ -341,7 +360,7 @@ describe("@opentray/spec", () => {
         type: "event",
         event: {
           type: "trayClick",
-          spaceId: "space-1",
+          appId: "app-1",
           trayId: "daemon-status",
           button: "left",
           x: 10,
@@ -354,7 +373,7 @@ describe("@opentray/spec", () => {
         type: "event",
         event: {
           type: "trayClick",
-          spaceId: "space-1",
+          appId: "app-1",
           button: "left",
           x: 10,
           y: 20,

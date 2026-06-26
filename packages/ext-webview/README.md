@@ -4,15 +4,15 @@ Official rich popup extension for OpenTray.
 
 ## Role
 
-- Provide borderless tray-adjacent popup spaces.
+- Provide borderless tray-adjacent popup panels.
 - Use platform WebView engines through the native extension layer.
-- Route WebView messages through the owning `spaceId` / `trayId`.
+- Route WebView messages through the owning `appId` / `trayId`.
 
 This package is an extension atom. It must not become the owner of core tray lifecycle.
 
-The facade stays platform-neutral. Supported native libraries are optional platform packages named `@opentray/ext-webview-<os>-<arch>`, and the daemon resolves them through the dynamic extension discovery law when a mounted WebView capability loads `@opentray/ext-webview`. Official WebView native packages are currently published for macOS and Windows only; Linux is unsupported for this extension.
+The facade stays platform-neutral. Supported native libraries are optional platform packages named `@opentray/ext-webview-<os>-<arch>`, and the runtime host resolves them through the dynamic extension discovery law when a mounted WebView capability loads `@opentray/ext-webview`. Official WebView native packages are currently published for macOS and Windows only; Linux is unsupported for this extension.
 
-The platform dylib owns the full WebView protocol and native runtime. `opentray` forwards scoped extension traffic to it, but does not keep a daemon-side WebView parser or native WebView builder.
+The platform dylib owns the full WebView protocol and native runtime. `opentray` forwards scoped extension traffic to it, but does not keep a core-side WebView parser or native WebView builder.
 
 ## Maturity Truth
 
@@ -33,7 +33,7 @@ Current WebView maturity:
 
 ## Window Capability
 
-`@opentray/ext-webview` owns its native window capability surface inside the extension atom. The broker only forwards extension traffic.
+`@opentray/ext-webview` owns its native window capability surface inside the extension atom. The runtime host only forwards extension traffic.
 
 macOS support includes:
 

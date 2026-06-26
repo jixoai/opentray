@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray v0.9 Self Review</title>
+    <style>
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 32px;
+        color: #172026;
+        background: #f7f9fb;
+      }
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+      }
+      section {
+        margin: 0 0 24px;
+        padding: 20px;
+        background: #ffffff;
+        border: 1px solid #d8e0e8;
+        border-radius: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 10px;
+        border-bottom: 1px solid #e6edf3;
+        text-align: left;
+        vertical-align: top;
+      }
+      code {
+        background: #eef3f8;
+        padding: 2px 5px;
+        border-radius: 4px;
+      }
+      .pass {
+        color: #0d6b3f;
+        font-weight: 600;
+      }
+      .warn {
+        color: #9a5b00;
+        font-weight: 600;
+      }
+      ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OpenTray v0.9 Tray-First Reset Self Review</h1>
+      <section>
+        <h2>Architecture Verdict</h2>
+        <p>
+          The implementation removes public Space/Surface creation, moves protocol routing to app/tray identity,
+          removes tray title mutation, and updates core/backend/extension host atoms around app-owned tray projection.
+          Rust protocol and tray-icon projection now accept the responsive icon candidate map and preserve text-only
+          absence when the native backend cannot render it.
+        </p>
+        <p class="warn">
+          Packaging plugin and final .node distribution remain specified but not implemented in this loop.
+        </p>
+      </section>
+      <section>
+        <h2>Evidence Matrix</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Evidence</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>TypeScript public SDK</td>
+              <td><code>pnpm --filter opentray typecheck</code>, <code>pnpm --filter opentray test</code></td>
+              <td class="pass">Pass</td>
+            </tr>
+            <tr>
+              <td>TypeScript protocol package</td>
+              <td><code>pnpm --filter @opentray/spec typecheck</code>, <code>pnpm --filter @opentray/spec test</code></td>
+              <td class="pass">Pass</td>
+            </tr>
+            <tr>
+              <td>Rust protocol/core/backend</td>
+              <td><code>cargo test -p opentray-spec --lib</code>, <code>cargo test -p opentray-core --lib</code>, backend crate tests, responsive icon projection tests</td>
+              <td class="pass">Pass</td>
+            </tr>
+            <tr>
+              <td>Official native extensions</td>
+              <td><code>cargo test -p opentray-ext-webview --lib</code>, <code>cargo test -p opentray-ext-lynx --lib</code>, <code>cargo test -p opentray-ext-badge --lib</code></td>
+              <td class="pass">Pass</td>
+            </tr>
+            <tr>
+              <td>OpenSpec</td>
+              <td><code>bun run openspec:vision -- validate opentray-v0-9</code></td>
+              <td class="pass">Pass</td>
+            </tr>
+            <tr>
+              <td>Build and whitespace</td>
+              <td><code>pnpm run build</code>, <code>pnpm run verify</code>, <code>git diff --check</code></td>
+              <td class="pass">Pass</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Open Questions</h2>
+        <ul>
+          <li>Whether packaging-plugin and .node distribution should be implemented in the same v0.9 closure loop.</li>
+          <li>Whether transitional daemon/local-broker command names should be renamed in the runtime-host packaging loop.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

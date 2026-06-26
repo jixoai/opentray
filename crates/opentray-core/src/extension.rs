@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use opentray_spec::{ExtensionEnvelope, ExtensionScope, Rect, SurfaceId, TrayId};
+use opentray_spec::{AppId, ExtensionEnvelope, ExtensionScope, Rect, TrayId};
 use serde_json::Value;
 
 pub const RECORDING_EXTENSION_PATH: &str = "opentray://recording-extension";
@@ -65,7 +65,7 @@ pub enum ExtensionError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionLoadRequest {
-    pub surface_id: SurfaceId,
+    pub app_id: AppId,
     pub name: String,
     pub path: String,
     pub mount_id: Option<String>,
@@ -120,18 +120,18 @@ impl ExtensionLoader for RecordingExtensionLoader {
 
 #[derive(Default)]
 pub struct ExtensionRegistry {
-    instances: HashMap<(SurfaceId, String), Box<dyn ExtensionInstance>>,
+    instances: HashMap<(AppId, String), Box<dyn ExtensionInstance>>,
 }
 
 impl ExtensionRegistry {
-    pub fn register(&mut self, surface_id: SurfaceId, instance: Box<dyn ExtensionInstance>) {
+    pub fn register(&mut self, app_id: AppId, instance: Box<dyn ExtensionInstance>) {
         let name = instance.name().to_string();
-        self.instances.insert((surface_id, name), instance);
+        self.instances.insert((app_id, name), instance);
     }
 
     pub fn command(
         &mut self,
-        surface_id: SurfaceId,
+        app_id: AppId,
         tray_id: TrayId,
         ext: String,
         data: Value,
@@ -139,12 +139,12 @@ impl ExtensionRegistry {
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
         let instance = self
             .instances
-            .get_mut(&(surface_id.clone(), ext.clone()))
+            .get_mut(&(app_id.clone(), ext.clone()))
             .ok_or_else(|| ExtensionError::NotFound(ext.clone()))?;
         instance.command(
             ExtensionEnvelope {
                 scope: ExtensionScope {
-                    surface_id,
+                    app_id,
                     tray_id: Some(tray_id),
                     ext,
                 },
@@ -206,7 +206,7 @@ impl ExtensionInstance for RecordingExtension {
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
         Ok(vec![ExtensionEnvelope {
             scope: ExtensionScope {
-                surface_id: "lease-cleanup".to_string(),
+                app_id: "lease-cleanup".to_string(),
                 tray_id: None,
                 ext: self.name.clone(),
             },

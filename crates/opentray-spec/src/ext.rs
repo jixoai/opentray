@@ -3,7 +3,7 @@ use std::ffi::{c_char, c_void};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::model::{Rect, SurfaceId, TrayId};
+use crate::model::{AppId, Rect, TrayId};
 
 pub const EXT_API_VERSION: u32 = 1;
 pub const EXT_ABI_VERSION: u32 = 2;
@@ -47,7 +47,7 @@ pub struct ExtOwnedBytes {
 #[repr(C)]
 pub struct ExtContext {
     pub api_version: u32,
-    pub surface_id: ExtBytes,
+    pub app_id: ExtBytes,
 }
 
 pub type ExtSendEventFn =
@@ -77,8 +77,8 @@ pub struct ExtHostContext {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionScope {
-    #[serde(rename = "spaceId", alias = "surfaceId")]
-    pub surface_id: SurfaceId,
+    #[serde(rename = "appId")]
+    pub app_id: AppId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tray_id: Option<TrayId>,
     pub ext: String,
