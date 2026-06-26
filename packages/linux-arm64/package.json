@@ -1,7 +1,7 @@
 {
   "name": "@opentray/linux-arm64",
   "version": "0.8.0",
-  "description": "OpenTray broker binary package for Linux ARM64.",
+  "description": "OpenTray runtime artifact package for Linux ARM64.",
   "license": "MIT",
   "repository": {
     "type": "git",

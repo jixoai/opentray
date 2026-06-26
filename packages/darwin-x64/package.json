@@ -1,7 +1,7 @@
 {
   "name": "@opentray/darwin-x64",
   "version": "0.8.0",
-  "description": "OpenTray broker binary package for macOS Intel.",
+  "description": "OpenTray runtime artifact package for macOS Intel.",
   "license": "MIT",
   "repository": {
     "type": "git",

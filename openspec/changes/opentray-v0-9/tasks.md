@@ -39,3 +39,11 @@
 - [x] 6.2 Run `cargo test -p opentray-spec --lib` and `cargo test -p opentray-core --lib` after the Rust mirror cleanup lands.
 - [x] 6.3 Run the repo-level verification gates once the mirror and example updates land.
 - [x] 6.4 Run `git diff --check` and a final status review before calling the change done.
+
+## 7. Packaging Plugin Completion
+
+- [x] 7.1 Add a bundler-neutral `@opentray/packaging` contract that stages runtime hosts, native sidecars, companion assets, and an app manifest under `app.id`-derived output paths.
+- [x] 7.2 Add the first Vite adapter without making packaging own runtime lifecycle, session policy, backend selection, or extension dispatch.
+- [x] 7.3 Add focused tests for missing app identity, deterministic app-derived artifact naming, manifest emission, path collision failure, Vite entry resolution, and adapter metadata.
+- [x] 7.4 Add README/example coverage for the packaging contract and Vite adapter.
+- [x] 7.5 Run package-level build/typecheck/test gates and then the repo-level verification gates.

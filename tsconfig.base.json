@@ -6,6 +6,8 @@
     "baseUrl": ".",
     "paths": {
       "@opentray/spec": ["packages/spec/src/index.ts"],
+      "@opentray/packaging": ["packages/packaging/src/index.ts"],
+      "@opentray/vite-plugin": ["packages/vite-plugin/src/index.ts"],
       "@opentray/ext-lynx": ["packages/ext-lynx/src/index.ts"],
       "@opentray/ext-lynx/runtime": ["packages/ext-lynx/src/runtime.ts"],
       "opentray": ["packages/cli/src/index.ts"],

@@ -223,7 +223,38 @@ importers:
 
   packages/linux-x64: {}
 
+  packages/packaging:
+    devDependencies:
+      tsdown:
+        specifier: ^0.22.1
+        version: 0.22.1(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(yaml@2.9.0))
+
   packages/spec:
+    devDependencies:
+      tsdown:
+        specifier: ^0.22.1
+        version: 0.22.1(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(yaml@2.9.0))
+
+  packages/vite-plugin:
+    dependencies:
+      '@opentray/packaging':
+        specifier: workspace:*
+        version: link:../packaging
+      vite:
+        specifier: '>=5'
+        version: 8.0.14(@types/node@25.9.1)(yaml@2.9.0)
     devDependencies:
       tsdown:
         specifier: ^0.22.1

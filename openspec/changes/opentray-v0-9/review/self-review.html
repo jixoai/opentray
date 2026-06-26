@@ -66,8 +66,9 @@
           Rust protocol and tray-icon projection now accept the responsive icon candidate map and preserve text-only
           absence when the native backend cannot render it.
         </p>
-        <p class="warn">
-          Packaging plugin and final .node distribution remain specified but not implemented in this loop.
+        <p>
+          The implementation also adds a bundler-neutral packaging contract and the first Vite adapter. Final .node
+          native-binding replacement remains a separate runtime-distribution break.
         </p>
       </section>
       <section>
@@ -107,6 +108,11 @@
               <td class="pass">Pass</td>
             </tr>
             <tr>
+              <td>Packaging plugin</td>
+              <td><code>pnpm --filter @opentray/packaging test</code>, <code>pnpm --filter @opentray/vite-plugin test</code>, package builds and typechecks</td>
+              <td class="pass">Pass</td>
+            </tr>
+            <tr>
               <td>Build and whitespace</td>
               <td><code>pnpm run build</code>, <code>pnpm run verify</code>, <code>git diff --check</code></td>
               <td class="pass">Pass</td>
@@ -117,8 +123,8 @@
       <section>
         <h2>Open Questions</h2>
         <ul>
-          <li>Whether packaging-plugin and .node distribution should be implemented in the same v0.9 closure loop.</li>
-          <li>Whether transitional daemon/local-broker command names should be renamed in the runtime-host packaging loop.</li>
+          <li>Whether final .node native-binding distribution should replace platform runtime packages in a dedicated follow-up change.</li>
+          <li>Whether transitional daemon/local-broker command names should be renamed in that runtime-distribution loop.</li>
         </ul>
       </section>
     </main>

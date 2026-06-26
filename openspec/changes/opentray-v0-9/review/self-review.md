@@ -5,7 +5,7 @@
 - Change: `opentray-v0-9`
 - Iteration: 1
 - Recurring issue counts: none
-- Exit-condition judgment: implementation loop is internally consistent and verified for the scoped tray-first API/protocol/backend reset; packaging-plugin and final `.node` distribution remain the next runtime-distribution change, not silently claimed by this iteration.
+- Exit-condition judgment: implementation loop is internally consistent and verified for the tray-first API/protocol/backend reset plus the first packaging-plugin contract and Vite adapter. Final `.node` native-binding replacement remains a future runtime-distribution change, but v0.9 now has the required app-manifest staging law and first bundler adapter.
 - Next loop action: run `openspec:vision -- check`, final whitespace/status review, then commit if no new issue appears.
 
 ## Intent Alignment
@@ -20,16 +20,17 @@
 | Rename internal backend law from surface projection to app projection | `crates/opentray-core/src/backend.rs`, `crates/opentray-backend-tray-icon/src/projection.rs`, `cargo test -p opentray-backend-tray-icon --lib` | Aligned |
 | Align official extension scope with app/tray identity | `crates/opentray-spec/src/ext.rs`, `crates/opentray-ext-webview/src/lib.rs`, `crates/opentray-ext-lynx/src/lib.rs`, `crates/opentray-ext-badge/src/lib.rs`; focused extension tests | Aligned |
 | Update docs and OpenSpec task ledger | `README.md`, package READMEs, `openspec/changes/opentray-v0-9/tasks.md`, `plans/plan.md` | Aligned |
+| Define packaging contract and first Vite adapter | `packages/packaging/src/index.ts`, `packages/vite-plugin/src/index.ts`, package READMEs/examples, `pnpm --filter @opentray/packaging test`, `pnpm --filter @opentray/vite-plugin test`, `pnpm run verify` | Aligned |
 
 ## Deviations From Intent
 
-1. The packaging-plugin / `.node` native-binding direction is captured in spec and README wording as runtime artifact law, but this iteration does not implement a Vite adapter or replace platform packages with final `.node` artifacts.
+1. Final `.node` native-binding replacement is not implemented in this loop. The v0.9 packaging-plugin requirement is satisfied as a build-layer staging/manifest contract plus Vite adapter; replacing platform runtime packages with final `.node` artifacts remains a separate runtime-distribution break.
 2. Transitional files and commands still contain implementation terms such as daemon/local broker for lower-level runtime wiring. They are no longer the top-level SDK ontology, but they have not been renamed across the entire repo.
 
 ## New Questions For User
 
-1. Should the next loop implement the packaging adapter and `.node` artifact layout immediately, or keep this as the next OpenSpec change after the tray-first API/protocol reset lands?
-2. Should transitional CLI command names such as `daemon-tray` and internal `connectLocalBroker` be renamed in the runtime-host packaging loop, or kept as low-level diagnostics?
+1. Should final `.node` native-binding distribution replace the existing runtime artifact package layout in a dedicated follow-up change?
+2. Should transitional CLI command names such as `daemon-tray` and internal `connectLocalBroker` be renamed in that runtime-distribution loop, or kept as low-level diagnostics?
 
 ## Evidence
 
@@ -41,6 +42,12 @@
   - `pnpm --filter opentray test`
   - `pnpm run build`
   - `pnpm run verify`
+  - `pnpm --filter @opentray/packaging build`
+  - `pnpm --filter @opentray/packaging typecheck`
+  - `pnpm --filter @opentray/packaging test`
+  - `pnpm --filter @opentray/vite-plugin build`
+  - `pnpm --filter @opentray/vite-plugin typecheck`
+  - `pnpm --filter @opentray/vite-plugin test`
   - `cargo test -p opentray-spec --lib`
   - `cargo test -p opentray-core --lib`
   - `cargo test -p opentray-backend-tray-icon --lib`
