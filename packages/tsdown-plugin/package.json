@@ -1,0 +1,44 @@
+{
+  "name": "@opentray/tsdown-plugin",
+  "version": "0.1.0",
+  "description": "tsdown adapter for the OpenTray runtime artifact packaging contract.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentray/packaging": "workspace:*"
+  },
+  "peerDependencies": {
+    "tsdown": ">=0.20"
+  },
+  "peerDependenciesMeta": {
+    "tsdown": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

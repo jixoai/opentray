@@ -65,8 +65,10 @@ await createTray(options, {
 
 `@opentray/packaging` stages runtime binding artifacts, native sidecars, and
 companion assets into app-id-derived output paths and writes an
-`opentray-app-manifest.json` manifest. `@opentray/vite-plugin` is the first
-adapter over that shared contract.
+`opentray-app-manifest.json` manifest. Adapters ship for the common bundlers:
+`@opentray/vite-plugin`, `@opentray/tsdown-plugin`, `@opentray/esbuild-plugin`,
+and `@opentray/webpack-plugin`. All four write the same manifest shape; pick by
+your existing toolchain.
 
 ```ts
 import { openTrayVitePlugin } from "@opentray/vite-plugin";

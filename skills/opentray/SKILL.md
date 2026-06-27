@@ -16,6 +16,7 @@ Use this skill when the user wants to build with OpenTray, not hack on the repo.
 - Scenario decision cards for common app shapes: read `references/scenarios.md`.
 - Runtime/daemon lifecycle (library-level, not CLI): read `references/daemon-ops.md`.
 - Reintroducing or auditing a broker/daemon process: read `references/daemon-best-practices.md`.
+- Packaging through a bundler (Vite/esbuild/tsdown/webpack) or writing a custom adapter: read `references/bundling.md`.
 - Visual acceptance and smoke recipes: read `references/visual-acceptance.md`.
 - Official WebView extension usage: read `references/ext-webview.md`.
 - Common local issues and capability limits: read `references/troubleshooting.md`.
