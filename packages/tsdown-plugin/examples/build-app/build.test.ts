@@ -53,5 +53,16 @@ describe("tsdown real build", () => {
     const resolved = await resolveOpenTrayPackage(manifestPath);
     expect(resolved.runtimeHostPath).toBe(join(outDir, `${stem}/runtime/${stem}`));
     await expect(stat(resolved.runtimeHostPath)).resolves.toBeTruthy();
+
+    // Verify the bundler's own primary output exists, is real compiled code,
+    // and is loadable at runtime — not just the staged sidecar artifacts.
+    const bundleOutput = join(outDir, "main.mjs");
+    await expect(stat(bundleOutput)).resolves.toBeTruthy();
+    const compiledCode = await readFile(bundleOutput, "utf8");
+    expect(compiledCode).toMatch(/opentray-tsdown-build-example/);
+    const imported = (await import(pathToFileURL(bundleOutput).pathname)) as {
+      main: () => string;
+    };
+    expect(imported.main()).toBe("opentray-tsdown-build-example");
   });
 });

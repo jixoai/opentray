@@ -41,6 +41,9 @@
   },
   "ignore": [
     "@opentray/packaging",
-    "@opentray/vite-plugin"
+    "@opentray/vite-plugin",
+    "@opentray/esbuild-plugin",
+    "@opentray/tsdown-plugin",
+    "@opentray/webpack-plugin"
   ]
 }

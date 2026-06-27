@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 
 import { describe, expect, it } from "vitest";
 
@@ -65,5 +66,15 @@ describe("webpack real build", () => {
     const resolved = await resolveOpenTrayPackage(manifestPath);
     expect(resolved.runtimeHostPath).toBe(join(outDir, `${stem}/runtime/${stem}`));
     await expect(stat(resolved.runtimeHostPath)).resolves.toBeTruthy();
+
+    // Verify the bundler's own primary output exists, is real compiled code,
+    // and is loadable at runtime — not just the staged sidecar artifacts.
+    const bundleOutput = join(outDir, "main.js");
+    await expect(stat(bundleOutput)).resolves.toBeTruthy();
+    const compiledCode = await readFile(bundleOutput, "utf8");
+    expect(compiledCode).toMatch(/opentray-webpack-build-example/);
+    const requireFromTest = createRequire(import.meta.url);
+    const imported = requireFromTest(bundleOutput) as { main: () => string };
+    expect(imported.main()).toBe("opentray-webpack-build-example");
   });
 });
