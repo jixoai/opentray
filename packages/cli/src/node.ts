@@ -1,35 +1,6 @@
-import {
-  loadOpenTrayRuntimeBinding,
-  type OpenTrayVisibleRuntimeHostOptions,
-  type ResolveRuntimeBindingOptions,
-} from "./native-runtime";
-
-export interface RunVisibleRuntimeHostOptions
-  extends ResolveRuntimeBindingOptions,
-    OpenTrayVisibleRuntimeHostOptions {}
-
-export const runVisibleRuntimeHost = async ({
-  platform,
-  arch,
-  resolvePackageJson,
-  nativeLoader,
-  ...hostOptions
-}: RunVisibleRuntimeHostOptions = {}): Promise<void> => {
-  const binding = await loadOpenTrayRuntimeBinding({
-    ...(platform === undefined ? {} : { platform }),
-    ...(arch === undefined ? {} : { arch }),
-    ...(resolvePackageJson === undefined ? {} : { resolvePackageJson }),
-    ...(nativeLoader === undefined ? {} : { nativeLoader }),
-  });
-  if (binding.runVisibleRuntimeHost === undefined) {
-    throw new Error(
-      "OpenTray runtime binding does not expose runVisibleRuntimeHost()"
-    );
-  }
-  binding.runVisibleRuntimeHost(hostOptions);
-};
-
 export {
+  runVisibleRuntimeHost,
+  type RunVisibleRuntimeHostOptions,
   MissingPlatformRuntimeBindingError,
   resolveInstalledRuntimeBindingPath,
   resolveRuntimeNativeTarget,
@@ -39,8 +10,13 @@ export {
   type OpenTrayVisibleRuntimeHostOptions,
   type ResolveRuntimeBindingOptions,
   type RuntimeNativeTarget,
-} from "./native-runtime";
-export {
   createRuntimeBindingTransport,
   type CreateRuntimeBindingTransportOptions,
-} from "./runtime-binding-transport";
+} from "./node-host";
+export {
+  createTrayAppWorkerSource,
+  runTrayApp,
+  type RunTrayAppOptions,
+  type TrayAppContext,
+  type TrayAppMain,
+} from "./node-app";

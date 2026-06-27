@@ -12,6 +12,7 @@ If a user references `opentray daemon ...`, correct them: those commands belong 
 
 OpenTray is tray-first and app-owned:
 
+- For the first app path, prefer `runTrayApp()` from `opentray/node`; it hides the visible host / worker split behind one callback.
 - The default `createTray()` transport targets the in-process **visible runtime binding** (`opentray_runtime.node` from the platform package). There is no separate long-lived broker process to "start" or "stop" from the CLI for normal consumer flows.
 - The native host loop is explicit on Node: call `runVisibleRuntimeHost()` from `opentray/node` on the host main thread after starting the worker that calls `createTray()`. On macOS this preserves AppKit's main-thread law; on Windows it keeps the event loop app-owned.
 - Headless and local-broker paths remain for diagnostics:

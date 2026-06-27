@@ -9,8 +9,10 @@ import type { Menu } from "@opentray/spec";
 
 import type {
   WebviewIpcMessage,
+  WebviewTrayCapability,
   WebviewWindowHandle,
 } from "../../../ext-webview/src/index";
+import { WebviewExt } from "../../../ext-webview/src/index";
 import { terminateWorkspaceDevBrokerProcess } from "../../src/daemon/broker-command";
 import { createClient, type EventfulTrayHandle } from "../../src/index";
 import {
@@ -92,6 +94,18 @@ export async function createWebviewExampleRuntime(
       await connection.close();
     },
   };
+}
+
+export function mountExampleWebview(
+  runtime: Pick<WebviewExampleRuntime, "localWebviewExtension" | "tray">,
+  mountId: string
+): WebviewTrayCapability {
+  return runtime.tray.extend(WebviewExt, {
+    mountId,
+    ...(runtime.localWebviewExtension === undefined
+      ? {}
+      : { path: runtime.localWebviewExtension }),
+  });
 }
 
 export function createShortExampleHome(homePrefix: string): string {

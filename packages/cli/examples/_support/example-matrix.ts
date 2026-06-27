@@ -70,6 +70,29 @@ const createRows = ({
     command: pnpmExample("example:basic"),
   },
   {
+    id: "first-app",
+    coverage: "default-runtime",
+    description: "runTrayApp quickstart through the default visible runtime",
+    platforms: WEBVIEW_PLATFORMS,
+    ...(runtimeSource === undefined
+      ? {}
+      : {
+          preflight: [
+            command("cargo", ["build", "-p", "opentray-runtime-node"]),
+            pnpm("pnpm", ["--filter", "opentray", "build"]),
+            command("bun", [
+              "run",
+              "scripts/binaries/stage-local.ts",
+              "--kind",
+              "runtime",
+              "--source",
+              runtimeSource,
+            ]),
+          ],
+        }),
+    command: pnpmExample("example:first-app"),
+  },
+  {
     id: "visible-binding",
     coverage: "default-runtime",
     description: "default visible Node runtime binding smoke",

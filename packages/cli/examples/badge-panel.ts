@@ -3,10 +3,12 @@ import { access, mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createExampleLifecycle } from "./_support/example-lifecycle";
 import {
   createWebviewExampleRuntime,
   createVisibleTrayIcon,
   listenWebviewIpcMessages,
+  mountExampleWebview,
   prepareLocalBadgeExtensionPath,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
@@ -16,7 +18,6 @@ import {
   type BadgeCapabilities,
   type BadgePanelEnvelope,
 } from "../../ext-badge/src/index";
-import { WebviewExt } from "../../ext-webview/src/index";
 import { createBadgePanelHtml, type BadgePlatform } from "./badge-panel-content";
 
 const runtime = await createWebviewExampleRuntime({
@@ -36,7 +37,7 @@ const runtime = await createWebviewExampleRuntime({
 });
 
 const localBadgeExtension = await prepareLocalBadgeExtensionPath(import.meta.url);
-const { tray, localWebviewExtension } = runtime;
+const { tray } = runtime;
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const homeDir = runtime.homeDir;
 const dockClickSignalPath = join(homeDir, "badge-dock-click.signal");
@@ -53,10 +54,7 @@ const badge = attachBadge(tray, {
   mountId: "badge-panel-badge",
   ...(localBadgeExtension === undefined ? {} : { path: localBadgeExtension }),
 });
-const webviewTray = tray.extend(WebviewExt, {
-  mountId: "badge-panel-webview",
-  ...(localWebviewExtension === undefined ? {} : { path: localWebviewExtension }),
-});
+const webviewTray = mountExampleWebview(runtime, "badge-panel-webview");
 const panel = webviewTray.createWebviewWindow({
   html: createBadgePanelHtml(process.platform as BadgePlatform),
   width: 1120,
@@ -102,12 +100,6 @@ const panelState: BadgePanelEnvelope = {
 console.log(`badge helper home: ${homeDir}`);
 console.log(`badge panel platform: ${process.platform}`);
 
-let closed = false;
-let exitTimer: NodeJS.Timeout | undefined;
-let resolveLifecycle: (() => void) | undefined;
-const lifecycle = new Promise<void>((resolve) => {
-  resolveLifecycle = resolve;
-});
 const pageMessageWatch: WebviewPageMessageWatch = listenWebviewIpcMessages(
   panel,
   handlePanelIpcMessage,
@@ -124,7 +116,17 @@ const dockClickWatch = watchDockClickSignal(dockClickSignalPath, async () => {
 const dockQuitWatch = watchDockQuitSignal(dockHelperQuitNotifyPath, async () => {
   panelState.log.unshift("dock helper exited -> shutting down tray");
   panelState.log = panelState.log.slice(0, 8);
-  await shutdown();
+  await lifecycle.shutdown();
+});
+const lifecycle = createExampleLifecycle({
+  exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
+  onShutdown: async () => {
+    await signalBadgeDockHelperQuit();
+    dockClickWatch.close();
+    dockQuitWatch.close();
+    pageMessageWatch.stop();
+    await runtime.shutdown();
+  },
 });
 if (process.platform === "darwin") {
   await prepareBadgeDockStateFiles();
@@ -137,27 +139,11 @@ if (process.platform === "darwin") {
 
 tray.onMenuClick(({ itemId }) => {
   if (itemId === 99) {
-    void shutdown();
+    void lifecycle.shutdown();
   }
 });
 
 await badge.showPanel();
-
-const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
-if (exitAfter !== undefined && exitAfter.length > 0) {
-  const duration = Number.parseInt(exitAfter, 10);
-  if (Number.isInteger(duration) && duration > 0) {
-    exitTimer = setTimeout(() => {
-      void shutdown();
-    }, duration);
-  }
-}
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    void shutdown();
-  });
-}
 
 await panel.show({
   fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
@@ -167,10 +153,10 @@ await broadcastState("panel opened");
 
 if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE === "1") {
   await panel.postMessage({ type: "badgePanelState", snapshot: panelState });
-  await shutdown();
+  await lifecycle.shutdown();
 }
 
-await lifecycle;
+await lifecycle.wait;
 
 async function handlePanelIpcMessage(message: { payload: unknown }): Promise<void> {
   // The WebView page only emits operator intents; all badge truth still flows
@@ -247,22 +233,6 @@ async function broadcastState(reason: string): Promise<void> {
     type: "badgePanelState",
     snapshot: panelState,
   });
-}
-
-async function shutdown(): Promise<void> {
-  if (closed) {
-    return;
-  }
-  closed = true;
-  await signalBadgeDockHelperQuit();
-  dockClickWatch.close();
-  dockQuitWatch.close();
-  pageMessageWatch.stop();
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-  }
-  await runtime.shutdown();
-  resolveLifecycle?.();
 }
 
 function resolveProgressState(value: unknown): BadgePanelEnvelope["state"]["progressState"] {

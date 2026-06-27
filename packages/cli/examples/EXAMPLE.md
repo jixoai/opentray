@@ -55,6 +55,20 @@ export OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1
 export OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE=1
 ```
 
+## Example 0: First App
+
+Command:
+
+```bash
+pnpm --filter opentray example:first-app
+```
+
+Expected checks:
+
+1. A tray appears without the user manually running `runVisibleRuntimeHost()`.
+2. The example stays under the quickstart path: one callback, one tray, one menu action.
+3. The tray closes cleanly when `Quit` is clicked.
+
 ## Example 1: Control Surface
 
 Command:
@@ -185,7 +199,7 @@ pnpm --filter opentray example:matrix
 pnpm --filter opentray example:matrix -- --row webview-control
 ```
 
-The matrix does not depend on shell wildcard expansion. It stages the generated `runtime/opentray_runtime.node` artifact before the default `visible-binding` row, labels WebView/Badge/Lynx rows as contributor-only `extension-debug-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts.
+The matrix does not depend on shell wildcard expansion. It stages the generated `runtime/opentray_runtime.node` artifact before the default-runtime `first-app` and `visible-binding` rows, labels WebView/Badge/Lynx rows as contributor-only `extension-debug-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts.
 
 These are useful for quick regression passes:
 

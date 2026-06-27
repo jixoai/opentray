@@ -11,7 +11,9 @@ Use this skill when the user wants to build with OpenTray, not hack on the repo.
 
 ## Quick Routing
 
-- Install, protocol-line tags, and first tray usage: read `references/getting-started.md`.
+- First install and first-app path: read `references/getting-started.md`.
+- Version selection, protocol-line tags, and install drift: read `references/versioning.md`.
+- For a progressive path from first tray to extensions and host control, read `references/tutorial.md`.
 - Public API patterns and examples: read `references/api-patterns.md`.
 - Scenario decision cards for common app shapes: read `references/scenarios.md`.
 - Runtime/daemon lifecycle (library-level, not CLI): read `references/daemon-ops.md`.
@@ -21,7 +23,7 @@ Use this skill when the user wants to build with OpenTray, not hack on the repo.
 - Official WebView extension usage: read `references/ext-webview.md`.
 - Common local issues and capability limits: read `references/troubleshooting.md`.
 - For tray/screen/edge placement reviews, start from `example:placement`.
-- For responsive native-window style and size-constraint reviews, start from the `media-query-panel.ts` example (no `example:mediaQuery` script exists; run it directly via the file or review the responsive style kit).
+- For responsive native-window style and size-constraint reviews, start from `example:mediaQuery`.
 
 ## Consumer Rules
 
@@ -33,13 +35,14 @@ Use this skill when the user wants to build with OpenTray, not hack on the repo.
 - Distinguish between protocol-only examples and real native visual acceptance.
 - Do not silently rewrite or inject user HTML/CSS for frameless, overlay, or drag behavior. Teach the relevant native APIs and the product tradeoff, then let the user own their UI structure.
 - Prefer scenario reasoning over API inventory. Pick the closest scenario card, then compose atoms for the remaining edge cases.
-- Use `latest` for newest published packages and `stable-A-B` / `alpha-A-B` when the user wants to lock a whole OpenTray protocol line; replace `A-B` with the current line from `@opentray/spec`.
+- Use `latest` for newest published packages and `stable-A-B` / `alpha-A-B` when the user wants to lock a whole OpenTray protocol line; read `references/versioning.md` before giving install advice that pairs official extensions with `opentray`.
 
 ## Quick Verification
 
 Use one of these depending on the question (run from a source checkout):
 
 ```bash
+pnpm --filter opentray example:first-app
 pnpm --filter opentray example:basic          # protocol-only request/response
 pnpm --filter opentray example:debug-runtime-tray   # real native tray + WebView
 pnpm --filter @opentray/ext-webview example:webview # protocol-only facade

@@ -1,71 +1,53 @@
 ﻿import { readFile } from "node:fs/promises";
 
-import { createClient } from "../src/index";
-import { connectLocalBroker } from "../src/local-broker";
+import type { WebviewWindowOptions } from "../../ext-webview/src/index";
+import { createExampleLifecycle } from "./_support/example-lifecycle";
 import {
-  attachWebview,
-  type WebviewShowCommand,
-} from "../../ext-webview/src/index";
-import {
-  createShortExampleHome,
+  createWebviewExampleRuntime,
   createVisibleTrayIcon,
-  prepareLocalWebviewExtensionPath,
+  mountExampleWebview,
 } from "./_support/webview-example-support";
 
 const controlPageUrl = new URL("./webview-control.html", import.meta.url);
 const controlPageHtml = await readFile(controlPageUrl, "utf8");
 
-const localWebviewExtension = await prepareLocalWebviewExtensionPath(
-  import.meta.url
-);
-const demoHomeDir =
-  process.env.OPENTRAY_HOME ??
-  createShortExampleHome("opentray-webview-control");
 // windowControlsOverlay is a show-time bridge gate; the page can test it, not enable it later.
 const overlayEnabled = resolveOverlayEnabled(
   process.argv.slice(2),
   process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY
 );
-const connection = await connectLocalBroker({ homeDir: demoHomeDir });
-const client = createClient(connection, { requestIdPrefix: "webview-control" });
-console.log(
-  `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
-);
-console.log(`runtime home: ${demoHomeDir}`);
 console.log(
   `windowControlsOverlay: ${overlayEnabled ? "enabled" : "disabled"}`
 );
-if (localWebviewExtension !== undefined) {
-  console.log(`webview dylib: ${localWebviewExtension}`);
-}
 
-const tray = await client.createTray({
-  id: "com.example.opentray.webview-control",
-  tooltip: {
-    title: "OpenTray",
-    description: "Native WebView control demo launched directly from the page",
-  },
-  icon: createVisibleTrayIcon(),
-  menu: {
-    items: [{ type: "item", id: 99, title: "Quit Demo" }],
+const runtime = await createWebviewExampleRuntime({
+  importMetaUrl: import.meta.url,
+  requestIdPrefix: "webview-control",
+  homePrefix: "opentray-webview-control",
+  tray: {
+    id: "com.example.opentray.webview-control",
+    tooltip: {
+      title: "OpenTray",
+      description:
+        "Native WebView control demo launched directly from the page",
+    },
+    menu: {
+      items: [{ type: "item", id: 99, title: "Quit Demo" }],
+    },
   },
 });
-console.log(`tray: ${tray.trayId}`);
+const { tray } = runtime;
+const icon = createVisibleTrayIcon();
 
-await tray.loadExtension({
-  name: "webview",
-  path: "@opentray/ext-webview",
-});
-
-const webview = attachWebview(tray);
-
-const showCommand: WebviewShowCommand = {
-  type: "show",
+const webview = mountExampleWebview(
+  runtime,
+  "webview-control-webview"
+).createWebviewWindow({
   html: controlPageHtml,
   width: 960,
   height: 720,
   title: "OpenTray WebView Control Demo",
-  icon: createVisibleTrayIcon(),
+  icon,
   style: {
     frameless: false,
     keepOnTop: false,
@@ -96,8 +78,8 @@ const showCommand: WebviewShowCommand = {
   nativeApiPolicy: {
     defaultSrc: ["'local'"],
   },
-};
-await webview.show(showCommand);
+} satisfies WebviewWindowOptions);
+await webview.show();
 
 console.log(`control page source: ${controlPageUrl.href}`);
 console.log(
@@ -162,53 +144,18 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
   console.log("bridge smoke evaluate injected");
 }
 
-let closed = false;
-let exitTimer: NodeJS.Timeout | undefined;
-let resolveLifecycle: (() => void) | undefined;
-const lifecycle = new Promise<void>((resolve) => {
-  resolveLifecycle = resolve;
+const lifecycle = createExampleLifecycle({
+  exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
+  onShutdown: runtime.shutdown,
 });
-const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 
-const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
-if (exitAfter !== undefined && exitAfter.length > 0) {
-  const duration = Number.parseInt(exitAfter, 10);
-  if (Number.isInteger(duration) && duration > 0) {
-    exitTimer = setTimeout(() => {
-      void shutdown();
-    }, duration);
-  }
-}
-
-for (const signal of shutdownSignals) {
-  process.once(signal, () => {
-    void shutdown();
-  });
-}
-
-connection.onEvent((frame) => {
-  if (
-    frame.type === "event" &&
-    frame.event.type === "menuClick" &&
-    frame.event.itemId === 99
-  ) {
-    void shutdown();
+tray.onMenuClick(({ itemId }) => {
+  if (itemId === 99) {
+    void lifecycle.shutdown();
   }
 });
 
-async function shutdown(): Promise<void> {
-  if (closed) {
-    return;
-  }
-  closed = true;
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-  }
-  await connection.close();
-  resolveLifecycle?.();
-}
-
-await lifecycle;
+await lifecycle.wait;
 
 function resolveOverlayEnabled(
   args: readonly string[],

@@ -127,7 +127,7 @@ The daemon patterns above become worth reintroducing precisely when a constraint
 
 - **Fixed-delay startup wait** (`await sleep(500); connect()`). Hides a missing ready handshake; breaks on slow machines; hangs on a dead broker.
 - **Pid file without liveness probe.** Pid recycling produces "daemon already running" for a totally unrelated process.
-- **Shared state directory across versions.** A 0.8 daemon and 0.9 daemon stomp each other's pid/ready files.
+- **Shared state directory across versions.** An older daemon and a newer runtime stomp each other's pid/ready files.
 - **Lock released before readiness.** Opens a race where a second start spawns a duplicate broker.
 - **Idle exit owned by the client.** A crashed client leaks a headless daemon forever.
 - **Stop without liveness confirmation.** `SIGTERM` then immediately deleting state leaves a still-running orphan that looks stopped.

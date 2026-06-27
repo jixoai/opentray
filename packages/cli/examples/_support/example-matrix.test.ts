@@ -29,6 +29,7 @@ describe("Feature: opentray example matrix planning", () => {
 
     expect(rows.map((row) => row.id)).toEqual([
       "basic",
+      "first-app",
       "visible-binding",
       "webview-control",
       "debug-runtime-tray",
@@ -44,6 +45,41 @@ describe("Feature: opentray example matrix planning", () => {
         "example:*",
       );
     }
+  });
+
+  it("Scenario: Given the first app row on macOS When planned Then it stages the default runtime artifact before execution", () => {
+    const workspaceRoot = "/repo";
+    const row = rowById(
+      createExampleMatrix({
+        platform: "darwin",
+        arch: "arm64",
+        workspaceRoot,
+      }),
+      "first-app",
+    );
+
+    expect(row.skipped).toBe(false);
+    expect(row.coverage).toBe("default-runtime");
+    expect(row.preflight).toEqual([
+      { command: "cargo", args: ["build", "-p", "opentray-runtime-node"] },
+      { command: "pnpm", args: ["--filter", "opentray", "build"] },
+      {
+        command: "bun",
+        args: [
+          "run",
+          "scripts/binaries/stage-local.ts",
+          "--kind",
+          "runtime",
+          "--source",
+          runtimeBindingSourcePath("darwin", "arm64", workspaceRoot),
+        ],
+      },
+    ]);
+    expect(row.command.args).toEqual([
+      "--filter",
+      "opentray",
+      "example:first-app",
+    ]);
   });
 
   it("Scenario: Given the visible binding row on macOS When planned Then it stages the default runtime artifact before execution", () => {

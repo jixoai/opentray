@@ -10,22 +10,62 @@ pnpm add opentray @opentray/ext-webview
 
 The facade package stays platform-neutral. Official native WebView packages are published for macOS and Windows. Linux remains supported by OpenTray core, but `@opentray/ext-webview` does not publish a Linux native runtime package.
 
+When version compatibility matters, install both packages from the same protocol-line tag:
+
+```bash
+pnpm add opentray@stable-A-B @opentray/ext-webview@stable-A-B
+```
+
 ## Public Shape
 
-There are two ways to use the facade. `attachWebview(tray)` returns a `WebviewHandle` with the legacy `show`/`hide`/`navigate`/... command surface. `tray.extend(WebviewExt)` returns a `WebviewTrayCapability` with `createWebviewWindow(...)` and `getScreenDetails()` — preferred for new code that wants explicit window handles.
+Use `tray.extend(WebviewExt)` for new code. It returns a tray-scoped WebView capability with `createWebviewWindow(...)` and `getScreenDetails()`.
 
-Legacy command shape:
+First panel:
+
+```ts
+import { runTrayApp } from "opentray/node";
+
+await runTrayApp(async ({ createTray }) => {
+  const { WebviewExt } = await import("@opentray/ext-webview");
+  const tray = (await createTray({
+    id: "com.example.panel",
+    icon: { "text-only": "OT" },
+    menu: { items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }] },
+  })).extend(WebviewExt);
+  const panel = tray.createWebviewWindow({
+    html: "<main>Hello</main>",
+    width: 360,
+    height: 220,
+  });
+  tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
+});
+```
+
+If a tray already exists:
+
+```ts
+import { WebviewExt } from "@opentray/ext-webview";
+
+const webviewTray = tray.extend(WebviewExt);
+const panel = webviewTray.createWebviewWindow({
+  html: "<main>Hello</main>",
+  width: 360,
+  height: 220,
+});
+
+await panel.show();
+```
+
+`attachWebview(tray)` returns a legacy `WebviewHandle` with the older `show`/`hide`/`navigate` command surface. Keep it for compatibility only:
 
 ```ts
 import { attachWebview } from "@opentray/ext-webview";
 
-const webview = attachWebview(tray);
-await webview.show({
+await attachWebview(tray).show({
   type: "show",
   html: "<main>Hello</main>",
   width: 360,
   height: 220,
-  fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
 });
 ```
 
@@ -90,7 +130,7 @@ Do not auto-inject titlebars, drag strips, or CSS into the user's HTML. For over
 
 Lightweight tray panels usually behave like desktop cards. If the whole document develops root-level scrollbars, the experience often feels less native than choosing a better window size, responsive card layout, or an intentional internal scroll region. Explain that product tradeoff instead of prescribing a universal CSS block.
 
-`example:placement` is the source-tree demo for `WebviewPlacementKit` tray, screen, and edge placement. There is no `example:mediaQuery` script; responsive native-window behavior (`mediaQueryKit` plus `styleKit`) lives in `packages/cli/examples/media-query-panel.ts` — run it directly when reviewing that surface.
+`example:placement` is the source-tree demo for `WebviewPlacementKit` tray, screen, and edge placement. `example:mediaQuery` is the source-tree demo for responsive native-window behavior (`mediaQueryKit` plus `styleKit`).
 
 ## Examples
 

@@ -1,15 +1,16 @@
 import type { Menu } from "@opentray/spec";
 
 import {
-  WebviewExt,
   WebviewPlacementKit,
   type WebviewPlacement,
   type WebviewPlacementResult,
 } from "../../ext-webview/src/index";
+import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import {
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
   listenWebviewIpcMessages,
+  mountExampleWebview,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
 import {
@@ -60,14 +61,9 @@ const runtime = await createWebviewExampleRuntime({
     menu: createMenu(),
   },
 });
-const { tray, localWebviewExtension } = runtime;
+const { tray } = runtime;
 
-const webviewTray = tray.extend(WebviewExt, {
-  mountId: "placement-demo-webview",
-  ...(localWebviewExtension === undefined
-    ? {}
-    : { path: localWebviewExtension }),
-});
+const webviewTray = mountExampleWebview(runtime, "placement-demo-webview");
 const panel = webviewTray.createWebviewWindow({
   html: createPlacementHtml(PLACEMENTS),
   width: PANEL_WIDTH,
@@ -83,7 +79,6 @@ const panel = webviewTray.createWebviewWindow({
 });
 const placementKit = new WebviewPlacementKit({ tray, screen: webviewTray });
 
-let closed = false;
 let panelShown = false;
 let placementWatch:
   | Awaited<ReturnType<WebviewPlacementKit["watch"]>>
@@ -93,10 +88,17 @@ let panelLifecycleUnlisten: (() => void) | undefined;
 let currentFallbackRect = { x: 0, y: 0, width: 1, height: 1 };
 let currentMode = "watch:tray";
 let lastPlacement: WebviewPlacementResult | undefined;
-let exitTimer: ReturnType<typeof setTimeout> | undefined;
-let resolveLifecycle: (() => void) | undefined;
-const lifecycle = new Promise<void>((resolve) => {
-  resolveLifecycle = resolve;
+const lifecycle = createExampleLifecycle({
+  exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
+  onShutdown: async () => {
+    stopPanelWatches();
+    try {
+      await panel.destroy();
+    } catch {
+      // The panel may never have been opened; closing the runtime session is still authoritative.
+    }
+    await runtime.shutdown();
+  },
 });
 
 tray.onMenuClick(({ itemId }) => {
@@ -105,7 +107,7 @@ tray.onMenuClick(({ itemId }) => {
     return;
   }
   if (itemId === QUIT_ITEM_ID) {
-    void shutdown();
+    void lifecycle.shutdown();
   }
 });
 
@@ -113,33 +115,16 @@ console.log(
   "Use tray menu item 'Open Placement Kit' to review placement modes."
 );
 
-const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
-if (exitAfter !== undefined && exitAfter.length > 0) {
-  const duration = Number.parseInt(exitAfter, 10);
-  if (Number.isInteger(duration) && duration > 0) {
-    exitTimer = setTimeout(() => {
-      void shutdown();
-    }, duration);
-  }
-}
-
 const smoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
-if (smoke === "1" && exitTimer !== undefined) {
-  clearTimeout(exitTimer);
-  exitTimer = undefined;
+if (smoke === "1") {
+  lifecycle.clearExitTimer();
 }
 if (smoke === "show" || smoke === "1") {
   await openPanel();
 }
 if (smoke === "1") {
   await sleep(500);
-  await shutdown();
-}
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    void shutdown();
-  });
+  await lifecycle.shutdown();
 }
 
 async function openPanel(): Promise<void> {
@@ -300,24 +285,6 @@ async function broadcastPanelState(): Promise<void> {
   }
 }
 
-async function shutdown(): Promise<void> {
-  if (closed) {
-    return;
-  }
-  closed = true;
-  stopPanelWatches();
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-  }
-  try {
-    await panel.destroy();
-  } catch {
-    // The panel may never have been opened; closing the runtime session is still authoritative.
-  }
-  await runtime.shutdown();
-  resolveLifecycle?.();
-}
-
 function createMenu(): Menu {
   return {
     items: [
@@ -376,8 +343,4 @@ function isWindowInteractionIntent(
   );
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-await lifecycle;
+await lifecycle.wait;

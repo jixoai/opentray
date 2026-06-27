@@ -1,10 +1,12 @@
 import type { Menu } from "@opentray/spec";
 
-import { mediaQueryKit, styleKit, WebviewExt } from "../../ext-webview/src/index";
+import { mediaQueryKit, styleKit } from "../../ext-webview/src/index";
+import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import {
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
   listenWebviewIpcMessages,
+  mountExampleWebview,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
 import { createMediaQueryHtml } from "./media-query-panel-content";
@@ -33,12 +35,9 @@ const runtime = await createWebviewExampleRuntime({
     menu: createMenu(),
   },
 });
-const { tray, localWebviewExtension } = runtime;
+const { tray } = runtime;
 
-const webviewTray = tray.extend(WebviewExt, {
-  mountId: "media-query-demo-webview",
-  ...(localWebviewExtension === undefined ? {} : { path: localWebviewExtension }),
-});
+const webviewTray = mountExampleWebview(runtime, "media-query-demo-webview");
 const panel = webviewTray.createWebviewWindow({
   html: createMediaQueryHtml(),
   width: PANEL_WIDTH,
@@ -52,7 +51,6 @@ const panel = webviewTray.createWebviewWindow({
   },
 });
 
-let closed = false;
 let panelShown = false;
 let panelBootstrapped = false;
 let mediaWatch: Awaited<ReturnType<typeof mediaQueryKit.match>> | undefined;
@@ -60,10 +58,18 @@ let pageMessageWatch: WebviewPageMessageWatch | undefined;
 let panelLifecycleUnlisten: (() => void) | undefined;
 let widthMode: WidthMode = "comfort";
 let heightMode: HeightMode = "fit";
-let exitTimer: ReturnType<typeof setTimeout> | undefined;
-let resolveLifecycle: (() => void) | undefined;
-const lifecycle = new Promise<void>((resolve) => {
-  resolveLifecycle = resolve;
+const lifecycle = createExampleLifecycle({
+  exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
+  onShutdown: async () => {
+    stopPanelWatches();
+    try {
+      await panel.destroy();
+    } catch {
+      // The panel may never have been opened; closing the runtime session is still authoritative.
+    }
+    panelBootstrapped = false;
+    await runtime.shutdown();
+  },
 });
 
 tray.onMenuClick(({ itemId }) => {
@@ -72,39 +78,22 @@ tray.onMenuClick(({ itemId }) => {
     return;
   }
   if (itemId === QUIT_ITEM_ID) {
-    void shutdown();
+    void lifecycle.shutdown();
   }
 });
 
 console.log("Use tray menu item 'Open Media Query Kit' to review responsive native-window style.");
 
-const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
-if (exitAfter !== undefined && exitAfter.length > 0) {
-  const duration = Number.parseInt(exitAfter, 10);
-  if (Number.isInteger(duration) && duration > 0) {
-    exitTimer = setTimeout(() => {
-      void shutdown();
-    }, duration);
-  }
-}
-
 const smoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
-if (smoke === "1" && exitTimer !== undefined) {
-  clearTimeout(exitTimer);
-  exitTimer = undefined;
+if (smoke === "1") {
+  lifecycle.clearExitTimer();
 }
 if (smoke === "show" || smoke === "1") {
   await openPanel();
 }
 if (smoke === "1") {
   await sleep(500);
-  await shutdown();
-}
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    void shutdown();
-  });
+  await lifecycle.shutdown();
 }
 
 async function openPanel(): Promise<void> {
@@ -277,25 +266,6 @@ async function broadcastPanelState(): Promise<void> {
   }
 }
 
-async function shutdown(): Promise<void> {
-  if (closed) {
-    return;
-  }
-  closed = true;
-  stopPanelWatches();
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-  }
-  try {
-    await panel.destroy();
-  } catch {
-    // The panel may never have been opened; closing the runtime session is still authoritative.
-  }
-  panelBootstrapped = false;
-  await runtime.shutdown();
-  resolveLifecycle?.();
-}
-
 function createMenu(): Menu {
   return {
     items: [
@@ -337,8 +307,4 @@ function isWindowInteractionIntent(value: unknown): value is WindowInteractionIn
   return record.type === "windowInteraction" && typeof record.active === "boolean";
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-await lifecycle;
+await lifecycle.wait;

@@ -1,53 +1,33 @@
-import { createClient } from "../src/index";
-import { connectLocalBroker } from "../src/local-broker";
-import { WebviewExt } from "../../ext-webview/src/index";
 import type { WebviewWindowStylePatch } from "../../ext-webview/src/index";
+import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import {
-  createShortExampleHome,
+  createWebviewExampleRuntime,
   createVisibleTrayIcon,
-  prepareLocalWebviewExtensionPath,
+  mountExampleWebview,
 } from "./_support/webview-example-support";
 
-const localWebviewExtension = await prepareLocalWebviewExtensionPath(
-  import.meta.url
-);
 const icon = createVisibleTrayIcon();
-
-const demoHomeDir =
-  process.env.OPENTRAY_HOME ??
-  createShortExampleHome("opentray-tray-panel");
-const connection = await connectLocalBroker({ homeDir: demoHomeDir });
-const client = createClient(connection, { requestIdPrefix: "tray-panel" });
-console.log(
-  `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
-);
-console.log(`runtime home: ${demoHomeDir}`);
-if (localWebviewExtension !== undefined) {
-  console.log(`webview dylib: ${localWebviewExtension}`);
-}
-
-const tray = await client.createTray({
-  id: "com.example.opentray.tray-panel",
-  tooltip: {
-    title: "OpenTray",
-    description:
-      "Single primary tray action launching a custom WebView tray panel",
-  },
-  icon,
-  menu: {
-    items: [
-      { type: "item", id: 1, title: "Open Tray Panel", primaryEvent: true },
-    ],
+const runtime = await createWebviewExampleRuntime({
+  importMetaUrl: import.meta.url,
+  requestIdPrefix: "tray-panel",
+  homePrefix: "opentray-tray-panel",
+  tray: {
+    id: "com.example.opentray.tray-panel",
+    tooltip: {
+      title: "OpenTray",
+      description:
+        "Single primary tray action launching a custom WebView tray panel",
+    },
+    menu: {
+      items: [
+        { type: "item", id: 1, title: "Open Tray Panel", primaryEvent: true },
+      ],
+    },
   },
 });
-console.log(`tray: ${tray.trayId}`);
+const { tray } = runtime;
 
-const webviewTray = tray.extend(WebviewExt, {
-  mountId: "tray-panel-webview",
-  ...(localWebviewExtension === undefined
-    ? {}
-    : { path: localWebviewExtension }),
-});
+const webviewTray = mountExampleWebview(runtime, "tray-panel-webview");
 const webview = webviewTray.createWebviewWindow({
   html: createTrayPanelHtml(),
   width: 388,
@@ -74,13 +54,10 @@ console.log(
 );
 console.log("press Ctrl-C to exit the tray demo");
 
-let closed = false;
-let exitTimer: NodeJS.Timeout | undefined;
-let resolveLifecycle: (() => void) | undefined;
-const lifecycle = new Promise<void>((resolve) => {
-  resolveLifecycle = resolve;
+const lifecycle = createExampleLifecycle({
+  exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
+  onShutdown: runtime.shutdown,
 });
-const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 
 tray.onMenuClick(({ itemId }) => {
   console.log(`menu click: ${itemId}`);
@@ -88,16 +65,6 @@ tray.onMenuClick(({ itemId }) => {
     void openTrayPanel();
   }
 });
-
-const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
-if (exitAfter !== undefined && exitAfter.length > 0) {
-  const duration = Number.parseInt(exitAfter, 10);
-  if (Number.isInteger(duration) && duration > 0) {
-    exitTimer = setTimeout(() => {
-      void shutdown();
-    }, duration);
-  }
-}
 
 const webviewSmoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
 if (webviewSmoke === "show" || webviewSmoke === "1") {
@@ -126,34 +93,19 @@ if (webviewSmoke === "destroy-reopen") {
   await openTrayPanel();
 }
 if (webviewSmoke === "1") {
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-    exitTimer = undefined;
-  }
+  lifecycle.clearExitTimer();
   await sleep(300);
-  await shutdown();
+  await lifecycle.shutdown();
 }
 if (webviewSmoke === "reopen") {
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-    exitTimer = undefined;
-  }
+  lifecycle.clearExitTimer();
   await sleep(400);
-  await shutdown();
+  await lifecycle.shutdown();
 }
 if (webviewSmoke === "set-content" || webviewSmoke === "destroy-reopen") {
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-    exitTimer = undefined;
-  }
+  lifecycle.clearExitTimer();
   await sleep(400);
-  await shutdown();
-}
-
-for (const signal of shutdownSignals) {
-  process.once(signal, () => {
-    void shutdown();
-  });
+  await lifecycle.shutdown();
 }
 
 async function openTrayPanel(): Promise<void> {
@@ -166,19 +118,7 @@ async function openTrayPanel(): Promise<void> {
   console.log("tray panel command: show");
 }
 
-async function shutdown(): Promise<void> {
-  if (closed) {
-    return;
-  }
-  closed = true;
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-  }
-  await connection.close();
-  resolveLifecycle?.();
-}
-
-await lifecycle;
+await lifecycle.wait;
 
 function createTrayPanelWindowStyle(): WebviewWindowStylePatch {
   const common = {
@@ -605,8 +545,4 @@ function createTrayPanelHtml(
     </script>
   </body>
 </html>`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

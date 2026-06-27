@@ -24,16 +24,19 @@ Useful checks:
 - a visible tray appears
 - WebView loads from `@opentray/ext-webview`
 - normal exit (or `tray.destroy()` / closing the connection) removes the tray contribution
+- the first-app helper can be used for the same fast path, while direct `createTray()` remains the lower-level route
 
 ## Source Checkout Smoke
 
 When the user is inside the OpenTray repo, prefer workspace examples. These are the real script names (from `packages/cli/package.json`):
 
 ```bash
+pnpm --filter opentray example:first-app
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:debug-runtime-tray
 pnpm --filter opentray example:placement
 pnpm --filter opentray example:tray-panel
 pnpm --filter opentray example:webview-control
+pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:badge
 ```
 
@@ -43,9 +46,8 @@ Notes on what each proves:
 - `example:placement` — `WebviewPlacementKit.watch()`, tray/screen/edge placement, page-owned frameless drag.
 - `example:tray-panel` — glass tray-anchored panel with a transparent root (preferred over `webview-control` for glass-window guidance).
 - `example:webview-control` — capability exerciser; starts opaque and enables overlay probes by default (use `-- --no-overlay` to test the disabled branch).
+- `example:mediaQuery` — responsive native-window behavior through `styleKit.apply(...)`, `mediaQueryKit.match(...)`, and size constraints.
 - `example:badge` — `@opentray/ext-badge` WebView IPC debug panel.
-
-There is no `example:mediaQuery` script. Responsive native-window behavior lives in `packages/cli/examples/media-query-panel.ts` (`styleKit.apply(...)`, `mediaQueryKit.match(...)`, size constraints); run it directly via the file when reviewing that surface.
 
 For Lynx contributor acceptance:
 

@@ -14,6 +14,41 @@ The facade stays platform-neutral. Supported native libraries are optional platf
 
 The platform dylib owns the full WebView protocol and native runtime. `opentray` forwards scoped extension traffic to it, but does not keep a core-side WebView parser or native WebView builder.
 
+## Install
+
+```bash
+pnpm add opentray @opentray/ext-webview
+```
+
+When locking a compatible package closure, use the same protocol-line tag for both packages:
+
+```bash
+pnpm add opentray@stable-A-B @opentray/ext-webview@stable-A-B
+```
+
+Use `alpha-A-B` for alpha packages on the same protocol line. Do not install platform WebView packages directly; `@opentray/ext-webview` resolves the supported native package through optional dependencies.
+
+## First Panel
+
+Start with `runTrayApp()` and mount WebView through `tray.extend(WebviewExt)`. The first `show()` loads the native extension:
+
+```ts
+import { runTrayApp } from "opentray/node";
+
+await runTrayApp(async ({ createTray }) => {
+  const { WebviewExt } = await import("@opentray/ext-webview");
+  const tray = (await createTray({
+    id: "com.example.panel",
+    icon: { "text-only": "OT" },
+    menu: { items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }] },
+  })).extend(WebviewExt);
+  const panel = tray.createWebviewWindow({ html: "<main>Hello</main>", width: 360, height: 220 });
+  tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
+});
+```
+
+Use `attachWebview(tray)` only as a compatibility adapter for older code. New code should prefer `tray.extend(WebviewExt)` so multiple trays can mount isolated WebView instances.
+
 ## Maturity Truth
 
 Read the current platform story as four different truths, not one vague support flag:
@@ -95,7 +130,7 @@ If the page paints every pixel itself, the native material is still present, but
 
 For tray panels or other glass-like borderless surfaces, keep the native and page responsibilities separate. The native layer owns the outer material, transparency, and platform corners; the page owns content structure inside that box. Avoid covering the whole native material with opaque page layers or treating page-level shadows, fake blur, and root decoration as a substitute for the native shell. Lightweight panels are closer to cards than documents, so a root-level document scrollbar usually means the window size or card composition needs a product decision.
 
-## Example
+## Direct Window API
 
 Mount WebView on a tray, then create a tray-scoped window. The first window command loads the native extension automatically:
 
@@ -104,9 +139,9 @@ import { WebviewExt } from "@opentray/ext-webview";
 import { createTray } from "opentray";
 
 const tray = (await createTray({
-  trayId: "status",
-  title: "Status",
-  icon: { type: "file", path: "./tray-icon.png" },
+  id: "com.example.status",
+  icon: { "text-only": "OT" },
+  tooltip: { title: "Status", description: "Background service" },
 })).extend(WebviewExt);
 
 const webview = tray.createWebviewWindow({
@@ -117,8 +152,6 @@ const webview = tray.createWebviewWindow({
 
 await webview.show();
 ```
-
-Use `attachWebview(tray)` only as a compatibility adapter for older code. New code should prefer `tray.extend(WebviewExt)` so multiple trays can mount isolated WebView instances.
 
 Run a runtime-host-free protocol example that sends WebView `show`, `navigate`, `postMessage`, and `hide` commands through the normal OpenTray extension command path:
 

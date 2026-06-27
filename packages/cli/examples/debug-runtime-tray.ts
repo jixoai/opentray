@@ -1,129 +1,74 @@
-import { createClient } from "../src/index";
-import { connectLocalBroker } from "../src/local-broker";
-import { attachWebview } from "../../ext-webview/src/index";
+import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import {
-  createShortExampleHome,
-  createVisibleTrayIcon,
-  prepareLocalWebviewExtensionPath,
+  createWebviewExampleRuntime,
+  mountExampleWebview,
 } from "./_support/webview-example-support";
 
-const localWebviewExtension = await prepareLocalWebviewExtensionPath(
-  import.meta.url
-);
-
-const demoHomeDir =
-  process.env.OPENTRAY_HOME ??
-  createShortExampleHome("opentray-debug-runtime-tray");
-const connection = await connectLocalBroker({ homeDir: demoHomeDir });
-const client = createClient(connection, {
+const runtime = await createWebviewExampleRuntime({
+  importMetaUrl: import.meta.url,
   requestIdPrefix: "debug-runtime-example",
-});
-console.log(
-  `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
-);
-console.log(`runtime home: ${demoHomeDir}`);
-if (localWebviewExtension !== undefined) {
-  console.log(`webview dylib: ${localWebviewExtension}`);
-}
-
-let webview: ReturnType<typeof attachWebview> | undefined;
-
-const tray = await client.createTray({
-  id: "com.example.opentray.debug-runtime",
-  tooltip: {
-    title: "OpenTray",
-    description:
-      "Single primary tray action; macOS direct-triggers without opening a menu",
-  },
-  icon: createVisibleTrayIcon(),
-  menu: {
-    items: [{ type: "item", id: 1, title: "Open WebView", primaryEvent: true }],
+  homePrefix: "opentray-debug-runtime-tray",
+  tray: {
+    id: "com.example.opentray.debug-runtime",
+    tooltip: {
+      title: "OpenTray",
+      description:
+        "Single primary tray action; macOS direct-triggers without opening a menu",
+    },
+    menu: {
+      items: [
+        { type: "item", id: 1, title: "Open WebView", primaryEvent: true },
+      ],
+    },
   },
 });
-console.log(`tray: ${tray.trayId}`);
-await tray.loadExtension({
-  name: "webview",
-  path: "@opentray/ext-webview",
+const { tray } = runtime;
+const webview = mountExampleWebview(
+  runtime,
+  "debug-runtime-webview"
+).createWebviewWindow({
+  html: createWebviewDemoHtml(),
+  width: 420,
+  height: 260,
+  nativeWindowApi: true,
+  bindWindowGlobals: true,
+  nativeTrayApi: true,
 });
-webview = attachWebview(tray);
+
 tray.onMenuClick(({ itemId }) => {
   console.log(`menu click: ${itemId}`);
   void handleMenuClick(itemId);
 });
 console.log(
-  "webview facade attached to the debug runtime native WebView extension"
+  "webview window mounted through tray.extend(WebviewExt)"
 );
 console.log(
   "click the tray icon: platforms with primary tray events should run the WebView action"
 );
 console.log("press Ctrl-C to exit the tray demo");
 
-let closed = false;
-const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
-let exitTimer: NodeJS.Timeout | undefined;
-let resolveLifecycle: (() => void) | undefined;
-const lifecycle = new Promise<void>((resolve) => {
-  resolveLifecycle = resolve;
+const lifecycle = createExampleLifecycle({
+  exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
+  onShutdown: runtime.shutdown,
 });
-const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
-if (exitAfter !== undefined && exitAfter.length > 0) {
-  const duration = Number.parseInt(exitAfter, 10);
-  if (Number.isInteger(duration) && duration > 0) {
-    exitTimer = setTimeout(() => {
-      void shutdown();
-    }, duration);
-  }
-}
 
 const webviewSmoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
 if (webviewSmoke === "show" || webviewSmoke === "1") {
   await handleMenuClick(1);
 }
 if (webviewSmoke === "1") {
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-    exitTimer = undefined;
-  }
+  lifecycle.clearExitTimer();
   await sleep(300);
-  await shutdown();
-}
-
-for (const signal of shutdownSignals) {
-  process.once(signal, () => {
-    void shutdown();
-  });
-}
-
-async function shutdown(): Promise<void> {
-  if (closed) {
-    return;
-  }
-  closed = true;
-  if (exitTimer !== undefined) {
-    clearTimeout(exitTimer);
-  }
-  await connection.close();
-  resolveLifecycle?.();
+  await lifecycle.shutdown();
 }
 
 async function handleMenuClick(itemId: number): Promise<void> {
   if (itemId === 1) {
-    if (webview === undefined) {
-      console.error("webview facade is not ready");
-      return;
-    }
     const trayBounds = await tray.getBounds();
     console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
 
     await webview.show({
-      type: "show",
-      html: createWebviewDemoHtml(),
-      width: 420,
-      height: 260,
       fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
-      nativeWindowApi: true,
-      bindWindowGlobals: true,
-      nativeTrayApi: true,
     });
     console.log("webview command: show");
     return;
@@ -299,8 +244,4 @@ function createWebviewDemoHtml(): string {
 </html>`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-await lifecycle;
+await lifecycle.wait;

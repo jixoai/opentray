@@ -8,6 +8,14 @@ Install it directly in the application or service that owns the tray lifetime:
 pnpm add opentray
 ```
 
+Use `latest` for the newest published package. When installing official extensions, use one protocol-line tag across the package set:
+
+```bash
+pnpm add opentray@stable-A-B @opentray/ext-webview@stable-A-B
+```
+
+Use `alpha-A-B` for alpha packages on the same protocol line. Replace `A-B` with the current OpenTray protocol-line tag from `@opentray/spec`; do not mix `latest` and protocol-line tags unless you are debugging install drift.
+
 ## Role
 
 - Expose `createTray()` as the public creation entrypoint.
@@ -18,6 +26,23 @@ pnpm add opentray
 `packages/cli` is the only unscoped npm package in this monorepo.
 
 ## Tray-First API
+
+For the first app, use `runTrayApp()` from `opentray/node` so the host/worker split stays out of the user's way:
+
+```ts
+import { runTrayApp } from "opentray/node";
+
+await runTrayApp(async ({ createTray }) => {
+  const tray = await createTray({
+    id: "com.example.first-app",
+    icon: { "text-only": "OT" },
+    menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
+  });
+  tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
+}, { autoExitAfterMs: 1500 });
+```
+
+`createTray()` is still the direct tray API when the caller already owns the runtime process shape.
 
 ```ts
 import { createTray } from "opentray";
@@ -46,7 +71,7 @@ tray.onMenuClick(({ itemId }) => {
 });
 ```
 
-Visible tray text belongs to `icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`. The v0.9 API does not export `createSpace()`, `createSurface()`, `resolveDefaultSpace()`, or `TrayHandle.setTitle()`.
+Visible tray text belongs to `icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`. The current tray-first API does not export `createSpace()`, `createSurface()`, `resolveDefaultSpace()`, or `TrayHandle.setTitle()`.
 
 ## Runtime Ownership
 
@@ -73,9 +98,10 @@ The `opentray/node` subpath exposes binding-resolution, visible host-loop, and b
 
 ## Examples
 
-Run a protocol-only example that creates a tray, dispatches an extension command, and prints each client frame:
+Run the quickstart example and the protocol-only example:
 
 ```bash
+pnpm --filter opentray example:first-app
 pnpm --filter opentray example:basic
 ```
 
@@ -102,4 +128,4 @@ pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The example matrix stages the generated Node runtime artifact before `visible-binding`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The visible-binding example exercises the default package runtime on macOS and Windows. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.
+The example matrix stages the generated Node runtime artifact before `first-app` and `visible-binding`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app and visible-binding examples exercise the default package runtime on macOS and Windows. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

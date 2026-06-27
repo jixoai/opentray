@@ -2,7 +2,7 @@
 
 OpenTray is a desktop status runtime for Node/Deno/Bun CLI and AI-skill ecosystems.
 
-The v0.9 platform model is tray-first:
+The current platform model is tray-first:
 
 - `App`: caller-owned runtime identity and isolation boundary.
 - `Tray`: one desktop status atom owned by that app/runtime.
@@ -10,6 +10,21 @@ The v0.9 platform model is tray-first:
 - `Extension`: optional native capability atom scoped to app and tray.
 
 OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Application code calls `createTray()` directly and owns foreground/background lifetime itself.
+
+For the first app, use `runTrayApp()` from `opentray/node` so users do not have to think about the visible host loop yet:
+
+```ts
+import { runTrayApp } from "opentray/node";
+
+await runTrayApp(async ({ createTray }) => {
+  const tray = await createTray({
+    id: "com.example.first-app",
+    icon: { "text-only": "OT" },
+    menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
+  });
+  tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
+}, { autoExitAfterMs: 1500 });
+```
 
 ## Workspace
 
@@ -28,6 +43,14 @@ OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()
 | `packages/<os>-<arch>`   | `@opentray/<os>-<arch>`   | Platform runtime artifact packages.                      |
 
 ## API
+
+Use `latest` for the newest published package. When an app uses official extensions, lock the same OpenTray protocol-line tag across the package set:
+
+```bash
+pnpm add opentray@stable-A-B @opentray/ext-webview@stable-A-B
+```
+
+Use `alpha-A-B` for alpha packages on the same protocol line. Replace `A-B` with the protocol-line tag published by `@opentray/spec`; do not mix `latest` and protocol-line tags unless you are debugging package drift.
 
 ```ts
 import { createTray } from "opentray";
@@ -60,6 +83,8 @@ await createTray(options, {
   appName: "Build",
 });
 ```
+
+If you already own the host process, `createTray()` remains the lower-level tray API.
 
 ## Packaging
 

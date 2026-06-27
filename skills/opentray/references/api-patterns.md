@@ -4,6 +4,7 @@ Use this reference when the user asks how to write code with OpenTray.
 
 ## Main Public Pieces
 
+- `runTrayApp(main, options?)`: first-app helper that owns the visible-runtime host loop and exposes a self-contained `createTray` callback for quick starts.
 - `createTray(options, runtimeOptions?)`: top-level entrypoint that resolves a runtime connection (default visible runtime binding, or an explicit runtime mode) and creates one tray.
 - `TrayHandle.setId` does not exist; the tray `id` is set at creation time and is immutable.
 - `TrayHandle.setMenu()`, `setTooltip()`, `setIcon()`: mutate one tray contribution. There is no `setTitle()` — visible text is part of icon projection.
@@ -14,6 +15,10 @@ Use this reference when the user asks how to write code with OpenTray.
 - `createClient(...)`: lower-level transport API for custom connections and protocol-only work.
 
 OpenTray no longer exposes `createSpace`, `resolveDefaultSpace`, or `createApp`. Application identity (`appId` / `appName`) is passed through `runtimeOptions`, not a separate creation step.
+
+Use `runTrayApp()` when the user wants the smallest first app and does not want to reason about host-thread choreography yet.
+
+The `runTrayApp()` callback executes in the app worker. Keep it self-contained; import official extensions such as `@opentray/ext-webview` inside the callback when the first app needs them.
 
 ## Typical Shape
 
