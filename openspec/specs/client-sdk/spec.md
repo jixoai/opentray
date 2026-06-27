@@ -218,48 +218,33 @@ The published `opentray` CLI SHALL expose daemon lifecycle and health commands o
 - **THEN** the CLI rejects the command as unsupported/help
 - **AND** official guidance points visual acceptance to the OpenTray skill or source-tree examples instead of a package-owned smoke subcommand.
 
-### Requirement: Top-level SDK SHALL expose broker-backed convenience entrypoints
+### Requirement: Top-level SDK SHALL expose tray-first convenience entrypoints
 
-The public `opentray` package entrypoint SHALL export top-level convenience APIs for the mainline broker-backed path. A developer importing from `opentray` SHALL be able to call `createSpace` as the primary entrypoint without first constructing a transport or manually creating an `OpenTrayClient`.
+The public `opentray` package entrypoint SHALL export top-level convenience APIs for the tray-first path. A developer importing from `opentray` SHALL be able to call `createTray` as the primary entrypoint without first constructing a transport or manually creating an `OpenTrayClient`.
 
-The package MAY continue exporting lower-level atoms such as `createClient` and `createSpaceHandle`, but those SHALL NOT be the only documented entrypoints for ordinary SDK consumers.
+The package MAY continue exporting lower-level atoms such as `createClient` and `createTrayHandle`, but those SHALL NOT be the only documented entrypoints for ordinary SDK consumers.
 
-#### Scenario: Top-level createSpace is importable from opentray
+#### Scenario: Top-level createTray is importable from opentray
 
 - **GIVEN** a developer installs `opentray` from npm
 - **WHEN** they evaluate the public exports of `opentray`
-- **THEN** `createSpace` is exported from the top-level package entrypoint
+- **THEN** `createTray` is exported from the top-level package entrypoint
 - **AND** calling it uses the same-version local broker connection law
-- **AND** the returned handle is a `SpaceHandle`.
+- **AND** the returned handle is a `TrayHandle`.
 
-#### Scenario: Deprecated surface alias remains a wrapper only
+#### Scenario: Top-level createTray uses local broker by default
 
-- **GIVEN** alpha compatibility keeps `createSurface`
-- **WHEN** a developer imports the alias from `opentray`
-- **THEN** it delegates to the same implementation path as `createSpace`
-- **AND** the package docs mark it as deprecated.
-
-### Requirement: Top-level createTray SHALL resolve the default space through broker law
-
-The public `opentray` package entrypoint SHALL expose a top-level `createTray` convenience API. When the caller does not provide an explicit target space, the API SHALL resolve the default space through the broker protocol rather than inventing a client-local fake default.
-
-The package MAY also expose an explicit `resolveDefaultSpace` helper so the default-space law is observable and testable from the public SDK surface.
-
-#### Scenario: Top-level createTray uses default space resolution
-
-- **GIVEN** a same-version daemon is available
-- **AND** the broker has a default space
-- **WHEN** a developer calls top-level `createTray` without an explicit space
-- **THEN** the SDK sends the broker request that resolves the default space
-- **AND** it creates the tray under the resolved space
+- **GIVEN** a same-version broker is available or can be started
+- **WHEN** a developer calls top-level `createTray` without diagnostic runtime options
+- **THEN** the SDK uses the local broker transport
 - **AND** it does not require the caller to manually create an `OpenTrayClient`.
 
-#### Scenario: Explicit space bypasses default-space lookup
+#### Scenario: Explicit runtime mode bypasses default local broker selection
 
-- **GIVEN** a developer already holds a `SpaceRef`
-- **WHEN** they call top-level `createTray` with that explicit space
-- **THEN** the SDK creates the tray under that space directly
-- **AND** it does not send an unnecessary default-space resolution request.
+- **GIVEN** a developer passes diagnostic runtime options
+- **WHEN** they call top-level `createTray`
+- **THEN** the SDK uses the requested diagnostic runtime mode
+- **AND** it does not invent a second default transport.
 
 ### Requirement: Top-level createTray SHALL forward tray icon sources unchanged
 
@@ -629,4 +614,3 @@ The public SDK SHALL treat transport and lifecycle as host binding concerns. It 
 - **WHEN** they create a tray
 - **THEN** the returned handle is bound to the current runtime host context
 - **AND** the caller does not need to create or manage a public daemon object first.
-

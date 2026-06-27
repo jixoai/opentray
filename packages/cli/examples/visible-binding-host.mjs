@@ -39,7 +39,7 @@ const workerExitAfterMs = Number(
 );
 
 await runVisibleRuntimeHost({
-  packageVersion: "0.9.0-example",
+  packageVersion: "0.10.0-example",
   appId: "com.opentray.visible-binding-example",
   appName: "OpenTray Visible Binding Example",
   autoExitAfterMs: workerExitAfterMs === 0 ? 0 : workerExitAfterMs + 1000,

@@ -63,13 +63,13 @@ The SDK MAY expose this headless binding route only as an explicit diagnostic or
 - **THEN** no visible tray claim is made by that headless proof
 - **AND** visual completion still requires a native event-loop-backed runtime host.
 
-### Requirement: Visible Node runtime binding SHALL own host-main-loop integration before becoming the default
+### Requirement: Visible Node runtime binding SHALL remain an explicit diagnostic path
 
-The visible Node runtime binding SHALL NOT create native tray state by hiding an OpenTray-owned broker process behind the binding API. It SHALL expose an explicit `runVisibleRuntimeHost()` host-main-loop integration contract that the owning application starts on the host main thread before visible tray creation. Application JS that calls `createTray()` SHALL run from a worker or another app-owned execution source that connects to that host through the binding.
+The visible Node runtime binding SHALL NOT create native tray state by hiding an OpenTray-owned broker process behind the binding API. It SHALL expose an explicit `runVisibleRuntimeHost()` host-main-loop integration contract for diagnostics and smoke tests. Application code that calls `createTray()` in the default quickstart SHALL use the tray-first local broker path directly and SHALL NOT need to split its business logic into a worker to satisfy the public API.
 
 On macOS, the visible tray backend SHALL respect AppKit's main-thread event-loop law: the native event loop and tray creation must run on the application main thread. A background Rust thread or detached helper spawned by the binding SHALL NOT be treated as equivalent visible-binding ownership on macOS. On Windows and other supported platforms, any background event-loop thread used by the binding SHALL still be app-owned, session-bound, and closed when the caller authority is lost.
 
-The default SDK `createTray()` transport SHALL use the visible binding on supported tray-icon platforms after a human-visible smoke path proves this host-main-loop contract. Headless binding tests, package artifact checks, and JSON frame smokes SHALL NOT satisfy this requirement. Unsupported platforms SHALL fail explicitly instead of pretending a visible tray exists.
+The default SDK `createTray()` transport SHALL use the local broker on supported tray-icon platforms unless the caller explicitly opts into a diagnostic runtime mode. Headless binding tests, package artifact checks, and JSON frame smokes SHALL NOT replace the visible smoke path where visible ownership must be proven. Unsupported platforms SHALL fail explicitly instead of pretending a visible tray exists.
 
 #### Scenario: macOS binding requires host-main-loop ownership
 
@@ -82,7 +82,7 @@ The default SDK `createTray()` transport SHALL use the visible binding on suppor
 
 - **GIVEN** the visible runtime host has been started through `runVisibleRuntimeHost()`
 - **AND** a supported-platform visible host-main-loop smoke has passed
-- **WHEN** application code calls `createTray()` without diagnostic runtime options
+- **WHEN** application code calls `createTray()` with diagnostic visible-binding runtime options
 - **THEN** the SDK uses the visible runtime binding transport
 - **AND** menu and tray events are routed back only to the live caller session.
 
@@ -164,4 +164,3 @@ The runtime host's `runtime-host-health` response SHALL include the stable `app.
 - **WHEN** a health request is sent over the local protocol
 - **THEN** the `runtime-host-health` response includes `appId` and `appName`
 - **AND** `sessionCount` is at most 1.
-

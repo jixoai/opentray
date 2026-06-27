@@ -16,7 +16,7 @@ parentPort.once("message", async (message) => {
   await new Promise((resolve) => setTimeout(resolve, startDelayMs));
 
   const connection = await createRuntimeBindingTransport({
-    packageVersion: "0.9.0-example",
+    packageVersion: "0.10.0-example",
     appId: "com.opentray.visible-binding-example",
     appName: "OpenTray Visible Binding Example",
   });

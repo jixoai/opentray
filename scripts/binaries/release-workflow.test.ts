@@ -33,6 +33,7 @@ describe("Feature: release native binary CI law", () => {
     expect(nativeJob).toContain("matrix: ${{ fromJson(needs.plan-native.outputs.matrix) }}");
     expect(nativeJob).toContain("if: matrix.buildsLynxRuntime == true");
     expect(nativeJob).toContain("bun run scripts/binaries/build-native-job.ts");
+    expect(nativeJob).toContain("name: ${{ matrix.artifactName }}");
     expect(nativeJob).not.toContain("packages+=(-p opentray-ext-lynx)");
     expect(releaseJob).toContain("Download native artifacts");
     expect(releaseJob).toContain("Stage native artifacts into npm packages");

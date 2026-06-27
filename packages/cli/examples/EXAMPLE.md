@@ -65,7 +65,7 @@ pnpm --filter opentray example:first-app
 
 Expected checks:
 
-1. A tray appears without the user manually running `runVisibleRuntimeHost()`.
+1. A tray appears without the user having to manage a worker or start a host loop first.
 2. The example stays under the quickstart path: one callback, one tray, one menu action.
 3. The tray closes cleanly when `Quit` is clicked.
 
@@ -199,7 +199,7 @@ pnpm --filter opentray example:matrix
 pnpm --filter opentray example:matrix -- --row webview-control
 ```
 
-The matrix does not depend on shell wildcard expansion. It stages the generated `runtime/opentray_runtime.node` artifact before the default-runtime `first-app` and `visible-binding` rows, labels WebView/Badge/Lynx rows as contributor-only `extension-debug-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts.
+The matrix does not depend on shell wildcard expansion. It stages the generated `runtime/opentray_runtime.node` artifact before the explicit diagnostic `visible-binding` row, warms the broker binary before `first-app`, labels WebView/Badge/Lynx rows as contributor-only `extension-debug-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts.
 
 These are useful for quick regression passes:
 

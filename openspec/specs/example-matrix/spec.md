@@ -59,12 +59,11 @@ The matrix SHALL NOT introduce extension-specific parsing, branching, or runtime
 
 ### Requirement: Example documentation SHALL distinguish default runtime and debug extension runtime
 
-The example documentation SHALL distinguish the default visible Node runtime binding from contributor debug-runtime extension smokes. The default runtime example SHALL prove app-owned host-main-loop tray creation. Extension examples that depend on dynamic native extension loading through the source-tree debug runtime SHALL be documented as extension/debug-runtime rows until the visible binding owns native extension loading.
+The example documentation SHALL distinguish the default tray-first local broker runtime from contributor debug-runtime extension smokes. The first-app example SHALL prove that the quickstart path creates a tray directly without a worker or manual host-loop bootstrap. Extension examples that depend on dynamic native extension loading through the source-tree debug runtime SHALL be documented as extension/debug-runtime rows and explicitly called out as diagnostic rows.
 
 #### Scenario: Documentation names the runtime owner
 
 - **GIVEN** a developer reads the example documentation
-- **WHEN** they choose between visible-binding and extension rows
+- **WHEN** they choose between first-app, visible-binding, and extension rows
 - **THEN** they can tell which command proves the default app runtime
 - **AND** which commands prove source-tree extension behavior through the debug runtime.
-

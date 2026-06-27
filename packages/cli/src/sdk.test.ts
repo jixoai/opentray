@@ -1,30 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createTray } from "./sdk";
+import { connectLocalBroker, type LocalBrokerClient } from "./local-broker";
 import type { OpenTrayRuntimeBinding } from "./native-runtime";
 
+vi.mock("./local-broker", () => ({
+  connectLocalBroker: vi.fn(),
+}));
+
 describe("Feature: SDK runtime selection", () => {
-  it("Scenario: Given no runtime override When createTray runs Then the default transport uses the visible binding", async () => {
+  it("Scenario: Given no runtime override When createTray runs Then the default transport uses the local broker", async () => {
     const frames: unknown[] = [];
-    const binding = createRecordingBinding(frames, "visible");
+    const connection = createRecordingConnection(frames);
+    vi.mocked(connectLocalBroker).mockResolvedValueOnce(connection);
 
     const tray = await createTray(
       {
         id: "status",
       },
       {
-        binding,
-        packageVersion: "0.9.0",
+        packageVersion: "0.10.0",
       }
     );
 
+    expect(connectLocalBroker).toHaveBeenCalledWith({
+      packageVersion: "0.10.0",
+    });
     expect(tray.trayId).toBe("status");
     expect(frames).toEqual([
-      {
-        type: "init",
-        protocolVersion: 1,
-        clientVersion: "0.9.0",
-      },
       {
         type: "resolve-default-app",
         requestId: "opentray-1",
@@ -53,7 +56,7 @@ describe("Feature: SDK runtime selection", () => {
       {
         runtime: "headless-binding",
         binding,
-        packageVersion: "0.9.0",
+        packageVersion: "0.10.0",
         appId: "com.example.build",
         appName: "Build",
       }
@@ -64,7 +67,7 @@ describe("Feature: SDK runtime selection", () => {
       {
         type: "init",
         protocolVersion: 1,
-        clientVersion: "0.9.0",
+        clientVersion: "0.10.0",
       },
       {
         type: "resolve-default-app",
@@ -107,14 +110,14 @@ const createRecordingBinding = (
       frames.push(frame);
       switch (frame.type) {
         case "init":
-          expect(packageVersion).toBe("0.9.0");
+          expect(packageVersion).toBe("0.10.0");
           expect(appId).toBe("com.example.build");
           expect(appName).toBe("Build");
           return [
             JSON.stringify({
               type: "ready",
               protocolVersion: 1,
-              brokerVersion: "0.9.0",
+              brokerVersion: "0.10.0",
               sessionId: "session-1",
             }),
           ];
@@ -165,7 +168,7 @@ const createRecordingRuntime = (frames: unknown[]) => ({
           JSON.stringify({
             type: "ready",
             protocolVersion: 1,
-            brokerVersion: "0.9.0",
+            brokerVersion: "0.10.0",
             sessionId: "session-1",
           }),
         ];
@@ -199,6 +202,44 @@ const createRecordingRuntime = (frames: unknown[]) => ({
         ];
     }
   },
+  onEvent: () => () => {},
   pollEvents: () => [],
   close: () => [],
+});
+
+const createRecordingConnection = (frames: unknown[]): LocalBrokerClient => ({
+  endpoint: "unix:///tmp/opentray.sock",
+  callerLabel: "com.example.build",
+  sessionId: "session-1",
+  request(frame) {
+    const serialized = JSON.stringify(frame);
+    const parsed = JSON.parse(serialized) as { type: string; requestId: string };
+    frames.push(parsed);
+    switch (parsed.type) {
+      case "resolve-default-app":
+        return Promise.resolve({
+          type: "default-app",
+          requestId: parsed.requestId,
+          app: {
+            appId: "app-default",
+          },
+        });
+      case "create-tray":
+        return Promise.resolve({
+          type: "tray-created",
+          requestId: parsed.requestId,
+          appId: "app-default",
+          trayId: "status",
+        });
+      default:
+        return Promise.resolve({
+          type: "error",
+          requestId: parsed.requestId,
+          code: "unsupported",
+          message: parsed.type,
+        });
+    }
+  },
+  onEvent: () => () => {},
+  close: async () => {},
 });

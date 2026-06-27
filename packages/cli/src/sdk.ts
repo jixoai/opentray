@@ -47,7 +47,7 @@ export const createTray = async (
       ? {}
       : { appName: runtimeOptions.appName }),
   };
-  const runtime = runtimeOptions.runtime ?? "visible-binding";
+  const runtime = runtimeOptions.runtime ?? "local-broker";
   const connection =
     runtime === "local-broker"
       ? await connectLocalBroker(runtimeOptions)

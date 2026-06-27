@@ -18,6 +18,7 @@ import {
 interface StagePlanEntry {
   readonly target: string;
   readonly artifactKinds: readonly string[];
+  readonly artifactName?: string;
 }
 
 const { values } = parseArgs({
@@ -59,7 +60,7 @@ for (const entry of stagePlan) {
   );
   const artifactDirectory = join(
     values["artifact-root"].trim(),
-    `native-${targetName}`
+    entry.artifactName ?? `native-${targetName}`
   );
 
   for (const rawKind of entry.artifactKinds) {
@@ -85,7 +86,7 @@ function parseStagePlan(value: string): StagePlanEntry[] {
   if (!Array.isArray(parsed)) {
     throw new Error("--stage-plan-json must be an array");
   }
-  return parsed.map((entry) => {
+  return parsed.map((entry: unknown) => {
     if (
       typeof entry !== "object" ||
       entry === null ||
@@ -93,15 +94,20 @@ function parseStagePlan(value: string): StagePlanEntry[] {
       !("artifactKinds" in entry) ||
       typeof entry.target !== "string" ||
       !Array.isArray(entry.artifactKinds) ||
-      entry.artifactKinds.some((kind) => typeof kind !== "string")
+      entry.artifactKinds.some((kind) => typeof kind !== "string") ||
+      ("artifactName" in entry &&
+        typeof entry.artifactName !== "string")
     ) {
       throw new Error(
-        "--stage-plan-json entries must contain string target and artifactKinds[]"
+        "--stage-plan-json entries must contain string target, artifactKinds[], and optional artifactName"
       );
     }
     return {
       target: entry.target,
       artifactKinds: entry.artifactKinds,
+      ...(typeof entry.artifactName === "string"
+        ? { artifactName: entry.artifactName }
+        : {}),
     };
   });
 }

@@ -56,6 +56,7 @@ export interface NativeBuildExecution {
   readonly components: readonly NativeBuildComponent[];
   readonly cargoPackages: readonly string[];
   readonly artifactKinds: readonly NativeArtifactKind[];
+  readonly artifactName: string;
   readonly runner: string;
   readonly previewJobTimeoutMinutes: number;
   readonly releaseJobTimeoutMinutes: number;
@@ -67,12 +68,14 @@ export interface NativeBuildManifest {
   readonly target: NativeBuildTargetName;
   readonly components: readonly NativeBuildComponent[];
   readonly artifactKinds: readonly NativeArtifactKind[];
+  readonly artifactName: string;
   readonly files: readonly string[];
 }
 
 export interface ReleaseStageEntry {
   readonly target: NativeBuildTargetName;
   readonly artifactKinds: readonly NativeArtifactKind[];
+  readonly artifactName: string;
 }
 
 const nativeBuildTargets: Record<
@@ -323,6 +326,10 @@ export const materializeNativeBuildExecutions = (
       components: selectedComponents,
       cargoPackages: [...cargoPackages],
       artifactKinds: [...artifactKinds],
+      artifactName: nativeBuildExecutionArtifactName(
+        target,
+        selectedComponents
+      ),
       runner: targetConfig.runner,
       previewJobTimeoutMinutes: buildsLynxRuntime
         ? targetConfig.previewLynxRuntimeJobTimeoutMinutes
@@ -334,6 +341,42 @@ export const materializeNativeBuildExecutions = (
       buildsLynxRuntime,
     };
   });
+};
+
+export const materializeIndependentNativeBuildExecutions = (
+  components: readonly NativeBuildComponent[],
+  targets: readonly NativeBuildTargetName[]
+): NativeBuildExecution[] => {
+  const requestedComponents = new Set(components);
+  const orderedComponents = nativeBuildComponentOrder.filter((component) =>
+    requestedComponents.has(component)
+  );
+  const executions: NativeBuildExecution[] = [];
+
+  for (const component of orderedComponents) {
+    const supportedTargets = targets.filter((target) =>
+      resolveNativeBuildComponent(component).allowedTargets.includes(target)
+    );
+    if (supportedTargets.length === 0) {
+      throw new Error(
+        `no native build targets support component ${component}`
+      );
+    }
+    for (const target of supportedTargets) {
+      const [execution] = materializeNativeBuildExecutions(
+        [component],
+        [target]
+      );
+      if (execution === undefined) {
+        throw new Error(
+          `failed to materialize native build component ${component} for target ${target}`
+        );
+      }
+      executions.push(execution);
+    }
+  }
+
+  return executions;
 };
 
 export const describeReleaseStagePlan = (
@@ -353,6 +396,7 @@ export const describeReleaseStagePlan = (
     return {
       target: execution.target,
       artifactKinds: execution.artifactKinds,
+      artifactName: execution.artifactName,
     };
   });
   return {
@@ -444,6 +488,7 @@ export const executeNativeBuildExecution = async (
     target: execution.target,
     components: execution.components,
     artifactKinds: execution.artifactKinds,
+    artifactName: execution.artifactName,
     files: copiedFiles,
   };
   await writeFile(
@@ -454,6 +499,11 @@ export const executeNativeBuildExecution = async (
   return manifest;
 };
 
+const nativeBuildExecutionArtifactName = (
+  target: NativeBuildTargetName,
+  components: readonly NativeBuildComponent[]
+): string => `native-${target}-${components.join("-")}`;
+
 export const parseNativeBuildTargetName = (
   value: string
 ): NativeBuildTargetName => {
@@ -461,6 +511,9 @@ export const parseNativeBuildTargetName = (
     return value;
   }
   const [packageOs, arch] = value.split("-");
+  if (packageOs === undefined || arch === undefined) {
+    throw new Error(`unsupported native build target: ${value}`);
+  }
   const normalizedArch = normalizeArch(arch);
   const combined = `${packageOs}-${normalizedArch}`;
   if (isNativeBuildTargetName(combined)) {

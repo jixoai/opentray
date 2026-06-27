@@ -13,10 +13,3 @@ export {
   createRuntimeBindingTransport,
   type CreateRuntimeBindingTransportOptions,
 } from "./node-host";
-export {
-  createTrayAppWorkerSource,
-  runTrayApp,
-  type RunTrayAppOptions,
-  type TrayAppContext,
-  type TrayAppMain,
-} from "./node-app";

@@ -123,6 +123,7 @@ Release planning is now package-truth-driven rather than platform-matrix-first:
 - preview and release share the same native build graph
 - the lowest-level native atoms are `daemon`, `webview`, `lynx`, and `lynx-runtime`
 - release reads pending changesets, infers which native atoms are actually part of this publish, and only builds those atoms on their supported targets
+- release and native verification emit independent jobs per native atom and target; a Darwin WebView or badge build must not share a job with Lynx native or the Lynx runtime sidecar
 - a WebView-only alpha or stable publish must not compile `opentray-ext-lynx` or build `LynxExplorer.app.zip`
 - a Lynx publish still includes both the darwin dylib and the darwin runtime zip, because those are separate atoms in the Lynx family rather than an accidental side effect of all macOS releases
 

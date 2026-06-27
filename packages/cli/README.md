@@ -27,22 +27,24 @@ Use `alpha-A-B` for alpha packages on the same protocol line. Replace `A-B` with
 
 ## Tray-First API
 
-For the first app, use `runTrayApp()` from `opentray/node` so the host/worker split stays out of the user's way:
+For the first app, call `createTray()` directly. The quickstart stays in one file and does not ask the user to wire a worker or a host loop first:
 
 ```ts
-import { runTrayApp } from "opentray/node";
+import { createTray } from "opentray";
 
-await runTrayApp(async ({ createTray }) => {
-  const tray = await createTray({
-    id: "com.example.first-app",
-    icon: { "text-only": "OT" },
-    menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
-  });
-  tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
-}, { autoExitAfterMs: 1500 });
+const tray = await createTray({
+  id: "com.example.first-app",
+  icon: { "text-only": "OT" },
+  menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
+}, {
+  appId: "com.example.first-app",
+  appName: "First App",
+});
+
+tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
 ```
 
-`createTray()` is still the direct tray API when the caller already owns the runtime process shape.
+`createTray()` remains the direct tray API when the caller already owns the runtime process shape.
 
 ```ts
 import { createTray } from "opentray";
@@ -79,9 +81,9 @@ OpenTray does not ask developers to create a public broker object. The applicati
 
 Node platform packages carry the host-loadable runtime artifact at `runtime/opentray_runtime.node`. `opentray/node` exposes `runVisibleRuntimeHost()`, `loadOpenTrayRuntimeBinding()`, and `resolveInstalledRuntimeBindingPath()` for Node-specific host-loop ownership, runtime diagnostics, and packaging checks.
 
-By default, `createTray()` routes through the visible Node runtime binding. The host main thread must run `runVisibleRuntimeHost()` while app logic runs in a worker or another app-owned execution source. This is a platform law, not a convenience wrapper: on macOS native tray creation must happen on the application main thread, and all native menu/tray events route back only to the live session that owns the tray.
+By default, `createTray()` routes through the local broker and starts it on first use when needed. `runVisibleRuntimeHost()` remains available from `opentray/node` as an explicit diagnostic path for the visible-binding smoke mode. That diagnostic path still follows the application main-thread law on macOS and the app-owned event-loop law on Windows.
 
-For protocol/session diagnostics, `createTray(options, { runtime: "headless-binding" })` routes through the Node binding without visible native state. Source-tree diagnostics may use `{ runtime: "local-broker" }`, but that transport is not the default package runtime.
+For protocol/session diagnostics, `createTray(options, { runtime: "headless-binding" })` routes through the Node binding without visible native state. Source-tree diagnostics may use `{ runtime: "visible-binding" }` or `{ runtime: "local-broker" }`, but those transports are not the default package runtime.
 
 Runtime options may also carry app identity facts:
 
@@ -128,4 +130,4 @@ pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The example matrix stages the generated Node runtime artifact before `first-app` and `visible-binding`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app and visible-binding examples exercise the default package runtime on macOS and Windows. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.
+The example matrix stages the generated Node runtime artifact before `visible-binding`, warms the broker binary before `first-app`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app example exercises the default package runtime. The visible-binding example is an explicit diagnostic row. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

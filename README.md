@@ -11,19 +11,21 @@ The current platform model is tray-first:
 
 OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Application code calls `createTray()` directly and owns foreground/background lifetime itself.
 
-For the first app, use `runTrayApp()` from `opentray/node` so users do not have to think about the visible host loop yet:
+For the first app, call `createTray()` directly. The default runtime starts the local broker automatically:
 
 ```ts
-import { runTrayApp } from "opentray/node";
+import { createTray } from "opentray";
 
-await runTrayApp(async ({ createTray }) => {
-  const tray = await createTray({
-    id: "com.example.first-app",
-    icon: { "text-only": "OT" },
-    menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
-  });
-  tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
-}, { autoExitAfterMs: 1500 });
+const tray = await createTray({
+  id: "com.example.first-app",
+  icon: { "text-only": "OT" },
+  menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
+}, {
+  appId: "com.example.first-app",
+  appName: "First App",
+});
+
+tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
 ```
 
 ## Workspace
@@ -116,13 +118,12 @@ Platform runtime packages such as `@opentray/darwin-arm64` carry
 truth; it does not own tray lifecycle, session authority, backend selection, or
 extension dispatch.
 
-The default Node `createTray()` transport now targets the in-process visible
-runtime binding on supported tray-icon platforms. The native host loop is
-explicit: call `runVisibleRuntimeHost()` from `opentray/node` on the host main
-thread after starting the app worker that will call `createTray()`. On macOS
-this preserves AppKit's main-thread law; on Windows it keeps the event loop
-app-owned and session-bound. Linux remains unsupported for visible binding until
-the KSNI backend grows an honest visible runtime contract.
+The default `createTray()` transport targets the local broker and starts it on
+first use when needed. `runVisibleRuntimeHost()` remains available from
+`opentray/node` as an explicit diagnostic path for the visible-binding smoke
+mode. That diagnostic path still carries the host-main-thread law on macOS and
+the app-owned event-loop law on Windows; ordinary app code does not need to
+split its business logic into a worker to use the default tray API.
 
 The explicit headless runtime path remains available for protocol/session
 diagnostics:
@@ -131,8 +132,9 @@ diagnostics:
 await createTray(options, { runtime: "headless-binding" });
 ```
 
-Source-tree debug examples may still opt into `{ runtime: "local-broker" }`.
-That path is contributor diagnostics, not the default package runtime.
+Source-tree debug examples may still opt into `{ runtime: "visible-binding" }`
+or `{ runtime: "headless-binding" }`. Those paths are contributor diagnostics,
+not the default package runtime.
 
 ## Development Checks
 

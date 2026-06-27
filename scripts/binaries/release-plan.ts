@@ -9,7 +9,7 @@ import {
 import {
   describeReleaseStagePlan,
   inferNativeBuildComponentsFromReleasePackages,
-  materializeNativeBuildExecutions,
+  materializeIndependentNativeBuildExecutions,
   resolveReleaseTargetsForComponents,
   type NativeBuildComponent,
   type NativeBuildExecution,
@@ -24,6 +24,7 @@ export interface ReleaseNativePlan {
   readonly stageEntries: readonly {
     readonly target: string;
     readonly artifactKinds: readonly string[];
+    readonly artifactName: string;
   }[];
   readonly validatePackageDirs: readonly string[];
   readonly reason?: string;
@@ -38,6 +39,7 @@ export interface ReleaseNativeJob
   readonly components: readonly NativeBuildComponent[];
   readonly componentsCsv: string;
   readonly artifactKinds: readonly string[];
+  readonly artifactName: string;
 }
 
 export async function resolveReleaseNativePlan(root = process.cwd()): Promise<ReleaseNativePlan> {
@@ -79,7 +81,10 @@ export async function resolveReleaseNativePlan(root = process.cwd()): Promise<Re
   }
 
   const targets = resolveReleaseTargetsForComponents(components);
-  const executions = materializeNativeBuildExecutions(components, targets);
+  const executions = materializeIndependentNativeBuildExecutions(
+    components,
+    targets
+  );
   const stagePlan = describeReleaseStagePlan(executions);
 
   return {
@@ -96,6 +101,7 @@ export async function resolveReleaseNativePlan(root = process.cwd()): Promise<Re
       components: execution.components,
       componentsCsv: execution.components.join(","),
       artifactKinds: execution.artifactKinds,
+      artifactName: execution.artifactName,
     })),
     stageEntries: stagePlan.stageEntries,
     validatePackageDirs: stagePlan.validatePackageDirs,

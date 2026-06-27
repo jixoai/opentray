@@ -47,7 +47,7 @@ describe("Feature: opentray example matrix planning", () => {
     }
   });
 
-  it("Scenario: Given the first app row on macOS When planned Then it stages the default runtime artifact before execution", () => {
+  it("Scenario: Given the first app row on macOS When planned Then it warms the broker binary before execution", () => {
     const workspaceRoot = "/repo";
     const row = rowById(
       createExampleMatrix({
@@ -61,19 +61,7 @@ describe("Feature: opentray example matrix planning", () => {
     expect(row.skipped).toBe(false);
     expect(row.coverage).toBe("default-runtime");
     expect(row.preflight).toEqual([
-      { command: "cargo", args: ["build", "-p", "opentray-runtime-node"] },
-      { command: "pnpm", args: ["--filter", "opentray", "build"] },
-      {
-        command: "bun",
-        args: [
-          "run",
-          "scripts/binaries/stage-local.ts",
-          "--kind",
-          "runtime",
-          "--source",
-          runtimeBindingSourcePath("darwin", "arm64", workspaceRoot),
-        ],
-      },
+      { command: "cargo", args: ["build", "-p", "opentray-bin"] },
     ]);
     expect(row.command.args).toEqual([
       "--filter",

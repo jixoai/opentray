@@ -45,6 +45,9 @@ describe("Feature: selective native release planner", () => {
     expect(plan.jobs.every((job) => job.componentsCsv === "webview")).toBe(
       true
     );
+    expect(plan.jobs.map((job) => job.artifactName)).toContain(
+      "native-darwin-arm64-webview"
+    );
     const artifactKinds = plan.stageEntries.flatMap(
       (entry) => entry.artifactKinds
     );
@@ -103,11 +106,22 @@ describe("Feature: selective native release planner", () => {
 
     expect(plan.enabled).toBe(true);
     expect(plan.components).toEqual(["lynx", "lynx-runtime"]);
-    expect(plan.jobs.map((job) => job.target)).toEqual([
-      "darwin-arm64",
-      "darwin-x64",
+    expect(plan.jobs.map((job) => job.artifactName)).toEqual([
+      "native-darwin-arm64-lynx",
+      "native-darwin-x64-lynx",
+      "native-darwin-arm64-lynx-runtime",
+      "native-darwin-x64-lynx-runtime",
     ]);
-    expect(plan.jobs.every((job) => job.buildsLynxRuntime)).toBe(true);
+    expect(
+      plan.jobs
+        .filter((job) => job.componentsCsv === "lynx")
+        .every((job) => job.buildsLynxRuntime)
+    ).toBe(false);
+    expect(
+      plan.jobs
+        .filter((job) => job.componentsCsv === "lynx-runtime")
+        .every((job) => job.buildsLynxRuntime)
+    ).toBe(true);
     expect(plan.validatePackageDirs).toEqual([
       "packages/ext-lynx-darwin-arm64",
       "packages/ext-lynx-darwin-x64",
@@ -127,11 +141,11 @@ describe("Feature: selective native release planner", () => {
 
     expect(plan.enabled).toBe(true);
     expect(plan.components).toEqual(["badge"]);
-    expect(plan.jobs.map((job) => job.target)).toEqual([
-      "darwin-arm64",
-      "darwin-x64",
-      "windows-arm64",
-      "windows-x64",
+    expect(plan.jobs.map((job) => job.artifactName)).toEqual([
+      "native-darwin-arm64-badge",
+      "native-darwin-x64-badge",
+      "native-windows-arm64-badge",
+      "native-windows-x64-badge",
     ]);
     expect(plan.validatePackageDirs).toEqual([
       "packages/ext-badge-darwin-arm64",
@@ -139,6 +153,43 @@ describe("Feature: selective native release planner", () => {
       "packages/ext-badge-windows-arm64",
       "packages/ext-badge-windows-x64",
     ]);
+  });
+
+  test("Scenario: Given line-wide native changesets When the planner runs Then sibling extensions compile in separate jobs", async () => {
+    const root = await createTempChangeset(
+      "line.md",
+      `---
+"opentray": minor
+"@opentray/ext-webview": minor
+"@opentray/ext-badge": minor
+"@opentray/ext-lynx": minor
+---
+`
+    );
+
+    const plan = await resolveReleaseNativePlan(root);
+
+    expect(plan.enabled).toBe(true);
+    expect(plan.components).toEqual([
+      "runtime",
+      "webview",
+      "badge",
+      "lynx",
+      "lynx-runtime",
+    ]);
+    expect(plan.jobs.every((job) => job.components.length === 1)).toBe(true);
+    expect(
+      plan.jobs.some(
+        (job) =>
+          job.components.includes("webview") && job.components.includes("lynx")
+      )
+    ).toBe(false);
+    expect(new Set(plan.jobs.map((job) => job.artifactName)).size).toBe(
+      plan.jobs.length
+    );
+    expect(
+      plan.stageEntries.every((entry) => entry.artifactName.startsWith("native-"))
+    ).toBe(true);
   });
 });
 

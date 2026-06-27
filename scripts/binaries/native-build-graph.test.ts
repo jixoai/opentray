@@ -4,6 +4,7 @@ import {
   describeReleaseStagePlan,
   inferNativeBuildComponentsFromReleasePackages,
   lynxRuntimeArtifactName,
+  materializeIndependentNativeBuildExecutions,
   materializeNativeBuildExecutions,
   resolveReleaseTargetsForComponents,
 } from "./native-build-graph";
@@ -27,7 +28,7 @@ describe("Feature: shared native build graph", () => {
     ).toEqual(["badge"]);
   });
 
-  test("Scenario: Given WebView and runtime atoms When executions are materialized Then cargo packages stay independent", () => {
+  test("Scenario: Given WebView and runtime atoms When a grouped execution is materialized Then preview families can still build one smoke closure", () => {
     const targets = resolveReleaseTargetsForComponents(["runtime", "webview"]);
     const [darwinArm64] = materializeNativeBuildExecutions(
       ["runtime", "webview"],
@@ -45,9 +46,50 @@ describe("Feature: shared native build graph", () => {
       "opentray-runtime-node",
       "opentray-ext-webview",
     ]);
+    expect(darwinArm64.artifactName).toBe(
+      "native-darwin-arm64-runtime-webview"
+    );
     expect(darwinArm64.buildsLynxRuntime).toBe(false);
     expect(linuxX64?.components).toEqual(["runtime"]);
     expect(linuxX64?.cargoPackages).toEqual(["opentray-runtime-node"]);
+  });
+
+  test("Scenario: Given multiple release atoms When independent executions are materialized Then extension builds are sharded per atom", () => {
+    const targets = resolveReleaseTargetsForComponents([
+      "runtime",
+      "webview",
+      "badge",
+      "lynx",
+      "lynx-runtime",
+    ]);
+    const executions = materializeIndependentNativeBuildExecutions(
+      ["runtime", "webview", "badge", "lynx", "lynx-runtime"],
+      targets
+    );
+
+    expect(executions.every((execution) => execution.components.length === 1))
+      .toBe(true);
+    expect(
+      executions.find(
+        (execution) =>
+          execution.target === "darwin-arm64" &&
+          execution.components.includes("webview")
+      )?.artifactName
+    ).toBe("native-darwin-arm64-webview");
+    expect(
+      executions.find(
+        (execution) =>
+          execution.target === "darwin-arm64" &&
+          execution.components.includes("lynx")
+      )?.buildsLynxRuntime
+    ).toBe(false);
+    expect(
+      executions.find(
+        (execution) =>
+          execution.target === "darwin-arm64" &&
+          execution.components.includes("lynx-runtime")
+      )?.buildsLynxRuntime
+    ).toBe(true);
   });
 
   test("Scenario: Given WebView-only executions When stage plan is derived Then unrelated Lynx package dirs stay absent", () => {
@@ -61,6 +103,7 @@ describe("Feature: shared native build graph", () => {
       {
         target: "darwin-arm64",
         artifactKinds: ["webview"],
+        artifactName: "native-darwin-arm64-webview",
       },
     ]);
     expect(plan.validatePackageDirs).toEqual([
@@ -79,10 +122,12 @@ describe("Feature: shared native build graph", () => {
       {
         target: "darwin-arm64",
         artifactKinds: ["badge"],
+        artifactName: "native-darwin-arm64-badge",
       },
       {
         target: "windows-x64",
         artifactKinds: ["badge"],
+        artifactName: "native-windows-x64-badge",
       },
     ]);
     expect(plan.validatePackageDirs).toEqual([
