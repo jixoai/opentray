@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenTray Example Matrix Self Review</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 32px;
+        background: Canvas;
+        color: CanvasText;
+      }
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+      }
+      section {
+        margin-block: 28px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+        padding: 10px 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: color-mix(in srgb, CanvasText 8%, transparent);
+      }
+      code {
+        font-family:
+          ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      .pass {
+        color: #167344;
+        font-weight: 700;
+      }
+      .question {
+        color: #8a5a00;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OpenTray Example Matrix Self Review</h1>
+      <p>
+        Change: <code>align-ext-examples-v0-9-matrix</code>. Iteration 1.
+        Review result: implementation matches the intent; archive is deferred
+        until operator acceptance.
+      </p>
+
+      <section>
+        <h2>Proof Matrix</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Row</th>
+              <th>Coverage law</th>
+              <th>Result</th>
+              <th>What it proves</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>basic</code></td>
+              <td>protocol</td>
+              <td class="pass">passed</td>
+              <td>Tray-first protocol frames still use app/tray facts.</td>
+            </tr>
+            <tr>
+              <td><code>visible-binding</code></td>
+              <td>default-runtime</td>
+              <td class="pass">passed</td>
+              <td>Generated Node runtime binding is built, staged, and used.</td>
+            </tr>
+            <tr>
+              <td><code>webview-control</code></td>
+              <td>extension-debug-runtime</td>
+              <td class="pass">passed</td>
+              <td>WebView commands mount through a tray extension path.</td>
+            </tr>
+            <tr>
+              <td><code>debug-runtime-tray</code></td>
+              <td>extension-debug-runtime</td>
+              <td class="pass">passed</td>
+              <td>Primary tray action routes to the WebView extension.</td>
+            </tr>
+            <tr>
+              <td><code>tray-panel</code></td>
+              <td>extension-debug-runtime</td>
+              <td class="pass">passed</td>
+              <td>Tray bounds projection stays a projection, not ontology.</td>
+            </tr>
+            <tr>
+              <td><code>placement</code></td>
+              <td>extension-debug-runtime</td>
+              <td class="pass">passed</td>
+              <td>Placement kit remains extension-owned.</td>
+            </tr>
+            <tr>
+              <td><code>media-query</code></td>
+              <td>extension-debug-runtime</td>
+              <td class="pass">passed</td>
+              <td>Native bounds media-query projection remains WebView-owned.</td>
+            </tr>
+            <tr>
+              <td><code>badge</code></td>
+              <td>extension-debug-runtime</td>
+              <td class="pass">passed</td>
+              <td>Badge debug panel projects badge extension state through WebView IPC.</td>
+            </tr>
+            <tr>
+              <td><code>lynx</code></td>
+              <td>extension-debug-runtime</td>
+              <td class="pass">passed</td>
+              <td>Lynx dylib is rebuilt/staged; carrier zip remains explicit artifact evidence.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Command Evidence</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>pnpm --filter opentray typecheck</code></td>
+              <td class="pass">passed</td>
+            </tr>
+            <tr>
+              <td><code>pnpm --filter opentray test</code></td>
+              <td class="pass">passed, 11 files, 63 tests</td>
+            </tr>
+            <tr>
+              <td><code>pnpm --filter opentray example:matrix</code></td>
+              <td class="pass">passed, 9 rows</td>
+            </tr>
+            <tr>
+              <td><code>pnpm --filter @opentray/ext-webview test</code></td>
+              <td class="pass">passed</td>
+            </tr>
+            <tr>
+              <td><code>pnpm --filter @opentray/ext-badge test</code></td>
+              <td class="pass">passed</td>
+            </tr>
+            <tr>
+              <td><code>pnpm --filter @opentray/ext-lynx test</code></td>
+              <td class="pass">passed</td>
+            </tr>
+            <tr>
+              <td><code>cargo test -p opentray-ext-webview</code></td>
+              <td class="pass">passed</td>
+            </tr>
+            <tr>
+              <td><code>cargo test -p opentray-ext-badge</code></td>
+              <td class="pass">passed</td>
+            </tr>
+            <tr>
+              <td><code>cargo test -p opentray-ext-lynx</code></td>
+              <td class="pass">passed</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Deviations And Questions</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Record</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Deviation</td>
+              <td>
+                Literal <code>example:*</code> is not shell-safe in zsh; the
+                stable surface is <code>example:matrix</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>Deviation</td>
+              <td>
+                Local Lynx proof rebuilds and stages the dylib, but does not
+                rebuild <code>OpenTrayLynxRuntime.app.zip</code>.
+              </td>
+            </tr>
+            <tr>
+              <td class="question">Question</td>
+              <td>Should Lynx carrier rebuilds become a separate CI matrix family?</td>
+            </tr>
+            <tr>
+              <td class="question">Question</td>
+              <td>Should this OpenSpec change be archived immediately after operator review?</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

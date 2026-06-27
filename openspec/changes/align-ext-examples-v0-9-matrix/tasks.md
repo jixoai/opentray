@@ -27,14 +27,14 @@
 - [x] 4.2 Run the improved `opentray` example matrix command and ensure it passes on the current host.
 - [x] 4.3 Run focused extension facade and native crate gates for touched extension families.
 - [x] 4.4 Run `bun run openspec:vision -- validate align-ext-examples-v0-9-matrix`.
-- [ ] 4.5 Run `bun run openspec:vision -- commit-check align-ext-examples-v0-9-matrix --phase self-review` before writing final review evidence.
+- [x] 4.5 Run `bun run openspec:vision -- commit-check align-ext-examples-v0-9-matrix --phase self-review` before writing final review evidence.
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
-- [ ] 5.2 Generate separate `review/self-review.html` as the structured evidence presentation.
-- [ ] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
+- [x] 5.1 Generate `review/self-review.md` as the macro review thinking record comparing implementation against `plans/plan.md`.
+- [x] 5.2 Generate separate `review/self-review.html` as the structured evidence presentation.
+- [x] 5.3 If the review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before the next apply loop.
 - [ ] 5.4 If the review is entering a real loop, run `bun run openspec:vision -- review-state align-ext-examples-v0-9-matrix` to persist iteration / recurrence state.
 - [ ] 5.5 If review cannot exit normally, run `bun run openspec:vision -- handoff align-ext-examples-v0-9-matrix` and commit the handoff evidence before returning to user discussion.
 - [ ] 5.6 If review exits normally, run `openspec archive align-ext-examples-v0-9-matrix` and commit the archive result.
-- [ ] 5.7 Run `bun run openspec:vision -- check align-ext-examples-v0-9-matrix` and decide whether to exit or return to `research-plan` with a backed-up plan revision.
+- [x] 5.7 Run `bun run openspec:vision -- check align-ext-examples-v0-9-matrix` and decide whether to exit or return to `research-plan` with a backed-up plan revision.
