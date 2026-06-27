@@ -39,5 +39,8 @@
   "___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH": {
     "onlyUpdatePeerDependentsWhenOutOfRange": true
   },
-  "ignore": []
+  "ignore": [
+    "@opentray/packaging",
+    "@opentray/vite-plugin"
+  ]
 }
