@@ -1,10 +1,10 @@
 # Backend Adapters
 
-Use this reference when changing `SurfaceBackend`, `opentray-backend-tray-icon`, `opentray-backend-ksni`, `opentray-bin`, or native tray examples.
+Use this reference when changing the `AppBackend` trait, `opentray-backend-tray-icon`, `opentray-backend-ksni`, `opentray-bin`, or native tray examples.
 
 ## Adapter Law
 
-Backends are physical atoms behind the backend contract. They receive already-derived space projection values and report capabilities or typed unsupported errors. They do not own session policy, extension dispatch, or package selection.
+Backends are physical atoms behind the `AppBackend` contract. They receive already-derived app projection values and report capabilities or typed unsupported errors. They do not own session policy, extension dispatch, or package selection.
 
 ## Current Backend Split
 
@@ -14,7 +14,7 @@ Backends are physical atoms behind the backend contract. They receive already-de
 
 ## tray-icon Runtime Boundary
 
-- `TrayIconProjection` compiles a core space projection into tray-icon-ready assets, menu entries, and route tables.
+- `TrayIconProjection` compiles a core app projection into tray-icon-ready assets, menu entries, and route tables.
 - `TrayIconRuntime` applies compiled projections. This keeps GUI handles out of the backend contract.
 - `NativeTrayIconRuntime` owns native tray handles but does not create or run the OS event loop. The caller owns the event loop.
 - `UnboundTrayIconRuntime` is intentionally unsupported; it proves the default backend cannot silently create native GUI state.
@@ -23,7 +23,7 @@ Backends are physical atoms behind the backend contract. They receive already-de
 
 - If rect is unavailable, return `Ok(None)` or an unsupported error instead of inventing a fake rect.
 - If menu display is unavailable, expose capability absence and let WebView or callers choose a fallback.
-- Menu ids must preserve route context with stable ids such as `opentray:<space>:<tray>:<item>`.
+- Menu ids must preserve route context with stable ids such as `opentray:<app>:<tray>:<item>`.
 
 ## Verification
 

@@ -4,11 +4,15 @@ Use this reference when changing `crates/opentray-core`, `crates/opentray-spec`,
 
 ## Platform Laws
 
-- `Space` is the public broker-owned desktop aggregation boundary.
-- `Tray` is a client-owned contribution mounted onto exactly one space.
-- `Session` is the public lifecycle boundary. Internal lease names may remain only as compatibility/ABI details.
-- A space projection is the only shape sent to a backend adapter. Client declarations stay separate from physical state.
-- Kernel event routing uses `(session authority, spaceId, trayId, itemId)` authority, not menu item id alone.
+OpenTray is tray-first:
+
+- `App` is the caller-owned runtime identity and isolation boundary (`AppId`). It is supplied through `createTray(options, { appId, appName })`, not a separate `createApp` call.
+- `Tray` is one client-owned status atom owned by an app (`TrayId`). `TrayOptions` is `{ id, tooltip?, icon?, menu? }` — there is no top-level `title`; visible text is part of icon projection.
+- `Session` is the public lifecycle boundary (`SessionId`). Closing a session removes its trays.
+- An app projection is the only shape sent to a backend adapter. Client declarations stay separate from physical state.
+- Kernel event routing uses `(session authority, appId, trayId, itemId)` authority, not menu item id alone.
+
+Public SDK handles expose `getBounds / setMenu / setTooltip / setIcon / loadExtension / commandExtension / requestExtension / extend / destroy`. There is no `setTitle`. `Space` / `Surface` / `Lease` are vocabulary from an earlier surface model; some internal ABI names may still carry `surface` as a compatibility detail, but they are not public ontology.
 
 ## Forbidden Couplings
 

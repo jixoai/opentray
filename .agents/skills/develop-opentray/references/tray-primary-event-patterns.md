@@ -20,7 +20,7 @@ Use this chapter map when the user starts from tray behavior instead of window b
 
 It is not a new public event family. The owning client still receives the normal `menuClick` frame with the same `itemId`.
 
-`opentray-core` must stay generic: it preserves menu data and routes backend-originated `MenuClick` events by `(session authority, spaceId, trayId, itemId)`. It must not contain Windows/macOS/Linux gesture policy and must not know that the primary action opens WebView.
+`opentray-core` must stay generic: it preserves menu data and routes backend-originated `menuClick` events by `(session authority, appId, trayId, itemId)`. It must not contain Windows/macOS/Linux gesture policy and must not know that the primary action opens WebView.
 
 Native tray backends own platform gesture projection:
 
@@ -43,7 +43,7 @@ Start from the user-visible tray interaction:
 
 Effect: clicking the tray/status icon shows a normal native menu; the user chooses actions from it.
 
-Atoms composed: `Surface`, `Tray`, normal `MenuItem`, native tray backend, `menuClick`.
+Atoms composed: `App`, `Tray`, normal `MenuItem`, native tray backend, `menuClick`.
 
 Why this design: most status tools should use platform menu conventions. There is no need for a primary role when discovery of multiple actions matters more than speed.
 
@@ -54,9 +54,8 @@ Ask the user: "Do you want users to see a menu first because there are multiple 
 Minimal shape:
 
 ```ts
-await space.createTray({
-  trayId: "build",
-  title: "Build",
+await createTray({
+  id: "com.example.build",
   menu: {
     items: [
       { type: "item", id: 1, title: "Open Dashboard" },
@@ -86,9 +85,8 @@ See also:
 Minimal shape:
 
 ```ts
-await space.createTray({
-  trayId: "app",
-  title: "App",
+const tray = await createTray({
+  id: "com.example.app",
   menu: {
     items: [
       { type: "item", id: 1, title: "Open Window", primaryEvent: true },
@@ -98,9 +96,8 @@ await space.createTray({
   },
 });
 
-client.onFrame((frame) => {
-  if (frame.type !== "event" || frame.event.type !== "menuClick") return;
-  if (frame.event.itemId === 1) openWindow();
+tray.onMenuClick(({ itemId }) => {
+  if (itemId === 1) openWindow();
 });
 ```
 
@@ -119,9 +116,8 @@ Ask the user: "Should macOS clicking the status item do the action immediately w
 Minimal shape:
 
 ```ts
-await space.createTray({
-  trayId: "launcher",
-  title: "Launcher",
+await createTray({
+  id: "com.example.launcher",
   menu: {
     items: [{ type: "item", id: 1, title: "Open WebView", primaryEvent: true }],
   },
@@ -131,8 +127,8 @@ await space.createTray({
 The handler still watches normal `menuClick`:
 
 ```ts
-client.onFrame((frame) => {
-  if (frame.type === "event" && frame.event.type === "menuClick" && frame.event.itemId === 1) {
+tray.onMenuClick(({ itemId }) => {
+  if (itemId === 1) {
     openWebView();
   }
 });
@@ -165,7 +161,8 @@ See also:
 Minimal handler:
 
 ```ts
-if (frame.type === "event" && frame.event.type === "menuClick" && frame.event.itemId === 1) {
+tray.onMenuClick(async ({ itemId }) => {
+  if (itemId !== 1) return;
   await webview.show({
     type: "show",
     html: menuHtml,
@@ -184,7 +181,7 @@ if (frame.type === "event" && frame.event.type === "menuClick" && frame.event.it
       },
     },
   });
-}
+});
 ```
 
 ## Common Mistakes
@@ -198,12 +195,11 @@ if (frame.type === "event" && frame.event.type === "menuClick" && frame.event.it
 
 ## Local Verification Notes
 
-When testing primary behavior from source, stale staged daemons can hide native changes. Build and point the CLI at the fresh broker, or stage the binary explicitly:
+When testing primary behavior from source, a stale staged runtime binding can hide native changes. Build the runtime binding and run the real example directly (the public CLI has no `daemon` subcommands):
 
 ```bash
 cargo build -p opentray-bin
-OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray cli -- daemon restart
-OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:debug-runtime-tray
 ```
 
 For the pure macOS manual path, the demo tray should declare exactly one menu item:

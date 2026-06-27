@@ -8,12 +8,16 @@ The product goal is not "show a tray icon". The goal is to give lightweight tool
 
 ## Platform Laws
 
-- `Surface` is the broker-owned desktop entry and aggregation boundary.
-- `Tray` is a client-owned status contribution mounted onto a surface.
-- `Lease` is the lifecycle contract that removes a tray contribution when its client exits.
-- Extensions add native capabilities, but they must attach through broker/surface/tray contracts.
+OpenTray is tray-first (v0.9). Application code calls `createTray()` directly and owns its own foreground/background lifetime.
+
+- `App` is the caller-owned runtime identity and isolation boundary (passed through `createTray(options, { appId, appName })`, not a separate `createApp` call).
+- `Tray` is one desktop status atom owned by that app/runtime.
+- `Session` is the live source of authority for tray events and mutations; closing a session removes its tray contributions.
+- Extensions add native capabilities, but they must attach through tray/session contracts (e.g. `tray.extend(...)` or `attachWebview(tray)`), not by reaching into broker internals.
 - Do not make one CLI directly own another CLI's menu, events, popup, or lifecycle.
 - Do not add platform special cases into shared layers; expose capability contracts instead.
+
+OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Older docs that still mention them are pre-v0.9 history.
 
 ## Monorepo Law
 

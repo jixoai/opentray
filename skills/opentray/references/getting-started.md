@@ -8,7 +8,7 @@ Use this reference when the user asks how to install OpenTray or create a first 
 pnpm add opentray
 ```
 
-`opentray` resolves the current platform daemon package through optional dependencies. The user installs the top-level package; they do not import platform binary packages directly.
+`opentray` resolves the current platform runtime package through optional dependencies. The user installs the top-level package; they do not import platform binary packages directly.
 
 For agent-assisted usage, install the consumer-facing OpenTray skill:
 
@@ -37,27 +37,32 @@ Replace `A-B` with the current line from `@opentray/spec`. The protocol-line tag
 ## First Flow
 
 1. Import the top-level SDK from `opentray`.
-2. Create or resolve a space.
-3. Create a tray on that space.
-4. Set title, tooltip, icon, and menu through the public SDK.
+2. Call `createTray(...)` with an `id`, plus optional `tooltip`, `icon`, and `menu`.
+3. Mutate the tray through the returned handle: `setMenu`, `setTooltip`, `setIcon`, `loadExtension`, `extend`, etc.
+4. Consume events through `onMenuClick` / `onTrayClick` / `onTrayDoubleClick` / `listen`.
 
 Typical consumer entrypoint:
 
 ```ts
-import { createSpace } from "opentray";
+import { createTray } from "opentray";
 
-const space = await createSpace({
-  id: "com.example.app",
-  default: true,
-});
-
-await space.createTray({
-  trayId: "status",
-  title: "OpenTray",
+const tray = await createTray({
+  id: "com.example.status",
+  tooltip: { title: "OpenTray", description: "Status" },
+  icon: { type: "file", path: "./tray.png" },
+  menu: { items: [{ type: "item", id: 1, title: "Open" }] },
 });
 ```
 
-Use the lower-level transport APIs only for custom protocol work.
+Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`), not a top-level tray `title`. There is no `tray.setTitle()`; update text through `setIcon(...)`.
+
+Runtime identity (app id/name) is separate from tray projection and is passed as the second argument when a host needs explicit diagnostic identity:
+
+```ts
+await createTray(options, { appId: "com.example.status", appName: "Status" });
+```
+
+Use the lower-level transport APIs (`createClient`) only for custom protocol work.
 
 For a ready-made example:
 
@@ -65,8 +70,8 @@ For a ready-made example:
 pnpm --filter opentray example:basic
 ```
 
-This is still useful for learning the request/response flow, but the public consumer path should start from top-level `opentray` exports.
+This is useful for learning the request/response flow, but the public consumer path should start from the top-level `opentray` exports.
 
 ## Real Native Acceptance
 
-For a real tray created through the public SDK and local broker, use the visual acceptance recipe in this skill. The public `opentray` CLI exposes daemon lifecycle and health only; smoke orchestration is a workflow, not a CLI subcommand.
+For a real native tray (and optional WebView), use the source-tree visual acceptance recipes in `references/visual-acceptance.md`. The public `opentray` CLI binary does not expose daemon lifecycle or smoke subcommands; smoke orchestration is a workflow over example scripts, not a CLI subcommand.

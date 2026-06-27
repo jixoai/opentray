@@ -4,13 +4,13 @@ Use this reference when changing extension dispatch, native extension loading, o
 
 ## Host Law
 
-The extension host is a kernel law. Extensions attach to a space and optionally a tray, receive commands through `ExtensionEnvelope`, and emit events through the same scoped envelope shape.
+The extension host is a kernel law. Extensions attach to a tray (and its owning app/session), receive commands through `ExtensionEnvelope`, and emit events through the same scoped envelope shape. Public SDK attachment is `tray.extend(...)` or `attachWebview(tray)`; there is no `space` to attach to.
 
 ## Current State
 
-- `ExtensionRegistry` stores instances by `(spaceId, extName)` semantics. Dynamic ABI names may still contain `surface` while alpha compatibility is being retired.
+- `ExtensionRegistry` stores instances by `(appId, trayId, extName)` semantics. Dynamic ABI names may still carry `surface` as a compatibility detail, but it is not public ontology.
 - `Kernel::ext_command` validates the target tray and dispatches through the registry.
-- `RecordingExtension` is the current test double for dispatch and session/lease cleanup.
+- `RecordingExtension` is the current test double for dispatch and session cleanup.
 - Dynamic library ABI is implemented in `crates/opentray-bin/src/dynamic_extension.rs`.
 - `opentray-bin` owns only generic discovery, loading, and scoped dispatch. Official extension protocol parsing and native runtime behavior belong inside the extension artifact.
 
@@ -35,4 +35,4 @@ Do not silently load arbitrary libraries outside configured locations.
 - No core special cases for official extensions.
 - No extension direct mutation of kernel registries.
 - No backend-specific extension imports in `opentray-core`.
-- No implicit cross-space or cross-session access.
+- No implicit cross-app or cross-session access.

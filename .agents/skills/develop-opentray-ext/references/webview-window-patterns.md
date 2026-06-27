@@ -395,9 +395,8 @@ See also:
 Minimal shape:
 
 ```ts
-const tray = await space.createTray({
-  trayId: "status",
-  title: "Status",
+const tray = await createTray({
+  id: "com.example.status",
   menu: {
     items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }],
   },

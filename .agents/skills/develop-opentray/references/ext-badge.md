@@ -15,7 +15,7 @@ Badge is an optional capability atom for platform status overlays such as badge 
 ## Design Rules
 
 - Start from capability detection. Do not fake badge/progress behavior on platforms without support.
-- Keep commands scoped to space/tray and session ownership.
+- Keep commands scoped to app/tray and session ownership.
 - Keep platform-specific implementation behind native extension or backend capability boundaries.
 - Avoid coupling badge semantics to WebView or island semantics.
 

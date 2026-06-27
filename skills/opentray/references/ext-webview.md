@@ -12,7 +12,9 @@ The facade package stays platform-neutral. Official native WebView packages are 
 
 ## Public Shape
 
-Attach the facade to an existing tray handle:
+There are two ways to use the facade. `attachWebview(tray)` returns a `WebviewHandle` with the legacy `show`/`hide`/`navigate`/... command surface. `tray.extend(WebviewExt)` returns a `WebviewTrayCapability` with `createWebviewWindow(...)` and `getScreenDetails()` — preferred for new code that wants explicit window handles.
+
+Legacy command shape:
 
 ```ts
 import { attachWebview } from "@opentray/ext-webview";
@@ -88,7 +90,7 @@ Do not auto-inject titlebars, drag strips, or CSS into the user's HTML. For over
 
 Lightweight tray panels usually behave like desktop cards. If the whole document develops root-level scrollbars, the experience often feels less native than choosing a better window size, responsive card layout, or an intentional internal scroll region. Explain that product tradeoff instead of prescribing a universal CSS block.
 
-`example:placement` is the source-tree demo for `WebviewPlacementKit` tray, screen, and edge placement. `example:mediaQuery` is the source-tree demo for `mediaQueryKit` plus `styleKit` responsive native-window behavior.
+`example:placement` is the source-tree demo for `WebviewPlacementKit` tray, screen, and edge placement. There is no `example:mediaQuery` script; responsive native-window behavior (`mediaQueryKit` plus `styleKit`) lives in `packages/cli/examples/media-query-panel.ts` — run it directly when reviewing that surface.
 
 ## Examples
 
@@ -101,7 +103,7 @@ pnpm --filter @opentray/ext-webview example:webview
 Real native smoke is a visual acceptance recipe, not an `opentray` CLI subcommand. In a source checkout, use:
 
 ```bash
-OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:debug-runtime-tray
 ```
 
 ## Platform Truth

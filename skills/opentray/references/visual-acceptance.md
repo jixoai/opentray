@@ -4,13 +4,13 @@ Use this reference when the user asks to smoke-test OpenTray or prove a real nat
 
 ## Rule
 
-`opentray` CLI stays pure: it owns daemon lifecycle and health only. Do not tell users to run `opentray smoke ...`.
+The public `opentray` CLI binary does not expose daemon lifecycle or smoke subcommands. Do not tell users to run `opentray daemon ...` or `opentray smoke ...`.
 
-Smoke is an agent/workflow activity. Before running it, explain that it can start or reuse the daemon, write versioned runtime state under `$OPENTRAY_HOME/.opentray/<package-version>/runtime` or the user's home directory, create visible tray/window UI, load native extensions, and require `opentray daemon stop` for immediate cleanup.
+Smoke is a workflow over the source-tree example scripts. Before running one, explain that it can start a real native tray/window, write versioned runtime state under `$OPENTRAY_HOME/.opentray/<package-version>/runtime` or the user's home directory, create visible tray/window UI, and load native extensions. The owning process controls cleanup; normal exit removes its tray contribution.
 
 ## Consumer Smoke Shape
 
-For a package-user smoke, create a temporary project, install the needed packages, and run a short SDK script that creates a real tray and, when needed, attaches `@opentray/ext-webview`.
+For a package-user smoke, create a temporary project, install the needed packages, and run a short SDK script that calls `createTray()` and, when needed, attaches `@opentray/ext-webview`.
 
 Minimum install:
 
@@ -20,32 +20,43 @@ pnpm add opentray @opentray/ext-webview
 
 Useful checks:
 
-- `opentray daemon health` before and after the script
-- SDK auto-starts or reuses the same-version daemon
+- the SDK script runs against the in-process visible runtime binding by default
 - a visible tray appears
 - WebView loads from `@opentray/ext-webview`
-- normal exit closes the broker connection and lease-owned tray contribution
+- normal exit (or `tray.destroy()` / closing the connection) removes the tray contribution
 
 ## Source Checkout Smoke
 
-When the user is inside the OpenTray repo, prefer workspace examples:
+When the user is inside the OpenTray repo, prefer workspace examples. These are the real script names (from `packages/cli/package.json`):
 
 ```bash
-OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:daemon-tray
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:debug-runtime-tray
 pnpm --filter opentray example:placement
-pnpm --filter opentray example:mediaQuery
-pnpm --filter opentray example:webview-control
 pnpm --filter opentray example:tray-panel
+pnpm --filter opentray example:webview-control
+pnpm --filter opentray example:badge
 ```
 
-Use `example:placement` when reviewing tray-anchored, screen-aware, and edge-aware placement. It focuses on `WebviewPlacementKit.watch()`, `applyOnce()`, result provenance, and page-owned frameless drag behavior.
+Notes on what each proves:
 
-Use `example:mediaQuery` when reviewing responsive native-window behavior. It focuses on `styleKit.apply(...)`, `mediaQueryKit.match(...)`, size constraints, and user resize/move quiescence.
+- `example:debug-runtime-tray` — real native tray + WebView, single primary action (set `OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` to auto-show the window).
+- `example:placement` — `WebviewPlacementKit.watch()`, tray/screen/edge placement, page-owned frameless drag.
+- `example:tray-panel` — glass tray-anchored panel with a transparent root (preferred over `webview-control` for glass-window guidance).
+- `example:webview-control` — capability exerciser; starts opaque and enables overlay probes by default (use `-- --no-overlay` to test the disabled branch).
+- `example:badge` — `@opentray/ext-badge` WebView IPC debug panel.
+
+There is no `example:mediaQuery` script. Responsive native-window behavior lives in `packages/cli/examples/media-query-panel.ts` (`styleKit.apply(...)`, `mediaQueryKit.match(...)`, size constraints); run it directly via the file when reviewing that surface.
 
 For Lynx contributor acceptance:
 
 ```bash
-pnpm --filter opentray example:daemon-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
+pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
 Use `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=<ms>` only for examples that support timed exit.
+
+For the pure Node visible-binding host loop (host main thread + worker), use:
+
+```bash
+pnpm --filter opentray example:visible-binding
+```

@@ -32,4 +32,4 @@ For an official native extension, keep three atoms distinct:
 
 ## Scope Rules
 
-Keep extension state scoped to `(surfaceId, trayId, leaseId)` semantics. Lease cleanup should destroy or hide only the owning lease's state.
+Keep extension state scoped to `(appId, trayId, sessionId)` semantics. Session cleanup should destroy or hide only the owning session's state.

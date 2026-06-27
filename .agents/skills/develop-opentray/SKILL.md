@@ -38,6 +38,13 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 - Do not claim visual/native work is complete unless a human-visible command exists and has been smoked.
 - Do not commit generated native binaries into source control.
 
+## Documentation Rules
+
+- Do not hard-code version numbers (e.g. `v0.9`, `0.9.x`) in user or contributor docs. Versions go stale on the next release; describe behavior by model, not by version ("the current tray-first model", "an earlier surface model", "the daemon era"). This applies to README files, skill references, and AGENTS-style guides alike.
+- The rule above is about fixed numeric labels in prose. Typed runtime fields such as `packageVersion`, `<package-version>` path segments, or `@opentray/spec` protocol-line values are variables, not version numbers in documentation — do not strip those.
+- Keep code examples consistent with the actual public exports. Do not reach for removed APIs (`createSpace`, `resolveDefaultSpace`, `tray.setTitle`) even when documenting history; show the real current surface (`createTray`, `setIcon({ text })`).
+- Prefer concrete example script names that exist in `package.json` (e.g. `example:debug-runtime-tray`). Verify a script name before writing it into a doc; never invent an `example:mediaQuery`-style name that does not resolve.
+
 ## Verification Baseline
 
 Use the smallest relevant gate first, then close with the repo gate:

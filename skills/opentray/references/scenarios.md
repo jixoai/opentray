@@ -10,8 +10,7 @@ Why: native menus are already accessible, platform-familiar, and cheap. Start he
 
 ```ts
 const tray = await createTray({
-  trayId: "status",
-  title: "Status",
+  id: "com.example.status",
   icon: { type: "file", path: "./tray.png" },
   menu: { items: [{ type: "item", id: 1, title: "Open" }] },
 });
@@ -24,7 +23,7 @@ Use this when app state changes after startup: timer phases, sync status, errors
 Why: tray state belongs to the tray atom. Do not rebuild the tray or send raw broker frames.
 
 ```ts
-await tray.setTitle("Focus 18:42");
+await tray.setIcon({ type: "file", path: "./focus.png", text: "Focus 18:42" });
 await tray.setTooltip({ title: "Pomodoro", description: "Focus session running" });
 await tray.setMenu({ items: [{ type: "item", id: 1, title: "Pause", primaryEvent: true }] });
 ```
@@ -36,12 +35,12 @@ Use this when clicking a tray item should open a WebView window.
 Why: `primaryEvent` stays a normal menu item role, so direct tray activation and menu selection share the same `menuClick` law.
 
 ```ts
-const tray = (await createTray({
-  trayId: "timer",
-  title: "Timer",
+const baseTray = await createTray({
+  id: "com.example.timer",
   icon: { type: "file", path: "./timer.png" },
   menu: { items: [{ type: "item", id: 1, title: "Open Timer", primaryEvent: true }] },
-})).extend(WebviewExt);
+});
+const tray = baseTray.extend(WebviewExt);
 
 const window = tray.createWebviewWindow({ html, width: 360, height: 240 });
 tray.onMenuClick(({ itemId }) => {
@@ -68,7 +67,7 @@ const panel = webviewTray.createWebviewWindow({
 });
 
 await panel.show();
-const placementWatch = await new WebviewPlacementKit({ tray, screen: webviewTray }).watch(panel, {
+const placementWatch = await new WebviewPlacementKit({ tray: webviewTray, screen: webviewTray }).watch(panel, {
   placement: "tray",
   width: 328,
   height: 244,
@@ -77,7 +76,7 @@ const placementWatch = await new WebviewPlacementKit({ tray, screen: webviewTray
 ```
 
 Design note: lightweight panels are closer to cards than documents. If the root document scrolls, consider a better window size or responsive card composition before accepting a browser-like page feel. Stop `placementWatch` when the panel is hidden, destroyed, or when another placement mode takes over.
-When composing a real app, placement can coexist with host-side `setMinimumSize` / `setMaximumSize` and the backend `styleKit` / `mediaQueryKit` helpers, but debug them as separate atoms first. Use `example:placement` for tray/screen/edge placement and `example:mediaQuery` for responsive native-window style. Keep watches quiescent-aware so user resize/move finishes before placement or media callbacks reapply native position. Continuous placement must not lock the user's current size; explicit backend resize intents should come from page IPC such as `navigator.opentray.ipc.postMessage({ type: "resize", ... })`. Startup style and size recipes should run once per session; repeated tray activation should restore the same panel with `show()`.
+When composing a real app, placement can coexist with host-side `setMinimumSize` / `setMaximumSize` and the backend `styleKit` / `mediaQueryKit` helpers, but debug them as separate atoms first. Use `example:placement` for tray/screen/edge placement; review responsive native-window style directly via `packages/cli/examples/media-query-panel.ts` (there is no `example:mediaQuery` script). Keep watches quiescent-aware so user resize/move finishes before placement or media callbacks reapply native position. Continuous placement must not lock the user's current size; explicit backend resize intents should come from page IPC such as `navigator.opentray.ipc.postMessage({ type: "resize", ... })`. Startup style and size recipes should run once per session; repeated tray activation should restore the same panel with `show()`.
 
 ## Frameless Glass Utility
 
