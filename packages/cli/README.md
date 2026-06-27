@@ -79,6 +79,13 @@ Run a protocol-only example that creates a tray, dispatches an extension command
 pnpm --filter opentray example:basic
 ```
 
+Run the finite source-tree smoke matrix instead of relying on shell expansion for `example:*`:
+
+```bash
+pnpm --filter opentray example:matrix
+pnpm --filter opentray example:matrix -- --row visible-binding
+```
+
 Run human-visible tray and extension examples from a source checkout:
 
 ```bash
@@ -95,4 +102,4 @@ pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The visible-binding example exercises the default package runtime on macOS and Windows. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.
+The example matrix stages the generated Node runtime artifact before `visible-binding`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The visible-binding example exercises the default package runtime on macOS and Windows. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

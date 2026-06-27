@@ -1,10 +1,8 @@
-﻿import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/local-broker";
 import { attachWebview } from "../../ext-webview/src/index";
 import {
+  createShortExampleHome,
   createVisibleTrayIcon,
   prepareLocalWebviewExtensionPath,
 } from "./_support/webview-example-support";
@@ -15,7 +13,7 @@ const localWebviewExtension = await prepareLocalWebviewExtensionPath(
 
 const demoHomeDir =
   process.env.OPENTRAY_HOME ??
-  join(tmpdir(), `opentray-debug-runtime-tray-${process.pid}`);
+  createShortExampleHome("opentray-debug-runtime-tray");
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
 const client = createClient(connection, {
   requestIdPrefix: "debug-runtime-example",

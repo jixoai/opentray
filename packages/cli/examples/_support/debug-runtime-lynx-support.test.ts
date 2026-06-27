@@ -1,5 +1,6 @@
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
@@ -7,12 +8,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createLynxShowCommand,
   describeLynxHostFeatures,
+  prepareLocalLynxExtensionPath,
   resolveBundledReviewBundlePath,
   resolveLynxBundlePath,
   resolveLynxHostFeatures,
@@ -21,6 +24,7 @@ import {
 describe("debug runtime lynx smoke helpers", () => {
   afterEach(() => {
     delete process.env.INIT_CWD;
+    delete process.env.OPENTRAY_EXT_PATH;
     delete process.env.OPENTRAY_LYNX_BUNDLE;
     delete process.env.OPENTRAY_LYNX_HOST_FEATURES;
   });
@@ -45,6 +49,40 @@ describe("debug runtime lynx smoke helpers", () => {
 
     expect(existsSync(reviewBundle)).toBe(true);
     expect(resolveLynxBundlePath()).toBe(realpathSync(reviewBundle));
+  });
+
+  it("resolves the source-tree Lynx extension path when the platform artifact and carrier are staged", () => {
+    const dir = mkdtempSync(join(tmpdir(), "opentray-lynx-extension-"));
+    try {
+      const modulePath = join(
+        dir,
+        "packages/cli/examples/_support/debug-runtime-lynx-support.ts"
+      );
+      const packageRoot = join(dir, "packages/ext-lynx-darwin-arm64");
+      const dylib = join(packageRoot, "lib/libopentray_ext_lynx.dylib");
+      const runtimeZip = join(
+        packageRoot,
+        "runtime/OpenTrayLynxRuntime.app.zip"
+      );
+      mkdirSync(join(dir, "crates/opentray-bin"), { recursive: true });
+      mkdirSync(join(modulePath, ".."), { recursive: true });
+      mkdirSync(join(packageRoot, "lib"), { recursive: true });
+      mkdirSync(join(packageRoot, "runtime"), { recursive: true });
+      writeFileSync(join(dir, "Cargo.toml"), "");
+      writeFileSync(join(dir, "crates/opentray-bin/Cargo.toml"), "");
+      writeFileSync(dylib, "");
+      writeFileSync(runtimeZip, "");
+
+      expect(
+        prepareLocalLynxExtensionPath(pathToFileURL(modulePath).href, {
+          platform: "darwin",
+          arch: "arm64",
+        })
+      ).toBe(dylib);
+      expect(process.env.OPENTRAY_EXT_PATH).toBe(dylib);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("resolves baseline host features from an empty expression", () => {

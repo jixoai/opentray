@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { access, mkdir, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,7 +38,7 @@ const runtime = await createWebviewExampleRuntime({
 const localBadgeExtension = await prepareLocalBadgeExtensionPath(import.meta.url);
 const { tray, localWebviewExtension } = runtime;
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
-const homeDir = process.env.OPENTRAY_HOME ?? join(tmpdir(), `opentray-badge-panel-${process.pid}`);
+const homeDir = runtime.homeDir;
 const dockClickSignalPath = join(homeDir, "badge-dock-click.signal");
 const dockHelperZipPath = join(homeDir, "OpenTrayBadgeHelper.app.zip");
 const dockHelperExtractDir = join(homeDir, "badge-dock-helper-extract");
@@ -100,7 +99,7 @@ const panelState: BadgePanelEnvelope = {
   ],
 };
 
-console.log(`broker home: ${homeDir}`);
+console.log(`badge helper home: ${homeDir}`);
 console.log(`badge panel platform: ${process.platform}`);
 
 let closed = false;

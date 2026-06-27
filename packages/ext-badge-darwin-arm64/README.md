@@ -3,7 +3,7 @@
 macOS arm64 Dock helper app package for `@opentray/ext-badge`.
 
 This package owns the Dock-facing helper bundle used to present badge state with a real
-application identity. The helper is intentionally separate from the broker process.
+application identity. The helper is intentionally separate from the OpenTray runtime host.
 It currently projects badge text, overlay, attention, and click/quit lifecycle only; progress is not a Dock projection on this helper.
 
 ## Build

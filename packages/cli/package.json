@@ -30,6 +30,7 @@
   "scripts": {
     "build": "tsdown src/index.ts src/node.ts src/cli.ts --format esm --dts",
     "cli": "bun run src/cli.ts",
+    "example:matrix": "bun run examples/example-matrix.ts",
     "example:basic": "bun run examples/basic-tray.ts",
     "example:debug-runtime-lynx": "bun run examples/debug-runtime-lynx.ts",
     "example:debug-runtime-tray": "bun run examples/debug-runtime-tray.ts",

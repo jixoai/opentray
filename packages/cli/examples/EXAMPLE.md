@@ -178,6 +178,15 @@ Expected checks:
 
 ## Non-Interactive Smoke Paths
 
+Run the finite package matrix when checking the source-tree examples together:
+
+```bash
+pnpm --filter opentray example:matrix
+pnpm --filter opentray example:matrix -- --row webview-control
+```
+
+The matrix does not depend on shell wildcard expansion. It stages the generated `runtime/opentray_runtime.node` artifact before the default `visible-binding` row, labels WebView/Badge/Lynx rows as contributor-only `extension-debug-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts.
+
 These are useful for quick regression passes:
 
 ```bash

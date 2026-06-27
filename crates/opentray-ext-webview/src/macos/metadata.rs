@@ -67,9 +67,9 @@ pub(super) fn update_window_title(
             && state.metadata.sync_title.native_to_page
             && state.page_access.title_sync
     };
-    // This stays window-scoped on purpose. In the broker's mixed-space model there is only one
-    // host process, so projecting a single webview title into NSApplication/Dock identity would
-    // make one window mutate app-level state for every other surface.
+    // This stays window-scoped on purpose. A runtime host can own multiple extension windows,
+    // so projecting one WebView title into NSApplication/Dock identity would make one window
+    // mutate app-level state for every sibling projection.
     window.setTitle(&NSString::from_str(&title));
     if should_sync_to_page {
         sync_title_to_page(bridge, &title)?;

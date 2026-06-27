@@ -1,6 +1,4 @@
 ﻿import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/local-broker";
@@ -9,6 +7,7 @@ import {
   type WebviewShowCommand,
 } from "../../ext-webview/src/index";
 import {
+  createShortExampleHome,
   createVisibleTrayIcon,
   prepareLocalWebviewExtensionPath,
 } from "./_support/webview-example-support";
@@ -21,7 +20,7 @@ const localWebviewExtension = await prepareLocalWebviewExtensionPath(
 );
 const demoHomeDir =
   process.env.OPENTRAY_HOME ??
-  join(tmpdir(), `opentray-webview-control-${process.pid}`);
+  createShortExampleHome("opentray-webview-control");
 // windowControlsOverlay is a show-time bridge gate; the page can test it, not enable it later.
 const overlayEnabled = resolveOverlayEnabled(
   process.argv.slice(2),

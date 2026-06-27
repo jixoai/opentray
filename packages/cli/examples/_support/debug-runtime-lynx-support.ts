@@ -58,11 +58,20 @@ export interface DebugRuntimeLynxSmokeOptions {
   featureExpression?: string;
 }
 
+export interface PrepareLocalLynxExtensionPathOptions {
+  platform?: NodeJS.Platform;
+  arch?: string;
+}
+
 export const runDebugRuntimeLynxSmoke = async (
   options: DebugRuntimeLynxSmokeOptions = {}
 ): Promise<void> => {
+  const localLynxExtension = prepareLocalLynxExtensionPath();
   const bundlePath = resolveLynxBundlePath(options.bundlePath);
   const hostFeatures = resolveLynxHostFeatures(options.featureExpression);
+  if (localLynxExtension !== undefined) {
+    console.log(`lynx dylib: ${localLynxExtension}`);
+  }
   if (process.env.OPENTRAY_LYNX_DEBUG) {
     console.log(`lynx debug modes: ${process.env.OPENTRAY_LYNX_DEBUG}`);
   }
@@ -102,10 +111,7 @@ export const runDebugRuntimeLynxSmoke = async (
   });
   console.log(`tray: ${tray.trayId}`);
 
-  await connection.request({
-    type: "load-ext",
-    requestId: "debug-runtime-lynx-load",
-    appId: "space-recorded",
+  await tray.loadExtension({
     name: "lynx",
     path: "@opentray/ext-lynx",
   });
@@ -220,6 +226,24 @@ export const runDebugRuntimeLynxSmoke = async (
   });
 };
 
+export const prepareLocalLynxExtensionPath = (
+  moduleUrl = import.meta.url,
+  options: PrepareLocalLynxExtensionPathOptions = {}
+): string | undefined => {
+  const localLynxExtension = resolveLocalLynxExtensionPath(
+    moduleUrl,
+    options.platform ?? process.platform,
+    options.arch ?? process.arch
+  );
+  if (
+    process.env.OPENTRAY_EXT_PATH === undefined &&
+    localLynxExtension !== undefined
+  ) {
+    process.env.OPENTRAY_EXT_PATH = localLynxExtension;
+  }
+  return localLynxExtension;
+};
+
 export const resolveLynxBundlePath = (value?: string): string => {
   const resolved = value ?? process.env[DEFAULT_LYNX_BUNDLE_ENV];
   if (resolved === undefined || resolved.length === 0) {
@@ -305,6 +329,53 @@ export const resolveBundledReviewBundlePath = (
       throw new Error(
         `failed to resolve opentray package root from ${moduleUrl}`
       );
+    }
+    currentDir = parent;
+  }
+};
+
+const resolveLocalLynxExtensionPath = (
+  moduleUrl: string,
+  platform: NodeJS.Platform,
+  arch: string
+): string | undefined => {
+  if (platform !== "darwin") {
+    return undefined;
+  }
+  const workspaceRoot = resolveWorkspaceRoot(moduleUrl);
+  if (workspaceRoot === undefined) {
+    return undefined;
+  }
+  const packageArch = arch === "x64" ? "x64" : "arm64";
+  const packageRoot = join(
+    workspaceRoot,
+    `packages/ext-lynx-darwin-${packageArch}`
+  );
+  const library = join(packageRoot, "lib/libopentray_ext_lynx.dylib");
+  const runtimeZip = join(
+    packageRoot,
+    "runtime/OpenTrayLynxRuntime.app.zip"
+  );
+  if (!existsSync(library) || !existsSync(runtimeZip)) {
+    return undefined;
+  }
+  return library;
+};
+
+const resolveWorkspaceRoot = (moduleUrl: string): string | undefined => {
+  let currentDir = dirname(fileURLToPath(moduleUrl));
+
+  while (true) {
+    if (
+      existsSync(join(currentDir, "Cargo.toml")) &&
+      existsSync(join(currentDir, "crates/opentray-bin/Cargo.toml"))
+    ) {
+      return currentDir;
+    }
+
+    const parent = dirname(currentDir);
+    if (parent === currentDir) {
+      return undefined;
     }
     currentDir = parent;
   }

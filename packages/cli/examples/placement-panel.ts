@@ -287,7 +287,7 @@ async function shutdown(): Promise<void> {
   try {
     await panel.destroy();
   } catch {
-    // The panel may never have been opened; closing the broker session is still authoritative.
+    // The panel may never have been opened; closing the runtime session is still authoritative.
   }
   await runtime.shutdown();
   resolveLifecycle?.();

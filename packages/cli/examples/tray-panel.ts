@@ -1,11 +1,9 @@
-﻿import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { createClient } from "../src/index";
 import { connectLocalBroker } from "../src/local-broker";
 import { WebviewExt } from "../../ext-webview/src/index";
 import type { WebviewWindowStylePatch } from "../../ext-webview/src/index";
 import {
+  createShortExampleHome,
   createVisibleTrayIcon,
   prepareLocalWebviewExtensionPath,
 } from "./_support/webview-example-support";
@@ -17,7 +15,7 @@ const icon = createVisibleTrayIcon();
 
 const demoHomeDir =
   process.env.OPENTRAY_HOME ??
-  join(tmpdir(), `opentray-tray-panel-${process.pid}`);
+  createShortExampleHome("opentray-tray-panel");
 const connection = await connectLocalBroker({ homeDir: demoHomeDir });
 const client = createClient(connection, { requestIdPrefix: "tray-panel" });
 console.log(

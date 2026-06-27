@@ -10,7 +10,10 @@ parentPort.once("message", async (message) => {
     return;
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  const startDelayMs = Number(
+    process.env.OPENTRAY_VISIBLE_BINDING_START_DELAY_MS ?? "1200"
+  );
+  await new Promise((resolve) => setTimeout(resolve, startDelayMs));
 
   const connection = await createRuntimeBindingTransport({
     packageVersion: "0.9.0-example",

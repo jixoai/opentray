@@ -94,7 +94,7 @@ export async function createWebviewExampleRuntime(
   };
 }
 
-function createShortExampleHome(homePrefix: string): string {
+export function createShortExampleHome(homePrefix: string): string {
   const candidateRoots = ["/tmp", join(homedir(), ".opentray"), tmpdir()];
   for (const root of candidateRoots) {
     if (root.length <= 16) {

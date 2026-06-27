@@ -120,7 +120,7 @@ await webview.show();
 
 Use `attachWebview(tray)` only as a compatibility adapter for older code. New code should prefer `tray.extend(WebviewExt)` so multiple trays can mount isolated WebView instances.
 
-Run a broker-free example that sends WebView `show`, `navigate`, `postMessage`, and `hide` commands through the normal OpenTray extension command path:
+Run a runtime-host-free protocol example that sends WebView `show`, `navigate`, `postMessage`, and `hide` commands through the normal OpenTray extension command path:
 
 ```bash
 pnpm --filter @opentray/ext-webview example:webview
@@ -286,8 +286,8 @@ Keep the capability ownership lines explicit:
 
 - Trusted backend tray geometry is the core-routed capability: `await tray.getBounds()`
 - Page tray geometry is the WebView projection of that same tray capability: `await navigator.opentray.tray.getBounds()`
-- The page tray API is intentionally a projection, not a second authority. Today it is injected from show-time tray context so the page can anchor layout without keeping a long-lived broker callback alive inside the WebView runtime.
-- `navigator.opentrayWindow` and `navigator.opentrayScreen` are extension-owned page APIs. They are not broker-wide contracts in `opentray-core`.
+- The page tray API is intentionally a projection, not a second authority. Today it is injected from show-time tray context so the page can anchor layout without keeping a long-lived runtime-host callback alive inside the WebView runtime.
+- `navigator.opentrayWindow` and `navigator.opentrayScreen` are extension-owned page APIs. They are not runtime-wide contracts in `opentray-core`.
 - `screen` stays in `@opentray/ext-webview` for now because its event model, coordinate-space law, and cross-platform substrate differences are not yet proven shared enough for core.
 - The package also exports page-side global typings for `navigator.window`, `navigator.opentrayWindow`, `navigator.opentrayScreen`, `navigator.opentray`, and `window.getScreenDetails()` so TypeScript page code matches the injected runtime shape.
 
@@ -471,4 +471,4 @@ cargo build -p opentray-bin -p opentray-ext-webview
 pnpm --filter opentray example:tray-panel
 ```
 
-Inside the repo on macOS and Windows, that example automatically points the daemon at the freshly built local WebView dynamic library when `OPENTRAY_EXT_PATH` is not already set, so manual tray-panel iteration does not depend on staging platform packages first.
+Inside the repo on macOS and Windows, that debug-runtime example automatically points the source-tree runtime host at the freshly built local WebView dynamic library when `OPENTRAY_EXT_PATH` is not already set, so manual tray-panel iteration does not depend on staging platform packages first.

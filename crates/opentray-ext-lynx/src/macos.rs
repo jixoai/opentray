@@ -237,7 +237,7 @@ fn resolve_current_library_file() -> Result<PathBuf, LynxRuntimeError> {
 
 fn default_runtime_zip_path(library_file: &Path) -> PathBuf {
     // The runtime stays owned by the platform package atom beside the dylib;
-    // the broker binary never becomes the storage location for the host app.
+    // the generic runtime host never becomes the storage location for the app.
     library_file
         .parent()
         .and_then(Path::parent)
