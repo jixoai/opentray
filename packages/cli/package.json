@@ -1,6 +1,6 @@
 {
   "name": "opentray",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "Developer-facing OpenTray SDK and CLI package.",
   "type": "module",
   "license": "MIT",
