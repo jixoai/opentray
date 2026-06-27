@@ -5,31 +5,32 @@
   "fixed": [
     [
       "opentray",
+      "@opentray/spec",
       "@opentray/darwin-arm64",
       "@opentray/darwin-x64",
       "@opentray/linux-arm64",
       "@opentray/linux-x64",
       "@opentray/windows-arm64",
-      "@opentray/windows-x64"
-    ],
-    [
+      "@opentray/windows-x64",
       "@opentray/ext-webview",
       "@opentray/ext-webview-darwin-arm64",
       "@opentray/ext-webview-darwin-x64",
       "@opentray/ext-webview-windows-arm64",
-      "@opentray/ext-webview-windows-x64"
-    ],
-    [
+      "@opentray/ext-webview-windows-x64",
       "@opentray/ext-badge",
       "@opentray/ext-badge-darwin-arm64",
       "@opentray/ext-badge-darwin-x64",
       "@opentray/ext-badge-windows-arm64",
-      "@opentray/ext-badge-windows-x64"
-    ],
-    [
+      "@opentray/ext-badge-windows-x64",
       "@opentray/ext-lynx",
       "@opentray/ext-lynx-darwin-arm64",
-      "@opentray/ext-lynx-darwin-x64"
+      "@opentray/ext-lynx-darwin-x64",
+      "@opentray/ext-island",
+      "@opentray/packaging",
+      "@opentray/vite-plugin",
+      "@opentray/esbuild-plugin",
+      "@opentray/tsdown-plugin",
+      "@opentray/webpack-plugin"
     ]
   ],
   "linked": [],
@@ -39,11 +40,5 @@
   "___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH": {
     "onlyUpdatePeerDependentsWhenOutOfRange": true
   },
-  "ignore": [
-    "@opentray/packaging",
-    "@opentray/vite-plugin",
-    "@opentray/esbuild-plugin",
-    "@opentray/tsdown-plugin",
-    "@opentray/webpack-plugin"
-  ]
+  "ignore": []
 }
