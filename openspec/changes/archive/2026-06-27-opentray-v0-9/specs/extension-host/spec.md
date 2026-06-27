@@ -22,6 +22,8 @@ Dynamic extension cleanup SHALL use session vocabulary at the host contract and 
 - **THEN** they see tray and app runtime concepts
 - **AND** they do not need to reason about `Surface` or `Space` to understand scope.
 
+## ADDED Requirements
+
 ### Requirement: Extensions SHALL bind through the runtime host rather than a public daemon API
 
 The extension host contract SHALL assume a runtime-host-bound app context. It SHALL not require a public daemon object or broker concept to exist in the developer API. The runtime host MAY still load native extension artifacts internally, but that is an implementation detail behind the tray/app runtime boundary.

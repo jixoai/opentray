@@ -1,6 +1,6 @@
 # runtime-host Specification Delta
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Runtime host SHALL be version-scoped and app-isolated
 
@@ -21,8 +21,6 @@ The runtime host SHALL store runtime state under `~/.opentray/<packageVersion>/<
 - **THEN** each resolves a different runtime directory
 - **AND** each resolves a different runtime host endpoint
 - **AND** neither host serves the other caller's session.
-
-## ADDED Requirements
 
 ### Requirement: Node runtime distribution SHALL use host-loadable native bindings
 
