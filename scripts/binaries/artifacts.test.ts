@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   badgeDockHelperArtifactName,
@@ -7,6 +9,8 @@ import {
   resolveNativeTarget,
   resolveStageDestination,
 } from "./artifacts";
+
+const repoRoot = resolve(import.meta.dir, "../..");
 
 describe("Feature: native runtime artifact topology", () => {
   test("Scenario: Given first-stage platforms When targets are enumerated Then runtime packages cover Linux while WebView stays macOS/Windows only", () => {
@@ -140,4 +144,36 @@ describe("Feature: native runtime artifact topology", () => {
       "packages/ext-badge-windows-x64/bin/opentray_ext_badge.dll"
     );
   });
+
+  test("Scenario: Given Linux runtime builds When manifest dependencies are inspected Then GUI tray crates stay macOS and Windows only", () => {
+    const manifest = readFileSync(
+      resolve(repoRoot, "crates/opentray-runtime-node/Cargo.toml"),
+      "utf8"
+    );
+    const rootDependencies = dependencySection(manifest, "[dependencies]");
+    const desktopDependencies = dependencySection(
+      manifest,
+      "[target.'cfg(any(target_os = \"macos\", target_os = \"windows\"))'.dependencies]"
+    );
+
+    expect(rootDependencies).toContain("opentray-core.workspace = true");
+    expect(rootDependencies).not.toContain("opentray-backend-tray-icon");
+    expect(rootDependencies).not.toContain("tray-icon");
+    expect(rootDependencies).not.toContain("winit");
+    expect(desktopDependencies).toContain(
+      "opentray-backend-tray-icon.workspace = true"
+    );
+    expect(desktopDependencies).toContain("tray-icon.workspace = true");
+    expect(desktopDependencies).toContain('winit = "0.30"');
+  });
 });
+
+function dependencySection(manifest: string, header: string): string {
+  const start = manifest.indexOf(header);
+  if (start === -1) {
+    throw new Error(`missing manifest section: ${header}`);
+  }
+  const section = manifest.slice(start + header.length);
+  const end = section.indexOf("\n[");
+  return section.slice(0, end === -1 ? section.length : end);
+}

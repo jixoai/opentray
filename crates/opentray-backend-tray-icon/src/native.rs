@@ -7,6 +7,8 @@ use objc2_app_kit::NSEvent;
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSRect;
 use opentray_core::BackendError;
+#[cfg(target_os = "windows")]
+use opentray_spec::geometry::DpiScale;
 use opentray_spec::{AppId, TrayEvent};
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
