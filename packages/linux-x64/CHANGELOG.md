@@ -1,5 +1,19 @@
 # @opentray/linux-x64
 
+## 0.8.1
+
+### Patch Changes
+
+- 9f63f71: Ship the core OpenTray runtime as host-loadable Node binding artifacts staged at `runtime/opentray_runtime.node`, expose Node-side runtime binding resolution diagnostics, and add an explicit headless binding transport for protocol/session runtime checks.
+
+  Remove public daemon lifecycle commands from the `opentray` CLI and stop exporting the transitional local broker transport from `opentray/node`. Source-tree visible diagnostics now use debug-runtime examples while the default visible runtime awaits an explicit host-main-loop binding contract.
+
+  Rename the health response protocol frame from `daemon-health` to `runtime-host-health` and expose the shared health model as `RuntimeHostHealth`.
+
+  Add explicit app identity metadata to runtime host health. Runtime hosts now retain app identity as `appId` / `appName` and keep `callerLabel` as the sanitized runtime routing slug.
+
+  Add the visible Node runtime binding host for macOS and Windows. The default `createTray()` path now targets the in-process visible binding, while `runVisibleRuntimeHost()` in `opentray/node` owns the native host main loop and routes menu/tray events back only to the live caller session. The headless binding and source-tree local broker remain explicit diagnostic modes.
+
 ## 0.8.0
 
 ## 0.7.0
