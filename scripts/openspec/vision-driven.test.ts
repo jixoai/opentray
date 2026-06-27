@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -52,33 +53,42 @@ const runBun = async (
   env: Record<string, string | undefined> = process.env,
   stdin?: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
-  const proc =
-    stdin === undefined
-      ? Bun.spawn({
-          cmd: ["bun", ...args],
-          cwd,
-          env,
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-      : Bun.spawn({
-          cmd: ["bun", ...args],
-          cwd,
-          env,
-          stdin: "pipe",
-          stdout: "pipe",
-          stderr: "pipe",
-        });
-  if (stdin !== undefined) {
-    proc.stdin.write(stdin);
-    proc.stdin.end();
+  const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+  const pathEnvKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  const spawnEnv: Record<string, string> = {};
+  for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "USER", "SHELL", "SYSTEMROOT", "SystemRoot", "ComSpec"]) {
+    const value = env[key];
+    if (value !== undefined) {
+      spawnEnv[key] = value;
+    }
   }
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { exitCode, stdout, stderr };
+  spawnEnv[pathEnvKey] = env[pathEnvKey] ?? process.env[pathEnvKey] ?? "";
+  if (env.VISION_TEST_LOG !== undefined) {
+    spawnEnv.VISION_TEST_LOG = env.VISION_TEST_LOG;
+  }
+  // Nested Bun processes can lose piped stdio under `bun test`; file capture keeps command evidence deterministic.
+  const captureDir = mkdtempSync(join(tmpdir(), "vision-driven-stdio-"));
+  const stdoutPath = join(captureDir, "stdout.log");
+  const stderrPath = join(captureDir, "stderr.log");
+  const stdinPath = join(captureDir, "stdin.txt");
+  if (stdin !== undefined) {
+    writeFileSync(stdinPath, stdin);
+  }
+  const command = [process.execPath, ...args].map(shellQuote).join(" ");
+  const stdinRedirect = stdin === undefined ? "" : ` < ${shellQuote(stdinPath)}`;
+  try {
+    const result = spawnSync("/bin/sh", ["-c", `${command}${stdinRedirect} > ${shellQuote(stdoutPath)} 2> ${shellQuote(stderrPath)}`], {
+      cwd,
+      encoding: "utf8",
+      env: spawnEnv,
+    });
+    const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
+    const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
+    const exitCode = result.status ?? 1;
+    return { exitCode, stdout, stderr };
+  } finally {
+    rmSync(captureDir, { recursive: true, force: true });
+  }
 };
 
 const runCommand = async (cmd: string[], cwd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
