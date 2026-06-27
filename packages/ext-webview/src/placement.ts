@@ -1,6 +1,9 @@
 import type { Rect, TrayBoundsResult } from "@opentray/spec";
 
-import { windowGeometryKit } from "./window-geometry";
+import {
+  windowGeometryKit,
+  type WebviewWindowGeometryCoordinateOrigin,
+} from "./window-geometry";
 
 export interface WebviewPlacementPoint {
   x: number;
@@ -20,21 +23,25 @@ export interface WebviewPlacementScreenDetails {
   currentScreen: WebviewPlacementScreenDetail | null;
   screens: WebviewPlacementScreenDetail[];
   isExtended?: boolean;
+  coordinateOrigin?: WebviewWindowGeometryCoordinateOrigin;
 }
 
 export interface WebviewPlacementInvalidationSource {
   subscribePlacementInvalidation?(listener: () => void): () => void;
 }
 
-export interface WebviewPlacementTrayAuthority extends WebviewPlacementInvalidationSource {
+export interface WebviewPlacementTrayAuthority
+  extends WebviewPlacementInvalidationSource {
   getBounds(): Promise<TrayBoundsResult>;
 }
 
-export interface WebviewPlacementScreenAuthority extends WebviewPlacementInvalidationSource {
+export interface WebviewPlacementScreenAuthority
+  extends WebviewPlacementInvalidationSource {
   getScreenDetails(): Promise<WebviewPlacementScreenDetails>;
 }
 
-export interface WebviewPlacementCursorAuthority extends WebviewPlacementInvalidationSource {
+export interface WebviewPlacementCursorAuthority
+  extends WebviewPlacementInvalidationSource {
   getPosition(): Promise<WebviewPlacementPoint>;
 }
 
@@ -43,13 +50,14 @@ export interface WebviewPlacementWindowEvent<TPayload = unknown> {
   payload: TPayload;
 }
 
-export interface WebviewPlacementTarget extends WebviewPlacementInvalidationSource {
+export interface WebviewPlacementTarget
+  extends WebviewPlacementInvalidationSource {
   moveTo(x: number, y: number): Promise<unknown>;
   resizeTo(width: number, height: number): Promise<unknown>;
   getBounds?(): Promise<Rect>;
   listen?<TPayload = unknown>(
     event: string,
-    handler: (event: WebviewPlacementWindowEvent<TPayload> | TPayload) => void,
+    handler: (event: WebviewPlacementWindowEvent<TPayload> | TPayload) => void
   ): Promise<() => Promise<void>> | (() => void);
 }
 
@@ -107,7 +115,9 @@ export interface WebviewPlacementWatch {
   readonly active: boolean;
   readonly paused: boolean;
   readonly latest: WebviewPlacementResult | null;
-  update(options: Partial<WebviewPlacementOptions>): Promise<WebviewPlacementResult>;
+  update(
+    options: Partial<WebviewPlacementOptions>
+  ): Promise<WebviewPlacementResult>;
   refresh(): Promise<WebviewPlacementResult>;
   pause(): void;
   resume(): Promise<WebviewPlacementResult>;
@@ -132,7 +142,9 @@ export class WebviewPlacementKit {
     this.#cursor = dependencies.cursor;
   }
 
-  async resolve(options: WebviewPlacementOptions): Promise<WebviewPlacementResult> {
+  async resolve(
+    options: WebviewPlacementOptions
+  ): Promise<WebviewPlacementResult> {
     const normalized = await this.resolveInputs(options);
 
     // TODO(positionTry): this algorithm is already expressed as anchorBound + windowBound +
@@ -141,19 +153,36 @@ export class WebviewPlacementKit {
     if (options.placement === "tray") {
       const bounds = await this.#tray?.getBounds();
       if (bounds?.rect) {
-        return resolveFromAnchor(options.placement, windowGeometryKit.normalizeRect(bounds.rect, "tray.rect"), normalized, {
-          kind: bounds.kind === "native" ? "native" : "inferred",
-          source: bounds.source,
-        });
+        return resolveFromAnchor(
+          options.placement,
+          windowGeometryKit.normalizeRect(bounds.rect, "tray.rect"),
+          normalized,
+          {
+            kind: bounds.kind === "native" ? "native" : "inferred",
+            source: bounds.source,
+          }
+        );
       }
-      return this.resolveFallback(options.placement, normalized, bounds?.source ?? "tray.unavailable");
+      return this.resolveFallback(
+        options.placement,
+        normalized,
+        bounds?.source ?? "tray.unavailable"
+      );
     }
 
     if (options.placement === "cursor") {
       const point = options.cursorPoint ?? (await this.#cursor?.getPosition());
       if (point) {
-        const normalizedPoint = windowGeometryKit.normalizePoint(point, "cursor");
-        const anchor = { x: normalizedPoint.x, y: normalizedPoint.y, width: 1, height: 1 };
+        const normalizedPoint = windowGeometryKit.normalizePoint(
+          point,
+          "cursor"
+        );
+        const anchor = {
+          x: normalizedPoint.x,
+          y: normalizedPoint.y,
+          width: 1,
+          height: 1,
+        };
         return resolveFromAnchor("cursor", anchor, normalized, {
           kind: "inferred",
           source: options.cursorPoint ? "cursorPoint" : "cursor",
@@ -163,38 +192,73 @@ export class WebviewPlacementKit {
     }
 
     if (isEdgePlacement(options.placement)) {
-      const screen = selectScreen(normalized.screenDetails, options.screenId, normalized.windowRect);
+      const screen = selectScreen(
+        normalized.screenDetails,
+        options.screenId,
+        normalized.windowRect
+      );
       if (screen) {
-        return resolveEdgePlacement(options.placement, screen.visibleFrame, normalized);
+        return resolveEdgePlacement(
+          options.placement,
+          screen.visibleFrame,
+          normalized
+        );
       }
-      return this.resolveFallback(options.placement, normalized, "screen.unavailable");
-    }
-
-    const screen = selectScreen(normalized.screenDetails, options.screenId, normalized.windowRect);
-    if (screen) {
-      return resolveFromAnchor(
+      return this.resolveFallback(
         options.placement,
-        anchorForScreenPlacement(screen.visibleFrame, options.placement),
-        { ...normalized, viewport: screen.visibleFrame },
-        { kind: "native", source: "screen.visibleFrame" },
+        normalized,
+        "screen.unavailable"
       );
     }
 
-    return this.resolveFallback(options.placement, normalized, "screen.unavailable");
+    const screen = selectScreen(
+      normalized.screenDetails,
+      options.screenId,
+      normalized.windowRect
+    );
+    if (screen) {
+      return resolveFromAnchor(
+        options.placement,
+        anchorForScreenPlacement(
+          screen.visibleFrame,
+          options.placement,
+          normalized.coordinateOrigin
+        ),
+        { ...normalized, viewport: screen.visibleFrame },
+        { kind: "native", source: "screen.visibleFrame" }
+      );
+    }
+
+    return this.resolveFallback(
+      options.placement,
+      normalized,
+      "screen.unavailable"
+    );
   }
 
-  async applyOnce(target: WebviewPlacementTarget, options: WebviewPlacementOptions): Promise<WebviewPlacementResult> {
+  async applyOnce(
+    target: WebviewPlacementTarget,
+    options: WebviewPlacementOptions
+  ): Promise<WebviewPlacementResult> {
     if (activeWatches.has(target)) {
-      throw new Error("cannot applyOnce while a placement watch is active for this target");
+      throw new Error(
+        "cannot applyOnce while a placement watch is active for this target"
+      );
     }
     return this.applyOnceInternal(target, options);
   }
 
-  once(target: WebviewPlacementTarget, options: WebviewPlacementOptions): Promise<WebviewPlacementResult> {
+  once(
+    target: WebviewPlacementTarget,
+    options: WebviewPlacementOptions
+  ): Promise<WebviewPlacementResult> {
     return this.applyOnce(target, options);
   }
 
-  async watch(target: WebviewPlacementTarget, options: WebviewPlacementOptions): Promise<WebviewPlacementWatch> {
+  async watch(
+    target: WebviewPlacementTarget,
+    options: WebviewPlacementOptions
+  ): Promise<WebviewPlacementWatch> {
     this.unwatch(target);
     let watch: PlacementWatch;
     watch = new PlacementWatch(this, target, options, () => {
@@ -207,7 +271,10 @@ export class WebviewPlacementKit {
     return watch;
   }
 
-  apply(target: WebviewPlacementTarget, options: WebviewPlacementOptions): Promise<WebviewPlacementWatch> {
+  apply(
+    target: WebviewPlacementTarget,
+    options: WebviewPlacementOptions
+  ): Promise<WebviewPlacementWatch> {
     return this.watch(target, options);
   }
 
@@ -218,11 +285,16 @@ export class WebviewPlacementKit {
 
   private async applyOnceInternal(
     target: WebviewPlacementTarget,
-    options: WebviewPlacementOptions,
+    options: WebviewPlacementOptions
   ): Promise<WebviewPlacementResult> {
     const rawTargetRect = options.windowRect ?? (await target.getBounds?.());
-    const targetRect = rawTargetRect ? windowGeometryKit.normalizeWindowRect(rawTargetRect) : undefined;
-    const result = await this.resolve({ ...options, ...(targetRect ? { windowRect: targetRect } : {}) });
+    const targetRect = rawTargetRect
+      ? windowGeometryKit.normalizeWindowRect(rawTargetRect)
+      : undefined;
+    const result = await this.resolve({
+      ...options,
+      ...(targetRect ? { windowRect: targetRect } : {}),
+    });
     await applyResolvedPlacement(target, result, targetRect);
     return result;
   }
@@ -232,7 +304,10 @@ export class WebviewPlacementKit {
       this.#tray?.subscribePlacementInvalidation?.(listener),
       this.#screen?.subscribePlacementInvalidation?.(listener),
       this.#cursor?.subscribePlacementInvalidation?.(listener),
-    ].filter((unsubscribe): unsubscribe is () => void => typeof unsubscribe === "function");
+    ].filter(
+      (unsubscribe): unsubscribe is () => void =>
+        typeof unsubscribe === "function"
+    );
     return () => {
       for (const unsubscribe of unsubscribers) {
         unsubscribe();
@@ -240,27 +315,59 @@ export class WebviewPlacementKit {
     };
   }
 
-  private async resolveInputs(options: WebviewPlacementOptions): Promise<ResolvedPlacementInputs> {
+  private async resolveInputs(
+    options: WebviewPlacementOptions
+  ): Promise<ResolvedPlacementInputs> {
     const size = windowGeometryKit.normalizeSize(options.width, options.height);
-    const margin = windowGeometryKit.normalizeMargin(options.placementMargin, DEFAULT_MARGIN);
-    const screenDetails = windowGeometryKit.normalizeScreenDetails(await this.#screen?.getScreenDetails());
-    const fallback = windowGeometryKit.normalizeRect(options.fallbackRect ?? DEFAULT_FALLBACK_RECT, "fallbackRect");
+    const margin = windowGeometryKit.normalizeMargin(
+      options.placementMargin,
+      DEFAULT_MARGIN
+    );
+    const screenDetails = windowGeometryKit.normalizeScreenDetails(
+      await this.#screen?.getScreenDetails()
+    );
+    const fallback = windowGeometryKit.normalizeRect(
+      options.fallbackRect ?? DEFAULT_FALLBACK_RECT,
+      "fallbackRect"
+    );
     const windowRect = options.windowRect
       ? windowGeometryKit.normalizeWindowRect(options.windowRect, "windowRect")
-      : { x: fallback.x, y: fallback.y, width: size.width, height: size.height };
-    const viewport = selectScreen(screenDetails, options.screenId, windowRect)?.visibleFrame ?? null;
-    return { size, margin, screenDetails, windowRect, viewport, fallbackRect: fallback };
+      : {
+          x: fallback.x,
+          y: fallback.y,
+          width: size.width,
+          height: size.height,
+        };
+    const viewport =
+      selectScreen(screenDetails, options.screenId, windowRect)?.visibleFrame ??
+      null;
+    return {
+      size,
+      margin,
+      screenDetails,
+      coordinateOrigin: windowGeometryKit.normalizeCoordinateOrigin(
+        screenDetails?.coordinateOrigin
+      ),
+      windowRect,
+      viewport,
+      fallbackRect: fallback,
+    };
   }
 
   private async resolveFallback(
     placement: WebviewPlacement,
     inputs: ResolvedPlacementInputs,
-    unavailableSource: string,
+    unavailableSource: string
   ): Promise<WebviewPlacementResult> {
     const point = await this.#cursor?.getPosition();
     if (point) {
       const normalizedPoint = windowGeometryKit.normalizePoint(point, "cursor");
-      const anchor = { x: normalizedPoint.x, y: normalizedPoint.y, width: 1, height: 1 };
+      const anchor = {
+        x: normalizedPoint.x,
+        y: normalizedPoint.y,
+        width: 1,
+        height: 1,
+      };
       return resolveFromAnchor("cursor", anchor, inputs, {
         kind: "fallback",
         source: `${unavailableSource}->cursor`,
@@ -268,18 +375,32 @@ export class WebviewPlacementKit {
       });
     }
 
-    const screen = selectScreen(inputs.screenDetails, undefined, inputs.windowRect);
+    const screen = selectScreen(
+      inputs.screenDetails,
+      undefined,
+      inputs.windowRect
+    );
     if (screen) {
-      return resolveFromAnchor("screen-center", screen.visibleFrame, { ...inputs, viewport: screen.visibleFrame }, {
-        kind: "fallback",
-        source: `${unavailableSource}->screen-center`,
-        placement,
-      });
+      return resolveFromAnchor(
+        "screen-center",
+        screen.visibleFrame,
+        { ...inputs, viewport: screen.visibleFrame },
+        {
+          kind: "fallback",
+          source: `${unavailableSource}->screen-center`,
+          placement,
+        }
+      );
     }
 
     return {
       placement,
-      rect: { x: inputs.fallbackRect.x, y: inputs.fallbackRect.y, width: inputs.size.width, height: inputs.size.height },
+      rect: {
+        x: inputs.fallbackRect.x,
+        y: inputs.fallbackRect.y,
+        width: inputs.size.width,
+        height: inputs.size.height,
+      },
       kind: "fallback",
       source: `${unavailableSource}->fallbackRect`,
       anchorRect: inputs.fallbackRect,
@@ -291,6 +412,7 @@ interface ResolvedPlacementInputs {
   size: { width: number; height: number };
   margin: number;
   screenDetails: WebviewPlacementScreenDetails | undefined;
+  coordinateOrigin: WebviewWindowGeometryCoordinateOrigin;
   windowRect: Rect;
   viewport: Rect | null;
   fallbackRect: Rect;
@@ -315,7 +437,7 @@ class PlacementWatch implements WebviewPlacementWatch {
     kit: WebviewPlacementKit,
     target: WebviewPlacementTarget,
     options: WebviewPlacementOptions,
-    onStop: () => void,
+    onStop: () => void
   ) {
     this.#kit = kit;
     this.target = target;
@@ -343,7 +465,9 @@ class PlacementWatch implements WebviewPlacementWatch {
     await this.refresh();
   }
 
-  async update(options: Partial<WebviewPlacementOptions>): Promise<WebviewPlacementResult> {
+  async update(
+    options: Partial<WebviewPlacementOptions>
+  ): Promise<WebviewPlacementResult> {
     this.#options = { ...this.#options, ...options };
     if (options.windowRect) {
       this.#windowRect = options.windowRect;
@@ -358,7 +482,9 @@ class PlacementWatch implements WebviewPlacementWatch {
     if (this.#interactionActive) {
       return this.#latest
         ? Promise.resolve(this.#latest)
-        : Promise.reject(new Error("placement watch is paused during native interaction"));
+        : Promise.reject(
+            new Error("placement watch is paused during native interaction")
+          );
     }
     return this.#requestRefresh();
   }
@@ -407,7 +533,9 @@ class PlacementWatch implements WebviewPlacementWatch {
     this.stop();
   }
 
-  async #refresh(options: { settleObservedRect: boolean }): Promise<WebviewPlacementResult> {
+  async #refresh(options: {
+    settleObservedRect: boolean;
+  }): Promise<WebviewPlacementResult> {
     const observedRect = await this.#targetBounds();
     this.#assertActive();
     // Native window bounds are the placement authority. User drag/resize owns the live bounds, so
@@ -428,7 +556,8 @@ class PlacementWatch implements WebviewPlacementWatch {
       return result;
     }
     const shouldSettle =
-      options.settleObservedRect && this.#shouldSettleObservedRect(observedRect, previousObservedRect);
+      options.settleObservedRect &&
+      this.#shouldSettleObservedRect(observedRect, previousObservedRect);
     if (shouldSettle) {
       this.#latest = result;
       this.#scheduleSettledRefresh();
@@ -436,7 +565,9 @@ class PlacementWatch implements WebviewPlacementWatch {
     }
     const currentRect = targetRect ?? this.#latest?.rect;
     if (!currentRect || !windowGeometryKit.sameRect(currentRect, result.rect)) {
-      await applyResolvedPlacement(this.target, result, currentRect, { resize: false });
+      await applyResolvedPlacement(this.target, result, currentRect, {
+        resize: false,
+      });
       this.#assertActive();
     }
     this.#latest = result;
@@ -446,8 +577,16 @@ class PlacementWatch implements WebviewPlacementWatch {
   }
 
   #subscribe(): void {
-    this.#pushUnsubscribe(this.#kit.subscribePlacementInvalidations(() => this.#requestBackgroundRefresh()));
-    this.#pushUnsubscribe(this.target.subscribePlacementInvalidation?.(() => this.#requestBackgroundRefresh()));
+    this.#pushUnsubscribe(
+      this.#kit.subscribePlacementInvalidations(() =>
+        this.#requestBackgroundRefresh()
+      )
+    );
+    this.#pushUnsubscribe(
+      this.target.subscribePlacementInvalidation?.(() =>
+        this.#requestBackgroundRefresh()
+      )
+    );
     this.#subscribeTargetEvent("moved");
     this.#subscribeTargetEvent("resized");
     this.#subscribeInteractionEvent();
@@ -458,7 +597,11 @@ class PlacementWatch implements WebviewPlacementWatch {
 
   #subscribeTargetEvent(event: "moved" | "resized"): void {
     const unlisten = this.target.listen?.(event, (payload) => {
-      this.#windowRect = mergeWindowEventRect(this.#windowRect ?? this.#latest?.rect, event, payload);
+      this.#windowRect = mergeWindowEventRect(
+        this.#windowRect ?? this.#latest?.rect,
+        event,
+        payload
+      );
       if (this.#interactionActive) {
         return;
       }
@@ -467,7 +610,9 @@ class PlacementWatch implements WebviewPlacementWatch {
     this.#trackUnlisten(unlisten);
   }
 
-  #subscribeLifecycleEvent(event: "closed" | "hidden" | "windowstatechange"): void {
+  #subscribeLifecycleEvent(
+    event: "closed" | "hidden" | "windowstatechange"
+  ): void {
     const unlisten = this.target.listen?.(event, (payload) => {
       if (shouldStopForLifecycleEvent(event, payload)) {
         this.stop();
@@ -477,21 +622,28 @@ class PlacementWatch implements WebviewPlacementWatch {
   }
 
   #subscribeInteractionEvent(): void {
-    const unlisten = this.target.listen?.("windowinteractionchange", (payload) => {
-      const active = readInteractionActive(payload);
-      if (active === null) {
-        return;
+    const unlisten = this.target.listen?.(
+      "windowinteractionchange",
+      (payload) => {
+        const active = readInteractionActive(payload);
+        if (active === null) {
+          return;
+        }
+        if (active) {
+          this.pause();
+          return;
+        }
+        this.#resumeInBackground();
       }
-      if (active) {
-        this.pause();
-        return;
-      }
-      this.#resumeInBackground();
-    });
+    );
     this.#trackUnlisten(unlisten);
   }
 
-  #trackUnlisten(unlisten: ReturnType<NonNullable<WebviewPlacementTarget["listen"]>> | undefined): void {
+  #trackUnlisten(
+    unlisten:
+      | ReturnType<NonNullable<WebviewPlacementTarget["listen"]>>
+      | undefined
+  ): void {
     if (typeof unlisten === "function") {
       this.#unsubscribers.push(unlisten);
       return;
@@ -517,14 +669,18 @@ class PlacementWatch implements WebviewPlacementWatch {
     }
   }
 
-  #requestRefresh(options: { settleObservedRect: boolean } = { settleObservedRect: true }): Promise<WebviewPlacementResult> {
+  #requestRefresh(
+    options: { settleObservedRect: boolean } = { settleObservedRect: true }
+  ): Promise<WebviewPlacementResult> {
     if (!this.#active) {
       return Promise.reject(new Error("placement watch is not active"));
     }
     if (this.#interactionActive) {
       return this.#latest
         ? Promise.resolve(this.#latest)
-        : Promise.reject(new Error("placement watch is paused during native interaction"));
+        : Promise.reject(
+            new Error("placement watch is paused during native interaction")
+          );
     }
     this.#refreshing ??= this.#refresh(options).finally(() => {
       this.#refreshing = undefined;
@@ -532,7 +688,9 @@ class PlacementWatch implements WebviewPlacementWatch {
     return this.#refreshing;
   }
 
-  #requestBackgroundRefresh(options: { settleObservedRect: boolean } = { settleObservedRect: true }): void {
+  #requestBackgroundRefresh(
+    options: { settleObservedRect: boolean } = { settleObservedRect: true }
+  ): void {
     void this.#requestRefresh(options).catch((error: unknown) => {
       if (this.#active) {
         console.error("WebviewPlacementKit background refresh failed:", error);
@@ -555,7 +713,11 @@ class PlacementWatch implements WebviewPlacementWatch {
   }
 
   #startInterval(): void {
-    if (this.#interval !== undefined || !this.#active || this.#interactionActive) {
+    if (
+      this.#interval !== undefined ||
+      !this.#active ||
+      this.#interactionActive
+    ) {
       return;
     }
     this.#interval = setInterval(() => {
@@ -586,7 +748,10 @@ class PlacementWatch implements WebviewPlacementWatch {
     }, normalizeSettleMs(this.#options.settleMs));
   }
 
-  #shouldSettleObservedRect(observedRect: Rect | undefined, previousObservedRect: Rect | undefined): boolean {
+  #shouldSettleObservedRect(
+    observedRect: Rect | undefined,
+    previousObservedRect: Rect | undefined
+  ): boolean {
     if (!observedRect || !previousObservedRect) {
       return false;
     }
@@ -597,7 +762,11 @@ class PlacementWatch implements WebviewPlacementWatch {
     if (!targetRect) {
       return this.#options;
     }
-    return { ...this.#options, width: targetRect.width, height: targetRect.height };
+    return {
+      ...this.#options,
+      width: targetRect.width,
+      height: targetRect.height,
+    };
   }
 
   async #targetBounds(): Promise<Rect | undefined> {
@@ -607,10 +776,18 @@ class PlacementWatch implements WebviewPlacementWatch {
 }
 
 const normalizeWatchInterval = (interval: number | undefined): number =>
-  Math.max(16, Math.round(finiteNumber(interval ?? DEFAULT_WATCH_INTERVAL_MS, "watchIntervalMs")));
+  Math.max(
+    16,
+    Math.round(
+      finiteNumber(interval ?? DEFAULT_WATCH_INTERVAL_MS, "watchIntervalMs")
+    )
+  );
 
 const normalizeSettleMs = (interval: number | undefined): number =>
-  Math.max(0, Math.round(finiteNumber(interval ?? DEFAULT_WATCH_SETTLE_MS, "settleMs")));
+  Math.max(
+    0,
+    Math.round(finiteNumber(interval ?? DEFAULT_WATCH_SETTLE_MS, "settleMs"))
+  );
 
 const finiteNumber = (value: number, name: string): number => {
   if (!Number.isFinite(value)) {
@@ -622,43 +799,61 @@ const finiteNumber = (value: number, name: string): number => {
 const selectScreen = (
   details: WebviewPlacementScreenDetails | undefined,
   screenId: string | undefined,
-  anchor: Rect | null,
-): WebviewPlacementScreenDetail | null => windowGeometryKit.selectScreen(details, screenId, anchor);
+  anchor: Rect | null
+): WebviewPlacementScreenDetail | null =>
+  windowGeometryKit.selectScreen(details, screenId, anchor);
 
 const resolveFromAnchor = (
   requestedPlacement: WebviewPlacement,
   anchor: Rect,
   inputs: ResolvedPlacementInputs,
-  provenance: { kind: WebviewPlacementResultKind; source: string; placement?: WebviewPlacement },
+  provenance: {
+    kind: WebviewPlacementResultKind;
+    source: string;
+    placement?: WebviewPlacement;
+  }
 ): WebviewPlacementResult => {
   const rect = rectForAnchor(anchor, requestedPlacement, inputs);
   return {
     placement: provenance.placement ?? requestedPlacement,
-    rect: inputs.viewport ? windowGeometryKit.clampRect(rect, inputs.viewport) : rect,
+    rect: inputs.viewport
+      ? windowGeometryKit.clampRect(rect, inputs.viewport)
+      : rect,
     kind: provenance.kind,
     source: provenance.source,
     anchorRect: anchor,
   };
 };
 
-const anchorForScreenPlacement = (frame: Rect, placement: WebviewPlacement): Rect => {
+const anchorForScreenPlacement = (
+  frame: Rect,
+  placement: WebviewPlacement,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): Rect => {
+  const top = visualTopY(frame, origin);
+  const bottom = visualBottomY(frame, origin);
   switch (placement) {
     case "screen-top":
-      return { x: frame.x, y: frame.y, width: frame.width, height: 0 };
+      return { x: frame.x, y: top, width: frame.width, height: 0 };
     case "screen-right":
-      return { x: frame.x + frame.width, y: frame.y, width: 0, height: frame.height };
+      return {
+        x: frame.x + frame.width,
+        y: frame.y,
+        width: 0,
+        height: frame.height,
+      };
     case "screen-bottom":
-      return { x: frame.x, y: frame.y + frame.height, width: frame.width, height: 0 };
+      return { x: frame.x, y: bottom, width: frame.width, height: 0 };
     case "screen-left":
       return { x: frame.x, y: frame.y, width: 0, height: frame.height };
     case "screen-top-left":
-      return { x: frame.x, y: frame.y, width: 0, height: 0 };
+      return { x: frame.x, y: top, width: 0, height: 0 };
     case "screen-top-right":
-      return { x: frame.x + frame.width, y: frame.y, width: 0, height: 0 };
+      return { x: frame.x + frame.width, y: top, width: 0, height: 0 };
     case "screen-bottom-left":
-      return { x: frame.x, y: frame.y + frame.height, width: 0, height: 0 };
+      return { x: frame.x, y: bottom, width: 0, height: 0 };
     case "screen-bottom-right":
-      return { x: frame.x + frame.width, y: frame.y + frame.height, width: 0, height: 0 };
+      return { x: frame.x + frame.width, y: bottom, width: 0, height: 0 };
     case "screen-center":
     case "tray":
     case "cursor":
@@ -673,29 +868,73 @@ const anchorForScreenPlacement = (frame: Rect, placement: WebviewPlacement): Rec
   }
 };
 
-const rectForAnchor = (anchor: Rect, placement: WebviewPlacement, inputs: ResolvedPlacementInputs): Rect => {
-  const { size, margin } = inputs;
+const rectForAnchor = (
+  anchor: Rect,
+  placement: WebviewPlacement,
+  inputs: ResolvedPlacementInputs
+): Rect => {
+  const { size, margin, coordinateOrigin } = inputs;
   switch (placement) {
     case "cursor":
-      return rect(anchor.x + margin, anchor.y + margin, size);
+      return rect(
+        anchor.x + margin,
+        yBelowPoint(anchor.y, size.height, margin, coordinateOrigin),
+        size
+      );
     case "screen-center":
-      return rect(anchor.x + (anchor.width - size.width) / 2, anchor.y + (anchor.height - size.height) / 2, size);
+      return rect(
+        anchor.x + (anchor.width - size.width) / 2,
+        anchor.y + (anchor.height - size.height) / 2,
+        size
+      );
     case "screen-top":
-      return rect(anchor.x + (anchor.width - size.width) / 2, anchor.y + margin, size);
+      return rect(
+        anchor.x + (anchor.width - size.width) / 2,
+        yNearTop(anchor.y, size.height, margin, coordinateOrigin),
+        size
+      );
     case "screen-right":
-      return rect(anchor.x - size.width - margin, anchor.y + (anchor.height - size.height) / 2, size);
+      return rect(
+        anchor.x - size.width - margin,
+        anchor.y + (anchor.height - size.height) / 2,
+        size
+      );
     case "screen-bottom":
-      return rect(anchor.x + (anchor.width - size.width) / 2, anchor.y - size.height - margin, size);
+      return rect(
+        anchor.x + (anchor.width - size.width) / 2,
+        yNearBottom(anchor.y, size.height, margin, coordinateOrigin),
+        size
+      );
     case "screen-left":
-      return rect(anchor.x + margin, anchor.y + (anchor.height - size.height) / 2, size);
+      return rect(
+        anchor.x + margin,
+        anchor.y + (anchor.height - size.height) / 2,
+        size
+      );
     case "screen-top-left":
-      return rect(anchor.x + margin, anchor.y + margin, size);
+      return rect(
+        anchor.x + margin,
+        yNearTop(anchor.y, size.height, margin, coordinateOrigin),
+        size
+      );
     case "screen-top-right":
-      return rect(anchor.x - size.width - margin, anchor.y + margin, size);
+      return rect(
+        anchor.x - size.width - margin,
+        yNearTop(anchor.y, size.height, margin, coordinateOrigin),
+        size
+      );
     case "screen-bottom-left":
-      return rect(anchor.x + margin, anchor.y - size.height - margin, size);
+      return rect(
+        anchor.x + margin,
+        yNearBottom(anchor.y, size.height, margin, coordinateOrigin),
+        size
+      );
     case "screen-bottom-right":
-      return rect(anchor.x - size.width - margin, anchor.y - size.height - margin, size);
+      return rect(
+        anchor.x - size.width - margin,
+        yNearBottom(anchor.y, size.height, margin, coordinateOrigin),
+        size
+      );
     case "tray":
       return rectForTrayAnchor(anchor, inputs);
     case "edge":
@@ -705,15 +944,30 @@ const rectForAnchor = (anchor: Rect, placement: WebviewPlacement, inputs: Resolv
     case "edge-right":
     case "edge-bottom":
     case "edge-left":
-      return rect(anchor.x + (anchor.width - size.width) / 2, anchor.y + anchor.height + margin, size);
+      return rect(
+        anchor.x + (anchor.width - size.width) / 2,
+        yBelowRect(anchor, size.height, margin, coordinateOrigin),
+        size
+      );
   }
 };
 
-const rectForTrayAnchor = (anchor: Rect, inputs: ResolvedPlacementInputs): Rect => {
-  const { size, margin, viewport } = inputs;
+const rectForTrayAnchor = (
+  anchor: Rect,
+  inputs: ResolvedPlacementInputs
+): Rect => {
+  const { size, margin, viewport, coordinateOrigin } = inputs;
   const centeredX = anchor.x + (anchor.width - size.width) / 2;
-  const above = rect(centeredX, anchor.y - size.height - margin, size);
-  const below = rect(centeredX, anchor.y + anchor.height + margin, size);
+  const above = rect(
+    centeredX,
+    yAboveRect(anchor, size.height, margin, coordinateOrigin),
+    size
+  );
+  const below = rect(
+    centeredX,
+    yBelowRect(anchor, size.height, margin, coordinateOrigin),
+    size
+  );
   if (!viewport) {
     return above;
   }
@@ -725,22 +979,36 @@ const rectForTrayAnchor = (anchor: Rect, inputs: ResolvedPlacementInputs): Rect 
   if (belowFits && !aboveFits) {
     return below;
   }
+  const anchorInTopHalf = isInVisualTopHalf(anchor, viewport, coordinateOrigin);
   if (aboveFits && belowFits) {
-    return windowGeometryKit.rectCenter(anchor).y < windowGeometryKit.rectCenter(viewport).y ? below : above;
+    return anchorInTopHalf ? below : above;
   }
-  return windowGeometryKit.rectCenter(anchor).y < windowGeometryKit.rectCenter(viewport).y ? below : above;
+  return anchorInTopHalf ? below : above;
 };
 
-const isEdgePlacement = (placement: WebviewPlacement): boolean => placement.startsWith("edge");
+const isEdgePlacement = (placement: WebviewPlacement): boolean =>
+  placement.startsWith("edge");
 
 const resolveEdgePlacement = (
   placement: WebviewPlacement,
   viewport: Rect,
-  inputs: ResolvedPlacementInputs,
+  inputs: ResolvedPlacementInputs
 ): WebviewPlacementResult => {
-  const edge = edgeForPlacement(placement, inputs.windowRect, viewport);
-  const anchor = anchorForEdge(viewport, edge);
-  const rect = rectForEdge(edge, viewport, inputs.windowRect, inputs.size, inputs.margin);
+  const edge = edgeForPlacement(
+    placement,
+    inputs.windowRect,
+    viewport,
+    inputs.coordinateOrigin
+  );
+  const anchor = anchorForEdge(viewport, edge, inputs.coordinateOrigin);
+  const rect = rectForEdge(
+    edge,
+    viewport,
+    inputs.windowRect,
+    inputs.size,
+    inputs.margin,
+    inputs.coordinateOrigin
+  );
   return {
     placement,
     rect: windowGeometryKit.clampRect(rect, viewport),
@@ -752,7 +1020,12 @@ const resolveEdgePlacement = (
 
 type Edge = "top" | "right" | "bottom" | "left";
 
-const edgeForPlacement = (placement: WebviewPlacement, windowRect: Rect, viewport: Rect): Edge => {
+const edgeForPlacement = (
+  placement: WebviewPlacement,
+  windowRect: Rect,
+  viewport: Rect,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): Edge => {
   switch (placement) {
     case "edge-top":
       return "top";
@@ -765,35 +1038,72 @@ const edgeForPlacement = (placement: WebviewPlacement, windowRect: Rect, viewpor
     case "edge-x":
       return nearestEdge(windowRect, viewport, ["left", "right"]);
     case "edge-y":
-      return nearestEdge(windowRect, viewport, ["top", "bottom"]);
+      return nearestEdge(windowRect, viewport, ["top", "bottom"], origin);
     case "edge":
-      return nearestEdge(windowRect, viewport, ["top", "right", "bottom", "left"]);
+      return nearestEdge(
+        windowRect,
+        viewport,
+        ["top", "right", "bottom", "left"],
+        origin
+      );
     default:
       throw new Error(`${placement} is not an edge placement`);
   }
 };
 
-const nearestEdge = (windowRect: Rect, viewport: Rect, candidates: Edge[]): Edge => {
+const nearestEdge = (
+  windowRect: Rect,
+  viewport: Rect,
+  candidates: Edge[],
+  origin: WebviewWindowGeometryCoordinateOrigin = "topLeft"
+): Edge => {
   const center = windowGeometryKit.rectCenter(windowRect);
   const distances: Record<Edge, number> = {
-    top: Math.abs(center.y - viewport.y),
+    top: Math.abs(center.y - visualTopY(viewport, origin)),
     right: Math.abs(viewport.x + viewport.width - center.x),
-    bottom: Math.abs(viewport.y + viewport.height - center.y),
+    bottom: Math.abs(visualBottomY(viewport, origin) - center.y),
     left: Math.abs(center.x - viewport.x),
   };
-  return candidates.reduce((best, edge) => (distances[edge] < distances[best] ? edge : best), candidates[0] ?? "right");
+  return candidates.reduce(
+    (best, edge) => (distances[edge] < distances[best] ? edge : best),
+    candidates[0] ?? "right"
+  );
 };
 
-const anchorForEdge = (viewport: Rect, edge: Edge): Rect => {
+const anchorForEdge = (
+  viewport: Rect,
+  edge: Edge,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): Rect => {
   switch (edge) {
     case "top":
-      return { x: viewport.x, y: viewport.y, width: viewport.width, height: 0 };
+      return {
+        x: viewport.x,
+        y: visualTopY(viewport, origin),
+        width: viewport.width,
+        height: 0,
+      };
     case "right":
-      return { x: viewport.x + viewport.width, y: viewport.y, width: 0, height: viewport.height };
+      return {
+        x: viewport.x + viewport.width,
+        y: viewport.y,
+        width: 0,
+        height: viewport.height,
+      };
     case "bottom":
-      return { x: viewport.x, y: viewport.y + viewport.height, width: viewport.width, height: 0 };
+      return {
+        x: viewport.x,
+        y: visualBottomY(viewport, origin),
+        width: viewport.width,
+        height: 0,
+      };
     case "left":
-      return { x: viewport.x, y: viewport.y, width: 0, height: viewport.height };
+      return {
+        x: viewport.x,
+        y: viewport.y,
+        width: 0,
+        height: viewport.height,
+      };
   }
 };
 
@@ -803,21 +1113,111 @@ const rectForEdge = (
   windowRect: Rect,
   size: { width: number; height: number },
   margin: number,
+  origin: WebviewWindowGeometryCoordinateOrigin
 ): Rect => {
   const center = windowGeometryKit.rectCenter(windowRect);
   switch (edge) {
     case "top":
-      return rect(center.x - size.width / 2, viewport.y + margin, size);
+      return rect(
+        center.x - size.width / 2,
+        yNearTop(visualTopY(viewport, origin), size.height, margin, origin),
+        size
+      );
     case "right":
-      return rect(viewport.x + viewport.width - size.width - margin, center.y - size.height / 2, size);
+      return rect(
+        viewport.x + viewport.width - size.width - margin,
+        center.y - size.height / 2,
+        size
+      );
     case "bottom":
-      return rect(center.x - size.width / 2, viewport.y + viewport.height - size.height - margin, size);
+      return rect(
+        center.x - size.width / 2,
+        yNearBottom(
+          visualBottomY(viewport, origin),
+          size.height,
+          margin,
+          origin
+        ),
+        size
+      );
     case "left":
       return rect(viewport.x + margin, center.y - size.height / 2, size);
   }
 };
 
-const rect = (x: number, y: number, size: { width: number; height: number }): Rect => ({
+const visualTopY = (
+  rect: Rect,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): number => (origin === "bottomLeft" ? rect.y + rect.height : rect.y);
+
+const visualBottomY = (
+  rect: Rect,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): number => (origin === "bottomLeft" ? rect.y : rect.y + rect.height);
+
+const yNearTop = (
+  visualTop: number,
+  height: number,
+  margin: number,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): number =>
+  origin === "bottomLeft" ? visualTop - height - margin : visualTop + margin;
+
+const yNearBottom = (
+  visualBottom: number,
+  height: number,
+  margin: number,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): number =>
+  origin === "bottomLeft"
+    ? visualBottom + margin
+    : visualBottom - height - margin;
+
+const yAboveRect = (
+  anchor: Rect,
+  height: number,
+  margin: number,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): number =>
+  origin === "bottomLeft"
+    ? visualTopY(anchor, origin) + margin
+    : visualTopY(anchor, origin) - height - margin;
+
+const yBelowPoint = (
+  pointY: number,
+  height: number,
+  margin: number,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): number =>
+  origin === "bottomLeft" ? pointY - height - margin : pointY + margin;
+
+const yBelowRect = (
+  anchor: Rect,
+  height: number,
+  margin: number,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): number =>
+  origin === "bottomLeft"
+    ? visualBottomY(anchor, origin) - height - margin
+    : visualBottomY(anchor, origin) + margin;
+
+const isInVisualTopHalf = (
+  anchor: Rect,
+  viewport: Rect,
+  origin: WebviewWindowGeometryCoordinateOrigin
+): boolean => {
+  const anchorCenterY = windowGeometryKit.rectCenter(anchor).y;
+  const viewportCenterY = windowGeometryKit.rectCenter(viewport).y;
+  return origin === "bottomLeft"
+    ? anchorCenterY > viewportCenterY
+    : anchorCenterY < viewportCenterY;
+};
+
+const rect = (
+  x: number,
+  y: number,
+  size: { width: number; height: number }
+): Rect => ({
   x: Math.round(x),
   y: Math.round(y),
   width: size.width,
@@ -827,16 +1227,30 @@ const rect = (x: number, y: number, size: { width: number; height: number }): Re
 const mergeWindowEventRect = (
   current: Rect | undefined,
   event: "moved" | "resized",
-  rawPayload: unknown,
+  rawPayload: unknown
 ): Rect | undefined => {
   const payload = unwrapWindowEventPayload(rawPayload);
   if (event === "moved" && hasNumber(payload, "x") && hasNumber(payload, "y")) {
     const point = windowGeometryKit.normalizePoint(payload, "moved");
-    return { x: point.x, y: point.y, width: current?.width ?? 1, height: current?.height ?? 1 };
+    return {
+      x: point.x,
+      y: point.y,
+      width: current?.width ?? 1,
+      height: current?.height ?? 1,
+    };
   }
-  if (event === "resized" && hasNumber(payload, "width") && hasNumber(payload, "height")) {
+  if (
+    event === "resized" &&
+    hasNumber(payload, "width") &&
+    hasNumber(payload, "height")
+  ) {
     const size = windowGeometryKit.normalizeSize(payload.width, payload.height);
-    return { x: current?.x ?? 0, y: current?.y ?? 0, width: size.width, height: size.height };
+    return {
+      x: current?.x ?? 0,
+      y: current?.y ?? 0,
+      width: size.width,
+      height: size.height,
+    };
   }
   return current;
 };
@@ -848,10 +1262,20 @@ const unwrapWindowEventPayload = (event: unknown): unknown => {
   return event;
 };
 
-const hasNumber = <TKey extends string>(value: unknown, key: TKey): value is Record<TKey, number> =>
-  Boolean(value && typeof value === "object" && typeof (value as Record<TKey, unknown>)[key] === "number");
+const hasNumber = <TKey extends string>(
+  value: unknown,
+  key: TKey
+): value is Record<TKey, number> =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as Record<TKey, unknown>)[key] === "number"
+  );
 
-const shouldStopForLifecycleEvent = (event: string, rawPayload: unknown): boolean => {
+const shouldStopForLifecycleEvent = (
+  event: string,
+  rawPayload: unknown
+): boolean => {
   if (event === "closed" || event === "hidden") {
     return true;
   }
@@ -864,14 +1288,21 @@ const readInteractionActive = (rawPayload: unknown): boolean | null => {
   return hasBoolean(payload, "active") ? payload.active : null;
 };
 
-const hasBoolean = <TKey extends string>(value: unknown, key: TKey): value is Record<TKey, boolean> =>
-  Boolean(value && typeof value === "object" && typeof (value as Record<TKey, unknown>)[key] === "boolean");
+const hasBoolean = <TKey extends string>(
+  value: unknown,
+  key: TKey
+): value is Record<TKey, boolean> =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as Record<TKey, unknown>)[key] === "boolean"
+  );
 
 const applyResolvedPlacement = async (
   target: WebviewPlacementTarget,
   result: WebviewPlacementResult,
   currentRect?: Rect,
-  options: { resize: boolean } = { resize: true },
+  options: { resize: boolean } = { resize: true }
 ): Promise<void> => {
   await windowGeometryKit.applyRect(target, result.rect, currentRect, options);
 };

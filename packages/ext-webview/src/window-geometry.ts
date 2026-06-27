@@ -2,6 +2,8 @@ import type { Rect } from "@opentray/spec";
 
 export const WINDOW_GEOMETRY_UNIT = "desktopLogicalPixels";
 
+export type WebviewWindowGeometryCoordinateOrigin = "topLeft" | "bottomLeft";
+
 export interface WebviewWindowGeometryPoint {
   x: number;
   y: number;
@@ -25,6 +27,7 @@ export interface WebviewWindowGeometryScreenDetails {
   currentScreen: WebviewWindowGeometryScreenDetail | null;
   screens: WebviewWindowGeometryScreenDetail[];
   isExtended?: boolean;
+  coordinateOrigin?: WebviewWindowGeometryCoordinateOrigin;
 }
 
 export interface WebviewWindowGeometryTarget {
@@ -42,7 +45,10 @@ export interface WebviewWindowGeometryApplyOptions {
 export const windowGeometryKit = {
   unit: WINDOW_GEOMETRY_UNIT,
 
-  normalizePoint(point: WebviewWindowGeometryPoint, name = "point"): WebviewWindowGeometryPoint {
+  normalizePoint(
+    point: WebviewWindowGeometryPoint,
+    name = "point"
+  ): WebviewWindowGeometryPoint {
     return {
       x: Math.round(finiteNumber(point.x, `${name}.x`)),
       y: Math.round(finiteNumber(point.y, `${name}.y`)),
@@ -61,7 +67,10 @@ export const windowGeometryKit = {
       x: Math.round(finiteNumber(rect.x, `${name}.x`)),
       y: Math.round(finiteNumber(rect.y, `${name}.y`)),
       width: Math.max(0, Math.round(finiteNumber(rect.width, `${name}.width`))),
-      height: Math.max(0, Math.round(finiteNumber(rect.height, `${name}.height`))),
+      height: Math.max(
+        0,
+        Math.round(finiteNumber(rect.height, `${name}.height`))
+      ),
     };
   },
 
@@ -75,40 +84,64 @@ export const windowGeometryKit = {
   },
 
   normalizeMargin(margin: number | undefined, fallback: number): number {
-    return Math.max(0, Math.round(finiteNumber(margin ?? fallback, "placementMargin")));
+    return Math.max(
+      0,
+      Math.round(finiteNumber(margin ?? fallback, "placementMargin"))
+    );
+  },
+
+  normalizeCoordinateOrigin(
+    origin: WebviewWindowGeometryCoordinateOrigin | undefined
+  ): WebviewWindowGeometryCoordinateOrigin {
+    return origin === "bottomLeft" ? "bottomLeft" : "topLeft";
   },
 
   normalizeScreenDetails(
-    details: WebviewWindowGeometryScreenDetails | undefined,
+    details: WebviewWindowGeometryScreenDetails | undefined
   ): WebviewWindowGeometryScreenDetails | undefined {
     if (!details) {
       return undefined;
     }
-    const screens = details.screens.map((screen) => normalizeScreenDetail(screen));
+    const screens = details.screens.map((screen) =>
+      normalizeScreenDetail(screen)
+    );
     const currentScreen = details.currentScreen
-      ? (screens.find((screen) => screen.id === details.currentScreen?.id) ?? normalizeScreenDetail(details.currentScreen))
+      ? screens.find((screen) => screen.id === details.currentScreen?.id) ??
+        normalizeScreenDetail(details.currentScreen)
       : null;
     return {
       currentScreen,
       screens,
-      ...(details.isExtended === undefined ? {} : { isExtended: details.isExtended }),
+      ...(details.isExtended === undefined
+        ? {}
+        : { isExtended: details.isExtended }),
+      coordinateOrigin: this.normalizeCoordinateOrigin(
+        details.coordinateOrigin
+      ),
     };
   },
 
   selectScreen(
     details: WebviewWindowGeometryScreenDetails | undefined,
     screenId: string | undefined,
-    anchor: Rect | null,
+    anchor: Rect | null
   ): WebviewWindowGeometryScreenDetail | null {
     if (!details || details.screens.length === 0) {
       return null;
     }
     if (screenId) {
-      return details.screens.find((screen) => screen.id === screenId) ?? details.currentScreen ?? details.screens[0] ?? null;
+      return (
+        details.screens.find((screen) => screen.id === screenId) ??
+        details.currentScreen ??
+        details.screens[0] ??
+        null
+      );
     }
     if (anchor) {
       const point = this.rectCenter(anchor);
-      const containing = details.screens.find((screen) => this.containsPoint(screen.visibleFrame, point));
+      const containing = details.screens.find((screen) =>
+        this.containsPoint(screen.visibleFrame, point)
+      );
       if (containing) {
         return containing;
       }
@@ -143,7 +176,10 @@ export const windowGeometryKit = {
 
   clampRect(candidate: Rect, bounds: Rect): Rect {
     const maxX = Math.max(bounds.x, bounds.x + bounds.width - candidate.width);
-    const maxY = Math.max(bounds.y, bounds.y + bounds.height - candidate.height);
+    const maxY = Math.max(
+      bounds.y,
+      bounds.y + bounds.height - candidate.height
+    );
     return {
       x: Math.min(Math.max(candidate.x, bounds.x), maxX),
       y: Math.min(Math.max(candidate.y, bounds.y), maxY),
@@ -168,7 +204,7 @@ export const windowGeometryKit = {
     target: WebviewWindowGeometryTarget,
     rect: Rect,
     currentRect?: Rect,
-    options: WebviewWindowGeometryApplyOptions = {},
+    options: WebviewWindowGeometryApplyOptions = {}
   ): Promise<void> {
     const shouldResize = options.resize ?? true;
     if (shouldResize && (!currentRect || !this.sameSize(currentRect, rect))) {
@@ -180,13 +216,25 @@ export const windowGeometryKit = {
   },
 };
 
-const normalizeScreenDetail = (screen: WebviewWindowGeometryScreenDetail): WebviewWindowGeometryScreenDetail => ({
+const normalizeScreenDetail = (
+  screen: WebviewWindowGeometryScreenDetail
+): WebviewWindowGeometryScreenDetail => ({
   id: screen.id,
   ...(screen.label === undefined ? {} : { label: screen.label }),
   ...(screen.isPrimary === undefined ? {} : { isPrimary: screen.isPrimary }),
   frame: windowGeometryKit.normalizeRect(screen.frame, `${screen.id}.frame`),
-  visibleFrame: windowGeometryKit.normalizeRect(screen.visibleFrame, `${screen.id}.visibleFrame`),
-  ...(screen.scaleFactor === undefined ? {} : { scaleFactor: finiteNumber(screen.scaleFactor, `${screen.id}.scaleFactor`) }),
+  visibleFrame: windowGeometryKit.normalizeRect(
+    screen.visibleFrame,
+    `${screen.id}.visibleFrame`
+  ),
+  ...(screen.scaleFactor === undefined
+    ? {}
+    : {
+        scaleFactor: finiteNumber(
+          screen.scaleFactor,
+          `${screen.id}.scaleFactor`
+        ),
+      }),
 });
 
 const finiteNumber = (value: number, name: string): number => {

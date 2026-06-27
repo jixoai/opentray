@@ -24,6 +24,7 @@ struct ScreenDetailsState {
     current_screen: Option<ScreenDetailState>,
     screens: Vec<ScreenDetailState>,
     is_extended: bool,
+    coordinate_origin: &'static str,
 }
 
 pub(super) fn screen_details_json(
@@ -82,6 +83,7 @@ fn build_screen_details(
         current_screen,
         is_extended: screens.len() > 1,
         screens,
+        coordinate_origin: "bottomLeft",
     })
 }
 

@@ -1,17 +1,29 @@
-import type { WebviewPlacement, WebviewWindowStylePatch } from "../../ext-webview/src/index";
+import type {
+  WebviewPlacement,
+  WebviewWindowStylePatch,
+} from "../../ext-webview/src/index";
 
-export function createPlacementStyle(platform: NodeJS.Platform): WebviewWindowStylePatch {
+export function createPlacementStyle(
+  platform: NodeJS.Platform
+): WebviewWindowStylePatch {
   return {
     frameless: true,
     keepOnTop: true,
     background: { kind: "semantic", token: "blur", state: "active" },
-    platform: platform === "win32" ? { windows: { cornerPreference: "round" } } : {},
+    platform:
+      platform === "win32" ? { windows: { cornerPreference: "round" } } : {},
   };
 }
 
-export function createPlacementHtml(placements: readonly WebviewPlacement[]): string {
-  const watchButtons = placements.map((placement) => placementButton("watch", placement)).join("");
-  const onceButtons = placements.map((placement) => placementButton("once", placement)).join("");
+export function createPlacementHtml(
+  placements: readonly WebviewPlacement[]
+): string {
+  const watchButtons = placements
+    .map((placement) => placementButton("watch", placement))
+    .join("");
+  const onceButtons = placements
+    .map((placement) => placementButton("once", placement))
+    .join("");
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -174,7 +186,6 @@ export function createPlacementHtml(placements: readonly WebviewPlacement[]): st
 
       dragRegion?.addEventListener("pointerdown", (event) => {
         if (event.button !== 0 || event.target.closest("button") || !pageWindow?.startAppRegionDrag) return;
-        void sendHostIntent({ type: "windowInteraction", active: true });
         void pageWindow.startAppRegionDrag({ pointerId: event.pointerId }).catch(() => {
           void sendHostIntent({ type: "windowInteraction", active: false });
         });
@@ -206,6 +217,9 @@ export function createPlacementHtml(placements: readonly WebviewPlacement[]): st
 </html>`;
 }
 
-function placementButton(action: "watch" | "once", placement: WebviewPlacement): string {
+function placementButton(
+  action: "watch" | "once",
+  placement: WebviewPlacement
+): string {
   return `<button data-action="${action}" data-placement="${placement}">${placement}</button>`;
 }

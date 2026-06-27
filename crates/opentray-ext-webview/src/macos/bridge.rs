@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use crate::{WebviewRuntimeError, WebviewWindowIcon};
 
 use super::{
+    drag::queue_window_interaction_message,
     metadata::{
         icon_json, update_window_icon, update_window_title, MetadataSource, PageIconChangedPayload,
     },
@@ -375,8 +376,20 @@ fn dispatch_navigator_window_command(
             }
             titlebar_area_rect_json(bridge, window)
         }
-        "startAppRegionDrag" => bridge.borrow_mut().app_region_drag.start(window),
-        "stopAppRegionDrag" => Ok(bridge.borrow_mut().app_region_drag.stop()),
+        "startAppRegionDrag" => {
+            let weak_bridge = Rc::downgrade(bridge);
+            let response = bridge
+                .borrow_mut()
+                .app_region_drag
+                .start(window, weak_bridge.clone())?;
+            queue_window_interaction_message(&weak_bridge, true);
+            Ok(response)
+        }
+        "stopAppRegionDrag" => {
+            let response = bridge.borrow_mut().app_region_drag.stop();
+            queue_window_interaction_message(&Rc::downgrade(bridge), false);
+            Ok(response)
+        }
         "getCapabilities" => bridge.borrow().capabilities_json(),
         "getTitle" => Ok(Value::String(bridge.borrow().metadata.title.clone())),
         "setTitle" => {

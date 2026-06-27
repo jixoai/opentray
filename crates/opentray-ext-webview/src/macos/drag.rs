@@ -1,4 +1,8 @@
-use std::{cell::Cell, ptr::NonNull, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    ptr::NonNull,
+    rc::{Rc, Weak},
+};
 
 use block2::RcBlock;
 use objc2::{rc::Retained, runtime::AnyObject};
@@ -6,6 +10,8 @@ use objc2_app_kit::{NSEvent, NSEventMask, NSEventType, NSWindow};
 use serde_json::{json, Value};
 
 use crate::WebviewRuntimeError;
+
+use super::NavigatorWindowBridge;
 
 #[derive(Clone)]
 pub(super) struct AppRegionDragState {
@@ -28,11 +34,12 @@ impl AppRegionDragState {
     pub(super) fn start(
         &mut self,
         window: &Retained<NSWindow>,
+        bridge: Weak<RefCell<NavigatorWindowBridge>>,
     ) -> Result<Value, WebviewRuntimeError> {
-        self.active.set(true);
         if self.monitor.is_none() {
-            self.install_monitor(window)?;
+            self.install_monitor(window, bridge.clone())?;
         }
+        self.active.set(true);
         Ok(json!({ "active": true }))
     }
 
@@ -45,7 +52,11 @@ impl AppRegionDragState {
         json!({ "active": false })
     }
 
-    fn install_monitor(&mut self, window: &Retained<NSWindow>) -> Result<(), WebviewRuntimeError> {
+    fn install_monitor(
+        &mut self,
+        window: &Retained<NSWindow>,
+        bridge: Weak<RefCell<NavigatorWindowBridge>>,
+    ) -> Result<(), WebviewRuntimeError> {
         let active = Rc::clone(&self.active);
         let window = window.clone();
         let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
@@ -58,10 +69,13 @@ impl AppRegionDragState {
                 NSEventType::LeftMouseDragged => {
                     active.set(false);
                     perform_native_window_drag(&window, event_ref);
+                    queue_window_interaction_message(&bridge, false);
                     std::ptr::null_mut()
                 }
                 NSEventType::LeftMouseUp => {
-                    active.set(false);
+                    if active.replace(false) {
+                        queue_window_interaction_message(&bridge, false);
+                    }
                     event.as_ptr()
                 }
                 _ => event.as_ptr(),
@@ -79,6 +93,23 @@ impl AppRegionDragState {
         self.monitor_block = Some(block);
         Ok(())
     }
+}
+
+pub(super) fn queue_window_interaction_message(
+    bridge: &Weak<RefCell<NavigatorWindowBridge>>,
+    active: bool,
+) {
+    let Some(bridge) = bridge.upgrade() else {
+        return;
+    };
+    let mut state = bridge.borrow_mut();
+    let id = state.next_ipc_message_id;
+    state.next_ipc_message_id = state.next_ipc_message_id.saturating_add(1).max(1);
+    state.ipc_messages.push_back(json!({
+        "id": id,
+        "source": "native",
+        "payload": { "type": "windowInteraction", "active": active }
+    }));
 }
 
 fn perform_native_window_drag(window: &Retained<NSWindow>, event: &NSEvent) {

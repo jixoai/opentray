@@ -1,8 +1,19 @@
-import type { ExtensionEnvelope, Icon, Rect, TrayBoundsResult } from "@opentray/spec";
+import type {
+  ExtensionEnvelope,
+  Icon,
+  Rect,
+  TrayBoundsResult,
+} from "@opentray/spec";
 import type { TrayExtension, TrayExtensionContext, TrayHandle } from "opentray";
 
 export type WebviewWindowIcon = Icon | { type: "href"; href: string };
-export type WebviewNativeApiSource = "*" | "'none'" | "'local'" | "'remote'" | `http://${string}` | `https://${string}`;
+export type WebviewNativeApiSource =
+  | "*"
+  | "'none'"
+  | "'local'"
+  | "'remote'"
+  | `http://${string}`
+  | `https://${string}`;
 
 export interface WebviewNativeApiPolicy {
   defaultSrc?: WebviewNativeApiSource[];
@@ -31,7 +42,9 @@ export interface WebviewShowCommand {
   title?: string;
   icon?: WebviewWindowIcon;
   style?: WebviewWindowStylePatch;
-  titleSync?: boolean | { documentToWindow?: boolean; windowToDocument?: boolean };
+  titleSync?:
+    | boolean
+    | { documentToWindow?: boolean; windowToDocument?: boolean };
   iconSync?: boolean | { faviconToWindow?: boolean; windowToFavicon?: boolean };
   nativeApiPolicy?: WebviewNativeApiPolicy;
 }
@@ -44,7 +57,10 @@ export interface WebviewSetContentCommand {
   url?: string;
 }
 
-export type WebviewBackgroundEffectState = "followsWindowActiveState" | "active" | "inactive";
+export type WebviewBackgroundEffectState =
+  | "followsWindowActiveState"
+  | "active"
+  | "inactive";
 
 export type WebviewBackgroundKeyword =
   | "default"
@@ -65,10 +81,16 @@ export type WebviewBackgroundKeyword =
 export type WebviewWindowBackground =
   | { kind: "opaque" }
   | { kind: "transparent" }
-  | { kind: "platformMaterial"; material: string; state?: WebviewBackgroundEffectState }
+  | {
+      kind: "platformMaterial";
+      material: string;
+      state?: WebviewBackgroundEffectState;
+    }
   | { kind: "semantic"; token: "blur"; state?: WebviewBackgroundEffectState };
 
-export type WebviewWindowBackgroundInput = WebviewBackgroundKeyword | WebviewWindowBackground;
+export type WebviewWindowBackgroundInput =
+  | WebviewBackgroundKeyword
+  | WebviewWindowBackground;
 
 export interface WebviewBackgroundOptions {
   state?: WebviewBackgroundEffectState;
@@ -78,7 +100,11 @@ export interface WebviewMacosWindowStyle {
   cornerRadius: number | null;
 }
 
-export type WebviewWindowsCornerPreference = "default" | "doNotRound" | "round" | "roundSmall";
+export type WebviewWindowsCornerPreference =
+  | "default"
+  | "doNotRound"
+  | "round"
+  | "roundSmall";
 
 export interface WebviewWindowsWindowStyle {
   cornerPreference: WebviewWindowsCornerPreference | null;
@@ -224,19 +250,29 @@ export interface WebviewWindowOverlay {
   getTitlebarAreaRect(): Promise<Rect>;
   listen(
     event: "geometrychange",
-    handler: (event: WebviewWindowOverlayGeometry) => void,
+    handler: (event: WebviewWindowOverlayGeometry) => void
   ): Promise<() => Promise<void>>;
   once(
     event: "geometrychange",
-    handler: (event: WebviewWindowOverlayGeometry) => void,
+    handler: (event: WebviewWindowOverlayGeometry) => void
   ): Promise<() => Promise<void>>;
-  addEventListener(event: "geometrychange", handler: (event: WebviewWindowOverlayGeometry) => void): void;
-  removeEventListener(event: "geometrychange", handler: (event: WebviewWindowOverlayGeometry) => void): void;
+  addEventListener(
+    event: "geometrychange",
+    handler: (event: WebviewWindowOverlayGeometry) => void
+  ): void;
+  removeEventListener(
+    event: "geometrychange",
+    handler: (event: WebviewWindowOverlayGeometry) => void
+  ): void;
 }
 
 export interface WebviewNavigatorWindow {
   readonly overlay?: WebviewWindowOverlay;
-  invoke<TResponse = unknown>(cmd: string, payload?: unknown, options?: unknown): Promise<TResponse>;
+  invoke<TResponse = unknown>(
+    cmd: string,
+    payload?: unknown,
+    options?: unknown
+  ): Promise<TResponse>;
   close(): Promise<void>;
   show(): Promise<WebviewWindowState>;
   hide(): Promise<WebviewWindowState>;
@@ -247,21 +283,34 @@ export interface WebviewNavigatorWindow {
   isMaximized(): Promise<boolean>;
   isMinimized(): Promise<boolean>;
   moveTo(x: number, y: number): Promise<{ x: number; y: number }>;
-  resizeTo(width: number, height: number): Promise<{ width: number; height: number }>;
+  resizeTo(
+    width: number,
+    height: number
+  ): Promise<{ width: number; height: number }>;
   getBounds(): Promise<Rect>;
   setMinimumWidth(width: WebviewWindowSizeConstraintValue): Promise<void>;
   setMinimumHeight(height: WebviewWindowSizeConstraintValue): Promise<void>;
-  setMinimumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMinimumSize(
+    width?: WebviewWindowSizeConstraintValue,
+    height?: WebviewWindowSizeConstraintValue
+  ): Promise<void>;
   setMaximumWidth(width: WebviewWindowSizeConstraintValue): Promise<void>;
   setMaximumHeight(height: WebviewWindowSizeConstraintValue): Promise<void>;
-  setMaximumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<void>;
-  startAppRegionDrag(options?: { x?: number; y?: number; pointerId?: number }): Promise<{ active: boolean }>;
+  setMaximumSize(
+    width?: WebviewWindowSizeConstraintValue,
+    height?: WebviewWindowSizeConstraintValue
+  ): Promise<void>;
+  startAppRegionDrag(options?: {
+    x?: number;
+    y?: number;
+    pointerId?: number;
+  }): Promise<{ active: boolean }>;
   stopAppRegionDrag(): Promise<{ active: boolean }>;
   getStyle(): Promise<WebviewWindowStyle>;
   setStyle(style: WebviewWindowStylePatch): Promise<WebviewWindowStyle>;
   setBackground(
     background: WebviewWindowBackgroundInput,
-    options?: WebviewBackgroundOptions,
+    options?: WebviewBackgroundOptions
   ): Promise<WebviewWindowStyle>;
   getCapabilities(): Promise<WebviewWindowCapabilities>;
   getTitle(): Promise<string>;
@@ -270,35 +319,35 @@ export interface WebviewNavigatorWindow {
   setIcon(icon: WebviewWindowIcon | null): Promise<WebviewWindowIcon | null>;
   listen<TEvent extends keyof WebviewWindowEventMap>(
     event: TEvent,
-    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void,
+    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void
   ): Promise<() => Promise<void>>;
   listen<TPayload = unknown>(
     event: string,
-    handler: (event: WebviewWindowEvent<TPayload>) => void,
+    handler: (event: WebviewWindowEvent<TPayload>) => void
   ): Promise<() => Promise<void>>;
   once<TEvent extends keyof WebviewWindowEventMap>(
     event: TEvent,
-    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void,
+    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void
   ): Promise<() => Promise<void>>;
   once<TPayload = unknown>(
     event: string,
-    handler: (event: WebviewWindowEvent<TPayload>) => void,
+    handler: (event: WebviewWindowEvent<TPayload>) => void
   ): Promise<() => Promise<void>>;
   addEventListener<TEvent extends keyof WebviewWindowEventMap>(
     event: TEvent,
-    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void,
+    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void
   ): void;
   addEventListener<TPayload = unknown>(
     event: string,
-    handler: (event: WebviewWindowEvent<TPayload>) => void,
+    handler: (event: WebviewWindowEvent<TPayload>) => void
   ): void;
   removeEventListener<TEvent extends keyof WebviewWindowEventMap>(
     event: TEvent,
-    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void,
+    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void
   ): void;
   removeEventListener<TPayload = unknown>(
     event: string,
-    handler: (event: WebviewWindowEvent<TPayload>) => void,
+    handler: (event: WebviewWindowEvent<TPayload>) => void
   ): void;
 }
 
@@ -315,6 +364,7 @@ export interface WebviewScreenDetails {
   currentScreen: WebviewScreenDetail | null;
   screens: WebviewScreenDetail[];
   isExtended: boolean;
+  coordinateOrigin?: "topLeft" | "bottomLeft";
 }
 
 export interface WebviewNavigatorScreen {
@@ -351,8 +401,16 @@ export type WebviewCommand =
   | { type: "getScreenDetails" }
   | { type: "drainIpcMessages" }
   | { type: "setStyle"; style: WebviewWindowStylePatch }
-  | { type: "setMinimumSize"; width?: WebviewWindowSizeConstraintValue; height?: WebviewWindowSizeConstraintValue }
-  | { type: "setMaximumSize"; width?: WebviewWindowSizeConstraintValue; height?: WebviewWindowSizeConstraintValue };
+  | {
+      type: "setMinimumSize";
+      width?: WebviewWindowSizeConstraintValue;
+      height?: WebviewWindowSizeConstraintValue;
+    }
+  | {
+      type: "setMaximumSize";
+      width?: WebviewWindowSizeConstraintValue;
+      height?: WebviewWindowSizeConstraintValue;
+    };
 
 export type WebviewEvent =
   | { type: "shown" }
@@ -373,7 +431,9 @@ export interface WebviewHandle {
   show(command: Extract<WebviewCommand, { type: "show" }>): Promise<void>;
   hide(): Promise<void>;
   destroy(): Promise<void>;
-  setContent(command: Extract<WebviewCommand, { type: "setContent" }>): Promise<void>;
+  setContent(
+    command: Extract<WebviewCommand, { type: "setContent" }>
+  ): Promise<void>;
   navigate(url: string): Promise<void>;
   evaluate(js: string): Promise<void>;
   postMessage(payload: unknown): Promise<void>;
@@ -388,21 +448,32 @@ export interface WebviewWindowHandle {
   getBounds(): Promise<Rect>;
   setMinimumWidth(width: WebviewWindowSizeConstraintValue): Promise<void>;
   setMinimumHeight(height: WebviewWindowSizeConstraintValue): Promise<void>;
-  setMinimumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMinimumSize(
+    width?: WebviewWindowSizeConstraintValue,
+    height?: WebviewWindowSizeConstraintValue
+  ): Promise<void>;
   setMaximumWidth(width: WebviewWindowSizeConstraintValue): Promise<void>;
   setMaximumHeight(height: WebviewWindowSizeConstraintValue): Promise<void>;
-  setMaximumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<void>;
+  setMaximumSize(
+    width?: WebviewWindowSizeConstraintValue,
+    height?: WebviewWindowSizeConstraintValue
+  ): Promise<void>;
   setStyle(style: WebviewWindowStylePatch): Promise<WebviewWindowStyle>;
   setBackground(
     background: WebviewWindowBackgroundInput,
-    options?: WebviewBackgroundOptions,
+    options?: WebviewBackgroundOptions
   ): Promise<WebviewWindowStyle>;
   listen<TEvent extends keyof WebviewWindowEventMap>(
     event: TEvent,
-    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void,
+    handler: (event: WebviewWindowEvent<WebviewWindowEventMap[TEvent]>) => void
   ): () => void;
-  listen<TPayload = unknown>(event: string, handler: (event: WebviewWindowEvent<TPayload>) => void): () => void;
-  setContent(command: Extract<WebviewCommand, { type: "setContent" }>): Promise<void>;
+  listen<TPayload = unknown>(
+    event: string,
+    handler: (event: WebviewWindowEvent<TPayload>) => void
+  ): () => void;
+  setContent(
+    command: Extract<WebviewCommand, { type: "setContent" }>
+  ): Promise<void>;
   navigate(url: string): Promise<void>;
   evaluate(js: string): Promise<void>;
   postMessage(payload: unknown): Promise<void>;
@@ -428,7 +499,7 @@ export class WebviewExtensionLoadError extends Error {
 
   constructor(context: TrayExtensionContext, cause: unknown) {
     super(
-      `WebView extension "${context.name}" could not be loaded for mount "${context.mountId}". Official @opentray/ext-webview native packages are published for macOS and Windows; Linux is unsupported for this extension. Provide a resolvable extension path only when testing a custom native runtime.`,
+      `WebView extension "${context.name}" could not be loaded for mount "${context.mountId}". Official @opentray/ext-webview native packages are published for macOS and Windows; Linux is unsupported for this extension. Provide a resolvable extension path only when testing a custom native runtime.`
     );
     this.name = "WebviewExtensionLoadError";
     this.extensionName = context.name;
@@ -453,7 +524,9 @@ export const WebviewExt = {
     const endpoint = createWebviewEndpoint(tray, context);
     return {
       getScreenDetails() {
-        return endpoint.command<WebviewScreenDetails>({ type: "getScreenDetails" } satisfies WebviewCommand);
+        return endpoint.command<WebviewScreenDetails>({
+          type: "getScreenDetails",
+        } satisfies WebviewCommand);
       },
       createWebviewWindow(options) {
         return createWebviewWindowHandle(endpoint, options);
@@ -465,7 +538,10 @@ export const WebviewExt = {
   },
 } satisfies TrayExtension<WebviewTrayCapability, WebviewExtensionOptions>;
 
-export const attachWebview = (tray: TrayHandle, options?: WebviewExtensionOptions): WebviewHandle => {
+export const attachWebview = (
+  tray: TrayHandle,
+  options?: WebviewExtensionOptions
+): WebviewHandle => {
   return tray
     .extend(WebviewExt, {
       ...options,
@@ -476,17 +552,23 @@ export const attachWebview = (tray: TrayHandle, options?: WebviewExtensionOption
 
 interface WebviewEndpoint {
   command<TResult = unknown>(command: WebviewCommand): Promise<TResult>;
-  listen<TPayload = unknown>(event: string, handler: (event: WebviewWindowEvent<TPayload>) => void): () => void;
+  listen<TPayload = unknown>(
+    event: string,
+    handler: (event: WebviewWindowEvent<TPayload>) => void
+  ): () => void;
 }
 
 type ExtensionEventSourceTray = TrayHandle & {
   listenExtension<TData = unknown>(
     ext: string,
-    handler: (event: ExtensionEnvelope<TData>) => void,
+    handler: (event: ExtensionEnvelope<TData>) => void
   ): () => void;
 };
 
-const createWebviewEndpoint = (tray: TrayHandle, context: TrayExtensionContext): WebviewEndpoint => ({
+const createWebviewEndpoint = (
+  tray: TrayHandle,
+  context: TrayExtensionContext
+): WebviewEndpoint => ({
   async command<TResult = unknown>(command: WebviewCommand): Promise<TResult> {
     try {
       await context.ensureLoaded();
@@ -496,7 +578,10 @@ const createWebviewEndpoint = (tray: TrayHandle, context: TrayExtensionContext):
     const events = await context.request(command);
     return events[0]?.data as TResult;
   },
-  listen<TPayload = unknown>(event: string, handler: (event: WebviewWindowEvent<TPayload>) => void): () => void {
+  listen<TPayload = unknown>(
+    event: string,
+    handler: (event: WebviewWindowEvent<TPayload>) => void
+  ): () => void {
     if (!isExtensionEventSourceTray(tray)) {
       return () => {};
     }
@@ -530,19 +615,28 @@ const createLegacyWebviewHandle = (endpoint: {
     return endpoint.command<void>(command);
   },
   navigate(url) {
-    return endpoint.command<void>({ type: "navigate", url } satisfies WebviewCommand);
+    return endpoint.command<void>({
+      type: "navigate",
+      url,
+    } satisfies WebviewCommand);
   },
   evaluate(js) {
-    return endpoint.command<void>({ type: "evaluate", js } satisfies WebviewCommand);
+    return endpoint.command<void>({
+      type: "evaluate",
+      js,
+    } satisfies WebviewCommand);
   },
   postMessage(payload) {
-    return endpoint.command<void>({ type: "postMessage", payload } satisfies WebviewCommand);
+    return endpoint.command<void>({
+      type: "postMessage",
+      payload,
+    } satisfies WebviewCommand);
   },
 });
 
 const createWebviewWindowHandle = (
   endpoint: WebviewEndpoint,
-  options: WebviewWindowOptions,
+  options: WebviewWindowOptions
 ): WebviewWindowHandle => {
   let bootstrapped = false;
   return {
@@ -559,62 +653,109 @@ const createWebviewWindowHandle = (
       return endpoint.command<void>({ type: "hide" } satisfies WebviewCommand);
     },
     async destroy() {
-      await endpoint.command<void>({ type: "destroy" } satisfies WebviewCommand);
+      await endpoint.command<void>({
+        type: "destroy",
+      } satisfies WebviewCommand);
       bootstrapped = false;
     },
     moveTo(x, y) {
-      return endpoint.command<void>({ type: "moveTo", x, y } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "moveTo",
+        x,
+        y,
+      } satisfies WebviewCommand);
     },
     resizeTo(width, height) {
-      return endpoint.command<void>({ type: "resizeTo", width, height } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "resizeTo",
+        width,
+        height,
+      } satisfies WebviewCommand);
     },
     getBounds() {
-      return endpoint.command<Rect>({ type: "getBounds" } satisfies WebviewCommand);
+      return endpoint.command<Rect>({
+        type: "getBounds",
+      } satisfies WebviewCommand);
     },
     setMinimumWidth(width) {
-      return endpoint.command<void>({ type: "setMinimumSize", width } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "setMinimumSize",
+        width,
+      } satisfies WebviewCommand);
     },
     setMinimumHeight(height) {
-      return endpoint.command<void>({ type: "setMinimumSize", height } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "setMinimumSize",
+        height,
+      } satisfies WebviewCommand);
     },
     setMinimumSize(width, height) {
-      return endpoint.command<void>(createSizeConstraintCommand("setMinimumSize", width, height));
+      return endpoint.command<void>(
+        createSizeConstraintCommand("setMinimumSize", width, height)
+      );
     },
     setMaximumWidth(width) {
-      return endpoint.command<void>({ type: "setMaximumSize", width } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "setMaximumSize",
+        width,
+      } satisfies WebviewCommand);
     },
     setMaximumHeight(height) {
-      return endpoint.command<void>({ type: "setMaximumSize", height } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "setMaximumSize",
+        height,
+      } satisfies WebviewCommand);
     },
     setMaximumSize(width, height) {
-      return endpoint.command<void>(createSizeConstraintCommand("setMaximumSize", width, height));
+      return endpoint.command<void>(
+        createSizeConstraintCommand("setMaximumSize", width, height)
+      );
     },
     setStyle(style) {
-      return endpoint.command<WebviewWindowStyle>({ type: "setStyle", style } satisfies WebviewCommand);
+      return endpoint.command<WebviewWindowStyle>({
+        type: "setStyle",
+        style,
+      } satisfies WebviewCommand);
     },
     setBackground(background, backgroundOptions) {
       return endpoint.command<WebviewWindowStyle>({
         type: "setStyle",
-        style: { background: backgroundInputWithOptions(background, backgroundOptions) },
+        style: {
+          background: backgroundInputWithOptions(background, backgroundOptions),
+        },
       } satisfies WebviewCommand);
     },
-    listen<TPayload = unknown>(event: string, handler: (event: WebviewWindowEvent<TPayload>) => void): () => void {
+    listen<TPayload = unknown>(
+      event: string,
+      handler: (event: WebviewWindowEvent<TPayload>) => void
+    ): () => void {
       return endpoint.listen(event, handler);
     },
     setContent(command) {
       return endpoint.command<void>(command);
     },
     navigate(url) {
-      return endpoint.command<void>({ type: "navigate", url } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "navigate",
+        url,
+      } satisfies WebviewCommand);
     },
     evaluate(js) {
-      return endpoint.command<void>({ type: "evaluate", js } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "evaluate",
+        js,
+      } satisfies WebviewCommand);
     },
     postMessage(payload) {
-      return endpoint.command<void>({ type: "postMessage", payload } satisfies WebviewCommand);
+      return endpoint.command<void>({
+        type: "postMessage",
+        payload,
+      } satisfies WebviewCommand);
     },
     async drainIpcMessages() {
-      const response = await endpoint.command<Extract<WebviewEvent, { type: "ipcMessages" }>>({
+      const response = await endpoint.command<
+        Extract<WebviewEvent, { type: "ipcMessages" }>
+      >({
         type: "drainIpcMessages",
       } satisfies WebviewCommand);
       return response.messages;
@@ -622,7 +763,9 @@ const createWebviewWindowHandle = (
   };
 };
 
-const isExtensionEventSourceTray = (tray: TrayHandle): tray is ExtensionEventSourceTray =>
+const isExtensionEventSourceTray = (
+  tray: TrayHandle
+): tray is ExtensionEventSourceTray =>
   "listenExtension" in tray && typeof tray.listenExtension === "function";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -639,7 +782,7 @@ const eventPayload = (data: Record<string, unknown>): unknown => {
 const createSizeConstraintCommand = (
   type: "setMinimumSize" | "setMaximumSize",
   width: WebviewWindowSizeConstraintValue | undefined,
-  height: WebviewWindowSizeConstraintValue | undefined,
+  height: WebviewWindowSizeConstraintValue | undefined
 ): Extract<WebviewCommand, { type: "setMinimumSize" | "setMaximumSize" }> => ({
   type,
   ...(width === undefined ? {} : { width }),
@@ -648,7 +791,7 @@ const createSizeConstraintCommand = (
 
 const backgroundInputWithOptions = (
   background: WebviewWindowBackgroundInput,
-  options: WebviewBackgroundOptions | undefined,
+  options: WebviewBackgroundOptions | undefined
 ): WebviewWindowBackgroundInput => {
   if (options?.state === undefined || typeof background !== "string") {
     return background;
@@ -656,13 +799,24 @@ const backgroundInputWithOptions = (
   if (background === "blur") {
     return { kind: "semantic", token: "blur", state: options.state };
   }
-  if (background === "mica" || background === "acrylic" || background === "tabbed" || background === "auto") {
-    return { kind: "platformMaterial", material: background, state: options.state };
+  if (
+    background === "mica" ||
+    background === "acrylic" ||
+    background === "tabbed" ||
+    background === "auto"
+  ) {
+    return {
+      kind: "platformMaterial",
+      material: background,
+      state: options.state,
+    };
   }
   return background;
 };
 
-export const isWebviewEvent = (event: ExtensionEnvelope): event is ExtensionEnvelope<WebviewEvent> =>
+export const isWebviewEvent = (
+  event: ExtensionEnvelope
+): event is ExtensionEnvelope<WebviewEvent> =>
   event.scope.ext === "webview" &&
   typeof event.data === "object" &&
   event.data !== null &&
@@ -688,6 +842,7 @@ export {
   WINDOW_GEOMETRY_UNIT,
   windowGeometryKit,
   type WebviewWindowGeometryApplyOptions,
+  type WebviewWindowGeometryCoordinateOrigin,
   type WebviewWindowGeometryPoint,
   type WebviewWindowGeometryScreenDetail,
   type WebviewWindowGeometryScreenDetails,

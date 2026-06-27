@@ -428,6 +428,7 @@ struct ScreenDetailsState {
     current_screen: Option<ScreenDetailState>,
     screens: Vec<ScreenDetailState>,
     is_extended: bool,
+    coordinate_origin: &'static str,
 }
 
 impl WindowsWebviewRuntime {
@@ -3240,6 +3241,7 @@ fn screen_details(hwnd: HWND) -> ScreenDetailsState {
         current_screen: current_screen.clone(),
         screens: current_screen.into_iter().collect(),
         is_extended: false,
+        coordinate_origin: "topLeft",
     }
 }
 

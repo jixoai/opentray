@@ -2,6 +2,7 @@ use super::bridge::{
     callback_script, error_callback_script, exec_page_command, parse_set_icon_payload,
     NavigatorWindowRequest,
 };
+use super::drag::queue_window_interaction_message;
 use super::style::{
     validate_style_request, MacosWindowStyleState, SetStyleMacosPayload, SetStylePayload,
     SetStylePlatformPayload, SetStyleWindowsPayload, WindowPlatformStyleState,
@@ -1236,6 +1237,60 @@ fn navigator_window_bridge_tracks_listener_ids() {
     bridge.remove_listener("resized", event_id);
     assert!(bridge.listeners_for("resized").is_empty());
     assert!(!bridge.has_listener("resized"));
+}
+
+#[test]
+fn app_region_drag_interaction_ipc_conserves_native_source() {
+    let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
+        webview: None,
+        content_view: None,
+        listeners: HashMap::new(),
+        ipc_messages: VecDeque::new(),
+        next_event_id: 1,
+        next_ipc_message_id: 1,
+        style: WindowStyleState {
+            frameless: false,
+            keep_on_top: false,
+            background: WebviewWindowBackground::Opaque,
+            platform: WindowPlatformStyleState {
+                macos: MacosWindowStyleState {
+                    corner_radius: None,
+                },
+            },
+        },
+        navigator_window: NavigatorWindowSettings {
+            enabled: true,
+            bind_window_globals: false,
+            window_controls_overlay: false,
+        },
+        navigator_screen: NavigatorScreenSettings::default(),
+        navigator_tray: NavigatorTraySettings::default(),
+        metadata: WindowMetadataState {
+            title: DEFAULT_WINDOW_TITLE.to_string(),
+            icon: None,
+            sync_title: MetadataSyncSettings::default(),
+            sync_icon: MetadataSyncSettings::default(),
+        },
+        app_region_drag: AppRegionDragState::default(),
+        native_api_policy: WebviewNativeApiPolicy::default(),
+        page_source: PageSourceState::default(),
+        page_access: PageCapabilityAccess::default(),
+        tray_bounds: None,
+        size_constraints: WindowSizeConstraints::default(),
+    }));
+
+    queue_window_interaction_message(&Rc::downgrade(&bridge), true);
+
+    let state = bridge.borrow();
+    assert_eq!(state.next_ipc_message_id, 2);
+    assert_eq!(state.ipc_messages.len(), 1);
+    let message = &state.ipc_messages[0];
+    assert_eq!(message["source"], Value::String("native".to_string()));
+    assert_eq!(
+        message["payload"]["type"],
+        Value::String("windowInteraction".to_string())
+    );
+    assert_eq!(message["payload"]["active"], Value::Bool(true));
 }
 
 #[test]

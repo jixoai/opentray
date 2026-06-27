@@ -63,13 +63,15 @@ describe("@opentray/ext-webview", () => {
   it("treats repeated window show as visibility restore instead of bootstrap replay", async () => {
     const transport = new RecordingTransport();
     const tray = createTrayHandle(transport, "app-1", "tray-1");
-    const webviewWindow = tray.extend(WebviewExt, { mountId: "webview.tray-1" }).createWebviewWindow({
-      html: "<main />",
-      width: 300,
-      height: 200,
-      nativeWindowApi: true,
-      style: { frameless: true, background: "blur" },
-    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+        width: 300,
+        height: 200,
+        nativeWindowApi: true,
+        style: { frameless: true, background: "blur" },
+      });
 
     await webviewWindow.show();
     await webviewWindow.resizeTo(360, 240);
@@ -300,11 +302,13 @@ describe("@opentray/ext-webview", () => {
   it("exposes host-side geometry verbs through the WebView command path", async () => {
     const transport = new RecordingTransport();
     const tray = createTrayHandle(transport, "app-1", "tray-1");
-    const webviewWindow = tray.extend(WebviewExt, { mountId: "webview.tray-1" }).createWebviewWindow({
-      html: "<main />",
-      width: 300,
-      height: 200,
-    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+        width: 300,
+        height: 200,
+      });
 
     await webviewWindow.resizeTo(360, 240);
     await webviewWindow.moveTo(10, 20);
@@ -345,7 +349,7 @@ describe("@opentray/ext-webview", () => {
             screens: [],
             isExtended: false,
           }
-        : { type: "ok" },
+        : { type: "ok" }
     );
     const tray = createTrayHandle(transport, "app-1", "tray-1");
     const webviewTray = tray.extend(WebviewExt, { mountId: "webview.tray-1" });
@@ -366,19 +370,31 @@ describe("@opentray/ext-webview", () => {
       isWebviewCommand(command) && command.type === "drainIpcMessages"
         ? {
             type: "ipcMessages",
-            messages: [{ id: 1, source: "page", payload: { type: "resize", width: 611, height: 260 } }],
+            messages: [
+              {
+                id: 1,
+                source: "page",
+                payload: { type: "resize", width: 611, height: 260 },
+              },
+            ],
           }
-        : { type: "ok" },
+        : { type: "ok" }
     );
     const tray = createTrayHandle(transport, "app-1", "tray-1");
-    const webviewWindow = tray.extend(WebviewExt, { mountId: "webview.tray-1" }).createWebviewWindow({
-      html: "<main />",
-      width: 300,
-      height: 200,
-    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+        width: 300,
+        height: 200,
+      });
 
     await expect(webviewWindow.drainIpcMessages()).resolves.toEqual([
-      { id: 1, source: "page", payload: { type: "resize", width: 611, height: 260 } },
+      {
+        id: 1,
+        source: "page",
+        payload: { type: "resize", width: 611, height: 260 },
+      },
     ]);
     expect(transport.frames.at(-1)).toMatchObject({
       type: "ext-command",
@@ -403,16 +419,20 @@ describe("@opentray/ext-webview", () => {
       return { type: "ok" };
     });
     const tray = createTrayHandle(transport, "app-1", "tray-1");
-    const webviewWindow = tray.extend(WebviewExt, { mountId: "webview.tray-1" }).createWebviewWindow({
-      html: "<main />",
-      width: 300,
-      height: 200,
-    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+        width: 300,
+        height: 200,
+      });
 
     await expect(webviewWindow.getBounds()).resolves.toEqual(bounds);
     await webviewWindow.setMinimumSize(260, null);
     await webviewWindow.setMaximumWidth(null);
-    await expect(webviewWindow.setBackground("blur", { state: "active" })).resolves.toMatchObject({
+    await expect(
+      webviewWindow.setBackground("blur", { state: "active" })
+    ).resolves.toMatchObject({
       background: { kind: "semantic", token: "blur", state: "active" },
     });
 
@@ -449,7 +469,9 @@ describe("@opentray/ext-webview", () => {
         ext: "webview.tray-1",
         data: {
           type: "setStyle",
-          style: { background: { kind: "semantic", token: "blur", state: "active" } },
+          style: {
+            background: { kind: "semantic", token: "blur", state: "active" },
+          },
         },
       },
     ]);
@@ -496,7 +518,7 @@ describe("@opentray/ext-webview", () => {
           calls.push(["moveTo", x, y]);
         },
       },
-      { placement: "tray", width: 240, height: 160, placementMargin: 12 },
+      { placement: "tray", width: 240, height: 160, placementMargin: 12 }
     );
 
     expect(result).toEqual({
@@ -559,7 +581,12 @@ describe("@opentray/ext-webview", () => {
     });
 
     expect(first.active).toBe(false);
-    expect(second.latest?.rect).toEqual({ x: 16, y: 16, width: 120, height: 80 });
+    expect(second.latest?.rect).toEqual({
+      x: 16,
+      y: 16,
+      width: 120,
+      height: 80,
+    });
     second.stop();
   });
 
@@ -666,7 +693,9 @@ describe("@opentray/ext-webview", () => {
         },
         listen<TPayload = unknown>(
           event: string,
-          handler: (event: TPayload | { event: string; payload: TPayload }) => void,
+          handler: (
+            event: TPayload | { event: string; payload: TPayload }
+          ) => void
         ) {
           const handlers = listeners.get(event) ?? [];
           handlers.push(handler as (event: unknown) => void);
@@ -674,7 +703,9 @@ describe("@opentray/ext-webview", () => {
           return () => {
             listeners.set(
               event,
-              (listeners.get(event) ?? []).filter((candidate) => candidate !== handler),
+              (listeners.get(event) ?? []).filter(
+                (candidate) => candidate !== handler
+              )
             );
           };
         },
@@ -738,7 +769,9 @@ describe("@opentray/ext-webview", () => {
       async moveTo() {},
       listen<TPayload = unknown>(
         event: string,
-        handler: (event: TPayload | { event: string; payload: TPayload }) => void,
+        handler: (
+          event: TPayload | { event: string; payload: TPayload }
+        ) => void
       ) {
         const handlers = listeners.get(event) ?? [];
         handlers.push(handler as (event: unknown) => void);
@@ -746,7 +779,9 @@ describe("@opentray/ext-webview", () => {
         return () => {
           listeners.set(
             event,
-            (listeners.get(event) ?? []).filter((candidate) => candidate !== handler),
+            (listeners.get(event) ?? []).filter(
+              (candidate) => candidate !== handler
+            )
           );
         };
       },
@@ -759,7 +794,10 @@ describe("@opentray/ext-webview", () => {
       placementMargin: 16,
       watchIntervalMs: 1000,
     });
-    listeners.get("windowstatechange")?.[0]?.({ event: "windowstatechange", payload: { visible: false } });
+    listeners.get("windowstatechange")?.[0]?.({
+      event: "windowstatechange",
+      payload: { visible: false },
+    });
 
     expect(watch.active).toBe(false);
   });
@@ -809,7 +847,9 @@ describe("@opentray/ext-webview", () => {
       async moveTo() {},
       listen<TPayload = unknown>(
         event: string,
-        handler: (event: TPayload | { event: string; payload: TPayload }) => void,
+        handler: (
+          event: TPayload | { event: string; payload: TPayload }
+        ) => void
       ) {
         const handlers = listeners.get(event) ?? [];
         handlers.push(handler as (event: unknown) => void);
@@ -817,7 +857,9 @@ describe("@opentray/ext-webview", () => {
         return () => {
           listeners.set(
             event,
-            (listeners.get(event) ?? []).filter((candidate) => candidate !== handler),
+            (listeners.get(event) ?? []).filter(
+              (candidate) => candidate !== handler
+            )
           );
         };
       },
@@ -836,7 +878,10 @@ describe("@opentray/ext-webview", () => {
     enteredBounds = new Promise<void>((resolve) => {
       resolveEnteredBounds = resolve;
     });
-    listeners.get("resized")?.[0]?.({ event: "resized", payload: { width: 121, height: 80 } });
+    listeners.get("resized")?.[0]?.({
+      event: "resized",
+      payload: { width: 121, height: 80 },
+    });
     await enteredBounds;
     watch.stop();
     closed = true;
@@ -919,7 +964,7 @@ describe("@opentray/ext-webview", () => {
         height: 50,
         placementMargin: 8,
         windowRect: { x: 780, y: 300, width: 100, height: 50 },
-      }),
+      })
     ).resolves.toEqual({
       placement: "edge-x",
       kind: "native",
@@ -960,7 +1005,7 @@ describe("@opentray/ext-webview", () => {
         height: 200,
         placementMargin: 20,
         windowRect: { x: 900, y: 300, width: 320, height: 200 },
-      }),
+      })
     ).resolves.toEqual({
       placement: "screen-bottom-right",
       kind: "native",
@@ -970,11 +1015,91 @@ describe("@opentray/ext-webview", () => {
     });
   });
 
+  it("resolves visual top and bottom placements from bottom-left screen coordinates", async () => {
+    const kit = new WebviewPlacementKit({
+      screen: {
+        async getScreenDetails() {
+          return {
+            currentScreen: {
+              id: "primary",
+              frame: { x: 0, y: 0, width: 1000, height: 800 },
+              visibleFrame: { x: 0, y: 0, width: 1000, height: 760 },
+            },
+            screens: [
+              {
+                id: "primary",
+                frame: { x: 0, y: 0, width: 1000, height: 800 },
+                visibleFrame: { x: 0, y: 0, width: 1000, height: 760 },
+              },
+            ],
+            coordinateOrigin: "bottomLeft",
+          };
+        },
+      },
+    });
+
+    await expect(
+      kit.resolve({
+        placement: "screen-top-left",
+        width: 120,
+        height: 80,
+        placementMargin: 16,
+        windowRect: { x: 500, y: 300, width: 120, height: 80 },
+      })
+    ).resolves.toMatchObject({
+      anchorRect: { x: 0, y: 760, width: 0, height: 0 },
+      rect: { x: 16, y: 664, width: 120, height: 80 },
+    });
+
+    await expect(
+      kit.resolve({
+        placement: "screen-bottom-right",
+        width: 120,
+        height: 80,
+        placementMargin: 16,
+        windowRect: { x: 500, y: 300, width: 120, height: 80 },
+      })
+    ).resolves.toMatchObject({
+      anchorRect: { x: 1000, y: 0, width: 0, height: 0 },
+      rect: { x: 864, y: 16, width: 120, height: 80 },
+    });
+
+    await expect(
+      kit.resolve({
+        placement: "edge-top",
+        width: 120,
+        height: 80,
+        placementMargin: 16,
+        windowRect: { x: 500, y: 300, width: 120, height: 80 },
+      })
+    ).resolves.toMatchObject({
+      anchorRect: { x: 0, y: 760, width: 1000, height: 0 },
+      rect: { x: 500, y: 664, width: 120, height: 80 },
+    });
+
+    await expect(
+      kit.resolve({
+        placement: "edge-bottom",
+        width: 120,
+        height: 80,
+        placementMargin: 16,
+        windowRect: { x: 500, y: 300, width: 120, height: 80 },
+      })
+    ).resolves.toMatchObject({
+      anchorRect: { x: 0, y: 0, width: 1000, height: 0 },
+      rect: { x: 500, y: 16, width: 120, height: 80 },
+    });
+  });
+
   it("falls back from unavailable tray placement to screen center with provenance", async () => {
     const kit = new WebviewPlacementKit({
       tray: {
         async getBounds() {
-          return { kind: "unavailable", source: "backend.unavailable", rect: null };
+          return {
+            kind: "unavailable",
+            source: "backend.unavailable",
+            rect: null,
+          };
         },
       },
       screen: {
@@ -997,7 +1122,9 @@ describe("@opentray/ext-webview", () => {
       },
     });
 
-    await expect(kit.resolve({ placement: "tray", width: 200, height: 100 })).resolves.toEqual({
+    await expect(
+      kit.resolve({ placement: "tray", width: 200, height: 100 })
+    ).resolves.toEqual({
       placement: "tray",
       kind: "fallback",
       source: "backend.unavailable->screen-center",
@@ -1037,7 +1164,14 @@ describe("@opentray/ext-webview", () => {
       },
     });
 
-    await expect(kit.resolve({ placement: "tray", width: 240, height: 160, placementMargin: 12 })).resolves.toMatchObject({
+    await expect(
+      kit.resolve({
+        placement: "tray",
+        width: 240,
+        height: 160,
+        placementMargin: 12,
+      })
+    ).resolves.toMatchObject({
       rect: { x: 760, y: 568, width: 240, height: 160 },
     });
   });
@@ -1091,14 +1225,28 @@ describe("@opentray/ext-webview", () => {
       ["setMinimumSize", 280, 180],
       ["setMaximumSize", undefined, null],
       ["resizeTo", 360, 240],
-      ["setStyle", { frameless: true, keepOnTop: true, platform: { windows: { cornerPreference: "round" } } }],
+      [
+        "setStyle",
+        {
+          frameless: true,
+          keepOnTop: true,
+          platform: { windows: { cornerPreference: "round" } },
+        },
+      ],
       ["setBackground", "blur", { state: "active" }],
     ]);
   });
 
   it("normalizes shared window geometry without applying browser DPR scaling", () => {
     expect(windowGeometryKit.unit).toBe("desktopLogicalPixels");
-    expect(windowGeometryKit.normalizeWindowRect({ x: 10.4, y: 20.6, width: 199.5, height: 200.4 })).toEqual({
+    expect(
+      windowGeometryKit.normalizeWindowRect({
+        x: 10.4,
+        y: 20.6,
+        width: 199.5,
+        height: 200.4,
+      })
+    ).toEqual({
       x: 10,
       y: 21,
       width: 200,
@@ -1107,8 +1255,8 @@ describe("@opentray/ext-webview", () => {
     expect(
       windowGeometryKit.clampRect(
         { x: 1180, y: 620, width: 320, height: 200 },
-        { x: 0, y: 0, width: 1280, height: 680 },
-      ),
+        { x: 0, y: 0, width: 1280, height: 680 }
+      )
     ).toEqual({ x: 960, y: 480, width: 320, height: 200 });
   });
 
@@ -1134,7 +1282,7 @@ describe("@opentray/ext-webview", () => {
           callback(_target, context) {
             calls.push(["compact", context.bounds.width]);
           },
-        },
+        }
       );
       bounds = { ...bounds, width: 260 };
       await watch.refresh();
@@ -1163,7 +1311,9 @@ describe("@opentray/ext-webview", () => {
         },
         listen<TPayload = unknown>(
           event: string,
-          handler: (event: TPayload | { event: string; payload: TPayload }) => void,
+          handler: (
+            event: TPayload | { event: string; payload: TPayload }
+          ) => void
         ) {
           const handlers = listeners.get(event) ?? [];
           handlers.push(handler as (event: unknown) => void);
@@ -1171,7 +1321,9 @@ describe("@opentray/ext-webview", () => {
           return () => {
             listeners.set(
               event,
-              (listeners.get(event) ?? []).filter((candidate) => candidate !== handler),
+              (listeners.get(event) ?? []).filter(
+                (candidate) => candidate !== handler
+              )
             );
           };
         },
@@ -1188,7 +1340,7 @@ describe("@opentray/ext-webview", () => {
           callback(_target, context) {
             calls.push(["compact", context.bounds.width]);
           },
-        },
+        }
       );
       expect(calls).toEqual([["wide", 320]]);
 
@@ -1218,7 +1370,9 @@ describe("@opentray/ext-webview", () => {
       },
       listen<TPayload = unknown>(
         event: string,
-        handler: (event: TPayload | { event: string; payload: TPayload }) => void,
+        handler: (
+          event: TPayload | { event: string; payload: TPayload }
+        ) => void
       ) {
         const handlers = listeners.get(event) ?? [];
         handlers.push(handler as (event: unknown) => void);
@@ -1226,14 +1380,23 @@ describe("@opentray/ext-webview", () => {
         return () => {
           listeners.set(
             event,
-            (listeners.get(event) ?? []).filter((candidate) => candidate !== handler),
+            (listeners.get(event) ?? []).filter(
+              (candidate) => candidate !== handler
+            )
           );
         };
       },
     };
 
-    const watch = await mediaQueryKit.match(target, { minWidth: 300 }, () => {});
-    listeners.get("windowstatechange")?.[0]?.({ event: "windowstatechange", payload: { visible: false } });
+    const watch = await mediaQueryKit.match(
+      target,
+      { minWidth: 300 },
+      () => {}
+    );
+    listeners.get("windowstatechange")?.[0]?.({
+      event: "windowstatechange",
+      payload: { visible: false },
+    });
 
     expect(watch.active).toBe(false);
   });
@@ -1261,7 +1424,9 @@ describe("@opentray/ext-webview", () => {
       },
       listen<TPayload = unknown>(
         event: string,
-        handler: (event: TPayload | { event: string; payload: TPayload }) => void,
+        handler: (
+          event: TPayload | { event: string; payload: TPayload }
+        ) => void
       ) {
         const handlers = listeners.get(event) ?? [];
         handlers.push(handler as (event: unknown) => void);
@@ -1269,19 +1434,28 @@ describe("@opentray/ext-webview", () => {
         return () => {
           listeners.set(
             event,
-            (listeners.get(event) ?? []).filter((candidate) => candidate !== handler),
+            (listeners.get(event) ?? []).filter(
+              (candidate) => candidate !== handler
+            )
           );
         };
       },
     };
 
-    const watch = await mediaQueryKit.match(target, { minWidth: 300 }, () => {});
+    const watch = await mediaQueryKit.match(
+      target,
+      { minWidth: 300 },
+      () => {}
+    );
     bounds = { ...bounds, width: 360 };
     blockNextBounds = true;
     enteredBounds = new Promise<void>((resolve) => {
       resolveEnteredBounds = resolve;
     });
-    listeners.get("resized")?.[0]?.({ event: "resized", payload: { width: 360, height: 220 } });
+    listeners.get("resized")?.[0]?.({
+      event: "resized",
+      payload: { width: 360, height: 220 },
+    });
     await enteredBounds;
     watch.stop();
     closed = true;
@@ -1301,7 +1475,7 @@ describe("@opentray/ext-webview", () => {
         html: "<main />",
         width: 300,
         height: 200,
-      }),
+      })
     ).rejects.toMatchObject({
       code: "webview_extension_load_failed",
       extensionName: "webview",
@@ -1310,16 +1484,32 @@ describe("@opentray/ext-webview", () => {
   });
 
   it("exports page-facing global types that match the injected bridge surface", () => {
-    expectTypeOf<Navigator["window"]>().toMatchTypeOf<WebviewNavigatorWindow | undefined>();
-    expectTypeOf<Navigator["opentrayWindow"]>().toMatchTypeOf<WebviewNavigatorWindow | undefined>();
-    expectTypeOf<Navigator["opentrayScreen"]>().toMatchTypeOf<WebviewNavigatorScreen | undefined>();
-    expectTypeOf<Navigator["opentray"]>().toMatchTypeOf<WebviewNavigatorNamespace | undefined>();
-    expectTypeOf<WebviewNavigatorNamespace["execCommand"]>().parameters.toEqualTypeOf<
+    expectTypeOf<Navigator["window"]>().toMatchTypeOf<
+      WebviewNavigatorWindow | undefined
+    >();
+    expectTypeOf<Navigator["opentrayWindow"]>().toMatchTypeOf<
+      WebviewNavigatorWindow | undefined
+    >();
+    expectTypeOf<Navigator["opentrayScreen"]>().toMatchTypeOf<
+      WebviewNavigatorScreen | undefined
+    >();
+    expectTypeOf<Navigator["opentray"]>().toMatchTypeOf<
+      WebviewNavigatorNamespace | undefined
+    >();
+    expectTypeOf<
+      WebviewNavigatorNamespace["execCommand"]
+    >().parameters.toEqualTypeOf<
       [command: "clearWhiteBlock" | (string & {})]
     >();
-    expectTypeOf<WebviewNavigatorNamespace["execCommand"]>().returns.toEqualTypeOf<void>();
-    expectTypeOf<WebviewNavigatorNamespace["ipc"]>().toMatchTypeOf<WebviewNavigatorIpc | undefined>();
-    expectTypeOf<WebviewNavigatorIpc["postMessage"]>().parameters.toEqualTypeOf<[payload: unknown]>();
+    expectTypeOf<
+      WebviewNavigatorNamespace["execCommand"]
+    >().returns.toEqualTypeOf<void>();
+    expectTypeOf<WebviewNavigatorNamespace["ipc"]>().toMatchTypeOf<
+      WebviewNavigatorIpc | undefined
+    >();
+    expectTypeOf<WebviewNavigatorIpc["postMessage"]>().parameters.toEqualTypeOf<
+      [payload: unknown]
+    >();
     expectTypeOf<Screen["getScreenDetails"]>().toMatchTypeOf<
       (() => Promise<WebviewScreenDetails>) | undefined
     >();
@@ -1327,8 +1517,12 @@ describe("@opentray/ext-webview", () => {
       (() => Promise<WebviewScreenDetails>) | undefined
     >();
     expectTypeOf<WebviewNavigatorWindow["invoke"]>().toBeFunction();
-    expectTypeOf<WebviewNavigatorWindow["show"]>().returns.toEqualTypeOf<Promise<WebviewWindowState>>();
-    expectTypeOf<WebviewNavigatorWindow["hide"]>().returns.toEqualTypeOf<Promise<WebviewWindowState>>();
+    expectTypeOf<WebviewNavigatorWindow["show"]>().returns.toEqualTypeOf<
+      Promise<WebviewWindowState>
+    >();
+    expectTypeOf<WebviewNavigatorWindow["hide"]>().returns.toEqualTypeOf<
+      Promise<WebviewWindowState>
+    >();
   });
 });
 

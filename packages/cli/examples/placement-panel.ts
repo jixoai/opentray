@@ -12,10 +12,13 @@ import {
   listenWebviewIpcMessages,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
-import { createPlacementHtml, createPlacementStyle } from "./placement-panel-content";
+import {
+  createPlacementHtml,
+  createPlacementStyle,
+} from "./placement-panel-content";
 
-const PANEL_WIDTH = 420;
-const PANEL_HEIGHT = 300;
+const PANEL_WIDTH = 800;
+const PANEL_HEIGHT = 600;
 const OPEN_ITEM_ID = 1;
 const QUIT_ITEM_ID = 99;
 
@@ -39,7 +42,9 @@ const PLACEMENTS = [
   "edge-left",
 ] as const satisfies readonly WebviewPlacement[];
 
-console.log("placement trace: WebviewPlacementKit watch/applyOnce with tray, screen, and edge anchors");
+console.log(
+  "placement trace: WebviewPlacementKit watch/applyOnce with tray, screen, and edge anchors"
+);
 
 const icon = createVisibleTrayIcon();
 const runtime = await createWebviewExampleRuntime({
@@ -59,7 +64,9 @@ const { tray, localWebviewExtension } = runtime;
 
 const webviewTray = tray.extend(WebviewExt, {
   mountId: "placement-demo-webview",
-  ...(localWebviewExtension === undefined ? {} : { path: localWebviewExtension }),
+  ...(localWebviewExtension === undefined
+    ? {}
+    : { path: localWebviewExtension }),
 });
 const panel = webviewTray.createWebviewWindow({
   html: createPlacementHtml(PLACEMENTS),
@@ -78,7 +85,9 @@ const placementKit = new WebviewPlacementKit({ tray, screen: webviewTray });
 
 let closed = false;
 let panelShown = false;
-let placementWatch: Awaited<ReturnType<WebviewPlacementKit["watch"]>> | undefined;
+let placementWatch:
+  | Awaited<ReturnType<WebviewPlacementKit["watch"]>>
+  | undefined;
 let pageMessageWatch: WebviewPageMessageWatch | undefined;
 let panelLifecycleUnlisten: (() => void) | undefined;
 let currentFallbackRect = { x: 0, y: 0, width: 1, height: 1 };
@@ -100,7 +109,9 @@ tray.onMenuClick(({ itemId }) => {
   }
 });
 
-console.log("Use tray menu item 'Open Placement Kit' to review placement modes.");
+console.log(
+  "Use tray menu item 'Open Placement Kit' to review placement modes."
+);
 
 const exitAfter = process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS;
 if (exitAfter !== undefined && exitAfter.length > 0) {
@@ -137,7 +148,9 @@ async function openPanel(): Promise<void> {
   currentFallbackRect = trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 };
   await panel.show({ fallbackRect: currentFallbackRect });
   panelShown = true;
-  pageMessageWatch = listenWebviewIpcMessages(panel, handlePanelIpcMessage, { intervalMs: 16 });
+  pageMessageWatch = listenWebviewIpcMessages(panel, handlePanelIpcMessage, {
+    intervalMs: 16,
+  });
   panelLifecycleUnlisten = panel.listen("windowstatechange", (event) => {
     if (!event.payload.visible) {
       panelShown = false;
@@ -213,7 +226,9 @@ function stopPanelWatches(): void {
   panelLifecycleUnlisten = undefined;
 }
 
-async function handlePanelIpcMessage(message: { payload: unknown }): Promise<void> {
+async function handlePanelIpcMessage(message: {
+  payload: unknown;
+}): Promise<void> {
   const payload = message.payload;
   if (isWindowInteractionIntent(payload)) {
     if (payload.active) {
@@ -250,11 +265,21 @@ async function handlePanelIpcMessage(message: { payload: unknown }): Promise<voi
   }
 }
 
-async function currentPanelBounds(): Promise<{ x: number; y: number; width: number; height: number }> {
+async function currentPanelBounds(): Promise<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> {
   try {
     return await panel.getBounds();
   } catch {
-    return { x: currentFallbackRect.x, y: currentFallbackRect.y, width: PANEL_WIDTH, height: PANEL_HEIGHT };
+    return {
+      x: currentFallbackRect.x,
+      y: currentFallbackRect.y,
+      width: PANEL_WIDTH,
+      height: PANEL_HEIGHT,
+    };
   }
 }
 
@@ -296,7 +321,12 @@ async function shutdown(): Promise<void> {
 function createMenu(): Menu {
   return {
     items: [
-      { type: "item", id: OPEN_ITEM_ID, title: "Open Placement Kit", primaryEvent: true },
+      {
+        type: "item",
+        id: OPEN_ITEM_ID,
+        title: "Open Placement Kit",
+        primaryEvent: true,
+      },
       { type: "separator" },
       { type: "item", id: QUIT_ITEM_ID, title: "Quit Demo" },
     ],
@@ -316,7 +346,11 @@ function isPlacementIntent(value: unknown): value is PlacementIntent {
     return false;
   }
   const record = value as Record<string, unknown>;
-  if (record.type === "refresh" || record.type === "stop" || record.type === "hide") {
+  if (
+    record.type === "refresh" ||
+    record.type === "stop" ||
+    record.type === "hide"
+  ) {
     return true;
   }
   return (
@@ -330,12 +364,16 @@ function isPlacement(value: string): value is WebviewPlacement {
   return PLACEMENTS.includes(value as (typeof PLACEMENTS)[number]);
 }
 
-function isWindowInteractionIntent(value: unknown): value is WindowInteractionIntent {
+function isWindowInteractionIntent(
+  value: unknown
+): value is WindowInteractionIntent {
   if (!value || typeof value !== "object") {
     return false;
   }
   const record = value as Record<string, unknown>;
-  return record.type === "windowInteraction" && typeof record.active === "boolean";
+  return (
+    record.type === "windowInteraction" && typeof record.active === "boolean"
+  );
 }
 
 function sleep(ms: number): Promise<void> {
