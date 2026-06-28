@@ -1,5 +1,13 @@
 # @opentray/webpack-plugin
 
+## 0.10.1
+
+### Patch Changes
+
+- Cut the current fixed public release line.
+- Updated dependencies
+  - @opentray/packaging@0.10.1
+
 ## 0.10.0
 
 ### Minor Changes
