@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-badge-darwin-x64",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "OpenTray badge Dock helper app package for macOS x64.",
   "license": "MIT",
   "repository": {

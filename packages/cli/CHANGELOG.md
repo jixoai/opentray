@@ -1,5 +1,13 @@
 # opentray
 
+## 0.10.2
+
+### Patch Changes
+
+- 9e5a35d: Cut the current fixed public release line.
+- Updated dependencies [9e5a35d]
+  - @opentray/spec@0.10.2
+
 ## 0.10.1
 
 ### Patch Changes

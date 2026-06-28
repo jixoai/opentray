@@ -1,6 +1,6 @@
 {
   "name": "@opentray/vite-plugin",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Vite adapter for the OpenTray runtime artifact packaging contract.",
   "type": "module",
   "license": "MIT",
