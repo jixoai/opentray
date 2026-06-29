@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
 const readRepoFile = (relativePath: string): string => readFileSync(join(repoRoot, relativePath), "utf8");
@@ -77,20 +78,47 @@ const runBun = async (
   args: string[],
   cwd: string,
   env: Record<string, string | undefined> = process.env,
+  stdin?: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
-  const proc = Bun.spawn({
-    cmd: ["bun", ...args],
-    cwd,
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { exitCode, stdout, stderr };
+  const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+  const pathEnvKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  const spawnEnv: Record<string, string> = {};
+  for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "USER", "SHELL", "SYSTEMROOT", "SystemRoot", "ComSpec"]) {
+    const value = env[key];
+    if (value !== undefined) {
+      spawnEnv[key] = value;
+    }
+  }
+  spawnEnv[pathEnvKey] = env[pathEnvKey] ?? process.env[pathEnvKey] ?? "";
+  if (env.VISION_TEST_LOG !== undefined) {
+    spawnEnv.VISION_TEST_LOG = env.VISION_TEST_LOG;
+  }
+
+  const captureDir = mkdtempSync(join(tmpdir(), "vision2-stdio-"));
+  const stdoutPath = join(captureDir, "stdout.log");
+  const stderrPath = join(captureDir, "stderr.log");
+  const stdinPath = join(captureDir, "stdin.txt");
+  if (stdin !== undefined) {
+    writeFileSync(stdinPath, stdin);
+  }
+  const command = [process.execPath, ...args].map(shellQuote).join(" ");
+  const stdinRedirect = stdin === undefined ? "" : ` < ${shellQuote(stdinPath)}`;
+  try {
+    const result = spawnSync(
+      "/bin/sh",
+      ["-c", `${command}${stdinRedirect} > ${shellQuote(stdoutPath)} 2> ${shellQuote(stderrPath)}`],
+      {
+        cwd,
+        encoding: "utf8",
+        env: spawnEnv,
+      },
+    );
+    const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
+    const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
+    return { exitCode: result.status ?? 1, stdout, stderr };
+  } finally {
+    rmSync(captureDir, { recursive: true, force: true });
+  }
 };
 
 const runCommand = async (
@@ -124,11 +152,39 @@ const createFakeOpenspec = async (
   const binDir = join(tmpRoot, "bin");
   const logPath = join(tmpRoot, "openspec.log");
   await mkdir(binDir, { recursive: true });
+  const fakeScriptPath = join(binDir, "openspec-fake.cjs");
+  writeFileSync(
+    fakeScriptPath,
+    [
+      'const { appendFileSync } = require("node:fs");',
+      "const logPath = process.env.VISION_TEST_LOG;",
+      "if (!logPath) {",
+      '  console.error("VISION_TEST_LOG is required");',
+      "  process.exit(1);",
+      "}",
+      'appendFileSync(logPath, `${process.argv.slice(2).join(" ")}\\n`);',
+      "",
+    ].join("\n"),
+  );
   const scriptPath = join(binDir, "openspec");
-  writeFileSync(scriptPath, ["#!/bin/sh", 'printf \'%s\\n\' "$*" >> "$VISION_TEST_LOG"', "exit 0", ""].join("\n"));
+  writeFileSync(
+    scriptPath,
+    [
+      "#!/bin/sh",
+      'script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
+      'node "$script_dir/openspec-fake.cjs" "$@"',
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(join(binDir, "openspec.cmd"), ['@echo off', 'node "%~dp0openspec-fake.cjs" %*', ""].join("\r\n"));
   chmodSync(scriptPath, 0o755);
+  const pathEnvKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   return {
-    env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}`, VISION_TEST_LOG: logPath },
+    env: {
+      ...process.env,
+      [pathEnvKey]: `${binDir}${delimiter}${process.env[pathEnvKey] ?? ""}`,
+      VISION_TEST_LOG: logPath,
+    },
     logPath,
   };
 };
@@ -764,16 +820,11 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision2\ncreated: 2026-06-26\n");
       writeFileSync(join(changeDir, "HANDOFF.md"), "previous handoff\n");
 
-      const scriptPath = join(repoRoot, "scripts", "openspec", "vision2-driven.ts");
-      const result = await runCommand(
-        [
-          "bash",
-          "-lc",
-          [`bun ${scriptPath} handoff demo-change <<'END'`, "# Manual Handoff", "Exact operator content.", "END"].join(
-            "\n",
-          ),
-        ],
+      const result = await runBun(
+        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "handoff", "demo-change"],
         tmpRoot,
+        process.env,
+        "# Manual Handoff\nExact operator content.\n",
       );
       const handoff = readFileSync(join(changeDir, "HANDOFF.md"), "utf8");
 

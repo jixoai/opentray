@@ -163,7 +163,7 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
     const selfReviewTemplate = readRepoFile("openspec/schemas/vision-driven/templates/self-review.md");
     const tasksTemplate = readRepoFile("openspec/schemas/vision-driven/templates/tasks.md");
 
-    expect(config).toMatch(/^schema: vision-driven$/m);
+    expect(config).toMatch(/^schema: vision2$/m);
     expect(schema).toContain("name: vision-driven");
     expect(schema).toContain("id: research-plan");
     expect(schema).toContain("generates: plans/plan.md");
