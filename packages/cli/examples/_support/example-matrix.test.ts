@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createExampleMatrix,
   lynxExtensionSourcePath,
-  runtimeBindingSourcePath,
   type PlannedExampleMatrixRow,
 } from "./example-matrix";
 
@@ -30,7 +29,6 @@ describe("Feature: opentray example matrix planning", () => {
     expect(rows.map((row) => row.id)).toEqual([
       "basic",
       "first-app",
-      "visible-binding",
       "webview-control",
       "debug-runtime-tray",
       "tray-panel",
@@ -68,39 +66,6 @@ describe("Feature: opentray example matrix planning", () => {
       "opentray",
       "example:first-app",
     ]);
-  });
-
-  it("Scenario: Given the visible binding row on macOS When planned Then it stages the default runtime artifact before execution", () => {
-    const workspaceRoot = "/repo";
-    const row = rowById(
-      createExampleMatrix({
-        platform: "darwin",
-        arch: "arm64",
-        workspaceRoot,
-      }),
-      "visible-binding",
-    );
-
-    expect(row.skipped).toBe(false);
-    expect(row.coverage).toBe("default-runtime");
-    expect(row.preflight).toEqual([
-      { command: "cargo", args: ["build", "-p", "opentray-runtime-node"] },
-      { command: "pnpm", args: ["--filter", "opentray", "build"] },
-      {
-        command: "bun",
-        args: [
-          "run",
-          "scripts/binaries/stage-local.ts",
-          "--kind",
-          "runtime",
-          "--source",
-          runtimeBindingSourcePath("darwin", "arm64", workspaceRoot),
-        ],
-      },
-    ]);
-    expect(row.command.env).toEqual({
-      OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "1200",
-    });
   });
 
   it("Scenario: Given an unsupported extension host When planned Then the row reports a typed skip reason", () => {

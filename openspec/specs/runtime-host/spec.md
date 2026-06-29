@@ -23,68 +23,25 @@ The runtime host SHALL store runtime state under `~/.opentray/<packageVersion>/<
 - **AND** each resolves a different runtime host endpoint
 - **AND** neither host serves the other caller's session.
 
-### Requirement: Node runtime distribution SHALL use host-loadable native bindings
+### Requirement: Runtime distribution SHALL use platform executables
 
-For Node-first distribution, platform runtime packages SHALL carry a host-loadable native binding artifact at `runtime/opentray_runtime.node`. They SHALL NOT publish a standalone `bin/opentray` broker executable as the normal app runtime artifact. The binding artifact MAY internally expose only a small contract while runtime APIs are incrementally moved in-process, but package and release truth SHALL identify it as the app-owned runtime binding rather than an OpenTray-owned background process.
+Platform runtime packages SHALL carry the packaged runtime executable at `bin/opentray` or `bin/opentray.exe`. The published `opentray` package SHALL discover and start that executable as the normal app runtime artifact. It SHALL NOT require `runtime/opentray_runtime.node` or any other Node addon on the public path.
 
-Contributor-only debug executables MAY remain in the source tree for smoke tests and transport diagnostics. They SHALL NOT be the release artifact inferred when publishing `opentray` or `@opentray/<os>-<arch>` platform packages.
+Contributor-only build outputs MAY still exist in the source tree for smoke tests and transport diagnostics, but they SHALL NOT become release truth for `opentray` or `@opentray/<os>-<arch>` platform packages.
 
-#### Scenario: Platform package carries a native binding
+#### Scenario: Platform package carries an executable runtime
 
 - **GIVEN** `@opentray/darwin-arm64` is staged for publish
 - **WHEN** package contents are inspected
-- **THEN** the core runtime artifact is `runtime/opentray_runtime.node`
-- **AND** no `bin/opentray` broker executable is required for the normal package runtime path.
+- **THEN** the core runtime artifact is `bin/opentray`
+- **AND** no `runtime/opentray_runtime.node` binding is required for the normal package runtime path.
 
-#### Scenario: Release graph builds runtime instead of debug broker
+#### Scenario: Release graph builds the executable runtime host
 
 - **GIVEN** a changeset releases `opentray`
 - **WHEN** the native release planner infers required native work
 - **THEN** it selects the `runtime` component
-- **AND** it builds `opentray-runtime-node` rather than `opentray-bin`.
-
-### Requirement: Node runtime binding SHALL own protocol/session operations before native visibility is claimed
-
-The Node runtime binding SHALL expose a direct in-process runtime path that owns protocol/session operations without spawning or connecting to the transitional local broker. This direct path MAY be headless while the native visible tray event-loop host is under construction, but it SHALL still use the same `BrokerKernel` session law as the visible runtime path.
-
-The SDK MAY expose this headless binding route only as an explicit diagnostic or test mode. The default `createTray()` path SHALL NOT switch to the binding until the binding owns the native visible tray backend and event routing on supported platforms.
-
-#### Scenario: Headless binding creates a tray through kernel session law
-
-- **GIVEN** the Node binding creates a headless runtime
-- **WHEN** the SDK sends `init`, `resolve-default-app`, and `create-tray` frames through that binding
-- **THEN** the binding returns `ready`, `default-app`, and `tray-created` frames
-- **AND** no local broker socket or broker executable is required.
-
-#### Scenario: Headless binding is not visual acceptance
-
-- **GIVEN** a headless binding runtime accepts a tray creation request
-- **WHEN** the operator inspects the desktop tray
-- **THEN** no visible tray claim is made by that headless proof
-- **AND** visual completion still requires a native event-loop-backed runtime host.
-
-### Requirement: Visible Node runtime binding SHALL remain an explicit diagnostic path
-
-The visible Node runtime binding SHALL NOT create native tray state by hiding an OpenTray-owned broker process behind the binding API. It SHALL expose an explicit `runVisibleRuntimeHost()` host-main-loop integration contract for diagnostics and smoke tests. Application code that calls `createTray()` in the default quickstart SHALL use the tray-first local broker path directly and SHALL NOT need to split its business logic into a worker to satisfy the public API.
-
-On macOS, the visible tray backend SHALL respect AppKit's main-thread event-loop law: the native event loop and tray creation must run on the application main thread. A background Rust thread or detached helper spawned by the binding SHALL NOT be treated as equivalent visible-binding ownership on macOS. On Windows and other supported platforms, any background event-loop thread used by the binding SHALL still be app-owned, session-bound, and closed when the caller authority is lost.
-
-The default SDK `createTray()` transport SHALL use the local broker on supported tray-icon platforms unless the caller explicitly opts into a diagnostic runtime mode. Headless binding tests, package artifact checks, and JSON frame smokes SHALL NOT replace the visible smoke path where visible ownership must be proven. Unsupported platforms SHALL fail explicitly instead of pretending a visible tray exists.
-
-#### Scenario: macOS binding requires host-main-loop ownership
-
-- **GIVEN** a Node process loads `runtime/opentray_runtime.node` on macOS
-- **WHEN** the binding is asked to create a visible tray
-- **THEN** it requires a host-main-loop integration path that runs native tray creation on the application main thread
-- **AND** it does not satisfy the requirement by spawning a detached OpenTray broker process.
-
-#### Scenario: default transport uses visible binding after visible proof
-
-- **GIVEN** the visible runtime host has been started through `runVisibleRuntimeHost()`
-- **AND** a supported-platform visible host-main-loop smoke has passed
-- **WHEN** application code calls `createTray()` with diagnostic visible-binding runtime options
-- **THEN** the SDK uses the visible runtime binding transport
-- **AND** menu and tray events are routed back only to the live caller session.
+- **AND** it builds `opentray-bin` rather than `opentray-runtime-node`.
 
 ### Requirement: Runtime host SHALL accept exactly one caller session for one app identity
 

@@ -3,9 +3,9 @@
 ## Purpose
 TBD - created by archiving change opentray-v0-9. Update Purpose after archive.
 ## Requirements
-### Requirement: OpenTray SHALL define a bundler packaging contract for app-owned runtime bindings
+### Requirement: OpenTray SHALL define a bundler packaging contract for app-owned runtime executables
 
-The system SHALL define a shared packaging contract that bundler adapters use to stage the OpenTray runtime binding, native sidecars, and companion assets into an app's distributable output. The packaging contract SHALL be bundler-neutral. Vite SHALL be the first supported adapter, but the contract SHALL remain reusable by `tsdown`, `esbuild`, `webpack`, and `turbopack` adapters without changing the manifest schema.
+The system SHALL define a shared packaging contract that bundler adapters use to stage the OpenTray runtime executable, native sidecars, and companion assets into an app's distributable output. The packaging contract SHALL be bundler-neutral. Vite SHALL be the first supported adapter, but the contract SHALL remain reusable by `tsdown`, `esbuild`, `webpack`, and `turbopack` adapters without changing the manifest schema.
 
 The packaging contract SHALL treat `app.id` as the primary artifact address key and `app.name` as the human label. The contract SHALL derive output directories and executable basenames from `app.id` through a deterministic sanitizer. It SHALL NOT use `opentray` as a generic output name for packaged applications.
 
@@ -25,9 +25,9 @@ The packaging contract SHALL keep runtime artifacts isolated per app identity. T
 - **THEN** it fails with a typed packaging error
 - **AND** it does not invent a generic fallback identity for the release artifact.
 
-### Requirement: Packaging adapters SHALL emit an app manifest for runtime binding discovery
+### Requirement: Packaging adapters SHALL emit an app manifest for runtime discovery
 
-The packaging contract SHALL emit a machine-readable app manifest next to the distributable output. The manifest SHALL include the stable `app.id`, the human-readable `app.name`, the chosen runtime binding artifact name or path, the entry module or bundle identity, and the staged native artifact paths needed by the runtime host.
+The packaging contract SHALL emit a machine-readable app manifest next to the distributable output. The manifest SHALL include the stable `app.id`, the human-readable `app.name`, the chosen runtime executable artifact name or path, the entry module or bundle identity, and the staged native artifact paths needed by the runtime host.
 
 The manifest SHALL be the source of truth for runtime artifact discovery. Runtime code MAY derive filenames from `app.id`, but it SHALL read the manifest for the final staged locations rather than guessing them from the workspace layout.
 The manifest SHALL also record the packaging adapter name and build mode so runtime diagnostics can report how the host was assembled.
@@ -36,7 +36,7 @@ The manifest SHALL also record the packaging adapter name and build mode so runt
 
 - **GIVEN** a packaged app contains an emitted OpenTray manifest
 - **WHEN** the runtime host starts
-- **THEN** it reads the manifest to locate its staged runtime binding and sidecar artifacts
+- **THEN** it reads the manifest to locate its staged runtime executable and sidecar artifacts
 - **AND** it does not depend on a hard-coded `opentray` filename.
 
 #### Scenario: app.id and app.name remain separate
@@ -77,4 +77,3 @@ The packaging plugin contract SHALL stay in the build layer. It SHALL stage arti
 - **WHEN** the app later starts
 - **THEN** the runtime host owns tray lifecycle and event routing
 - **AND** the packaging adapter does not remain active as a hidden runtime service.
-

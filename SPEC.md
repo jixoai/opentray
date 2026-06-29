@@ -15,7 +15,6 @@
 
 - Call `createTray()` directly.
 - The default runtime starts the local broker on demand.
-- `runVisibleRuntimeHost()` stays available only as an explicit diagnostic path.
 - Public docs and SDK APIs do not use `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()`.
 
 **Where to read more:**

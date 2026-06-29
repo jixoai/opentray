@@ -16,13 +16,6 @@ The matrix SHALL report each row with a stable id, the command it ran, and a res
 - **THEN** the shell does not need to expand `example:*`
 - **AND** the command enumerates the intended example rows itself.
 
-#### Scenario: Matrix prepares generated runtime artifacts
-
-- **GIVEN** the visible binding example requires `runtime/opentray_runtime.node`
-- **WHEN** the matrix reaches that row on a supported host platform
-- **THEN** it builds and stages the generated runtime binding artifact before running the example
-- **AND** the generated artifact remains uncommitted source-tree output.
-
 #### Scenario: Matrix reports unsupported rows honestly
 
 - **GIVEN** an example row cannot run on the current platform
@@ -64,6 +57,6 @@ The example documentation SHALL distinguish the default tray-first local broker 
 #### Scenario: Documentation names the runtime owner
 
 - **GIVEN** a developer reads the example documentation
-- **WHEN** they choose between first-app, visible-binding, and extension rows
+- **WHEN** they choose between first-app and extension rows
 - **THEN** they can tell which command proves the default app runtime
 - **AND** which commands prove source-tree extension behavior through the debug runtime.

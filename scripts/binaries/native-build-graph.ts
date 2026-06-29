@@ -9,7 +9,6 @@ import {
   badgeDockHelperArtifactName,
   normalizeArch,
   resolveNativePackageTarget,
-  runtimeBindingArtifactName,
 } from "./artifacts";
 
 export type NativeBuildTargetName =
@@ -181,7 +180,7 @@ const nativeBuildComponents: Record<
     component: "runtime",
     allowedTargets: allNativeBuildTargets,
     defaultReleaseTargets: allNativeBuildTargets,
-    cargoPackages: ["opentray-runtime-node"],
+    cargoPackages: ["opentray-bin"],
     artifactKinds: ["runtime"],
     inferredPackages: ["opentray"],
     inferredPackagePrefixes: [
@@ -604,11 +603,11 @@ const resolvePackageDirForComponent = (
 const runtimeLibraryName = (packageOs: PackageOs): string => {
   switch (packageOs) {
     case "windows":
-      return "opentray_runtime_node.dll";
+      return "opentray.exe";
     case "darwin":
-      return "libopentray_runtime_node.dylib";
+      return "opentray";
     case "linux":
-      return "libopentray_runtime_node.so";
+      return "opentray";
   }
 };
 

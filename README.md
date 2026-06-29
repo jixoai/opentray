@@ -90,7 +90,7 @@ If you already own the host process, `createTray()` remains the lower-level tray
 
 ## Packaging
 
-`@opentray/packaging` stages runtime binding artifacts, native sidecars, and
+`@opentray/packaging` stages runtime executable artifacts, native sidecars, and
 companion assets into app-id-derived output paths and writes an
 `opentray-app-manifest.json` manifest. Adapters ship for the common bundlers:
 `@opentray/vite-plugin`, `@opentray/tsdown-plugin`, `@opentray/esbuild-plugin`,
@@ -105,8 +105,7 @@ export default {
     openTrayVitePlugin({
       app: { id: "com.example.build", name: "Build" },
       runtimeHost: {
-        source:
-          "node_modules/@opentray/darwin-arm64/runtime/opentray_runtime.node",
+        source: "node_modules/@opentray/darwin-arm64/bin/opentray",
       },
     }),
   ],
@@ -114,27 +113,15 @@ export default {
 ```
 
 Platform runtime packages such as `@opentray/darwin-arm64` carry
-`runtime/opentray_runtime.node`. Packaging remains a build-layer concern. It stages artifacts and emits manifest
+`bin/opentray` or `bin/opentray.exe`. Packaging remains a build-layer concern. It stages artifacts and emits manifest
 truth; it does not own tray lifecycle, session authority, backend selection, or
 extension dispatch.
 
-The default `createTray()` transport targets the local broker and starts it on
-first use when needed. `runVisibleRuntimeHost()` remains available from
-`opentray/node` as an explicit diagnostic path for the visible-binding smoke
-mode. That diagnostic path still carries the host-main-thread law on macOS and
-the app-owned event-loop law on Windows; ordinary app code does not need to
-split its business logic into a worker to use the default tray API.
-
-The explicit headless runtime path remains available for protocol/session
-diagnostics:
-
-```ts
-await createTray(options, { runtime: "headless-binding" });
-```
-
-Source-tree debug examples may still opt into `{ runtime: "visible-binding" }`
-or `{ runtime: "headless-binding" }`. Those paths are contributor diagnostics,
-not the default package runtime.
+The default `createTray()` transport targets the local runtime host and starts
+it on first use when needed. Ordinary app code talks to the packaged
+`opentray` executable through the public tray/session protocol; it does not
+load a Node addon and does not need to split its business logic into a worker
+to create a tray.
 
 ## Development Checks
 

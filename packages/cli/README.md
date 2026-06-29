@@ -79,11 +79,9 @@ Visible tray text belongs to `icon.text`, `icon["text-only"]`, or `icon["icon-te
 
 OpenTray does not ask developers to create a public broker object. The application process or an application-owned background service imports `opentray`, calls `createTray()`, owns event handlers, and releases the tray when that process exits.
 
-Node platform packages carry the host-loadable runtime artifact at `runtime/opentray_runtime.node`. `opentray/node` exposes `runVisibleRuntimeHost()`, `loadOpenTrayRuntimeBinding()`, and `resolveInstalledRuntimeBindingPath()` for Node-specific host-loop ownership, runtime diagnostics, and packaging checks.
+Platform runtime packages carry the packaged runtime executable at `bin/opentray` or `bin/opentray.exe`.
 
-By default, `createTray()` routes through the local broker and starts it on first use when needed. `runVisibleRuntimeHost()` remains available from `opentray/node` as an explicit diagnostic path for the visible-binding smoke mode. That diagnostic path still follows the application main-thread law on macOS and the app-owned event-loop law on Windows.
-
-For protocol/session diagnostics, `createTray(options, { runtime: "headless-binding" })` routes through the Node binding without visible native state. Source-tree diagnostics may use `{ runtime: "visible-binding" }` or `{ runtime: "local-broker" }`, but those transports are not the default package runtime.
+By default, `createTray()` routes through the local runtime host and starts it on first use when needed. The executable host remains the source of truth for tray lifecycle, session cleanup, and native event routing on supported platforms.
 
 Runtime options may also carry app identity facts:
 
@@ -95,8 +93,6 @@ await createTray(options, {
 ```
 
 The runtime host reports those facts as `appId` and `appName` in `runtime-host-health`; tray icon text, menu labels, and tooltip text remain projection data.
-
-The `opentray/node` subpath exposes binding-resolution, visible host-loop, and binding-transport helpers. Source-tree diagnostics may still use the internal local broker transport, but that transport is not exported as a package contract.
 
 ## Examples
 
@@ -111,17 +107,13 @@ Run the finite source-tree smoke matrix instead of relying on shell expansion fo
 
 ```bash
 pnpm --filter opentray example:matrix
-pnpm --filter opentray example:matrix -- --row visible-binding
+pnpm --filter opentray example:matrix -- --row webview-control
 ```
 
 Run human-visible tray and extension examples from a source checkout:
 
 ```bash
-cargo build -p opentray-runtime-node
-pnpm --filter opentray build
-bun run scripts/binaries/stage-local.ts --kind runtime --source target/debug/libopentray_runtime_node.dylib
-OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:visible-binding
-
+cargo build -p opentray-bin
 pnpm --filter opentray example:debug-runtime-tray
 pnpm --filter opentray example:webview-control
 pnpm --filter opentray example:tray-panel
@@ -130,4 +122,4 @@ pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The example matrix stages the generated Node runtime artifact before `visible-binding`, warms the broker binary before `first-app`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app example exercises the default package runtime. The visible-binding example is an explicit diagnostic row. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.
+The example matrix warms the runtime executable before `first-app`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app example exercises the default package runtime. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

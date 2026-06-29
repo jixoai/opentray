@@ -49,7 +49,7 @@ describe("broker command resolver", () => {
     });
 
     expect(command.command).toBe("/repo/target/debug/opentray");
-    expect(command.cwd).toBe("/repo");
+    expect(command.cwd).toBeUndefined();
   });
 
   it("falls back to the workspace broker build when no installed package exists", async () => {
@@ -68,7 +68,7 @@ describe("broker command resolver", () => {
     });
 
     expect(command.command).toBe("/repo/target/debug/opentray");
-    expect(command.cwd).toBe("/repo");
+    expect(command.cwd).toBeUndefined();
   });
 
   it("falls back to workspace dev build when a workspace package has not staged its binary yet", async () => {
@@ -87,7 +87,7 @@ describe("broker command resolver", () => {
     });
 
     expect(command.command).toBe("/repo/target/debug/opentray");
-    expect(command.cwd).toBe("/repo");
+    expect(command.cwd).toBeUndefined();
   });
 
   it("fails with a typed missing-platform-binary error outside a workspace", async () => {

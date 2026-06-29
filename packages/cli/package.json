@@ -13,10 +13,6 @@
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
     },
-    "./node": {
-      "types": "./dist/node.d.mts",
-      "import": "./dist/node.mjs"
-    },
     "./package.json": "./package.json"
   },
   "bin": {
@@ -28,14 +24,13 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsdown src/index.ts src/node.ts src/cli.ts --format esm --dts",
+    "build": "tsdown src/index.ts src/cli.ts --format esm --dts",
     "cli": "bun run src/cli.ts",
     "example:matrix": "bun run examples/example-matrix.ts",
     "example:basic": "bun run examples/basic-tray.ts",
     "example:first-app": "bun run examples/first-app.ts",
     "example:debug-runtime-lynx": "bun run examples/debug-runtime-lynx.ts",
     "example:debug-runtime-tray": "bun run examples/debug-runtime-tray.ts",
-    "example:visible-binding": "node examples/visible-binding-host.mjs",
     "example:mediaQuery": "bun run examples/media-query-panel.ts",
     "example:badge": "bun run examples/badge-panel.ts",
     "example:placement": "bun run examples/placement-panel.ts",

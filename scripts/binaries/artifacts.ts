@@ -11,7 +11,7 @@ export type NativeStageKind =
   | "lynx-runtime"
   | "badge";
 export const badgeDockHelperArtifactName = "OpenTrayBadgeHelper.app.zip";
-export const runtimeBindingArtifactName = "opentray_runtime.node";
+export const runtimeExecutableArtifactName = "opentray";
 
 export interface NativeTarget {
   packageOs: PackageOs;
@@ -76,7 +76,9 @@ export function createNativeTarget(
     arch,
     runtimePackageName: `@opentray/${packageOs}-${arch}`,
     runtimePackageDir,
-    runtimeArtifact: `${runtimePackageDir}/runtime/${runtimeBindingArtifactName}`,
+    runtimeArtifact: `${runtimePackageDir}/bin/${
+      packageOs === "windows" ? "opentray.exe" : runtimeExecutableArtifactName
+    }`,
     webviewPackageName:
       webviewPackageDir === undefined
         ? undefined

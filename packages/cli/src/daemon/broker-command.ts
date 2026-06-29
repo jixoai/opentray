@@ -45,7 +45,7 @@ export const resolveBrokerCommand = async (
     const binary = await (
       options.ensureDevBrokerBinary ?? ensureDevBrokerBinary
     )(workspaceRoot);
-    return commandForBinary(binary, paths, workspaceRoot);
+    return commandForBinary(binary, paths);
   }
 
   const platform = options.platform ?? process.platform;

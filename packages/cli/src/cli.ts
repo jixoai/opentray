@@ -28,12 +28,11 @@ const printHelp = (unsupportedCommand?: string): void => {
   }
   console.error(
     [
-      "OpenTray v0.9 does not expose daemon lifecycle commands.",
+      "OpenTray does not expose daemon lifecycle commands.",
       "Create trays from an app-owned process with:",
       "",
       '  import { createTray } from "opentray";',
       "",
-      "Node runtime diagnostics live under the opentray/node binding helpers.",
       "Source-tree visual diagnostics live in packages/cli/examples.",
     ].join("\n")
   );

@@ -53,7 +53,7 @@ describe("Feature: native runtime artifact topology", () => {
     const windows = resolveNativeTarget("win32", "x64");
 
     expect(darwin.runtimeArtifact).toBe(
-      "packages/darwin-arm64/runtime/opentray_runtime.node"
+      "packages/darwin-arm64/bin/opentray"
     );
     expect(darwin.webviewArtifact).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
@@ -70,7 +70,7 @@ describe("Feature: native runtime artifact topology", () => {
     expect(linux.webviewArtifact).toBeUndefined();
     expect(linux.lynxArtifact).toBeUndefined();
     expect(windows.runtimeArtifact).toBe(
-      "packages/windows-x64/runtime/opentray_runtime.node"
+      "packages/windows-x64/bin/opentray.exe"
     );
     expect(windows.webviewArtifact).toBe(
       "packages/ext-webview-windows-x64/bin/opentray_ext_webview.dll"
@@ -93,7 +93,7 @@ describe("Feature: native runtime artifact topology", () => {
     const target = resolveNativePackageTarget("windows", "arm64");
 
     expect(target.runtimeArtifact).toBe(
-      "packages/windows-arm64/runtime/opentray_runtime.node"
+      "packages/windows-arm64/bin/opentray.exe"
     );
     expect(target.webviewArtifact).toBe(
       "packages/ext-webview-windows-arm64/bin/opentray_ext_webview.dll"
@@ -116,7 +116,7 @@ describe("Feature: native runtime artifact topology", () => {
     const target = resolveNativePackageTarget("darwin", "arm64");
 
     expect(resolveStageDestination(target, "runtime")).toBe(
-      "packages/darwin-arm64/runtime/opentray_runtime.node"
+      "packages/darwin-arm64/bin/opentray"
     );
     expect(resolveStageDestination(target, "webview")).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
@@ -145,35 +145,12 @@ describe("Feature: native runtime artifact topology", () => {
     );
   });
 
-  test("Scenario: Given Linux runtime builds When manifest dependencies are inspected Then GUI tray crates stay macOS and Windows only", () => {
+  test("Scenario: Given runtime builds When manifest dependencies are inspected Then the executable host stays in the broker crate", () => {
     const manifest = readFileSync(
-      resolve(repoRoot, "crates/opentray-runtime-node/Cargo.toml"),
+      resolve(repoRoot, "crates/opentray-bin/Cargo.toml"),
       "utf8"
     );
-    const rootDependencies = dependencySection(manifest, "[dependencies]");
-    const desktopDependencies = dependencySection(
-      manifest,
-      "[target.'cfg(any(target_os = \"macos\", target_os = \"windows\"))'.dependencies]"
-    );
-
-    expect(rootDependencies).toContain("opentray-core.workspace = true");
-    expect(rootDependencies).not.toContain("opentray-backend-tray-icon");
-    expect(rootDependencies).not.toContain("tray-icon");
-    expect(rootDependencies).not.toContain("winit");
-    expect(desktopDependencies).toContain(
-      "opentray-backend-tray-icon.workspace = true"
-    );
-    expect(desktopDependencies).toContain("tray-icon.workspace = true");
-    expect(desktopDependencies).toContain('winit = "0.30"');
+    expect(manifest).toContain('name = "opentray-bin"');
+    expect(manifest).toContain("opentray-core.workspace = true");
   });
 });
-
-function dependencySection(manifest: string, header: string): string {
-  const start = manifest.indexOf(header);
-  if (start === -1) {
-    throw new Error(`missing manifest section: ${header}`);
-  }
-  const section = manifest.slice(start + header.length);
-  const end = section.indexOf("\n[");
-  return section.slice(0, end === -1 ? section.length : end);
-}

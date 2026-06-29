@@ -40,10 +40,10 @@ describe("Feature: shared native build graph", () => {
     ).find((execution) => execution.target === "linux-x64");
 
     expect(targets).toContain("darwin-arm64");
-    expect(targets).toContain("linux-x64");
+   expect(targets).toContain("linux-x64");
     expect(darwinArm64.components).toEqual(["runtime", "webview"]);
     expect(darwinArm64.cargoPackages).toEqual([
-      "opentray-runtime-node",
+      "opentray-bin",
       "opentray-ext-webview",
     ]);
     expect(darwinArm64.artifactName).toBe(
@@ -51,7 +51,7 @@ describe("Feature: shared native build graph", () => {
     );
     expect(darwinArm64.buildsLynxRuntime).toBe(false);
     expect(linuxX64?.components).toEqual(["runtime"]);
-    expect(linuxX64?.cargoPackages).toEqual(["opentray-runtime-node"]);
+    expect(linuxX64?.cargoPackages).toEqual(["opentray-bin"]);
   });
 
   test("Scenario: Given multiple release atoms When independent executions are materialized Then extension builds are sharded per atom", () => {

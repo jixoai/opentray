@@ -14,7 +14,7 @@
     "arm64"
   ],
   "files": [
-    "runtime",
+    "bin",
     "README.md"
   ]
 }

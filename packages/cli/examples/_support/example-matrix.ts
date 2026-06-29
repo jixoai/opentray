@@ -41,12 +41,10 @@ export const createExampleMatrix = ({
   arch = process.arch,
   workspaceRoot,
 }: CreateExampleMatrixOptions): PlannedExampleMatrixRow[] => {
-  const runtimeSource = runtimeBindingSourcePath(platform, arch, workspaceRoot);
   const lynxSource = lynxExtensionSourcePath(platform, workspaceRoot);
   const rows = createRows({
     platform,
     arch,
-    runtimeSource,
     lynxSource,
   });
   return rows.map((row) => planRow(row, platform, workspaceRoot));
@@ -55,12 +53,10 @@ export const createExampleMatrix = ({
 const createRows = ({
   platform,
   arch,
-  runtimeSource,
   lynxSource,
 }: {
   readonly platform: NodeJS.Platform;
   readonly arch: string;
-  readonly runtimeSource: string | undefined;
   readonly lynxSource: string | undefined;
 }): ExampleMatrixRow[] => [
   {
@@ -76,31 +72,6 @@ const createRows = ({
     platforms: WEBVIEW_PLATFORMS,
     preflight: [command("cargo", ["build", "-p", "opentray-bin"])],
     command: pnpmExample("example:first-app"),
-  },
-  {
-    id: "visible-binding",
-    coverage: "default-runtime",
-    description: "explicit visible Node runtime diagnostic smoke",
-    platforms: WEBVIEW_PLATFORMS,
-    ...(runtimeSource === undefined
-      ? {}
-      : {
-          preflight: [
-            command("cargo", ["build", "-p", "opentray-runtime-node"]),
-            pnpm("pnpm", ["--filter", "opentray", "build"]),
-            command("bun", [
-              "run",
-              "scripts/binaries/stage-local.ts",
-              "--kind",
-              "runtime",
-              "--source",
-              runtimeSource,
-            ]),
-          ],
-        }),
-    command: pnpmExample("example:visible-binding", {
-      OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "1200",
-    }),
   },
   {
     id: "webview-control",
@@ -248,20 +219,6 @@ const requiredPaths = (
   paths: readonly string[] | undefined,
 ): Pick<ExampleMatrixRow, "requiredPaths"> =>
   paths === undefined ? {} : { requiredPaths: paths };
-
-export const runtimeBindingSourcePath = (
-  platform: NodeJS.Platform,
-  arch: string,
-  workspaceRoot: string,
-): string | undefined => {
-  if (platform === "darwin") {
-    return join(workspaceRoot, "target/debug/libopentray_runtime_node.dylib");
-  }
-  if (platform === "win32") {
-    return join(workspaceRoot, "target/debug/opentray_runtime_node.dll");
-  }
-  return undefined;
-};
 
 export const lynxExtensionSourcePath = (
   platform: NodeJS.Platform,
