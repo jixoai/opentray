@@ -24,6 +24,8 @@ use serde_json::json;
 #[cfg(not(target_os = "macos"))]
 use crate::dynamic_extension::DynamicExtensionLoader;
 use crate::BrokerOptions;
+#[cfg(not(target_os = "macos"))]
+use crate::{broker_disconnect_action, BrokerDisconnectAction};
 
 pub type Writer = Arc<Mutex<UnixStream>>;
 type EventSender = Arc<dyn Fn(TransportEvent) + Send + Sync>;
@@ -186,8 +188,16 @@ where
                 session.write_frames(frames);
             }
             TransportEvent::Disconnected { id } => {
+                let mut was_initialized = false;
                 if let Some(mut session) = sessions.remove(&id) {
+                    was_initialized = session.broker.session_id().is_some();
                     let _ = broker.close_session(&mut session.broker);
+                }
+                if matches!(
+                    broker_disconnect_action(was_initialized),
+                    BrokerDisconnectAction::ExitOwnedBroker
+                ) {
+                    break;
                 }
                 if sessions.is_empty() {
                     idle_since = Some(Instant::now());

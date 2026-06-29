@@ -185,6 +185,22 @@ fn parse_daemon_idle_timeout(value: Option<&str>) -> Result<Option<Duration>, St
     Ok(Some(Duration::from_millis(timeout_ms)))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BrokerDisconnectAction {
+    ExitOwnedBroker,
+    WaitForIdle,
+}
+
+pub(crate) fn broker_disconnect_action(
+    disconnected_session_was_initialized: bool,
+) -> BrokerDisconnectAction {
+    if disconnected_session_was_initialized {
+        BrokerDisconnectAction::ExitOwnedBroker
+    } else {
+        BrokerDisconnectAction::WaitForIdle
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod native_broker {
     use std::{collections::HashMap, error::Error, time::Duration};
@@ -204,7 +220,10 @@ mod native_broker {
     use super::unix_transport as broker_transport;
     #[cfg(target_os = "windows")]
     use super::windows_transport as broker_transport;
-    use super::{dynamic_extension::DynamicExtensionLoader, BrokerOptions};
+    use super::{
+        broker_disconnect_action, dynamic_extension::DynamicExtensionLoader,
+        BrokerDisconnectAction, BrokerOptions,
+    };
 
     #[derive(Debug)]
     enum UserEvent {
@@ -290,7 +309,14 @@ mod native_broker {
 
         fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
             match event {
-                UserEvent::Transport(event) => self.handle_transport(event),
+                UserEvent::Transport(event) => {
+                    if matches!(
+                        self.handle_transport(event),
+                        BrokerDisconnectAction::ExitOwnedBroker
+                    ) {
+                        event_loop.exit();
+                    }
+                }
                 UserEvent::Menu(event) => self.handle_menu(event),
                 UserEvent::Tray(event) => self.handle_tray(event),
                 UserEvent::IdleExpired(generation) => {
@@ -317,7 +343,10 @@ mod native_broker {
     }
 
     impl NativeBrokerApp {
-        fn handle_transport(&mut self, event: broker_transport::TransportEvent) {
+        fn handle_transport(
+            &mut self,
+            event: broker_transport::TransportEvent,
+        ) -> BrokerDisconnectAction {
             match event {
                 broker_transport::TransportEvent::Connected { id, writer } => {
                     // A broker is pinned to exactly one caller session. With per-caller
@@ -338,7 +367,7 @@ mod native_broker {
                             code: "OPENTRAY_BROKER_SINGLE_SESSION".to_string(),
                             message: "broker already serves one caller session".to_string(),
                         });
-                        return;
+                        return BrokerDisconnectAction::WaitForIdle;
                     }
                     self.bump_idle_generation();
                     self.sessions.insert(
@@ -348,6 +377,7 @@ mod native_broker {
                             broker: BrokerSession::new(),
                         },
                     );
+                    BrokerDisconnectAction::WaitForIdle
                 }
                 broker_transport::TransportEvent::Frame { id, frame } => {
                     if let ClientFrame::Health { request_id } = frame {
@@ -359,10 +389,10 @@ mod native_broker {
                             session
                                 .write_frame(ServerFrame::RuntimeHostHealth { request_id, health });
                         }
-                        return;
+                        return BrokerDisconnectAction::WaitForIdle;
                     }
                     let Some(session) = self.sessions.get_mut(&id) else {
-                        return;
+                        return BrokerDisconnectAction::WaitForIdle;
                     };
                     let mut extension_host = UnsupportedExtensionHostContext;
                     let frames = self.broker.handle_frame_with_extension_host(
@@ -372,9 +402,12 @@ mod native_broker {
                         &mut extension_host,
                     );
                     session.write_frames(frames);
+                    BrokerDisconnectAction::WaitForIdle
                 }
                 broker_transport::TransportEvent::Disconnected { id } => {
+                    let mut was_initialized = false;
                     if let Some(mut session) = self.sessions.remove(&id) {
+                        was_initialized = session.broker.session_id().is_some();
                         let mut extension_host = UnsupportedExtensionHostContext;
                         let _ = self.broker.close_session_with_extension_host(
                             &mut session.broker,
@@ -383,6 +416,7 @@ mod native_broker {
                     }
                     self.bump_idle_generation();
                     self.schedule_idle_if_empty();
+                    broker_disconnect_action(was_initialized)
                 }
             }
         }
@@ -458,7 +492,10 @@ mod native_broker {
 mod tests {
     use std::time::Duration;
 
-    use super::{parse_broker_options, parse_daemon_idle_timeout, DEFAULT_DAEMON_IDLE_TIMEOUT_MS};
+    use super::{
+        broker_disconnect_action, parse_broker_options, parse_daemon_idle_timeout,
+        BrokerDisconnectAction, DEFAULT_DAEMON_IDLE_TIMEOUT_MS,
+    };
 
     #[test]
     fn daemon_idle_timeout_defaults_to_short_release_window() {
@@ -478,6 +515,22 @@ mod tests {
         assert_eq!(
             parse_daemon_idle_timeout(Some("500")).unwrap(),
             Some(Duration::from_millis(500))
+        );
+    }
+
+    #[test]
+    fn uninitialized_disconnect_stays_on_idle_timeout() {
+        assert_eq!(
+            broker_disconnect_action(false),
+            BrokerDisconnectAction::WaitForIdle
+        );
+    }
+
+    #[test]
+    fn initialized_session_disconnect_exits_owned_broker() {
+        assert_eq!(
+            broker_disconnect_action(true),
+            BrokerDisconnectAction::ExitOwnedBroker
         );
     }
 
