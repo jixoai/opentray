@@ -77,8 +77,9 @@ use crate::{
     parse_background_input, MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings,
     NavigatorWindowSettings, WebviewBackgroundEffectState, WebviewBackgroundInput, WebviewCommand,
     WebviewInitialMacosStyle, WebviewInitialWindowsStyle, WebviewNativeApiPolicy,
-    WebviewNativeApiSource, WebviewRuntimeError, WebviewSessionBootstrapSettings,
-    WebviewShowSettings, WebviewWindowBackground, WebviewWindowIcon,
+    WebviewNativeApiSource, WebviewPermissionManagerPolicy, WebviewRuntimeError,
+    WebviewSessionBootstrapSettings, WebviewShowSettings, WebviewWindowBackground,
+    WebviewWindowIcon,
 };
 
 const CLASS_NAME: &str = "OpenTrayWebViewWindow";
@@ -87,6 +88,7 @@ const WINDOW_NAMESPACE: &str = "opentray.window";
 const SCREEN_NAMESPACE: &str = "opentray.screen";
 const TRAY_NAMESPACE: &str = "opentray.tray";
 const PAGE_IPC_NAMESPACE: &str = "opentray.ipc";
+const PERMISSIONS_NAMESPACE: &str = "opentray.permissions";
 const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
 const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
@@ -151,15 +153,18 @@ struct NavigatorWindowBridge {
     content_descriptor: WebviewContentDescriptor,
     listeners: HashMap<String, Vec<NavigatorWindowListener>>,
     ipc_messages: VecDeque<Value>,
+    permission_messages: VecDeque<Value>,
     window_events: VecDeque<Value>,
     next_event_id: u32,
     next_ipc_message_id: u32,
+    next_permission_message_id: u32,
     style: WindowStyleState,
     navigator_window: NavigatorWindowSettings,
     navigator_screen: NavigatorScreenSettings,
     navigator_tray: NavigatorTraySettings,
     metadata: WindowMetadataState,
     native_api_policy: WebviewNativeApiPolicy,
+    permission_manager_policy: WebviewPermissionManagerPolicy,
     page_source: PageSourceState,
     page_access: PageCapabilityAccess,
     tray_bounds: Option<Rect>,
@@ -244,6 +249,7 @@ struct PageCapabilityAccess {
     screen_globals: bool,
     title_sync: bool,
     icon_sync: bool,
+    permission_manager: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -575,6 +581,37 @@ impl WindowsWebviewRuntime {
                     slot.bridge.borrow_mut().ipc_messages.drain(..).collect();
                 Ok(json!({ "type": "ipcMessages", "messages": messages }))
             }
+            WebviewCommand::DrainPermissionMessages => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "drainPermissionMessages requires an active WebView window".into(),
+                        )
+                    })?;
+                let messages: Vec<Value> = slot
+                    .bridge
+                    .borrow_mut()
+                    .permission_messages
+                    .drain(..)
+                    .collect();
+                Ok(json!({ "type": "permissionMessages", "messages": messages }))
+            }
+            WebviewCommand::ResolvePermissionMessage { id, result } => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "resolvePermissionMessage requires an active WebView window".into(),
+                        )
+                    })?;
+                resolve_callback(&slot.bridge, id, result)?;
+                Ok(json!({ "type": "permissionMessageResolved", "id": id }))
+            }
             WebviewCommand::DrainWindowEvents => {
                 let slot = self
                     .slot
@@ -790,9 +827,11 @@ impl WindowsWebviewRuntime {
             content_descriptor: content_descriptor.clone(),
             listeners: HashMap::new(),
             ipc_messages: VecDeque::new(),
+            permission_messages: VecDeque::new(),
             window_events: VecDeque::new(),
             next_event_id: 1,
             next_ipc_message_id: 1,
+            next_permission_message_id: 1,
             style,
             navigator_window: show_settings.navigator_window,
             navigator_screen: show_settings.navigator_screen,
@@ -809,6 +848,7 @@ impl WindowsWebviewRuntime {
                 sync_icon: show_settings.window.sync.icon,
             },
             native_api_policy: show_settings.native_api_policy.clone(),
+            permission_manager_policy: show_settings.permission_manager_policy.clone(),
             page_source: page_source.clone(),
             page_access,
             tray_bounds,
@@ -824,6 +864,7 @@ impl WindowsWebviewRuntime {
             show_settings.window.sync.title,
             show_settings.window.sync.icon,
             &show_settings.native_api_policy,
+            &show_settings.permission_manager_policy,
             webview_bounds,
             html,
             url,
@@ -945,6 +986,7 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
             | SCREEN_NAMESPACE
             | TRAY_NAMESPACE
             | PAGE_IPC_NAMESPACE
+            | PERMISSIONS_NAMESPACE
             | COMMAND_NAMESPACE
             | PRIVATE_SYNC_NAMESPACE
     ) {
@@ -968,6 +1010,9 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
         TRAY_NAMESPACE if !access.tray => Err(WebviewRuntimeError::Rejected(
             "navigator.opentray.tray is not enabled for the current page source".into(),
         )),
+        PERMISSIONS_NAMESPACE if !access.permission_manager => Err(WebviewRuntimeError::Rejected(
+            "navigator.opentrayPermissions is not enabled for the current page source".into(),
+        )),
         COMMAND_NAMESPACE if !access.window => Err(WebviewRuntimeError::Rejected(
             "navigator.opentray.execCommand is not enabled for the current page source".into(),
         )),
@@ -980,6 +1025,9 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
         SCREEN_NAMESPACE => dispatch_navigator_screen_command(bridge, &request.cmd),
         TRAY_NAMESPACE => dispatch_navigator_tray_command(bridge, &request.cmd),
         PAGE_IPC_NAMESPACE => dispatch_page_ipc_command(bridge, &request.cmd, request.payload),
+        PERMISSIONS_NAMESPACE => {
+            dispatch_permission_command(bridge, &request.cmd, request.callback, request.payload)
+        }
         COMMAND_NAMESPACE => dispatch_page_exec_command(bridge, &request.cmd, request.payload),
         PRIVATE_SYNC_NAMESPACE => {
             dispatch_private_sync_command(bridge, &request.cmd, request.payload)
@@ -990,6 +1038,9 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
     match result {
         Ok(response) => {
             if request.callback != 0 {
+                if request.namespace == PERMISSIONS_NAMESPACE {
+                    return;
+                }
                 if let Err(error) = resolve_callback(bridge, request.callback, response) {
                     eprintln!("opentray-ext-webview navigator callback failed: {error}");
                 } else if webview_debug_enabled() {
@@ -1015,6 +1066,62 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
             }
         }
     }
+}
+
+fn dispatch_permission_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    cmd: &str,
+    callback: u32,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    if callback == 0 {
+        return Err(WebviewRuntimeError::Rejected(
+            "opentrayPermissions command requires callback".into(),
+        ));
+    }
+    let id = {
+        let mut state = bridge.borrow_mut();
+        let id = state.next_permission_message_id;
+        state.next_permission_message_id =
+            state.next_permission_message_id.saturating_add(1).max(1);
+        state
+            .permission_messages
+            .push_back(permission_message_payload(id, cmd, callback, payload)?);
+        id
+    };
+    Ok(json!({ "queued": true, "id": id }))
+}
+
+fn permission_message_payload(
+    id: u32,
+    action: &str,
+    callback: u32,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    let source = payload.get("source").cloned().unwrap_or(Value::Null);
+    if !matches!(
+        source.get("type").and_then(Value::as_str),
+        Some("local" | "origin")
+    ) {
+        return Err(WebviewRuntimeError::Rejected(
+            "opentrayPermissions command requires source".into(),
+        ));
+    }
+    let mut message = json!({
+        "id": callback,
+        "nativeId": id,
+        "source": "page",
+        "action": action,
+        "sourceScope": source,
+    });
+    if let Some(target) = message.as_object_mut() {
+        for key in ["family", "decision", "sourceAction"] {
+            if let Some(value) = payload.get(key) {
+                target.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    Ok(message)
 }
 
 fn dispatch_page_ipc_command(
@@ -1374,6 +1481,7 @@ fn build_webview(
     sync_title: MetadataSyncSettings,
     sync_icon: MetadataSyncSettings,
     native_api_policy: &WebviewNativeApiPolicy,
+    permission_manager_policy: &WebviewPermissionManagerPolicy,
     bounds: WryRect,
     html: Option<String>,
     url: Option<String>,
@@ -1389,6 +1497,7 @@ fn build_webview(
             sync_title,
             sync_icon,
             native_api_policy,
+            permission_manager_policy,
         ))
         .with_ipc_handler(move |request| {
             handle_navigator_window_request(request.body(), &bridge_for_ipc);
@@ -3581,6 +3690,17 @@ fn resolve_page_access(
         || show_settings.window.sync.title.native_to_page;
     let icon_sync_requested = show_settings.window.sync.icon.page_to_native
         || show_settings.window.sync.icon.native_to_page;
+    let permission_manager =
+        policy_allows(
+            &show_settings.native_api_policy,
+            Some(
+                show_settings
+                    .permission_manager_policy
+                    .default_src
+                    .as_slice(),
+            ),
+            page_source,
+        ) || exact_remote_permission_manager_origin_allows(show_settings, page_source);
     let window = show_settings.navigator_window.enabled
         && policy_allows(
             &show_settings.native_api_policy,
@@ -3629,6 +3749,7 @@ fn resolve_page_access(
                 show_settings.native_api_policy.icon_sync.as_deref(),
                 page_source,
             ),
+        permission_manager,
     }
 }
 
@@ -3637,6 +3758,11 @@ fn resolve_page_access_from_bridge(bridge: &NavigatorWindowBridge) -> PageCapabi
         bridge.metadata.sync_title.page_to_native || bridge.metadata.sync_title.native_to_page;
     let icon_sync_requested =
         bridge.metadata.sync_icon.page_to_native || bridge.metadata.sync_icon.native_to_page;
+    let permission_manager = policy_allows(
+        &bridge.native_api_policy,
+        Some(bridge.permission_manager_policy.default_src.as_slice()),
+        &bridge.page_source,
+    ) || exact_remote_permission_manager_origin_allows_bridge(bridge);
     let window = bridge.navigator_window.enabled
         && policy_allows(
             &bridge.native_api_policy,
@@ -3685,7 +3811,39 @@ fn resolve_page_access_from_bridge(bridge: &NavigatorWindowBridge) -> PageCapabi
                 bridge.native_api_policy.icon_sync.as_deref(),
                 &bridge.page_source,
             ),
+        permission_manager,
     }
+}
+
+fn exact_remote_permission_manager_origin_allows(
+    show_settings: &WebviewShowSettings,
+    page_source: &PageSourceState,
+) -> bool {
+    let ResolvedPageSource::Remote {
+        origin: Some(origin),
+    } = classify_page_source(page_source)
+    else {
+        return false;
+    };
+    show_settings
+        .permission_manager_policy
+        .remote_origins
+        .iter()
+        .any(|allowed| allowed == &origin)
+}
+
+fn exact_remote_permission_manager_origin_allows_bridge(bridge: &NavigatorWindowBridge) -> bool {
+    let ResolvedPageSource::Remote {
+        origin: Some(origin),
+    } = classify_page_source(&bridge.page_source)
+    else {
+        return false;
+    };
+    bridge
+        .permission_manager_policy
+        .remote_origins
+        .iter()
+        .any(|allowed| allowed == &origin)
 }
 
 fn update_page_access_for_url(bridge: &Rc<RefCell<NavigatorWindowBridge>>, url: &str) {

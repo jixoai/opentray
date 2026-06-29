@@ -323,6 +323,11 @@ enum WebviewCommand {
     GetBounds,
     GetScreenDetails,
     DrainIpcMessages,
+    DrainPermissionMessages,
+    ResolvePermissionMessage {
+        id: u32,
+        result: Value,
+    },
     DrainWindowEvents,
     SetStyle {
         style: Value,
@@ -395,6 +400,13 @@ struct ResizeCommandData {
 struct SizeConstraintCommandData {
     width: Option<Option<f64>>,
     height: Option<Option<f64>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvePermissionMessageCommandData {
+    id: u32,
+    result: Value,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -803,6 +815,19 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
         "getBounds" => Ok(WebviewCommand::GetBounds),
         "getScreenDetails" => Ok(WebviewCommand::GetScreenDetails),
         "drainIpcMessages" | "drainPageMessages" => Ok(WebviewCommand::DrainIpcMessages),
+        "drainPermissionMessages" => Ok(WebviewCommand::DrainPermissionMessages),
+        "resolvePermissionMessage" => {
+            let parsed: ResolvePermissionMessageCommandData = serde_json::from_value(data.clone())
+                .map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "invalid webview resolvePermissionMessage command: {error}"
+                    ))
+                })?;
+            Ok(WebviewCommand::ResolvePermissionMessage {
+                id: parsed.id,
+                result: parsed.result,
+            })
+        }
         "drainWindowEvents" => Ok(WebviewCommand::DrainWindowEvents),
         "setStyle" => {
             let style = data
@@ -1512,7 +1537,10 @@ mod tests {
             panic!("expected show command");
         };
 
-        assert_eq!(show_settings.native_api_policy, WebviewNativeApiPolicy::default());
+        assert_eq!(
+            show_settings.native_api_policy,
+            WebviewNativeApiPolicy::default()
+        );
         assert_eq!(
             show_settings.browser_permission_policy.rules,
             vec![
@@ -1541,6 +1569,35 @@ mod tests {
             }
         );
         assert!(show_settings.bootstrap_requested);
+    }
+
+    #[test]
+    fn parse_permission_manager_commands_are_extension_owned_protocol() {
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({
+                "type": "drainPermissionMessages"
+            }))
+            .expect("drain command"),
+            WebviewCommand::DrainPermissionMessages
+        );
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({
+                "type": "resolvePermissionMessage",
+                "id": 7,
+                "result": {
+                    "family": "camera",
+                    "decision": "unsupported"
+                }
+            }))
+            .expect("resolve command"),
+            WebviewCommand::ResolvePermissionMessage {
+                id: 7,
+                result: serde_json::json!({
+                    "family": "camera",
+                    "decision": "unsupported"
+                }),
+            }
+        );
     }
 
     #[test]

@@ -20,8 +20,8 @@ use super::{
     style::{apply_window_style, normalize_corner_radius, validate_style_request, SetStylePayload},
     window_state::window_state_json,
     NavigatorWindowBridge, WindowSizeConstraints, COMMAND_NAMESPACE, PAGE_IPC_NAMESPACE,
-    PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE, WINDOW_INTERNALS_GLOBAL,
-    WINDOW_NAMESPACE,
+    PERMISSIONS_NAMESPACE, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE,
+    WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
 };
 
 struct MainThreadWebView(usize);
@@ -108,6 +108,7 @@ pub(super) fn handle_navigator_window_request(
         if request.namespace != SCREEN_NAMESPACE
             && request.namespace != TRAY_NAMESPACE
             && request.namespace != PAGE_IPC_NAMESPACE
+            && request.namespace != PERMISSIONS_NAMESPACE
             && request.namespace != COMMAND_NAMESPACE
             && request.namespace != PRIVATE_SYNC_NAMESPACE
         {
@@ -134,6 +135,9 @@ pub(super) fn handle_navigator_window_request(
         TRAY_NAMESPACE if !access.tray => Err(WebviewRuntimeError::Rejected(
             "navigator.opentray.tray is not enabled for the current page source".into(),
         )),
+        PERMISSIONS_NAMESPACE if !access.permission_manager => Err(WebviewRuntimeError::Rejected(
+            "navigator.opentrayPermissions is not enabled for the current page source".into(),
+        )),
         COMMAND_NAMESPACE if !access.window => Err(WebviewRuntimeError::Rejected(
             "navigator.opentray.execCommand is not enabled for the current page source".into(),
         )),
@@ -147,6 +151,9 @@ pub(super) fn handle_navigator_window_request(
         SCREEN_NAMESPACE => dispatch_navigator_screen_command(window, &request.cmd),
         TRAY_NAMESPACE => dispatch_navigator_tray_command(bridge, &request.cmd),
         PAGE_IPC_NAMESPACE => dispatch_page_ipc_command(bridge, &request.cmd, request.payload),
+        PERMISSIONS_NAMESPACE => {
+            dispatch_permission_command(bridge, &request.cmd, request.callback, request.payload)
+        }
         COMMAND_NAMESPACE => dispatch_page_exec_command(&request.cmd, request.payload),
         PRIVATE_SYNC_NAMESPACE => {
             dispatch_private_sync_command(bridge, window, &request.cmd, request.payload)
@@ -156,6 +163,9 @@ pub(super) fn handle_navigator_window_request(
     match result {
         Ok(response) => {
             if request.callback == 0 {
+                return;
+            }
+            if request.namespace == PERMISSIONS_NAMESPACE {
                 return;
             }
             if let Err(error) = resolve_callback(bridge, request.callback, response) {
@@ -182,6 +192,62 @@ pub(super) fn handle_navigator_window_request(
             }
         }
     }
+}
+
+fn dispatch_permission_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    cmd: &str,
+    callback: u32,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    if callback == 0 {
+        return Err(WebviewRuntimeError::Rejected(
+            "opentrayPermissions command requires callback".into(),
+        ));
+    }
+    let id = {
+        let mut state = bridge.borrow_mut();
+        let id = state.next_permission_message_id;
+        state.next_permission_message_id =
+            state.next_permission_message_id.saturating_add(1).max(1);
+        state
+            .permission_messages
+            .push_back(permission_message_payload(id, cmd, callback, payload)?);
+        id
+    };
+    Ok(json!({ "queued": true, "id": id }))
+}
+
+fn permission_message_payload(
+    id: u32,
+    action: &str,
+    callback: u32,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    let source = payload.get("source").cloned().unwrap_or(Value::Null);
+    if !matches!(
+        source.get("type").and_then(Value::as_str),
+        Some("local" | "origin")
+    ) {
+        return Err(WebviewRuntimeError::Rejected(
+            "opentrayPermissions command requires source".into(),
+        ));
+    }
+    let mut message = json!({
+        "id": callback,
+        "nativeId": id,
+        "source": "page",
+        "action": action,
+        "sourceScope": source,
+    });
+    if let Some(target) = message.as_object_mut() {
+        for key in ["family", "decision", "sourceAction"] {
+            if let Some(value) = payload.get(key) {
+                target.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    Ok(message)
 }
 
 fn dispatch_page_exec_command(cmd: &str, payload: Value) -> Result<Value, WebviewRuntimeError> {

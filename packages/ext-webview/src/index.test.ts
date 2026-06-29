@@ -20,6 +20,7 @@ import type {
   WebviewCommand,
   WebviewNavigatorIpc,
   WebviewNavigatorNamespace,
+  WebviewNavigatorPermissions,
   WebviewNavigatorScreen,
   WebviewNavigatorWindow,
   WebviewPermissionStore,
@@ -338,6 +339,72 @@ describe("@opentray/ext-webview", () => {
           "camera"
         )
       ).resolves.toBeUndefined();
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves page permission manager messages through the app-scoped store", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "opentray-permissions-"));
+    try {
+      const store = createAppScopedWebviewPermissionStore({
+        appId: "app-1",
+        baseDir,
+      });
+      let drained = false;
+      const transport = new WebviewResultTransport((command) => {
+        if (!isWebviewCommand(command)) {
+          return { type: "unknown" };
+        }
+        if (command.type === "drainPermissionMessages") {
+          if (drained) {
+            return { type: "permissionMessages", messages: [] };
+          }
+          drained = true;
+          return {
+            type: "permissionMessages",
+            messages: [
+              {
+                id: 7,
+                source: "page",
+                action: "set",
+                sourceScope: { type: "origin", origin: "https://example.com" },
+                family: "camera",
+                decision: "allow",
+                sourceAction: "test",
+              },
+            ],
+          };
+        }
+        if (command.type === "resolvePermissionMessage") {
+          return { type: "permissionMessageResolved", id: command.id };
+        }
+        return { type: "ok" };
+      });
+      const window = createTrayHandle(transport, "app-1", "tray-1")
+        .extend(WebviewExt, {
+          mountId: "webview.tray-1",
+          permissions: { store },
+        })
+        .createWebviewWindow({ html: "<main />" });
+
+      const stop = window.startPermissionManager();
+      const record = await eventually(() =>
+        store.get({ type: "origin", origin: "https://example.com" }, "camera")
+      );
+      stop();
+
+      expect(record).toMatchObject({ decision: "allow", sourceAction: "test" });
+      expect(
+        transport.frames.some(
+          (frame) =>
+            frame.type === "ext-command" &&
+            isWebviewCommand(frame.data) &&
+            frame.data.type === "resolvePermissionMessage" &&
+            frame.data.id === 7 &&
+            frame.data.result.decision === "allow"
+        )
+      ).toBe(true);
     } finally {
       await rm(baseDir, { recursive: true, force: true });
     }
@@ -1724,6 +1791,12 @@ describe("@opentray/ext-webview", () => {
     expectTypeOf<WebviewNavigatorNamespace["ipc"]>().toMatchTypeOf<
       WebviewNavigatorIpc | undefined
     >();
+    expectTypeOf<WebviewNavigatorNamespace["permissions"]>().toMatchTypeOf<
+      WebviewNavigatorPermissions | undefined
+    >();
+    expectTypeOf<Navigator["opentrayPermissions"]>().toMatchTypeOf<
+      WebviewNavigatorPermissions | undefined
+    >();
     expectTypeOf<WebviewNavigatorIpc["postMessage"]>().parameters.toEqualTypeOf<
       [payload: unknown]
     >();
@@ -1815,4 +1888,17 @@ const isWebviewCommand = (value: unknown): value is WebviewCommand =>
 const flushMicrotasks = async (): Promise<void> => {
   await Promise.resolve();
   await Promise.resolve();
+};
+
+const eventually = async <T>(
+  read: () => Promise<T | undefined>
+): Promise<T> => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const value = await read();
+    if (value !== undefined) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("expected value to become available");
 };

@@ -32,6 +32,27 @@ export type WebviewPermissionPromptDecision =
   | "prompt"
   | "unsupported";
 
+export interface WebviewPermissionState {
+  source: WebviewPermissionSource;
+  family: WebviewBrowserPermissionFamily;
+  decision: WebviewPermissionPromptDecision;
+  durable?: WebviewPermissionRecord;
+  unsupported?: boolean;
+}
+
+export interface WebviewPermissionRequest {
+  source: WebviewPermissionSource;
+  family: WebviewBrowserPermissionFamily;
+  sourceAction: string;
+}
+
+export interface WebviewPermissionStoreChange {
+  readonly type: "set" | "clear";
+  readonly record?: WebviewPermissionRecord;
+  readonly source?: WebviewPermissionSource;
+  readonly family?: WebviewBrowserPermissionFamily;
+}
+
 export interface WebviewPermissionRecord {
   namespace: string;
   source: WebviewPermissionSource;
@@ -77,6 +98,9 @@ export interface WebviewPermissionStore {
     family: WebviewBrowserPermissionFamily
   ): Promise<boolean>;
   list(): Promise<WebviewPermissionRecord[]>;
+  subscribe?(
+    listener: (change: WebviewPermissionStoreChange) => void
+  ): () => void;
 }
 
 export interface AppScopedWebviewPermissionStoreOptions {
@@ -105,6 +129,13 @@ export const createAppScopedWebviewPermissionStore = (
       options.baseDir ?? join(homedir(), ".opentray", "permissions"),
       `${sanitizeNamespace(namespace)}.json`
     );
+  const listeners = new Set<(change: WebviewPermissionStoreChange) => void>();
+
+  const notify = (change: WebviewPermissionStoreChange): void => {
+    for (const listener of listeners) {
+      listener(change);
+    }
+  };
 
   const readStore = async (): Promise<PermissionStoreFile> => {
     try {
@@ -155,6 +186,7 @@ export const createAppScopedWebviewPermissionStore = (
         store.records[existingIndex] = record;
       }
       await writeStore(store);
+      notify({ type: "set", record });
       return record;
     },
     async clear(source, family) {
@@ -170,10 +202,17 @@ export const createAppScopedWebviewPermissionStore = (
         return false;
       }
       await writeStore({ ...store, records });
+      notify({ type: "clear", source, family });
       return true;
     },
     async list() {
       return (await readStore()).records;
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 };

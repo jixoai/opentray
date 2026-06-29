@@ -243,7 +243,13 @@ const webview = tray.createWebviewWindow({
 
 `permissionManagerPolicy` controls whether `opentrayPermissions` can be injected as a permission-management object. Remote origins do not receive that object by default, even when a permission family is allowlisted. Durable permission facts use the default app-scoped JavaScript permission store from `createAppScopedWebviewPermissionStore({ appId })`; the store is namespaced by OpenTray `appId` and does not use WebView page storage as the source of truth.
 
-Native prompt behavior depends on what the platform WebView substrate exposes. Unsupported permission families must resolve as unsupported instead of pretending a grant succeeded.
+Call `startPermissionManager()` on the WebView window handle to drain page-side `opentrayPermissions` messages into the app-scoped store. Apps can pass `permissions.store` to use a custom adapter; otherwise the default store is created from the OpenTray app identity.
+
+```ts
+const stopPermissions = webview.startPermissionManager();
+```
+
+Native prompt behavior depends on what the platform WebView substrate exposes. Current Wry WebKit/WebView2 hooks do not expose a stable all-permission decision callback, so native browser-engine grants remain typed unsupported until OpenTray owns that substrate hook.
 
 When enabled, the page receives:
 
@@ -252,6 +258,7 @@ When enabled, the page receives:
 - `navigator.screen`
 - `navigator.opentrayScreen`
 - `navigator.opentray.tray`
+- `navigator.opentrayPermissions` when `permissionManagerPolicy` allows the current source
 - optional `window.close()` / `window.moveTo()` / `window.resizeTo()` overrides when `bindWindowGlobals` is `true`
 - optional `window.getScreenDetails()` override when `bindScreenGlobals` is `true`
 - `navigator.opentrayWindow.overlay` when `windowControlsOverlay` is `true`

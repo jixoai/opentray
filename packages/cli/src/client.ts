@@ -99,6 +99,8 @@ export interface TrayExtensionMountSpec {
 }
 
 export interface TrayExtensionContext {
+  readonly appId: string;
+  readonly trayId: TrayId;
   readonly name: string;
   readonly path: string;
   readonly mountId: string;
@@ -279,6 +281,7 @@ export function createTrayHandle(
     ): TrayHandle & TCapability {
       const context = createTrayExtensionContext(
         handle,
+        appId,
         extension,
         options,
         nextMountId
@@ -355,6 +358,7 @@ const attachEventfulTrayHandle = (
     ): EventfulTrayHandle & TCapability {
       const context = createTrayExtensionContext(
         eventful,
+        appId,
         extension,
         options,
         nextMountId
@@ -392,6 +396,7 @@ const resolveDefaultAppRef = async (
 
 const createTrayExtensionContext = <TCapability extends object, TOptions>(
   tray: TrayHandle,
+  appId: string,
   extension: TrayExtension<TCapability, TOptions>,
   options: TOptions | undefined,
   nextMountId: (extensionName: string) => string
@@ -415,6 +420,8 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
   };
 
   return {
+    appId,
+    trayId: tray.trayId,
     name,
     path,
     mountId,

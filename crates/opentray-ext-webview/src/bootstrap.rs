@@ -2,7 +2,7 @@ use serde_json::json;
 
 use crate::{
     MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings,
-    WebviewNativeApiPolicy, WebviewNativeApiSource,
+    WebviewNativeApiPolicy, WebviewNativeApiSource, WebviewPermissionManagerPolicy,
 };
 
 pub(crate) fn navigator_window_bootstrap_script(
@@ -12,6 +12,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     title_sync: MetadataSyncSettings,
     icon_sync: MetadataSyncSettings,
     native_api_policy: &WebviewNativeApiPolicy,
+    permission_manager_policy: &WebviewPermissionManagerPolicy,
 ) -> String {
     let window_enabled = js_bool(window_settings.enabled);
     let bind_window_globals = js_bool(window_settings.bind_window_globals);
@@ -24,6 +25,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     let icon_page_to_native = js_bool(icon_sync.page_to_native);
     let icon_native_to_page = js_bool(icon_sync.native_to_page);
     let native_api_policy_json = native_api_policy_json(native_api_policy);
+    let permission_manager_policy_json = permission_manager_policy_json(permission_manager_policy);
     r#"(function () {
   const requestedWindowEnabled = __OPENTRAY_WINDOW_ENABLED__;
   const requestedBindWindowGlobals = __OPENTRAY_BIND_GLOBALS__;
@@ -36,10 +38,12 @@ pub(crate) fn navigator_window_bootstrap_script(
   const requestedIconSyncPageToNative = __OPENTRAY_ICON_PAGE_TO_NATIVE__;
   const requestedIconSyncNativeToPage = __OPENTRAY_ICON_NATIVE_TO_PAGE__;
   const capabilityPolicy = __OPENTRAY_NATIVE_API_POLICY__;
+  const permissionManagerPolicy = __OPENTRAY_PERMISSION_MANAGER_POLICY__;
   const INTERNALS_KEY = "__OPENTRAY_WINDOW_INTERNALS__";
   const WINDOW_API_KEY = "__OPENTRAY_WINDOW_API__";
   const SCREEN_API_KEY = "__OPENTRAY_SCREEN_API__";
   const TRAY_API_KEY = "__OPENTRAY_TRAY_API__";
+  const PERMISSIONS_API_KEY = "__OPENTRAY_PERMISSIONS_API__";
   const isLoopbackHost = (host) =>
     host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
   const resolvePageSource = () => {
@@ -73,6 +77,16 @@ pub(crate) fn navigator_window_bootstrap_script(
     const source = resolvePageSource();
     return Array.isArray(rules) && rules.some((rule) => ruleMatches(rule, source));
   };
+  const permissionManagerAllows = () => {
+    const source = resolvePageSource();
+    if (source.kind === "remote") {
+      return Array.isArray(permissionManagerPolicy.remoteOrigins) &&
+        source.origin !== null &&
+        permissionManagerPolicy.remoteOrigins.includes(source.origin);
+    }
+    const rules = permissionManagerPolicy.defaultSrc ?? ["'local'"];
+    return Array.isArray(rules) && rules.some((rule) => ruleMatches(rule, source));
+  };
   const windowEnabled = requestedWindowEnabled && directiveAllows("window");
       let windowControlsOverlay = requestedWindowControlsOverlay && windowEnabled;
   const bindWindowGlobals =
@@ -89,6 +103,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     requestedIconSyncPageToNative && directiveAllows("iconSync");
   const iconSyncNativeToPage =
     requestedIconSyncNativeToPage && directiveAllows("iconSync");
+  const permissionManagerEnabled = permissionManagerAllows();
   if (!window[INTERNALS_KEY]) {
     const callbacks = new Map();
     const windowDomListeners = Object.create(null);
@@ -464,6 +479,46 @@ pub(crate) fn navigator_window_bootstrap_script(
       };
       return Object.freeze(api);
     };
+    const currentPermissionSource = () => {
+      const source = resolvePageSource();
+      return source.kind === "local"
+        ? { type: "local" }
+        : { type: "origin", origin: source.origin || "" };
+    };
+    const createPermissionsApi = () => {
+      if (window[PERMISSIONS_API_KEY]) return window[PERMISSIONS_API_KEY];
+      const invokePermission = (action, family, options = {}) =>
+        invokeWithNamespace("opentray.permissions", action, {
+          source: currentPermissionSource(),
+          family,
+          ...options
+        });
+      const api = {
+        query(family) {
+          return invokePermission("query", family);
+        },
+        request(family) {
+          return invokePermission("request", family, {
+            sourceAction: "opentrayPermissions.request"
+          });
+        },
+        set(family, decision) {
+          return invokePermission("set", family, {
+            decision,
+            sourceAction: "opentrayPermissions.set"
+          });
+        },
+        clear(family) {
+          return invokePermission("clear", family);
+        }
+      };
+      Object.freeze(api);
+      Object.defineProperty(window, PERMISSIONS_API_KEY, {
+        value: api,
+        configurable: true
+      });
+      return api;
+    };
     const createCommandApi = () => {
       const execCommand = (command) => {
         if (typeof command !== "string" || command.length === 0) return;
@@ -644,6 +699,17 @@ pub(crate) fn navigator_window_bootstrap_script(
         value: createCommandApi(),
         configurable: true
       });
+      if (config && config.permissionManagerEnabled) {
+        const permissionsApi = createPermissionsApi();
+        defineBridgeProperty(navigator, "opentrayPermissions", {
+          value: permissionsApi,
+          configurable: true
+        });
+        defineBridgeProperty(opentrayApi, "permissions", {
+          value: permissionsApi,
+          configurable: true
+        });
+      }
       if (opentrayApi) {
         defineBridgeProperty(navigator, "opentray", {
           value: Object.freeze(opentrayApi),
@@ -659,6 +725,7 @@ pub(crate) fn navigator_window_bootstrap_script(
         delete navigator.screen;
         delete navigator.opentrayScreen;
         delete navigator.opentray;
+        delete navigator.opentrayPermissions;
       } catch (_) {}
       teardownFaviconObserver();
       restoreGlobals();
@@ -686,6 +753,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     windowEnabled ||
     screenEnabled ||
     trayEnabled ||
+    permissionManagerEnabled ||
     titleSyncPageToNative ||
     titleSyncNativeToPage ||
     iconSyncPageToNative ||
@@ -697,7 +765,8 @@ pub(crate) fn navigator_window_bootstrap_script(
       windowControlsOverlay,
       screenEnabled,
       bindScreenGlobals,
-      trayEnabled
+      trayEnabled,
+      permissionManagerEnabled
     });
   } else {
     internals.uninstall();
@@ -714,6 +783,10 @@ pub(crate) fn navigator_window_bootstrap_script(
         .replace("__OPENTRAY_ICON_PAGE_TO_NATIVE__", icon_page_to_native)
         .replace("__OPENTRAY_ICON_NATIVE_TO_PAGE__", icon_native_to_page)
         .replace("__OPENTRAY_NATIVE_API_POLICY__", &native_api_policy_json)
+        .replace(
+            "__OPENTRAY_PERMISSION_MANAGER_POLICY__",
+            &permission_manager_policy_json,
+        )
 }
 
 fn js_bool(value: bool) -> &'static str {
@@ -736,6 +809,14 @@ fn native_api_policy_json(policy: &WebviewNativeApiPolicy) -> String {
         "iconSync": policy.icon_sync.as_ref().map(|rules| native_api_sources_json(rules)),
     }))
     .expect("native api policy serialization should not fail")
+}
+
+fn permission_manager_policy_json(policy: &WebviewPermissionManagerPolicy) -> String {
+    serde_json::to_string(&json!({
+        "defaultSrc": native_api_sources_json(&policy.default_src),
+        "remoteOrigins": policy.remote_origins,
+    }))
+    .expect("permission manager policy serialization should not fail")
 }
 
 fn native_api_sources_json(rules: &[WebviewNativeApiSource]) -> Vec<String> {
@@ -905,6 +986,7 @@ return await rectPromise;
             MetadataSyncSettings::default(),
             MetadataSyncSettings::default(),
             &WebviewNativeApiPolicy::default(),
+            &Default::default(),
         )
     }
 

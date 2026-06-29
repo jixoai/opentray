@@ -10,7 +10,8 @@ use super::style::{
 use super::*;
 use crate::{
     MetadataSyncSettings, WebviewBackgroundEffectState, WebviewBackgroundInput,
-    WebviewNativeApiSource, WebviewWindowBackground, WebviewWindowIcon,
+    WebviewNativeApiSource, WebviewPermissionManagerPolicy, WebviewWindowBackground,
+    WebviewWindowIcon,
 };
 use std::process::Command;
 
@@ -45,6 +46,25 @@ fn bootstrap_script_with_policy(
         title_sync,
         icon_sync,
         &native_api_policy,
+        &Default::default(),
+    )
+}
+
+fn bootstrap_script_with_permission_policy(
+    default_src: Vec<WebviewNativeApiSource>,
+    remote_origins: Vec<String>,
+) -> String {
+    navigator_window_bootstrap_script(
+        NavigatorWindowSettings::default(),
+        NavigatorScreenSettings::default(),
+        NavigatorTraySettings::default(),
+        MetadataSyncSettings::default(),
+        MetadataSyncSettings::default(),
+        &WebviewNativeApiPolicy::default(),
+        &WebviewPermissionManagerPolicy {
+            default_src,
+            remote_origins,
+        },
     )
 }
 
@@ -701,6 +721,73 @@ return {
 }
 
 #[test]
+fn opentray_permissions_requires_remote_exact_origin_opt_in() {
+    let denied = run_node_probe_at(
+        &bootstrap_script_with_policy(
+            NavigatorWindowSettings::default(),
+            NavigatorScreenSettings::default(),
+            NavigatorTraySettings::default(),
+            MetadataSyncSettings::default(),
+            MetadataSyncSettings::default(),
+            WebviewNativeApiPolicy::default(),
+        ),
+        r#"
+return {
+  hasPermissions: typeof navigator.opentrayPermissions !== "undefined",
+  hasNamespace: typeof navigator.opentray?.permissions !== "undefined"
+};
+"#,
+        "https://example.com/dashboard",
+    );
+    assert_eq!(denied["hasPermissions"], Value::Bool(false));
+    assert_eq!(denied["hasNamespace"], Value::Bool(false));
+
+    let allowed = run_node_probe_at(
+        &bootstrap_script_with_permission_policy(
+            Default::default(),
+            vec!["https://example.com".to_string()],
+        ),
+        r#"
+const queryPromise = navigator.opentrayPermissions.query("camera");
+const request = messages.shift();
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(request.callback, {
+  family: "camera",
+  decision: "unsupported"
+});
+const result = await queryPromise;
+return {
+  hasPermissions: typeof navigator.opentrayPermissions !== "undefined",
+  hasNamespace: typeof navigator.opentray?.permissions !== "undefined",
+  namespace: request.namespace,
+  action: request.cmd,
+  family: request.payload.family,
+  sourceType: request.payload.source.type,
+  sourceOrigin: request.payload.source.origin,
+  decision: result.decision
+};
+"#,
+        "https://example.com/dashboard",
+    );
+    assert_eq!(allowed["hasPermissions"], Value::Bool(true));
+    assert_eq!(allowed["hasNamespace"], Value::Bool(true));
+    assert_eq!(
+        allowed["namespace"],
+        Value::String("opentray.permissions".to_string())
+    );
+    assert_eq!(allowed["action"], Value::String("query".to_string()));
+    assert_eq!(allowed["family"], Value::String("camera".to_string()));
+    assert_eq!(allowed["sourceType"], Value::String("origin".to_string()));
+    assert_eq!(
+        allowed["sourceOrigin"],
+        Value::String("https://example.com".to_string())
+    );
+    assert_eq!(
+        allowed["decision"],
+        Value::String("unsupported".to_string())
+    );
+}
+
+#[test]
 fn navigator_tray_runtime_uses_prefixed_namespace_and_policy_gate() {
     let allowed = run_node_probe(
         &bootstrap_script_with_policy(
@@ -1195,9 +1282,11 @@ fn navigator_window_bridge_tracks_listener_ids() {
         content_view: None,
         listeners: HashMap::new(),
         ipc_messages: VecDeque::new(),
+        permission_messages: VecDeque::new(),
         window_events: VecDeque::new(),
         next_event_id: 1,
         next_ipc_message_id: 1,
+        next_permission_message_id: 1,
         style: WindowStyleState {
             frameless: false,
             keep_on_top: false,
@@ -1223,6 +1312,7 @@ fn navigator_window_bridge_tracks_listener_ids() {
         },
         app_region_drag: AppRegionDragState::default(),
         native_api_policy: WebviewNativeApiPolicy::default(),
+        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
         page_source: PageSourceState::default(),
         page_access: PageCapabilityAccess::default(),
         tray_bounds: None,
@@ -1247,9 +1337,11 @@ fn app_region_drag_interaction_window_event_conserves_native_source() {
         content_view: None,
         listeners: HashMap::new(),
         ipc_messages: VecDeque::new(),
+        permission_messages: VecDeque::new(),
         window_events: VecDeque::new(),
         next_event_id: 1,
         next_ipc_message_id: 1,
+        next_permission_message_id: 1,
         style: WindowStyleState {
             frameless: false,
             keep_on_top: false,
@@ -1275,6 +1367,7 @@ fn app_region_drag_interaction_window_event_conserves_native_source() {
         },
         app_region_drag: AppRegionDragState::default(),
         native_api_policy: WebviewNativeApiPolicy::default(),
+        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
         page_source: PageSourceState::default(),
         page_access: PageCapabilityAccess::default(),
         tray_bounds: None,

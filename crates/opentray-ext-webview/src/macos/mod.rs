@@ -33,8 +33,8 @@ use wry::{PageLoadEvent, WebView, WebViewBuilder, WebViewExtMacOS, RGBA};
 
 use crate::{
     NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings, WebviewCommand,
-    WebviewNativeApiPolicy, WebviewRuntimeError, WebviewSessionBootstrapSettings,
-    WebviewShowSettings,
+    WebviewNativeApiPolicy, WebviewPermissionManagerPolicy, WebviewRuntimeError,
+    WebviewSessionBootstrapSettings, WebviewShowSettings,
 };
 
 use self::app_menu::ensure_standard_edit_menu;
@@ -62,6 +62,7 @@ const WINDOW_NAMESPACE: &str = "opentray.window";
 const SCREEN_NAMESPACE: &str = "opentray.screen";
 const TRAY_NAMESPACE: &str = "opentray.tray";
 const PAGE_IPC_NAMESPACE: &str = "opentray.ipc";
+const PERMISSIONS_NAMESPACE: &str = "opentray.permissions";
 const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
 const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
@@ -88,9 +89,11 @@ struct NavigatorWindowBridge {
     content_view: Option<Retained<NSView>>,
     listeners: HashMap<String, Vec<NavigatorWindowListener>>,
     ipc_messages: VecDeque<Value>,
+    permission_messages: VecDeque<Value>,
     window_events: VecDeque<Value>,
     next_event_id: u32,
     next_ipc_message_id: u32,
+    next_permission_message_id: u32,
     style: WindowStyleState,
     navigator_window: NavigatorWindowSettings,
     navigator_screen: NavigatorScreenSettings,
@@ -98,6 +101,7 @@ struct NavigatorWindowBridge {
     metadata: WindowMetadataState,
     app_region_drag: AppRegionDragState,
     native_api_policy: WebviewNativeApiPolicy,
+    permission_manager_policy: WebviewPermissionManagerPolicy,
     page_source: PageSourceState,
     page_access: PageCapabilityAccess,
     tray_bounds: Option<opentray_spec::Rect>,
@@ -175,6 +179,7 @@ struct PageCapabilityAccess {
     screen_globals: bool,
     title_sync: bool,
     icon_sync: bool,
+    permission_manager: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,6 +324,37 @@ impl MacosWebviewRuntime {
                 let messages: Vec<Value> =
                     slot.bridge.borrow_mut().ipc_messages.drain(..).collect();
                 Ok(json!({ "type": "ipcMessages", "messages": messages }))
+            }
+            WebviewCommand::DrainPermissionMessages => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "drainPermissionMessages requires an active WebView window".into(),
+                        )
+                    })?;
+                let messages: Vec<Value> = slot
+                    .bridge
+                    .borrow_mut()
+                    .permission_messages
+                    .drain(..)
+                    .collect();
+                Ok(json!({ "type": "permissionMessages", "messages": messages }))
+            }
+            WebviewCommand::ResolvePermissionMessage { id, result } => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "resolvePermissionMessage requires an active WebView window".into(),
+                        )
+                    })?;
+                self::bridge::resolve_callback(&slot.bridge, id, result)?;
+                Ok(json!({ "type": "permissionMessageResolved", "id": id }))
             }
             WebviewCommand::DrainWindowEvents => {
                 let slot = self
@@ -558,9 +594,11 @@ impl MacosWebviewRuntime {
             content_view: None,
             listeners: HashMap::new(),
             ipc_messages: VecDeque::new(),
+            permission_messages: VecDeque::new(),
             window_events: VecDeque::new(),
             next_event_id: 1,
             next_ipc_message_id: 1,
+            next_permission_message_id: 1,
             style: WindowStyleState {
                 frameless: show_settings.window.style.frameless,
                 keep_on_top: show_settings.window.style.keep_on_top,
@@ -586,6 +624,7 @@ impl MacosWebviewRuntime {
             },
             app_region_drag: AppRegionDragState::default(),
             native_api_policy: show_settings.native_api_policy.clone(),
+            permission_manager_policy: show_settings.permission_manager_policy.clone(),
             page_source: page_source.clone(),
             page_access: resolve_page_access(&show_settings, &page_source),
             tray_bounds,
@@ -618,6 +657,7 @@ impl MacosWebviewRuntime {
                 show_settings.window.sync.title,
                 show_settings.window.sync.icon,
                 &show_settings.native_api_policy,
+                &show_settings.permission_manager_policy,
             ))
             .with_ipc_handler(move |request| {
                 handle_navigator_window_request(request.body(), &bridge_for_ipc, &window_for_ipc);

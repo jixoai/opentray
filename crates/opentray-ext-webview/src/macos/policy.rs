@@ -14,6 +14,17 @@ pub(super) fn resolve_page_access(
         || show_settings.window.sync.title.native_to_page;
     let icon_sync_requested = show_settings.window.sync.icon.page_to_native
         || show_settings.window.sync.icon.native_to_page;
+    let permission_manager =
+        policy_allows(
+            &show_settings.native_api_policy,
+            Some(
+                show_settings
+                    .permission_manager_policy
+                    .default_src
+                    .as_slice(),
+            ),
+            page_source,
+        ) || exact_remote_permission_manager_origin_allows(show_settings, page_source);
     let window = show_settings.navigator_window.enabled
         && policy_allows(
             &show_settings.native_api_policy,
@@ -63,6 +74,7 @@ pub(super) fn resolve_page_access(
                 show_settings.native_api_policy.icon_sync.as_deref(),
                 page_source,
             ),
+        permission_manager,
     }
 }
 
@@ -73,6 +85,11 @@ pub(super) fn resolve_page_access_from_bridge(
         bridge.metadata.sync_title.page_to_native || bridge.metadata.sync_title.native_to_page;
     let icon_sync_requested =
         bridge.metadata.sync_icon.page_to_native || bridge.metadata.sync_icon.native_to_page;
+    let permission_manager = policy_allows(
+        &bridge.native_api_policy,
+        Some(bridge.permission_manager_policy.default_src.as_slice()),
+        &bridge.page_source,
+    ) || exact_remote_permission_manager_origin_allows_bridge(bridge);
     let window = bridge.navigator_window.enabled
         && policy_allows(
             &bridge.native_api_policy,
@@ -122,7 +139,39 @@ pub(super) fn resolve_page_access_from_bridge(
                 bridge.native_api_policy.icon_sync.as_deref(),
                 &bridge.page_source,
             ),
+        permission_manager,
     }
+}
+
+fn exact_remote_permission_manager_origin_allows(
+    show_settings: &WebviewShowSettings,
+    page_source: &PageSourceState,
+) -> bool {
+    let ResolvedPageSource::Remote {
+        origin: Some(origin),
+    } = classify_page_source(page_source)
+    else {
+        return false;
+    };
+    show_settings
+        .permission_manager_policy
+        .remote_origins
+        .iter()
+        .any(|allowed| allowed == &origin)
+}
+
+fn exact_remote_permission_manager_origin_allows_bridge(bridge: &NavigatorWindowBridge) -> bool {
+    let ResolvedPageSource::Remote {
+        origin: Some(origin),
+    } = classify_page_source(&bridge.page_source)
+    else {
+        return false;
+    };
+    bridge
+        .permission_manager_policy
+        .remote_origins
+        .iter()
+        .any(|allowed| allowed == &origin)
 }
 
 pub(super) fn update_page_access_for_url(bridge: &Rc<RefCell<NavigatorWindowBridge>>, url: &str) {

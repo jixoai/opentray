@@ -6,9 +6,16 @@ import type {
 } from "@opentray/spec";
 import type { TrayExtension, TrayExtensionContext, TrayHandle } from "opentray";
 import type {
+  WebviewBrowserPermissionFamily,
   WebviewBrowserPermissionPolicy,
+  WebviewPermissionPromptDecision,
   WebviewPermissionManagerPolicy,
+  WebviewPermissionRequest,
+  WebviewPermissionSource,
+  WebviewPermissionState,
+  WebviewPermissionStore,
 } from "./permission-store";
+import { createAppScopedWebviewPermissionStore } from "./permission-store";
 
 export * from "./permission-store";
 
@@ -189,6 +196,11 @@ export interface WebviewWindowCapabilities {
   platform: string;
   background: boolean;
   platformCapabilities: WebviewWindowPlatformCapabilities;
+}
+
+export interface WebviewPermissionRuntimeOptions {
+  store?: WebviewPermissionStore;
+  prompt?: (request: WebviewPermissionRequest) => Promise<WebviewPermissionPromptDecision>;
 }
 
 export type WebviewWindowStateKind = "normal" | "minimized" | "maximized";
@@ -387,11 +399,24 @@ export interface WebviewNavigatorTray {
   getBounds(): Promise<TrayBoundsResult>;
 }
 
+export interface WebviewNavigatorPermissions {
+  query(family: WebviewBrowserPermissionFamily): Promise<WebviewPermissionState>;
+  request(
+    family: WebviewBrowserPermissionFamily
+  ): Promise<WebviewPermissionState>;
+  set(
+    family: WebviewBrowserPermissionFamily,
+    decision: "allow" | "deny"
+  ): Promise<WebviewPermissionState>;
+  clear(family: WebviewBrowserPermissionFamily): Promise<WebviewPermissionState>;
+}
+
 export interface WebviewNavigatorNamespace {
   readonly window?: WebviewNavigatorWindow;
   readonly screen?: WebviewNavigatorScreen;
   readonly tray?: WebviewNavigatorTray;
   readonly ipc?: WebviewNavigatorIpc;
+  readonly permissions?: WebviewNavigatorPermissions;
   execCommand(command: WebviewExecCommand): void;
 }
 
@@ -412,6 +437,8 @@ export type WebviewCommand =
   | { type: "getBounds" }
   | { type: "getScreenDetails" }
   | { type: "drainIpcMessages" }
+  | { type: "drainPermissionMessages" }
+  | { type: "resolvePermissionMessage"; id: number; result: WebviewPermissionState }
   | { type: "drainWindowEvents" }
   | { type: "setStyle"; style: WebviewWindowStylePatch }
   | {
@@ -431,6 +458,8 @@ export type WebviewEvent =
   | ({ type: "moved" } & WebviewWindowPositionChange)
   | ({ type: "resized" } & WebviewWindowSizeChange)
   | { type: "ipcMessages"; messages: WebviewIpcMessage[] }
+  | { type: "permissionMessages"; messages: WebviewPermissionIpcMessage[] }
+  | { type: "permissionMessageResolved"; id: number }
   | { type: "windowEvents"; events: WebviewHostWindowEvent[] }
   | { type: "message"; payload: unknown }
   | { type: "positionFallback"; strategy: "cursor" | "platformDefault" };
@@ -439,6 +468,16 @@ export interface WebviewIpcMessage {
   id: number;
   source: "page" | "native";
   payload: unknown;
+}
+
+export interface WebviewPermissionIpcMessage {
+  id: number;
+  source: "page";
+  action: "query" | "request" | "set" | "clear" | "list";
+  sourceScope: WebviewPermissionSource;
+  family?: WebviewBrowserPermissionFamily;
+  decision?: "allow" | "deny";
+  sourceAction?: string;
 }
 
 export type WebviewHostWindowEvent =
@@ -498,6 +537,8 @@ export interface WebviewWindowHandle {
   evaluate(js: string): Promise<void>;
   postMessage(payload: unknown): Promise<void>;
   drainIpcMessages(): Promise<WebviewIpcMessage[]>;
+  drainPermissionMessages(): Promise<WebviewPermissionIpcMessage[]>;
+  startPermissionManager(): () => void;
 }
 
 export interface WebviewTrayCapability {
@@ -509,6 +550,7 @@ export interface WebviewTrayCapability {
 export interface WebviewExtensionOptions {
   mountId?: string;
   path?: string;
+  permissions?: WebviewPermissionRuntimeOptions;
 }
 
 export class WebviewExtensionLoadError extends Error {
@@ -542,7 +584,7 @@ export const WebviewExt = {
       ...(options?.path === undefined ? {} : { path: options.path }),
     };
   },
-  extend(tray, context) {
+  extend(tray, context, options) {
     const endpoint = createWebviewEndpoint(tray, context);
     return {
       getScreenDetails() {
@@ -550,8 +592,11 @@ export const WebviewExt = {
           type: "getScreenDetails",
         } satisfies WebviewCommand);
       },
-      createWebviewWindow(options) {
-        return createWebviewWindowHandle(endpoint, options);
+      createWebviewWindow(windowOptions) {
+        return createWebviewWindowHandle(endpoint, windowOptions, {
+          appId: context.appId,
+          permissions: options?.permissions ?? {},
+        });
       },
       createWebviewHandle() {
         return createLegacyWebviewHandle(endpoint);
@@ -704,13 +749,28 @@ const createLegacyWebviewHandle = (endpoint: {
   },
 });
 
+interface WebviewWindowRuntimeContext {
+  appId: string;
+  permissions: WebviewPermissionRuntimeOptions;
+}
+
 const createWebviewWindowHandle = (
   endpoint: WebviewEndpoint,
-  options: WebviewWindowOptions
+  options: WebviewWindowOptions,
+  runtime: WebviewWindowRuntimeContext
 ): WebviewWindowHandle => {
+  const permissions: WebviewPermissionRuntimeOptions = {
+    store:
+      runtime.permissions.store ??
+      createAppScopedWebviewPermissionStore({ appId: runtime.appId }),
+    ...(runtime.permissions.prompt === undefined
+      ? {}
+      : { prompt: runtime.permissions.prompt }),
+  };
   let bootstrapped = false;
   const listenerCounts = new Map<string, number>();
   let windowEventPoll: ReturnType<typeof setInterval> | undefined;
+  let permissionPoll: ReturnType<typeof setInterval> | undefined;
 
   const drainWindowEvents = async (): Promise<void> => {
     const response = await endpoint.command<
@@ -744,6 +804,47 @@ const createWebviewWindowHandle = (
     }
     clearInterval(windowEventPoll);
     windowEventPoll = undefined;
+  };
+
+  const drainPermissionMessages = async (): Promise<WebviewPermissionIpcMessage[]> => {
+    const response = await endpoint.command<
+      Extract<WebviewEvent, { type: "permissionMessages" }>
+    >({
+      type: "drainPermissionMessages",
+    } satisfies WebviewCommand);
+    return response.messages;
+  };
+
+  const resolvePermissionMessages = async (): Promise<void> => {
+    const messages = await drainPermissionMessages();
+    for (const message of messages) {
+      const result = await resolvePermissionMessage(permissions, message);
+      await endpoint.command<void>({
+        type: "resolvePermissionMessage",
+        id: message.id,
+        result,
+      } satisfies WebviewCommand);
+    }
+  };
+
+  const startPermissionManager = (): (() => void) => {
+    if (permissionPoll === undefined) {
+      void resolvePermissionMessages().catch((error: unknown) => {
+        console.error("WebView permission manager failed:", error);
+      });
+      permissionPoll = setInterval(() => {
+        void resolvePermissionMessages().catch((error: unknown) => {
+          console.error("WebView permission manager failed:", error);
+        });
+      }, WINDOW_EVENT_POLL_INTERVAL_MS);
+    }
+    return () => {
+      if (permissionPoll === undefined) {
+        return;
+      }
+      clearInterval(permissionPoll);
+      permissionPoll = undefined;
+    };
   };
 
   const trackWindowListener = (
@@ -791,6 +892,10 @@ const createWebviewWindowHandle = (
         type: "destroy",
       } satisfies WebviewCommand);
       bootstrapped = false;
+      if (permissionPoll !== undefined) {
+        clearInterval(permissionPoll);
+        permissionPoll = undefined;
+      }
     },
     moveTo(x, y) {
       return endpoint.command<void>({
@@ -894,6 +999,8 @@ const createWebviewWindowHandle = (
       } satisfies WebviewCommand);
       return response.messages;
     },
+    drainPermissionMessages,
+    startPermissionManager,
   };
 };
 
@@ -901,6 +1008,88 @@ const isExtensionEventSourceTray = (
   tray: TrayHandle
 ): tray is ExtensionEventSourceTray =>
   "listenExtension" in tray && typeof tray.listenExtension === "function";
+
+const resolvePermissionMessage = async (
+  permissions: WebviewPermissionRuntimeOptions,
+  message: WebviewPermissionIpcMessage
+): Promise<WebviewPermissionState> => {
+  const store = permissions.store;
+  const family = message.family;
+  if (family === undefined) {
+    return permissionState(message.sourceScope, "camera", "unsupported");
+  }
+  if (store === undefined) {
+    return permissionState(message.sourceScope, family, "unsupported");
+  }
+  if (message.action === "clear") {
+    await store.clear(message.sourceScope, family);
+    return permissionState(message.sourceScope, family, "prompt");
+  }
+  if (message.action === "set") {
+    if (message.decision === undefined) {
+      return permissionState(message.sourceScope, family, "unsupported");
+    }
+    const record = await store.set({
+      source: message.sourceScope,
+      family,
+      decision: message.decision,
+      sourceAction: message.sourceAction ?? "opentrayPermissions.set",
+    });
+    return {
+      source: message.sourceScope,
+      family,
+      decision: record.decision,
+      durable: record,
+    };
+  }
+  const durable = await store.get(message.sourceScope, family);
+  if (durable !== undefined) {
+    return {
+      source: message.sourceScope,
+      family,
+      decision: durable.decision,
+      durable,
+    };
+  }
+  if (message.action === "request") {
+    const prompt = permissions.prompt;
+    if (prompt === undefined) {
+      return permissionState(message.sourceScope, family, "unsupported");
+    }
+    const decision = await prompt({
+      source: message.sourceScope,
+      family,
+      sourceAction: message.sourceAction ?? "opentrayPermissions.request",
+    });
+    if (decision === "allow" || decision === "deny") {
+      const record = await store.set({
+        source: message.sourceScope,
+        family,
+        decision,
+        sourceAction: message.sourceAction ?? "opentrayPermissions.request",
+      });
+      return {
+        source: message.sourceScope,
+        family,
+        decision,
+        durable: record,
+      };
+    }
+    return permissionState(message.sourceScope, family, decision);
+  }
+  return permissionState(message.sourceScope, family, "prompt");
+};
+
+const permissionState = (
+  source: WebviewPermissionSource,
+  family: WebviewBrowserPermissionFamily,
+  decision: WebviewPermissionPromptDecision
+): WebviewPermissionState => ({
+  source,
+  family,
+  decision,
+  ...(decision === "unsupported" ? { unsupported: true } : {}),
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1003,6 +1192,7 @@ declare global {
     window?: WebviewNavigatorWindow;
     opentrayWindow?: WebviewNavigatorWindow;
     opentrayScreen?: WebviewNavigatorScreen;
+    opentrayPermissions?: WebviewNavigatorPermissions;
     opentray?: WebviewNavigatorNamespace;
   }
 

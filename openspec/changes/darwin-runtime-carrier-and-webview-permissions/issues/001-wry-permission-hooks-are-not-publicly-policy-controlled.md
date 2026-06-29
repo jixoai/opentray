@@ -22,6 +22,8 @@ The current Wry substrate does not expose a stable public builder callback for a
 
 If OpenTray claims native browser permissions are fully enforced before owning the substrate hook, remote or local pages could still reach engine-level grants outside OpenTray's policy law. The most visible risk is camera/microphone on macOS: `Info.plist` can make the app identity valid, but Wry's internal delegate still decides media capture unless OpenTray controls or patches that delegate path.
 
+This release therefore scopes the implemented surface to typed policy parsing, exact-origin `opentrayPermissions` injection, app-scoped durable permission facts, and typed unsupported request results for browser-engine permission grants that the native substrate cannot route through OpenTray yet.
+
 ## Evidence
 
 - `~/.cargo/registry/src/.../wry-0.55.1/src/wkwebview/class/wry_web_view_ui_delegate.rs` implements `requestMediaCapturePermissionForOrigin` and calls `WKPermissionDecision::Grant`.
@@ -30,4 +32,4 @@ If OpenTray claims native browser permissions are fully enforced before owning t
 
 ## Recommendation
 
-Keep the current implementation to typed policy parsing, session compatibility, app-scoped JS store, and Darwin carrier plumbing until the native substrate is owned. Before closing this risk, either add an OpenTray-owned Wry extension point / fork patch for native permission callbacks, or explicitly scope the release as policy contract only with unsupported native prompt decisions where hooks are not controllable. Verification must include a native test or manual smoke proving camera/microphone requests pass through OpenTray policy before WebKit/WebView2 grant.
+Keep native browser-engine grant enforcement scoped as unsupported until the native substrate is owned. Before closing this risk, add an OpenTray-owned Wry extension point / fork patch for native permission callbacks. Verification must include a native test or manual smoke proving camera/microphone requests pass through OpenTray policy before WebKit/WebView2 grant.

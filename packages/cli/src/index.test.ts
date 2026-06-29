@@ -41,6 +41,32 @@ describe("opentray client", () => {
     ]);
   });
 
+  it("passes app and tray identity into extension context", () => {
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(
+      transport,
+      "app-1",
+      "tray-1",
+      createTestRequestId
+    );
+
+    const extended = tray.extend({
+      name: "identity",
+      path: "@example/identity",
+      extend(_tray, context) {
+        return {
+          appId: context.appId,
+          trayId: context.trayId,
+          mountId: context.mountId,
+        };
+      },
+    });
+
+    expect(extended.appId).toBe("app-1");
+    expect(extended.trayId).toBe("tray-1");
+    expect(extended.mountId).toBe("identity.tray-1.1");
+  });
+
   it("queries tray bounds through the runtime-bound tray handle", async () => {
     const transport = new RecordingTransport();
     const tray = createTrayHandle(
