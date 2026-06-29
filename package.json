@@ -6,7 +6,9 @@
   "scripts": {
     "changeset": "changeset",
     "openspec:vision": "bun run scripts/openspec/vision-driven.ts",
+    "openspec:vision2": "bun run scripts/openspec/vision2-driven.ts",
     "test:openspec:vision": "bun test scripts/openspec/vision-driven.test.ts",
+    "test:openspec:vision2": "bun test scripts/openspec/vision2-driven.test.ts",
     "packages:list": "pnpm -r list --depth -1",
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
@@ -22,7 +24,7 @@
     "trusted-publish:configure": "bun run scripts/npm/configure-trusted-publish.ts",
     "trusted-publish:dry-run": "bun run scripts/npm/configure-trusted-publish.ts --dry-run",
     "smoke:lynx": "bun run scripts/binaries/launch-lynx-smoke.ts",
-    "verify": "bun test scripts/openspec/vision-driven.test.ts scripts/npm && bun test scripts/binaries && openspec schema validate vision-driven && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
+    "verify": "bun test scripts/openspec/vision-driven.test.ts scripts/openspec/vision2-driven.test.ts scripts/npm && bun test scripts/binaries && openspec schema validate vision-driven && openspec schema validate vision2 && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
     "version-packages": "changeset version",
     "version-packages:alpha": "changeset version --snapshot alpha"
   },

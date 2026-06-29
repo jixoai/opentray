@@ -1,0 +1,160 @@
+name: vision2
+version: 1
+description: Default new-change workflow for this repo - interview record is the intent source of truth; specs and tasks drive implementation; typed issues drive iteration; toc closes.
+artifacts:
+  - id: interview
+    generates: interview_plan.md
+    description: Interview record that preserves the user's underlying intent and every requirement-bearing Q&A, as the signal source for later automated decisions
+    template: interview_plan.md
+    instruction: |
+      Interview the user to build the intent source of truth for this change.
+
+      Default workflow law:
+      - vision2 is the default new-change workflow for this repository.
+      - Do not switch to vision-driven unless the user explicitly asks for the legacy workflow or the existing change already declares `schema: vision-driven`.
+      - Do not create legacy plan or review artifact families for a vision2 change.
+
+      Interview method (grilling): interview the user relentlessly about every aspect of this requirement until you reach shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one by one. For each question, provide your recommended answer first.
+
+      Pre-interview orientation:
+      - Before starting the interview, confirm the interview topic with the current interviewee.
+      - If the conversation includes mixed-language context, or if the interviewee's likely mother tongue is not English, explicitly confirm the interview mother tongue before asking requirement questions.
+      - If the confirmed mother tongue is not English, switch the interview thinking language to that target language. Do not merely translate English reasoning into the target language; reason in the interviewee's mother tongue for requirement discovery.
+      - Record the confirmed topic, interview mother tongue, and thinking language in `interview_plan.md`.
+      - If the interviewee cannot be reached interactively and the language signal is strong, mark the topic and mother-tongue choice as ASSUMPTION pending confirmation.
+
+      Hard rules of the interview:
+      - Ask questions ONE AT A TIME. Wait for feedback on each question before continuing. Asking multiple questions at once is bewildering.
+      - Before each question, give your recommended answer with the reasoning.
+      - If a question can be answered by exploring the codebase or existing OpenSpec changes/specs, explore it yourself instead of asking the user.
+      - Do not summarize or clean the user's original words. Preserve requirement-bearing user input verbatim.
+      - Record the user's language system: the phrases, metaphors, and app vocabulary the user actually uses.
+
+      Interactive vs. offline mode:
+      - The ideal is a live, one-question-at-a-time exchange with the user.
+      - When the user cannot be reached interactively (you received a requirement and must produce the record), conduct an honest self-interview instead: for every real question you would have asked, state the question, then give your recommended answer with reasoning, and explicitly mark it ASSUMPTION pending user confirmation. Do NOT let an inference harden into a fact; assumptions stay in the Open Questions / User Confirmation Gates tables until confirmed.
+      - Prefer self-answering from the codebase or existing OpenSpec changes/specs over guessing. A question you can resolve by exploration must not become an ASSUMPTION.
+
+      Mandatory content of interview_plan.md:
+      - The user's original requirement, quoted verbatim.
+      - A Q&A ledger table: each turn records speaker, the objective record of what was said, and the impact on intent.
+      - The underlying drive inferred from the user's language and the repo facts, separate from surface intent.
+      - A pre-interview orientation record with confirmed topic, interview mother tongue, and thinking language.
+      - Evidence read from the codebase and existing OpenSpec changes/specs (with file/line references).
+      - Open questions still needing user confirmation, each with your current inference before the user answers.
+      - Decisions, rejected paths, and user confirmation gates, kept separate from objective records.
+
+      Why this artifact matters:
+      - The interview record is the signal source agents consult when a later problem forces an automated decision. An answer the user gave once is more trustworthy than a re-guessed intent.
+      - The record itself preserves version history through the interview process; there is no separate plan-vN backup file. Do not create a plans/ directory.
+
+      Do not write specs, tasks, or code in this artifact. Keep it an objective intent record.
+    requires: []
+
+  - id: specs
+    generates: specs/**/*.md
+    description: OpenSpec-compatible capability specs derived from the interview record
+    template: spec.md
+    instruction: |
+      Create specification files that define WHAT the system must do.
+
+      Persona: Linus. Be direct. Data structures and contracts matter more than decorative wording. If the interview record contains technically naive shape, flatten it into a cleaner contract without losing the user's intent.
+
+      Required workflow:
+      - Read `interview_plan.md` first and keep every requirement traceable to the recorded intent.
+      - Create one spec file per durable capability under `specs/<capability>/spec.md`.
+      - Make architecture design and data-structure design explicit instead of burying them in vague prose.
+      - Follow OpenSpec delta format exactly:
+        - `## ADDED Requirements`
+        - `## MODIFIED Requirements`
+        - `## REMOVED Requirements`
+        - `## RENAMED Requirements`
+      - Every requirement uses `### Requirement: <name>`.
+      - Every scenario uses exactly `#### Scenario: <name>`.
+      - Use SHALL/MUST for normative contract.
+      - Include architecture and data-structure constraints in requirement prose when they are durable contract, not transient implementation notes.
+
+      Modified requirement discipline:
+      - Copy the full existing requirement block before editing it.
+      - Do not partially patch requirements.
+
+      Specs are not a mood board. They are the contract the implementation must obey.
+    requires:
+      - interview
+
+  - id: tasks
+    generates: tasks.md
+    description: Atomic execution checklist with BDD gates mapped to the interview record and specs
+    template: tasks.md
+    instruction: |
+      Create the task list that turns intent and specs into executable work.
+
+      Persona: John Carmack. Be mechanical, precise, and edge-case obsessed. Each task must have a visible completion condition.
+
+      Mandatory content:
+      - Treat `bun run openspec:vision2 -- ...` as the controller surface for this change.
+      - Treat `issues/*.md` as the iteration ledger for new findings. Issues are typed Markdown records stored as `issues/NNN-slug.md`, created from `openspec/schemas/vision2/templates/issues/*.md`, with front matter for `type`, `group`, `labels`, `depends_on`, `blocks`, `priority`, and source attribution.
+      - Start with alignment / investigation tasks when the intent still needs confirmation or repo truth still needs to be read.
+      - Include BDD tasks before implementation tasks.
+      - BDD scenarios must trace back to `interview_plan.md` and the relevant spec requirement.
+      - Cover boundary conditions, migration/cleanup paths, destructive-update confirmation points, and regression checks.
+      - Add explicit tasks for user confirmation when breaking cleanup, migration, or state reset cannot be assumed safely.
+      - Include controller checkpoints for verification through `bun run openspec:vision2 -- ...`.
+      - Include Git evidence checkpoints: OpenSpec artifact commit before apply, task-progress commits during apply, archive commit after normal close.
+      - State that an agent may only check off tasks it completed and verified in the current working context.
+      - Use checkbox format exactly: `- [ ] X.Y Task description`.
+
+      Iteration finding rule:
+      - When implementation or verification discovers a NEW problem that is not in the original plan, record it with `bun run openspec:vision2 -- issues <change> --new <bug|task|decision|risk|question> --title "<title>"` instead of silently editing tasks.
+      - Use `--group`, repeated `--label`, `--depends-on`, `--blocks`, `--priority`, and `--owner` when they change how the issue should be triaged.
+      - The issue standard is enforced by `bun run openspec:vision2 -- issues <change> --validate` and `bun run openspec:vision2 -- check <change>`.
+      - Do not introduce the legacy plan-backup or self-review loop artifacts into vision2 tasks.
+
+      Keep tasks atomic. If a task cannot be verified, split it.
+    requires:
+      - specs
+
+  - id: close
+    generates: toc.md
+    description: Human-authored overview that indexes the change with Markdown footnotes; converges open issues
+    template: toc.md
+    instruction: |
+      Write the closing overview for this change.
+
+      The toc.md is the entry point a future agent or operator reads first when exploring this change. It has two jobs: orient the reader (a short preface summarizing the task), and index every artifact so nothing is orphaned or untraceable.
+
+      Mandatory content:
+      - A preface: one or two paragraphs in plain language describing what this change accomplishes and the final visible effect.
+      - A "Guided Reading" section that walks the reader through the artifacts in reading order.
+      - A footnote reference block that cites every spec file and the interview/tasks artifacts using Markdown footnotes in this exact form:
+
+            [^core]: specs/core/spec.md
+
+        The footnote id is arbitrary; the value is the path relative to the change directory.
+
+      Footnote law (enforced by `bun run openspec:vision2 -- check <change>`):
+      - Every file under `specs/**/*.md` MUST be cited by at least one footnote. An uncited spec file is flagged as an orphan (a leftover artifact or an incomplete toc).
+      - Every footnote path MUST point to a file that actually exists. A dangling footnote is flagged as a broken reference.
+      - The first whitespace-delimited token after the colon is the reference path. You MAY add an inline comment after it on the same line (e.g. `[^core]: specs/core/spec.md primary contract`); the comment is ignored by the checker, so use it to annotate why a file is cited.
+      - You MAY also footnote `interview_plan.md`, `tasks.md`, and key `issues/NNN-*.md` files, but only spec files are required references.
+
+      Check exit codes (read these before acting on a `check` result):
+      - Exit 0: all structural checks pass AND no issue has `state: open`. The change is ready to archive.
+      - Exit 1: a structural check failed (missing/empty artifact, orphan spec, dangling footnote, invalid issue file). Fix the artifact, do NOT treat this as a loop signal.
+      - Exit 2: structural checks pass BUT at least one issue has `state: open`. This is the iteration-loop signal: keep working the open issues (close them with a fix, or resolve them), then re-run `check`. Do NOT retry blindly; read which issues are open.
+
+      Issue convergence:
+      - Before this artifact can pass `check`, every active issue under `issues/*.md` must have `state: closed` or `state: resolved` (with a `## Resolution` section naming the fix). Any `state: open` issue keeps the workflow in the iteration loop.
+      - Issue front matter must remain valid: dependency references must point to existing active or archived issue ids, and active dependency cycles are structural errors.
+      - If an issue cannot be closed, leave it open and write the reason in the toc preface so the next iteration knows what blocks exit.
+
+      Do not reduce toc.md to a mechanical file listing. The preface is the human judgment layer; the footnotes are the structural invariant.
+    requires:
+      - tasks
+
+apply:
+  requires:
+    - tasks
+  tracks: tasks.md
+  instruction: |
+    Implement pending tasks with BDD-first discipline. Keep `interview_plan.md` as the intent source of truth. Before app-code work starts, run `bun run openspec:vision2 -- commit-check <change> --phase apply` and make sure OpenSpec artifacts have been committed. Update only task checkboxes completed and verified in the current working context, commit task updates with matching implementation/BDD evidence, and run `bun run openspec:vision2 -- check <change>` before claiming the workflow is complete. When a new problem surfaces during implementation, create a typed issue through `bun run openspec:vision2 -- issues <change> --new ...` rather than silently editing the plan.
