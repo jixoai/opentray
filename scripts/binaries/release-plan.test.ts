@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { resolveReleaseNativePlan } from "./release-plan";
+import {
+  type PackageVersionRegistry,
+  resolveReleaseNativePlan,
+} from "./release-plan";
 
 const tempDirs: string[] = [];
 
@@ -19,12 +22,15 @@ afterEach(async () => {
 });
 
 describe("Feature: selective native release planner", () => {
-  test("Scenario: Given no pending changesets When the planner runs Then native work is skipped", async () => {
-    const root = await createTempChangesetDir();
-    const plan = await resolveReleaseNativePlan(root);
+  test("Scenario: Given no pending changesets and no unpublished workspace versions When the planner runs Then native work is skipped", async () => {
+    const root = await createTempWorkspace();
+    const plan = await resolveReleaseNativePlan(root, publishedRegistry());
 
     expect(plan.enabled).toBe(false);
-    expect(plan.reason).toBe("no pending changesets");
+    expect(plan.publishEnabled).toBe(false);
+    expect(plan.reason).toBe(
+      "no pending changesets or unpublished workspace versions"
+    );
     expect(plan.jobs).toEqual([]);
   });
 
@@ -40,6 +46,7 @@ describe("Feature: selective native release planner", () => {
     const plan = await resolveReleaseNativePlan(root);
 
     expect(plan.enabled).toBe(true);
+    expect(plan.publishEnabled).toBe(true);
     expect(plan.components).toEqual(["webview"]);
     expect(plan.jobs).toHaveLength(4);
     expect(plan.jobs.every((job) => job.componentsCsv === "webview")).toBe(
@@ -58,6 +65,48 @@ describe("Feature: selective native release planner", () => {
       "packages/ext-webview-darwin-x64",
       "packages/ext-webview-windows-arm64",
       "packages/ext-webview-windows-x64",
+    ]);
+  });
+
+  test("Scenario: Given no pending changesets but missing published package versions When the planner runs Then native recovery work is selected", async () => {
+    const root = await createTempWorkspace();
+    await writeManifest(root, "cli", {
+      name: "opentray",
+      version: "1.2.3",
+    });
+    await writeManifest(root, "ext-webview-darwin-arm64", {
+      name: "@opentray/ext-webview-darwin-arm64",
+      version: "1.2.3",
+    });
+    await writeManifest(root, "packaging", {
+      name: "@opentray/packaging",
+      version: "1.2.3",
+    });
+
+    const plan = await resolveReleaseNativePlan(
+      root,
+      publishedRegistry(new Set(["@opentray/packaging@1.2.3"]))
+    );
+
+    expect(plan.pendingChangesetFiles).toEqual([]);
+    expect(plan.unpublishedWorkspacePackages).toEqual([
+      "@opentray/ext-webview-darwin-arm64",
+      "opentray",
+    ]);
+    expect(plan.publishEnabled).toBe(true);
+    expect(plan.enabled).toBe(true);
+    expect(plan.components).toEqual(["runtime", "webview"]);
+    expect(plan.validatePackageDirs).toEqual([
+      "packages/darwin-arm64",
+      "packages/darwin-x64",
+      "packages/ext-webview-darwin-arm64",
+      "packages/ext-webview-darwin-x64",
+      "packages/ext-webview-windows-arm64",
+      "packages/ext-webview-windows-x64",
+      "packages/linux-arm64",
+      "packages/linux-x64",
+      "packages/windows-arm64",
+      "packages/windows-x64",
     ]);
   });
 
@@ -193,10 +242,26 @@ describe("Feature: selective native release planner", () => {
   });
 });
 
-async function createTempChangesetDir(): Promise<string> {
+interface TestManifest {
+  readonly name: string;
+  readonly version: string;
+  readonly private?: boolean;
+}
+
+function publishedRegistry(
+  publishedVersions: ReadonlySet<string> = new Set()
+): PackageVersionRegistry {
+  return {
+    versionExists: async (name, version) =>
+      publishedVersions.size === 0 || publishedVersions.has(`${name}@${version}`),
+  };
+}
+
+async function createTempWorkspace(): Promise<string> {
   const root = await mkdtemp(`${tmpdir()}/opentray-release-plan-`);
   tempDirs.push(root);
   await mkdir(join(root, ".changeset"), { recursive: true });
+  await mkdir(join(root, "packages"), { recursive: true });
   return root;
 }
 
@@ -204,7 +269,21 @@ async function createTempChangeset(
   fileName: string,
   content: string
 ): Promise<string> {
-  const root = await createTempChangesetDir();
+  const root = await createTempWorkspace();
   await writeFile(join(root, ".changeset", fileName), content, "utf8");
   return root;
+}
+
+async function writeManifest(
+  root: string,
+  dirName: string,
+  manifest: TestManifest
+): Promise<void> {
+  const dir = join(root, "packages", dirName);
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, "package.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8"
+  );
 }

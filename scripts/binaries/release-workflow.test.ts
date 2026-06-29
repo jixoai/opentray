@@ -29,6 +29,8 @@ describe("Feature: release native binary CI law", () => {
 
     expect(workflow).toContain("Plan native release build");
     expect(workflow).toContain("bun run scripts/binaries/release-plan.ts --root \"$PWD\"");
+    expect(workflow).toContain("publish-enabled: ${{ steps.plan.outputs.publish-enabled }}");
+    expect(workflow).toContain("publish_enabled = \"true\" if plan.get(\"publishEnabled\") else \"false\"");
     expect(nativeJob).toContain("if: needs.plan-native.outputs.enabled == 'true'");
     expect(nativeJob).toContain("matrix: ${{ fromJson(needs.plan-native.outputs.matrix) }}");
     expect(nativeJob).toContain("if: matrix.buildsLynxRuntime == true");
@@ -49,8 +51,10 @@ describe("Feature: release native binary CI law", () => {
     expect(workflow).toContain("Upload Lynx build logs");
     expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("git push origin --tags");
+    expect(releaseJob).toContain("Backfill release tags");
+    expect(releaseJob).toContain("pnpm exec changeset tag");
     expect(releaseJob).toContain(
-      "steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'"
+      "needs.plan-native.outputs.publish-enabled == 'true' && steps.release-channel.outputs.channel == 'stable'"
     );
     expect(releaseJob).not.toContain("git push --follow-tags");
     expect(releaseJob).not.toContain("--source target/release");
@@ -71,6 +75,9 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("pnpm run release:alpha");
     expect(releaseJob).toContain("steps.release-channel.outputs.channel == 'stable'");
     expect(releaseJob).toContain("steps.release-channel.outputs.channel == 'alpha'");
+    expect(releaseJob).toContain(
+      "steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'alpha'"
+    );
     expect(pkg).toContain("\"version-packages:alpha\": \"changeset version --snapshot alpha\"");
     expect(pkg).toContain("\"release:alpha\": \"changeset publish --tag alpha --no-git-tag\"");
   });

@@ -34,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       enabled: ${{ steps.plan.outputs.enabled }}
+      publish-enabled: ${{ steps.plan.outputs.publish-enabled }}
       matrix: ${{ steps.plan.outputs.matrix }}
       stage-plan: ${{ steps.plan.outputs.stage-plan }}
       validate-package-dirs: ${{ steps.plan.outputs.validate-package-dirs }}
@@ -63,12 +64,14 @@ jobs:
               plan = json.load(handle)
 
           enabled = "true" if plan.get("enabled") else "false"
+          publish_enabled = "true" if plan.get("publishEnabled") else "false"
           matrix = json.dumps({"include": plan.get("jobs", [])})
           stage_plan = json.dumps(plan.get("stageEntries", []))
           validate_package_dirs = json.dumps(plan.get("validatePackageDirs", []))
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               handle.write(f"enabled={enabled}\n")
+              handle.write(f"publish-enabled={publish_enabled}\n")
               handle.write(f"matrix={matrix}\n")
               handle.write(f"stage-plan={stage_plan}\n")
               handle.write(f"validate-package-dirs={validate_package_dirs}\n")
@@ -281,13 +284,17 @@ jobs:
             --package-dirs-json '${{ needs.plan-native.outputs.validate-package-dirs }}'
 
       - name: Publish packages
-        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'
+        if: needs.plan-native.outputs.publish-enabled == 'true' && steps.release-channel.outputs.channel == 'stable'
         run: pnpm run release
 
       - name: Publish alpha packages
         if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'alpha'
         run: pnpm run release:alpha
 
+      - name: Backfill release tags
+        if: needs.plan-native.outputs.publish-enabled == 'true' && steps.release-channel.outputs.channel == 'stable'
+        run: pnpm exec changeset tag
+
       - name: Push release tags
-        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'
+        if: needs.plan-native.outputs.publish-enabled == 'true' && steps.release-channel.outputs.channel == 'stable'
         run: git push origin --tags
