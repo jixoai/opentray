@@ -378,7 +378,7 @@ await navigator.opentrayWindow.moveTo(
 
 Effect: clicking the tray/status icon opens the WebView surface directly where the platform supports a primary tray gesture.
 
-Atoms composed: a normal tray menu item with `primaryEvent: true`, the existing `menuClick` event, and `@opentray/ext-webview` `show`.
+Atoms composed: a normal tray menu item with `primaryEvent: true`, the existing `menuClick` event, one retained `WebviewWindowHandle`, and `@opentray/ext-webview` `show` / `hide`.
 
 Why this design: `primaryEvent` is a role on a plain menu item, not a new event family. App code handles the same `menuClick` path whether the user selected a native menu item or triggered the platform primary gesture.
 
@@ -392,7 +392,12 @@ See also:
 - [Tray Primary Event Patterns](../../develop-opentray/references/tray-primary-event-patterns.md#scenario-card-macos-single-primary-direct-launcher) for macOS single-primary direct activation
 - [Tray-Anchored Custom Panel](#scenario-card-tray-anchored-custom-panel) when the opened surface must be positioned from tray geometry rather than just shown
 
-Minimal shape:
+Choose one dismissal law before writing app code:
+
+- Pinned panel: set `style.keepOnTop: true`; tray primary click toggles `show()` / `hide()` on the same handle; do not blur-auto-hide.
+- Non-pinned panel: leave `keepOnTop` false; listen for native `blur` and call `hide()` when no blocking work is pending.
+
+Minimal pinned-panel shape:
 
 ```ts
 const tray = await createTray({
@@ -402,10 +407,32 @@ const tray = await createTray({
   },
 });
 
+const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
+  html,
+  width: 420,
+  height: 260,
+  style: { keepOnTop: true },
+});
+
+let visible = false;
+
 tray.onMenuClick(({ itemId }) => {
-  if (itemId === 1) {
-    void webview.show({ type: "show", html, width: 420, height: 260 });
+  if (itemId !== 1) return;
+  if (visible) {
+    visible = false;
+    void webviewWindow.hide();
+  } else {
+    visible = true;
+    void webviewWindow.show();
   }
+});
+```
+
+Minimal non-pinned dismissal:
+
+```ts
+webviewWindow.listen("blur", () => {
+  if (!hasBlockingWork()) void webviewWindow.hide();
 });
 ```
 
@@ -420,6 +447,8 @@ Why this design: tray geometry belongs to the tray atom, not to WebView. The bac
 Benefit: developers can build custom tray menus, launchers, and compact panels without inventing fake cursor-based placement or asking the core to understand WebView layout.
 
 Ask the user: "Should the panel merely open from the tray, or should its HTML also react to the tray anchor for arrows, reveal animation, and edge alignment?"
+
+Lifecycle best practice: tray panels are not ordinary document popups. If the panel is `keepOnTop`, the primary tray event must toggle it; if it is not `keepOnTop`, native `blur` is the dismissal source. Do not combine both rules unless a product-specific pending/confirmation state explicitly overrides dismissal.
 
 See also:
 

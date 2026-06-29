@@ -2,7 +2,7 @@ use super::bridge::{
     callback_script, error_callback_script, exec_page_command, parse_set_icon_payload,
     NavigatorWindowRequest,
 };
-use super::drag::queue_window_interaction_message;
+use super::drag::queue_window_interaction_event;
 use super::style::{
     validate_style_request, MacosWindowStyleState, SetStyleMacosPayload, SetStylePayload,
     SetStylePlatformPayload, SetStyleWindowsPayload, WindowPlatformStyleState,
@@ -1195,6 +1195,7 @@ fn navigator_window_bridge_tracks_listener_ids() {
         content_view: None,
         listeners: HashMap::new(),
         ipc_messages: VecDeque::new(),
+        window_events: VecDeque::new(),
         next_event_id: 1,
         next_ipc_message_id: 1,
         style: WindowStyleState {
@@ -1240,12 +1241,13 @@ fn navigator_window_bridge_tracks_listener_ids() {
 }
 
 #[test]
-fn app_region_drag_interaction_ipc_conserves_native_source() {
+fn app_region_drag_interaction_window_event_conserves_native_source() {
     let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
         webview: None,
         content_view: None,
         listeners: HashMap::new(),
         ipc_messages: VecDeque::new(),
+        window_events: VecDeque::new(),
         next_event_id: 1,
         next_ipc_message_id: 1,
         style: WindowStyleState {
@@ -1279,18 +1281,18 @@ fn app_region_drag_interaction_ipc_conserves_native_source() {
         size_constraints: WindowSizeConstraints::default(),
     }));
 
-    queue_window_interaction_message(&Rc::downgrade(&bridge), true);
+    queue_window_interaction_event(&Rc::downgrade(&bridge), true);
 
     let state = bridge.borrow();
-    assert_eq!(state.next_ipc_message_id, 2);
-    assert_eq!(state.ipc_messages.len(), 1);
-    let message = &state.ipc_messages[0];
-    assert_eq!(message["source"], Value::String("native".to_string()));
+    assert_eq!(state.next_ipc_message_id, 1);
+    assert!(state.ipc_messages.is_empty());
+    assert_eq!(state.window_events.len(), 1);
+    let message = &state.window_events[0];
     assert_eq!(
-        message["payload"]["type"],
-        Value::String("windowInteraction".to_string())
+        message["type"],
+        Value::String("windowinteractionchange".to_string())
     );
-    assert_eq!(message["payload"]["active"], Value::Bool(true));
+    assert_eq!(message["active"], Value::Bool(true));
 }
 
 #[test]

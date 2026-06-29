@@ -50,9 +50,11 @@ const webview = webviewTray.createWebviewWindow({
   },
 });
 console.log(
-  "click the tray icon: platforms with primary tray events should open the WebView panel"
+  "click the tray icon: platforms with primary tray events should toggle the WebView panel"
 );
 console.log("press Ctrl-C to exit the tray demo");
+
+let panelVisible = false;
 
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
@@ -62,9 +64,23 @@ const lifecycle = createExampleLifecycle({
 tray.onMenuClick(({ itemId }) => {
   console.log(`menu click: ${itemId}`);
   if (itemId === 1) {
-    void openTrayPanel();
+    void toggleTrayPanel();
   }
 });
+
+webview.listen("blur", () => {
+  console.log("tray panel blur: ignored because keepOnTop panels use click-toggle dismissal");
+});
+
+async function toggleTrayPanel(): Promise<void> {
+  if (panelVisible) {
+    await webview.hide();
+    panelVisible = false;
+    console.log("tray panel command: hide");
+    return;
+  }
+  await openTrayPanel();
+}
 
 const webviewSmoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
 if (webviewSmoke === "show" || webviewSmoke === "1") {
@@ -115,6 +131,7 @@ async function openTrayPanel(): Promise<void> {
   await webview.show({
     fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
   });
+  panelVisible = true;
   console.log("tray panel command: show");
 }
 

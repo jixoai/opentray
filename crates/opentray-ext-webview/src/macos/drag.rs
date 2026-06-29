@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use crate::WebviewRuntimeError;
 
-use super::NavigatorWindowBridge;
+use super::{bridge::emit_window_event, NavigatorWindowBridge};
 
 #[derive(Clone)]
 pub(super) struct AppRegionDragState {
@@ -69,12 +69,12 @@ impl AppRegionDragState {
                 NSEventType::LeftMouseDragged => {
                     active.set(false);
                     perform_native_window_drag(&window, event_ref);
-                    queue_window_interaction_message(&bridge, false);
+                    queue_window_interaction_event(&bridge, false);
                     std::ptr::null_mut()
                 }
                 NSEventType::LeftMouseUp => {
                     if active.replace(false) {
-                        queue_window_interaction_message(&bridge, false);
+                        queue_window_interaction_event(&bridge, false);
                     }
                     event.as_ptr()
                 }
@@ -95,21 +95,24 @@ impl AppRegionDragState {
     }
 }
 
-pub(super) fn queue_window_interaction_message(
+pub(super) fn queue_window_interaction_event(
     bridge: &Weak<RefCell<NavigatorWindowBridge>>,
     active: bool,
 ) {
     let Some(bridge) = bridge.upgrade() else {
         return;
     };
-    let mut state = bridge.borrow_mut();
-    let id = state.next_ipc_message_id;
-    state.next_ipc_message_id = state.next_ipc_message_id.saturating_add(1).max(1);
-    state.ipc_messages.push_back(json!({
-        "id": id,
-        "source": "native",
-        "payload": { "type": "windowInteraction", "active": active }
-    }));
+    bridge
+        .borrow_mut()
+        .window_events
+        .push_back(json!({ "type": "windowinteractionchange", "active": active }));
+    if let Err(error) = emit_window_event(
+        &bridge,
+        "windowinteractionchange",
+        json!({ "active": active }),
+    ) {
+        eprintln!("opentray-ext-webview failed to emit macOS interaction event: {error}");
+    }
 }
 
 fn perform_native_window_drag(window: &Retained<NSWindow>, event: &NSEvent) {

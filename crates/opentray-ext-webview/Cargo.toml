@@ -22,7 +22,7 @@ block2 = "0.6.2"
 dispatch2 = "0.3.1"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSColor", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSMenu", "NSMenuItem", "NSResponder", "NSScreen", "NSView", "NSWindow", "block2", "objc2-core-foundation", "objc2-quartz-core"] }
-objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSData", "NSDictionary", "NSGeometry", "NSString", "NSURL"] }
+objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSData", "NSDictionary", "NSGeometry", "NSNotification", "NSOperation", "NSString", "NSURL", "block2"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CALayer", "objc2-core-foundation"] }
 png = "0.17.16"
 raw-window-handle = { version = "0.6.2", features = ["std"] }

@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use crate::{WebviewRuntimeError, WebviewWindowIcon};
 
 use super::{
-    drag::queue_window_interaction_message,
+    drag::queue_window_interaction_event,
     metadata::{
         icon_json, update_window_icon, update_window_title, MetadataSource, PageIconChangedPayload,
     },
@@ -382,12 +382,12 @@ fn dispatch_navigator_window_command(
                 .borrow_mut()
                 .app_region_drag
                 .start(window, weak_bridge.clone())?;
-            queue_window_interaction_message(&weak_bridge, true);
+            queue_window_interaction_event(&weak_bridge, true);
             Ok(response)
         }
         "stopAppRegionDrag" => {
             let response = bridge.borrow_mut().app_region_drag.stop();
-            queue_window_interaction_message(&Rc::downgrade(bridge), false);
+            queue_window_interaction_event(&Rc::downgrade(bridge), false);
             Ok(response)
         }
         "getCapabilities" => bridge.borrow().capabilities_json(),

@@ -266,6 +266,7 @@ enum WebviewCommand {
     GetBounds,
     GetScreenDetails,
     DrainIpcMessages,
+    DrainWindowEvents,
     SetStyle {
         style: Value,
     },
@@ -705,6 +706,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
         "getBounds" => Ok(WebviewCommand::GetBounds),
         "getScreenDetails" => Ok(WebviewCommand::GetScreenDetails),
         "drainIpcMessages" | "drainPageMessages" => Ok(WebviewCommand::DrainIpcMessages),
+        "drainWindowEvents" => Ok(WebviewCommand::DrainWindowEvents),
         "setStyle" => {
             let style = data
                 .get("style")

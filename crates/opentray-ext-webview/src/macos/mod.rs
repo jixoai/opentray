@@ -16,9 +16,17 @@ use std::{
     rc::Rc,
 };
 
-use objc2::{rc::Retained, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSApplication, NSBackingStoreType, NSResponder, NSScreen, NSView, NSWindow};
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use block2::RcBlock;
+use objc2::{
+    rc::Retained,
+    runtime::{NSObjectProtocol, ProtocolObject},
+    MainThreadMarker, MainThreadOnly,
+};
+use objc2_app_kit::{
+    NSApplication, NSBackingStoreType, NSResponder, NSScreen, NSView, NSWindow,
+    NSWindowDidBecomeKeyNotification, NSWindowDidResignKeyNotification,
+};
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{AppKitWindowHandle, HasWindowHandle, RawWindowHandle, WindowHandle};
 use serde_json::{json, Value};
 use wry::{PageLoadEvent, WebView, WebViewBuilder, WebViewExtMacOS, RGBA};
@@ -70,6 +78,7 @@ struct WebviewSlot {
     window: Retained<NSWindow>,
     webview: Box<WebView>,
     bridge: Rc<RefCell<NavigatorWindowBridge>>,
+    _focus_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     content_descriptor: WebviewContentDescriptor,
     show_settings: WebviewShowSettings,
 }
@@ -79,6 +88,7 @@ struct NavigatorWindowBridge {
     content_view: Option<Retained<NSView>>,
     listeners: HashMap<String, Vec<NavigatorWindowListener>>,
     ipc_messages: VecDeque<Value>,
+    window_events: VecDeque<Value>,
     next_event_id: u32,
     next_ipc_message_id: u32,
     style: WindowStyleState,
@@ -310,6 +320,19 @@ impl MacosWebviewRuntime {
                     slot.bridge.borrow_mut().ipc_messages.drain(..).collect();
                 Ok(json!({ "type": "ipcMessages", "messages": messages }))
             }
+            WebviewCommand::DrainWindowEvents => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "drainWindowEvents requires an active WebView window".into(),
+                        )
+                    })?;
+                let events: Vec<Value> = slot.bridge.borrow_mut().window_events.drain(..).collect();
+                Ok(json!({ "type": "windowEvents", "events": events }))
+            }
             WebviewCommand::SetStyle { style } => {
                 let slot = self
                     .slot
@@ -535,6 +558,7 @@ impl MacosWebviewRuntime {
             content_view: None,
             listeners: HashMap::new(),
             ipc_messages: VecDeque::new(),
+            window_events: VecDeque::new(),
             next_event_id: 1,
             next_ipc_message_id: 1,
             style: WindowStyleState {
@@ -646,11 +670,14 @@ impl MacosWebviewRuntime {
         // be seen without promoting the whole process into a Dock app.
         window.orderFrontRegardless();
 
+        let focus_observers = install_focus_observers(&window, &bridge);
+
         Ok(WebviewSlot {
             tray_id,
             window,
             webview,
             bridge,
+            _focus_observers: focus_observers,
             content_descriptor,
             show_settings,
         })
@@ -1024,6 +1051,65 @@ fn focus_webview_responder(window: &NSWindow, webview: &WebView) {
     let responder = unsafe { &*Retained::as_ptr(&webview).cast::<NSResponder>() };
     window.setInitialFirstResponder(Some(view));
     window.makeFirstResponder(Some(responder));
+}
+
+fn install_focus_observers(
+    window: &Retained<NSWindow>,
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>> {
+    let center = NSNotificationCenter::defaultCenter();
+    let window_object = window.as_ref();
+    let focus_bridge = Rc::downgrade(bridge);
+    let blur_bridge = Rc::downgrade(bridge);
+    let focus_block = RcBlock::new(move |_notification: NonNull<NSNotification>| {
+        queue_window_event(&focus_bridge, "focus", json!({}));
+    });
+    let blur_block = RcBlock::new(move |_notification: NonNull<NSNotification>| {
+        queue_window_event(&blur_bridge, "blur", json!({}));
+    });
+    unsafe {
+        vec![
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWindowDidBecomeKeyNotification),
+                Some(window_object),
+                None,
+                &focus_block,
+            ),
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWindowDidResignKeyNotification),
+                Some(window_object),
+                None,
+                &blur_block,
+            ),
+        ]
+    }
+}
+
+fn queue_window_event(
+    bridge: &std::rc::Weak<RefCell<NavigatorWindowBridge>>,
+    event: &str,
+    payload: Value,
+) {
+    let Some(bridge) = bridge.upgrade() else {
+        return;
+    };
+    bridge
+        .borrow_mut()
+        .window_events
+        .push_back(window_event_payload(event, &payload));
+    if let Err(error) = emit_window_event(&bridge, event, payload) {
+        eprintln!("opentray-ext-webview failed to emit macOS {event} event: {error}");
+    }
+}
+
+fn window_event_payload(event: &str, payload: &Value) -> Value {
+    let mut value = json!({ "type": event });
+    if let (Some(target), Some(source)) = (value.as_object_mut(), payload.as_object()) {
+        for (key, payload_value) in source {
+            target.insert(key.clone(), payload_value.clone());
+        }
+    }
+    value
 }
 
 struct AppKitViewHandle {

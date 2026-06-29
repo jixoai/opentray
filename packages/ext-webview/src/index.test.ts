@@ -402,6 +402,110 @@ describe("@opentray/ext-webview", () => {
     });
   });
 
+  it("publishes drained native window interaction events to host-side listeners", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: unknown[] = [];
+      let drained = false;
+      const transport = new WebviewResultTransport((command) => {
+        if (isWebviewCommand(command) && command.type === "drainWindowEvents") {
+          if (drained) {
+            return { type: "windowEvents", events: [] };
+          }
+          drained = true;
+          return {
+            type: "windowEvents",
+            events: [{ type: "windowinteractionchange", active: true }],
+          };
+        }
+        return { type: "ok" };
+      });
+      const tray = createTrayHandle(transport, "app-1", "tray-1");
+      const webviewWindow = tray
+        .extend(WebviewExt, { mountId: "webview.tray-1" })
+        .createWebviewWindow({
+          html: "<main />",
+          width: 300,
+          height: 200,
+        });
+
+      const unlisten = webviewWindow.listen(
+        "windowinteractionchange",
+        (event) => {
+          events.push(event);
+        }
+      );
+      await vi.advanceTimersByTimeAsync(16);
+
+      expect(events).toEqual([
+        {
+          event: "windowinteractionchange",
+          id: 0,
+          payload: { active: true },
+        },
+      ]);
+      expect(transport.frames.at(-1)).toMatchObject({
+        type: "ext-command",
+        data: { type: "drainWindowEvents" },
+      });
+
+      unlisten();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("publishes drained native focus and blur events to host-side listeners", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: unknown[] = [];
+      let drained = false;
+      const transport = new WebviewResultTransport((command) => {
+        if (isWebviewCommand(command) && command.type === "drainWindowEvents") {
+          if (drained) {
+            return { type: "windowEvents", events: [] };
+          }
+          drained = true;
+          return {
+            type: "windowEvents",
+            events: [{ type: "focus" }, { type: "blur" }],
+          };
+        }
+        return { type: "ok" };
+      });
+      const tray = createTrayHandle(transport, "app-1", "tray-1");
+      const webviewWindow = tray
+        .extend(WebviewExt, { mountId: "webview.tray-1" })
+        .createWebviewWindow({
+          html: "<main />",
+          width: 300,
+          height: 200,
+        });
+
+      const unlistenFocus = webviewWindow.listen("focus", (event) => {
+        events.push(event);
+      });
+      const unlistenBlur = webviewWindow.listen("blur", (event) => {
+        events.push(event);
+      });
+      await vi.advanceTimersByTimeAsync(16);
+
+      expect(events).toEqual([
+        { event: "focus", id: 0, payload: {} },
+        { event: "blur", id: 0, payload: {} },
+      ]);
+      expect(transport.frames.at(-1)).toMatchObject({
+        type: "ext-command",
+        data: { type: "drainWindowEvents" },
+      });
+
+      unlistenFocus();
+      unlistenBlur();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("exposes host-side bounds, size constraints, and style verbs through extension responses", async () => {
     const bounds = { x: 10, y: 20, width: 360, height: 240 };
     const transport = new WebviewResultTransport((command) => {
@@ -721,13 +825,26 @@ describe("@opentray/ext-webview", () => {
       });
       expect(calls).toEqual([["moveTo", 16, 16]]);
 
-      watch.pause();
+      listeners.get("windowinteractionchange")?.[0]?.({
+        event: "windowinteractionchange",
+        payload: { active: true },
+      });
       expect(watch.paused).toBe(true);
       rect = { x: 620, y: 480, width: 180, height: 100 };
-      await watch.refresh();
+      listeners.get("moved")?.[0]?.({
+        event: "moved",
+        payload: { x: 620, y: 480 },
+      });
+      await vi.advanceTimersByTimeAsync(1000);
       expect(calls).toEqual([["moveTo", 16, 16]]);
 
-      await watch.resume();
+      listeners.get("windowinteractionchange")?.[0]?.({
+        event: "windowinteractionchange",
+        payload: { active: false },
+      });
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
       expect(watch.paused).toBe(false);
       expect(calls).toEqual([
         ["moveTo", 16, 16],

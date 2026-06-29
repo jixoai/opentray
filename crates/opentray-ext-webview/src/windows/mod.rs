@@ -52,11 +52,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, MINMAXINFO,
     SM_CXSIZE, SM_CYSIZE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
     SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWMINNOACTIVE, SW_SHOWNORMAL,
-    WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE,
-    WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED,
-    WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOREDIRECTIONBITMAP, WS_MAXIMIZE,
-    WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME,
-    WS_VISIBLE,
+    WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
+    WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE,
+    WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    WS_EX_NOREDIRECTIONBITMAP, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX,
+    WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -151,6 +151,7 @@ struct NavigatorWindowBridge {
     content_descriptor: WebviewContentDescriptor,
     listeners: HashMap<String, Vec<NavigatorWindowListener>>,
     ipc_messages: VecDeque<Value>,
+    window_events: VecDeque<Value>,
     next_event_id: u32,
     next_ipc_message_id: u32,
     style: WindowStyleState,
@@ -574,6 +575,19 @@ impl WindowsWebviewRuntime {
                     slot.bridge.borrow_mut().ipc_messages.drain(..).collect();
                 Ok(json!({ "type": "ipcMessages", "messages": messages }))
             }
+            WebviewCommand::DrainWindowEvents => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "drainWindowEvents requires an active WebView window".into(),
+                        )
+                    })?;
+                let events: Vec<Value> = slot.bridge.borrow_mut().window_events.drain(..).collect();
+                Ok(json!({ "type": "windowEvents", "events": events }))
+            }
             WebviewCommand::SetStyle { style } => {
                 let slot = self
                     .slot
@@ -776,6 +790,7 @@ impl WindowsWebviewRuntime {
             content_descriptor: content_descriptor.clone(),
             listeners: HashMap::new(),
             ipc_messages: VecDeque::new(),
+            window_events: VecDeque::new(),
             next_event_id: 1,
             next_ipc_message_id: 1,
             style,
@@ -4087,6 +4102,10 @@ unsafe extern "system" fn window_proc(
             });
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
+        WM_ACTIVATE => {
+            emit_window_focus_change(hwnd, (wparam & 0xffff) != WA_INACTIVE as usize);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_GETMINMAXINFO => {
             apply_minmax_info(hwnd, lparam);
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -4180,15 +4199,34 @@ fn refresh_attached_window_surface(hwnd: HWND) {
 fn emit_window_interaction_change(hwnd: HWND, active: bool) {
     with_window_proc_state(hwnd, |state| {
         if let Some(bridge) = state.bridge {
-            let mut bridge_state = unsafe { bridge.as_ref() }.borrow_mut();
-            let id = bridge_state.next_ipc_message_id;
-            bridge_state.next_ipc_message_id =
-                bridge_state.next_ipc_message_id.saturating_add(1).max(1);
-            bridge_state.ipc_messages.push_back(json!({
-                "id": id,
-                "source": "native",
-                "payload": { "type": "windowInteraction", "active": active }
-            }));
+            let bridge = unsafe { bridge.as_ref() };
+            bridge
+                .borrow_mut()
+                .window_events
+                .push_back(json!({ "type": "windowinteractionchange", "active": active }));
+            if let Err(error) = emit_window_event(
+                bridge,
+                "windowinteractionchange",
+                json!({ "active": active }),
+            ) {
+                eprintln!("opentray-ext-webview failed to emit Windows interaction event: {error}");
+            }
+        }
+    });
+}
+
+fn emit_window_focus_change(hwnd: HWND, focused: bool) {
+    let event = if focused { "focus" } else { "blur" };
+    with_window_proc_state(hwnd, |state| {
+        if let Some(bridge) = state.bridge {
+            let bridge = unsafe { bridge.as_ref() };
+            bridge
+                .borrow_mut()
+                .window_events
+                .push_back(json!({ "type": event }));
+            if let Err(error) = emit_window_event(bridge, event, json!({})) {
+                eprintln!("opentray-ext-webview failed to emit Windows {event} event: {error}");
+            }
         }
     });
 }

@@ -163,7 +163,8 @@ Expected checks:
    - `background: "mica"` and `cornerPreference: "round"` on Windows
 4. `html` and `body` stay reset and transparent; padding belongs to inner content only.
 5. The panel positions from `fallbackRect: trayBounds.rect ?? ...`.
-6. The in-page tray API returns a provenance-bearing object:
+6. Repeated tray clicks toggle the same WebView handle with `show()` / `hide()`. Because this example uses `keepOnTop`, native `blur` is logged but does not auto-hide.
+7. The in-page tray API returns a provenance-bearing object:
 
 ```json
 {
@@ -173,7 +174,7 @@ Expected checks:
 }
 ```
 
-7. The page status surface shows the same tray result shape instead of assuming `Rect | null`.
+8. The page status surface shows the same tray result shape instead of assuming `Rect | null`.
 
 ## Example 5: Debug Runtime Tray
 

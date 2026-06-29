@@ -196,6 +196,8 @@ export interface WebviewWindowInteractionChange {
   active: boolean;
 }
 
+export interface WebviewWindowFocusChange {}
+
 export interface WebviewWindowEvent<TPayload = unknown> {
   event: string;
   id: number;
@@ -235,6 +237,8 @@ export interface WebviewWindowOverlayGeometry {
 
 export interface WebviewWindowEventMap {
   closed: { visible: false };
+  focus: WebviewWindowFocusChange;
+  blur: WebviewWindowFocusChange;
   moved: WebviewWindowPositionChange;
   resized: WebviewWindowSizeChange;
   windowinteractionchange: WebviewWindowInteractionChange;
@@ -400,6 +404,7 @@ export type WebviewCommand =
   | { type: "getBounds" }
   | { type: "getScreenDetails" }
   | { type: "drainIpcMessages" }
+  | { type: "drainWindowEvents" }
   | { type: "setStyle"; style: WebviewWindowStylePatch }
   | {
       type: "setMinimumSize";
@@ -418,6 +423,7 @@ export type WebviewEvent =
   | ({ type: "moved" } & WebviewWindowPositionChange)
   | ({ type: "resized" } & WebviewWindowSizeChange)
   | { type: "ipcMessages"; messages: WebviewIpcMessage[] }
+  | { type: "windowEvents"; events: WebviewHostWindowEvent[] }
   | { type: "message"; payload: unknown }
   | { type: "positionFallback"; strategy: "cursor" | "platformDefault" };
 
@@ -426,6 +432,12 @@ export interface WebviewIpcMessage {
   source: "page" | "native";
   payload: unknown;
 }
+
+export type WebviewHostWindowEvent =
+  | { type: "focus" }
+  | { type: "blur" }
+  | ({ type: "windowinteractionchange" } & WebviewWindowInteractionChange)
+  | ({ type: string } & Record<string, unknown>);
 
 export interface WebviewHandle {
   show(command: Extract<WebviewCommand, { type: "show" }>): Promise<void>;
@@ -510,6 +522,8 @@ export class WebviewExtensionLoadError extends Error {
 
 const WEBVIEW_EXTENSION_NAME = "webview";
 const WEBVIEW_EXTENSION_PACKAGE = "@opentray/ext-webview";
+const WINDOW_EVENT_POLL_INTERVAL_MS = 16;
+const POLLED_WINDOW_EVENTS = new Set(["focus", "blur", "windowinteractionchange"]);
 
 export const WebviewExt = {
   name: WEBVIEW_EXTENSION_NAME,
@@ -552,6 +566,10 @@ export const attachWebview = (
 
 interface WebviewEndpoint {
   command<TResult = unknown>(command: WebviewCommand): Promise<TResult>;
+  emit<TPayload = unknown>(
+    event: string,
+    payload: WebviewWindowEvent<TPayload>["payload"]
+  ): void;
   listen<TPayload = unknown>(
     event: string,
     handler: (event: WebviewWindowEvent<TPayload>) => void
@@ -568,36 +586,80 @@ type ExtensionEventSourceTray = TrayHandle & {
 const createWebviewEndpoint = (
   tray: TrayHandle,
   context: TrayExtensionContext
-): WebviewEndpoint => ({
-  async command<TResult = unknown>(command: WebviewCommand): Promise<TResult> {
-    try {
-      await context.ensureLoaded();
-    } catch (error) {
-      throw new WebviewExtensionLoadError(context, error);
+): WebviewEndpoint => {
+  const localListeners = new Map<
+    string,
+    Set<(event: WebviewWindowEvent<unknown>) => void>
+  >();
+
+  const emit = <TPayload = unknown>(
+    event: string,
+    payload: WebviewWindowEvent<TPayload>["payload"]
+  ): void => {
+    for (const handler of localListeners.get(event) ?? []) {
+      handler({ event, id: 0, payload });
     }
-    const events = await context.request(command);
-    return events[0]?.data as TResult;
-  },
-  listen<TPayload = unknown>(
+  };
+
+  const listenLocal = <TPayload = unknown>(
     event: string,
     handler: (event: WebviewWindowEvent<TPayload>) => void
-  ): () => void {
-    if (!isExtensionEventSourceTray(tray)) {
-      return () => {};
-    }
-    return tray.listenExtension(context.mountId, (envelope) => {
-      const data = envelope.data;
-      if (!isRecord(data) || data.type !== event) {
-        return;
+  ): (() => void) => {
+    const handlers = localListeners.get(event) ?? new Set();
+    handlers.add(handler as (event: WebviewWindowEvent<unknown>) => void);
+    localListeners.set(event, handlers);
+    return () => {
+      handlers.delete(handler as (event: WebviewWindowEvent<unknown>) => void);
+      if (handlers.size === 0) {
+        localListeners.delete(event);
       }
-      handler({
-        event,
-        id: 0,
-        payload: eventPayload(data) as Parameters<typeof handler>[0]["payload"],
-      });
-    });
-  },
-});
+    };
+  };
+
+  return {
+    async command<TResult = unknown>(
+      command: WebviewCommand
+    ): Promise<TResult> {
+      try {
+        await context.ensureLoaded();
+      } catch (error) {
+        throw new WebviewExtensionLoadError(context, error);
+      }
+      const events = await context.request(command);
+      return events[0]?.data as TResult;
+    },
+    emit,
+    listen<TPayload = unknown>(
+      event: string,
+      handler: (event: WebviewWindowEvent<TPayload>) => void
+    ): () => void {
+      const unlistenLocal = listenLocal(event, handler);
+      if (!isExtensionEventSourceTray(tray)) {
+        return unlistenLocal;
+      }
+      const unlistenExtension = tray.listenExtension(
+        context.mountId,
+        (envelope) => {
+          const data = envelope.data;
+          if (!isRecord(data) || data.type !== event) {
+            return;
+          }
+          handler({
+            event,
+            id: 0,
+            payload: eventPayload(data) as Parameters<
+              typeof handler
+            >[0]["payload"],
+          });
+        }
+      );
+      return () => {
+        unlistenLocal();
+        unlistenExtension();
+      };
+    },
+  };
+};
 
 const createLegacyWebviewHandle = (endpoint: {
   command<TResult = unknown>(command: WebviewCommand): Promise<TResult>;
@@ -639,6 +701,70 @@ const createWebviewWindowHandle = (
   options: WebviewWindowOptions
 ): WebviewWindowHandle => {
   let bootstrapped = false;
+  const listenerCounts = new Map<string, number>();
+  let windowEventPoll: ReturnType<typeof setInterval> | undefined;
+
+  const drainWindowEvents = async (): Promise<void> => {
+    const response = await endpoint.command<
+      Extract<WebviewEvent, { type: "windowEvents" }>
+    >({
+      type: "drainWindowEvents",
+    } satisfies WebviewCommand);
+    for (const event of response.events) {
+      const { type, ...payload } = event;
+      endpoint.emit(type, payload);
+    }
+  };
+
+  const startWindowEventPoll = (): void => {
+    if (windowEventPoll !== undefined) {
+      return;
+    }
+    void drainWindowEvents().catch((error: unknown) => {
+      console.error("WebView window event polling failed:", error);
+    });
+    windowEventPoll = setInterval(() => {
+      void drainWindowEvents().catch((error: unknown) => {
+        console.error("WebView window event polling failed:", error);
+      });
+    }, WINDOW_EVENT_POLL_INTERVAL_MS);
+  };
+
+  const stopWindowEventPollIfIdle = (): void => {
+    if (windowEventPoll === undefined || listenerCounts.size > 0) {
+      return;
+    }
+    clearInterval(windowEventPoll);
+    windowEventPoll = undefined;
+  };
+
+  const trackWindowListener = (
+    event: string,
+    unlisten: () => void
+  ): (() => void) => {
+    if (POLLED_WINDOW_EVENTS.has(event)) {
+      listenerCounts.set(event, (listenerCounts.get(event) ?? 0) + 1);
+      startWindowEventPoll();
+    }
+    let active = true;
+    return () => {
+      if (!active) {
+        return;
+      }
+      active = false;
+      if (POLLED_WINDOW_EVENTS.has(event)) {
+        const count = listenerCounts.get(event) ?? 0;
+        if (count <= 1) {
+          listenerCounts.delete(event);
+        } else {
+          listenerCounts.set(event, count - 1);
+        }
+      }
+      unlisten();
+      stopWindowEventPollIfIdle();
+    };
+  };
+
   return {
     async show(command = {}) {
       const showCommand = {
@@ -729,7 +855,7 @@ const createWebviewWindowHandle = (
       event: string,
       handler: (event: WebviewWindowEvent<TPayload>) => void
     ): () => void {
-      return endpoint.listen(event, handler);
+      return trackWindowListener(event, endpoint.listen(event, handler));
     },
     setContent(command) {
       return endpoint.command<void>(command);

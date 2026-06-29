@@ -161,28 +161,41 @@ See also:
 Minimal handler:
 
 ```ts
+let visible = false;
+
 tray.onMenuClick(async ({ itemId }) => {
   if (itemId !== 1) return;
-  await webview.show({
-    type: "show",
-    html: menuHtml,
-    width: 360,
-    height: 420,
-    nativeWindowApi: true,
-    windowControlsOverlay: true,
-    style: {
-      frameless: true,
-      transparent: true,
-      platform: {
-        macos: {
+  if (visible) {
+    visible = false;
+    await window.hide();
+  } else {
+    visible = true;
+    await window.show({
+      html: menuHtml,
+      width: 360,
+      height: 420,
+      nativeWindowApi: true,
+      windowControlsOverlay: true,
+      style: {
+        frameless: true,
+        keepOnTop: true,
+        background: {
+          kind: "platformMaterial",
           material: "hudWindow",
-          cornerRadius: 18,
+          state: "active",
+        },
+        platform: {
+          macos: {
+            cornerRadius: 18,
+          },
         },
       },
-    },
-  });
+    });
+  }
 });
 ```
+
+Best-practice fork: a `keepOnTop` tray panel should toggle on repeated primary clicks; a non-pinned panel should hide on the WebView window's native `blur` event. Show-only handlers leave the user with no predictable dismissal law.
 
 ## Common Mistakes
 
