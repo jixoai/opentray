@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-badge",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Official OpenTray status extension backed by the OpenTray extension ABI.",
   "type": "module",
   "license": "MIT",

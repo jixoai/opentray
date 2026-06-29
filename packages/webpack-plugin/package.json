@@ -1,6 +1,6 @@
 {
   "name": "@opentray/webpack-plugin",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "webpack adapter for the OpenTray runtime artifact packaging contract.",
   "type": "module",
   "license": "MIT",
