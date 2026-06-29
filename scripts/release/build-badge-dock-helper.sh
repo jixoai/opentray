@@ -20,27 +20,12 @@ output_dir="$(cd "${output_dir}" && pwd)"
 output_zip="${output_dir}/$(basename "${output_zip}")"
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source_dir="${root_dir}/packages/ext-badge-darwin-arm64/app"
-build_dir="${root_dir}/target/badge-dock-helper"
-app_bundle="${build_dir}/OpenTrayBadgeHelper.app"
-binary_name="OpenTrayBadgeHelper"
+source_dir="packages/ext-badge-darwin-arm64/app"
 
-rm -rf "${build_dir}"
-mkdir -p "${build_dir}"
-
-swiftc \
-  -O \
-  -framework AppKit \
-  -o "${build_dir}/${binary_name}" \
-  "${source_dir}/main.swift"
-
-mkdir -p "${app_bundle}/Contents/MacOS"
-cp "${source_dir}/Info.plist" "${app_bundle}/Contents/Info.plist"
-cp "${build_dir}/${binary_name}" "${app_bundle}/Contents/MacOS/${binary_name}"
-chmod 755 "${app_bundle}/Contents/MacOS/${binary_name}"
-
-ditto -c -k --sequesterRsrc --keepParent \
-  "${app_bundle}" \
-  "${output_zip}"
+bash "${root_dir}/scripts/release/build-darwin-app-carrier.sh" \
+  "${output_zip}" \
+  "${source_dir}" \
+  "OpenTrayBadgeHelper" \
+  "OpenTrayBadgeHelper"
 
 echo "built badge dock helper artifact: ${output_zip}"

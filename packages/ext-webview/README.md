@@ -225,6 +225,26 @@ This is intentional. `show(...)` is the visibility/bootstrap verb, not the impli
 
 Without `nativeApiPolicy`, page-exposed native capability is local-only by default. Remote URLs do not receive `navigator.window`, `navigator.screen`, global bindings, or page-native sync unless their source is explicitly allowed.
 
+Browser/device permissions use a separate policy surface. Do not overload `nativeApiPolicy` for camera, microphone, geolocation, notifications, clipboard read, autoplay, local fonts, sensors, MIDI system exclusive, file read/write, multiple downloads, or window management:
+
+```ts
+const webview = tray.createWebviewWindow({
+  html: "<main />",
+  browserPermissionPolicy: {
+    camera: { sources: ["'local'"], decision: "prompt" },
+    microphone: { sources: ["'local'"], decision: "allow" },
+  },
+  permissionManagerPolicy: {
+    defaultSrc: ["'local'"],
+    remoteOrigins: ["https://example.com"],
+  },
+});
+```
+
+`permissionManagerPolicy` controls whether `opentrayPermissions` can be injected as a permission-management object. Remote origins do not receive that object by default, even when a permission family is allowlisted. Durable permission facts use the default app-scoped JavaScript permission store from `createAppScopedWebviewPermissionStore({ appId })`; the store is namespaced by OpenTray `appId` and does not use WebView page storage as the source of truth.
+
+Native prompt behavior depends on what the platform WebView substrate exposes. Unsupported permission families must resolve as unsupported instead of pretending a grant succeeded.
+
 When enabled, the page receives:
 
 - `navigator.window`

@@ -1,13 +1,18 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 import { createTrayHandle, type OpenTrayTransport } from "opentray";
 
 import {
   attachWebview,
+  createAppScopedWebviewPermissionStore,
   mediaQueryKit,
   styleKit,
   WebviewExt,
   WebviewExtensionLoadError,
+  webviewBrowserPermissionFamilies,
   WebviewPlacementKit,
   windowGeometryKit,
 } from "./index";
@@ -17,6 +22,7 @@ import type {
   WebviewNavigatorNamespace,
   WebviewNavigatorScreen,
   WebviewNavigatorWindow,
+  WebviewPermissionStore,
   WebviewScreenDetails,
   WebviewWindowState,
   WebviewWindowStyle,
@@ -241,6 +247,100 @@ describe("@opentray/ext-webview", () => {
         },
       },
     ]);
+  });
+
+  it("forwards browser permission policy separately from nativeApiPolicy", async () => {
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+
+    await attachWebview(tray).show({
+      type: "show",
+      html: "<main />",
+      nativeApiPolicy: {
+        defaultSrc: ["'local'"],
+        window: ["https://example.com"],
+      },
+      browserPermissionPolicy: {
+        camera: {
+          sources: ["'local'", "https://example.com"],
+          decision: "prompt",
+        },
+        microphone: {
+          sources: ["'local'"],
+          decision: "allow",
+        },
+      },
+      permissionManagerPolicy: {
+        defaultSrc: ["'local'"],
+        remoteOrigins: ["https://example.com"],
+      },
+    });
+
+    expect(transport.frames.at(-1)).toMatchObject({
+      type: "ext-command",
+      data: {
+        type: "show",
+        nativeApiPolicy: {
+          defaultSrc: ["'local'"],
+          window: ["https://example.com"],
+        },
+        browserPermissionPolicy: {
+          camera: {
+            sources: ["'local'", "https://example.com"],
+            decision: "prompt",
+          },
+          microphone: {
+            sources: ["'local'"],
+            decision: "allow",
+          },
+        },
+        permissionManagerPolicy: {
+          defaultSrc: ["'local'"],
+          remoteOrigins: ["https://example.com"],
+        },
+      },
+    });
+  });
+
+  it("stores durable permission facts in an app-scoped JS store", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "opentray-permissions-"));
+    try {
+      const store = createAppScopedWebviewPermissionStore({
+        appId: "com.example.tray",
+        baseDir,
+      });
+      const otherStore = createAppScopedWebviewPermissionStore({
+        appId: "com.example.other",
+        baseDir,
+      });
+
+      const record = await store.set({
+        source: { type: "origin", origin: "https://example.com" },
+        family: "camera",
+        decision: "allow",
+        sourceAction: "test",
+      });
+
+      expect(store.namespace).toBe("com.example.tray");
+      expect(record).toMatchObject({
+        namespace: "com.example.tray",
+        source: { type: "origin", origin: "https://example.com" },
+        family: "camera",
+        decision: "allow",
+        sourceAction: "test",
+      });
+      await expect(
+        store.get({ type: "origin", origin: "https://example.com" }, "camera")
+      ).resolves.toMatchObject({ decision: "allow" });
+      await expect(
+        otherStore.get(
+          { type: "origin", origin: "https://example.com" },
+          "camera"
+        )
+      ).resolves.toBeUndefined();
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
   });
 
   it("exposes explicit lifecycle verbs instead of overloading repeated show", async () => {
@@ -1640,6 +1740,9 @@ describe("@opentray/ext-webview", () => {
     expectTypeOf<WebviewNavigatorWindow["hide"]>().returns.toEqualTypeOf<
       Promise<WebviewWindowState>
     >();
+    expectTypeOf<WebviewPermissionStore["namespace"]>().toEqualTypeOf<string>();
+    expect(webviewBrowserPermissionFamilies).toContain("camera");
+    expect(webviewBrowserPermissionFamilies).toContain("windowManagement");
   });
 });
 

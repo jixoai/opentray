@@ -5,6 +5,12 @@ import type {
   TrayBoundsResult,
 } from "@opentray/spec";
 import type { TrayExtension, TrayExtensionContext, TrayHandle } from "opentray";
+import type {
+  WebviewBrowserPermissionPolicy,
+  WebviewPermissionManagerPolicy,
+} from "./permission-store";
+
+export * from "./permission-store";
 
 export type WebviewWindowIcon = Icon | { type: "href"; href: string };
 export type WebviewNativeApiSource =
@@ -47,6 +53,8 @@ export interface WebviewShowCommand {
     | { documentToWindow?: boolean; windowToDocument?: boolean };
   iconSync?: boolean | { faviconToWindow?: boolean; windowToFavicon?: boolean };
   nativeApiPolicy?: WebviewNativeApiPolicy;
+  browserPermissionPolicy?: WebviewBrowserPermissionPolicy;
+  permissionManagerPolicy?: WebviewPermissionManagerPolicy;
 }
 
 export type WebviewWindowOptions = Omit<WebviewShowCommand, "type">;

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   describeReleaseStagePlan,
@@ -8,6 +10,8 @@ import {
   materializeNativeBuildExecutions,
   resolveReleaseTargetsForComponents,
 } from "./native-build-graph";
+
+const repoRoot = resolve(import.meta.dir, "../..");
 
 describe("Feature: shared native build graph", () => {
   test("Scenario: Given WebView release packages When components are inferred Then only the WebView atom is selected", () => {
@@ -138,5 +142,33 @@ describe("Feature: shared native build graph", () => {
 
   test("Scenario: Given Lynx runtime build and staging When artifact names are resolved Then the OpenTray host carrier name is shared", () => {
     expect(lynxRuntimeArtifactName).toBe("OpenTrayLynxRuntime.app.zip");
+  });
+
+  test("Scenario: Given badge Darwin helper builds When script is inspected Then it delegates to the shared Darwin carrier", () => {
+    const executions = materializeNativeBuildExecutions(
+      ["badge"],
+      ["darwin-arm64"]
+    );
+    const [execution] = executions;
+    const script = readFileSync(
+      resolve(repoRoot, "scripts/release/build-badge-dock-helper.sh"),
+      "utf8"
+    );
+
+    expect(execution.artifactKinds).toEqual(["badge"]);
+    expect(execution.artifactName).toBe("native-darwin-arm64-badge");
+    expect(script).toContain("scripts/release/build-darwin-app-carrier.sh");
+    expect(script).toContain("OpenTrayBadgeHelper");
+  });
+
+  test("Scenario: Given Darwin privacy families When carrier script is inspected Then plist usage strings are carrier-owned", () => {
+    const script = readFileSync(
+      resolve(repoRoot, "scripts/release/build-darwin-app-carrier.sh"),
+      "utf8"
+    );
+
+    expect(script).toContain("OPENTRAY_DARWIN_PRIVACY_FAMILIES");
+    expect(script).toContain("NSCameraUsageDescription");
+    expect(script).toContain("NSMicrophoneUsageDescription");
   });
 });

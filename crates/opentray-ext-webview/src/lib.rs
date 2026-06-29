@@ -143,6 +143,57 @@ impl Default for WebviewNativeApiPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WebviewBrowserPermissionFamily {
+    Camera,
+    Microphone,
+    Geolocation,
+    Notifications,
+    ClipboardRead,
+    Autoplay,
+    LocalFonts,
+    Sensors,
+    MidiSystemExclusive,
+    FileReadWrite,
+    MultipleDownloads,
+    WindowManagement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WebviewBrowserPermissionDecision {
+    Allow,
+    Deny,
+    Prompt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WebviewBrowserPermissionRule {
+    pub family: WebviewBrowserPermissionFamily,
+    pub sources: Vec<WebviewNativeApiSource>,
+    pub decision: WebviewBrowserPermissionDecision,
+    pub prompt: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct WebviewBrowserPermissionPolicy {
+    pub rules: Vec<WebviewBrowserPermissionRule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WebviewPermissionManagerPolicy {
+    pub default_src: Vec<WebviewNativeApiSource>,
+    pub remote_origins: Vec<String>,
+}
+
+impl Default for WebviewPermissionManagerPolicy {
+    fn default() -> Self {
+        Self {
+            default_src: vec![WebviewNativeApiSource::Local],
+            remote_origins: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub(crate) enum WebviewWindowIcon {
@@ -178,6 +229,8 @@ pub(crate) struct WebviewShowSettings {
     pub navigator_tray: NavigatorTraySettings,
     pub window: WebviewWindowOptions,
     pub native_api_policy: WebviewNativeApiPolicy,
+    pub browser_permission_policy: WebviewBrowserPermissionPolicy,
+    pub permission_manager_policy: WebviewPermissionManagerPolicy,
     pub bootstrap_requested: bool,
 }
 
@@ -188,6 +241,8 @@ pub(crate) struct WebviewSessionBootstrapSettings {
     pub navigator_tray: NavigatorTraySettings,
     pub sync: WebviewMetadataSyncSettings,
     pub native_api_policy: WebviewNativeApiPolicy,
+    pub browser_permission_policy: WebviewBrowserPermissionPolicy,
+    pub permission_manager_policy: WebviewPermissionManagerPolicy,
 }
 
 impl WebviewShowSettings {
@@ -198,6 +253,8 @@ impl WebviewShowSettings {
             navigator_tray: self.navigator_tray,
             sync: self.window.sync,
             native_api_policy: self.native_api_policy.clone(),
+            browser_permission_policy: self.browser_permission_policy.clone(),
+            permission_manager_policy: self.permission_manager_policy.clone(),
         }
     }
 }
@@ -308,6 +365,8 @@ struct ShowCommandData {
     title_sync: Option<TitleSyncInput>,
     icon_sync: Option<IconSyncInput>,
     native_api_policy: Option<NativeApiPolicyInput>,
+    browser_permission_policy: Option<BrowserPermissionPolicyInput>,
+    permission_manager_policy: Option<PermissionManagerPolicyInput>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -399,6 +458,38 @@ struct NativeApiPolicyInput {
     screen_globals: Option<Vec<String>>,
     title_sync: Option<Vec<String>>,
     icon_sync: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserPermissionPolicyInput {
+    camera: Option<BrowserPermissionFamilyPolicyInput>,
+    microphone: Option<BrowserPermissionFamilyPolicyInput>,
+    geolocation: Option<BrowserPermissionFamilyPolicyInput>,
+    notifications: Option<BrowserPermissionFamilyPolicyInput>,
+    clipboard_read: Option<BrowserPermissionFamilyPolicyInput>,
+    autoplay: Option<BrowserPermissionFamilyPolicyInput>,
+    local_fonts: Option<BrowserPermissionFamilyPolicyInput>,
+    sensors: Option<BrowserPermissionFamilyPolicyInput>,
+    midi_system_exclusive: Option<BrowserPermissionFamilyPolicyInput>,
+    file_read_write: Option<BrowserPermissionFamilyPolicyInput>,
+    multiple_downloads: Option<BrowserPermissionFamilyPolicyInput>,
+    window_management: Option<BrowserPermissionFamilyPolicyInput>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserPermissionFamilyPolicyInput {
+    sources: Option<Vec<String>>,
+    decision: Option<String>,
+    prompt: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionManagerPolicyInput {
+    default_src: Option<Vec<String>>,
+    remote_origins: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -649,6 +740,12 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                         },
                     },
                     native_api_policy: parse_native_api_policy(parsed.native_api_policy)?,
+                    browser_permission_policy: parse_browser_permission_policy(
+                        parsed.browser_permission_policy,
+                    )?,
+                    permission_manager_policy: parse_permission_manager_policy(
+                        parsed.permission_manager_policy,
+                    )?,
                     bootstrap_requested,
                 },
             })
@@ -786,6 +883,8 @@ fn show_bootstrap_requested(data: &Value) -> bool {
         || data.get("titleSync").is_some()
         || data.get("iconSync").is_some()
         || data.get("nativeApiPolicy").is_some()
+        || data.get("browserPermissionPolicy").is_some()
+        || data.get("permissionManagerPolicy").is_some()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -959,6 +1058,136 @@ fn parse_native_api_policy(
         title_sync: parse_native_api_sources(input.title_sync)?,
         icon_sync: parse_native_api_sources(input.icon_sync)?,
     })
+}
+
+fn parse_browser_permission_policy(
+    input: Option<BrowserPermissionPolicyInput>,
+) -> Result<WebviewBrowserPermissionPolicy, WebviewRuntimeError> {
+    let Some(input) = input else {
+        return Ok(WebviewBrowserPermissionPolicy::default());
+    };
+    let mut rules = Vec::new();
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::Camera,
+        input.camera,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::Microphone,
+        input.microphone,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::Geolocation,
+        input.geolocation,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::Notifications,
+        input.notifications,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::ClipboardRead,
+        input.clipboard_read,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::Autoplay,
+        input.autoplay,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::LocalFonts,
+        input.local_fonts,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::Sensors,
+        input.sensors,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::MidiSystemExclusive,
+        input.midi_system_exclusive,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::FileReadWrite,
+        input.file_read_write,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::MultipleDownloads,
+        input.multiple_downloads,
+    )?;
+    push_permission_rule(
+        &mut rules,
+        WebviewBrowserPermissionFamily::WindowManagement,
+        input.window_management,
+    )?;
+    Ok(WebviewBrowserPermissionPolicy { rules })
+}
+
+fn push_permission_rule(
+    rules: &mut Vec<WebviewBrowserPermissionRule>,
+    family: WebviewBrowserPermissionFamily,
+    input: Option<BrowserPermissionFamilyPolicyInput>,
+) -> Result<(), WebviewRuntimeError> {
+    let Some(input) = input else {
+        return Ok(());
+    };
+    rules.push(WebviewBrowserPermissionRule {
+        family,
+        sources: parse_native_api_sources(input.sources)?
+            .unwrap_or_else(|| vec![WebviewNativeApiSource::Local]),
+        decision: parse_browser_permission_decision(input.decision.as_deref())?,
+        prompt: input.prompt.unwrap_or(false),
+    });
+    Ok(())
+}
+
+fn parse_browser_permission_decision(
+    input: Option<&str>,
+) -> Result<WebviewBrowserPermissionDecision, WebviewRuntimeError> {
+    match input.unwrap_or("prompt") {
+        "allow" => Ok(WebviewBrowserPermissionDecision::Allow),
+        "deny" => Ok(WebviewBrowserPermissionDecision::Deny),
+        "prompt" => Ok(WebviewBrowserPermissionDecision::Prompt),
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported browserPermissionPolicy decision {other:?}"
+        ))),
+    }
+}
+
+fn parse_permission_manager_policy(
+    input: Option<PermissionManagerPolicyInput>,
+) -> Result<WebviewPermissionManagerPolicy, WebviewRuntimeError> {
+    let Some(input) = input else {
+        return Ok(WebviewPermissionManagerPolicy::default());
+    };
+    let default_src = parse_native_api_sources(input.default_src)?
+        .unwrap_or_else(|| WebviewPermissionManagerPolicy::default().default_src);
+    let remote_origins = input
+        .remote_origins
+        .unwrap_or_default()
+        .into_iter()
+        .map(|origin| parse_exact_origin(&origin, "permissionManagerPolicy remote origin"))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(WebviewPermissionManagerPolicy {
+        default_src,
+        remote_origins,
+    })
+}
+
+fn parse_exact_origin(value: &str, label: &str) -> Result<String, WebviewRuntimeError> {
+    match parse_native_api_source(value)? {
+        WebviewNativeApiSource::Origin(origin) => Ok(origin),
+        _ => Err(WebviewRuntimeError::Rejected(format!(
+            "{label} {value:?} must be an exact http or https origin"
+        ))),
+    }
 }
 
 unsafe fn read_tray_bounds(context: *const ExtHostContext) -> Option<Rect> {
@@ -1249,10 +1478,69 @@ mod tests {
                         )]),
                         icon_sync: Some(vec![WebviewNativeApiSource::Local]),
                     },
+                    browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
+                    permission_manager_policy: WebviewPermissionManagerPolicy::default(),
                     bootstrap_requested: true,
                 },
             }
         );
+    }
+
+    #[test]
+    fn parse_show_command_keeps_browser_permissions_separate_from_native_api_policy() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "html": "<main />",
+            "browserPermissionPolicy": {
+              "camera": {
+                "sources": ["'local'", "https://example.com"],
+                "decision": "prompt"
+              },
+              "microphone": {
+                "sources": ["'local'"],
+                "decision": "allow"
+              }
+            },
+            "permissionManagerPolicy": {
+              "defaultSrc": ["'local'"],
+              "remoteOrigins": ["https://example.com"]
+            }
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show { show_settings, .. } = command else {
+            panic!("expected show command");
+        };
+
+        assert_eq!(show_settings.native_api_policy, WebviewNativeApiPolicy::default());
+        assert_eq!(
+            show_settings.browser_permission_policy.rules,
+            vec![
+                WebviewBrowserPermissionRule {
+                    family: WebviewBrowserPermissionFamily::Camera,
+                    sources: vec![
+                        WebviewNativeApiSource::Local,
+                        WebviewNativeApiSource::Origin("https://example.com".to_string()),
+                    ],
+                    decision: WebviewBrowserPermissionDecision::Prompt,
+                    prompt: false,
+                },
+                WebviewBrowserPermissionRule {
+                    family: WebviewBrowserPermissionFamily::Microphone,
+                    sources: vec![WebviewNativeApiSource::Local],
+                    decision: WebviewBrowserPermissionDecision::Allow,
+                    prompt: false,
+                },
+            ]
+        );
+        assert_eq!(
+            show_settings.permission_manager_policy,
+            WebviewPermissionManagerPolicy {
+                default_src: vec![WebviewNativeApiSource::Local],
+                remote_origins: vec!["https://example.com".to_string()],
+            }
+        );
+        assert!(show_settings.bootstrap_requested);
     }
 
     #[test]
