@@ -30,22 +30,25 @@ Use `alpha-A-B` for alpha packages on the same protocol line. Do not install pla
 
 ## First Panel
 
-Start with `runTrayApp()` and mount WebView through `tray.extend(WebviewExt)`. The first `show()` loads the native extension:
+Call `createTray()` directly and mount WebView through `tray.extend(WebviewExt)`. The first `show()` loads the native extension:
 
 ```ts
-import { runTrayApp } from "opentray/node";
+import { createTray } from "opentray";
+import { WebviewExt } from "@opentray/ext-webview";
 
-await runTrayApp(async ({ createTray }) => {
-  const { WebviewExt } = await import("@opentray/ext-webview");
-  const tray = (await createTray({
+const tray = (await createTray(
+  {
     id: "com.example.panel",
     icon: { "text-only": "OT" },
     menu: { items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }] },
-  })).extend(WebviewExt);
-  const panel = tray.createWebviewWindow({ html: "<main>Hello</main>", width: 360, height: 220 });
-  tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
-});
+  },
+  { appId: "com.example.panel", appName: "Panel" },
+)).extend(WebviewExt);
+const panel = tray.createWebviewWindow({ html: "<main>Hello</main>", width: 360, height: 220 });
+tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
 ```
+
+`createTray()` is the public creation entrypoint. The runtime ships as a packaged executable (`bin/opentray`); `createTray()` spawns it on demand and talks the OpenTray newline-JSON protocol over a socket. Application code does not import a Node binding, host a native main loop, or wrap tray creation in a worker — the calling process is the caller, and the executable owns the native event loop and session lifecycle.
 
 Use `attachWebview(tray)` only as a compatibility adapter for older code. New code should prefer `tray.extend(WebviewExt)` so multiple trays can mount isolated WebView instances.
 
