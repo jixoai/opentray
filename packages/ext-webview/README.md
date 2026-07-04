@@ -285,7 +285,7 @@ Call `startPermissionManager()` on the WebView window handle to drain page-side 
 const stopPermissions = webview.startPermissionManager();
 ```
 
-Native prompt behavior depends on what the platform WebView substrate exposes. Dedicated download hooks now exist, so standard silent downloads are supported, but current Wry WebKit/WebView2 hooks still do not expose a stable all-permission decision callback. Browser-engine grants outside the dedicated download path remain typed unsupported until OpenTray owns that substrate hook, and `multipleDownloads: { decision: "prompt" }` still depends on the carrier-owned native prompt flow.
+Native prompt behavior depends on what the platform WebView substrate exposes. Dedicated download hooks now exist, so standard silent downloads are supported, but current Wry WebKit/WebView2 hooks still do not expose a stable all-permission decision callback. Browser-engine grants outside the dedicated download path remain typed unsupported until OpenTray owns that substrate hook, and `multipleDownloads: { decision: "prompt" }` currently fails closed instead of rendering a download-specific prompt UI.
 
 When enabled, the page receives:
 

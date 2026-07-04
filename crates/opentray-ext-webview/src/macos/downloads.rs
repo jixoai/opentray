@@ -569,3 +569,30 @@ fn basename(path: &Path) -> Option<String> {
         .and_then(|value| value.to_str())
         .map(ToOwned::to_owned)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::dedupe_destination;
+    use std::fs::{create_dir_all, remove_dir_all, write};
+    use std::path::PathBuf;
+
+    #[test]
+    fn macos_default_download_path_deduplicates_existing_filename() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "opentray-download-dedupe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("epoch")
+                .as_nanos()
+        ));
+        create_dir_all(&base_dir).expect("create temp dir");
+        let original = base_dir.join("report.json");
+        write(&original, "{}").expect("seed original file");
+
+        let deduped = dedupe_destination(PathBuf::from(&original));
+        assert_eq!(deduped, base_dir.join("report (1).json"));
+
+        remove_dir_all(&base_dir).expect("remove temp dir");
+    }
+}
