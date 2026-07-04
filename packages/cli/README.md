@@ -110,6 +110,21 @@ OpenTray does not ask developers to create a public broker object. The applicati
 
 Platform runtime packages carry the packaged runtime executable at `bin/opentray` or `bin/opentray.exe`.
 
+When a local consumer links this workspace, refresh native package artifacts explicitly instead of relying on `pnpm run build` alone:
+
+```bash
+pnpm run npm:cp-bin:runtime
+pnpm run npm:cp-bin:webview
+```
+
+Use `pnpm run npm:cp-bin` to refresh both the packaged runtime executable and the current platform WebView native library. Without `--target`, it compares existing `target/debug` and `target/release` artifacts and copies the newest binary for each kind. Pass `--target debug`, `-t debug`, or `--target release` to build and copy a specific target into the package projection:
+
+```bash
+pnpm run npm:cp-bin
+pnpm run npm:cp-bin -- --target debug
+pnpm run npm:cp-bin:webview -- -t debug
+```
+
 By default, `createTray()` routes through the local runtime host and starts it on first use when needed. The executable host remains the source of truth for tray lifecycle, session cleanup, and native event routing on supported platforms.
 
 Runtime options may also carry app identity facts:
