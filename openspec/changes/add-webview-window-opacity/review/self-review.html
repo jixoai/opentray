@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>add-webview-window-opacity Self Review</title>
+    <style>
+      body {
+        margin: 0;
+        color: #172033;
+        background: #f7f8fb;
+        font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+      main {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 32px;
+      }
+      h1 {
+        margin: 0 0 16px;
+        font-size: 24px;
+      }
+      section {
+        margin-top: 18px;
+      }
+      code,
+      pre {
+        border-radius: 6px;
+        background: #edf1f7;
+        padding: 2px 5px;
+      }
+      pre {
+        overflow: auto;
+        padding: 14px;
+      }
+      li {
+        margin: 6px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Window Opacity Review</h1>
+      <section>
+        <h2>Ontology</h2>
+        <pre>
+style.opacity    -> whole native-window alpha
+style.background -> native backing/material/blur
+style.platform.* -> substrate-specific appearance</pre
+        >
+      </section>
+      <section>
+        <h2>Evidence</h2>
+        <ul>
+          <li>
+            <code>pnpm --filter @opentray/ext-webview test</code>: passed, 34
+            tests.
+          </li>
+          <li>
+            <code>pnpm --filter @opentray/ext-webview typecheck</code>: passed.
+          </li>
+          <li>
+            <code>cargo test -p opentray-ext-webview</code>: passed, 54 tests.
+          </li>
+          <li>
+            <code
+              >cargo check -p opentray-ext-webview --target
+              x86_64-pc-windows-msvc</code
+            >: passed with rustup cargo/rustc.
+          </li>
+          <li>
+            <code>pnpm --filter @opentray/ext-webview build</code>: passed.
+          </li>
+          <li>
+            <code
+              >bun run openspec:vision -- validate
+              add-webview-window-opacity</code
+            >: passed.
+          </li>
+          <li>
+            <code
+              >bun run openspec:vision -- check
+              add-webview-window-opacity</code
+            >: passed.
+          </li>
+          <li><code>git diff --check</code>: passed.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Documentation</h2>
+        <ul>
+          <li>
+            README, examples, and the WebView control demo document and expose
+            <code>style.opacity</code> as whole-window shell alpha.
+          </li>
+          <li>
+            OpenSpec records opacity as separate from
+            <code>style.background</code> and owned by the WebView extension
+            atom.
+          </li>
+          <li>
+            WebView pattern guidance scopes the Windows
+            <code>WS_EX_LAYERED</code> warning to background and white-block
+            repair; opacity is the explicit exception.
+          </li>
+        </ul>
+      </section>
+      <section>
+        <h2>Decision</h2>
+        <p>
+          No review loop required. The change is additive and remains inside the
+          WebView extension atom.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

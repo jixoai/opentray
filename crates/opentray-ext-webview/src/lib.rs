@@ -54,12 +54,25 @@ pub(crate) struct WebviewMetadataSyncSettings {
     pub icon: MetadataSyncSettings,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WebviewInitialStyle {
     pub frameless: bool,
     pub keep_on_top: bool,
+    pub opacity: f64,
     pub background: WebviewWindowBackground,
     pub platform: WebviewInitialPlatformStyle,
+}
+
+impl Default for WebviewInitialStyle {
+    fn default() -> Self {
+        Self {
+            frameless: false,
+            keep_on_top: false,
+            opacity: 1.0,
+            background: WebviewWindowBackground::Opaque,
+            platform: WebviewInitialPlatformStyle::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -414,6 +427,7 @@ struct ResolvePermissionMessageCommandData {
 struct ShowWindowStyleData {
     frameless: Option<bool>,
     keep_on_top: Option<bool>,
+    opacity: Option<f64>,
     background: Option<WebviewBackgroundInput>,
     platform: Option<ShowWindowPlatformStyleData>,
 }
@@ -725,6 +739,11 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                         style_requested: style.is_some(),
                         style: WebviewInitialStyle {
                             frameless: style.and_then(|style| style.frameless).unwrap_or(false),
+                            opacity: style
+                                .and_then(|style| style.opacity)
+                                .map(normalize_opacity)
+                                .transpose()?
+                                .unwrap_or(1.0),
                             background: style
                                 .and_then(|style| style.background.clone())
                                 .map(parse_background_input)
@@ -961,6 +980,20 @@ fn normalize_corner_radius(radius: f64) -> Result<f64, WebviewRuntimeError> {
         ));
     }
     Ok(radius.clamp(0.0, 128.0))
+}
+
+pub(crate) fn normalize_opacity(opacity: f64) -> Result<f64, WebviewRuntimeError> {
+    if !opacity.is_finite() {
+        return Err(WebviewRuntimeError::Rejected(
+            "opacity must be a finite number".into(),
+        ));
+    }
+    if !(0.0..=1.0).contains(&opacity) {
+        return Err(WebviewRuntimeError::Rejected(
+            "opacity must be between 0 and 1".into(),
+        ));
+    }
+    Ok(opacity)
 }
 
 pub(crate) fn parse_background_input(
@@ -1408,6 +1441,7 @@ mod tests {
             },
             "style": {
               "frameless": true,
+              "opacity": 0.72,
               "background": {
                 "kind": "platformMaterial",
                 "material": "hudWindow",
@@ -1466,6 +1500,7 @@ mod tests {
                         style: WebviewInitialStyle {
                             frameless: true,
                             keep_on_top: true,
+                            opacity: 0.72,
                             background: WebviewWindowBackground::PlatformMaterial {
                                 material: "hudWindow".to_string(),
                                 state: WebviewBackgroundEffectState::Active,
@@ -1656,6 +1691,20 @@ mod tests {
             show_settings.window.style.background,
             WebviewWindowBackground::Opaque
         );
+        assert_eq!(show_settings.window.style.opacity, 1.0);
+    }
+
+    #[test]
+    fn parse_show_command_rejects_invalid_opacity() {
+        let error = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "style": {
+              "opacity": -0.1
+            }
+        }))
+        .expect_err("opacity outside 0..1 should be rejected");
+
+        assert_eq!(error.to_string(), "opacity must be between 0 and 1");
     }
 
     #[test]

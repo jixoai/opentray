@@ -134,6 +134,7 @@ export interface WebviewWindowPlatformStyle {
 export interface WebviewWindowStyle {
   frameless: boolean;
   keepOnTop: boolean;
+  opacity: number;
   background: WebviewWindowBackground;
   platform: WebviewWindowPlatformStyle;
 }
@@ -141,6 +142,7 @@ export interface WebviewWindowStyle {
 export interface WebviewWindowStylePatch {
   frameless?: boolean;
   keepOnTop?: boolean;
+  opacity?: number;
   background?: WebviewWindowBackgroundInput;
   platform?: {
     macos?: Partial<WebviewMacosWindowStyle>;
@@ -185,6 +187,7 @@ export interface WebviewWindowCapabilities {
   appRegionDrag: boolean;
   frameless: boolean;
   keepOnTop: boolean;
+  opacity: boolean;
   title: boolean;
   icon: boolean;
   screen: boolean;
@@ -200,7 +203,9 @@ export interface WebviewWindowCapabilities {
 
 export interface WebviewPermissionRuntimeOptions {
   store?: WebviewPermissionStore;
-  prompt?: (request: WebviewPermissionRequest) => Promise<WebviewPermissionPromptDecision>;
+  prompt?: (
+    request: WebviewPermissionRequest
+  ) => Promise<WebviewPermissionPromptDecision>;
 }
 
 export type WebviewWindowStateKind = "normal" | "minimized" | "maximized";
@@ -400,7 +405,9 @@ export interface WebviewNavigatorTray {
 }
 
 export interface WebviewNavigatorPermissions {
-  query(family: WebviewBrowserPermissionFamily): Promise<WebviewPermissionState>;
+  query(
+    family: WebviewBrowserPermissionFamily
+  ): Promise<WebviewPermissionState>;
   request(
     family: WebviewBrowserPermissionFamily
   ): Promise<WebviewPermissionState>;
@@ -408,7 +415,9 @@ export interface WebviewNavigatorPermissions {
     family: WebviewBrowserPermissionFamily,
     decision: "allow" | "deny"
   ): Promise<WebviewPermissionState>;
-  clear(family: WebviewBrowserPermissionFamily): Promise<WebviewPermissionState>;
+  clear(
+    family: WebviewBrowserPermissionFamily
+  ): Promise<WebviewPermissionState>;
 }
 
 export interface WebviewNavigatorNamespace {
@@ -438,7 +447,11 @@ export type WebviewCommand =
   | { type: "getScreenDetails" }
   | { type: "drainIpcMessages" }
   | { type: "drainPermissionMessages" }
-  | { type: "resolvePermissionMessage"; id: number; result: WebviewPermissionState }
+  | {
+      type: "resolvePermissionMessage";
+      id: number;
+      result: WebviewPermissionState;
+    }
   | { type: "drainWindowEvents" }
   | { type: "setStyle"; style: WebviewWindowStylePatch }
   | {
@@ -573,7 +586,11 @@ export class WebviewExtensionLoadError extends Error {
 const WEBVIEW_EXTENSION_NAME = "webview";
 const WEBVIEW_EXTENSION_PACKAGE = "@opentray/ext-webview";
 const WINDOW_EVENT_POLL_INTERVAL_MS = 16;
-const POLLED_WINDOW_EVENTS = new Set(["focus", "blur", "windowinteractionchange"]);
+const POLLED_WINDOW_EVENTS = new Set([
+  "focus",
+  "blur",
+  "windowinteractionchange",
+]);
 
 export const WebviewExt = {
   name: WEBVIEW_EXTENSION_NAME,
@@ -806,7 +823,9 @@ const createWebviewWindowHandle = (
     windowEventPoll = undefined;
   };
 
-  const drainPermissionMessages = async (): Promise<WebviewPermissionIpcMessage[]> => {
+  const drainPermissionMessages = async (): Promise<
+    WebviewPermissionIpcMessage[]
+  > => {
     const response = await endpoint.command<
       Extract<WebviewEvent, { type: "permissionMessages" }>
     >({

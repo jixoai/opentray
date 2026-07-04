@@ -36,15 +36,23 @@ Call `createTray()` directly and mount WebView through `tray.extend(WebviewExt)`
 import { createTray } from "opentray";
 import { WebviewExt } from "@opentray/ext-webview";
 
-const tray = (await createTray(
-  {
-    id: "com.example.panel",
-    icon: { "text-only": "OT" },
-    menu: { items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }] },
-  },
-  { appId: "com.example.panel", appName: "Panel" },
-)).extend(WebviewExt);
-const panel = tray.createWebviewWindow({ html: "<main>Hello</main>", width: 360, height: 220 });
+const tray = (
+  await createTray(
+    {
+      id: "com.example.panel",
+      icon: { "text-only": "OT" },
+      menu: {
+        items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }],
+      },
+    },
+    { appId: "com.example.panel", appName: "Panel" }
+  )
+).extend(WebviewExt);
+const panel = tray.createWebviewWindow({
+  html: "<main>Hello</main>",
+  width: 360,
+  height: 220,
+});
 tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
 ```
 
@@ -79,6 +87,7 @@ macOS support includes:
 - transparent WebView/window background through Wry + AppKit
 - material backgrounds through `window-vibrancy`
 - keep-on-top window level on macOS
+- whole-window opacity through `style.opacity`
 - titlebar overlay geometry through `navigator.opentrayWindow.overlay`
 - native app-region dragging through `startAppRegionDrag()`
 - minimize, maximize, and restore window-state controls
@@ -96,7 +105,7 @@ Windows support includes:
 - `show`, `hide`, `destroy`, `setContent`, `navigate`, `evaluate`, and `postMessage`
 - `navigator.window` / `navigator.opentrayWindow` bridge injection with source-scoped `nativeApiPolicy`
 - `close`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, and `isMinimized`
-- `getStyle` / `setStyle` for common `frameless`, `background`, and `keepOnTop`
+- `getStyle` / `setStyle` for common `frameless`, `background`, `keepOnTop`, and `opacity`
 - `windowControlsOverlay` geometry, `startAppRegionDrag()`, and subscription-driven bridge events
 - title sync and native window/taskbar icon projection for RGBA icons, local icon files, and PNG data URLs
 - Windows DWM background materials through `style.background`: `auto`, `mica`, `acrylic`, and `tabbed`
@@ -112,6 +121,8 @@ For glass or blur-style surfaces, two things must line up at once:
 
 - native background must be one mutually exclusive mode: `transparent`, `semantic: blur`, or `platformMaterial`
 - the page must leave some regions genuinely transparent instead of covering the whole window with opaque HTML or CSS blur overlays
+
+`style.opacity` is a separate whole-window shell alpha from `0` through `1`. It composes with `style.background`, but it does not choose a backing mode: `opacity: 0.72` keeps an opaque background opaque unless you also request `background: "transparent"`, semantic blur, or a platform material.
 
 Treat `style.background` as the single source of truth for native backing and material composition:
 
@@ -141,11 +152,13 @@ Mount WebView on a tray, then create a tray-scoped window. The first window comm
 import { WebviewExt } from "@opentray/ext-webview";
 import { createTray } from "opentray";
 
-const tray = (await createTray({
-  id: "com.example.status",
-  icon: { "text-only": "OT" },
-  tooltip: { title: "Status", description: "Background service" },
-})).extend(WebviewExt);
+const tray = (
+  await createTray({
+    id: "com.example.status",
+    icon: { "text-only": "OT" },
+    tooltip: { title: "Status", description: "Background service" },
+  })
+).extend(WebviewExt);
 
 const webview = tray.createWebviewWindow({
   html: "<main><h1>OpenTray</h1></main>",
@@ -274,7 +287,7 @@ The injected capability follows a typed facade, with a raw `invoke(cmd, payload)
 - `await navigator.window.resizeTo(520, 320)`
 - `await navigator.window.minimize()`, `maximize()`, and `restore()`
 - `await navigator.window.getWindowState()`, `isMaximized()`, and `isMinimized()`
-- `await navigator.window.setStyle({ frameless: true, platform: { macos: { cornerRadius: 18 } } })`
+- `await navigator.window.setStyle({ frameless: true, opacity: 0.82, platform: { macos: { cornerRadius: 18 } } })`
 - `await navigator.opentrayWindow.overlay.getTitlebarAreaRect()`
 - `await navigator.opentrayWindow.startAppRegionDrag()`
 - `await navigator.window.setTitle("OpenTray Status")`
@@ -325,6 +338,7 @@ Current native support:
 - macOS: `close`, `moveTo`, `resizeTo`, `getCapabilities`, `getStyle`, `setStyle`
 - macOS: `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, `isMinimized`, and native app-region drag
 - macOS: `keepOnTop` through `setStyle({ keepOnTop: true })`
+- macOS: whole-window opacity through `setStyle({ opacity: 0.82 })`
 - macOS: `style.platform.macos.cornerRadius` through layer-backed content clipping
 - macOS: `getTitle`, `setTitle`, `getIcon`, `setIcon`
 - macOS: titlebar overlay geometry through `windowControlsOverlay`
@@ -333,7 +347,7 @@ Current native support:
 - macOS: transparent background and material effects through `style.background`, including `hudWindow`, `sidebar`, `windowBackground`, `contentBackground`, and `underWindowBackground`
 - macOS: global override binding through `bindWindowGlobals` and `bindScreenGlobals`
 - Windows: visible WebView2-backed windows, lifecycle verbs, content replacement/navigation, `evaluate`, `postMessage`, common window bridge commands, title/icon sync, current-monitor screen snapshot, tray bounds projection, and global override binding through `bindWindowGlobals` / `bindScreenGlobals`
-- Windows: `frameless`, `background`, `keepOnTop`, and `style.platform.windows.cornerPreference`
+- Windows: `frameless`, `background`, `keepOnTop`, `opacity`, and `style.platform.windows.cornerPreference`
 - Linux: no official native WebView runtime package is published. A custom `path` may still be used for private experiments, but the official package treats Linux WebView as unsupported.
 
 Keep the unsupported taxonomy explicit:
@@ -482,7 +496,7 @@ await navigator.opentrayWindow.setStyle({
 await navigator.opentrayWindow.resizeTo(320, 180);
 await navigator.opentrayWindow.moveTo(
   screen.visibleFrame.x + screen.visibleFrame.width - 320 - margin,
-  screen.visibleFrame.y + margin,
+  screen.visibleFrame.y + margin
 );
 ```
 

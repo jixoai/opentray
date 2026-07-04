@@ -12,10 +12,19 @@ import { windowGeometryKit } from "./window-geometry";
 
 export interface WebviewStyleKitTarget {
   resizeTo(width: number, height: number): Promise<unknown>;
-  setMinimumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<unknown>;
-  setMaximumSize(width?: WebviewWindowSizeConstraintValue, height?: WebviewWindowSizeConstraintValue): Promise<unknown>;
+  setMinimumSize(
+    width?: WebviewWindowSizeConstraintValue,
+    height?: WebviewWindowSizeConstraintValue
+  ): Promise<unknown>;
+  setMaximumSize(
+    width?: WebviewWindowSizeConstraintValue,
+    height?: WebviewWindowSizeConstraintValue
+  ): Promise<unknown>;
   setStyle?(style: WebviewWindowStylePatch): Promise<WebviewWindowStyle>;
-  setBackground?(background: WebviewWindowBackgroundInput, options?: WebviewBackgroundOptions): Promise<WebviewWindowStyle>;
+  setBackground?(
+    background: WebviewWindowBackgroundInput,
+    options?: WebviewBackgroundOptions
+  ): Promise<WebviewWindowStyle>;
 }
 
 export interface WebviewWindowStyleRecipe {
@@ -30,6 +39,7 @@ export interface WebviewWindowStyleRecipe {
   state?: WebviewBackgroundEffectState;
   frameless?: boolean;
   keepOnTop?: boolean;
+  opacity?: number;
   platform?: WebviewWindowStylePatch["platform"];
 }
 
@@ -37,7 +47,7 @@ export interface WebviewMediaQueryTarget {
   getBounds(): Promise<Rect>;
   listen?<TPayload = unknown>(
     event: string,
-    handler: (event: { event: string; payload: TPayload } | TPayload) => void,
+    handler: (event: { event: string; payload: TPayload } | TPayload) => void
   ): (() => void) | Promise<() => Promise<void>>;
 }
 
@@ -54,15 +64,14 @@ export interface WebviewMediaQueryContext {
   matches: boolean;
 }
 
-export type WebviewMediaQueryCallback<TTarget extends WebviewMediaQueryTarget> = (
-  target: TTarget,
-  context: WebviewMediaQueryContext,
-) => void | Promise<void>;
+export type WebviewMediaQueryCallback<TTarget extends WebviewMediaQueryTarget> =
+  (target: TTarget, context: WebviewMediaQueryContext) => void | Promise<void>;
 
-export type WebviewMediaQueryRule<TTarget extends WebviewMediaQueryTarget = WebviewMediaQueryTarget> =
-  WebviewMediaQuery & {
-    callback: WebviewMediaQueryCallback<TTarget>;
-  };
+export type WebviewMediaQueryRule<
+  TTarget extends WebviewMediaQueryTarget = WebviewMediaQueryTarget
+> = WebviewMediaQuery & {
+  callback: WebviewMediaQueryCallback<TTarget>;
+};
 
 export type WebviewMediaQueryInput<TTarget extends WebviewMediaQueryTarget> =
   | WebviewMediaQuery
@@ -81,14 +90,22 @@ export interface WebviewMediaQueryWatch {
 
 const DEFAULT_MEDIA_QUERY_INTERVAL_MS = 250;
 const DEFAULT_MEDIA_QUERY_SETTLE_MS = 180;
-const activeMediaQueryWatches = new WeakMap<WebviewMediaQueryTarget, WebviewMediaQueryWatch>();
+const activeMediaQueryWatches = new WeakMap<
+  WebviewMediaQueryTarget,
+  WebviewMediaQueryWatch
+>();
 
 export const styleKit = {
-  gen<TTarget extends WebviewStyleKitTarget>(style: WebviewWindowStyleRecipe): (target: TTarget) => Promise<void> {
+  gen<TTarget extends WebviewStyleKitTarget>(
+    style: WebviewWindowStyleRecipe
+  ): (target: TTarget) => Promise<void> {
     return (target) => styleKit.apply(target, style);
   },
 
-  async apply<TTarget extends WebviewStyleKitTarget>(target: TTarget, style: WebviewWindowStyleRecipe): Promise<void> {
+  async apply<TTarget extends WebviewStyleKitTarget>(
+    target: TTarget,
+    style: WebviewWindowStyleRecipe
+  ): Promise<void> {
     const size = initialSizeFromStyle(style);
     if (style.minWidth !== undefined || style.minHeight !== undefined) {
       await target.setMinimumSize(style.minWidth, style.minHeight);
@@ -104,7 +121,10 @@ export const styleKit = {
       await target.setStyle?.(patch);
     }
     if (style.background !== undefined) {
-      await target.setBackground?.(style.background, backgroundOptionsFromStyle(style));
+      await target.setBackground?.(
+        style.background,
+        backgroundOptionsFromStyle(style)
+      );
     }
   },
 };
@@ -127,30 +147,44 @@ export const mediaQueryKit = {
   },
 };
 
-const initialSizeFromStyle = (style: WebviewWindowStyleRecipe): { width: number; height: number } | null => {
+const initialSizeFromStyle = (
+  style: WebviewWindowStyleRecipe
+): { width: number; height: number } | null => {
   const width = positiveFiniteOptional(style.initWidth, "initWidth");
   const explicitHeight = positiveFiniteOptional(style.initHeight, "initHeight");
   const aspectRatio = positiveFiniteOptional(style.aspectRatio, "aspectRatio");
-  const height = explicitHeight ?? (width !== undefined && aspectRatio !== undefined ? width / aspectRatio : undefined);
+  const height =
+    explicitHeight ??
+    (width !== undefined && aspectRatio !== undefined
+      ? width / aspectRatio
+      : undefined);
   if (width === undefined || height === undefined) {
     return null;
   }
   return windowGeometryKit.normalizeSize(width, height);
 };
 
-const stylePatchFromRecipe = (style: WebviewWindowStyleRecipe): WebviewWindowStylePatch | null => {
+const stylePatchFromRecipe = (
+  style: WebviewWindowStyleRecipe
+): WebviewWindowStylePatch | null => {
   const patch: WebviewWindowStylePatch = {
     ...(style.frameless === undefined ? {} : { frameless: style.frameless }),
     ...(style.keepOnTop === undefined ? {} : { keepOnTop: style.keepOnTop }),
+    ...(style.opacity === undefined ? {} : { opacity: style.opacity }),
     ...(style.platform === undefined ? {} : { platform: style.platform }),
   };
   return Object.keys(patch).length === 0 ? null : patch;
 };
 
-const backgroundOptionsFromStyle = (style: WebviewWindowStyleRecipe): WebviewBackgroundOptions | undefined =>
+const backgroundOptionsFromStyle = (
+  style: WebviewWindowStyleRecipe
+): WebviewBackgroundOptions | undefined =>
   style.state === undefined ? undefined : { state: style.state };
 
-const positiveFiniteOptional = (value: number | undefined, name: string): number | undefined => {
+const positiveFiniteOptional = (
+  value: number | undefined,
+  name: string
+): number | undefined => {
   if (value === undefined) {
     return undefined;
   }
@@ -161,14 +195,16 @@ const positiveFiniteOptional = (value: number | undefined, name: string): number
 };
 
 const normalizeMediaQueryRules = <TTarget extends WebviewMediaQueryTarget>(
-  inputs: WebviewMediaQueryInput<TTarget>[],
+  inputs: WebviewMediaQueryInput<TTarget>[]
 ): WebviewMediaQueryRule<TTarget>[] => {
   const rules: WebviewMediaQueryRule<TTarget>[] = [];
   let pending: WebviewMediaQuery | undefined;
   for (const input of inputs) {
     if (typeof input === "function") {
       if (pending === undefined) {
-        throw new Error("mediaQueryKit.match callback must follow a media query object");
+        throw new Error(
+          "mediaQueryKit.match callback must follow a media query object"
+        );
       }
       rules.push({ ...pending, callback: input });
       pending = undefined;
@@ -176,7 +212,9 @@ const normalizeMediaQueryRules = <TTarget extends WebviewMediaQueryTarget>(
     }
     if (isMediaQueryRule(input)) {
       if (pending !== undefined) {
-        throw new Error("mediaQueryKit.match media query is missing a callback");
+        throw new Error(
+          "mediaQueryKit.match media query is missing a callback"
+        );
       }
       rules.push(input);
       continue;
@@ -197,9 +235,12 @@ const normalizeMediaQueryRules = <TTarget extends WebviewMediaQueryTarget>(
 };
 
 const isMediaQueryRule = <TTarget extends WebviewMediaQueryTarget>(
-  input: WebviewMediaQueryInput<TTarget>,
+  input: WebviewMediaQueryInput<TTarget>
 ): input is WebviewMediaQueryRule<TTarget> =>
-  typeof input === "object" && input !== null && "callback" in input && typeof input.callback === "function";
+  typeof input === "object" &&
+  input !== null &&
+  "callback" in input &&
+  typeof input.callback === "function";
 
 const validateMediaQuery = (query: WebviewMediaQuery): void => {
   positiveFiniteOptional(query.minWidth, "minWidth");
@@ -208,7 +249,9 @@ const validateMediaQuery = (query: WebviewMediaQuery): void => {
   positiveFiniteOptional(query.maxHeight, "maxHeight");
 };
 
-class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements WebviewMediaQueryWatch {
+class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget>
+  implements WebviewMediaQueryWatch
+{
   readonly #target: TTarget;
   readonly #rules: WebviewMediaQueryRule<TTarget>[];
   readonly #onStop: () => void;
@@ -221,7 +264,11 @@ class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements Webvie
   #interactionActive = false;
   #lastMatches = new Map<WebviewMediaQueryRule<TTarget>, boolean>();
 
-  constructor(target: TTarget, rules: WebviewMediaQueryRule<TTarget>[], onStop: () => void) {
+  constructor(
+    target: TTarget,
+    rules: WebviewMediaQueryRule<TTarget>[],
+    onStop: () => void
+  ) {
     this.#target = target;
     this.#rules = rules;
     this.#onStop = onStop;
@@ -301,14 +348,17 @@ class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements Webvie
   }
 
   async #refresh(options: { settleObservedBounds: boolean }): Promise<void> {
-    const bounds = windowGeometryKit.normalizeWindowRect(await this.#target.getBounds());
+    const bounds = windowGeometryKit.normalizeWindowRect(
+      await this.#target.getBounds()
+    );
     this.#assertActive();
     // Bounds are already normalized to desktop logical pixels by the native boundary; do not do DPI correction here.
     // Defer callback-driven window adjustments until the current resize/move settles.
     const previousBounds = this.#observedBounds;
     if (
       this.#interactionActive ||
-      (options.settleObservedBounds && this.#shouldSettleBounds(bounds, previousBounds))
+      (options.settleObservedBounds &&
+        this.#shouldSettleBounds(bounds, previousBounds))
     ) {
       this.#observedBounds = bounds;
       if (!this.#interactionActive) {
@@ -340,7 +390,9 @@ class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements Webvie
     this.#trackUnlisten(unlisten);
   }
 
-  #subscribeLifecycleEvent(event: "closed" | "hidden" | "windowstatechange"): void {
+  #subscribeLifecycleEvent(
+    event: "closed" | "hidden" | "windowstatechange"
+  ): void {
     const unlisten = this.#target.listen?.(event, (payload) => {
       if (shouldStopForLifecycleEvent(event, payload)) {
         this.stop();
@@ -350,21 +402,28 @@ class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements Webvie
   }
 
   #subscribeInteractionEvent(): void {
-    const unlisten = this.#target.listen?.("windowinteractionchange", (payload) => {
-      const active = readInteractionActive(payload);
-      if (active === null) {
-        return;
+    const unlisten = this.#target.listen?.(
+      "windowinteractionchange",
+      (payload) => {
+        const active = readInteractionActive(payload);
+        if (active === null) {
+          return;
+        }
+        if (active) {
+          this.pause();
+          return;
+        }
+        this.#resumeInBackground();
       }
-      if (active) {
-        this.pause();
-        return;
-      }
-      this.#resumeInBackground();
-    });
+    );
     this.#trackUnlisten(unlisten);
   }
 
-  #trackUnlisten(unlisten: ReturnType<NonNullable<WebviewMediaQueryTarget["listen"]>> | undefined): void {
+  #trackUnlisten(
+    unlisten:
+      | ReturnType<NonNullable<WebviewMediaQueryTarget["listen"]>>
+      | undefined
+  ): void {
     if (typeof unlisten === "function") {
       this.#unsubscribers.push(unlisten);
       return;
@@ -384,7 +443,9 @@ class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements Webvie
     }
   }
 
-  #requestRefresh(options: { settleObservedBounds: boolean } = { settleObservedBounds: true }): Promise<void> {
+  #requestRefresh(
+    options: { settleObservedBounds: boolean } = { settleObservedBounds: true }
+  ): Promise<void> {
     if (!this.#active) {
       return Promise.reject(new Error("media query watch is not active"));
     }
@@ -397,7 +458,9 @@ class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements Webvie
     return this.#refreshing;
   }
 
-  #requestBackgroundRefresh(options: { settleObservedBounds: boolean } = { settleObservedBounds: true }): void {
+  #requestBackgroundRefresh(
+    options: { settleObservedBounds: boolean } = { settleObservedBounds: true }
+  ): void {
     void this.#requestRefresh(options).catch((error: unknown) => {
       if (this.#active) {
         console.error("mediaQueryKit background refresh failed:", error);
@@ -420,7 +483,11 @@ class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements Webvie
   }
 
   #startInterval(): void {
-    if (this.#interval !== undefined || !this.#active || this.#interactionActive) {
+    if (
+      this.#interval !== undefined ||
+      !this.#active ||
+      this.#interactionActive
+    ) {
       return;
     }
     this.#interval = setInterval(() => {
@@ -452,7 +519,10 @@ class MediaQueryWatch<TTarget extends WebviewMediaQueryTarget> implements Webvie
   }
 
   #shouldSettleBounds(bounds: Rect, previousBounds: Rect | undefined): boolean {
-    return previousBounds !== undefined && !windowGeometryKit.sameRect(bounds, previousBounds);
+    return (
+      previousBounds !== undefined &&
+      !windowGeometryKit.sameRect(bounds, previousBounds)
+    );
   }
 }
 
@@ -462,7 +532,10 @@ const matchesMediaQuery = (bounds: Rect, query: WebviewMediaQuery): boolean =>
   (query.minHeight === undefined || bounds.height >= query.minHeight) &&
   (query.maxHeight === undefined || bounds.height <= query.maxHeight);
 
-const shouldStopForLifecycleEvent = (event: string, rawPayload: unknown): boolean => {
+const shouldStopForLifecycleEvent = (
+  event: string,
+  rawPayload: unknown
+): boolean => {
   if (event === "closed" || event === "hidden") {
     return true;
   }
@@ -482,5 +555,12 @@ const unwrapWindowEventPayload = (event: unknown): unknown => {
   return event;
 };
 
-const hasBoolean = <TKey extends string>(value: unknown, key: TKey): value is Record<TKey, boolean> =>
-  Boolean(value && typeof value === "object" && typeof (value as Record<TKey, unknown>)[key] === "boolean");
+const hasBoolean = <TKey extends string>(
+  value: unknown,
+  key: TKey
+): value is Record<TKey, boolean> =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as Record<TKey, unknown>)[key] === "boolean"
+  );

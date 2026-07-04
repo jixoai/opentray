@@ -331,6 +331,14 @@
               <button id="window-state-button" class="ghost">Window State</button>
             </div>
             <div class="field">
+              <label for="opacity-input">Opacity <span id="opacity-value">100%</span></label>
+              <input id="opacity-input" type="range" min="0" max="1" step="0.01" value="1" />
+            </div>
+            <div class="row">
+              <button id="apply-opacity-button">Apply Opacity</button>
+              <button id="opaque-opacity-button" class="ghost">Opaque Window</button>
+            </div>
+            <div class="field">
               <label for="background-select">Background</label>
               <select id="background-select">
                 <option value="opaque">opaque</option>
@@ -592,6 +600,23 @@
         }
         return { kind: "platformMaterial", material: value, state };
       };
+      const normalizeOpacityInput = (value) => {
+        const opacity = Number(value);
+        if (!Number.isFinite(opacity)) return 1;
+        return Math.max(0, Math.min(1, opacity));
+      };
+      const formatOpacity = (opacity) => `${Math.round(opacity * 100)}%`;
+      const syncOpacityControl = (style) => {
+        const opacity =
+          style && typeof style === "object" && typeof style.opacity === "number"
+            ? normalizeOpacityInput(style.opacity)
+            : 1;
+        const input = $("opacity-input");
+        if (input) {
+          input.value = String(opacity);
+        }
+        text("opacity-value", formatOpacity(opacity));
+      };
       const syncBackgroundControl = (style) => {
         const select = $("background-select");
         if (!select) return;
@@ -615,6 +640,7 @@
       const applyStyleMode = (style) => {
         const macosStyle = getMacosStyle(style);
         const windowsStyle = getWindowsStyle(style);
+        syncOpacityControl(style);
         syncBackgroundControl(style);
         const windowsCornerPreference =
           windowsStyle && typeof windowsStyle.cornerPreference === "string"
@@ -790,6 +816,21 @@
           return JSON.stringify(error);
         } catch (_jsonError) {
           return String(error);
+        }
+      };
+      const applyOpacity = async () => {
+        if (!bridge) {
+          text("style-status", "navigator.window is unavailable for this page source.");
+          return;
+        }
+        try {
+          const opacity = normalizeOpacityInput($("opacity-input")?.value ?? 1);
+          await bridge.setStyle({ opacity });
+          const nextStyle = await bridge.getStyle();
+          applyStyleMode(nextStyle);
+          text("style-status", JSON.stringify(toDisplayedStyle(nextStyle), null, 2));
+        } catch (error) {
+          text("style-status", `Failed to update opacity.\n${formatError(error)}`);
         }
       };
       const ensureFaviconLink = () => {
@@ -1089,6 +1130,15 @@
       bindIfPresent("opaque-background-button", () => {
         void setOpaqueBackground();
       });
+      bindIfPresent("apply-opacity-button", applyOpacity);
+      bindIfPresent("opaque-opacity-button", () => {
+        const input = $("opacity-input");
+        if (input) {
+          input.value = "1";
+        }
+        text("opacity-value", "100%");
+        void applyOpacity();
+      });
       bindIfPresent("apply-corner-button", applyCorner);
       bindIfPresent("system-corner-button", async () => {
         if (!bridge) return;
@@ -1119,6 +1169,9 @@
       });
       $("corner-radius-input")?.addEventListener("input", (event) => {
         text("corner-radius-value", `${event.currentTarget.value}px`);
+      });
+      $("opacity-input")?.addEventListener("input", (event) => {
+        text("opacity-value", formatOpacity(normalizeOpacityInput(event.currentTarget.value)));
       });
       bindIfPresent("minimize-button", () => {
         void bridge?.minimize()

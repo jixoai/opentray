@@ -12,8 +12,8 @@ use window_vibrancy::{
 use wry::RGBA;
 
 use crate::{
-    parse_background_input, WebviewBackgroundEffectState, WebviewBackgroundInput,
-    WebviewRuntimeError, WebviewShowSettings, WebviewWindowBackground,
+    normalize_opacity, parse_background_input, WebviewBackgroundEffectState,
+    WebviewBackgroundInput, WebviewRuntimeError, WebviewShowSettings, WebviewWindowBackground,
 };
 
 use super::{AppKitViewHandle, NavigatorWindowBridge, CLEAR_BACKGROUND, OPAQUE_BACKGROUND};
@@ -23,6 +23,7 @@ use super::{AppKitViewHandle, NavigatorWindowBridge, CLEAR_BACKGROUND, OPAQUE_BA
 pub(super) struct WindowStyleState {
     pub(super) frameless: bool,
     pub(super) keep_on_top: bool,
+    pub(super) opacity: f64,
     pub(super) background: WebviewWindowBackground,
     pub(super) platform: WindowPlatformStyleState,
 }
@@ -44,6 +45,7 @@ impl Default for WindowStyleState {
         Self {
             frameless: false,
             keep_on_top: false,
+            opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
             platform: WindowPlatformStyleState {
                 macos: MacosWindowStyleState {
@@ -59,6 +61,7 @@ impl Default for WindowStyleState {
 pub(super) struct SetStylePayload {
     pub(super) frameless: Option<bool>,
     pub(super) keep_on_top: Option<bool>,
+    pub(super) opacity: Option<f64>,
     pub(super) background: Option<WebviewBackgroundInput>,
     pub(super) platform: Option<SetStylePlatformPayload>,
 }
@@ -106,6 +109,9 @@ pub(super) fn validate_style_request(payload: &SetStylePayload) -> Result<(), We
     if let Some(background) = payload.background.clone() {
         validate_background(&parse_background_input(background)?)?;
     }
+    if let Some(opacity) = payload.opacity {
+        normalize_opacity(opacity)?;
+    }
     let macos_payload = payload
         .platform
         .as_ref()
@@ -145,6 +151,7 @@ pub(super) fn validate_initial_style(
     validate_style_request(&SetStylePayload {
         frameless: Some(show_settings.window.style.frameless),
         keep_on_top: Some(show_settings.window.style.keep_on_top),
+        opacity: Some(show_settings.window.style.opacity),
         background: None,
         platform: Some(SetStylePlatformPayload {
             macos: Some(SetStyleMacosPayload {
@@ -271,6 +278,7 @@ pub(super) fn apply_window_style(
         NSNormalWindowLevel
     });
     window.setOpaque(!wants_clear_background);
+    window.setAlphaValue(style.opacity);
     window.setMovableByWindowBackground(style.frameless);
     window.setTitlebarAppearsTransparent(wants_clear_background || overlay_enabled);
     window.setTitleVisibility(if overlay_enabled {

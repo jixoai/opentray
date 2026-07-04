@@ -136,6 +136,7 @@ struct WindowCapabilities {
     app_region_drag: bool,
     frameless: bool,
     keep_on_top: bool,
+    opacity: bool,
     title: bool,
     icon: bool,
     screen: bool,
@@ -602,6 +603,7 @@ impl MacosWebviewRuntime {
             style: WindowStyleState {
                 frameless: show_settings.window.style.frameless,
                 keep_on_top: show_settings.window.style.keep_on_top,
+                opacity: show_settings.window.style.opacity,
                 background: show_settings.window.style.background.clone(),
                 platform: self::style::WindowPlatformStyleState {
                     macos: self::style::MacosWindowStyleState {
@@ -887,6 +889,7 @@ fn apply_reused_show_updates(
         let requested_style = WindowStyleState {
             frameless: show_settings.window.style.frameless,
             keep_on_top: show_settings.window.style.keep_on_top,
+            opacity: show_settings.window.style.opacity,
             background: show_settings.window.style.background.clone(),
             platform: self::style::WindowPlatformStyleState {
                 macos: self::style::MacosWindowStyleState {
@@ -1013,6 +1016,7 @@ impl NavigatorWindowBridge {
             app_region_drag: self.page_access.window,
             frameless: true,
             keep_on_top: true,
+            opacity: true,
             title: true,
             icon: true,
             screen: self.page_access.screen,

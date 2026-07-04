@@ -39,9 +39,7 @@ tray.onMenuClick(({ itemId }) => {
   console.log(`menu click: ${itemId}`);
   void handleMenuClick(itemId);
 });
-console.log(
-  "webview window mounted through tray.extend(WebviewExt)"
-);
+console.log("webview window mounted through tray.extend(WebviewExt)");
 console.log(
   "click the tray icon: platforms with primary tray events should run the WebView action"
 );
@@ -161,6 +159,7 @@ function createWebviewDemoHtml(): string {
           <div class="actions">
             <button id="capabilities-button">Capabilities</button>
             <button id="frameless-button">Toggle Frameless</button>
+            <button id="opacity-button">Opacity</button>
             <button id="navigator-resize-button">Grow via navigator.window</button>
             <button id="navigator-move-button">Move via navigator.window</button>
           </div>
@@ -216,6 +215,11 @@ function createWebviewDemoHtml(): string {
         document.getElementById("frameless-button")?.addEventListener("click", async () => {
           const style = await pageWindow.getStyle();
           await pageWindow.setStyle({ frameless: !style.frameless });
+          navigatorStatus.textContent = JSON.stringify(await pageWindow.getStyle(), null, 2);
+        });
+        document.getElementById("opacity-button")?.addEventListener("click", async () => {
+          const style = await pageWindow.getStyle();
+          await pageWindow.setStyle({ opacity: style.opacity < 1 ? 1 : 0.72 });
           navigatorStatus.textContent = JSON.stringify(await pageWindow.getStyle(), null, 2);
         });
         document.getElementById("navigator-resize-button")?.addEventListener("click", () => {

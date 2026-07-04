@@ -163,6 +163,7 @@ describe("@opentray/ext-webview", () => {
       style: {
         frameless: true,
         keepOnTop: true,
+        opacity: 0.72,
         background: {
           kind: "platformMaterial",
           material: "hudWindow",
@@ -220,6 +221,7 @@ describe("@opentray/ext-webview", () => {
           style: {
             frameless: true,
             keepOnTop: true,
+            opacity: 0.72,
             background: {
               kind: "platformMaterial",
               material: "hudWindow",
@@ -683,6 +685,7 @@ describe("@opentray/ext-webview", () => {
         return {
           frameless: true,
           keepOnTop: true,
+          opacity: command.style.opacity ?? 1,
           background: { kind: "semantic", token: "blur", state: "active" },
           platform: { windows: { cornerPreference: "round" } },
         };
@@ -702,8 +705,15 @@ describe("@opentray/ext-webview", () => {
     await webviewWindow.setMinimumSize(260, null);
     await webviewWindow.setMaximumWidth(null);
     await expect(
+      webviewWindow.setStyle({ opacity: 0.64 })
+    ).resolves.toMatchObject({
+      opacity: 0.64,
+      background: { kind: "semantic", token: "blur", state: "active" },
+    });
+    await expect(
       webviewWindow.setBackground("blur", { state: "active" })
     ).resolves.toMatchObject({
+      opacity: 1,
       background: { kind: "semantic", token: "blur", state: "active" },
     });
 
@@ -735,6 +745,17 @@ describe("@opentray/ext-webview", () => {
       {
         type: "ext-command",
         requestId: "opentray-5",
+        appId: "app-1",
+        trayId: "tray-1",
+        ext: "webview.tray-1",
+        data: {
+          type: "setStyle",
+          style: { opacity: 0.64 },
+        },
+      },
+      {
+        type: "ext-command",
+        requestId: "opentray-6",
         appId: "app-1",
         trayId: "tray-1",
         ext: "webview.tray-1",
@@ -1537,6 +1558,7 @@ describe("@opentray/ext-webview", () => {
         return {
           frameless: true,
           keepOnTop: true,
+          opacity: 0.88,
           background: { kind: "opaque" },
           platform: { windows: { cornerPreference: "round" } },
         } satisfies WebviewWindowStyle;
@@ -1546,6 +1568,7 @@ describe("@opentray/ext-webview", () => {
         return {
           frameless: true,
           keepOnTop: true,
+          opacity: 0.88,
           background: { kind: "semantic", token: "blur", state: "active" },
           platform: { windows: { cornerPreference: "round" } },
         } satisfies WebviewWindowStyle;
@@ -1560,6 +1583,7 @@ describe("@opentray/ext-webview", () => {
       maxHeight: null,
       frameless: true,
       keepOnTop: true,
+      opacity: 0.88,
       background: "blur",
       state: "active",
       platform: { windows: { cornerPreference: "round" } },
@@ -1574,6 +1598,7 @@ describe("@opentray/ext-webview", () => {
         {
           frameless: true,
           keepOnTop: true,
+          opacity: 0.88,
           platform: { windows: { cornerPreference: "round" } },
         },
       ],

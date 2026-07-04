@@ -6,7 +6,7 @@ This guide is for manual source-tree verification of the official WebView exampl
 
 Use these examples to verify the delivered window contract in this branch:
 
-- common shell traits: `frameless`, `background`, `keepOnTop`
+- common shell traits: `frameless`, `background`, `keepOnTop`, `opacity`
 - background modes: `opaque`, `transparent`, semantic `blur`, and platform material names
 - platform corner family: `style.platform.macos.cornerRadius` and `style.platform.windows.cornerPreference`
 - title/icon sync
@@ -83,8 +83,8 @@ Expected checks:
 
 1. A normal opaque WebView window opens immediately without requiring tray interaction.
 2. The capability panel shows nested platform data under the active `platformCapabilities.*` family.
-3. `Toggle Frameless`, `Apply Background`, and `Toggle Topmost` update `getStyle()` and emit `stylechange`.
-4. `Apply Background` updates the single `style.background` mode. Platform material names are accepted only on the matching substrate, while semantic `blur` maps to the runtime's platform material.
+3. `Toggle Frameless`, `Apply Background`, `Toggle Topmost`, and opacity changes update `getStyle()` and emit `stylechange`.
+4. `Apply Background` updates the single `style.background` mode. Platform material names are accepted only on the matching substrate, while semantic `blur` maps to the runtime's platform material. `style.opacity` is separate whole-window alpha and does not choose or mutate the background mode.
 5. `Apply Corner` updates only the active platform corner API, while `System Corner` clears that platform corner setting.
 6. `Minimize`, `Maximize`, and `Restore` update `windowstatechange`.
 7. By default, the custom titlebar and overlay drag test area can drag the native window through `startAppRegionDrag()`.
@@ -95,6 +95,7 @@ Expected checks:
 Overlay is a show-time capability gate, not a runtime style. The control demo enables it by default because this is the overlay acceptance surface. You can force it on with `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=1` or force it off with `--no-overlay` / `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=0`.
 
 On Windows, macOS corner controls remain unsupported, while `style.platform.windows.cornerPreference` is the native DWM corner family. Windows DWM material choice lives in `style.background`.
+Whole-window opacity lives in `style.opacity` on both supported WebView runtimes and composes with the current background mode.
 
 ## Example 2: Placement Kit
 

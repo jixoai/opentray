@@ -66,6 +66,7 @@ pub(super) fn default_webview_html() -> String {
             <button id="capabilities-button">Capabilities</button>
             <button id="frameless-button">Toggle Frameless</button>
             <button id="topmost-button">Topmost</button>
+            <button id="opacity-button">Opacity</button>
             <button id="material-button">Material</button>
             <button id="title-button">Title</button>
             <button id="screen-button">Screen</button>
@@ -202,6 +203,15 @@ pub(super) fn default_webview_html() -> String {
             await loadStyle();
           } catch (error) {
             setNavigatorStatus(`Failed to toggle topmost.\n${formatError(error)}`);
+          }
+        });
+        document.getElementById("opacity-button")?.addEventListener("click", async () => {
+          try {
+            const style = await pageWindow.getStyle();
+            await pageWindow.setStyle({ opacity: style.opacity < 1 ? 1 : 0.72 });
+            await loadStyle();
+          } catch (error) {
+            setNavigatorStatus(`Failed to toggle opacity.\n${formatError(error)}`);
           }
         });
         document.getElementById("material-button")?.addEventListener("click", async () => {

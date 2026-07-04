@@ -46,17 +46,18 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
     GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible, IsZoomed,
-    LoadCursorW, LoadImageW, RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW,
-    SetWindowPos, SetWindowTextW, ShowWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT,
-    GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
-    ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, MINMAXINFO,
-    SM_CXSIZE, SM_CYSIZE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWMINNOACTIVE, SW_SHOWNORMAL,
-    WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
-    WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE,
-    WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-    WS_EX_NOREDIRECTIONBITMAP, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX,
-    WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+    LoadCursorW, LoadImageW, RegisterClassW, SendMessageW, SetForegroundWindow,
+    SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+    CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON,
+    HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON,
+    LR_DEFAULTSIZE, LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SM_CXSIZE, SM_CYSIZE, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
+    SW_RESTORE, SW_SHOW, SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE,
+    WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE,
+    WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED,
+    WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
+    WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    WS_THICKFRAME, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -74,12 +75,12 @@ use self::appwindow::{
 use self::geometry::WindowsGeometry;
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::{
-    parse_background_input, MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings,
-    NavigatorWindowSettings, WebviewBackgroundEffectState, WebviewBackgroundInput, WebviewCommand,
-    WebviewInitialMacosStyle, WebviewInitialWindowsStyle, WebviewNativeApiPolicy,
-    WebviewNativeApiSource, WebviewPermissionManagerPolicy, WebviewRuntimeError,
-    WebviewSessionBootstrapSettings, WebviewShowSettings, WebviewWindowBackground,
-    WebviewWindowIcon,
+    normalize_opacity, parse_background_input, MetadataSyncSettings, NavigatorScreenSettings,
+    NavigatorTraySettings, NavigatorWindowSettings, WebviewBackgroundEffectState,
+    WebviewBackgroundInput, WebviewCommand, WebviewInitialMacosStyle, WebviewInitialWindowsStyle,
+    WebviewNativeApiPolicy, WebviewNativeApiSource, WebviewPermissionManagerPolicy,
+    WebviewRuntimeError, WebviewSessionBootstrapSettings, WebviewShowSettings,
+    WebviewWindowBackground, WebviewWindowIcon,
 };
 
 const CLASS_NAME: &str = "OpenTrayWebViewWindow";
@@ -182,6 +183,7 @@ struct NavigatorWindowListener {
 struct WindowStyleState {
     frameless: bool,
     keep_on_top: bool,
+    opacity: f64,
     background: WebviewWindowBackground,
     platform: WindowPlatformStyleState,
 }
@@ -324,6 +326,7 @@ struct PageIconChangedPayload {
 struct SetStylePayload {
     frameless: Option<bool>,
     keep_on_top: Option<bool>,
+    opacity: Option<f64>,
     background: Option<WebviewBackgroundInput>,
     platform: Option<SetStylePlatformPayload>,
 }
@@ -367,6 +370,7 @@ struct WindowCapabilities {
     app_region_drag: bool,
     frameless: bool,
     keep_on_top: bool,
+    opacity: bool,
     title: bool,
     icon: bool,
     screen: bool,
@@ -1875,6 +1879,9 @@ fn validate_style_request(payload: &SetStylePayload) -> Result<(), WebviewRuntim
     if let Some(background) = payload.background.clone() {
         validate_windows_background(&parse_background_input(background)?)?;
     }
+    if let Some(opacity) = payload.opacity {
+        normalize_opacity(opacity)?;
+    }
     let windows_payload = payload
         .platform
         .as_ref()
@@ -1903,6 +1910,7 @@ fn window_style_from_initial(
     Ok(WindowStyleState {
         frameless: style.frameless,
         keep_on_top: style.keep_on_top,
+        opacity: normalize_opacity(style.opacity)?,
         background: normalize_windows_background(&style.background)?,
         platform: WindowPlatformStyleState {
             windows: WindowsWindowStyleState {
@@ -2040,6 +2048,13 @@ fn apply_style_patch(
     if let Some(keep_on_top) = payload.keep_on_top {
         if bridge_state.style.keep_on_top != keep_on_top {
             bridge_state.style.keep_on_top = keep_on_top;
+            changed = true;
+        }
+    }
+    if let Some(opacity) = payload.opacity {
+        let opacity = normalize_opacity(opacity)?;
+        if bridge_state.style.opacity != opacity {
+            bridge_state.style.opacity = opacity;
             changed = true;
         }
     }
@@ -2232,6 +2247,7 @@ fn apply_native_window_style(
             SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE,
         );
     }
+    apply_window_opacity(hwnd, style.opacity)?;
     apply_native_window_theme(hwnd, dark_mode)?;
     apply_dwm_client_frame(hwnd, wants_dwm_extended_client_frame(style))?;
     apply_dwm_transparency(hwnd, wants_dwm_transparent_host(style))?;
@@ -2491,18 +2507,49 @@ fn window_style_bits(style: &WindowStyleState, current_style: u32) -> u32 {
 
 fn window_ex_style_bits(style: &WindowStyleState, current_ex_style: isize) -> isize {
     let no_redirection_bitmap = WS_EX_NOREDIRECTIONBITMAP as isize;
-    if wants_no_redirection_bitmap(style) {
+    let layered = WS_EX_LAYERED as isize;
+    let with_redirection = if wants_no_redirection_bitmap(style) {
         current_ex_style | no_redirection_bitmap
     } else {
         current_ex_style & !no_redirection_bitmap
+    };
+    if wants_layered_opacity(style) {
+        with_redirection | layered
+    } else {
+        with_redirection & !layered
     }
 }
 
 fn wants_no_redirection_bitmap(style: &WindowStyleState) -> bool {
+    if wants_layered_opacity(style) {
+        return false;
+    }
     matches!(
         host_surface_kind(&style.background),
         WindowsHostSurfaceKind::TransparentNoRedirection
     )
+}
+
+fn wants_layered_opacity(style: &WindowStyleState) -> bool {
+    style.opacity < 1.0
+}
+
+fn opacity_alpha_byte(opacity: f64) -> u8 {
+    (opacity.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn apply_window_opacity(hwnd: HWND, opacity: f64) -> Result<(), WebviewRuntimeError> {
+    if opacity >= 1.0 {
+        return Ok(());
+    }
+    let alpha = opacity_alpha_byte(opacity);
+    let ok = unsafe { SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA) };
+    if ok == 0 {
+        return Err(WebviewRuntimeError::Internal(
+            "Windows window opacity could not be applied".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn wants_clear_background(style: &WindowStyleState) -> bool {
@@ -3930,6 +3977,7 @@ impl NavigatorWindowBridge {
             app_region_drag: self.page_access.window,
             frameless: true,
             keep_on_top: true,
+            opacity: true,
             title: true,
             icon: true,
             screen: self.page_access.screen,
@@ -4485,6 +4533,7 @@ mod tests {
         validate_style_request(&SetStylePayload {
             frameless: None,
             keep_on_top: None,
+            opacity: Some(0.64),
             background: Some(WebviewBackgroundInput::Keyword("mica".to_string())),
             platform: Some(SetStylePlatformPayload {
                 macos: None,
@@ -4499,6 +4548,7 @@ mod tests {
         validate_style_request(&SetStylePayload {
             frameless: None,
             keep_on_top: None,
+            opacity: None,
             background: Some(WebviewBackgroundInput::Keyword("sidebar".to_string())),
             platform: None,
         })
@@ -4507,6 +4557,7 @@ mod tests {
         validate_style_request(&SetStylePayload {
             frameless: None,
             keep_on_top: None,
+            opacity: None,
             background: Some(WebviewBackgroundInput::Object(
                 crate::WebviewBackgroundObjectInput {
                     kind: "semantic".to_string(),
@@ -4521,8 +4572,23 @@ mod tests {
     }
 
     #[test]
+    fn validate_style_request_rejects_invalid_opacity() {
+        let error = validate_style_request(&SetStylePayload {
+            frameless: None,
+            keep_on_top: None,
+            opacity: Some(1.1),
+            background: None,
+            platform: None,
+        })
+        .expect_err("opacity outside 0..1 should be rejected");
+
+        assert_eq!(error.to_string(), "opacity must be between 0 and 1");
+    }
+
+    #[test]
     fn window_style_from_initial_normalizes_windows_background_aliases() {
         let mut style = crate::WebviewInitialStyle {
+            opacity: 0.64,
             background: crate::WebviewWindowBackground::PlatformMaterial {
                 material: "micaAlt".to_string(),
                 state: WebviewBackgroundEffectState::FollowsWindowActiveState,
@@ -4532,6 +4598,7 @@ mod tests {
         style.platform.windows.corner_preference = Some("small".to_string());
 
         let state = window_style_from_initial(&style).expect("windows style");
+        assert_eq!(state.opacity, 0.64);
 
         assert_eq!(
             state.background,
@@ -4619,6 +4686,7 @@ mod tests {
         let style = WindowStyleState {
             frameless: false,
             keep_on_top: false,
+            opacity: 1.0,
             background: crate::WebviewWindowBackground::Semantic {
                 token: "blur".to_string(),
                 state: WebviewBackgroundEffectState::FollowsWindowActiveState,
@@ -4654,6 +4722,7 @@ mod tests {
             settings.window.style.background,
             crate::WebviewWindowBackground::Opaque
         );
+        assert_eq!(settings.window.style.opacity, 1.0);
     }
 
     #[test]
@@ -4665,6 +4734,12 @@ mod tests {
         style.background = crate::WebviewWindowBackground::Transparent;
         assert!(wants_no_redirection_bitmap(&style));
 
+        style.opacity = 0.5;
+        assert!(!wants_no_redirection_bitmap(&style));
+        assert!(wants_layered_opacity(&style));
+        assert_eq!(opacity_alpha_byte(style.opacity), 128);
+
+        style.opacity = 1.0;
         style.background = crate::WebviewWindowBackground::PlatformMaterial {
             material: "mica".to_string(),
             state: WebviewBackgroundEffectState::FollowsWindowActiveState,

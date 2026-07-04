@@ -511,6 +511,13 @@ pub(super) fn apply_window_style_patch(
             changed = true;
         }
     }
+    if let Some(opacity) = payload.opacity {
+        let opacity = crate::normalize_opacity(opacity)?;
+        if bridge_state.style.opacity != opacity {
+            bridge_state.style.opacity = opacity;
+            changed = true;
+        }
+    }
     if let Some(background) = payload.background {
         let background = crate::parse_background_input(background)?;
         if bridge_state.style.background != background {
