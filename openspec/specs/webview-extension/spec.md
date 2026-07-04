@@ -697,6 +697,8 @@ Supported placements SHALL include `tray`, `cursor`, `screen-center`, `screen-to
 
 The extension SHALL expose a shared host-side geometry helper that treats public window, screen, and tray rectangles as desktop logical pixels. Placement and responsive helpers SHALL use this helper for normalization, screen selection, clamping, comparison, and native window application instead of applying browser DPR or platform-specific scaling in TypeScript helper code.
 
+For `placement: "tray"`, the utility SHALL treat tray bounds as usable only when the rect has positive dimensions and, when screen details are available, the rect center belongs to a known screen frame or visible frame. A transient unusable tray rect SHALL NOT override a previous usable tray anchor in the same placement kit instance. If a previous usable tray anchor exists, the utility SHALL resolve from that last-good tray anchor and mark the result provenance with `last-good`; otherwise it SHALL use the normal portable fallback path with provenance.
+
 #### Scenario: Developer places a lightweight panel from tray geometry
 
 - **GIVEN** a developer has a tray handle and a WebView window handle
@@ -725,6 +727,14 @@ The extension SHALL expose a shared host-side geometry helper that treats public
 - **WHEN** the placement kit resolves a screen-relative placement
 - **THEN** the algorithm uses the logical `width`, `height`, `x`, and `y` values directly
 - **AND** it does not multiply or divide by `devicePixelRatio` or the screen `scaleFactor`.
+
+#### Scenario: Transient invalid tray bounds reuse the last good anchor
+
+- **GIVEN** a placement kit previously resolved a valid tray anchor
+- **AND** a later tray-bounds query returns a zero-size or off-screen rect
+- **WHEN** the placement kit resolves `placement: "tray"`
+- **THEN** it ignores the unusable rect
+- **AND** it resolves from the previous usable tray anchor with `last-good` provenance.
 
 #### Scenario: Portable placement falls back with provenance
 

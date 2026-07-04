@@ -9,7 +9,7 @@ use objc2_foundation::NSRect;
 use opentray_core::BackendError;
 #[cfg(target_os = "windows")]
 use opentray_spec::geometry::DpiScale;
-use opentray_spec::{AppId, TrayEvent};
+use opentray_spec::{AppId, MouseButton, TrayEvent};
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };
@@ -64,6 +64,9 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
             routes,
             ..
         } = projection;
+        let mut surfaces = self.surfaces.borrow_mut();
+        let previous = surfaces.remove(&app_id);
+        let mut previous_icons = previous.map(|state| state.icons).unwrap_or_default();
         let mut icons = HashMap::with_capacity(trays.len());
         let mut direct_primary_routes = HashMap::new();
 
@@ -88,20 +91,32 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
                 }
             }
 
-            let native = create_native_tray(
-                tray_icon_id.clone(),
-                icon,
-                icon_is_template,
-                tray.title,
-                tooltip,
-                menu,
-                menu_policy,
-            )?;
+            let native = if let Some(native) = previous_icons.remove(&tray_icon_id) {
+                apply_native_tray_update(
+                    &native,
+                    icon,
+                    icon_is_template,
+                    tray.title,
+                    tooltip,
+                    menu,
+                    menu_policy,
+                )?;
+                native
+            } else {
+                create_native_tray(
+                    tray_icon_id.clone(),
+                    icon,
+                    icon_is_template,
+                    tray.title,
+                    tooltip,
+                    menu,
+                    menu_policy,
+                )?
+            };
 
             icons.insert(tray_icon_id, native);
         }
 
-        let mut surfaces = self.surfaces.borrow_mut();
         if icons.is_empty() {
             surfaces.remove(&app_id);
         } else {
@@ -131,6 +146,19 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
                 .get(tray_icon_id)
                 .and_then(|menu_id| surface.routes.menu_event(menu_id))
         })
+    }
+
+    fn tray_click_event(
+        &self,
+        tray_icon_id: &str,
+        button: MouseButton,
+        x: i32,
+        y: i32,
+    ) -> Option<TrayEvent> {
+        self.surfaces
+            .borrow()
+            .values()
+            .find_map(|surface| surface.routes.tray_click_event(tray_icon_id, button, x, y))
     }
 
     fn tray_bounds(&self, tray_icon_id: &str) -> Result<Option<opentray_spec::Rect>, BackendError> {
@@ -201,6 +229,39 @@ fn create_native_tray(
     Ok(native)
 }
 
+fn apply_native_tray_update(
+    native: &TrayIcon,
+    icon: Option<NativeIcon>,
+    icon_is_template: bool,
+    title: Option<String>,
+    tooltip: Option<String>,
+    menu: Option<NativeMenu>,
+    menu_policy: NativeMenuPolicy,
+) -> Result<(), BackendError> {
+    #[cfg(target_os = "macos")]
+    native
+        .set_icon_with_as_template(icon, icon_is_template)
+        .map_err(|error| BackendError::Failure(error.to_string()))?;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = icon_is_template;
+        native
+            .set_icon(icon)
+            .map_err(|error| BackendError::Failure(error.to_string()))?;
+    }
+    #[cfg(target_os = "macos")]
+    native.set_title(Some(title.unwrap_or_default()));
+    #[cfg(not(target_os = "macos"))]
+    native.set_title(title);
+    native
+        .set_tooltip(tooltip)
+        .map_err(|error| BackendError::Failure(error.to_string()))?;
+    native.set_menu(menu.map(|menu| Box::new(menu) as Box<dyn tray_icon::menu::ContextMenu>));
+    native.set_show_menu_on_left_click(menu_policy.show_menu_on_left_click);
+    native.set_show_menu_on_right_click(menu_policy.show_menu_on_right_click);
+    Ok(())
+}
+
 struct NativeAppState {
     icons: HashMap<String, TrayIcon>,
     routes: TrayIconRouteTable,
@@ -228,14 +289,14 @@ fn native_menu_policy(menu: &TrayIconMenuProjection) -> NativeMenuPolicy {
 
 #[cfg(target_os = "macos")]
 fn native_menu_policy(menu: &TrayIconMenuProjection) -> NativeMenuPolicy {
-    let direct_primary = menu.has_single_primary_event();
+    let direct_primary = menu.has_primary_event();
     NativeMenuPolicy {
-        // AppKit's NSStatusItem may open its attached NSMenu before custom
-        // click routing. Single-primary mode is a launcher, so do not attach
-        // native menu chrome at all; route the click through TrayIconEvent.
-        attach_menu: !direct_primary,
+        // tray-icon 0.24 exposes independent macOS left/right menu toggles.
+        // A primary item is therefore a left-click route while the attached
+        // NSMenu remains available through the normal right-click context menu.
+        attach_menu: true,
         show_menu_on_left_click: !direct_primary,
-        show_menu_on_right_click: !direct_primary,
+        show_menu_on_right_click: true,
         direct_primary,
     }
 }
@@ -472,13 +533,13 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_single_primary_direct_mode_detaches_native_menu() {
+    fn macos_single_primary_routes_left_click_and_keeps_context_menu() {
         assert_eq!(
             native_menu_policy(&menu(true, 1)),
             NativeMenuPolicy {
-                attach_menu: false,
+                attach_menu: true,
                 show_menu_on_left_click: false,
-                show_menu_on_right_click: false,
+                show_menu_on_right_click: true,
                 direct_primary: true,
             }
         );
@@ -486,14 +547,14 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_multi_item_primary_keeps_native_menu() {
+    fn macos_multi_item_primary_routes_left_click_and_keeps_context_menu() {
         assert_eq!(
             native_menu_policy(&menu(true, 2)),
             NativeMenuPolicy {
                 attach_menu: true,
-                show_menu_on_left_click: true,
+                show_menu_on_left_click: false,
                 show_menu_on_right_click: true,
-                direct_primary: false,
+                direct_primary: true,
             }
         );
     }

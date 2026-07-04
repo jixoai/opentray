@@ -805,6 +805,66 @@ describe("@opentray/ext-webview", () => {
     ]);
   });
 
+  it("keeps the last valid tray anchor when a transient tray bounds result is invalid", async () => {
+    let trayRect = { x: 900, y: 10, width: 24, height: 24 };
+    const kit = new WebviewPlacementKit({
+      tray: {
+        async getBounds() {
+          return {
+            kind: "native" as const,
+            source: "backend.nativeTrayBounds",
+            rect: trayRect,
+          };
+        },
+      },
+      screen: {
+        async getScreenDetails() {
+          return {
+            currentScreen: {
+              id: "primary",
+              frame: { x: 0, y: 0, width: 1000, height: 800 },
+              visibleFrame: { x: 0, y: 0, width: 1000, height: 760 },
+            },
+            screens: [
+              {
+                id: "primary",
+                frame: { x: 0, y: 0, width: 1000, height: 800 },
+                visibleFrame: { x: 0, y: 0, width: 1000, height: 760 },
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    const target = {
+      async resizeTo() {},
+      async moveTo() {},
+    };
+    await kit.applyOnce(target, {
+      placement: "tray",
+      width: 240,
+      height: 160,
+      placementMargin: 12,
+    });
+
+    trayRect = { x: -4000, y: -4000, width: 0, height: 0 };
+    const result = await kit.applyOnce(target, {
+      placement: "tray",
+      width: 240,
+      height: 160,
+      placementMargin: 12,
+    });
+
+    expect(result).toMatchObject({
+      placement: "tray",
+      kind: "native",
+      source: "backend.nativeTrayBounds->last-good",
+      anchorRect: { x: 900, y: 10, width: 24, height: 24 },
+      rect: { x: 760, y: 46, width: 240, height: 160 },
+    });
+  });
+
   it("watches placement and replaces an existing watch for the same target", async () => {
     const calls: unknown[] = [];
     const kit = new WebviewPlacementKit({

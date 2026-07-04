@@ -131,10 +131,17 @@ const DEFAULT_WATCH_SETTLE_MS = 180;
 const DEFAULT_FALLBACK_RECT: Rect = { x: 0, y: 0, width: 1, height: 1 };
 const activeWatches = new WeakMap<WebviewPlacementTarget, PlacementWatch>();
 
+interface TrayPlacementAnchor {
+  rect: Rect;
+  kind: WebviewPlacementResultKind;
+  source: string;
+}
+
 export class WebviewPlacementKit {
   readonly #tray: WebviewPlacementTrayAuthority | undefined;
   readonly #screen: WebviewPlacementScreenAuthority | undefined;
   readonly #cursor: WebviewPlacementCursorAuthority | undefined;
+  #lastTrayAnchor: TrayPlacementAnchor | null = null;
 
   constructor(dependencies: WebviewPlacementKitDependencies = {}) {
     this.#tray = dependencies.tray;
@@ -152,21 +159,24 @@ export class WebviewPlacementKit {
     // inventing separate placement families.
     if (options.placement === "tray") {
       const bounds = await this.#tray?.getBounds();
-      if (bounds?.rect) {
+      const anchor = this.resolveTrayAnchor(bounds, normalized);
+      if (anchor) {
         return resolveFromAnchor(
           options.placement,
-          windowGeometryKit.normalizeRect(bounds.rect, "tray.rect"),
+          anchor.rect,
           normalized,
           {
-            kind: bounds.kind === "native" ? "native" : "inferred",
-            source: bounds.source,
+            kind: anchor.kind,
+            source: anchor.source,
           }
         );
       }
       return this.resolveFallback(
         options.placement,
         normalized,
-        bounds?.source ?? "tray.unavailable"
+        bounds?.rect
+          ? `${bounds.source}->invalid`
+          : bounds?.source ?? "tray.unavailable"
       );
     }
 
@@ -405,6 +415,32 @@ export class WebviewPlacementKit {
       source: `${unavailableSource}->fallbackRect`,
       anchorRect: inputs.fallbackRect,
     };
+  }
+
+  private resolveTrayAnchor(
+    bounds: TrayBoundsResult | undefined,
+    inputs: ResolvedPlacementInputs
+  ): TrayPlacementAnchor | null {
+    if (!bounds?.rect) {
+      return null;
+    }
+    const rect = windowGeometryKit.normalizeRect(bounds.rect, "tray.rect");
+    if (isUsableTrayAnchor(rect, inputs.screenDetails)) {
+      const anchor = {
+        rect,
+        kind: bounds.kind === "native" ? "native" : "inferred",
+        source: bounds.source,
+      } satisfies TrayPlacementAnchor;
+      this.#lastTrayAnchor = anchor;
+      return anchor;
+    }
+    if (this.#lastTrayAnchor) {
+      return {
+        ...this.#lastTrayAnchor,
+        source: `${bounds.source}->last-good`,
+      };
+    }
+    return null;
   }
 }
 
@@ -802,6 +838,24 @@ const selectScreen = (
   anchor: Rect | null
 ): WebviewPlacementScreenDetail | null =>
   windowGeometryKit.selectScreen(details, screenId, anchor);
+
+const isUsableTrayAnchor = (
+  rect: Rect,
+  details: WebviewPlacementScreenDetails | undefined
+): boolean => {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+  if (!details || details.screens.length === 0) {
+    return true;
+  }
+  const center = windowGeometryKit.rectCenter(rect);
+  return details.screens.some(
+    (screen) =>
+      windowGeometryKit.containsPoint(screen.visibleFrame, center) ||
+      windowGeometryKit.containsPoint(screen.frame, center)
+  );
+};
 
 const resolveFromAnchor = (
   requestedPlacement: WebviewPlacement,

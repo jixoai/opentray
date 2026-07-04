@@ -73,6 +73,7 @@ impl TrayIconTrayProjection {
         routes: &mut TrayIconRouteTable,
     ) -> Result<Self, opentray_core::BackendError> {
         let tray_icon_id = stable_tray_icon_id(app_id, &tray.tray_id);
+        routes.insert_tray(&tray_icon_id, app_id, &tray.tray_id);
         let menu =
             TrayIconMenuProjection::from_menu(app_id, &tray.tray_id, tray.menu.as_ref(), routes);
         if let Some(primary_menu_id) = menu.primary_menu_id.clone() {
@@ -347,10 +348,6 @@ impl TrayIconMenuProjection {
     pub fn has_primary_event(&self) -> bool {
         self.primary_menu_id.is_some()
     }
-
-    pub fn has_single_primary_event(&self) -> bool {
-        self.primary_menu_id.is_some() && self.click_item_count == 1
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -389,9 +386,16 @@ pub struct TrayIconMenuRoute {
     pub item_id: MenuItemId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayIconTrayRoute {
+    pub app_id: AppId,
+    pub tray_id: TrayId,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrayIconRouteTable {
     routes: HashMap<String, TrayIconMenuRoute>,
+    tray_routes: HashMap<String, TrayIconTrayRoute>,
     primary_routes: HashMap<String, String>,
 }
 
@@ -408,6 +412,34 @@ impl TrayIconRouteTable {
         self.primary_routes
             .get(tray_icon_id)
             .and_then(|menu_id| self.menu_event(menu_id))
+    }
+
+    pub fn tray_click_event(
+        &self,
+        tray_icon_id: &str,
+        button: opentray_spec::MouseButton,
+        x: i32,
+        y: i32,
+    ) -> Option<TrayEvent> {
+        self.tray_routes
+            .get(tray_icon_id)
+            .map(|route| TrayEvent::TrayClick {
+                app_id: route.app_id.clone(),
+                tray_id: route.tray_id.clone(),
+                button,
+                x,
+                y,
+            })
+    }
+
+    fn insert_tray(&mut self, tray_icon_id: &str, app_id: &str, tray_id: &str) {
+        self.tray_routes.insert(
+            tray_icon_id.to_string(),
+            TrayIconTrayRoute {
+                app_id: app_id.to_string(),
+                tray_id: tray_id.to_string(),
+            },
+        );
     }
 
     fn insert(&mut self, app_id: &str, tray_id: &str, item_id: MenuItemId) -> String {
@@ -830,13 +862,51 @@ mod tests {
         let tray = &projection.trays[0];
         assert_eq!(tray.tray_icon_id, "opentray-tray:surface-1:tray-1");
         assert!(tray.menu.has_primary_event());
-        assert!(tray.menu.has_single_primary_event());
         assert_eq!(
             projection.routes.primary_event(&tray.tray_icon_id),
             Some(TrayEvent::MenuClick {
                 app_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 8,
+            })
+        );
+    }
+
+    #[test]
+    fn tray_click_routes_to_owning_tray() {
+        let projection = TrayIconProjection::from_app_projection(&AppProjection {
+            app: AppRef {
+                app_id: "surface-1".to_string(),
+            },
+            title: None,
+            tooltip: None,
+            icon: None,
+            trays: vec![TrayProjection {
+                tray_id: "tray-1".to_string(),
+                title: "Tray".to_string(),
+                tooltip: None,
+                icon: icon(),
+                menu: Some(Menu {
+                    items: vec![primary_item(8, "Show Window", true, true)],
+                }),
+            }],
+        })
+        .expect("projection");
+
+        let tray = &projection.trays[0];
+        assert_eq!(
+            projection.routes.tray_click_event(
+                &tray.tray_icon_id,
+                opentray_spec::MouseButton::Left,
+                10,
+                20
+            ),
+            Some(TrayEvent::TrayClick {
+                app_id: "surface-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                button: opentray_spec::MouseButton::Left,
+                x: 10,
+                y: 20,
             })
         );
     }
@@ -893,7 +963,6 @@ mod tests {
 
         let tray = &projection.trays[0];
         assert!(tray.menu.has_primary_event());
-        assert!(!tray.menu.has_single_primary_event());
         assert_eq!(
             projection.routes.primary_event(&tray.tray_icon_id),
             Some(TrayEvent::MenuClick {

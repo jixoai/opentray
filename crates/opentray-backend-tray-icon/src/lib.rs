@@ -9,7 +9,7 @@ pub use projection::*;
 pub use runtime::*;
 
 use opentray_core::{AppBackend, AppProjection, BackendCapabilities, BackendError};
-use opentray_spec::{AppId, Rect, TrayEvent, TrayId};
+use opentray_spec::{AppId, MouseButton, Rect, TrayEvent, TrayId};
 
 #[derive(Debug, Default)]
 pub struct TrayIconBackend<R = UnboundTrayIconRuntime> {
@@ -33,6 +33,16 @@ impl<R: TrayIconRuntime> TrayIconBackend<R> {
 
     pub fn primary_event(&self, tray_icon_id: &str) -> Option<TrayEvent> {
         self.runtime.primary_event(tray_icon_id)
+    }
+
+    pub fn tray_click_event(
+        &self,
+        tray_icon_id: &str,
+        button: MouseButton,
+        x: i32,
+        y: i32,
+    ) -> Option<TrayEvent> {
+        self.runtime.tray_click_event(tray_icon_id, button, x, y)
     }
 
     pub fn record_tray_interaction(&self, tray_icon_id: &str) {
@@ -149,6 +159,26 @@ mod tests {
     }
 
     #[test]
+    fn tray_click_event_delegates_to_runtime_ingress() {
+        let backend = TrayIconBackend::with_runtime(RoutingRuntime);
+
+        assert_eq!(
+            backend.tray_click_event("native-tray-id", MouseButton::Left, 10, 20),
+            Some(TrayEvent::TrayClick {
+                app_id: "surface-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                button: MouseButton::Left,
+                x: 10,
+                y: 20,
+            })
+        );
+        assert_eq!(
+            backend.tray_click_event("missing", MouseButton::Left, 10, 20),
+            None
+        );
+    }
+
+    #[test]
     fn tray_bounds_delegate_to_runtime_by_tray_identity() {
         let backend = TrayIconBackend::with_runtime(RoutingRuntime);
 
@@ -228,6 +258,22 @@ mod tests {
                 app_id: "surface-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 item_id: 7,
+            })
+        }
+
+        fn tray_click_event(
+            &self,
+            tray_icon_id: &str,
+            button: MouseButton,
+            x: i32,
+            y: i32,
+        ) -> Option<TrayEvent> {
+            (tray_icon_id == "native-tray-id").then(|| TrayEvent::TrayClick {
+                app_id: "surface-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                button,
+                x,
+                y,
             })
         }
     }

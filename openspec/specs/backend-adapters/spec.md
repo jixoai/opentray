@@ -143,8 +143,10 @@ Disabled primary items SHALL NOT become direct activation targets. If no enabled
 On platforms where the native tray runtime exposes tray icon click events, the tray-icon runtime SHALL use the primary route only for platform gestures that are intended to be direct activation:
 
 - On Windows, an enabled primary item MAY disable menu-on-left-click so left-click activates the primary route while right-click can still show the menu.
-- On macOS, multi-item menus SHALL keep normal menu-on-left-click behavior. If the menu has exactly one click-capable item and it is an enabled primary item, macOS SHALL avoid attaching native menu chrome to the status item so clicking the status item directly activates the primary route instead of opening a menu.
+- On macOS with `tray-icon` left/right menu control, an enabled primary item SHALL disable menu-on-left-click so left-click activates the primary route while right-click can still show the attached native menu.
 - On Linux, missing or backend-specific tray icon click support SHALL keep normal menu behavior rather than faking primary activation.
+
+When a native tray click is not consumed by a direct primary route, the runtime SHALL preserve it as a normal owned `trayClick` event when the backend can identify the tray contribution. Native clicks SHALL NOT disappear merely because no `primaryEvent` route is active.
 
 #### Scenario: Windows primary click can bypass menu
 
@@ -153,20 +155,20 @@ On platforms where the native tray runtime exposes tray icon click events, the t
 - **THEN** the backend may route that tray click to the primary item
 - **AND** the normal menu remains available through the platform context-menu gesture.
 
-#### Scenario: macOS multi-item menu stays menu-first
+#### Scenario: macOS primary click can bypass menu while preserving right-click menu
 
 - **GIVEN** a macOS tray menu has multiple click-capable items and one is primary
 - **WHEN** the user clicks the status item
-- **THEN** the native menu opens normally
-- **AND** choosing the primary menu item emits the normal `menuClick`.
-
-#### Scenario: macOS single primary item direct-triggers
-
-- **GIVEN** a macOS tray menu has exactly one click-capable item
-- **AND** that item is enabled and marked `primaryEvent: true`
-- **WHEN** the user clicks the status item
 - **THEN** the backend routes the click to that primary item without showing the menu
-- **AND** the native runtime does not attach an `NSMenu` to that direct-primary status item.
+- **AND** the normal menu remains available through the platform context-menu gesture.
+
+#### Scenario: Non-primary tray click remains observable
+
+- **GIVEN** a native tray backend receives a tray icon click for a known tray
+- **AND** no direct primary route consumes that click
+- **WHEN** the runtime handles the click
+- **THEN** the owning session receives a normal `trayClick` event
+- **AND** the event carries the same app and tray identity used by menu routing.
 
 ### Requirement: Backend selection SHALL apply app-owned tray projections
 
@@ -190,6 +192,8 @@ If no explicit visible icon/text survives projection, the native tray backend SH
 
 Darwin candidate metadata such as `isTemplate` SHALL stay in the tray-icon backend projection/native adapter. It SHALL NOT become an `opentray-core` field and SHALL NOT require direct AppKit or objc2 logic in OpenTray shared layers.
 
+When a projection update keeps the same app/tray identity, the native tray-icon runtime SHALL update the existing native status item in place where the underlying backend supports mutation. Icon and Darwin template metadata SHALL be updated together through the native adapter. The runtime SHALL NOT drop and recreate the status item for ordinary `setIcon`, tooltip, title, or menu projection updates, because temporary removal can produce invisible tray targets and unstable placement bounds.
+
 #### Scenario: Platform chooses the best supported presentation
 
 - **GIVEN** a tray projection provides both an icon-bearing candidate and a text-only candidate
@@ -210,6 +214,13 @@ Darwin candidate metadata such as `isTemplate` SHALL stay in the tray-icon backe
 - **WHEN** the tray-icon backend builds the native status item
 - **THEN** it applies the template flag through the native tray-icon adapter
 - **AND** core projections remain platform-neutral app/tray/session facts.
+
+#### Scenario: setIcon updates the existing native tray handle
+
+- **GIVEN** a tray has already been materialized by the tray-icon backend
+- **WHEN** the same tray identity receives a new icon projection
+- **THEN** the backend updates the existing native tray handle in place
+- **AND** Darwin template state changes atomically with the icon image.
 
 #### Scenario: Missing icon falls back to app name text
 

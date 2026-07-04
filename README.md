@@ -111,6 +111,10 @@ await createTray(options, {
 });
 ```
 
+`primaryEvent` is a role on a normal menu item and emits the usual `menuClick`.
+Use `tray.onTrayClick(...)` when you want to listen to raw tray-icon clicks
+without making a menu item the primary route.
+
 The `opentray` package re-exports application-facing types such as
 `CreateTrayOptions`, `TrayIcon`, `TrayMenu`, `TrayTooltip`, `TrayEvent`, and
 `TrayBoundsResult`. Application code should not need `Parameters<typeof createTray>`

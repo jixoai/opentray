@@ -300,16 +300,24 @@ impl VisibleRuntimeApp {
     }
 
     fn handle_tray(&mut self, event: tray_icon::TrayIconEvent) {
-        if !is_primary_tray_activation(&event) {
-            return;
-        }
-        self.broker
-            .backend()
-            .record_tray_interaction(event.id().as_ref());
-        let Some(event) = self.broker.backend().primary_event(event.id().as_ref()) else {
+        let Some((button, x, y)) = tray_click_payload(&event) else {
             return;
         };
-        self.dispatch_backend_event(event);
+        let tray_icon_id = event.id().as_ref();
+        self.broker.backend().record_tray_interaction(tray_icon_id);
+        if button == opentray_spec::MouseButton::Left {
+            if let Some(event) = self.broker.backend().primary_event(tray_icon_id) {
+                self.dispatch_backend_event(event);
+                return;
+            }
+        }
+        if let Some(event) = self
+            .broker
+            .backend()
+            .tray_click_event(tray_icon_id, button, x, y)
+        {
+            self.dispatch_backend_event(event);
+        }
     }
 
     fn dispatch_backend_event(&mut self, event: TrayEvent) {
@@ -357,15 +365,34 @@ impl VisibleRuntimeApp {
     }
 }
 
-fn is_primary_tray_activation(event: &tray_icon::TrayIconEvent) -> bool {
-    matches!(
-        event,
+fn tray_click_payload(
+    event: &tray_icon::TrayIconEvent,
+) -> Option<(opentray_spec::MouseButton, i32, i32)> {
+    match event {
         tray_icon::TrayIconEvent::Click {
-            button: tray_icon::MouseButton::Left,
+            button,
             button_state: tray_icon::MouseButtonState::Up,
+            position,
             ..
-        }
-    )
+        } => Some((
+            mouse_button(*button)?,
+            coordinate_to_i32(position.x),
+            coordinate_to_i32(position.y),
+        )),
+        _ => None,
+    }
+}
+
+fn mouse_button(button: tray_icon::MouseButton) -> Option<opentray_spec::MouseButton> {
+    match button {
+        tray_icon::MouseButton::Left => Some(opentray_spec::MouseButton::Left),
+        tray_icon::MouseButton::Right => Some(opentray_spec::MouseButton::Right),
+        tray_icon::MouseButton::Middle => Some(opentray_spec::MouseButton::Middle),
+    }
+}
+
+fn coordinate_to_i32(value: f64) -> i32 {
+    value.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32
 }
 
 fn current_visible_host() -> napi::Result<VisibleHostHandle> {

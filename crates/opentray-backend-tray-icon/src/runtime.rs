@@ -1,5 +1,5 @@
 use opentray_core::BackendError;
-use opentray_spec::{AppId, Rect, TrayEvent};
+use opentray_spec::{AppId, MouseButton, Rect, TrayEvent};
 
 use crate::TrayIconProjection;
 
@@ -11,6 +11,16 @@ pub trait TrayIconRuntime {
     }
 
     fn primary_event(&self, _tray_icon_id: &str) -> Option<TrayEvent> {
+        None
+    }
+
+    fn tray_click_event(
+        &self,
+        _tray_icon_id: &str,
+        _button: MouseButton,
+        _x: i32,
+        _y: i32,
+    ) -> Option<TrayEvent> {
         None
     }
 
