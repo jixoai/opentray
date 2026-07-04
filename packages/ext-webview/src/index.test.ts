@@ -25,6 +25,7 @@ import type {
   WebviewNavigatorWindow,
   WebviewPermissionStore,
   WebviewScreenDetails,
+  WebviewWindowEventMap,
   WebviewWindowState,
   WebviewWindowStyle,
 } from "./index";
@@ -300,6 +301,43 @@ describe("@opentray/ext-webview", () => {
         permissionManagerPolicy: {
           defaultSrc: ["'local'"],
           remoteOrigins: ["https://example.com"],
+        },
+      },
+    });
+  });
+
+  it("forwards the top-level download options without overloading permission policy", async () => {
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+
+    await attachWebview(tray).show({
+      type: "show",
+      html: "<main />",
+      download: {
+        enabled: false,
+        saveAs: true,
+      },
+      browserPermissionPolicy: {
+        multipleDownloads: {
+          sources: ["https://example.com"],
+          decision: "allow",
+        },
+      },
+    });
+
+    expect(transport.frames.at(-1)).toMatchObject({
+      type: "ext-command",
+      data: {
+        type: "show",
+        download: {
+          enabled: false,
+          saveAs: true,
+        },
+        browserPermissionPolicy: {
+          multipleDownloads: {
+            sources: ["https://example.com"],
+            decision: "allow",
+          },
         },
       },
     });
@@ -1898,6 +1936,30 @@ describe("@opentray/ext-webview", () => {
     expectTypeOf<WebviewNavigatorWindow["hide"]>().returns.toEqualTypeOf<
       Promise<WebviewWindowState>
     >();
+    expectTypeOf<
+      Parameters<WebviewNavigatorWindow["listen"]>[0]
+    >().toMatchTypeOf<string>();
+    expectTypeOf<
+      Parameters<WebviewNavigatorWindow["listen"]>[1]
+    >().toMatchTypeOf<
+      (
+        event: {
+          event: "downloadprogress";
+          id: number;
+          payload: {
+            url: string;
+            filename: string;
+            receivedBytes: number;
+            totalBytes: number | null;
+          };
+        }
+      ) => void
+    >();
+    expectTypeOf<WebviewWindowEventMap["downloadcompleted"]>().toEqualTypeOf<{
+      url: string;
+      filename: string;
+      success: boolean;
+    }>();
     expectTypeOf<WebviewPermissionStore["namespace"]>().toEqualTypeOf<string>();
     expect(webviewBrowserPermissionFamilies).toContain("camera");
     expect(webviewBrowserPermissionFamilies).toContain("windowManagement");

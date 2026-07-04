@@ -7,6 +7,7 @@ This guide is for manual source-tree verification of the official WebView exampl
 Use these examples to verify the delivered window contract in this branch:
 
 - common shell traits: `frameless`, `background`, `keepOnTop`, `opacity`
+- HTML-standard download semantics through the native runtime download handlers
 - background modes: `opaque`, `transparent`, semantic `blur`, and platform material names
 - platform corner family: `style.platform.macos.cornerRadius` and `style.platform.windows.cornerPreference`
 - title/icon sync
@@ -97,7 +98,28 @@ Overlay is a show-time capability gate, not a runtime style. The control demo en
 On Windows, macOS corner controls remain unsupported, while `style.platform.windows.cornerPreference` is the native DWM corner family. Windows DWM material choice lives in `style.background`.
 Whole-window opacity lives in `style.opacity` on both supported WebView runtimes and composes with the current background mode.
 
-## Example 2: Placement Kit
+## Example 2: Download
+
+Command:
+
+```bash
+pnpm --filter opentray example:download
+```
+
+Expected checks:
+
+1. A normal WebView window opens immediately and shows a `Download report` button.
+2. Clicking the button writes a real JSON file into the operating system Downloads directory.
+3. The page updates through `downloadstarted`, `downloadprogress`, and `downloadcompleted`.
+4. The example relies on the default silent-download behavior; it does not pass an explicit `download` option to `show()`.
+
+For quick smoke:
+
+```bash
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:download
+```
+
+## Example 3: Placement Kit
 
 Command:
 
@@ -122,7 +144,7 @@ For quick smoke:
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:placement
 ```
 
-## Example 3: Media Query Kit
+## Example 4: Media Query Kit
 
 Command:
 
@@ -145,7 +167,7 @@ For quick smoke:
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:mediaQuery
 ```
 
-## Example 4: Tray Panel
+## Example 5: Tray Panel
 
 Command:
 
@@ -177,7 +199,7 @@ Expected checks:
 
 8. The page status surface shows the same tray result shape instead of assuming `Rect | null`.
 
-## Example 5: Debug Runtime Tray
+## Example 6: Debug Runtime Tray
 
 Command:
 
@@ -207,6 +229,7 @@ These are useful for quick regression passes:
 
 ```bash
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:debug-runtime-tray
+OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:download
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:mediaQuery
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:placement
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=show pnpm --filter opentray example:tray-panel

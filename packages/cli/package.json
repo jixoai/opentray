@@ -31,6 +31,7 @@
     "example:first-app": "bun run examples/first-app.ts",
     "example:debug-runtime-lynx": "bun run examples/debug-runtime-lynx.ts",
     "example:debug-runtime-tray": "bun run examples/debug-runtime-tray.ts",
+    "example:download": "bun run examples/download-panel.ts",
     "example:mediaQuery": "bun run examples/media-query-panel.ts",
     "example:badge": "bun run examples/badge-panel.ts",
     "example:placement": "bun run examples/placement-panel.ts",

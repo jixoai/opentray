@@ -20,10 +20,12 @@ url = "2.5.7"
 base64 = "0.22.1"
 block2 = "0.6.2"
 dispatch2 = "0.3.1"
+dirs = "6.0.0"
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSColor", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSMenu", "NSMenuItem", "NSResponder", "NSScreen", "NSView", "NSWindow", "block2", "objc2-core-foundation", "objc2-quartz-core"] }
-objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSData", "NSDictionary", "NSGeometry", "NSNotification", "NSOperation", "NSString", "NSURL", "block2"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSColor", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSMenu", "NSMenuItem", "NSPanel", "NSResponder", "NSSavePanel", "NSScreen", "NSView", "NSWindow", "block2", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSData", "NSDictionary", "NSGeometry", "NSKeyValueObserving", "NSNotification", "NSOperation", "NSProgress", "NSString", "NSURL", "block2"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CALayer", "objc2-core-foundation"] }
+objc2-web-kit = { version = "0.3.2", features = ["WKDownload", "WKNavigation", "WKUIDelegate", "WKWebView"] }
 png = "0.17.16"
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 window-vibrancy = "0.7.1"
@@ -37,6 +39,7 @@ softbuffer = { version = "0.4.8", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 windows = { version = "0.61", features = ["Win32_Foundation"] }
 windows-core = "0.61.2"
+webview2-com = "0.38.2"
 window-vibrancy = "0.7.1"
 wry = { version = "0.55.1", default-features = false, features = ["os-webview", "transparent"] }
 

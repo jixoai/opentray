@@ -66,21 +66,25 @@ use wry::{
 
 mod appwindow;
 mod appwindow_abi;
+mod downloads;
 mod geometry;
 
 use self::appwindow::{
     apply_windows_titlebar_overlay, titlebar_metrics as appwindow_titlebar_metrics,
     WindowsTitlebarMetrics,
 };
+use self::downloads::install_download_handlers;
 use self::geometry::WindowsGeometry;
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::{
     normalize_opacity, parse_background_input, MetadataSyncSettings, NavigatorScreenSettings,
     NavigatorTraySettings, NavigatorWindowSettings, WebviewBackgroundEffectState,
-    WebviewBackgroundInput, WebviewCommand, WebviewInitialMacosStyle, WebviewInitialWindowsStyle,
-    WebviewNativeApiPolicy, WebviewNativeApiSource, WebviewPermissionManagerPolicy,
-    WebviewRuntimeError, WebviewSessionBootstrapSettings, WebviewShowSettings,
-    WebviewWindowBackground, WebviewWindowIcon,
+    WebviewBackgroundInput, WebviewBrowserPermissionDecision, WebviewBrowserPermissionFamily,
+    WebviewBrowserPermissionPolicy, WebviewCommand, WebviewDownloadSettings,
+    WebviewInitialMacosStyle, WebviewInitialWindowsStyle, WebviewNativeApiPolicy,
+    WebviewNativeApiSource, WebviewPermissionManagerPolicy, WebviewRuntimeError,
+    WebviewSessionBootstrapSettings, WebviewShowSettings, WebviewWindowBackground,
+    WebviewWindowIcon,
 };
 
 const CLASS_NAME: &str = "OpenTrayWebViewWindow";
@@ -147,7 +151,7 @@ struct WindowSizeConstraints {
     max_height: Option<i32>,
 }
 
-struct NavigatorWindowBridge {
+pub(super) struct NavigatorWindowBridge {
     hwnd: HWND,
     window: Option<NonNull<Win32HostWindow>>,
     webview: Option<NonNull<WebView>>,
@@ -164,7 +168,9 @@ struct NavigatorWindowBridge {
     navigator_screen: NavigatorScreenSettings,
     navigator_tray: NavigatorTraySettings,
     metadata: WindowMetadataState,
+    download: WebviewDownloadSettings,
     native_api_policy: WebviewNativeApiPolicy,
+    browser_permission_policy: WebviewBrowserPermissionPolicy,
     permission_manager_policy: WebviewPermissionManagerPolicy,
     page_source: PageSourceState,
     page_access: PageCapabilityAccess,
@@ -851,7 +857,9 @@ impl WindowsWebviewRuntime {
                 sync_title: show_settings.window.sync.title,
                 sync_icon: show_settings.window.sync.icon,
             },
+            download: show_settings.download,
             native_api_policy: show_settings.native_api_policy.clone(),
+            browser_permission_policy: show_settings.browser_permission_policy.clone(),
             permission_manager_policy: show_settings.permission_manager_policy.clone(),
             page_source: page_source.clone(),
             page_access,
@@ -1531,7 +1539,9 @@ fn build_webview(
     let webview = builder
         .build_as_child(window)
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
-    Ok(Box::new(webview))
+    let webview = Box::new(webview);
+    install_download_handlers(webview.as_ref(), bridge)?;
+    Ok(webview)
 }
 
 fn client_webview_bounds(hwnd: HWND) -> Option<WryRect> {
@@ -3211,7 +3221,7 @@ fn reject_callback(
     evaluate_bridge_script(bridge, error_callback_script(callback_id, error)?)
 }
 
-fn emit_window_event(
+pub(super) fn emit_window_event(
     bridge: &RefCell<NavigatorWindowBridge>,
     event: &str,
     payload: Value,
@@ -3910,6 +3920,27 @@ fn policy_allows(
     let rules = directive.unwrap_or(&policy.default_src);
     let source = classify_page_source(page_source);
     rules.iter().any(|rule| match_source_rule(rule, &source))
+}
+
+fn resolve_browser_permission_decision(
+    policy: &WebviewBrowserPermissionPolicy,
+    family: WebviewBrowserPermissionFamily,
+    page_source: &PageSourceState,
+) -> WebviewBrowserPermissionDecision {
+    let source = classify_page_source(page_source);
+    let matched = policy.rules.iter().find(|rule| {
+        rule.family == family
+            && rule
+                .sources
+                .iter()
+                .any(|candidate| match_source_rule(candidate, &source))
+    });
+    matched
+        .map(|rule| rule.decision)
+        .unwrap_or_else(|| match source {
+            ResolvedPageSource::Local => WebviewBrowserPermissionDecision::Allow,
+            ResolvedPageSource::Remote { .. } => WebviewBrowserPermissionDecision::Deny,
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4723,6 +4754,69 @@ mod tests {
             crate::WebviewWindowBackground::Opaque
         );
         assert_eq!(settings.window.style.opacity, 1.0);
+    }
+
+    #[test]
+    fn multiple_downloads_policy_defaults_local_allow_and_deny_remote_on_windows() {
+        assert_eq!(
+            resolve_browser_permission_decision(
+                &WebviewBrowserPermissionPolicy::default(),
+                WebviewBrowserPermissionFamily::MultipleDownloads,
+                &PageSourceState {
+                    url: None,
+                    host_html: true,
+                },
+            ),
+            WebviewBrowserPermissionDecision::Allow
+        );
+        assert_eq!(
+            resolve_browser_permission_decision(
+                &WebviewBrowserPermissionPolicy::default(),
+                WebviewBrowserPermissionFamily::MultipleDownloads,
+                &PageSourceState {
+                    url: Some("https://tools.example/export".to_string()),
+                    host_html: false,
+                },
+            ),
+            WebviewBrowserPermissionDecision::Deny
+        );
+    }
+
+    #[test]
+    fn multiple_downloads_policy_respects_exact_remote_allow_rule_on_windows() {
+        let policy = WebviewBrowserPermissionPolicy {
+            rules: vec![WebviewBrowserPermissionRule {
+                family: WebviewBrowserPermissionFamily::MultipleDownloads,
+                sources: vec![WebviewNativeApiSource::Origin(
+                    "https://tools.example".to_string(),
+                )],
+                decision: WebviewBrowserPermissionDecision::Allow,
+                prompt: false,
+            }],
+        };
+
+        assert_eq!(
+            resolve_browser_permission_decision(
+                &policy,
+                WebviewBrowserPermissionFamily::MultipleDownloads,
+                &PageSourceState {
+                    url: Some("https://tools.example/export".to_string()),
+                    host_html: false,
+                },
+            ),
+            WebviewBrowserPermissionDecision::Allow
+        );
+        assert_eq!(
+            resolve_browser_permission_decision(
+                &policy,
+                WebviewBrowserPermissionFamily::MultipleDownloads,
+                &PageSourceState {
+                    url: Some("https://other.example/export".to_string()),
+                    host_html: false,
+                },
+            ),
+            WebviewBrowserPermissionDecision::Deny
+        );
     }
 
     #[test]

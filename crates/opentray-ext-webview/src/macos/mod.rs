@@ -1,6 +1,7 @@
 mod app_menu;
 mod bridge;
 mod demo_html;
+mod downloads;
 mod drag;
 mod metadata;
 mod overlay;
@@ -32,7 +33,8 @@ use serde_json::{json, Value};
 use wry::{PageLoadEvent, WebView, WebViewBuilder, WebViewExtMacOS, RGBA};
 
 use crate::{
-    NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings, WebviewCommand,
+    NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings,
+    WebviewBrowserPermissionPolicy, WebviewCommand, WebviewDownloadSettings,
     WebviewNativeApiPolicy, WebviewPermissionManagerPolicy, WebviewRuntimeError,
     WebviewSessionBootstrapSettings, WebviewShowSettings,
 };
@@ -43,6 +45,7 @@ use self::bridge::{
     handle_navigator_window_request, window_bounds_json, SizeConstraintKind,
 };
 use self::demo_html::default_webview_html;
+use self::downloads::{install_download_navigation_delegate, DownloadNavigationDelegate};
 use self::drag::AppRegionDragState;
 use self::metadata::{
     apply_window_icon_from_bridge, handle_document_title_changed, sync_native_metadata_to_page,
@@ -79,12 +82,13 @@ struct WebviewSlot {
     window: Retained<NSWindow>,
     webview: Box<WebView>,
     bridge: Rc<RefCell<NavigatorWindowBridge>>,
+    _download_navigation_delegate: Option<Retained<DownloadNavigationDelegate>>,
     _focus_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     content_descriptor: WebviewContentDescriptor,
     show_settings: WebviewShowSettings,
 }
 
-struct NavigatorWindowBridge {
+pub(super) struct NavigatorWindowBridge {
     webview: Option<NonNull<WebView>>,
     content_view: Option<Retained<NSView>>,
     listeners: HashMap<String, Vec<NavigatorWindowListener>>,
@@ -100,7 +104,9 @@ struct NavigatorWindowBridge {
     navigator_tray: NavigatorTraySettings,
     metadata: WindowMetadataState,
     app_region_drag: AppRegionDragState,
+    download: WebviewDownloadSettings,
     native_api_policy: WebviewNativeApiPolicy,
+    browser_permission_policy: WebviewBrowserPermissionPolicy,
     permission_manager_policy: WebviewPermissionManagerPolicy,
     page_source: PageSourceState,
     page_access: PageCapabilityAccess,
@@ -625,7 +631,9 @@ impl MacosWebviewRuntime {
                 sync_icon: show_settings.window.sync.icon,
             },
             app_region_drag: AppRegionDragState::default(),
+            download: show_settings.download,
             native_api_policy: show_settings.native_api_policy.clone(),
+            browser_permission_policy: show_settings.browser_permission_policy.clone(),
             permission_manager_policy: show_settings.permission_manager_policy.clone(),
             page_source: page_source.clone(),
             page_access: resolve_page_access(&show_settings, &page_source),
@@ -675,6 +683,8 @@ impl MacosWebviewRuntime {
                     }
                 }
             })
+            .with_download_started_handler(|_, _| true)
+            .with_download_completed_handler(|_, _, _| {})
             // `style.background` is mutable after the WebView is created. Keep WKWebView
             // alpha-capable from creation time, then let `apply_window_style` choose the
             // actual opaque or clear backing color for the current style.
@@ -697,6 +707,8 @@ impl MacosWebviewRuntime {
             bridge_state.webview = Some(NonNull::from(webview.as_mut()));
             bridge_state.content_view = window.contentView();
         }
+        let download_navigation_delegate =
+            install_download_navigation_delegate(webview.as_ref(), &bridge)?;
         apply_window_style(&bridge, &window)?;
         apply_window_icon_from_bridge(&bridge, &window)?;
         apply_initial_window_position(&window, tray_bounds);
@@ -719,6 +731,7 @@ impl MacosWebviewRuntime {
             window,
             webview,
             bridge,
+            _download_navigation_delegate: Some(download_navigation_delegate),
             _focus_observers: focus_observers,
             content_descriptor,
             show_settings,
@@ -1129,7 +1142,7 @@ fn install_focus_observers(
     }
 }
 
-fn queue_window_event(
+pub(super) fn queue_window_event(
     bridge: &std::rc::Weak<RefCell<NavigatorWindowBridge>>,
     event: &str,
     payload: Value,
@@ -1146,7 +1159,7 @@ fn queue_window_event(
     }
 }
 
-fn window_event_payload(event: &str, payload: &Value) -> Value {
+pub(super) fn window_event_payload(event: &str, payload: &Value) -> Value {
     let mut value = json!({ "type": event });
     if let (Some(target), Some(source)) = (value.as_object_mut(), payload.as_object()) {
         for (key, payload_value) in source {

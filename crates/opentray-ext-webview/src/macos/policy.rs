@@ -2,7 +2,11 @@ use std::{cell::RefCell, rc::Rc};
 
 use url::Url;
 
-use crate::{WebviewNativeApiPolicy, WebviewNativeApiSource, WebviewShowSettings};
+use crate::{
+    WebviewBrowserPermissionDecision, WebviewBrowserPermissionFamily,
+    WebviewBrowserPermissionPolicy, WebviewNativeApiPolicy, WebviewNativeApiSource,
+    WebviewShowSettings,
+};
 
 use super::{NavigatorWindowBridge, PageCapabilityAccess, PageSourceState};
 
@@ -181,6 +185,27 @@ pub(super) fn update_page_access_for_url(bridge: &Rc<RefCell<NavigatorWindowBrid
     state.page_source.host_html = keep_host_html;
     state.page_source.url = Some(url.to_string());
     state.page_access = resolve_page_access_from_bridge(&state);
+}
+
+pub(super) fn resolve_browser_permission_decision(
+    policy: &WebviewBrowserPermissionPolicy,
+    family: WebviewBrowserPermissionFamily,
+    page_source: &PageSourceState,
+) -> WebviewBrowserPermissionDecision {
+    let source = classify_page_source(page_source);
+    let matched = policy.rules.iter().find(|rule| {
+        rule.family == family
+            && rule
+                .sources
+                .iter()
+                .any(|candidate| match_source_rule(candidate, &source))
+    });
+    matched
+        .map(|rule| rule.decision)
+        .unwrap_or_else(|| match source {
+            ResolvedPageSource::Local => WebviewBrowserPermissionDecision::Allow,
+            ResolvedPageSource::Remote { .. } => WebviewBrowserPermissionDecision::Deny,
+        })
 }
 
 fn policy_allows(

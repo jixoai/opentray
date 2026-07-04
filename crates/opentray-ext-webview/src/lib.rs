@@ -207,6 +207,21 @@ impl Default for WebviewPermissionManagerPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WebviewDownloadSettings {
+    pub enabled: bool,
+    pub save_as: bool,
+}
+
+impl Default for WebviewDownloadSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            save_as: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub(crate) enum WebviewWindowIcon {
@@ -241,6 +256,7 @@ pub(crate) struct WebviewShowSettings {
     pub navigator_screen: NavigatorScreenSettings,
     pub navigator_tray: NavigatorTraySettings,
     pub window: WebviewWindowOptions,
+    pub download: WebviewDownloadSettings,
     pub native_api_policy: WebviewNativeApiPolicy,
     pub browser_permission_policy: WebviewBrowserPermissionPolicy,
     pub permission_manager_policy: WebviewPermissionManagerPolicy,
@@ -253,6 +269,7 @@ pub(crate) struct WebviewSessionBootstrapSettings {
     pub navigator_screen: NavigatorScreenSettings,
     pub navigator_tray: NavigatorTraySettings,
     pub sync: WebviewMetadataSyncSettings,
+    pub download: WebviewDownloadSettings,
     pub native_api_policy: WebviewNativeApiPolicy,
     pub browser_permission_policy: WebviewBrowserPermissionPolicy,
     pub permission_manager_policy: WebviewPermissionManagerPolicy,
@@ -265,6 +282,7 @@ impl WebviewShowSettings {
             navigator_screen: self.navigator_screen,
             navigator_tray: self.navigator_tray,
             sync: self.window.sync,
+            download: self.download,
             native_api_policy: self.native_api_policy.clone(),
             browser_permission_policy: self.browser_permission_policy.clone(),
             permission_manager_policy: self.permission_manager_policy.clone(),
@@ -385,6 +403,7 @@ struct ShowCommandData {
     native_api_policy: Option<NativeApiPolicyInput>,
     browser_permission_policy: Option<BrowserPermissionPolicyInput>,
     permission_manager_policy: Option<PermissionManagerPolicyInput>,
+    download: Option<DownloadCommandData>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -516,6 +535,13 @@ struct BrowserPermissionFamilyPolicyInput {
 struct PermissionManagerPolicyInput {
     default_src: Option<Vec<String>>,
     remote_origins: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadCommandData {
+    enabled: Option<bool>,
+    save_as: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -770,6 +796,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                             icon: parse_icon_sync(parsed.icon_sync),
                         },
                     },
+                    download: parse_download_settings(parsed.download),
                     native_api_policy: parse_native_api_policy(parsed.native_api_policy)?,
                     browser_permission_policy: parse_browser_permission_policy(
                         parsed.browser_permission_policy,
@@ -1219,6 +1246,16 @@ fn parse_browser_permission_decision(
     }
 }
 
+fn parse_download_settings(input: Option<DownloadCommandData>) -> WebviewDownloadSettings {
+    let Some(input) = input else {
+        return WebviewDownloadSettings::default();
+    };
+    WebviewDownloadSettings {
+        enabled: input.enabled.unwrap_or(true),
+        save_as: input.save_as.unwrap_or(false),
+    }
+}
+
 fn parse_permission_manager_policy(
     input: Option<PermissionManagerPolicyInput>,
 ) -> Result<WebviewPermissionManagerPolicy, WebviewRuntimeError> {
@@ -1524,6 +1561,7 @@ mod tests {
                             },
                         },
                     },
+                    download: WebviewDownloadSettings::default(),
                     native_api_policy: WebviewNativeApiPolicy {
                         default_src: vec![WebviewNativeApiSource::Local],
                         window: Some(vec![WebviewNativeApiSource::Origin(
@@ -1603,7 +1641,48 @@ mod tests {
                 remote_origins: vec!["https://example.com".to_string()],
             }
         );
+        assert_eq!(show_settings.download, WebviewDownloadSettings::default());
         assert!(show_settings.bootstrap_requested);
+    }
+
+    #[test]
+    fn parse_show_command_defaults_download_to_enabled_silent_mode() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "html": "<main />"
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show { show_settings, .. } = command else {
+            panic!("expected show command");
+        };
+
+        assert_eq!(show_settings.download, WebviewDownloadSettings::default());
+    }
+
+    #[test]
+    fn parse_show_command_reads_explicit_download_settings() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "html": "<main />",
+            "download": {
+              "enabled": false,
+              "saveAs": true
+            }
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show { show_settings, .. } = command else {
+            panic!("expected show command");
+        };
+
+        assert_eq!(
+            show_settings.download,
+            WebviewDownloadSettings {
+                enabled: false,
+                save_as: true,
+            }
+        );
     }
 
     #[test]

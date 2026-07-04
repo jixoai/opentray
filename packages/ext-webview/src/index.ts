@@ -39,6 +39,11 @@ export interface WebviewNativeApiPolicy {
   iconSync?: WebviewNativeApiSource[];
 }
 
+export interface WebviewDownloadOptions {
+  enabled?: boolean;
+  saveAs?: boolean;
+}
+
 export interface WebviewShowCommand {
   type: "show";
   html?: string;
@@ -62,6 +67,7 @@ export interface WebviewShowCommand {
   nativeApiPolicy?: WebviewNativeApiPolicy;
   browserPermissionPolicy?: WebviewBrowserPermissionPolicy;
   permissionManagerPolicy?: WebviewPermissionManagerPolicy;
+  download?: WebviewDownloadOptions;
 }
 
 export type WebviewWindowOptions = Omit<WebviewShowCommand, "type">;
@@ -260,6 +266,20 @@ export interface WebviewWindowOverlayGeometry {
   titlebarAreaRect: Rect;
 }
 
+export interface WebviewDownloadStarted {
+  url: string;
+  filename: string;
+}
+
+export interface WebviewDownloadProgress extends WebviewDownloadStarted {
+  receivedBytes: number;
+  totalBytes: number | null;
+}
+
+export interface WebviewDownloadCompleted extends WebviewDownloadStarted {
+  success: boolean;
+}
+
 export interface WebviewWindowEventMap {
   closed: { visible: false };
   focus: WebviewWindowFocusChange;
@@ -272,6 +292,11 @@ export interface WebviewWindowEventMap {
   iconchange: WebviewWindowIconChange;
   windowstatechange: WebviewWindowState;
   "overlay.geometrychange": WebviewWindowOverlayGeometry;
+  downloadstarted: WebviewDownloadStarted;
+  downloadprogress: WebviewDownloadProgress;
+  downloadcompleted: WebviewDownloadCompleted;
+  downloadfailed: WebviewDownloadStarted;
+  downloadcanceled: WebviewDownloadStarted;
 }
 
 export interface WebviewWindowOverlay {
@@ -590,6 +615,11 @@ const POLLED_WINDOW_EVENTS = new Set([
   "focus",
   "blur",
   "windowinteractionchange",
+  "downloadstarted",
+  "downloadprogress",
+  "downloadcompleted",
+  "downloadfailed",
+  "downloadcanceled",
 ]);
 
 export const WebviewExt = {

@@ -257,6 +257,26 @@ const webview = tray.createWebviewWindow({
 });
 ```
 
+Download routing is a separate top-level window option, not part of `nativeApiPolicy`:
+
+```ts
+const webview = tray.createWebviewWindow({
+  html: "<main />",
+  download: {
+    enabled: true,
+    saveAs: false,
+  },
+  browserPermissionPolicy: {
+    multipleDownloads: {
+      sources: ["'local'"],
+      decision: "allow",
+    },
+  },
+});
+```
+
+`download` defaults to `{ enabled: true, saveAs: false }`, so local HTML can use standard `<a download>` or blob downloads with zero extra configuration. Local pages are allowed by default; remote pages stay denied unless `browserPermissionPolicy.multipleDownloads` explicitly allows them. The lifecycle events `downloadstarted`, `downloadprogress`, `downloadcompleted`, `downloadfailed`, and `downloadcanceled` flow through the same `navigator.opentrayWindow.listen(...)` / `webview.listen(...)` bus as other native window events.
+
 `permissionManagerPolicy` controls whether `opentrayPermissions` can be injected as a permission-management object. Remote origins do not receive that object by default, even when a permission family is allowlisted. Durable permission facts use the default app-scoped JavaScript permission store from `createAppScopedWebviewPermissionStore({ appId })`; the store is namespaced by OpenTray `appId` and does not use WebView page storage as the source of truth.
 
 Call `startPermissionManager()` on the WebView window handle to drain page-side `opentrayPermissions` messages into the app-scoped store. Apps can pass `permissions.store` to use a custom adapter; otherwise the default store is created from the OpenTray app identity.
@@ -265,7 +285,7 @@ Call `startPermissionManager()` on the WebView window handle to drain page-side 
 const stopPermissions = webview.startPermissionManager();
 ```
 
-Native prompt behavior depends on what the platform WebView substrate exposes. Current Wry WebKit/WebView2 hooks do not expose a stable all-permission decision callback, so native browser-engine grants remain typed unsupported until OpenTray owns that substrate hook.
+Native prompt behavior depends on what the platform WebView substrate exposes. Dedicated download hooks now exist, so standard silent downloads are supported, but current Wry WebKit/WebView2 hooks still do not expose a stable all-permission decision callback. Browser-engine grants outside the dedicated download path remain typed unsupported until OpenTray owns that substrate hook, and `multipleDownloads: { decision: "prompt" }` still depends on the carrier-owned native prompt flow.
 
 When enabled, the page receives:
 

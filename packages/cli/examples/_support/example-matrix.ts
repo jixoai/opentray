@@ -92,6 +92,16 @@ const createRows = ({
     }),
   },
   {
+    id: "download",
+    coverage: "extension-debug-runtime",
+    description: "ext-webview native download lifecycle through a real blob export",
+    platforms: WEBVIEW_PLATFORMS,
+    command: pnpmExample("example:download", {
+      OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
+      OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "8000",
+    }),
+  },
+  {
     id: "tray-panel",
     coverage: "extension-debug-runtime",
     description: "tray-anchored ext-webview panel",

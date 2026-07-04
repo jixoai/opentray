@@ -31,6 +31,7 @@ describe("Feature: opentray example matrix planning", () => {
       "first-app",
       "webview-control",
       "debug-runtime-tray",
+      "download",
       "tray-panel",
       "placement",
       "media-query",
@@ -143,6 +144,7 @@ describe("Feature: opentray example matrix planning", () => {
     const extensionRows = [
       "webview-control",
       "debug-runtime-tray",
+      "download",
       "tray-panel",
       "placement",
       "media-query",

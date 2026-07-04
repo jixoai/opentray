@@ -1,8 +1,9 @@
 use super::bridge::{
-    callback_script, error_callback_script, exec_page_command, parse_set_icon_payload,
-    NavigatorWindowRequest,
+    callback_script, emit_window_event, error_callback_script, exec_page_command,
+    parse_set_icon_payload, NavigatorWindowRequest,
 };
 use super::drag::queue_window_interaction_event;
+use super::policy::resolve_browser_permission_decision;
 use super::style::{
     validate_style_request, MacosWindowStyleState, SetStyleMacosPayload, SetStylePayload,
     SetStylePlatformPayload, SetStyleWindowsPayload, WindowPlatformStyleState,
@@ -10,8 +11,9 @@ use super::style::{
 use super::*;
 use crate::{
     MetadataSyncSettings, WebviewBackgroundEffectState, WebviewBackgroundInput,
-    WebviewNativeApiSource, WebviewPermissionManagerPolicy, WebviewWindowBackground,
-    WebviewWindowIcon,
+    WebviewBrowserPermissionDecision, WebviewBrowserPermissionFamily,
+    WebviewBrowserPermissionRule, WebviewNativeApiSource, WebviewPermissionManagerPolicy,
+    WebviewWindowBackground, WebviewWindowIcon,
 };
 use std::process::Command;
 
@@ -1318,7 +1320,9 @@ fn navigator_window_bridge_tracks_listener_ids() {
             sync_icon: MetadataSyncSettings::default(),
         },
         app_region_drag: AppRegionDragState::default(),
+        download: WebviewDownloadSettings::default(),
         native_api_policy: WebviewNativeApiPolicy::default(),
+        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
         permission_manager_policy: WebviewPermissionManagerPolicy::default(),
         page_source: PageSourceState::default(),
         page_access: PageCapabilityAccess::default(),
@@ -1335,6 +1339,128 @@ fn navigator_window_bridge_tracks_listener_ids() {
     bridge.remove_listener("resized", event_id);
     assert!(bridge.listeners_for("resized").is_empty());
     assert!(!bridge.has_listener("resized"));
+}
+
+#[test]
+fn multiple_downloads_policy_defaults_local_allow_and_remote_deny_on_macos() {
+    assert_eq!(
+        resolve_browser_permission_decision(
+            &WebviewBrowserPermissionPolicy::default(),
+            WebviewBrowserPermissionFamily::MultipleDownloads,
+            &PageSourceState {
+                url: None,
+                host_html: true,
+            },
+        ),
+        WebviewBrowserPermissionDecision::Allow
+    );
+    assert_eq!(
+        resolve_browser_permission_decision(
+            &WebviewBrowserPermissionPolicy::default(),
+            WebviewBrowserPermissionFamily::MultipleDownloads,
+            &PageSourceState {
+                url: Some("https://tools.example/export".to_string()),
+                host_html: false,
+            },
+        ),
+        WebviewBrowserPermissionDecision::Deny
+    );
+}
+
+#[test]
+fn multiple_downloads_policy_respects_exact_remote_allow_rule_on_macos() {
+    let policy = WebviewBrowserPermissionPolicy {
+        rules: vec![WebviewBrowserPermissionRule {
+            family: WebviewBrowserPermissionFamily::MultipleDownloads,
+            sources: vec![WebviewNativeApiSource::Origin(
+                "https://tools.example".to_string(),
+            )],
+            decision: WebviewBrowserPermissionDecision::Allow,
+            prompt: false,
+        }],
+    };
+
+    assert_eq!(
+        resolve_browser_permission_decision(
+            &policy,
+            WebviewBrowserPermissionFamily::MultipleDownloads,
+            &PageSourceState {
+                url: Some("https://tools.example/export".to_string()),
+                host_html: false,
+            },
+        ),
+        WebviewBrowserPermissionDecision::Allow
+    );
+    assert_eq!(
+        resolve_browser_permission_decision(
+            &policy,
+            WebviewBrowserPermissionFamily::MultipleDownloads,
+            &PageSourceState {
+                url: Some("https://other.example/export".to_string()),
+                host_html: false,
+            },
+        ),
+        WebviewBrowserPermissionDecision::Deny
+    );
+}
+
+#[test]
+fn emit_window_event_ignores_unlistened_download_events_on_macos() {
+    let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
+        webview: None,
+        content_view: None,
+        listeners: HashMap::new(),
+        ipc_messages: VecDeque::new(),
+        permission_messages: VecDeque::new(),
+        window_events: VecDeque::new(),
+        next_event_id: 1,
+        next_ipc_message_id: 1,
+        next_permission_message_id: 1,
+        style: WindowStyleState {
+            frameless: false,
+            keep_on_top: false,
+            opacity: 1.0,
+            background: WebviewWindowBackground::Opaque,
+            platform: WindowPlatformStyleState {
+                macos: MacosWindowStyleState {
+                    corner_radius: None,
+                },
+            },
+        },
+        navigator_window: NavigatorWindowSettings {
+            enabled: true,
+            bind_window_globals: false,
+            window_controls_overlay: false,
+        },
+        navigator_screen: NavigatorScreenSettings::default(),
+        navigator_tray: NavigatorTraySettings::default(),
+        metadata: WindowMetadataState {
+            title: DEFAULT_WINDOW_TITLE.to_string(),
+            icon: None,
+            sync_title: MetadataSyncSettings::default(),
+            sync_icon: MetadataSyncSettings::default(),
+        },
+        app_region_drag: AppRegionDragState::default(),
+        download: WebviewDownloadSettings::default(),
+        native_api_policy: WebviewNativeApiPolicy::default(),
+        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
+        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
+        page_source: PageSourceState::default(),
+        page_access: PageCapabilityAccess::default(),
+        tray_bounds: None,
+        size_constraints: WindowSizeConstraints::default(),
+    }));
+
+    emit_window_event(
+        &bridge,
+        "downloadcompleted",
+        serde_json::json!({
+            "url": "https://tools.example/export",
+            "filename": "report.json",
+            "success": true,
+        }),
+    )
+    .expect("unlistened events should be ignored before any bridge eval");
 }
 
 #[test]
@@ -1374,7 +1500,9 @@ fn app_region_drag_interaction_window_event_conserves_native_source() {
             sync_icon: MetadataSyncSettings::default(),
         },
         app_region_drag: AppRegionDragState::default(),
+        download: WebviewDownloadSettings::default(),
         native_api_policy: WebviewNativeApiPolicy::default(),
+        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
         permission_manager_policy: WebviewPermissionManagerPolicy::default(),
         page_source: PageSourceState::default(),
         page_access: PageCapabilityAccess::default(),
