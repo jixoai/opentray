@@ -25,6 +25,13 @@ const icon: Icon = {
   "icon-only": { type: "file", path: "./status-small.png" },
   "text-only": "Status",
   "icon-text": { type: "file", path: "./status.png", text: "Status" },
+  "darwin-icon-only": {
+    type: "file",
+    path: "./status-template.png",
+    isTemplate: true,
+  },
+  "win32-icon-only": { type: "file", path: "./status.ico.png" },
+  "linux-icon-only": { type: "file", path: "./status-linux.png" },
 };
 
 const tray: TrayOptions = {
@@ -33,4 +40,6 @@ const tray: TrayOptions = {
 };
 ```
 
-`Space`, `Surface`, `spaceId`, `create-space`, and top-level tray `title` are removed public vocabulary for v0.9.
+`Space`, `Surface`, `spaceId`, `create-space`, and top-level tray `title` are removed public vocabulary in the current tray-first model.
+
+OS-scoped candidates are peers of the generic keys. The active OS candidate shadows the matching generic candidate for the same mode; non-matching OS keys are ignored. Darwin candidates may carry `isTemplate` so the tray-icon backend can render a macOS template image.

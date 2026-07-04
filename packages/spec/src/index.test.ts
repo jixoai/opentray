@@ -131,6 +131,29 @@ describe("@opentray/spec", () => {
       "icon-only": { type: "file", path: "./icon-only.png" },
       "text-only": "Build",
       "icon-text": { type: "file", path: "./icon-text.png", text: "Build" },
+      "darwin-icon-only": {
+        type: "file",
+        path: "./darwin-icon-only.png",
+        isTemplate: true,
+      },
+      "darwin-icon-text": {
+        type: "file",
+        path: "./darwin-icon-text.png",
+        text: "Build",
+        isTemplate: true,
+      },
+      "win32-icon-only": { type: "file", path: "./win32-icon-only.png" },
+      "win32-icon-text": {
+        type: "file",
+        path: "./win32-icon-text.png",
+        text: "Build",
+      },
+      "linux-icon-only": { type: "file", path: "./linux-icon-only.png" },
+      "linux-icon-text": {
+        type: "file",
+        path: "./linux-icon-text.png",
+        text: "Build",
+      },
     };
 
     const textOnlyIcon: Icon = {
@@ -138,6 +161,13 @@ describe("@opentray/spec", () => {
     };
 
     expect(icon["icon-text"]?.text).toBe("Build");
+    expect(icon["darwin-icon-only"]?.isTemplate).toBe(true);
+    expect(icon["darwin-icon-text"]?.text).toBe("Build");
+    expect(JSON.parse(JSON.stringify(icon))).toMatchObject({
+      "darwin-icon-only": { isTemplate: true },
+      "win32-icon-only": { path: "./win32-icon-only.png" },
+      "linux-icon-text": { text: "Build" },
+    });
     expect(textOnlyIcon["text-only"]).toBe("Build");
   });
 

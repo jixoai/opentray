@@ -69,6 +69,7 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
 
         for tray in trays {
             let tray_icon_id = tray.tray_icon_id.clone();
+            let icon_is_template = tray.icon.as_ref().is_some_and(TrayIconAsset::is_template);
             let icon = native_icon(tray.icon.as_ref())?;
             let menu_policy = native_menu_policy(&tray.menu);
             let menu = if menu_policy.attach_menu {
@@ -87,25 +88,15 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
                 }
             }
 
-            let mut builder = TrayIconBuilder::new().with_id(tray_icon_id.clone());
-            if let Some(tooltip) = tooltip {
-                builder = builder.with_tooltip(tooltip);
-            }
-            if let Some(title) = tray.title {
-                builder = builder.with_title(title);
-            }
-            if let Some(icon) = icon {
-                builder = builder.with_icon(icon);
-            }
-            if let Some(menu) = menu {
-                builder = builder.with_menu(Box::new(menu));
-            }
-
-            let native = builder
-                .with_menu_on_left_click(menu_policy.show_menu_on_left_click)
-                .with_menu_on_right_click(menu_policy.show_menu_on_right_click)
-                .build()
-                .map_err(|error| BackendError::Failure(error.to_string()))?;
+            let native = create_native_tray(
+                tray_icon_id.clone(),
+                icon,
+                icon_is_template,
+                tray.title,
+                tooltip,
+                menu,
+                menu_policy,
+            )?;
 
             icons.insert(tray_icon_id, native);
         }
@@ -176,6 +167,40 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
     }
 }
 
+fn create_native_tray(
+    tray_icon_id: String,
+    icon: Option<NativeIcon>,
+    icon_is_template: bool,
+    title: Option<String>,
+    tooltip: Option<String>,
+    menu: Option<NativeMenu>,
+    menu_policy: NativeMenuPolicy,
+) -> Result<TrayIcon, BackendError> {
+    let mut builder = TrayIconBuilder::new().with_id(tray_icon_id);
+    if let Some(tooltip) = tooltip {
+        builder = builder.with_tooltip(tooltip);
+    }
+    if let Some(title) = title {
+        builder = builder.with_title(title);
+    }
+    if let Some(icon) = icon {
+        builder = builder
+            .with_icon(icon)
+            .with_icon_as_template(icon_is_template);
+    }
+    if let Some(menu) = menu {
+        builder = builder.with_menu(Box::new(menu));
+    }
+
+    let native = builder
+        .with_menu_on_left_click(menu_policy.show_menu_on_left_click)
+        .with_menu_on_right_click(menu_policy.show_menu_on_right_click)
+        .build()
+        .map_err(|error| BackendError::Failure(error.to_string()))?;
+    native.set_icon_as_template(icon_is_template);
+    Ok(native)
+}
+
 struct NativeAppState {
     icons: HashMap<String, TrayIcon>,
     routes: TrayIconRouteTable,
@@ -226,6 +251,7 @@ fn native_icon(asset: Option<&TrayIconAsset>) -> Result<Option<NativeIcon>, Back
             data,
             width,
             height,
+            ..
         } => NativeIcon::from_rgba(data.clone(), *width, *height)
             .map(Some)
             .map_err(|error| BackendError::Failure(error.to_string())),

@@ -491,9 +491,9 @@ The v0.9 protocol-facing SDK SHALL reject or fail to type-check old public input
 
 ### Requirement: Public tray creation SHALL use a unified icon projection field
 
-The public v0.9 `createTray` API SHALL expose one `icon` field for tray visual projection. The API SHALL NOT introduce a separate `icons`, `display`, `appearance`, or `presentation` field for the same concern.
+The public `createTray` API SHALL expose one `icon` field for tray visual projection. The API SHALL NOT introduce a separate `icons`, `display`, `appearance`, or `presentation` field for the same concern.
 
-The existing single-image icon payload SHALL be renamed at the type level from `Icon` to `IconImage`. The public `Icon` contract SHALL represent the unified tray projection input: image-only candidates, text-only candidates, icon-with-text candidates, and simple fallback material carried through the same `icon` field.
+The existing single-image icon payload SHALL be named `IconImage`. The public `Icon` contract SHALL represent the unified tray projection input: generic image-only candidates, text-only candidates, generic icon-with-text candidates, OS-scoped image and icon-text candidates, and simple fallback material carried through the same `icon` field.
 
 The intended TypeScript shape SHALL preserve the user's intersection-style compression:
 
@@ -507,6 +507,12 @@ type Icons = {
   "icon-only"?: IconImage;
   "text-only"?: string;
   "icon-text"?: IconImage & { text: string };
+  "darwin-icon-only"?: IconImage & { isTemplate?: boolean };
+  "darwin-icon-text"?: IconImage & { text: string; isTemplate?: boolean };
+  "win32-icon-only"?: IconImage;
+  "win32-icon-text"?: IconImage & { text: string };
+  "linux-icon-only"?: IconImage;
+  "linux-icon-text"?: IconImage & { text: string };
 };
 
 type SimpleIcon = IconImage & { text?: string };
@@ -514,9 +520,9 @@ type SimpleIcon = IconImage & { text?: string };
 type Icon = Icons & SimpleIcon;
 ```
 
-`Icons` SHALL remain a pure explicit-candidate map. It SHALL NOT contain a generic `text` field. Generic fallback text belongs to `SimpleIcon.text`, so fallback image and fallback text share one simple icon atom.
+`Icons` SHALL remain a pure explicit-candidate map. It SHALL NOT contain a generic `text` field. Generic fallback text belongs to `SimpleIcon.text`, so fallback image and fallback text share one simple icon atom. Darwin `isTemplate` SHALL be metadata only on Darwin candidates.
 
-Implementation MAY refine the exact TypeScript expression if plain `Icons & SimpleIcon` prevents valid candidate-only values, but it MUST preserve the public contract: one `icon` field, `IconImage` as the image atom, `SimpleIcon` as fallback material, and the responsive candidate map as part of `Icon` rather than a sibling field.
+Implementation MAY refine the exact TypeScript expression if plain `Icons & SimpleIcon` prevents valid candidate-only values, but it MUST preserve the public contract: one `icon` field, `IconImage` as the image atom, `SimpleIcon` as fallback material, and generic plus OS-scoped candidate maps as part of `Icon` rather than a sibling field.
 
 #### Scenario: Simple icon remains low ceremony
 
@@ -527,30 +533,52 @@ Implementation MAY refine the exact TypeScript expression if plain `Icons & Simp
 
 #### Scenario: Responsive icon candidates use the icon field
 
-- **GIVEN** a caller invokes `createTray` with `icon["icon-only"]`, `icon["text-only"]`, `icon["icon-text"]`, or `SimpleIcon` fallback fields
+- **GIVEN** a caller invokes `createTray` with generic icon candidates, OS-scoped icon candidates, or `SimpleIcon` fallback fields
 - **WHEN** the SDK and broker evaluate tray display options
 - **THEN** those candidates are read from `icon`
 - **AND** no separate `icons`, `display`, `appearance`, or `presentation` option is required.
 
-### Requirement: Icon candidate selection SHALL prefer explicit only modes before fallback
+#### Scenario: Darwin template metadata stays scoped to Darwin candidates
+
+- **GIVEN** a caller provides `icon["darwin-icon-only"].isTemplate` or `icon["darwin-icon-text"].isTemplate`
+- **WHEN** the public type contract accepts the icon
+- **THEN** the template flag belongs to the Darwin candidate
+- **AND** generic, Win32, and Linux candidates do not gain template-specific fields.
+
+### Requirement: Public SDK SHALL export application-facing tray types
+
+The `opentray` package SHALL re-export the common application-facing TypeScript types that callers need to author tray code without deriving shapes from runtime functions. At minimum, the public entrypoint SHALL provide `TrayIcon`, `TrayTooltip`, `TrayEvent`, and `TrayBoundsResult`.
+
+Application examples and consumer skills SHALL import these names from `opentray` or the source entrypoint used by repository-local examples. They SHALL NOT teach ordinary app code to derive SDK shapes with `Parameters<typeof createTray>` or import `@opentray/spec` directly for common tray options, icons, tooltips, or events. Direct `@opentray/spec` imports remain valid for low-level protocol tooling and package-internal code.
+
+#### Scenario: App code can name icon atoms directly
+
+- **GIVEN** an application exports a helper that builds a tray icon
+- **WHEN** it imports `TrayIcon` from `opentray`
+- **THEN** the helper can publish a stable application-facing type
+- **AND** it does not need a direct `@opentray/spec` dependency for ordinary tray authoring.
+
+### Requirement: Icon candidate selection SHALL prefer current-OS candidates before same-mode generic candidates
 
 The tray projection resolver SHALL derive display candidates from `icon` using deterministic order. It SHALL inspect the following candidate sources:
 
-1. `icon["icon-text"]` as the icon-with-text candidate.
-2. `icon["icon-only"]` as the explicit icon-only candidate.
-3. `icon["text-only"]` as the explicit text-only candidate.
+1. Current-OS `icon["<os>-icon-only"]` and generic `icon["icon-only"]` as the effective icon-only candidate.
+2. `icon["text-only"]` as the explicit text-only candidate.
+3. Current-OS `icon["<os>-icon-text"]` and generic `icon["icon-text"]` as the effective icon-with-text candidate.
 4. `SimpleIcon` fallback fields picked from `icon`, including `type`, `data`, `path`, `width`, `height`, and optional `text`, as fallback material.
 
 When choosing the effective projection for a platform, explicit only-mode candidates SHALL have highest priority for their matching mode because they are authored as "only" projections. The effective priority SHALL be:
 
 ```text
-icon-only
+effective icon-only
 text-only
-icon-text
+effective icon-text
 fallback
 ```
 
-The fallback candidate SHALL be computed from `SimpleIcon` fields when present; if those fields are absent, fallback MAY use `icon-text`, then `icon-only`, then `text-only` so explicitly authored candidates can still degrade to another platform-supported mode.
+The effective icon-only candidate SHALL use the current OS-specific key when present and otherwise use `icon["icon-only"]`. The effective icon-text candidate SHALL use the current OS-specific key when present and otherwise use `icon["icon-text"]`. OS-specific keys for other operating systems SHALL be ignored by the current platform resolver.
+
+The fallback candidate SHALL be computed from `SimpleIcon` fields when present; if those fields are absent, fallback MAY use effective icon-text, effective icon-only, then text-only so explicitly authored candidates can still degrade to another platform-supported mode.
 
 #### Scenario: Explicit icon-only wins for icon-only platforms
 
@@ -559,6 +587,22 @@ The fallback candidate SHALL be computed from `SimpleIcon` fields when present; 
 - **WHEN** the resolver selects the tray projection
 - **THEN** it uses `icon["icon-only"]` before any generic top-level fallback image
 - **AND** it does not synthesize an icon from text.
+
+#### Scenario: Current OS icon-only shadows generic icon-only
+
+- **GIVEN** `icon["darwin-icon-only"]` and `icon["icon-only"]` are present
+- **AND** the selected platform is Darwin
+- **WHEN** the resolver selects an icon-only projection
+- **THEN** it uses `icon["darwin-icon-only"]`
+- **AND** it does not read `icon["icon-only"]` for that mode.
+
+#### Scenario: Non-current OS candidates do not shadow generic candidates
+
+- **GIVEN** `icon["win32-icon-only"]` and `icon["icon-only"]` are present
+- **AND** the selected platform is Darwin
+- **WHEN** the resolver selects an icon-only projection
+- **THEN** it ignores `icon["win32-icon-only"]`
+- **AND** it may use `icon["icon-only"]`.
 
 #### Scenario: Explicit text-only wins for text-only platforms
 
@@ -570,18 +614,26 @@ The fallback candidate SHALL be computed from `SimpleIcon` fields when present; 
 
 #### Scenario: Icon-text is used before generic fallback when only modes do not apply
 
-- **GIVEN** `icon["icon-text"]` is present
+- **GIVEN** effective `icon["<os>-icon-text"]` or generic `icon["icon-text"]` is present
 - **AND** no applicable `icon-only` or `text-only` projection is selected
 - **WHEN** the resolver needs an icon-with-text projection
-- **THEN** it uses `icon["icon-text"]`
+- **THEN** it uses the effective icon-text candidate
 - **AND** the candidate's `text` belongs to the icon projection rather than to a separate `title` ontology.
+
+#### Scenario: Darwin icon-text can carry template metadata and visible text
+
+- **GIVEN** `icon["darwin-icon-text"]` has image data, `text`, and `isTemplate: true`
+- **AND** the selected platform is Darwin
+- **WHEN** the resolver selects icon-text projection
+- **THEN** it uses the Darwin candidate image and text
+- **AND** the template flag is preserved for the native Darwin tray backend.
 
 #### Scenario: Explicit candidates can still provide fallback
 
 - **GIVEN** no `SimpleIcon` image fields are present on `icon`
 - **AND** one or more explicit candidates are present
 - **WHEN** the resolver computes fallback material
-- **THEN** it MAY fall back through `icon-text`, `icon-only`, and `text-only` in that order
+- **THEN** it MAY fall back through effective icon-text, effective icon-only, and text-only in that order
 - **AND** it MUST preserve the rule that only-mode candidates win for their own projection modes.
 
 ### Requirement: Tray visible text SHALL live in icon projection

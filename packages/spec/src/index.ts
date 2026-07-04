@@ -337,10 +337,24 @@ export type SimpleIcon = IconImage & { text?: string };
 
 export type IconText = IconImage & { text: string };
 
+export type DarwinIcon = IconImage & { isTemplate?: boolean };
+
+export type Win32Icon = IconImage;
+
+export type LinuxIcon = IconImage;
+
+export type DarwinIconText = DarwinIcon & { text: string };
+
 export interface IconCandidates {
   "icon-only"?: IconImage;
   "text-only"?: string;
   "icon-text"?: IconText;
+  "darwin-icon-only"?: DarwinIcon;
+  "darwin-icon-text"?: DarwinIconText;
+  "win32-icon-only"?: Win32Icon;
+  "win32-icon-text"?: IconText;
+  "linux-icon-only"?: LinuxIcon;
+  "linux-icon-text"?: IconText;
 }
 
 export type Icon = IconCandidates & Partial<SimpleIcon>;

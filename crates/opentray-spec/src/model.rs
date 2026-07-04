@@ -99,8 +99,14 @@ pub enum MenuItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Icon {
     pub icon_only: Option<IconImage>,
+    pub darwin_icon_only: Option<DarwinIcon>,
+    pub win32_icon_only: Option<IconImage>,
+    pub linux_icon_only: Option<IconImage>,
     pub text_only: Option<String>,
     pub icon_text: Option<IconText>,
+    pub darwin_icon_text: Option<DarwinIconText>,
+    pub win32_icon_text: Option<IconText>,
+    pub linux_icon_text: Option<IconText>,
     pub fallback: Option<SimpleIcon>,
 }
 
@@ -124,8 +130,14 @@ impl Icon {
     pub fn simple(image: IconImage) -> Self {
         Self {
             icon_only: None,
+            darwin_icon_only: None,
+            win32_icon_only: None,
+            linux_icon_only: None,
             text_only: None,
             icon_text: None,
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
             fallback: Some(SimpleIcon { image, text: None }),
         }
     }
@@ -146,12 +158,48 @@ impl Serialize for Icon {
                 serde_json::to_value(icon_only).map_err(serde::ser::Error::custom)?,
             );
         }
+        if let Some(icon_only) = &self.darwin_icon_only {
+            object.insert(
+                "darwin-icon-only".to_string(),
+                serde_json::to_value(icon_only).map_err(serde::ser::Error::custom)?,
+            );
+        }
+        if let Some(icon_only) = &self.win32_icon_only {
+            object.insert(
+                "win32-icon-only".to_string(),
+                serde_json::to_value(icon_only).map_err(serde::ser::Error::custom)?,
+            );
+        }
+        if let Some(icon_only) = &self.linux_icon_only {
+            object.insert(
+                "linux-icon-only".to_string(),
+                serde_json::to_value(icon_only).map_err(serde::ser::Error::custom)?,
+            );
+        }
         if let Some(text_only) = &self.text_only {
             object.insert("text-only".to_string(), Value::String(text_only.clone()));
         }
         if let Some(icon_text) = &self.icon_text {
             object.insert(
                 "icon-text".to_string(),
+                serde_json::to_value(icon_text).map_err(serde::ser::Error::custom)?,
+            );
+        }
+        if let Some(icon_text) = &self.darwin_icon_text {
+            object.insert(
+                "darwin-icon-text".to_string(),
+                serde_json::to_value(icon_text).map_err(serde::ser::Error::custom)?,
+            );
+        }
+        if let Some(icon_text) = &self.win32_icon_text {
+            object.insert(
+                "win32-icon-text".to_string(),
+                serde_json::to_value(icon_text).map_err(serde::ser::Error::custom)?,
+            );
+        }
+        if let Some(icon_text) = &self.linux_icon_text {
+            object.insert(
+                "linux-icon-text".to_string(),
                 serde_json::to_value(icon_text).map_err(serde::ser::Error::custom)?,
             );
         }
@@ -174,6 +222,24 @@ impl<'de> Deserialize<'de> for Icon {
             .map(serde_json::from_value)
             .transpose()
             .map_err(de::Error::custom)?;
+        let darwin_icon_only = object
+            .get("darwin-icon-only")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(de::Error::custom)?;
+        let win32_icon_only = object
+            .get("win32-icon-only")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(de::Error::custom)?;
+        let linux_icon_only = object
+            .get("linux-icon-only")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(de::Error::custom)?;
         let text_only = object
             .get("text-only")
             .map(|value| {
@@ -189,6 +255,24 @@ impl<'de> Deserialize<'de> for Icon {
             .map(serde_json::from_value)
             .transpose()
             .map_err(de::Error::custom)?;
+        let darwin_icon_text = object
+            .get("darwin-icon-text")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(de::Error::custom)?;
+        let win32_icon_text = object
+            .get("win32-icon-text")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(de::Error::custom)?;
+        let linux_icon_text = object
+            .get("linux-icon-text")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(de::Error::custom)?;
         let fallback = if object.contains_key("type") {
             Some(serde_json::from_value(value).map_err(de::Error::custom)?)
         } else {
@@ -196,8 +280,14 @@ impl<'de> Deserialize<'de> for Icon {
         };
         Ok(Self {
             icon_only,
+            darwin_icon_only,
+            win32_icon_only,
+            linux_icon_only,
             text_only,
             icon_text,
+            darwin_icon_text,
+            win32_icon_text,
+            linux_icon_text,
             fallback,
         })
     }
@@ -294,6 +384,100 @@ impl<'de> Deserialize<'de> for IconText {
     }
 }
 
+pub type Win32Icon = IconImage;
+
+pub type LinuxIcon = IconImage;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DarwinIcon {
+    pub image: IconImage,
+    pub is_template: bool,
+}
+
+impl Serialize for DarwinIcon {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut object = image_object(&self.image).map_err(serde::ser::Error::custom)?;
+        if self.is_template {
+            object.insert("isTemplate".to_string(), Value::Bool(true));
+        }
+        object.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DarwinIcon {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| de::Error::custom("darwin icon must be an object"))?;
+        let is_template = object
+            .get("isTemplate")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| de::Error::custom("darwin icon isTemplate must be a boolean"))
+            })
+            .transpose()?
+            .unwrap_or(false);
+        let image = serde_json::from_value(value).map_err(de::Error::custom)?;
+        Ok(Self { image, is_template })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DarwinIconText {
+    pub image: IconImage,
+    pub text: String,
+    pub is_template: bool,
+}
+
+impl Serialize for DarwinIconText {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut object = image_object(&self.image).map_err(serde::ser::Error::custom)?;
+        object.insert("text".to_string(), Value::String(self.text.clone()));
+        if self.is_template {
+            object.insert("isTemplate".to_string(), Value::Bool(true));
+        }
+        object.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DarwinIconText {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| de::Error::custom("darwin-icon-text candidate must be an object"))?;
+        let icon = DarwinIcon::deserialize(value.clone()).map_err(de::Error::custom)?;
+        let text = object
+            .get("text")
+            .map(|value| {
+                value.as_str().map(ToOwned::to_owned).ok_or_else(|| {
+                    de::Error::custom("darwin-icon-text candidate text must be a string")
+                })
+            })
+            .transpose()?
+            .ok_or_else(|| de::Error::custom("darwin-icon-text candidate requires text"))?;
+        Ok(Self {
+            image: icon.image,
+            text,
+            is_template: icon.is_template,
+        })
+    }
+}
+
 fn image_object(image: &IconImage) -> Result<Map<String, Value>, serde_json::Error> {
     match serde_json::to_value(image)? {
         Value::Object(object) => Ok(object),
@@ -327,12 +511,35 @@ mod tests {
             "path": "fallback.png",
             "text": "Fallback",
             "icon-only": { "type": "encoded", "data": [1, 2, 3] },
+            "darwin-icon-only": {
+                "type": "file",
+                "path": "darwin.png",
+                "isTemplate": true
+            },
+            "win32-icon-only": { "type": "file", "path": "win32.png" },
+            "linux-icon-only": { "type": "file", "path": "linux.png" },
             "text-only": "Build",
             "icon-text": {
                 "type": "rgba",
                 "data": [0, 0, 0, 0],
                 "width": 1,
                 "height": 1,
+                "text": "Build"
+            },
+            "darwin-icon-text": {
+                "type": "file",
+                "path": "darwin-text.png",
+                "text": "Build",
+                "isTemplate": true
+            },
+            "win32-icon-text": {
+                "type": "file",
+                "path": "win32-text.png",
+                "text": "Build"
+            },
+            "linux-icon-text": {
+                "type": "file",
+                "path": "linux-text.png",
                 "text": "Build"
             }
         }))
@@ -344,6 +551,27 @@ mod tests {
                 data: vec![1, 2, 3]
             })
         );
+        assert_eq!(
+            icon.darwin_icon_only,
+            Some(DarwinIcon {
+                image: IconImage::File {
+                    path: "darwin.png".to_string(),
+                },
+                is_template: true,
+            })
+        );
+        assert_eq!(
+            icon.win32_icon_only,
+            Some(IconImage::File {
+                path: "win32.png".to_string(),
+            })
+        );
+        assert_eq!(
+            icon.linux_icon_only,
+            Some(IconImage::File {
+                path: "linux.png".to_string(),
+            })
+        );
         assert_eq!(icon.text_only.as_deref(), Some("Build"));
         assert_eq!(
             icon.icon_text,
@@ -352,6 +580,34 @@ mod tests {
                     data: vec![0, 0, 0, 0],
                     width: 1,
                     height: 1,
+                },
+                text: "Build".to_string(),
+            })
+        );
+        assert_eq!(
+            icon.darwin_icon_text,
+            Some(DarwinIconText {
+                image: IconImage::File {
+                    path: "darwin-text.png".to_string(),
+                },
+                text: "Build".to_string(),
+                is_template: true,
+            })
+        );
+        assert_eq!(
+            icon.win32_icon_text,
+            Some(IconText {
+                image: IconImage::File {
+                    path: "win32-text.png".to_string(),
+                },
+                text: "Build".to_string(),
+            })
+        );
+        assert_eq!(
+            icon.linux_icon_text,
+            Some(IconText {
+                image: IconImage::File {
+                    path: "linux-text.png".to_string(),
                 },
                 text: "Build".to_string(),
             })
@@ -369,6 +625,10 @@ mod tests {
         let encoded = serde_json::to_value(icon).expect("serialized icon");
         assert_eq!(encoded["type"], "file");
         assert_eq!(encoded["icon-text"]["text"], "Build");
+        assert_eq!(encoded["darwin-icon-only"]["isTemplate"], true);
+        assert_eq!(encoded["darwin-icon-text"]["isTemplate"], true);
+        assert_eq!(encoded["win32-icon-text"]["text"], "Build");
+        assert_eq!(encoded["linux-icon-only"]["path"], "linux.png");
     }
 
     #[test]
@@ -381,6 +641,38 @@ mod tests {
         assert!(error
             .to_string()
             .contains("icon-text candidate requires text"));
+    }
+
+    #[test]
+    fn darwin_icon_template_defaults_to_false() {
+        let icon: Icon = serde_json::from_value(json!({
+            "darwin-icon-only": { "type": "file", "path": "darwin.png" }
+        }))
+        .expect("icon");
+
+        assert_eq!(
+            icon.darwin_icon_only,
+            Some(DarwinIcon {
+                image: IconImage::File {
+                    path: "darwin.png".to_string(),
+                },
+                is_template: false,
+            })
+        );
+        let encoded = serde_json::to_value(icon).expect("serialized icon");
+        assert!(encoded["darwin-icon-only"].get("isTemplate").is_none());
+    }
+
+    #[test]
+    fn darwin_icon_text_requires_text() {
+        let error = serde_json::from_value::<Icon>(json!({
+            "darwin-icon-text": { "type": "file", "path": "missing-text.png" }
+        }))
+        .expect_err("missing text");
+
+        assert!(error
+            .to_string()
+            .contains("darwin-icon-text candidate requires text"));
     }
 }
 

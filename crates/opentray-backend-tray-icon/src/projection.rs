@@ -21,12 +21,18 @@ impl TrayIconProjection {
         projection: &AppProjection,
     ) -> Result<Self, opentray_core::BackendError> {
         let mut routes = TrayIconRouteTable::default();
+        let fallback_title = projection
+            .title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or(&projection.app.app_id);
         let trays = projection
             .trays
             .iter()
             .map(|tray| {
                 TrayIconTrayProjection::from_tray_projection(
                     &projection.app.app_id,
+                    fallback_title,
                     tray,
                     &mut routes,
                 )
@@ -41,7 +47,7 @@ impl TrayIconProjection {
                 .icon
                 .as_ref()
                 .and_then(TrayIconSelection::from_icon)
-                .map(|selection| TrayIconAsset::from_icon_image(selection.image))
+                .map(TrayIconAsset::from_selection)
                 .transpose()?,
             trays,
             routes,
@@ -62,6 +68,7 @@ pub struct TrayIconTrayProjection {
 impl TrayIconTrayProjection {
     fn from_tray_projection(
         app_id: &str,
+        fallback_title: &str,
         tray: &TrayProjection,
         routes: &mut TrayIconRouteTable,
     ) -> Result<Self, opentray_core::BackendError> {
@@ -72,50 +79,152 @@ impl TrayIconTrayProjection {
             routes.insert_primary_event(&tray_icon_id, primary_menu_id);
         }
 
+        let selection = tray.icon.as_ref().and_then(TrayIconSelection::from_icon);
+        let icon = selection
+            .as_ref()
+            .map(|selection| TrayIconAsset::from_selection(*selection))
+            .transpose()?;
+        let title = selection
+            .and_then(|selection| selection.text.cloned())
+            .or_else(|| tray.icon.as_ref().and_then(|icon| icon.text_only.clone()))
+            .or_else(|| {
+                if icon.as_ref().is_some_and(TrayIconAsset::has_visible_pixels) {
+                    None
+                } else {
+                    Some(fallback_title.to_string())
+                }
+            });
+
         Ok(Self {
             tray_icon_id,
             tray_id: tray.tray_id.clone(),
-            title: tray
-                .icon
-                .as_ref()
-                .and_then(TrayIconSelection::from_icon)
-                .and_then(|selection| selection.text.cloned()),
+            title,
             tooltip: tray.tooltip.clone(),
-            icon: tray
-                .icon
-                .as_ref()
-                .and_then(TrayIconSelection::from_icon)
-                .map(|selection| TrayIconAsset::from_icon_image(selection.image))
-                .transpose()?,
+            icon,
             menu,
         })
     }
 }
 
+#[derive(Clone, Copy)]
 struct TrayIconSelection<'a> {
     image: &'a IconImage,
     text: Option<&'a String>,
+    is_template: bool,
 }
 
 impl<'a> TrayIconSelection<'a> {
     fn from_icon(icon: &'a Icon) -> Option<Self> {
-        if let Some(image) = &icon.icon_only {
-            return Some(Self { image, text: None });
+        let os = current_icon_os();
+        if let Some(selection) = effective_icon_only(icon, os) {
+            return Some(selection);
         }
         if icon.text_only.is_some() {
             return None;
         }
-        if let Some(icon_text) = &icon.icon_text {
-            return Some(Self {
-                image: &icon_text.image,
-                text: Some(&icon_text.text),
-            });
+        if let Some(selection) = effective_icon_text(icon, os) {
+            return Some(selection);
         }
         icon.fallback.as_ref().map(|fallback| Self {
             image: &fallback.image,
             text: fallback.text.as_ref(),
+            is_template: false,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IconOs {
+    Darwin,
+    Win32,
+    Linux,
+    Other,
+}
+
+fn current_icon_os() -> IconOs {
+    if cfg!(target_os = "macos") {
+        IconOs::Darwin
+    } else if cfg!(target_os = "windows") {
+        IconOs::Win32
+    } else if cfg!(target_os = "linux") {
+        IconOs::Linux
+    } else {
+        IconOs::Other
+    }
+}
+
+fn effective_icon_only(icon: &Icon, os: IconOs) -> Option<TrayIconSelection<'_>> {
+    match os {
+        IconOs::Darwin => icon
+            .darwin_icon_only
+            .as_ref()
+            .map(|candidate| TrayIconSelection {
+                image: &candidate.image,
+                text: None,
+                is_template: candidate.is_template,
+            }),
+        IconOs::Win32 => icon
+            .win32_icon_only
+            .as_ref()
+            .map(|image| TrayIconSelection {
+                image,
+                text: None,
+                is_template: false,
+            }),
+        IconOs::Linux => icon
+            .linux_icon_only
+            .as_ref()
+            .map(|image| TrayIconSelection {
+                image,
+                text: None,
+                is_template: false,
+            }),
+        IconOs::Other => None,
+    }
+    .or_else(|| {
+        icon.icon_only.as_ref().map(|image| TrayIconSelection {
+            image,
+            text: None,
+            is_template: false,
+        })
+    })
+}
+
+fn effective_icon_text(icon: &Icon, os: IconOs) -> Option<TrayIconSelection<'_>> {
+    match os {
+        IconOs::Darwin => icon
+            .darwin_icon_text
+            .as_ref()
+            .map(|candidate| TrayIconSelection {
+                image: &candidate.image,
+                text: Some(&candidate.text),
+                is_template: candidate.is_template,
+            }),
+        IconOs::Win32 => icon
+            .win32_icon_text
+            .as_ref()
+            .map(|candidate| TrayIconSelection {
+                image: &candidate.image,
+                text: Some(&candidate.text),
+                is_template: false,
+            }),
+        IconOs::Linux => icon
+            .linux_icon_text
+            .as_ref()
+            .map(|candidate| TrayIconSelection {
+                image: &candidate.image,
+                text: Some(&candidate.text),
+                is_template: false,
+            }),
+        IconOs::Other => None,
+    }
+    .or_else(|| {
+        icon.icon_text.as_ref().map(|candidate| TrayIconSelection {
+            image: &candidate.image,
+            text: Some(&candidate.text),
+            is_template: false,
+        })
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,23 +233,46 @@ pub enum TrayIconAsset {
         data: Vec<u8>,
         width: u32,
         height: u32,
+        is_template: bool,
     },
 }
 
 impl TrayIconAsset {
-    fn from_icon_image(image: &IconImage) -> Result<Self, opentray_core::BackendError> {
+    pub fn has_visible_pixels(&self) -> bool {
+        match self {
+            Self::Rgba { data, .. } => data.chunks_exact(4).any(|pixel| pixel[3] != 0),
+        }
+    }
+
+    pub fn is_template(&self) -> bool {
+        match self {
+            Self::Rgba { is_template, .. } => *is_template,
+        }
+    }
+
+    fn from_selection(
+        selection: TrayIconSelection<'_>,
+    ) -> Result<Self, opentray_core::BackendError> {
+        Self::from_icon_image(selection.image, selection.is_template)
+    }
+
+    fn from_icon_image(
+        image: &IconImage,
+        is_template: bool,
+    ) -> Result<Self, opentray_core::BackendError> {
         match image {
             IconImage::Rgba {
                 data,
                 width,
                 height,
-            } => Self::from_rgba(data, *width, *height),
+            } => Self::from_rgba(data, *width, *height, is_template),
             IconImage::Encoded { data } => decode_png_bytes(
                 data,
                 "encoded tray icon bytes",
                 "tray_icon_encoded_decode_failed",
+                is_template,
             ),
-            IconImage::File { path } => decode_png_file(path),
+            IconImage::File { path } => decode_png_file(path, is_template),
         }
     }
 
@@ -148,6 +280,7 @@ impl TrayIconAsset {
         data: &[u8],
         width: u32,
         height: u32,
+        is_template: bool,
     ) -> Result<Self, opentray_core::BackendError> {
         validate_rgba_dimensions(width, height, "rgba tray icon")?;
         let expected_length = rgba_byte_len(width, height)?;
@@ -165,6 +298,7 @@ impl TrayIconAsset {
             data: data.to_vec(),
             width,
             height,
+            is_template,
         })
     }
 }
@@ -403,7 +537,10 @@ fn encode_component(input: &str) -> String {
         .replace('/', "%2F")
 }
 
-fn decode_png_file(path: &str) -> Result<TrayIconAsset, opentray_core::BackendError> {
+fn decode_png_file(
+    path: &str,
+    is_template: bool,
+) -> Result<TrayIconAsset, opentray_core::BackendError> {
     let bytes = std::fs::read(path).map_err(|error| {
         tray_icon_failure(
             "tray_icon_file_read_failed",
@@ -414,6 +551,7 @@ fn decode_png_file(path: &str) -> Result<TrayIconAsset, opentray_core::BackendEr
         &bytes,
         &format!("file tray icon: {path}"),
         "tray_icon_file_decode_failed",
+        is_template,
     )
 }
 
@@ -421,6 +559,7 @@ fn decode_png_bytes(
     bytes: &[u8],
     source: &str,
     error_code: &'static str,
+    is_template: bool,
 ) -> Result<TrayIconAsset, opentray_core::BackendError> {
     let mut decoder = Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(Transformations::normalize_to_color8() | Transformations::ALPHA);
@@ -456,6 +595,7 @@ fn decode_png_bytes(
         data,
         width: info.width,
         height: info.height,
+        is_template,
     })
 }
 
@@ -577,7 +717,9 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use opentray_spec::{AppRef, Icon, IconImage, IconText, Menu, MenuItem, SimpleIcon};
+    use opentray_spec::{
+        AppRef, DarwinIcon, DarwinIconText, Icon, IconImage, IconText, Menu, MenuItem, SimpleIcon,
+    };
     use png::Encoder;
 
     use super::*;
@@ -775,6 +917,7 @@ mod tests {
                 data: vec![13, 37, 91, 255],
                 width: 1,
                 height: 1,
+                is_template: false,
             })
         );
     }
@@ -796,8 +939,38 @@ mod tests {
                 data: vec![21, 42, 84, 255],
                 width: 1,
                 height: 1,
+                is_template: false,
             })
         );
+    }
+
+    #[test]
+    fn missing_icon_projects_app_name_as_visible_tray_text() {
+        let projection =
+            TrayIconProjection::from_app_projection(&projection_with_optional_icon(None))
+                .expect("projection");
+
+        assert_eq!(projection.trays[0].icon, None);
+        assert_eq!(projection.trays[0].title.as_deref(), Some("Status App"));
+    }
+
+    #[test]
+    fn transparent_icon_projects_app_name_as_visible_tray_text() {
+        let projection = TrayIconProjection::from_app_projection(&projection_with_optional_icon(
+            Some(Icon::rgba(vec![0, 0, 0, 0], 1, 1)),
+        ))
+        .expect("projection");
+
+        assert_eq!(
+            projection.trays[0].icon,
+            Some(TrayIconAsset::Rgba {
+                data: vec![0, 0, 0, 0],
+                width: 1,
+                height: 1,
+                is_template: false,
+            })
+        );
+        assert_eq!(projection.trays[0].title.as_deref(), Some("Status App"));
     }
 
     #[test]
@@ -822,6 +995,9 @@ mod tests {
                 width: 1,
                 height: 1,
             }),
+            darwin_icon_only: None,
+            win32_icon_only: None,
+            linux_icon_only: None,
             text_only: None,
             icon_text: Some(IconText {
                 image: IconImage::Rgba {
@@ -831,6 +1007,9 @@ mod tests {
                 },
                 text: "Visible".to_string(),
             }),
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
             fallback: Some(SimpleIcon {
                 image: IconImage::Rgba {
                     data: vec![9, 10, 11, 12],
@@ -848,6 +1027,7 @@ mod tests {
                 data: vec![1, 2, 3, 4],
                 width: 1,
                 height: 1,
+                is_template: false,
             })
         );
         assert_eq!(projection.trays[0].title, None);
@@ -857,6 +1037,9 @@ mod tests {
     fn text_only_icon_preserves_unsupported_image_absence() {
         let projection = TrayIconProjection::from_app_projection(&projection_with_icon(Icon {
             icon_only: None,
+            darwin_icon_only: None,
+            win32_icon_only: None,
+            linux_icon_only: None,
             text_only: Some("Build".to_string()),
             icon_text: Some(IconText {
                 image: IconImage::Rgba {
@@ -866,6 +1049,9 @@ mod tests {
                 },
                 text: "Build".to_string(),
             }),
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
             fallback: Some(SimpleIcon {
                 image: IconImage::Rgba {
                     data: vec![9, 10, 11, 12],
@@ -878,13 +1064,16 @@ mod tests {
         .expect("projection");
 
         assert_eq!(projection.trays[0].icon, None);
-        assert_eq!(projection.trays[0].title, None);
+        assert_eq!(projection.trays[0].title.as_deref(), Some("Build"));
     }
 
     #[test]
     fn icon_text_candidate_supplies_visible_text_when_image_supported() {
         let projection = TrayIconProjection::from_app_projection(&projection_with_icon(Icon {
             icon_only: None,
+            darwin_icon_only: None,
+            win32_icon_only: None,
+            linux_icon_only: None,
             text_only: None,
             icon_text: Some(IconText {
                 image: IconImage::Rgba {
@@ -894,6 +1083,9 @@ mod tests {
                 },
                 text: "Build".to_string(),
             }),
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
             fallback: None,
         }))
         .expect("projection");
@@ -904,9 +1096,100 @@ mod tests {
                 data: vec![5, 6, 7, 8],
                 width: 1,
                 height: 1,
+                is_template: false,
             })
         );
         assert_eq!(projection.trays[0].title.as_deref(), Some("Build"));
+    }
+
+    #[test]
+    fn darwin_icon_only_shadows_generic_icon_only_candidate() {
+        let icon = Icon {
+            icon_only: Some(rgba_image([1, 2, 3, 4])),
+            darwin_icon_only: Some(DarwinIcon {
+                image: rgba_image([5, 6, 7, 8]),
+                is_template: true,
+            }),
+            win32_icon_only: None,
+            linux_icon_only: None,
+            text_only: None,
+            icon_text: None,
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
+            fallback: None,
+        };
+
+        let selection = effective_icon_only(&icon, IconOs::Darwin).expect("selection");
+
+        assert_selection(selection, &[5, 6, 7, 8], None, true);
+    }
+
+    #[test]
+    fn win32_icon_only_shadows_generic_icon_only_candidate() {
+        let icon = Icon {
+            icon_only: Some(rgba_image([1, 2, 3, 4])),
+            darwin_icon_only: None,
+            win32_icon_only: Some(rgba_image([9, 10, 11, 12])),
+            linux_icon_only: None,
+            text_only: None,
+            icon_text: None,
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
+            fallback: None,
+        };
+
+        let selection = effective_icon_only(&icon, IconOs::Win32).expect("selection");
+
+        assert_selection(selection, &[9, 10, 11, 12], None, false);
+    }
+
+    #[test]
+    fn non_matching_os_icon_candidate_does_not_shadow_generic() {
+        let icon = Icon {
+            icon_only: Some(rgba_image([1, 2, 3, 4])),
+            darwin_icon_only: None,
+            win32_icon_only: Some(rgba_image([9, 10, 11, 12])),
+            linux_icon_only: None,
+            text_only: None,
+            icon_text: None,
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
+            fallback: None,
+        };
+
+        let selection = effective_icon_only(&icon, IconOs::Darwin).expect("selection");
+
+        assert_selection(selection, &[1, 2, 3, 4], None, false);
+    }
+
+    #[test]
+    fn darwin_icon_text_carries_template_and_visible_text() {
+        let icon = Icon {
+            icon_only: None,
+            darwin_icon_only: None,
+            win32_icon_only: None,
+            linux_icon_only: None,
+            text_only: None,
+            icon_text: Some(IconText {
+                image: rgba_image([1, 2, 3, 4]),
+                text: "Generic".to_string(),
+            }),
+            darwin_icon_text: Some(DarwinIconText {
+                image: rgba_image([5, 6, 7, 8]),
+                text: "Darwin".to_string(),
+                is_template: true,
+            }),
+            win32_icon_text: None,
+            linux_icon_text: None,
+            fallback: None,
+        };
+
+        let selection = effective_icon_text(&icon, IconOs::Darwin).expect("selection");
+
+        assert_selection(selection, &[5, 6, 7, 8], Some("Darwin"), true);
     }
 
     fn menu(id: MenuItemId) -> Menu {
@@ -938,19 +1221,52 @@ mod tests {
         }
     }
 
+    fn rgba_image(data: [u8; 4]) -> IconImage {
+        IconImage::Rgba {
+            data: data.to_vec(),
+            width: 1,
+            height: 1,
+        }
+    }
+
+    fn assert_selection(
+        selection: TrayIconSelection<'_>,
+        expected_data: &[u8],
+        expected_text: Option<&str>,
+        expected_template: bool,
+    ) {
+        match selection.image {
+            IconImage::Rgba {
+                data,
+                width,
+                height,
+            } => {
+                assert_eq!(data, expected_data);
+                assert_eq!((*width, *height), (1, 1));
+            }
+            image => panic!("unexpected image: {image:?}"),
+        }
+        assert_eq!(selection.text.map(String::as_str), expected_text);
+        assert_eq!(selection.is_template, expected_template);
+    }
+
     fn projection_with_icon(icon: Icon) -> AppProjection {
+        projection_with_optional_icon(Some(icon))
+    }
+
+    fn projection_with_optional_icon(icon: Option<Icon>) -> AppProjection {
         AppProjection {
             app: AppRef {
                 app_id: "surface-1".to_string(),
             },
-            title: None,
+            title: Some("Status App".to_string()),
             tooltip: None,
             icon: None,
             trays: vec![TrayProjection {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
                 tooltip: None,
-                icon: Some(icon),
+                icon,
                 menu: None,
             }],
         }
