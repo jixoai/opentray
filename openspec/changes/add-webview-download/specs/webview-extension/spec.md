@@ -48,9 +48,9 @@ The extension SHALL report a typed unsupported error on platforms where the WebV
 
 ### Requirement: Webview download SHALL be governed by the multipleDownloads permission family
 
-The extension SHALL consult the existing `multipleDownloads` browser permission family before allowing a download to proceed. The permission decision SHALL follow the same `allow` / `deny` / `prompt` semantics already defined for other browser permission families, and the same per-origin source rule model.
+The extension SHALL consult the existing `multipleDownloads` browser permission family before allowing a download to proceed. The permission decision SHALL follow the same `allow` / `deny` / `prompt` ontology already defined for other browser permission families, and the same per-origin source rule model.
 
-Local page sources SHALL be allowed to download by default. Remote page sources SHALL be denied by default unless an explicit policy rule allows them. When the resolved decision is `prompt`, the extension SHALL defer to the native permission prompt flow owned by the Darwin runtime carrier change (`darwin-runtime-carrier-and-webview-permissions`); this change SHALL NOT introduce a parallel prompt UI for downloads.
+Local page sources SHALL be allowed to download by default. Remote page sources SHALL be denied by default unless an explicit policy rule allows them. Until the carrier-owned native permission prompt substrate exists, a resolved `prompt` decision SHALL fail closed for downloads: the extension SHALL block the download and SHALL NOT introduce a parallel download-specific prompt UI.
 
 The `multipleDownloads` permission family already exists in the TypeScript facade permission store and in the native permission policy parser; this requirement makes the platform webview builder actually consume it for download gating, removing the prior dead-code state where the family was parsed but never enforced.
 
@@ -74,11 +74,11 @@ The `multipleDownloads` permission family already exists in the TypeScript facad
 - **WHEN** the page triggers a standard HTML download
 - **THEN** the download proceeds to the Downloads directory.
 
-#### Scenario: Prompt decision reuses the carrier-owned permission flow
+#### Scenario: Prompt decision fails closed until the carrier prompt substrate exists
 
 - **GIVEN** a WebView is shown with a `multipleDownloads` policy of `decision: "prompt"`
 - **WHEN** the page triggers a standard HTML download
-- **THEN** the extension routes the decision through the native permission prompt flow owned by the Darwin runtime carrier change
+- **THEN** the extension blocks the download
 - **AND** this change does not render its own download-specific prompt UI.
 
 ### Requirement: Webview saveAs SHALL be an explicit opt-in over the default silent download
