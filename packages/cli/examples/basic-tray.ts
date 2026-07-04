@@ -1,9 +1,9 @@
-import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
-
 import {
   createClient,
   createInitFrame,
+  type ClientRequestFrame,
   type OpenTrayTransport,
+  type ServerFrame,
 } from "../src/index";
 
 class RecordingTransport implements OpenTrayTransport {

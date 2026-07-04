@@ -14,18 +14,33 @@ OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()
 For the first app, call `createTray()` directly. The default runtime starts the local broker automatically:
 
 ```ts
-import { createTray } from "opentray";
+import {
+  createTray,
+  type CreateTrayHandle,
+  type CreateTrayOptions,
+  type TrayIcon,
+} from "opentray";
 
-const tray = await createTray({
+const icon: TrayIcon = { "text-only": "OT" };
+let tray: CreateTrayHandle;
+const options: CreateTrayOptions = {
   id: "com.example.first-app",
-  icon: { "text-only": "OT" },
-  menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
-}, {
+  icon,
+  menu: {
+    items: [
+      {
+        title: "Quit",
+        primaryEvent: true,
+        onMenuClick: () => void tray.destroy(),
+      },
+    ],
+  },
+};
+
+tray = await createTray(options, {
   appId: "com.example.first-app",
   appName: "First App",
 });
-
-tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
 ```
 
 ## Workspace
@@ -70,12 +85,22 @@ const tray = await createTray({
     description: "Build monitor",
   },
   menu: {
-    items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }],
+    items: [
+      {
+        title: "Open",
+        primaryEvent: true,
+        onMenuClick: () => {
+          // Open an app-owned window, command, or extension surface.
+        },
+      },
+      "-",
+      ["More", ["Settings", "Quit"]],
+    ],
   },
 });
 ```
 
-Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`), not a top-level tray `title`.
+Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`), not a top-level tray `title`. If no visible icon/text survives projection, native tray backends fall back to the runtime `appName` so the tray does not become an invisible click target.
 Runtime identity is separate from tray projection. When a host needs explicit
 diagnostic identity, pass it through runtime options:
 
@@ -85,6 +110,15 @@ await createTray(options, {
   appName: "Build",
 });
 ```
+
+The `opentray` package re-exports application-facing types such as
+`CreateTrayOptions`, `TrayIcon`, `TrayMenu`, `TrayTooltip`, `TrayEvent`, and
+`TrayBoundsResult`. Application code should not need `Parameters<typeof createTray>`
+or a direct `@opentray/spec` import for ordinary tray work.
+
+Top-level `createTray(...)` and its returned `setMenu(...)` accept app-facing
+menu shorthand. Lower-level `createClient(...)` remains protocol-only for tools
+that need exact wire shapes.
 
 If you already own the host process, `createTray()` remains the lower-level tray API.
 

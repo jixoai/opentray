@@ -1,6 +1,6 @@
-import type { Icon } from "@opentray/spec";
+import type { TrayIcon } from "../../src/index";
 
-export function createVisibleTrayIcon(): Icon {
+export function createVisibleTrayIcon(): TrayIcon {
   const width = 32;
   const height = 32;
   const data: number[] = [];

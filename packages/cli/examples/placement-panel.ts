@@ -1,10 +1,9 @@
-import type { Menu } from "@opentray/spec";
-
 import {
   WebviewPlacementKit,
   type WebviewPlacement,
   type WebviewPlacementResult,
 } from "../../ext-webview/src/index";
+import type { Menu } from "../src/index";
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import {
   createVisibleTrayIcon,

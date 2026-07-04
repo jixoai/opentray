@@ -30,6 +30,7 @@ Use this skill when the user wants to build with OpenTray, not hack on the repo.
 - The public `opentray` CLI binary does not expose daemon lifecycle or smoke subcommands. It only prints a usage pointer. Do not recommend `opentray daemon ...` or `opentray smoke ...` to package users.
 - For real tray/window behavior, run the source-tree example scripts under `packages/cli/examples` (see `references/visual-acceptance.md`), or compose a short SDK recipe and explain its side effects before running it.
 - The top-level SDK entrypoint is `createTray(options, runtimeOptions?)`. Do not reach for `createSpace` / `resolveDefaultSpace` / `createApp` — those belong to an earlier surface model and no longer exist.
+- Menu item-local `onMenuClick` callbacks are a convenience layer, not a replacement for tray handle events. Keep teaching `tray.onMenuClick(...)`, `tray.onTrayClick(...)`, `tray.onTrayDoubleClick(...)`, and `tray.listen(...)` when apps need stable IDs, centralized routing, or raw tray activation.
 - Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`), not a top-level tray `title`. There is no `tray.setTitle()`; mutate text through `setIcon(...)`.
 - Keep platform truth explicit. If a platform or icon/runtime capability is limited, say so instead of pretending it works.
 - Distinguish between protocol-only examples and real native visual acceptance.

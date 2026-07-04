@@ -5,8 +5,6 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Menu } from "@opentray/spec";
-
 import type {
   WebviewIpcMessage,
   WebviewTrayCapability,
@@ -14,7 +12,11 @@ import type {
 } from "../../../ext-webview/src/index";
 import { WebviewExt } from "../../../ext-webview/src/index";
 import { terminateWorkspaceDevBrokerProcess } from "../../src/daemon/broker-command";
-import { createClient, type EventfulTrayHandle } from "../../src/index";
+import {
+  createClient,
+  type EventfulTrayHandle,
+  type Menu,
+} from "../../src/index";
 import {
   connectLocalBroker,
   type LocalBrokerClient,

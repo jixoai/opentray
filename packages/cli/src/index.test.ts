@@ -7,11 +7,12 @@ import {
   createTrayHandle,
   formatBrokerEndpointName,
   PROTOCOL_VERSION,
+  type ClientRequestFrame,
   type OpenTrayTransport,
   type OpenTrayConnection,
   type OpenTrayEventFrame,
+  type ServerFrame,
 } from "./index";
-import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 
 describe("opentray client", () => {
   it("routes extension commands through public protocol", async () => {

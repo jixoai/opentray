@@ -304,6 +304,33 @@ The primary role SHALL be additive. Existing menu items without `primaryEvent` S
 - **THEN** the client receives an `event` frame whose event is `menuClick`
 - **AND** the event carries the same `itemId: 8` used by normal menu selection.
 
+### Requirement: Top-level createTray SHALL normalize ergonomic menu input
+
+The public `opentray` package MAY accept app-facing menu shorthand in top-level `createTray(...)` and the tray handle returned by that function. This shorthand SHALL normalize to pure protocol `TrayOptions` before crossing the runtime boundary. The `@opentray/spec` package, `TrayOptions`, `Menu`, `MenuItem`, and lower-level `createClient(...)` path SHALL remain protocol-only and SHALL NOT accept callbacks.
+
+App-facing menu shorthand SHALL support plain string items, hyphen-only separator strings, tuple submenus such as `["Group", ["Child"]]`, plain item objects with omitted `type: "item"` and omitted `id`, and item-local `onMenuClick` callbacks. Generated ids SHALL be local implementation detail for callback routing; apps that need stable external identity SHOULD provide explicit ids.
+
+#### Scenario: Shorthand menu becomes pure protocol data
+
+- **GIVEN** a developer calls top-level `createTray(...)` with menu items `"Open"`, `"-"`, and `["Group", ["Child"]]`
+- **WHEN** the SDK sends the create-tray request
+- **THEN** the request contains only protocol menu items with explicit `type` and generated ids where needed
+- **AND** it does not include callback functions.
+
+#### Scenario: Item-local callback routes through menuClick
+
+- **GIVEN** a shorthand item declares `onMenuClick`
+- **WHEN** the owning tray receives `menuClick` for the normalized item id
+- **THEN** the SDK invokes that item-local callback
+- **AND** the protocol event remains a normal `menuClick`.
+
+#### Scenario: setMenu replaces local callback bindings after ACK
+
+- **GIVEN** a top-level tray handle has item-local menu callbacks
+- **WHEN** the app calls `tray.setMenu(...)` with ergonomic menu input
+- **THEN** the SDK sends normalized protocol menu data
+- **AND** it replaces old item-local callback bindings only after the runtime acknowledges the menu update.
+
 ### Requirement: Tray placement result SHALL carry provenance in the public SDK
 
 The public TypeScript SDK SHALL expose tray placement through a durable result shape that can represent authoritative native bounds, future inferred placement, and unavailable placement. This result shape SHALL be tray-owned and SHALL be reusable by both trusted host code and page projections.
@@ -547,14 +574,21 @@ Implementation MAY refine the exact TypeScript expression if plain `Icons & Simp
 
 ### Requirement: Public SDK SHALL export application-facing tray types
 
-The `opentray` package SHALL re-export the common application-facing TypeScript types that callers need to author tray code without deriving shapes from runtime functions. At minimum, the public entrypoint SHALL provide `TrayIcon`, `TrayTooltip`, `TrayEvent`, and `TrayBoundsResult`.
+The `opentray` package SHALL re-export the common application-facing TypeScript types that callers need to author tray code without deriving shapes from runtime functions. At minimum, the public entrypoint SHALL provide `CreateTrayOptions`, `TrayIcon`, `TrayMenu`, `TrayTooltip`, `TrayEvent`, and `TrayBoundsResult`.
 
-Application examples and consumer skills SHALL import these names from `opentray` or the source entrypoint used by repository-local examples. They SHALL NOT teach ordinary app code to derive SDK shapes with `Parameters<typeof createTray>` or import `@opentray/spec` directly for common tray options, icons, tooltips, or events. Direct `@opentray/spec` imports remain valid for low-level protocol tooling and package-internal code.
+Application examples and consumer skills SHALL import these names from `opentray` or the source entrypoint used by repository-local examples. They SHALL NOT teach ordinary app code to derive SDK shapes with `Parameters<typeof createTray>` or import `@opentray/spec` directly for common tray options, icons, menus, tooltips, or events. Direct `@opentray/spec` imports remain valid for low-level protocol tooling and package-internal code.
 
-#### Scenario: App code can name icon atoms directly
+#### Scenario: App code can name createTray options directly
 
-- **GIVEN** an application exports a helper that builds a tray icon
-- **WHEN** it imports `TrayIcon` from `opentray`
+- **GIVEN** an application imports `createTray` and `CreateTrayOptions` from `opentray`
+- **WHEN** it declares its tray options before calling `createTray`
+- **THEN** the public type is available without `typeof` inference
+- **AND** the type describes the same first argument accepted by `createTray`.
+
+#### Scenario: App code can name icon and menu atoms directly
+
+- **GIVEN** an application exports a helper that builds a tray icon or menu
+- **WHEN** it imports `TrayIcon` or `TrayMenu` from `opentray`
 - **THEN** the helper can publish a stable application-facing type
 - **AND** it does not need a direct `@opentray/spec` dependency for ordinary tray authoring.
 

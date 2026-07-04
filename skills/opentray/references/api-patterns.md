@@ -16,6 +16,10 @@ Use this reference when the user asks how to write code with OpenTray.
 
 OpenTray no longer exposes `createSpace`, `resolveDefaultSpace`, or `createApp`. Application identity (`appId` / `appName`) is passed through `runtimeOptions`, not a separate creation step.
 
+The `opentray` package re-exports common application types: `CreateTrayOptions`, `TrayIcon`, `TrayMenu`, `TrayTooltip`, `TrayEvent`, `TrayBoundsResult`, and the lower-level protocol frame types. Prefer these names over `Parameters<typeof createTray>` or direct `@opentray/spec` imports in ordinary application code.
+
+`primaryEvent` is an additive role on a normal menu item. It still emits `menuClick`, so handle it through item-local `onMenuClick` for simple commands or `tray.onMenuClick(...)` for centralized routing. Use `tray.onTrayClick(...)` for independent raw tray-icon clicks. Do not create a separate `bindPrimaryEvent` API unless the event ontology changes.
+
 Use `runTrayApp()` when the user wants the smallest first app and does not want to reason about host-thread choreography yet.
 
 The `runTrayApp()` callback executes in the app worker. Keep it self-contained; import official extensions such as `@opentray/ext-webview` inside the callback when the first app needs them.
@@ -23,25 +27,51 @@ The `runTrayApp()` callback executes in the app worker. Keep it self-contained; 
 ## Typical Shape
 
 ```ts
-import { createTray } from "opentray";
+import { createTray, type CreateTrayOptions, type TrayIcon } from "opentray";
 
-const tray = await createTray({
+const icon: TrayIcon = { type: "file", path: "./tray.png" };
+const options: CreateTrayOptions = {
   id: "com.example.status",
   tooltip: { title: "OpenTray", description: "Status" },
-  icon: { type: "file", path: "./tray.png" },
-  menu: { items: [{ type: "item", id: 1, title: "Open" }] },
+  icon,
+  menu: {
+    items: [
+      {
+        title: "Open",
+        primaryEvent: true,
+        onMenuClick: () => {
+          // Simple local command.
+        },
+      },
+      "-",
+      ["More", [{ id: 20, title: "Settings" }, "Quit"]],
+    ],
+  },
+};
+
+const tray = await createTray(options);
+
+tray.onMenuClick(({ itemId }) => {
+  if (itemId === 20) {
+    // Centralized routing for stable menu ids.
+  }
+});
+
+tray.onTrayClick(({ button, x, y }) => {
+  // Raw tray activation, independent from menu item primaryEvent.
 });
 
 await tray.setIcon({ type: "file", path: "./tray-on.png", text: "Ready" });
 await tray.setMenu({
-  items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }],
-});
-tray.onMenuClick(({ itemId }) => {
-  if (itemId === 1) {
-    // Open the app surface or run the primary action.
-  }
+  items: [
+    "Ready",
+    "-",
+    { title: "Quit", onMenuClick: () => void tray.destroy() },
+  ],
 });
 ```
+
+Use item-local `onMenuClick` when the action belongs entirely to that menu declaration. Use `tray.onMenuClick(...)` when the app wants a single router, explicit item IDs, logging, permission checks, or shared command dispatch. These are sibling action sources over the same `menuClick` event, not competing ontologies.
 
 To supply explicit diagnostic identity for the owning runtime:
 

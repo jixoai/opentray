@@ -46,14 +46,19 @@ Typical first app:
 ```ts
 import { runTrayApp } from "opentray/node";
 
-await runTrayApp(async ({ createTray }) => {
-  const tray = await createTray({
-    id: "com.example.status",
-    icon: { "text-only": "OT" },
-    menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
-  });
-  tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
-}, { autoExitAfterMs: 1500 });
+await runTrayApp(
+  async ({ createTray }) => {
+    const tray = await createTray({
+      id: "com.example.status",
+      icon: { "text-only": "OT" },
+      menu: {
+        items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }],
+      },
+    });
+    tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
+  },
+  { autoExitAfterMs: 1500 }
+);
 ```
 
 If the user already owns the runtime/process boundary, use the lower-level direct tray path:
@@ -66,17 +71,46 @@ If the user already owns the runtime/process boundary, use the lower-level direc
 Typical consumer entrypoint:
 
 ```ts
-import { createTray } from "opentray";
+import { createTray, type CreateTrayOptions, type TrayIcon } from "opentray";
 
-const tray = await createTray({
+const icon: TrayIcon = { type: "file", path: "./tray.png" };
+const options: CreateTrayOptions = {
   id: "com.example.status",
   tooltip: { title: "OpenTray", description: "Status" },
-  icon: { type: "file", path: "./tray.png" },
-  menu: { items: [{ type: "item", id: 1, title: "Open" }] },
+  icon,
+  menu: {
+    items: [
+      {
+        title: "Open",
+        primaryEvent: true,
+        onMenuClick: () => {
+          // Simple local command.
+        },
+      },
+      "-",
+      ["More", [{ id: 20, title: "Settings" }, "Quit"]],
+    ],
+  },
+};
+
+const tray = await createTray(options);
+
+tray.onMenuClick(({ itemId }) => {
+  if (itemId === 20) {
+    // Centralized routing for stable menu ids.
+  }
+});
+
+tray.onTrayClick(({ button, x, y }) => {
+  // Raw tray activation, independent from menu item primaryEvent.
 });
 ```
 
-Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`), not a top-level tray `title`. There is no `tray.setTitle()`; update text through `setIcon(...)`.
+Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`), not a top-level tray `title`. If no visible icon/text survives projection, native tray backends fall back to the runtime `appName`. There is no `tray.setTitle()`; update text through `setIcon(...)`.
+
+Use the public types exported by `opentray` (`CreateTrayOptions`, `CreateTrayHandle`, `TrayIcon`, `TrayMenu`, `TrayTooltip`) instead of deriving shapes with `typeof` in app code. Top-level `createTray(...)` and its returned `setMenu(...)` accept app-facing menu shorthand; import `@opentray/spec` directly only for low-level protocol tooling.
+
+Item-local `onMenuClick` is useful for one-off commands, but it does not replace handle events. Keep `tray.onMenuClick(...)` for stable ID routing and `tray.onTrayClick(...)` for raw tray-icon activation.
 
 Runtime identity (app id/name) is separate from tray projection and is passed as the second argument when a host needs explicit diagnostic identity:
 

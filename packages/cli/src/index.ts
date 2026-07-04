@@ -17,7 +17,23 @@ export {
   type TrayExtensionMountSpec,
   type TrayHandle,
 } from "./client";
-export { createTray, type OpenTrayRuntimeOptions } from "./sdk";
+export {
+  createTray,
+  type CreateTrayHandle,
+  type CreateTrayOptions,
+  type OpenTrayRuntimeOptions,
+} from "./sdk";
+export {
+  type CreateTrayCheckItem,
+  type CreateTrayItem,
+  type CreateTrayMenu,
+  type CreateTrayMenu as TrayMenu,
+  type CreateTrayMenuClickHandler,
+  type CreateTrayMenuItem,
+  type CreateTrayRadioItem,
+  type CreateTraySeparatorItem,
+  type CreateTraySubmenuItem,
+} from "./menu-input";
 export {
   createBrokerEndpointIdentity,
   formatBrokerEndpointName,

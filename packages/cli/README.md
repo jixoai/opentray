@@ -30,18 +30,33 @@ Use `alpha-A-B` for alpha packages on the same protocol line. Replace `A-B` with
 For the first app, call `createTray()` directly. The quickstart stays in one file and does not ask the user to wire a worker or a host loop first:
 
 ```ts
-import { createTray } from "opentray";
+import {
+  createTray,
+  type CreateTrayHandle,
+  type CreateTrayOptions,
+  type TrayIcon,
+} from "opentray";
 
-const tray = await createTray({
+const icon: TrayIcon = { "text-only": "OT" };
+let tray: CreateTrayHandle;
+const options: CreateTrayOptions = {
   id: "com.example.first-app",
-  icon: { "text-only": "OT" },
-  menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
-}, {
+  icon,
+  menu: {
+    items: [
+      {
+        title: "Quit",
+        primaryEvent: true,
+        onMenuClick: () => void tray.destroy(),
+      },
+    ],
+  },
+};
+
+tray = await createTray(options, {
   appId: "com.example.first-app",
   appName: "First App",
 });
-
-tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
 ```
 
 `createTray()` remains the direct tray API when the caller already owns the runtime process shape.
@@ -62,18 +77,32 @@ const tray = await createTray({
     description: "Background service is running",
   },
   menu: {
-    items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }],
+    items: [
+      {
+        title: "Open",
+        primaryEvent: true,
+        onMenuClick: () => {
+          // Open an app-owned window, command, or extension surface.
+        },
+      },
+      "-",
+      ["More", ["Settings", "Quit"]],
+    ],
   },
-});
-
-tray.onMenuClick(({ itemId }) => {
-  if (itemId === 1) {
-    // Open an app-owned window, command, or extension surface.
-  }
 });
 ```
 
-Visible tray text belongs to `icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`. The current tray-first API does not export `createSpace()`, `createSurface()`, `resolveDefaultSpace()`, or `TrayHandle.setTitle()`.
+Visible tray text belongs to `icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`. If no visible icon/text survives projection, native tray backends fall back to the runtime `appName`. The current tray-first API does not export `createSpace()`, `createSurface()`, `resolveDefaultSpace()`, or `TrayHandle.setTitle()`.
+
+The package re-exports common application-facing types including `CreateTrayOptions`, `TrayIcon`, `TrayMenu`, `TrayTooltip`, `TrayEvent`, and `TrayBoundsResult`. Use those public names instead of deriving SDK shapes with `typeof` in application code.
+
+Top-level `createTray(...)` and its returned `setMenu(...)` accept app-facing
+menu shorthand. Lower-level `createClient(...)` remains protocol-only for tools
+that need exact wire shapes.
+
+`primaryEvent` is a role on a normal menu item and emits the usual `menuClick`.
+Use `tray.onTrayClick(...)` when you want to listen to raw tray-icon clicks
+without making a menu item the primary route.
 
 ## Runtime Ownership
 
