@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Self Review - add-webview-download-suggested-filename</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 32px;
+        color: #111827;
+        background: #f9fafb;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      h1,
+      h2 {
+        margin-bottom: 12px;
+      }
+      section {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 16px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 10px 12px;
+        border-top: 1px solid #e5e7eb;
+      }
+      th {
+        border-top: none;
+        background: #f3f4f6;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.95em;
+      }
+      .ok {
+        color: #065f46;
+        font-weight: 600;
+      }
+      .warn {
+        color: #92400e;
+        font-weight: 600;
+      }
+      ul {
+        margin: 8px 0 0 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Self Review: <code>add-webview-download-suggested-filename</code></h1>
+
+      <section>
+        <h2>Review State</h2>
+        <table>
+          <tr>
+            <th>Field</th>
+            <th>Value</th>
+          </tr>
+          <tr>
+            <td>Iteration</td>
+            <td>1</td>
+          </tr>
+          <tr>
+            <td>Exit judgment</td>
+            <td>
+              <span class="ok"
+                >Intent satisfied for the additive contract change</span
+              >; Windows compile proof remains environment-limited.
+            </td>
+          </tr>
+          <tr>
+            <td>Next loop action</td>
+            <td>
+              Wait for user review or verify on a Windows-capable Rust
+              toolchain.
+            </td>
+          </tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>Intent Alignment</h2>
+        <table>
+          <tr>
+            <th>Intent Point</th>
+            <th>Evidence</th>
+            <th>Verdict</th>
+          </tr>
+          <tr>
+            <td>Keep <code>filename</code> unchanged</td>
+            <td>
+              Native emitters still carry <code>filename</code>; TS facade kept
+              the field required.
+            </td>
+            <td class="ok">Aligned</td>
+          </tr>
+          <tr>
+            <td>Add <code>suggestedFilename</code></td>
+            <td>
+              macOS metadata preserves the original suggestion; Windows extracts
+              from <code>Content-Disposition</code> when available; README and
+              TS types updated.
+            </td>
+            <td class="ok">Aligned</td>
+          </tr>
+          <tr>
+            <td>Do not fabricate source truth</td>
+            <td>
+              Windows returns <code>null</code> when no distinct suggestion is
+              exposed rather than mirroring the projection.
+            </td>
+            <td class="ok">Aligned</td>
+          </tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>Verification Evidence</h2>
+        <ul>
+          <li><code>cargo test -p opentray-ext-webview</code></li>
+          <li><code>pnpm --filter @opentray/ext-webview test</code></li>
+          <li><code>pnpm --filter @opentray/ext-webview typecheck</code></li>
+          <li>
+            <code
+              >bun run openspec:vision -- validate
+              add-webview-download-suggested-filename</code
+            >
+          </li>
+          <li><code>git diff --check</code></li>
+          <li>
+            <code
+              >cargo check -p opentray-ext-webview --target
+              x86_64-pc-windows-msvc</code
+            >:
+            <span class="warn"
+              >blocked by local toolchain missing the Windows
+              <code>core</code> crate</span
+            >
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Deviation / Open Questions</h2>
+        <p>
+          The only deviation is the missing Windows compile proof on this host.
+          No new user confirmation is required for the additive API shape
+          itself.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
