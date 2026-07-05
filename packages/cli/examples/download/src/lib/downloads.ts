@@ -84,9 +84,9 @@ export function buildPayloadBody(size: PayloadSize): string {
 // offline, and tunable size/delay.
 export function buildSlowDownloadUrl(options: {
   sizeBytes: number;
-  chunkBytes?: number;
-  delayMs?: number;
-  filename?: string;
+  chunkBytes?: number | undefined;
+  delayMs?: number | undefined;
+  filename?: string | undefined;
 }): string {
   const params = new URLSearchParams({
     size: String(options.sizeBytes),
@@ -106,7 +106,28 @@ export function buildSlowDownloadUrl(options: {
 // Fire a download by navigating to a URL. The native handler intercepts it as a
 // download (because of Content-Disposition: attachment on the slow endpoint, or
 // the resource's native disposition for external URLs).
-export function triggerUrlDownload(url: string, filename?: string): string {
+//
+// By default this uses an <a> click. When triggering several downloads close
+// together, the browser/WebView cancels earlier same-frame navigations and only
+// the last one survives — pass { useIframe: true } to spawn each download in a
+// hidden iframe so each is an independent browsing context and they run in
+// parallel. (iframe works for same-origin loopback URLs; keep anchor mode for
+// cross-origin resources that may send X-Frame-Options: DENY.)
+export function triggerUrlDownload(
+  url: string,
+  options?: {
+    filename?: string | undefined;
+    useIframe?: boolean | undefined;
+  },
+): string {
+  const filename = options?.filename;
+  if (options?.useIframe) {
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    return url;
+  }
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.rel = "noopener";
@@ -149,4 +170,37 @@ export function triggerConcurrent(
     results.set(name, url);
   }
   return results;
+}
+
+// Trigger N concurrent downloads against the loopback slow-download endpoint.
+// Each download gets a distinct filename (and therefore a distinct URL), so the
+// browser does not throttle them as duplicate same-frame blob clicks, and each
+// one streams long enough to show simultaneous live progress across rows.
+export function triggerConcurrentSlow(
+  options: {
+    sizeBytes: number;
+    chunkBytes?: number | undefined;
+    delayMs?: number | undefined;
+    count: number;
+    baseFilename?: string | undefined;
+  },
+): string[] {
+  const urls: string[] = [];
+  const base = options.baseFilename ?? "opentray-concurrent";
+  for (let i = 0; i < options.count; i += 1) {
+    const filename = `${base}-${i + 1}.bin`;
+    const url = buildSlowDownloadUrl({
+      sizeBytes: options.sizeBytes,
+      chunkBytes: options.chunkBytes,
+      delayMs: options.delayMs,
+      filename,
+    });
+    // No `download` attribute: rely on Content-Disposition so each download's
+    // suggestedFilename comes from the server response, and each URL is unique.
+    // useIframe: each download spawns in its own browsing context so the browser
+    // does not cancel earlier same-frame navigations.
+    triggerUrlDownload(url, { useIframe: true });
+    urls.push(url);
+  }
+  return urls;
 }

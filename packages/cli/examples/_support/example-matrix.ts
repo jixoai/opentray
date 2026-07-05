@@ -99,7 +99,7 @@ const createRows = ({
     platforms: WEBVIEW_PLATFORMS,
     command: pnpmExample("example:download", {
       OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
-      OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "60000",
+      OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "90000",
     }),
   },
   {

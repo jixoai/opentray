@@ -133,3 +133,17 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+/* Indeterminate progress band used when totalBytes is unknown but a download
+   is actively receiving bytes. Animates a compact band across the track. */
+@keyframes opentray-progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+.opentray-progress-indeterminate {
+  animation: opentray-progress-indeterminate 1.1s ease-in-out infinite;
+}

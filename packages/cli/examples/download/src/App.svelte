@@ -24,7 +24,7 @@
     PAYLOAD_SIZES,
     buildPayloadBody,
     buildSlowDownloadUrl,
-    triggerConcurrent,
+    triggerConcurrentSlow,
     triggerDownload,
     triggerUrlDownload,
     uniqueFilename,
@@ -66,12 +66,17 @@
         triggerCollision: () => void;
         triggerOne: () => void;
         triggerSlow: () => void;
+        triggerConcurrent: (count?: number) => void;
       };
     };
     g.__OPENTRAY_DOWNLOAD_EXAMPLE__ = {
       triggerCollision: doCollisionDownload,
       triggerOne: () => doDownload(uniqueFilename("report")),
       triggerSlow: doSlowDownload,
+      triggerConcurrent: (count?: number) => {
+        if (count !== undefined) concurrentCount = count;
+        doConcurrentDownload();
+      },
     };
     return () => {
       delete g.__OPENTRAY_DOWNLOAD_EXAMPLE__;
@@ -114,7 +119,18 @@
 
   function doConcurrentDownload(): void {
     if (!bridge) return;
-    triggerConcurrent("report", payloadSize, concurrentCount);
+    // Use the loopback slow endpoint so each of the N downloads has a distinct
+    // URL (browser does not throttle them as duplicate same-frame blob clicks)
+    // and each streams long enough to show simultaneous live progress rows.
+    const cfg = SLOW_SIZES[slowSize];
+    if (!cfg) return;
+    triggerConcurrentSlow({
+      sizeBytes: cfg.bytes,
+      chunkBytes: 64 * 1024,
+      delayMs: slowDelay,
+      count: concurrentCount,
+      baseFilename: `opentray-concurrent-${slowSize}`,
+    });
   }
 
   function onSlowSizeChange(e: Event): void {
@@ -269,7 +285,7 @@
               value={String(concurrentCount)}
               onchange={onConcurrentChange}
             >
-              {#each [1, 2, 3, 4, 5, 6] as n}
+              {#each [2, 3, 4, 5, 6] as n}
                 <option value={n}>{n} parallel</option>
               {/each}
             </NativeSelect>
@@ -278,8 +294,9 @@
             </Button>
           </div>
           <p class="text-xs text-muted-foreground">
-            Each parallel download gets a distinct filename so you can follow per-download
-            progress and event correlation.
+            Fires {concurrentCount} slow-endpoint downloads at once using the size/delay from
+            the progress-test controls below. Each gets a distinct URL so the browser does not
+            throttle them, and all rows advance in parallel.
           </p>
         </div>
 
@@ -349,9 +366,11 @@
           <p class="text-sm text-muted-foreground">No active downloads yet.</p>
         {:else}
           {#each activeList as row (row.key)}
-            {@const pct = row.totalBytes && row.totalBytes > 0
-              ? row.receivedBytes / row.totalBytes
+            {@const hasTotal = row.totalBytes !== null && row.totalBytes > 0}
+            {@const pct = hasTotal
+              ? Math.max(0, Math.min(1, row.receivedBytes / (row.totalBytes ?? 1)))
               : null}
+            {@const isDone = row.status === "completed" || row.status === "failed" || row.status === "canceled"}
             <div class="flex flex-col gap-2 rounded-lg border p-3">
               <div class="flex items-center justify-between gap-2">
                 <code class="truncate text-sm font-medium" title={row.url}>{row.filename}</code>
@@ -363,15 +382,24 @@
                   <code class="rounded bg-muted px-1.5 py-0.5 text-emerald-500">{row.suggestedFilename}</code>
                 </div>
               {/if}
-              <div class="h-1.5 w-full overflow-hidden rounded-full bg-primary/15">
-                <div
-                  class="h-full rounded-full bg-primary transition-[width] duration-150"
-                  style:width={pct === null ? "30%" : `${Math.max(0, Math.min(1, pct)) * 100}%`}
-                  style:opacity={pct === null ? "0.5" : "1"}
-                ></div>
-              </div>
+              {#if isDone}
+                <div class="h-1.5 w-full rounded-full bg-primary/15"></div>
+              {:else if pct !== null}
+                <div class="h-1.5 w-full overflow-hidden rounded-full bg-primary/15">
+                  <div
+                    class="h-full rounded-full bg-primary transition-[width] duration-150 ease-out"
+                    style:width="{pct * 100}%"
+                  ></div>
+                </div>
+              {:else}
+                <!-- Indeterminate: totalBytes unknown but download in progress. Animate a
+                     moving band instead of pretending a fixed percentage. -->
+                <div class="h-1.5 w-full overflow-hidden rounded-full bg-primary/15">
+                  <div class="opentray-progress-indeterminate h-full w-1/3 rounded-full bg-primary"></div>
+                </div>
+              {/if}
               <div class="flex justify-between text-xs text-muted-foreground">
-                <span>{formatBytes(row.receivedBytes)}{row.totalBytes ? ` / ${formatBytes(row.totalBytes)}` : ""}</span>
+                <span>{formatBytes(row.receivedBytes)}{row.totalBytes ? ` / ${formatBytes(row.totalBytes)}` : " / unknown"}</span>
                 <span class="truncate" title={row.url}>{shortUrl(row.url)}</span>
               </div>
             </div>

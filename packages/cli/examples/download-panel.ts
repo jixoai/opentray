@@ -207,6 +207,12 @@ async function runDownloadSmoke(
   // advance from "started" through "progress" to "completed", which is the bug
   // surface the example was built to exercise.
   await runSlowProgressSmoke(window);
+
+  // Phase 4: concurrent slow downloads must all start in parallel. Browsers
+  // throttle same-frame anchor-click downloads to the last one, so the page
+  // uses hidden iframes as independent browsing contexts. This phase verifies
+  // that N downloads actually run simultaneously.
+  await runConcurrentSmoke(window, 3);
 }
 
 async function runSlowProgressSmoke(
@@ -315,6 +321,54 @@ async function runSlowProgressSmoke(
     `smoke phase 3: slow download saw ${progressCount} progress events, ${maxReceived}/${totalBytes} bytes`,
   );
   console.log("smoke verified: progress events advance active download rows");
+}
+
+async function runConcurrentSmoke(
+  window: Pick<WebviewWindowHandle, "evaluate" | "listen">,
+  count: number,
+): Promise<void> {
+  // Trigger N concurrent slow downloads via the page hook. The page routes
+  // concurrent downloads through hidden iframes so the browser does not
+  // collapse them into a single navigation. We then assert that at least `count`
+  // distinct downloads emitted a started event with overlapping progress.
+  const startedFilenames = new Set<string>();
+  const progressFilenames = new Set<string>();
+  const stops: Array<() => void> = [
+    window.listen<WebviewDownloadStarted>("downloadstarted", ({ payload }) => {
+      if (payload.filename.startsWith("opentray-concurrent-")) {
+        startedFilenames.add(payload.filename);
+      }
+    }),
+    window.listen<WebviewDownloadProgress>("downloadprogress", ({ payload }) => {
+      if (payload.filename.startsWith("opentray-concurrent-")) {
+        progressFilenames.add(payload.filename);
+      }
+    }),
+  ];
+  try {
+    await window.evaluate(`
+      window.__OPENTRAY_DOWNLOAD_EXAMPLE__.triggerConcurrent(${count});
+    `);
+    // Give them time to start and make progress.
+    await sleep(4000);
+  } finally {
+    stops.forEach((stop) => stop());
+  }
+
+  if (startedFilenames.size < count) {
+    throw new Error(
+      `concurrent smoke expected >=${count} started downloads, got ${startedFilenames.size}`,
+    );
+  }
+  if (progressFilenames.size < count) {
+    throw new Error(
+      `concurrent smoke expected >=${count} downloads with progress, got ${progressFilenames.size}`,
+    );
+  }
+  console.log(
+    `smoke phase 4: ${startedFilenames.size} concurrent downloads started, ${progressFilenames.size} produced progress`,
+  );
+  console.log("smoke verified: concurrent downloads run in parallel");
 }
 
 interface CompletionResult {
