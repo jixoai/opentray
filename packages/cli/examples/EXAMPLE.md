@@ -106,14 +106,27 @@ Command:
 pnpm --filter opentray example:download
 ```
 
+The download example is also the **SPA + component library benchmark** for the WebView examples. Its page is a Svelte 5 + shadcn-svelte + Tailwind v4 single-page app served by a Vite dev server that the example launcher starts on demand. The dev server binds to loopback only, so the native runtime classifies the page origin as `Local` and the default `nativeApiPolicy.defaultSrc: ["'local'"]` admits every capability — no policy override is needed.
+
+First-time setup (one-off):
+
+```bash
+cd packages/cli/examples/download && bun install
+```
+
+Then run the example from the repo root. The launcher spawns the Vite dev server on a random loopback port, waits for it to be ready, loads it via `url:`, and opens the native window:
+
 Expected checks:
 
-1. A normal WebView window opens immediately and shows a `Download report` button.
-2. Clicking the button writes a real JSON file into the operating system Downloads directory.
-3. The page updates through `downloadstarted`, `downloadprogress`, and `downloadcompleted`.
-4. The example relies on the default silent-download behavior; it does not pass an explicit `download` option to `show()`.
+1. The terminal prints `vite dev server: http://localhost:<port>` and `panel url: ...` before the window appears.
+2. The window opens with a three-section control panel: trigger controls, active downloads, and the live event stream.
+3. The header shows a green `bridge ready` badge and the page origin (loopback).
+4. `Download report` triggers a real blob download and writes a JSON file into the operating system Downloads directory; the page updates through `downloadstarted`, `downloadprogress`, and `downloadcompleted`.
+5. `Fixed-name download (collision)` always uses `report.json`. Click it twice in a row: the second `filename` becomes `report (1).json` while `suggestedFilename` stays `report.json` — the exact contract of the `add-webview-download-suggested-filename` change.
+6. `Fire concurrent` triggers N parallel downloads with distinct filenames; each row in the active-downloads panel tracks its own progress and event correlation.
+7. The event stream shows every download lifecycle payload (including the `suggestedFilename` field) and can be filtered by event type.
 
-For quick smoke:
+For quick smoke (drives the collision path and asserts `suggestedFilename` survives dedupe):
 
 ```bash
 OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:download

@@ -1,7 +1,9 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   WebviewDownloadCompleted,
@@ -17,22 +19,18 @@ import {
   mountExampleWebview,
 } from "./_support/webview-example-support";
 
-const downloadFilename = `opentray-download-${process.pid}-${Date.now()}.json`;
-const downloadPayload = JSON.stringify(
-  {
-    generatedBy: "opentray example:download",
-    kind: "webview-download-smoke",
-    lines: "0123456789abcdef".repeat(32 * 1024),
-  },
-  null,
-  2
-);
-const downloadPath = join(homedir(), "Downloads", downloadFilename);
+const here = dirname(fileURLToPath(import.meta.url));
+const panelDir = resolve(here, "download");
+const panelNodeModules = join(panelDir, "node_modules");
 const smokeEnabled = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE === "1";
+const smokeCollisionFilename = "report.json";
+const smokeCollisionPath = join(homedir(), "Downloads", smokeCollisionFilename);
 
 if (smokeEnabled) {
-  await rm(downloadPath, { force: true });
+  await rm(smokeCollisionPath, { force: true });
 }
+
+ensurePanelInstalled(panelNodeModules);
 
 const runtime = await createWebviewExampleRuntime({
   importMetaUrl: import.meta.url,
@@ -49,23 +47,26 @@ const runtime = await createWebviewExampleRuntime({
     },
   },
 });
+
+const vite = await startViteDevServer(panelDir);
+console.log(`vite dev server: ${vite.url}`);
+
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
+    await vite.close();
     await runtime.shutdown();
-    if (smokeEnabled) {
-      await rm(downloadPath, { force: true });
-    }
   },
 });
+
 const icon = createVisibleTrayIcon();
 const webview = mountExampleWebview(
   runtime,
-  "webview-download-webview"
+  "webview-download-webview",
 ).createWebviewWindow({
-  html: createDownloadExampleHtml(downloadFilename, downloadPayload),
-  width: 760,
-  height: 560,
+  url: vite.url,
+  width: 1080,
+  height: 760,
   title: "OpenTray Download Example",
   icon,
   nativeWindowApi: true,
@@ -83,15 +84,14 @@ const webview = mountExampleWebview(
       },
     },
   },
-  nativeApiPolicy: {
-    defaultSrc: ["'local'"],
-  },
+  // The default `nativeApiPolicy.defaultSrc: ["'local'"]` already admits every
+  // capability because the page origin is a loopback host classified as Local.
 } satisfies WebviewWindowOptions);
 
 await webview.show();
-console.log(`download target: ${downloadPath}`);
+console.log(`panel url: ${vite.url}`);
 console.log(
-  "Use the page button to trigger a real blob download and watch the lifecycle events."
+  "Use the page controls to trigger single, collision, and concurrent downloads.",
 );
 
 const unlisten = attachDownloadLogging(webview);
@@ -114,88 +114,287 @@ if (smokeEnabled) {
 }
 
 await lifecycle.wait;
-for (const stop of unlisten) {
-  stop();
+for (const stop of unlisten) stop();
+
+function ensurePanelInstalled(nodeModules: string): void {
+  if (existsSync(nodeModules)) return;
+  console.error(
+    `download panel dependencies are not installed.\n` +
+      `Run: cd packages/cli/examples/download && bun install`,
+  );
+  process.exit(1);
 }
 
 function attachDownloadLogging(
-  window: Pick<WebviewWindowHandle, "listen">
+  window: Pick<WebviewWindowHandle, "listen">,
 ): Array<() => void> {
   return [
     window.listen<WebviewDownloadStarted>("downloadstarted", ({ payload }) => {
-      console.log(`downloadstarted: ${payload.filename}`);
+      console.log(
+        `downloadstarted: filename=${payload.filename} suggestedFilename=${payload.suggestedFilename} url=${payload.url}`,
+      );
     }),
     window.listen<WebviewDownloadProgress>("downloadprogress", ({ payload }) => {
       const total = payload.totalBytes ?? 0;
       console.log(
-        `downloadprogress: ${payload.filename} ${payload.receivedBytes}/${total || "unknown"}`
+        `downloadprogress: ${payload.filename} ${payload.receivedBytes}/${total || "unknown"} (suggested=${payload.suggestedFilename})`,
       );
     }),
     window.listen<WebviewDownloadCompleted>("downloadcompleted", ({ payload }) => {
-      console.log(`downloadcompleted: ${payload.filename} success=${payload.success}`);
+      console.log(
+        `downloadcompleted: ${payload.filename} success=${payload.success} (suggested=${payload.suggestedFilename})`,
+      );
     }),
     window.listen<WebviewDownloadStarted>("downloadfailed", ({ payload }) => {
-      console.log(`downloadfailed: ${payload.filename}`);
+      console.log(
+        `downloadfailed: ${payload.filename} (suggested=${payload.suggestedFilename})`,
+      );
     }),
     window.listen<WebviewDownloadStarted>("downloadcanceled", ({ payload }) => {
-      console.log(`downloadcanceled: ${payload.filename}`);
+      console.log(
+        `downloadcanceled: ${payload.filename} (suggested=${payload.suggestedFilename})`,
+      );
     }),
   ];
 }
 
 async function runDownloadSmoke(
-  window: Pick<WebviewWindowHandle, "evaluate" | "listen">
+  window: Pick<WebviewWindowHandle, "evaluate" | "listen">,
 ): Promise<void> {
-  let sawProgress = false;
-  const result = await new Promise<"completed" | "failed" | "canceled">(
-    async (resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("timed out waiting for download lifecycle"));
-      }, 8000);
-      const stopListening = [
-        window.listen<WebviewDownloadProgress>("downloadprogress", () => {
-          sawProgress = true;
-        }),
-        window.listen<WebviewDownloadCompleted>("downloadcompleted", ({ payload }) => {
-          if (payload.filename === downloadFilename && payload.success) {
-            clearTimeout(timeout);
-            stopListening.forEach((stop) => stop());
-            resolve("completed");
-          }
-        }),
-        window.listen<WebviewDownloadStarted>("downloadfailed", ({ payload }) => {
-          if (payload.filename === downloadFilename) {
-            clearTimeout(timeout);
-            stopListening.forEach((stop) => stop());
-            resolve("failed");
-          }
-        }),
-        window.listen<WebviewDownloadStarted>("downloadcanceled", ({ payload }) => {
-          if (payload.filename === downloadFilename) {
-            clearTimeout(timeout);
-            stopListening.forEach((stop) => stop());
-            resolve("canceled");
-          }
-        }),
-      ];
-      await sleep(400);
-      await window.evaluate(`
-        window.__OPENTRAY_DOWNLOAD_EXAMPLE__.triggerDownload();
-      `);
-    }
+  // Give the SPA a moment to mount and subscribe to the bridge. The Svelte app
+  // exposes its smoke hook in onMount; evaluate() is fire-and-forget so we can't
+  // probe the hook directly — waitForCompletion re-triggers until events arrive.
+  await sleep(1000);
+
+  // Phase 1: single download asserts the basic lifecycle contract.
+  const first = await waitForCompletion(window, 15_000);
+  if (first.kind !== "completed") {
+    throw new Error(`first download ended as ${first.kind}`);
+  }
+  await waitForFile(smokeCollisionPath, 15_000);
+  console.log(
+    `smoke phase 1: ${first.payload.filename} saved, suggestedFilename=${first.payload.suggestedFilename}`,
   );
 
-  if (result !== "completed") {
-    throw new Error(`download lifecycle ended as ${result}`);
+  // Phase 2: a second download with the same suggested name must be deduped to
+  // `report (1).json` while suggestedFilename stays `report.json`. This is the
+  // exact scenario the add-webview-download-suggested-filename change targets.
+  const second = await waitForCompletion(window, 15_000);
+  if (second.kind !== "completed") {
+    throw new Error(`second download ended as ${second.kind}`);
   }
-  if (!sawProgress) {
-    throw new Error("downloadprogress did not fire");
+  const secondFilename = second.payload.filename;
+  const secondSuggested = second.payload.suggestedFilename;
+  console.log(
+    `smoke phase 2: filename=${secondFilename} suggestedFilename=${secondSuggested}`,
+  );
+  if (secondSuggested !== smokeCollisionFilename) {
+    throw new Error(
+      `suggestedFilename not preserved on dedupe (got ${secondSuggested})`,
+    );
   }
-  await waitForFile(downloadPath, 8000);
-  const fileContent = await readFile(downloadPath, "utf8");
-  if (fileContent !== downloadPayload) {
-    throw new Error("downloaded file content did not match the expected payload");
+  if (secondFilename === smokeCollisionFilename) {
+    throw new Error(
+      `expected filename to be deduped but got ${secondFilename}`,
+    );
   }
+  console.log(
+    "smoke verified: lifecycle, progress, suggestedFilename preserved across collision dedupe",
+  );
+
+  // Phase 3: a loopback slow download must emit visible progress events with
+  // increasing receivedBytes. This proves the active-downloads rows actually
+  // advance from "started" through "progress" to "completed", which is the bug
+  // surface the example was built to exercise.
+  await runSlowProgressSmoke(window);
+}
+
+async function runSlowProgressSmoke(
+  window: Pick<WebviewWindowHandle, "evaluate" | "listen">,
+): Promise<void> {
+  let lastReceived = -1;
+  let progressCount = 0;
+  let maxReceived = 0;
+  let totalBytes: number | null = null;
+  const slowStarted = await new Promise<string>((resolveStarted, rejectStarted) => {
+    const startTimeout = setTimeout(() => {
+      rejectStarted(new Error("slow download did not start in time"));
+    }, 10_000);
+    const stops: Array<() => void> = [];
+    const finish = (err?: Error): void => {
+      clearTimeout(startTimeout);
+      stops.forEach((stop) => stop());
+    };
+    stops.push(
+      window.listen<WebviewDownloadStarted>("downloadstarted", ({ payload }) => {
+        if (payload.url.includes("/slow-download")) {
+          clearTimeout(startTimeout);
+          resolveStarted(payload.url);
+        }
+      }),
+    );
+    stops.push(
+      window.listen<WebviewDownloadStarted>("downloadfailed", ({ payload }) => {
+        if (payload.url.includes("/slow-download")) {
+          finish(
+            new Error(`slow download failed: ${payload.filename}`),
+          );
+          rejectStarted(new Error(`slow download failed`));
+        }
+      }),
+    );
+    void window
+      .evaluate(
+        `window.__OPENTRAY_DOWNLOAD_EXAMPLE__.triggerSlow && window.__OPENTRAY_DOWNLOAD_EXAMPLE__.triggerSlow();`,
+      )
+      .catch((error: unknown) => {
+        finish(error as Error);
+        rejectStarted(error as Error);
+      });
+  });
+
+  await new Promise<void>((resolveCompletion, rejectCompletion) => {
+    const completionTimeout = setTimeout(() => {
+      rejectCompletion(
+        new Error(
+          `slow download timed out (progressCount=${progressCount}, maxReceived=${maxReceived})`,
+        ),
+      );
+    }, 30_000);
+    const stops: Array<() => void> = [
+      window.listen<WebviewDownloadProgress>(
+        "downloadprogress",
+        ({ payload }) => {
+          if (!payload.url.includes("/slow-download")) return;
+          progressCount += 1;
+          if (payload.receivedBytes > maxReceived) {
+            maxReceived = payload.receivedBytes;
+          }
+          if (payload.totalBytes !== null) {
+            totalBytes = payload.totalBytes;
+          }
+          if (payload.receivedBytes > lastReceived) {
+            lastReceived = payload.receivedBytes;
+          }
+        },
+      ),
+      window.listen<WebviewDownloadCompleted>(
+        "downloadcompleted",
+        ({ payload }) => {
+          if (!payload.url.includes("/slow-download")) return;
+          clearTimeout(completionTimeout);
+          stops.forEach((stop) => stop());
+          if (!payload.success) {
+            rejectCompletion(new Error("slow download completed without success"));
+            return;
+          }
+          resolveCompletion();
+        },
+      ),
+      window.listen<WebviewDownloadStarted>("downloadfailed", ({ payload }) => {
+        if (!payload.url.includes("/slow-download")) return;
+        clearTimeout(completionTimeout);
+        stops.forEach((stop) => stop());
+        rejectCompletion(new Error(`slow download failed mid-stream`));
+      }),
+    ];
+  });
+
+  if (progressCount === 0) {
+    throw new Error("slow download produced no progress events");
+  }
+  if (totalBytes === null) {
+    throw new Error("slow download never reported totalBytes");
+  }
+  if (maxReceived < totalBytes) {
+    throw new Error(
+      `slow download did not reach full size: maxReceived=${maxReceived} totalBytes=${totalBytes}`,
+    );
+  }
+  console.log(
+    `smoke phase 3: slow download saw ${progressCount} progress events, ${maxReceived}/${totalBytes} bytes`,
+  );
+  console.log("smoke verified: progress events advance active download rows");
+}
+
+interface CompletionResult {
+  kind: "completed" | "failed" | "canceled";
+  payload: WebviewDownloadCompleted;
+}
+
+// Triggers one collision download and resolves on the first terminal event
+// whose suggestedFilename matches the smoke collision filename.
+//
+// `webview.evaluate()` is fire-and-forget: it does not surface the script's
+// return value or thrown errors. The Svelte app exposes its smoke hook in
+// onMount, so the first evaluate may run before the hook exists. We therefore
+// re-trigger on a short cadence until a download event arrives (or the overall
+// deadline elapses), which makes the smoke robust to mount timing.
+function waitForCompletion(
+  window: Pick<WebviewWindowHandle, "evaluate" | "listen">,
+  timeoutMs: number,
+): Promise<CompletionResult> {
+  return new Promise<CompletionResult>((resolve, reject) => {
+    let settled = false;
+    const overallTimeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      stopAll();
+      reject(new Error("timed out waiting for download terminal event"));
+    }, timeoutMs);
+    const stopListening: Array<() => void> = [
+      window.listen<WebviewDownloadCompleted>(
+        "downloadcompleted",
+        ({ payload }) => {
+          if (payload.suggestedFilename === smokeCollisionFilename) {
+            if (settled) return;
+            settled = true;
+            stopAll();
+            resolve({ kind: payload.success ? "completed" : "failed", payload });
+          }
+        },
+      ),
+      window.listen<WebviewDownloadStarted>("downloadfailed", ({ payload }) => {
+        if (payload.suggestedFilename === smokeCollisionFilename) {
+          if (settled) return;
+          settled = true;
+          stopAll();
+          resolve({ kind: "failed", payload: { ...payload, success: false } });
+        }
+      }),
+      window.listen<WebviewDownloadStarted>(
+        "downloadcanceled",
+        ({ payload }) => {
+          if (payload.suggestedFilename === smokeCollisionFilename) {
+            if (settled) return;
+            settled = true;
+            stopAll();
+            resolve({ kind: "canceled", payload: { ...payload, success: false } });
+          }
+        },
+      ),
+    ];
+    const stopAll = (): void => {
+      clearTimeout(overallTimeout);
+      clearTimeout(retriggerTimer);
+      stopListening.forEach((stop) => stop());
+    };
+    // Re-trigger every 400ms until a matching event arrives. Each evaluate is
+    // a no-op once the hook exists and the download has started, because the
+    // hook just creates another blob download whose events also match — but the
+    // first matching terminal event settles the promise and cancels the timer.
+    const retrigger = (): void => {
+      if (settled) return;
+      void window
+        .evaluate(`window.__OPENTRAY_DOWNLOAD_EXAMPLE__.triggerCollision();`)
+        .catch(() => {
+          // evaluate never rejects for script errors; swallow transport errors
+          // too and let the retrigger cadence retry.
+        });
+      retriggerTimer = setTimeout(retrigger, 400);
+    };
+    let retriggerTimer: ReturnType<typeof setTimeout> = setTimeout(retrigger, 0);
+  });
 }
 
 async function waitForFile(path: string, timeoutMs: number): Promise<void> {
@@ -208,111 +407,102 @@ async function waitForFile(path: string, timeoutMs: number): Promise<void> {
   }
 }
 
-function createDownloadExampleHtml(
-  filename: string,
-  payload: string
-): string {
-  const filenameJson = JSON.stringify(filename);
-  const payloadJson = JSON.stringify(payload);
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OpenTray Download Example</title>
-    <style>
-      :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; }
-      body { margin: 0; background: #f5f5f7; color: #111827; }
-      main { max-width: 760px; margin: 0 auto; padding: 24px; display: grid; gap: 16px; }
-      .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-      button { border: 0; border-radius: 8px; background: #111827; color: white; padding: 10px 14px; font: inherit; cursor: pointer; }
-      .meta { display: grid; gap: 6px; font-size: 14px; }
-      .surface { background: white; border: 1px solid #d1d5db; border-radius: 8px; padding: 16px; }
-      ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
-      code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-      pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
-      @media (prefers-color-scheme: dark) {
-        body { background: #0f172a; color: #e5e7eb; }
-        .surface { background: #111827; border-color: #334155; }
-        button { background: #2563eb; }
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="surface toolbar">
-        <button id="download-button" type="button">Download report</button>
-        <strong id="status">idle</strong>
-      </section>
-      <section class="surface meta">
-        <div><strong>Filename:</strong> <code id="filename"></code></div>
-        <div><strong>Lifecycle:</strong> standard blob URL -> native download handler -> window event bus</div>
-      </section>
-      <section class="surface">
-        <strong>Recent events</strong>
-        <ul id="events"></ul>
-      </section>
-      <section class="surface">
-        <strong>Payload preview</strong>
-        <pre id="preview"></pre>
-      </section>
-    </main>
-    <script>
-      const filename = ${filenameJson};
-      const payload = ${payloadJson};
-      const bridge = navigator.opentrayWindow ?? navigator.window;
-      const state = { status: "idle", events: [] };
-      const statusEl = document.getElementById("status");
-      const eventsEl = document.getElementById("events");
-      document.getElementById("filename").textContent = filename;
-      document.getElementById("preview").textContent = payload.slice(0, 320) + (payload.length > 320 ? "\\n..." : "");
+interface ViteDev {
+  readonly url: string;
+  close(): Promise<void>;
+}
 
-      const render = () => {
-        statusEl.textContent = state.status;
-        eventsEl.replaceChildren(...state.events.map((entry) => {
-          const item = document.createElement("li");
-          item.textContent = entry;
-          return item;
-        }));
-      };
+async function startViteDevServer(root: string): Promise<ViteDev> {
+  const portRegex = /http:\/\/(localhost|127\.0\.0\.1|\[::1\]):(\d+)/;
+  // Run vite via `bun run dev` so the example launcher owns the dev-server
+  // lifecycle. We parse the printed `Local:` URL to discover the actual port.
+  const proc = spawn("bun", ["run", "dev"], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 
-      const record = (event, payload) => {
-        state.status = event;
-        state.events.unshift(event + " " + JSON.stringify(payload));
-        state.events = state.events.slice(0, 8);
-        render();
-      };
-
-      const triggerDownload = () => {
-        const blob = new Blob([payload], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = filename;
-        anchor.click();
-        setTimeout(() => URL.revokeObjectURL(url), 0);
-      };
-
-      window.__OPENTRAY_DOWNLOAD_EXAMPLE__ = { triggerDownload };
-      document.getElementById("download-button").addEventListener("click", triggerDownload);
-      render();
-
-      if (bridge && typeof bridge.listen === "function") {
-        for (const event of [
-          "downloadstarted",
-          "downloadprogress",
-          "downloadcompleted",
-          "downloadfailed",
-          "downloadcanceled"
-        ]) {
-          void bridge.listen(event, (message) => {
-            record(event, message?.payload ?? message ?? {});
-          });
+  let url: string | undefined;
+  const buffer: string[] = [];
+  const collect = (stream: NodeJS.ReadableStream, label: string): void => {
+    stream.setEncoding("utf8");
+    let partial = "";
+    stream.on("data", (chunk: string) => {
+      partial += chunk;
+      const lines = partial.split(/\r?\n/);
+      partial = lines.pop() ?? "";
+      for (const line of lines) {
+        buffer.push(`[vite ${label}] ${line}`);
+        if (url === undefined) {
+          const match = line.match(portRegex);
+          if (match && match[2]) {
+            url = `http://localhost:${match[2]}`;
+          }
         }
-      } else {
-        record("bridge-missing", {});
       }
-    </script>
-  </body>
-</html>`;
+    });
+  };
+  if (proc.stdout) collect(proc.stdout, "out");
+  if (proc.stderr) collect(proc.stderr, "err");
+
+  // Wait for Vite to print its Local URL.
+  const deadline = Date.now() + 20_000;
+  while (url === undefined && Date.now() < deadline) {
+    await sleep(50);
+  }
+  if (url === undefined) {
+    await killProc(proc);
+    throw new Error(
+      `vite dev server did not print a URL within 20s.\n${buffer.slice(-20).join("\n")}`,
+    );
+  }
+
+  // Wait until the server actually responds.
+  const readyDeadline = Date.now() + 10_000;
+  while (Date.now() < readyDeadline) {
+    try {
+      const response = await fetch(url);
+      if (response.ok || response.status === 404) break;
+    } catch {
+      // Not ready yet.
+    }
+    await sleep(100);
+  }
+
+  return {
+    url,
+    async close() {
+      await killProc(proc);
+    },
+  };
+}
+
+function killProc(proc: ChildProcess): Promise<void> {
+  return new Promise((resolve) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      resolve();
+      return;
+    }
+    const finalize = (): void => {
+      resolve();
+    };
+    proc.once("exit", finalize);
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+    // Force-kill safety net so shutdown never hangs the example.
+    setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      finalize();
+    }, 3000);
+  });
 }
