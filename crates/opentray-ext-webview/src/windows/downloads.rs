@@ -69,6 +69,7 @@ pub(super) fn install_download_handlers(
                                 json!({
                                     "url": metadata.url,
                                     "filename": metadata.filename,
+                                    "suggestedFilename": metadata.suggested_filename.as_deref(),
                                 }),
                             );
                             return Ok(());
@@ -87,6 +88,7 @@ pub(super) fn install_download_handlers(
                         json!({
                             "url": metadata.url,
                             "filename": metadata.filename,
+                            "suggestedFilename": metadata.suggested_filename.as_deref(),
                         }),
                     );
                     Ok(())
@@ -102,6 +104,7 @@ pub(super) fn install_download_handlers(
 struct DownloadMetadata {
     url: String,
     filename: String,
+    suggested_filename: Option<String>,
 }
 
 fn attach_progress_handlers(
@@ -128,6 +131,7 @@ fn attach_progress_handlers(
                     json!({
                         "url": progress_metadata.url,
                         "filename": progress_metadata.filename,
+                        "suggestedFilename": progress_metadata.suggested_filename.as_deref(),
                         "receivedBytes": received.max(0),
                         "totalBytes": if total > 0 { Some(total) } else { None },
                     }),
@@ -159,6 +163,7 @@ fn attach_progress_handlers(
                         json!({
                             "url": state_metadata.url,
                             "filename": state_metadata.filename,
+                            "suggestedFilename": state_metadata.suggested_filename.as_deref(),
                             "success": true,
                         }),
                     );
@@ -178,6 +183,7 @@ fn attach_progress_handlers(
                     json!({
                         "url": state_metadata.url,
                         "filename": state_metadata.filename,
+                        "suggestedFilename": state_metadata.suggested_filename.as_deref(),
                     }),
                 );
                 Ok(())
@@ -203,7 +209,12 @@ fn download_metadata(
         .and_then(|value| value.to_str())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| "download".to_string());
-    Ok(DownloadMetadata { url, filename })
+    let suggested_filename = download_suggested_filename(operation)?;
+    Ok(DownloadMetadata {
+        url,
+        filename,
+        suggested_filename,
+    })
 }
 
 fn args_result_file_path(
@@ -216,6 +227,103 @@ fn args_result_file_path(
     Ok(take_pwstr(path))
 }
 
+fn download_suggested_filename(
+    operation: &ICoreWebView2DownloadOperation,
+) -> windows::core::Result<Option<String>> {
+    let mut disposition = PWSTR::null();
+    unsafe {
+        operation.ContentDisposition(&mut disposition)?;
+    }
+    // WebView2 does not expose a dedicated suggested-file-name API in this hook, so stay honest:
+    // only surface `suggestedFilename` when the substrate gives a distinct source fact.
+    Ok(parse_content_disposition_filename(&take_pwstr(disposition)))
+}
+
+fn parse_content_disposition_filename(disposition: &str) -> Option<String> {
+    let mut suggested_filename = None;
+    let mut plain_filename = None;
+    for parameter in disposition.split(';').skip(1) {
+        let Some((name, raw_value)) = parameter.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        let value = raw_value.trim();
+        if name.eq_ignore_ascii_case("filename*") {
+            suggested_filename = decode_rfc5987_filename(value);
+            if suggested_filename.is_some() {
+                break;
+            }
+            continue;
+        }
+        if name.eq_ignore_ascii_case("filename") && plain_filename.is_none() {
+            plain_filename = decode_quoted_header_value(value);
+        }
+    }
+    suggested_filename
+        .or(plain_filename)
+        .filter(|value| !value.is_empty())
+}
+
+fn decode_rfc5987_filename(value: &str) -> Option<String> {
+    let value = strip_optional_quotes(value);
+    let (_, encoded_value) = value.split_once("''")?;
+    let decoded_bytes = percent_decode_bytes(encoded_value)?;
+    String::from_utf8(decoded_bytes).ok()
+}
+
+fn decode_quoted_header_value(value: &str) -> Option<String> {
+    let value = strip_optional_quotes(value);
+    let mut decoded = String::with_capacity(value.len());
+    let mut escaped = false;
+    for ch in value.chars() {
+        if escaped {
+            decoded.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        decoded.push(ch);
+    }
+    Some(decoded)
+}
+
+fn strip_optional_quotes(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|trimmed| trimmed.strip_suffix('"'))
+        .unwrap_or(value)
+}
+
+fn percent_decode_bytes(value: &str) -> Option<Vec<u8>> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = *bytes.get(index + 1)?;
+            let low = *bytes.get(index + 2)?;
+            decoded.push((hex_value(high)? << 4) | hex_value(low)?);
+            index += 3;
+            continue;
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    Some(decoded)
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(10 + (value - b'a')),
+        b'A'..=b'F' => Some(10 + (value - b'A')),
+        _ => None,
+    }
+}
+
 fn emit_download_event(
     bridge: &Weak<RefCell<NavigatorWindowBridge>>,
     event: &str,
@@ -226,5 +334,33 @@ fn emit_download_event(
     };
     if let Err(error) = emit_window_event(bridge.as_ref(), event, payload) {
         eprintln!("opentray-ext-webview failed to emit Windows {event} event: {error}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_content_disposition_filename;
+
+    #[test]
+    fn parses_plain_filename_from_content_disposition() {
+        let filename = parse_content_disposition_filename(r#"attachment; filename="backup.json""#);
+
+        assert_eq!(filename.as_deref(), Some("backup.json"));
+    }
+
+    #[test]
+    fn prefers_rfc5987_filename_over_plain_filename() {
+        let filename = parse_content_disposition_filename(
+            "attachment; filename=\"backup.json\"; filename*=UTF-8''backup%20final.json",
+        );
+
+        assert_eq!(filename.as_deref(), Some("backup final.json"));
+    }
+
+    #[test]
+    fn returns_none_when_content_disposition_has_no_filename() {
+        let filename = parse_content_disposition_filename("attachment");
+
+        assert_eq!(filename, None);
     }
 }

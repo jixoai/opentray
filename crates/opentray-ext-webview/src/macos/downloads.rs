@@ -39,6 +39,7 @@ use super::{
 struct DownloadMetadata {
     url: String,
     filename: String,
+    suggested_filename: Option<String>,
 }
 
 pub(super) fn install_download_navigation_delegate(
@@ -237,6 +238,7 @@ define_class!(
                 json!({
                     "url": metadata.url,
                     "filename": metadata.filename,
+                    "suggestedFilename": metadata.suggested_filename.as_deref(),
                     "success": true,
                 }),
             );
@@ -263,6 +265,7 @@ define_class!(
                 json!({
                     "url": metadata.url,
                     "filename": metadata.filename,
+                    "suggestedFilename": metadata.suggested_filename.as_deref(),
                 }),
             );
         }
@@ -312,6 +315,7 @@ impl DownloadEventDelegate {
                     json!({
                         "url": metadata.url,
                         "filename": metadata.filename,
+                        "suggestedFilename": metadata.suggested_filename.as_deref(),
                     }),
                 );
                 return None;
@@ -325,6 +329,7 @@ impl DownloadEventDelegate {
                     json!({
                         "url": metadata.url,
                         "filename": metadata.filename,
+                        "suggestedFilename": metadata.suggested_filename.as_deref(),
                     }),
                 );
                 return None;
@@ -341,6 +346,7 @@ impl DownloadEventDelegate {
                         json!({
                             "url": metadata.url,
                             "filename": metadata.filename,
+                            "suggestedFilename": metadata.suggested_filename.as_deref(),
                         }),
                     );
                     return None;
@@ -350,9 +356,11 @@ impl DownloadEventDelegate {
             default_download_path(&metadata.filename)
         };
 
+        // Preserve the substrate suggestion even when the final save target is deduplicated.
         let final_metadata = DownloadMetadata {
             url: metadata.url,
             filename: basename(&destination).unwrap_or(metadata.filename),
+            suggested_filename: metadata.suggested_filename,
         };
         let key = download_key(download);
         self.ivars()
@@ -366,6 +374,7 @@ impl DownloadEventDelegate {
             json!({
                 "url": final_metadata.url,
                 "filename": final_metadata.filename,
+                "suggestedFilename": final_metadata.suggested_filename.as_deref(),
             }),
         );
         Some(destination)
@@ -432,6 +441,7 @@ define_class!(
                 json!({
                     "url": self.ivars().metadata.url,
                     "filename": self.ivars().metadata.filename,
+                    "suggestedFilename": self.ivars().metadata.suggested_filename.as_deref(),
                     "receivedBytes": completed.max(0),
                     "totalBytes": if total > 0 { Some(total) } else { None },
                 }),
@@ -494,12 +504,19 @@ fn download_key(download: &WKDownload) -> usize {
 }
 
 fn fallback_download_metadata(download: &WKDownload) -> DownloadMetadata {
-    fallback_download_metadata_with_filename(download, "download")
+    download_metadata_from_fallback(download, None)
 }
 
 fn fallback_download_metadata_with_filename(
     download: &WKDownload,
-    fallback_filename: &str,
+    suggested_filename: &str,
+) -> DownloadMetadata {
+    download_metadata_from_fallback(download, Some(suggested_filename))
+}
+
+fn download_metadata_from_fallback(
+    download: &WKDownload,
+    suggested_filename: Option<&str>,
 ) -> DownloadMetadata {
     let url = unsafe {
         download
@@ -509,16 +526,33 @@ fn fallback_download_metadata_with_filename(
             .map(|url| url.to_string())
             .unwrap_or_default()
     };
-    let filename = if fallback_filename.is_empty() {
-        url.rsplit('/')
-            .next()
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| "download".to_string())
-    } else {
-        fallback_filename.to_string()
-    };
-    DownloadMetadata { url, filename }
+    download_metadata_from_parts(&url, suggested_filename, None)
+}
+
+fn download_metadata_from_parts(
+    url: &str,
+    suggested_filename: Option<&str>,
+    final_filename: Option<&str>,
+) -> DownloadMetadata {
+    let suggested_filename = suggested_filename
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let filename = final_filename
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| suggested_filename.clone())
+        .or_else(|| {
+            url.rsplit('/')
+                .next()
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| "download".to_string());
+    DownloadMetadata {
+        url: url.to_string(),
+        filename,
+        suggested_filename,
+    }
 }
 
 fn prompt_save_as_path(suggested_filename: &str) -> Option<PathBuf> {
@@ -572,7 +606,7 @@ fn basename(path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::dedupe_destination;
+    use super::{dedupe_destination, download_metadata_from_parts};
     use std::fs::{create_dir_all, remove_dir_all, write};
     use std::path::PathBuf;
 
@@ -594,5 +628,26 @@ mod tests {
         assert_eq!(deduped, base_dir.join("report (1).json"));
 
         remove_dir_all(&base_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn download_metadata_preserves_suggested_filename_separately_from_final_filename() {
+        let metadata = download_metadata_from_parts(
+            "blob:http://127.0.0.1/export",
+            Some("backup.json"),
+            Some("backup (6).json"),
+        );
+
+        assert_eq!(metadata.filename, "backup (6).json");
+        assert_eq!(metadata.suggested_filename.as_deref(), Some("backup.json"));
+    }
+
+    #[test]
+    fn download_metadata_uses_null_suggestion_when_fallback_is_synthetic() {
+        let metadata =
+            download_metadata_from_parts("https://tools.example/export/report.json", None, None);
+
+        assert_eq!(metadata.filename, "report.json");
+        assert_eq!(metadata.suggested_filename, None);
     }
 }

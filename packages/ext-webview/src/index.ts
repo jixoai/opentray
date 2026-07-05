@@ -269,6 +269,7 @@ export interface WebviewWindowOverlayGeometry {
 export interface WebviewDownloadStarted {
   url: string;
   filename: string;
+  suggestedFilename: string | null;
 }
 
 export interface WebviewDownloadProgress extends WebviewDownloadStarted {

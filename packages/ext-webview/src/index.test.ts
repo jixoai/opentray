@@ -1942,22 +1942,22 @@ describe("@opentray/ext-webview", () => {
     expectTypeOf<
       Parameters<WebviewNavigatorWindow["listen"]>[1]
     >().toMatchTypeOf<
-      (
-        event: {
-          event: "downloadprogress";
-          id: number;
-          payload: {
-            url: string;
-            filename: string;
-            receivedBytes: number;
-            totalBytes: number | null;
-          };
-        }
-      ) => void
+      (event: {
+        event: "downloadprogress";
+        id: number;
+        payload: {
+          url: string;
+          filename: string;
+          suggestedFilename: string | null;
+          receivedBytes: number;
+          totalBytes: number | null;
+        };
+      }) => void
     >();
     expectTypeOf<WebviewWindowEventMap["downloadcompleted"]>().toEqualTypeOf<{
       url: string;
       filename: string;
+      suggestedFilename: string | null;
       success: boolean;
     }>();
     expectTypeOf<WebviewPermissionStore["namespace"]>().toEqualTypeOf<string>();

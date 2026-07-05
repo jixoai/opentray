@@ -11,9 +11,9 @@ use super::style::{
 use super::*;
 use crate::{
     MetadataSyncSettings, WebviewBackgroundEffectState, WebviewBackgroundInput,
-    WebviewBrowserPermissionDecision, WebviewBrowserPermissionFamily,
-    WebviewBrowserPermissionRule, WebviewNativeApiSource, WebviewPermissionManagerPolicy,
-    WebviewWindowBackground, WebviewWindowIcon,
+    WebviewBrowserPermissionDecision, WebviewBrowserPermissionFamily, WebviewBrowserPermissionRule,
+    WebviewNativeApiSource, WebviewPermissionManagerPolicy, WebviewWindowBackground,
+    WebviewWindowIcon,
 };
 use std::process::Command;
 
@@ -1457,6 +1457,7 @@ fn emit_window_event_ignores_unlistened_download_events_on_macos() {
         serde_json::json!({
             "url": "https://tools.example/export",
             "filename": "report.json",
+            "suggestedFilename": "report.json",
             "success": true,
         }),
     )
