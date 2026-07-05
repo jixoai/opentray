@@ -1,7 +1,25 @@
-import { defineConfig, type Plugin } from "vite";
-import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
-import { fileURLToPath, URL } from "node:url";
+import { defineConfig, type Plugin } from "vite";
+
+// Loopback-only dev/preview server. The host the WebView connects to must
+// classify as Local (localhost/127.0.0.1/::1) so the default
+// nativeApiPolicy.defaultSrc: ["'local'"] admits every capability without
+// per-route policy overrides.
+export default defineConfig({
+  plugins: [tailwindcss(), sveltekit(), slowDownloadMiddleware()],
+  server: {
+    host: "localhost",
+    strictPort: false,
+  },
+  preview: {
+    host: "localhost",
+    strictPort: false,
+  },
+  build: {
+    target: "esnext",
+  },
+});
 
 // A Vite middleware that streams a deterministic payload of the requested size
 // with an optional per-chunk delay. This gives the download example a stable,
@@ -46,7 +64,6 @@ function slowDownloadMiddleware(): Plugin {
         );
         res.setHeader("Cache-Control", "no-store");
 
-        // Deterministic chunk content so the bytes are reproducible.
         const chunk = Buffer.alloc(chunkSize, 0x61);
         let written = 0;
         const writeNext = (): void => {
@@ -62,8 +79,6 @@ function slowDownloadMiddleware(): Plugin {
           if (delay > 0) {
             setTimeout(writeNext, delay);
           } else {
-            // Yield to the event loop so progress events stay observable even
-            // without an artificial delay.
             setImmediate(writeNext);
           }
         };
@@ -72,25 +87,3 @@ function slowDownloadMiddleware(): Plugin {
     },
   };
 }
-
-// Single-page dev/preview config for the OpenTray download example.
-// Vite binds to loopback only so the native WebView classifies the page as `Local`,
-// which means the default `nativeApiPolicy.defaultSrc: ["'local'"]` admits every capability.
-export default defineConfig({
-  plugins: [tailwindcss(), svelte(), slowDownloadMiddleware()],
-  // Listen on loopback: the host must resolve as `Local` (localhost/127.0.0.1/::1).
-  // Don't pin a port — let vite pick 5173 (or the next free one) so multiple
-  // example runs don't collide. The launcher parses the actual port from stdout.
-  server: {
-    host: "localhost",
-    strictPort: false,
-  },
-  resolve: {
-    alias: {
-      $lib: fileURLToPath(new URL("./src/lib", import.meta.url)),
-    },
-  },
-  build: {
-    target: "esnext",
-  },
-});

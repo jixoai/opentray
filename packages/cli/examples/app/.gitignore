@@ -1,0 +1,8 @@
+# SvelteKit / Vite generated output. The dev server is started on demand by
+# the per-example launchers, so nothing here is committed.
+node_modules/
+dist/
+build/
+.svelte-kit/
+.vite/
+*.local

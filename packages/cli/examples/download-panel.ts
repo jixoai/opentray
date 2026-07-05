@@ -1,9 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import type {
   WebviewDownloadCompleted,
@@ -14,14 +12,15 @@ import type {
 } from "../../ext-webview/src/index";
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import {
+  ensureAppInstalled,
+  startDevServer,
+} from "./_support/dev-server";
+import {
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
   mountExampleWebview,
 } from "./_support/webview-example-support";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const panelDir = resolve(here, "download");
-const panelNodeModules = join(panelDir, "node_modules");
 const smokeEnabled = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE === "1";
 const smokeCollisionFilename = "report.json";
 const smokeCollisionPath = join(homedir(), "Downloads", smokeCollisionFilename);
@@ -30,7 +29,7 @@ if (smokeEnabled) {
   await rm(smokeCollisionPath, { force: true });
 }
 
-ensurePanelInstalled(panelNodeModules);
+ensureAppInstalled();
 
 const runtime = await createWebviewExampleRuntime({
   importMetaUrl: import.meta.url,
@@ -48,13 +47,13 @@ const runtime = await createWebviewExampleRuntime({
   },
 });
 
-const vite = await startViteDevServer(panelDir);
-console.log(`vite dev server: ${vite.url}`);
+const devServer = await startDevServer("/download");
+console.log(`download panel: ${devServer.url}`);
 
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
-    await vite.close();
+    await devServer.close();
     await runtime.shutdown();
   },
 });
@@ -64,7 +63,7 @@ const webview = mountExampleWebview(
   runtime,
   "webview-download-webview",
 ).createWebviewWindow({
-  url: vite.url,
+  url: devServer.url,
   width: 1080,
   height: 760,
   title: "OpenTray Download Example",
@@ -89,7 +88,7 @@ const webview = mountExampleWebview(
 } satisfies WebviewWindowOptions);
 
 await webview.show();
-console.log(`panel url: ${vite.url}`);
+console.log(`panel url: ${devServer.url}`);
 console.log(
   "Use the page controls to trigger single, collision, and concurrent downloads.",
 );
@@ -115,15 +114,6 @@ if (smokeEnabled) {
 
 await lifecycle.wait;
 for (const stop of unlisten) stop();
-
-function ensurePanelInstalled(nodeModules: string): void {
-  if (existsSync(nodeModules)) return;
-  console.error(
-    `download panel dependencies are not installed.\n` +
-      `Run: cd packages/cli/examples/download && bun install`,
-  );
-  process.exit(1);
-}
 
 function attachDownloadLogging(
   window: Pick<WebviewWindowHandle, "listen">,
@@ -459,104 +449,4 @@ async function waitForFile(path: string, timeoutMs: number): Promise<void> {
     }
     await sleep(100);
   }
-}
-
-interface ViteDev {
-  readonly url: string;
-  close(): Promise<void>;
-}
-
-async function startViteDevServer(root: string): Promise<ViteDev> {
-  const portRegex = /http:\/\/(localhost|127\.0\.0\.1|\[::1\]):(\d+)/;
-  // Run vite via `bun run dev` so the example launcher owns the dev-server
-  // lifecycle. We parse the printed `Local:` URL to discover the actual port.
-  const proc = spawn("bun", ["run", "dev"], {
-    cwd: root,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  let url: string | undefined;
-  const buffer: string[] = [];
-  const collect = (stream: NodeJS.ReadableStream, label: string): void => {
-    stream.setEncoding("utf8");
-    let partial = "";
-    stream.on("data", (chunk: string) => {
-      partial += chunk;
-      const lines = partial.split(/\r?\n/);
-      partial = lines.pop() ?? "";
-      for (const line of lines) {
-        buffer.push(`[vite ${label}] ${line}`);
-        if (url === undefined) {
-          const match = line.match(portRegex);
-          if (match && match[2]) {
-            url = `http://localhost:${match[2]}`;
-          }
-        }
-      }
-    });
-  };
-  if (proc.stdout) collect(proc.stdout, "out");
-  if (proc.stderr) collect(proc.stderr, "err");
-
-  // Wait for Vite to print its Local URL.
-  const deadline = Date.now() + 20_000;
-  while (url === undefined && Date.now() < deadline) {
-    await sleep(50);
-  }
-  if (url === undefined) {
-    await killProc(proc);
-    throw new Error(
-      `vite dev server did not print a URL within 20s.\n${buffer.slice(-20).join("\n")}`,
-    );
-  }
-
-  // Wait until the server actually responds.
-  const readyDeadline = Date.now() + 10_000;
-  while (Date.now() < readyDeadline) {
-    try {
-      const response = await fetch(url);
-      if (response.ok || response.status === 404) break;
-    } catch {
-      // Not ready yet.
-    }
-    await sleep(100);
-  }
-
-  return {
-    url,
-    async close() {
-      await killProc(proc);
-    },
-  };
-}
-
-function killProc(proc: ChildProcess): Promise<void> {
-  return new Promise((resolve) => {
-    if (proc.exitCode !== null || proc.signalCode !== null) {
-      resolve();
-      return;
-    }
-    const finalize = (): void => {
-      resolve();
-    };
-    proc.once("exit", finalize);
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-      try {
-        proc.kill("SIGKILL");
-      } catch {
-        // Already gone.
-      }
-    }
-    // Force-kill safety net so shutdown never hangs the example.
-    setTimeout(() => {
-      try {
-        proc.kill("SIGKILL");
-      } catch {
-        // Already gone.
-      }
-      finalize();
-    }, 3000);
-  });
 }

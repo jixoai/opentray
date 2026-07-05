@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
-  import type { ActiveDownload } from "$lib/event-log.svelte";
+  import type { ActiveDownload } from "$lib/download/event-log.svelte";
 
   type Props = {
     status: ActiveDownload["status"];

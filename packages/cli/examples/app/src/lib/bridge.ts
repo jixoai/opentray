@@ -17,16 +17,47 @@ export function resolveBridge(): WebviewBridge | undefined {
   return nav.opentrayWindow ?? nav.window;
 }
 
-export type DownloadUnlisten = () => void;
+// The opentray namespace (navigator.opentray) exposes ipc + tray + screen +
+// permissions sub-objects when the corresponding native APIs are enabled.
+export interface WebviewNamespace {
+  ipc?: { postMessage(payload: unknown): Promise<{ queued: true }> };
+  tray?: { getBounds(): Promise<unknown> };
+  screen?: { getScreenDetails(): Promise<unknown> };
+  permissions?: unknown;
+  execCommand(command: string): void;
+}
+
+export function resolveNamespace(): WebviewNamespace | undefined {
+  if (typeof navigator === "undefined") return undefined;
+  const nav = navigator as Navigator & { opentray?: WebviewNamespace };
+  return nav.opentray;
+}
+
+export type Unlisten = () => void;
 
 // Subscribe to one download event with a typed payload.
 export function listenDownload<K extends DownloadEventName>(
   bridge: WebviewBridge,
   event: K,
   handler: (payload: DownloadEventPayloadMap[K], raw: WebviewWindowEvent) => void,
-): DownloadUnlisten {
+): Unlisten {
   const wrapped = (raw: WebviewWindowEvent) => {
     handler(raw.payload as DownloadEventPayloadMap[K], raw);
+  };
+  const stop = bridge.listen(event, wrapped);
+  return () => {
+    void Promise.resolve(stop).then((fn) => fn?.());
+  };
+}
+
+// Subscribe to any bridge event with an untyped payload.
+export function listenEvent(
+  bridge: WebviewBridge,
+  event: string,
+  handler: (payload: unknown, raw: WebviewWindowEvent) => void,
+): Unlisten {
+  const wrapped = (raw: WebviewWindowEvent) => {
+    handler(raw.payload, raw);
   };
   const stop = bridge.listen(event, wrapped);
   return () => {

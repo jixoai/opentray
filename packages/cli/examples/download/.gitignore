@@ -1,8 +1,0 @@
-# Svelte/Vite generated output. The dev server is started on demand by
-# download-panel.ts, so nothing in here is committed.
-node_modules/
-dist/
-build/
-.svelte-kit/
-.vite/
-*.local

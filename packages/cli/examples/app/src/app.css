@@ -38,6 +38,7 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
   --radius: 0.625rem;
+  --titlebar-bg: rgba(247, 249, 244, 0.58);
 }
 
 .dark {
@@ -73,6 +74,7 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --titlebar-bg: rgba(14, 18, 16, 0.42);
 }
 
 @theme inline {

@@ -4,8 +4,8 @@ import type {
   DownloadProgressPayload,
   DownloadStartedPayload,
   WebviewBridge,
-} from "./types";
-import { DOWNLOAD_EVENT_NAMES, listenDownload } from "./bridge";
+} from "$lib/types";
+import { DOWNLOAD_EVENT_NAMES, listenDownload } from "$lib/bridge";
 
 const EVENT_LOG_CAP = 60;
 

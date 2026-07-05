@@ -106,19 +106,19 @@ Command:
 pnpm --filter opentray example:download
 ```
 
-The download example is also the **SPA + component library benchmark** for the WebView examples. Its page is a Svelte 5 + shadcn-svelte + Tailwind v4 single-page app served by a Vite dev server that the example launcher starts on demand. The dev server binds to loopback only, so the native runtime classifies the page origin as `Local` and the default `nativeApiPolicy.defaultSrc: ["'local'"]` admits every capability — no policy override is needed.
+The download example is hosted by the **unified SvelteKit app** under `packages/cli/examples/app`. Every WebView example is one route in that single SvelteKit + Tailwind v4 + shadcn-style SPA; the launcher spawns the app's loopback dev server and loads the `/download` route via `url:`. The dev server binds to loopback only, so the native runtime classifies the page origin as `Local` and the default `nativeApiPolicy.defaultSrc: ["'local'"]` admits every capability — no policy override is needed.
 
-First-time setup (one-off):
+First-time setup (one-off, shared by all WebView examples):
 
 ```bash
-cd packages/cli/examples/download && bun install
+cd packages/cli/examples/app && bun install
 ```
 
-Then run the example from the repo root. The launcher spawns the Vite dev server on a random loopback port, waits for it to be ready, loads it via `url:`, and opens the native window:
+Then run the example from the repo root. The launcher spawns the SvelteKit dev server on a loopback port, waits for `/download` to respond, loads it via `url:`, and opens the native window:
 
 Expected checks:
 
-1. The terminal prints `vite dev server: http://localhost:<port>` and `panel url: ...` before the window appears.
+1. The terminal prints `download panel: http://localhost:<port>/download` and `panel url: ...` before the window appears.
 2. The window opens with a three-section control panel: trigger controls, active downloads, and the live event stream.
 3. The header shows a green `bridge ready` badge and the page origin (loopback).
 4. `Download report` triggers a real blob download and writes a JSON file into the operating system Downloads directory; the page updates through `downloadstarted`, `downloadprogress`, and `downloadcompleted`.

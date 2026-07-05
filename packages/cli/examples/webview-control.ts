@@ -1,24 +1,22 @@
-﻿import { readFile } from "node:fs/promises";
-
 import type { WebviewWindowOptions } from "../../ext-webview/src/index";
 import { createExampleLifecycle } from "./_support/example-lifecycle";
+import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
-  createWebviewExampleRuntime,
   createVisibleTrayIcon,
+  createWebviewExampleRuntime,
   mountExampleWebview,
 } from "./_support/webview-example-support";
-
-const controlPageUrl = new URL("./webview-control.html", import.meta.url);
-const controlPageHtml = await readFile(controlPageUrl, "utf8");
 
 // windowControlsOverlay is a show-time bridge gate; the page can test it, not enable it later.
 const overlayEnabled = resolveOverlayEnabled(
   process.argv.slice(2),
-  process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY
+  process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY,
 );
 console.log(
-  `windowControlsOverlay: ${overlayEnabled ? "enabled" : "disabled"}`
+  `windowControlsOverlay: ${overlayEnabled ? "enabled" : "disabled"}`,
 );
+
+ensureAppInstalled();
 
 const runtime = await createWebviewExampleRuntime({
   importMetaUrl: import.meta.url,
@@ -39,11 +37,22 @@ const runtime = await createWebviewExampleRuntime({
 const { tray } = runtime;
 const icon = createVisibleTrayIcon();
 
+const devServer = await startDevServer("/webview-control");
+console.log(`webview-control panel: ${devServer.url}`);
+
+const lifecycle = createExampleLifecycle({
+  exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
+  onShutdown: async () => {
+    await devServer.close();
+    await runtime.shutdown();
+  },
+});
+
 const webview = mountExampleWebview(
   runtime,
-  "webview-control-webview"
+  "webview-control-webview",
 ).createWebviewWindow({
-  html: controlPageHtml,
+  url: devServer.url,
   width: 960,
   height: 720,
   title: "OpenTray WebView Control Demo",
@@ -81,9 +90,8 @@ const webview = mountExampleWebview(
 } satisfies WebviewWindowOptions);
 await webview.show();
 
-console.log(`control page source: ${controlPageUrl.href}`);
 console.log(
-  "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, screen, and navigation behavior."
+  "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, screen, and navigation behavior.",
 );
 
 if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
@@ -144,11 +152,6 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
   console.log("bridge smoke evaluate injected");
 }
 
-const lifecycle = createExampleLifecycle({
-  exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
-  onShutdown: runtime.shutdown,
-});
-
 tray.onMenuClick(({ itemId }) => {
   if (itemId === 99) {
     void lifecycle.shutdown();
@@ -159,7 +162,7 @@ await lifecycle.wait;
 
 function resolveOverlayEnabled(
   args: readonly string[],
-  envValue: string | undefined
+  envValue: string | undefined,
 ): boolean {
   let enabled = parseBooleanEnv(envValue) ?? true;
   for (const arg of args) {

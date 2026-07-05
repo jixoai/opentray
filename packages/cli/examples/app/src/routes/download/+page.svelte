@@ -16,8 +16,8 @@
   import DownloadStatusBadge from "$lib/components/download-status-badge.svelte";
   import EventBadge from "$lib/components/event-badge.svelte";
   import { resolveBridge, DOWNLOAD_EVENT_NAMES } from "$lib/bridge";
-  import { downloadEvents } from "$lib/event-log.svelte";
-  import type { ActiveDownload } from "$lib/event-log.svelte";
+  import { downloadEvents } from "$lib/download/event-log.svelte";
+  import type { ActiveDownload } from "$lib/download/event-log.svelte";
   import {
     COLLISION_FILENAME,
     GITHUB_PRESETS,
@@ -30,7 +30,7 @@
     uniqueFilename,
     type GitHubPreset,
     type PayloadSize,
-  } from "$lib/downloads";
+  } from "$lib/download/downloads";
   import type { WebviewBridge } from "$lib/types";
 
   let bridge = $state<WebviewBridge | undefined>(undefined);

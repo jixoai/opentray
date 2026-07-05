@@ -1,17 +1,19 @@
 {
-  "name": "opentray-example-download",
+  "name": "opentray-examples-app",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "OpenTray WebView download example — Svelte 5 + shadcn-svelte control panel.",
+  "description": "OpenTray examples — unified SvelteKit SPA hosting every WebView example as a route.",
   "scripts": {
-    "dev": "vite --host localhost",
+    "dev": "vite dev --host localhost",
     "build": "vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --host localhost",
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
     "@lucide/svelte": "^1.23.0",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.69.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/vite": "^4.3.2",
     "bits-ui": "^2.18.1",
