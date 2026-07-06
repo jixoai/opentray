@@ -7,10 +7,11 @@
     class?: string;
     value?: string;
     onchange?: (e: Event) => void;
+    disabled?: boolean;
     children: Snippet;
   };
 
-  let { id, class: className, value, onchange, children }: Props = $props();
+  let { id, class: className, value, onchange, disabled = false, children }: Props = $props();
 </script>
 
 <select
@@ -21,6 +22,7 @@
   )}
   {value}
   {onchange}
+  {disabled}
 >
   {@render children()}
 </select>

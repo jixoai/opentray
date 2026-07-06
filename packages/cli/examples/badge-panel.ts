@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createExampleLifecycle } from "./_support/example-lifecycle";
+import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
   createWebviewExampleRuntime,
   createVisibleTrayIcon,
@@ -18,7 +19,8 @@ import {
   type BadgeCapabilities,
   type BadgePanelEnvelope,
 } from "../../ext-badge/src/index";
-import { createBadgePanelHtml, type BadgePlatform } from "./badge-panel-content";
+
+ensureAppInstalled();
 
 const runtime = await createWebviewExampleRuntime({
   importMetaUrl: import.meta.url,
@@ -55,8 +57,11 @@ const badge = attachBadge(tray, {
   ...(localBadgeExtension === undefined ? {} : { path: localBadgeExtension }),
 });
 const webviewTray = mountExampleWebview(runtime, "badge-panel-webview");
+const badgePlatform = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
+const devServer = await startDevServer(`/badge?platform=${badgePlatform}`);
+console.log(`badge panel: ${devServer.url}`);
 const panel = webviewTray.createWebviewWindow({
-  html: createBadgePanelHtml(process.platform as BadgePlatform),
+  url: devServer.url,
   width: 1120,
   height: 840,
   title: "OpenTray Badge Debug Panel",
@@ -125,6 +130,7 @@ const lifecycle = createExampleLifecycle({
     dockClickWatch.close();
     dockQuitWatch.close();
     pageMessageWatch.stop();
+    await devServer.close();
     await runtime.shutdown();
   },
 });

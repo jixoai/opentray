@@ -1,20 +1,27 @@
 import type {
   DownloadEventName,
   DownloadEventPayloadMap,
+  NavigatorWindow,
   WebviewBridge,
   WebviewWindowEvent,
 } from "./types";
 
 // The native extension exposes the bridge as `navigator.opentrayWindow` and,
 // when `bindWindowGlobals` is on, also as `navigator.window`. Both point at the
-// same object; prefer the opentray-prefixed name and fall back to the global.
-export function resolveBridge(): WebviewBridge | undefined {
+// same full navigator window surface; prefer the opentray-prefixed name.
+export function resolveBridge(): NavigatorWindow | undefined {
   if (typeof navigator === "undefined") return undefined;
   const nav = navigator as Navigator & {
-    opentrayWindow?: WebviewBridge;
-    window?: WebviewBridge;
+    opentrayWindow?: NavigatorWindow;
+    window?: NavigatorWindow;
   };
   return nav.opentrayWindow ?? nav.window;
+}
+
+// Screen API surfaced via navigator.opentrayScreen / navigator.screen when
+// nativeScreenApi / bindScreenGlobals is enabled.
+export interface ScreenApi {
+  getScreenDetails(): Promise<unknown>;
 }
 
 // The opentray namespace (navigator.opentray) exposes ipc + tray + screen +

@@ -1,6 +1,7 @@
 import { mediaQueryKit, styleKit } from "../../ext-webview/src/index";
 import type { Menu } from "../src/index";
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
+import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
@@ -8,7 +9,6 @@ import {
   mountExampleWebview,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
-import { createMediaQueryHtml } from "./media-query-panel-content";
 
 const PANEL_WIDTH = 440;
 const PANEL_HEIGHT = 290;
@@ -19,6 +19,8 @@ type WidthMode = "compact" | "comfort" | "wide";
 type HeightMode = "fit" | "tall";
 
 console.log("mediaQuery trace: styleKit recipes + mediaQueryKit native-bounds callbacks");
+
+ensureAppInstalled();
 
 const icon = createVisibleTrayIcon();
 const runtime = await createWebviewExampleRuntime({
@@ -37,8 +39,10 @@ const runtime = await createWebviewExampleRuntime({
 const { tray } = runtime;
 
 const webviewTray = mountExampleWebview(runtime, "media-query-demo-webview");
+const devServer = await startDevServer("/media-query");
+console.log(`media-query panel: ${devServer.url}`);
 const panel = webviewTray.createWebviewWindow({
-  html: createMediaQueryHtml(),
+  url: devServer.url,
   width: PANEL_WIDTH,
   height: PANEL_HEIGHT,
   title: "OpenTray Media Query Demo",
@@ -67,6 +71,7 @@ const lifecycle = createExampleLifecycle({
       // The panel may never have been opened; closing the runtime session is still authoritative.
     }
     panelBootstrapped = false;
+    await devServer.close();
     await runtime.shutdown();
   },
 });

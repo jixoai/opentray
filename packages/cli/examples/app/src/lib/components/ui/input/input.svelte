@@ -4,11 +4,15 @@
   type Props = {
     id?: string;
     class?: string;
-    value?: string;
+    value?: string | number;
     type?: string;
     placeholder?: string;
     oninput?: (e: Event) => void;
     disabled?: boolean;
+    maxlength?: number;
+    min?: number | string;
+    max?: number | string;
+    step?: number | string;
   };
 
   let {
@@ -19,6 +23,10 @@
     placeholder,
     oninput,
     disabled = false,
+    maxlength,
+    min,
+    max,
+    step,
   }: Props = $props();
 </script>
 
@@ -33,4 +41,8 @@
   {placeholder}
   {oninput}
   {disabled}
+  {maxlength}
+  {min}
+  {max}
+  {step}
 />

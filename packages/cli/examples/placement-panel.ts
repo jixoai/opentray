@@ -2,9 +2,11 @@ import {
   WebviewPlacementKit,
   type WebviewPlacement,
   type WebviewPlacementResult,
+  type WebviewWindowStylePatch,
 } from "../../ext-webview/src/index";
 import type { Menu } from "../src/index";
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
+import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
@@ -12,10 +14,16 @@ import {
   mountExampleWebview,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
-import {
-  createPlacementHtml,
-  createPlacementStyle,
-} from "./placement-panel-content";
+
+function createPlacementStyle(platform: NodeJS.Platform): WebviewWindowStylePatch {
+  return {
+    frameless: true,
+    keepOnTop: true,
+    background: { kind: "semantic", token: "blur", state: "active" },
+    platform:
+      platform === "win32" ? { windows: { cornerPreference: "round" } } : {},
+  };
+}
 
 const PANEL_WIDTH = 800;
 const PANEL_HEIGHT = 600;
@@ -46,6 +54,8 @@ console.log(
   "placement trace: WebviewPlacementKit watch/applyOnce with tray, screen, and edge anchors"
 );
 
+ensureAppInstalled();
+
 const icon = createVisibleTrayIcon();
 const runtime = await createWebviewExampleRuntime({
   importMetaUrl: import.meta.url,
@@ -63,8 +73,10 @@ const runtime = await createWebviewExampleRuntime({
 const { tray } = runtime;
 
 const webviewTray = mountExampleWebview(runtime, "placement-demo-webview");
+const devServer = await startDevServer("/placement");
+console.log(`placement panel: ${devServer.url}`);
 const panel = webviewTray.createWebviewWindow({
-  html: createPlacementHtml(PLACEMENTS),
+  url: devServer.url,
   width: PANEL_WIDTH,
   height: PANEL_HEIGHT,
   title: "OpenTray Placement Demo",
@@ -96,6 +108,7 @@ const lifecycle = createExampleLifecycle({
     } catch {
       // The panel may never have been opened; closing the runtime session is still authoritative.
     }
+    await devServer.close();
     await runtime.shutdown();
   },
 });
