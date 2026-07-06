@@ -60,15 +60,32 @@ const webview = mountExampleWebview(
   style: {
     frameless: false,
     keepOnTop: false,
-    background: { kind: "opaque" },
-    platform: {
-      macos: {
-        cornerRadius: null,
-      },
-      windows: {
-        cornerPreference: null,
-      },
-    },
+    // Translucent native material so the page's own translucent background
+    // (bg-background/80 in the route) composes with the window vibrancy. The
+    // web theme tracks prefers-color-scheme so the native tint and the page
+    // foreground stay readable together.
+    background:
+      process.platform === "darwin"
+        ? {
+            kind: "platformMaterial",
+            material: "windowBackground",
+            state: "followsWindowActiveState",
+          }
+        : process.platform === "win32"
+          ? { kind: "platformMaterial", material: "mica", state: "followsWindowActiveState" }
+          : { kind: "opaque" },
+    platform:
+      process.platform === "darwin"
+        ? {
+            macos: {
+              // Verify the cornerRadius fix: this now rounds the native window
+              // frame, not the page content.
+              cornerRadius: 12,
+            },
+          }
+        : process.platform === "win32"
+          ? { windows: { cornerPreference: "round" } }
+          : {},
   },
   windowControlsOverlay: overlayEnabled,
   fallbackRect: { x: 0, y: 0, width: 1, height: 1 },

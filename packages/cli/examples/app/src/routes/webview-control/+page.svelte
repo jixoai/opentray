@@ -59,6 +59,19 @@
     // Initial refresh.
     void refreshCapabilities();
     void refreshWindowState();
+    // Overlay geometry: auto-fetch on mount + subscribe to changes so the
+    // titlebar avoids the native window controls (macOS traffic lights on the
+    // left, Windows caption buttons on the right) without waiting for a user
+    // to click the "Geometry" button.
+    void refreshOverlayGeometry();
+    const overlayBridge = (bridge as { overlay?: { listen?: (e: string, cb: (e: unknown) => void) => Promise<() => void> } }).overlay;
+    if (overlayBridge?.listen) {
+      void overlayBridge.listen("geometrychange", (event) => {
+        const rect = (event as { titlebarAreaRect?: RectLike })?.titlebarAreaRect;
+        if (rect) applyOverlayInsets(rect);
+        store.appendEvent("overlay.geometrychange", event);
+      });
+    }
 
     return () => {
       unlistens.forEach((u) => u());
@@ -87,12 +100,47 @@
     }
   }
 
+  // titlebarAreaRect is the safe/draggable region the page may own; native
+  // window controls are excluded from it. x = right edge of macOS traffic lights
+  // (or Windows left inset); x + width = left edge of Windows caption buttons.
+  type RectLike = { x?: number; y?: number; width?: number; height?: number };
+  function applyOverlayInsets(rect: RectLike): void {
+    const x = typeof rect.x === "number" ? rect.x : 0;
+    const w = typeof rect.width === "number" ? rect.width : 0;
+    const h = typeof rect.height === "number" ? rect.height : 44;
+    const innerW = typeof window !== "undefined" ? window.innerWidth : 0;
+    // left inset avoids the macOS traffic lights; right inset avoids the
+    // Windows caption-button cluster. On the platform that has no controls on
+    // a side, that side's inset resolves to 0.
+    store.setOverlayInsets({
+      left: Math.max(0, x),
+      right: Math.max(0, innerW - (x + w)),
+      height: Math.max(28, h),
+    });
+    store.setOverlayStatusText(`x=${Math.round(x)} w=${Math.round(w)} h=${Math.round(h)}`);
+  }
+  async function refreshOverlayGeometry(): Promise<void> {
+    const overlay = (bridge as { overlay?: { getTitlebarAreaRect?: () => Promise<RectLike> } }).overlay;
+    if (!overlay?.getTitlebarAreaRect) return;
+    try {
+      const rect = await overlay.getTitlebarAreaRect();
+      applyOverlayInsets(rect);
+      store.appendEvent("overlay.geometry", rect);
+    } catch (error) {
+      store.appendEvent("overlay.geometry:error", { error: formatError(error) });
+    }
+  }
+
   const origin = $derived(typeof location !== "undefined" ? location.origin : "");
+  // windowControlsOverlay is on when the native overlay object is exposed.
+  const overlayActive = $derived(
+    Boolean((bridge as { overlay?: unknown } | undefined)?.overlay),
+  );
 </script>
 
-<div class="flex h-screen flex-col overflow-hidden">
+<div class="flex h-screen flex-col overflow-hidden bg-background/80 backdrop-blur-xl">
   {#if bridge}
-    <Titlebar {bridge} />
+    <Titlebar {bridge} {overlayActive} />
   {/if}
   <main class="flex-1 overflow-auto p-4">
     <header class="mb-4 flex flex-wrap items-center gap-3">

@@ -93,7 +93,7 @@
   }
 </script>
 
-<div class="flex h-screen flex-col overflow-hidden">
+<div class="flex h-screen flex-col overflow-hidden bg-background/70 backdrop-blur-xl">
   <header
     class="flex items-center justify-between gap-3 border-b border-border px-4 py-3 select-none"
     role="button"

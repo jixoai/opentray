@@ -26,7 +26,7 @@
       {/each}
     </nav>
   </aside>
-  <main class="min-w-0 flex-1 p-8">
+  <main class="min-w-0 flex-1 bg-background/70 p-8 backdrop-blur-xl">
     <header class="mb-6">
       <h1 class="text-2xl font-semibold tracking-tight">OpenTray Examples</h1>
       <p class="mt-2 text-sm text-muted-foreground">

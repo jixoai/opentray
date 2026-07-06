@@ -196,7 +196,7 @@
   );
 </script>
 
-<main class="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 p-6">
+<main class="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 bg-background/70 p-6 backdrop-blur-xl">
   <header class="flex flex-col gap-3">
     <div class="flex items-center justify-between gap-4">
       <div>

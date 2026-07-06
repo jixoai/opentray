@@ -1,9 +1,26 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpenTray Examples</title>
+    <!--
+      Match the web theme to the OS appearance BEFORE first paint so the native
+      window material (which macOS/Windows tint by system appearance) and the
+      page stay in lockstep. When the web theme tracks the system theme, even a
+      near-transparent page background stays readable because the native window
+      backing supplies the contrasting base color.
+    -->
+    <script>
+      (function () {
+        try {
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.classList.toggle("dark", prefersDark);
+        } catch (e) {
+          /* matchMedia unavailable; default to light */
+        }
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

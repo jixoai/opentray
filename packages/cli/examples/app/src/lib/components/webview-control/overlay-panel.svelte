@@ -33,10 +33,17 @@
   function applyInsets(rect: unknown): void {
     const r = rect as { x?: number; width?: number; height?: number } | null;
     if (!r) return;
+    const x = typeof r.x === "number" ? r.x : 0;
     const w = typeof r.width === "number" ? r.width : 0;
     const h = typeof r.height === "number" ? r.height : 44;
-    store.setOverlayInsets({ left: 0, right: 0, height: h });
-    store.setOverlayStatusText(`w=${Math.round(w)} h=${Math.round(h)}`);
+    const innerW = typeof window !== "undefined" ? window.innerWidth : 0;
+    // left avoids macOS traffic lights; right avoids Windows caption buttons.
+    store.setOverlayInsets({
+      left: Math.max(0, x),
+      right: Math.max(0, innerW - (x + w)),
+      height: Math.max(28, h),
+    });
+    store.setOverlayStatusText(`x=${Math.round(x)} w=${Math.round(w)} h=${Math.round(h)}`);
   }
   async function toggleListen(): Promise<void> {
     if (listenActive && unlisten) {

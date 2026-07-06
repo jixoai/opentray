@@ -125,9 +125,13 @@
     margin: 0;
     padding: 0;
     height: 100%;
+    /* Transparent so the native window material (vibrancy/mica/acrylic) shows
+       through. Each route paints its own translucent background layer; the
+       body itself never paints an opaque color, otherwise it would mask the
+       native blur entirely. */
+    background: transparent;
   }
   body {
-    background-color: var(--background);
     color: var(--foreground);
     font-family:
       ui-rounded, "SF Pro Rounded", "Avenir Next", system-ui, -apple-system,
