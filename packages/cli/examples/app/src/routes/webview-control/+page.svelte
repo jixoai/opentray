@@ -132,15 +132,30 @@
   }
 
   const origin = $derived(typeof location !== "undefined" ? location.origin : "");
-  // windowControlsOverlay is on when the native overlay object is exposed.
+  // The overlay object is exposed only when windowControlsOverlay is on, which
+  // means native controls are still visible (FullSizeContentView on macOS) and
+  // the titlebar must pad around them.
   const overlayActive = $derived(
     Boolean((bridge as { overlay?: unknown } | undefined)?.overlay),
   );
+  // Self-drawn window controls (close/min/max/restore) must appear when the
+  // native controls are GONE — i.e. on a frameless (Borderless) window. On a
+  // framed window (with or without overlay) the native controls are still
+  // visible, so drawing our own would duplicate them. This is distinct from
+  // overlayActive: a framed+overlay window has native controls AND an overlay
+  // object; a frameless window has neither native controls nor (typically) an
+  // overlay object.
+  const frameless = $derived(
+    Boolean(
+      (store.capabilities as { frameless?: boolean } | null)?.frameless,
+    ),
+  );
+  const showWindowControls = $derived(frameless);
 </script>
 
 <div class="flex h-screen flex-col overflow-hidden bg-background/80 backdrop-blur-xl">
   {#if bridge}
-    <Titlebar {bridge} {overlayActive} />
+    <Titlebar {bridge} {overlayActive} {showWindowControls} />
   {/if}
   <main class="flex-1 overflow-auto p-4">
     <header class="mb-4 flex flex-wrap items-center gap-3">

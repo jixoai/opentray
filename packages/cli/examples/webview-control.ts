@@ -12,8 +12,12 @@ const overlayEnabled = resolveOverlayEnabled(
   process.argv.slice(2),
   process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY,
 );
+// --frameless strips the native title bar (and with it the native window
+// controls), so the page must draw its own. Useful for verifying the
+// self-drawn control cluster appears when native controls are gone.
+const frameless = resolveFrameless(process.argv.slice(2));
 console.log(
-  `windowControlsOverlay: ${overlayEnabled ? "enabled" : "disabled"}`,
+  `windowControlsOverlay: ${overlayEnabled ? "enabled" : "disabled"} · frameless: ${frameless}`,
 );
 
 ensureAppInstalled();
@@ -58,7 +62,7 @@ const webview = mountExampleWebview(
   title: "OpenTray WebView Control Demo",
   icon,
   style: {
-    frameless: false,
+    frameless,
     keepOnTop: false,
     // Translucent native material so the page's own translucent background
     // (bg-background/80 in the route) composes with the window vibrancy. The
@@ -213,4 +217,8 @@ function parseBooleanEnv(value: string | undefined): boolean | undefined {
     default:
       return undefined;
   }
+}
+
+function resolveFrameless(args: readonly string[]): boolean {
+  return args.some((arg) => arg === "--frameless");
 }

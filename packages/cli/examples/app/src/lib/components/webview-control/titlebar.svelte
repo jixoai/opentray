@@ -2,8 +2,15 @@
   import type { NavigatorWindow } from "$lib/types";
   import { store } from "./store.svelte";
 
-  type Props = { bridge: NavigatorWindow; overlayActive?: boolean };
-  let { bridge, overlayActive = false }: Props = $props();
+  type Props = {
+    bridge: NavigatorWindow;
+    /** True when windowControlsOverlay is on — the titlebar pads around native controls. */
+    overlayActive?: boolean;
+    /** True when the page must draw its own window controls (frameless window). */
+    showWindowControls?: boolean;
+  };
+  let { bridge, overlayActive = false, showWindowControls = false }: Props =
+    $props();
 
   // Inset style driven by overlay geometry. left avoids the macOS traffic
   // lights; right avoids the Windows caption buttons. Both come from
@@ -46,10 +53,10 @@
       <code class="truncate text-[10px] text-muted-foreground">{store.overlayStatusText}</code>
     {/if}
   </div>
-  {#if !overlayActive}
-    <!-- When windowControlsOverlay is OFF the page owns the window controls.
-         When it is ON the native buttons (macOS left, Windows right) are
-         responsible, so we hide these to avoid overlap. -->
+  {#if showWindowControls}
+    <!-- Native window controls are gone (frameless window), so the page owns
+         close/min/max/restore. On a framed window the native controls remain
+         visible (even with overlay), so we don't draw our own. -->
     <div class="flex items-center gap-1 px-2" aria-label="Window controls">
       <button
         type="button"
