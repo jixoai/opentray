@@ -37,6 +37,13 @@ export interface DevServer {
   close(): Promise<void>;
 }
 
+interface WaitForUrlReadyOptions {
+  fetchImpl?: typeof fetch;
+  sleepImpl?: typeof sleep;
+  now?: () => number;
+  intervalMs?: number;
+}
+
 /**
  * Ensure the SvelteKit app dependencies are installed. Hard-exits with a clear
  * message if not, since the dev server cannot start without them.
@@ -66,7 +73,11 @@ export async function startDevServer(route: string): Promise<DevServer> {
 
   const portRegex = /http:\/\/(localhost|127\.0\.0\.1|\[::1\]):(\d+)/;
   let baseUrl: string | undefined;
+  let earlyExit: string | undefined;
   const buffer: string[] = [];
+  proc.once("exit", (code, signal) => {
+    earlyExit = `examples app dev server exited before readiness (code=${code ?? "null"}, signal=${signal ?? "null"})`;
+  });
 
   const collect = (stream: NodeJS.ReadableStream, label: string): void => {
     stream.setEncoding("utf8");
@@ -89,13 +100,17 @@ export async function startDevServer(route: string): Promise<DevServer> {
 
   // Wait for Vite/SvelteKit to print its Local URL.
   const printDeadline = Date.now() + 30_000;
-  while (baseUrl === undefined && Date.now() < printDeadline) {
+  while (
+    baseUrl === undefined &&
+    earlyExit === undefined &&
+    Date.now() < printDeadline
+  ) {
     await sleep(50);
   }
   if (baseUrl === undefined) {
     await killProc(proc);
     throw new Error(
-      `examples app dev server did not print a URL within 30s.\n${buffer.slice(-20).join("\n")}`,
+      `${earlyExit ?? "examples app dev server did not print a URL within 30s."}\n${buffer.slice(-20).join("\n")}`,
     );
   }
 
@@ -105,19 +120,12 @@ export async function startDevServer(route: string): Promise<DevServer> {
   // Wait until the route actually responds. The first request may take longer
   // while Vite compiles the route on demand. Loopback fetches bypass the
   // system proxy via NO_PROXY (set at module load above).
-  const readyDeadline = Date.now() + 20_000;
-  while (Date.now() < readyDeadline) {
-    try {
-      const response = await fetch(fullUrl);
-      if (response.ok || response.status === 404 || response.status === 500) {
-        // 200 = ready; 404/500 means the server is up but the route may still
-        // be compiling — accept and let the WebView load it.
-        break;
-      }
-    } catch {
-      // Not ready yet.
-    }
-    await sleep(150);
+  const ready = await waitForUrlReady(fullUrl, Date.now() + 20_000);
+  if (!ready) {
+    await killProc(proc);
+    throw new Error(
+      `examples app dev server did not respond on ${fullUrl} within 20s.\n${buffer.slice(-20).join("\n")}`,
+    );
   }
 
   return {
@@ -128,20 +136,38 @@ export async function startDevServer(route: string): Promise<DevServer> {
   };
 }
 
+export async function waitForUrlReady(
+  url: string,
+  deadlineMs: number,
+  options: WaitForUrlReadyOptions = {},
+): Promise<boolean> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const sleepImpl = options.sleepImpl ?? sleep;
+  const now = options.now ?? Date.now;
+  const intervalMs = Math.max(10, Math.round(options.intervalMs ?? 150));
+  while (now() < deadlineMs) {
+    try {
+      const response = await fetchImpl(url);
+      if (response.ok || response.status === 404 || response.status === 500) {
+        // 200 = ready; 404/500 means the server is up but the route may still
+        // be compiling — accept and let the WebView load it.
+        return true;
+      }
+    } catch {
+      // Not ready yet.
+    }
+    await sleepImpl(intervalMs);
+  }
+  return false;
+}
+
 function killProc(proc: ChildProcess): Promise<void> {
   return new Promise((resolve) => {
     if (proc.exitCode !== null || proc.signalCode !== null) {
       resolve();
       return;
     }
-    proc.once("exit", () => resolve());
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-      // Already exiting.
-    }
-    // Force-kill safety net so shutdown never hangs the example.
-    setTimeout(() => {
+    const forceKillTimer = setTimeout(() => {
       try {
         proc.kill("SIGKILL");
       } catch {
@@ -149,5 +175,15 @@ function killProc(proc: ChildProcess): Promise<void> {
       }
       resolve();
     }, 3000);
+    forceKillTimer.unref?.();
+    proc.once("exit", () => {
+      clearTimeout(forceKillTimer);
+      resolve();
+    });
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+      // Already exiting.
+    }
   });
 }
