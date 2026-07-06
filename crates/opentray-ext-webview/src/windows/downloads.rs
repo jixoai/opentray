@@ -9,6 +9,7 @@ use webview2_com::{
     take_pwstr, BytesReceivedChangedEventHandler, DownloadStartingEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2DownloadOperation, ICoreWebView2DownloadStartingEventArgs, ICoreWebView2_4,
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON,
         COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED,
         COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED, COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS,
     },
@@ -151,7 +152,7 @@ fn attach_progress_handlers(
                 let Some(operation) = operation else {
                     return Ok(());
                 };
-                let mut state = 0i32;
+                let mut state = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
                 operation.State(&mut state)?;
                 if state == COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS {
                     return Ok(());
@@ -169,7 +170,7 @@ fn attach_progress_handlers(
                     );
                     return Ok(());
                 }
-                let mut interrupt_reason = 0i32;
+                let mut interrupt_reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON::default();
                 operation.InterruptReason(&mut interrupt_reason)?;
                 let event =
                     if interrupt_reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED {
