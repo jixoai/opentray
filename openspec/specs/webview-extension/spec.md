@@ -1016,4 +1016,3 @@ The extension SHALL NOT overwrite `suggestedFilename` with the deduped or final 
 - **WHEN** any download lifecycle event payload is emitted
 - **THEN** the payload contains `suggestedFilename: null`
 - **AND** the extension does not fabricate a separate suggestion by pretending the current `filename` projection is source truth.
-
