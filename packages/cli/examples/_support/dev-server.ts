@@ -5,6 +5,23 @@ import { fileURLToPath } from "node:url";
 
 import { sleep } from "./example-lifecycle";
 
+// Ensure loopback fetches bypass any system HTTP proxy. A misconfigured or
+// slow proxy returns 502 for localhost, and each retry burns the proxy
+// timeout (~3.5s), turning a sub-second readiness probe into a 20s+ stall.
+// Bun fetch reads NO_PROXY at call time, so amending it here is enough.
+const LOOPBACK_NO_PROXY = "localhost,127.0.0.1,::1";
+{
+  const existing = process.env.NO_PROXY ?? process.env.no_proxy ?? "";
+  const merged = [existing, LOOPBACK_NO_PROXY]
+    .join(",")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(merged));
+  process.env.NO_PROXY = unique.join(",");
+  process.env.no_proxy = unique.join(",");
+}
+
 const EXAMPLES_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -86,7 +103,8 @@ export async function startDevServer(route: string): Promise<DevServer> {
   const fullUrl = `${baseUrl}${cleanRoute}`;
 
   // Wait until the route actually responds. The first request may take longer
-  // while Vite compiles the route on demand.
+  // while Vite compiles the route on demand. Loopback fetches bypass the
+  // system proxy via NO_PROXY (set at module load above).
   const readyDeadline = Date.now() + 20_000;
   while (Date.now() < readyDeadline) {
     try {

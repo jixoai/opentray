@@ -145,10 +145,12 @@
   // overlayActive: a framed+overlay window has native controls AND an overlay
   // object; a frameless window has neither native controls nor (typically) an
   // overlay object.
+  // NOTE: capabilities.frameless is a capability flag (always true on macOS that
+  // supports frameless), NOT the current window state. The current frameless
+  // state lives in getStyle().frameless — use that to decide whether native
+  // controls are gone and self-drawn controls must appear.
   const frameless = $derived(
-    Boolean(
-      (store.capabilities as { frameless?: boolean } | null)?.frameless,
-    ),
+    Boolean((store.style as { frameless?: boolean } | null)?.frameless),
   );
   const showWindowControls = $derived(frameless);
 </script>
