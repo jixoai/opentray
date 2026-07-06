@@ -91,7 +91,7 @@ macOS support includes:
 - titlebar overlay geometry through `navigator.opentrayWindow.overlay`
 - native app-region dragging through `startAppRegionDrag()`
 - minimize, maximize, and restore window-state controls
-- adjustable content corner radius through `style.platform.macos.cornerRadius`
+- adjustable native window-frame corner radius through `style.platform.macos.cornerRadius`
 - native title and icon state
 - declarative `document.title` / native-title synchronization
 - declarative favicon / native-icon synchronization, with best-effort native projection
@@ -359,7 +359,7 @@ Current native support:
 - macOS: `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, `isMinimized`, and native app-region drag
 - macOS: `keepOnTop` through `setStyle({ keepOnTop: true })`
 - macOS: whole-window opacity through `setStyle({ opacity: 0.82 })`
-- macOS: `style.platform.macos.cornerRadius` through layer-backed content clipping
+- macOS: `style.platform.macos.cornerRadius` through layer-backed theme-frame clipping
 - macOS: `getTitle`, `setTitle`, `getIcon`, `setIcon`
 - macOS: titlebar overlay geometry through `windowControlsOverlay`
 - macOS: `navigator.screen.getScreenDetails`

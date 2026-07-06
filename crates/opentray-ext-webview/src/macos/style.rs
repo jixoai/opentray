@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use objc2::rc::Retained;
 use objc2_app_kit::{
-    NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSWindow, NSWindowStyleMask,
+    NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSView, NSWindow, NSWindowStyleMask,
     NSWindowTitleVisibility,
 };
 use serde::{Deserialize, Serialize};
@@ -209,7 +209,7 @@ fn requires_clear_backing(style: &WindowStyleState) -> bool {
         WebviewWindowBackground::Transparent
             | WebviewWindowBackground::PlatformMaterial { .. }
             | WebviewWindowBackground::Semantic { .. }
-    )
+    ) || style.platform.macos.corner_radius.is_some()
 }
 
 fn validate_background(background: &WebviewWindowBackground) -> Result<(), WebviewRuntimeError> {
@@ -270,7 +270,8 @@ pub(super) fn apply_window_style(
         let state = bridge.borrow();
         state.navigator_window.window_controls_overlay
     };
-    let wants_clear_background = requires_clear_backing(&style);
+    let wants_clear_background =
+        requires_clear_backing(&style) || style.platform.macos.corner_radius.is_some();
     window.setStyleMask(framed_window_style_mask(style.frameless, overlay_enabled));
     window.setLevel(if style.keep_on_top {
         NSFloatingWindowLevel
@@ -309,7 +310,7 @@ pub(super) fn apply_window_style(
         )
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     }
-    apply_corner_radius(&host_view.ns_view, style.platform.macos.corner_radius);
+    apply_corner_radius(window, style.platform.macos.corner_radius)?;
     Ok(())
 }
 
@@ -322,7 +323,25 @@ pub(super) fn normalize_corner_radius(radius: f64) -> Result<f64, WebviewRuntime
     Ok(radius.clamp(0.0, 128.0))
 }
 
-fn apply_corner_radius(content_view: &Retained<objc2_app_kit::NSView>, radius: Option<f64>) {
+fn apply_corner_radius(
+    window: &Retained<NSWindow>,
+    radius: Option<f64>,
+) -> Result<(), WebviewRuntimeError> {
+    let frame_view = window_frame_view(window).ok_or_else(|| {
+        WebviewRuntimeError::Internal("webview window frame view is not ready".into())
+    })?;
+    apply_layer_corner_radius(&frame_view, radius);
+    Ok(())
+}
+
+fn window_frame_view(window: &Retained<NSWindow>) -> Option<Retained<NSView>> {
+    let content_view = window.contentView()?;
+    // AppKit installs the content view inside the theme frame; that frame owns the native
+    // window silhouette, while the content view belongs to page/WebView composition.
+    unsafe { content_view.superview() }
+}
+
+fn apply_layer_corner_radius(content_view: &Retained<NSView>, radius: Option<f64>) {
     if radius.is_some() {
         content_view.setWantsLayer(true);
     }
@@ -339,4 +358,66 @@ fn ns_color((red, green, blue, alpha): RGBA) -> Retained<NSColor> {
         blue as f64 / 255.0,
         alpha as f64 / 255.0,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2_app_kit::NSBackingStoreType;
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    #[test]
+    fn corner_radius_requires_clear_backing_even_with_opaque_background() {
+        let mut style = WindowStyleState::default();
+        assert!(!requires_clear_backing(&style));
+
+        style.platform.macos.corner_radius = Some(18.0);
+        assert!(requires_clear_backing(&style));
+    }
+
+    #[test]
+    fn corner_radius_targets_theme_frame_layer_not_content_layer() {
+        let Some(mtm) = MainThreadMarker::new() else {
+            eprintln!("skipping AppKit layer test outside the main thread");
+            return;
+        };
+        let window = unsafe {
+            NSWindow::initWithContentRect_styleMask_backing_defer(
+                NSWindow::alloc(mtm),
+                NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(320.0, 200.0)),
+                framed_window_style_mask(true, false),
+                NSBackingStoreType::Buffered,
+                true,
+            )
+        };
+        let content_view = window.contentView().expect("content view should exist");
+
+        apply_corner_radius(&window, Some(18.0)).expect("corner radius should apply");
+
+        let frame_view = unsafe {
+            content_view
+                .superview()
+                .expect("content view should be mounted in a theme frame")
+        };
+        let frame_layer = frame_view
+            .layer()
+            .expect("theme frame should become layer-backed");
+        assert_eq!(frame_layer.cornerRadius(), 18.0);
+        assert!(frame_layer.masksToBounds());
+
+        let content_layer_radius = content_view
+            .layer()
+            .map(|layer| layer.cornerRadius())
+            .unwrap_or(0.0);
+        assert_eq!(content_layer_radius, 0.0);
+
+        apply_corner_radius(&window, None).expect("corner radius should clear");
+
+        let frame_layer = frame_view
+            .layer()
+            .expect("theme frame layer should remain readable");
+        assert_eq!(frame_layer.cornerRadius(), 0.0);
+        assert!(!frame_layer.masksToBounds());
+    }
 }

@@ -73,7 +73,7 @@ The next real platform-law shift should happen when Windows/Linux material, corn
 | --- | --- | --- | --- | --- |
 | Material/background | `NSVisualEffectView` via `window-vibrancy`; future macOS liquid-glass naming may diverge. | DWM/Mica/Acrylic/Tabbed/host-backdrop families vary by Windows version. | GTK/libadwaita/compositor-specific transparency and blur vary by desktop. | Keep common shell state small; model native backing and material as one `style.background` atom, with semantic tokens only when the runtime can truthfully project them. |
 | Whole-window opacity | `NSWindow.setAlphaValue(...)`. | `WS_EX_LAYERED` plus `SetLayeredWindowAttributes` for shell alpha. | Compositor/window-manager-specific and currently unsupported. | Keep `style.opacity` as common shell alpha only; do not fold it into `style.background`, material state, or page CSS opacity. |
-| Corners | Layer-backed content clipping can project numeric radius; system shell corners remain platform-owned when unset. | Windows 11 exposes rounded-corner preferences, while older versions differ or lack system corners. | Window manager/compositor decides; app-side clipping may not equal native shell corners. | Keep numeric radius or enum corner preference inside the platform family that can truthfully project it. |
+| Corners | Layer-backed theme-frame clipping can project numeric radius; system shell corners remain platform-owned when unset. | Windows 11 exposes rounded-corner preferences, while older versions differ or lack system corners. | Window manager/compositor decides; app-side clipping may not equal native shell corners. | Keep numeric radius or enum corner preference inside the platform family that can truthfully project it. |
 | Screen details/events | `NSScreen` and `NSWindow.screen()` provide current snapshots; event observers should be listener-driven. | Win32 display topology and DPI events have their own coordinate and scale rules. | X11/Wayland/GTK monitor events and permissions vary by stack. | Keep `getScreenDetails()` standard-like, but model event source, coordinate space, and permission/capability per substrate before broadening. |
 
 Do not pre-build `navigator.opentrayWindow.macos26|win11|gtk.*` namespaces only from speculation. First expose stable common capability state. Introduce substrate namespaces only when a concrete backend has behavior that cannot be truthfully represented by the common contract plus capability metadata.
@@ -603,3 +603,28 @@ See also:
 - [Tray-Anchored Custom Panel](#scenario-card-tray-anchored-custom-panel)
 
 Current screen support is snapshot-oriented. If a product requires monitor hot-plug, per-monitor DPI changes, or cross-platform screen topology events, treat that as the Windows/Linux/macOS screen-event matrix modeling point instead of adding a speculative one-off event.
+
+## Glass Theme Alignment
+
+When a window uses a translucent native material (vibrancy / mica / acrylic), the native window backing is tinted by the OS appearance: macOS and Windows give a dark base under a dark system theme and a light base under a light system theme. The page's own translucent background composites on top of that native base, so text contrast depends on the page foreground reading against the *native* tint, not against a CSS color the page fully controls.
+
+The robust rule: **keep the web theme aligned with the system theme** (`prefers-color-scheme`). When `web-dark` rides on `system-dark` (or `web-light` on `system-light`), even a near-transparent page background stays readable because the native window backing supplies the contrasting base color and the page foreground is chosen against that same base.
+
+When the themes disagree (for example a `web-light` panel inside a `system-dark` window), the translucent page background must be **more opaque** to guarantee contrast — a thinner blur, a heavier fill. "More opaque" here means lower transparency on the page background layer, which makes the native blur visually fainter. That is the cost of theme disagreement; it is intentional, not a bug.
+
+Concrete guidance for example/production pages:
+
+1. Set the root `<html>` class (`dark` or none) from `matchMedia("(prefers-color-scheme: dark)")` **before first paint** (inline script in the host HTML), so the web theme never flashes against the wrong native tint.
+2. Make `html, body { background: transparent }` so the native material shows through. Never paint an opaque body color over a material window — that hides the blur entirely.
+3. Give each page's root container a translucent background layer (for example Tailwind `bg-background/70 backdrop-blur-xl`). The opacity is the readability knob: aligned themes can go very transparent; mismatched themes should raise the opacity.
+4. Do not rely on CSS `color-scheme` alone to fix contrast — it only picks UA defaults; the native window material still needs the page background to let it through.
+
+## Corner Radius Target Layer
+
+`style.platform.macos.cornerRadius` rounds the **native window frame**, not the page content. The native code applies `setCornerRadius` to the window themeFrame's backing layer (`contentView.superview().layer()`), and forces the window non-opaque with a clear backing whenever `cornerRadius` is set, so the rounded corners actually clip against the desktop instead of leaving a square window rectangle behind the rounded content.
+
+Implementation law: `cornerRadius` must never be applied to `contentView.layer()` directly — that rounds the page/WebView composition while the window rectangle stays sharp, which is the classic "it rounds the content, not the window" bug. Always target the themeFrame layer, and always pair a non-null `cornerRadius` with a clear window backing (`setOpaque(false)` + clear `backgroundColor`), otherwise the opaque window shows through behind the rounded superview.
+
+Page-side law: a page cannot round the native window via CSS `border-radius` on `body`/`html` — that only rounds the page content and leaves a square window behind. Native corner rounding belongs solely to `style.platform.macos.cornerRadius` (macOS) and `style.platform.windows.cornerPreference` (Windows DWM corner family). Keep both platform families in their own `style.platform.{macos,windows}` namespace; setting a non-null `windows.cornerPreference` on macOS (or vice versa) is rejected by the native validator.
+
+Overlay pairing: when combining `cornerRadius` with `windowControlsOverlay`, the overlay geometry (`getTitlebarAreaRect()`) already accounts for the titlebar height; the rounded window corners are orthogonal and apply to the whole frame.
