@@ -30,6 +30,32 @@ Current maturity truth for these examples:
 
 This guide does **not** prove future bootstrap families such as managed `window.open()`, localhost asset origin hosting, profile/partition control, or host/page devtools APIs.
 
+## Unified SvelteKit App
+
+Every WebView example is a route in a single private SvelteKit SPA at `packages/cli/examples/app`. Routes are mutually isolated — each owns its full window surface and shares only the component library (`src/lib/components/ui`) and build pipeline. The root layout renders no chrome; the index page at `/` is the sole cross-example navigation surface.
+
+Pages are pure CSR (SSR and prerendering are off because they read `navigator.opentrayWindow`). The dev server binds to loopback only, so the native runtime classifies the page origin as `Local` and the default `nativeApiPolicy.defaultSrc: ["'local'"]` admits every capability — no per-route policy override is needed.
+
+Each example launcher (`*-panel.ts`) spawns the shared dev server via `_support/dev-server.ts`, parses the assigned port, and loads its own route through `createWebviewWindow({ url })`. Routes:
+
+| Route | Example launcher |
+| --- | --- |
+| `/download` | `example:download` |
+| `/webview-control` | `example:webview-control` |
+| `/tray-panel` | `example:tray-panel` |
+| `/placement` | `example:placement` |
+| `/media-query` | `example:mediaQuery` |
+| `/badge` | `example:badge` |
+| `/debug-runtime-tray` | `example:debug-runtime-tray` |
+
+First-time setup (one-off, shared by all WebView examples):
+
+```bash
+cd packages/cli/examples/app && bun install
+```
+
+The three non-WebView examples (`basic-tray`, `first-app`, `debug-runtime-lynx`) remain standalone scripts with no page.
+
 ## Preflight
 
 Run from the repo root:

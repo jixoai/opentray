@@ -1,11 +1,10 @@
 <script lang="ts">
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
-  import { Badge } from "$lib/components/ui/badge";
   import { EXAMPLES } from "$lib/examples";
 
   // The index page is the only route that carries navigation chrome. Each
-  // example route (download, webview-control, ...) is a fully isolated window
-  // surface; this page is the launchpad that links to them.
+  // example route is a fully isolated window surface; this page is the
+  // launchpad that links to them.
 </script>
 
 <div class="flex min-h-screen">
@@ -18,11 +17,9 @@
     <nav class="flex flex-col gap-0.5">
       {#each EXAMPLES as ex}
         <a
-          href={ex.ready ? ex.href : undefined}
-          class="rounded-md px-3 py-1.5 text-sm transition-colors {ex.ready
-            ? "text-foreground hover:bg-accent"
-            : "cursor-not-allowed text-muted-foreground/50"}"
-          title={ex.ready ? ex.title : `${ex.title} (coming soon)`}
+          href={ex.href}
+          class="rounded-md px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+          title={ex.title}
         >
           {ex.title}
         </a>
@@ -42,18 +39,10 @@
 
     <div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
       {#each EXAMPLES as ex}
-        <a
-          href={ex.ready ? ex.href : undefined}
-          class="block {ex.ready ? "cursor-pointer" : "cursor-not-allowed"}"
-        >
-          <Card class="h-full transition-colors {ex.ready ? "hover:bg-accent/40" : "opacity-60"}">
+        <a href={ex.href} class="block cursor-pointer">
+          <Card class="h-full transition-colors hover:bg-accent/40">
             <CardHeader>
-              <div class="flex items-center justify-between gap-2">
-                <CardTitle>{ex.title}</CardTitle>
-                {#if !ex.ready}
-                  <Badge variant="muted">soon</Badge>
-                {/if}
-              </div>
+              <CardTitle>{ex.title}</CardTitle>
             </CardHeader>
             <CardContent>
               <p class="text-sm text-muted-foreground">{ex.description}</p>
