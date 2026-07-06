@@ -1,5 +1,17 @@
 # @opentray/ext-webview
 
+## 0.11.0
+
+### Minor Changes
+
+- ebed69b: Add native WebView download handling across supported platforms, including explicit download events, save-path control, multiple-download policy defaults, and preservation of the browser-provided `suggestedFilename` through the download lifecycle.
+- a2c9541: Add whole-window opacity to the WebView window style contract. `style.opacity` is a common shell-alpha field that composes with, but does not replace or imply, `style.background` material, blur, or transparent backing modes.
+
+### Patch Changes
+
+- 1eb8b13: Rewrite the `@opentray/ext-webview` "First Panel" example to the current executable-host model. The previous example imported `runTrayApp` from the `opentray/node` subpath, but both were removed in the v0.10 `drop Node runtime binding and ship the executable host` refactor: `opentray/node` no longer exists in the package `exports`, and the runtime ships as a packaged executable (`bin/opentray`) that `createTray()` spawns on demand. The README now teaches the supported path — `createTray()` from the `opentray` root entry, with runtime identity passed through the second argument — and documents that application code does not host a native main loop or worker.
+- cd4d563: Update native tray-icon projections in place when `setIcon` and related tray state change, avoiding temporary status-item removal during ordinary tray updates. WebView tray placement now rejects transient invalid tray bounds and reuses the last valid tray anchor before falling back to portable placement. macOS primary tray activation now routes left-click to the primary menu item while preserving the native menu on right-click.
+
 ## 0.10.3
 
 ### Patch Changes

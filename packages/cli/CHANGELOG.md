@@ -1,5 +1,18 @@
 # opentray
 
+## 0.11.0
+
+### Patch Changes
+
+- 1b28aa8: Add app-facing ergonomic menu input for top-level `createTray` and `setMenu`, including string items, hyphen separators, tuple submenus, auto ids, and item-local `onMenuClick` callbacks while preserving pure protocol menu frames.
+- b92e8e9: Add OS-scoped tray icon candidates for Darwin, Win32, and Linux. Darwin candidates can carry `isTemplate`, which the tray-icon backend now applies through native template rendering when the Darwin candidate is selected.
+
+  The tray-icon backend now also projects `appName` as final visible tray text when no configured icon/text produces visible pixels, preventing invisible click targets when an app omits an icon or accidentally supplies a transparent image. The `opentray` entrypoint re-exports common app-facing tray types such as `CreateTrayOptions`, `TrayIcon`, and `TrayMenu` so consumers do not need `typeof` inference or direct `@opentray/spec` imports for ordinary app code.
+
+- cd4d563: Update native tray-icon projections in place when `setIcon` and related tray state change, avoiding temporary status-item removal during ordinary tray updates. WebView tray placement now rejects transient invalid tray bounds and reuses the last valid tray anchor before falling back to portable placement. macOS primary tray activation now routes left-click to the primary menu item while preserving the native menu on right-click.
+- Updated dependencies [b92e8e9]
+  - @opentray/spec@0.11.0
+
 ## 0.10.3
 
 ### Patch Changes
