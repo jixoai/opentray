@@ -262,7 +262,7 @@ pnpm --filter opentray example:matrix
 pnpm --filter opentray example:matrix -- --row webview-control
 ```
 
-The matrix does not depend on shell wildcard expansion. It warms the runtime executable before `first-app`, labels WebView/Badge/Lynx rows as contributor-only `extension-debug-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts.
+The matrix does not depend on shell wildcard expansion. It stages the packaged runtime executable before `first-app`, labels WebView/Badge/Lynx rows as contributor-only `extension-debug-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts.
 
 These are useful for quick regression passes:
 

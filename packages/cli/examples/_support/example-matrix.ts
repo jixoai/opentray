@@ -70,7 +70,15 @@ const createRows = ({
     coverage: "default-runtime",
     description: "direct createTray quickstart through the default local broker",
     platforms: WEBVIEW_PLATFORMS,
-    preflight: [command("cargo", ["build", "-p", "opentray-bin"])],
+    preflight: [
+      command("pnpm", [
+        "run",
+        "npm:cp-bin:runtime",
+        "--",
+        "--target",
+        "debug",
+      ]),
+    ],
     command: pnpmExample("example:first-app"),
   },
   {

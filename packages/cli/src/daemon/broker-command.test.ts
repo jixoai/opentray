@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveBrokerCommand,
   resolveDevBrokerBinaryPath,
+  resolveInstalledBrokerBinary,
 } from "./broker-command";
 import { resolveBrokerNativeTarget } from "./native-target";
 import { resolveDaemonPaths } from "./paths";
@@ -33,7 +34,7 @@ describe("broker command resolver", () => {
     expect(command.args).toContain(paths.appName);
   });
 
-  it("prefers the workspace broker build over an installed platform package when running from source", async () => {
+  it("prefers the installed platform package before workspace fallback", async () => {
     const paths = resolveDaemonPaths({
       homeDir: "/tmp/opentray-test",
       packageVersion: "0.1.0",
@@ -43,12 +44,18 @@ describe("broker command resolver", () => {
       env: {},
       platform: "darwin",
       arch: "arm64",
-      findWorkspaceRoot: async () => "/repo",
-      ensureDevBrokerBinary: async (workspaceRoot) =>
-        `${workspaceRoot}/target/debug/opentray`,
+      resolveInstalledBrokerBinary: async (target) => ({
+        binary: `/node_modules/${target.packageName}/bin/opentray`,
+        binaryPath: `/node_modules/${target.packageName}/bin/opentray`,
+      }),
+      findWorkspaceRoot: async () => {
+        throw new Error("workspace resolution should not run");
+      },
     });
 
-    expect(command.command).toBe("/repo/target/debug/opentray");
+    expect(command.command).toBe(
+      "/node_modules/@opentray/darwin-arm64/bin/opentray"
+    );
     expect(command.cwd).toBeUndefined();
   });
 
@@ -62,6 +69,7 @@ describe("broker command resolver", () => {
       env: {},
       platform: "linux",
       arch: "x64",
+      resolveInstalledBrokerBinary: async () => ({}),
       findWorkspaceRoot: async () => "/repo",
       ensureDevBrokerBinary: async (workspaceRoot) =>
         `${workspaceRoot}/target/debug/opentray`,
@@ -81,6 +89,9 @@ describe("broker command resolver", () => {
       env: {},
       platform: "darwin",
       arch: "arm64",
+      resolveInstalledBrokerBinary: async () => ({
+        binaryPath: "/repo/packages/darwin-arm64/bin/opentray",
+      }),
       findWorkspaceRoot: async () => "/repo",
       ensureDevBrokerBinary: async (workspaceRoot) =>
         `${workspaceRoot}/target/debug/opentray`,
@@ -101,6 +112,7 @@ describe("broker command resolver", () => {
         env: {},
         platform: "linux",
         arch: "x64",
+        resolveInstalledBrokerBinary: async () => ({}),
         findWorkspaceRoot: async () => undefined,
       })
     ).rejects.toMatchObject({
@@ -109,10 +121,93 @@ describe("broker command resolver", () => {
     });
   });
 
+  it("reports the expected binary path when the installed package exists but is not staged", async () => {
+    const paths = resolveDaemonPaths({
+      homeDir: "/tmp/opentray-test",
+      packageVersion: "0.1.0",
+    });
+
+    await expect(
+      resolveBrokerCommand(paths, {
+        env: {},
+        platform: "darwin",
+        arch: "arm64",
+        resolveInstalledBrokerBinary: async () => ({
+          binaryPath: "/node_modules/@opentray/darwin-arm64/bin/opentray",
+        }),
+        findWorkspaceRoot: async () => undefined,
+      })
+    ).rejects.toMatchObject({
+      code: "OPENTRAY_MISSING_PLATFORM_BROKER_BINARY",
+      packageName: "@opentray/darwin-arm64",
+      binaryPath: "/node_modules/@opentray/darwin-arm64/bin/opentray",
+    });
+  });
+
   it("targets only the workspace debug broker binary for Windows dev rebuild cleanup", () => {
     expect(resolveDevBrokerBinaryPath("E:/repo/opentray", "win32")).toBe(
       join("E:/repo/opentray", "target", "debug", "opentray.exe")
     );
+  });
+});
+
+describe("installed broker package resolution", () => {
+  it("derives the binary path from the resolved package root", async () => {
+    const result = await resolveInstalledBrokerBinary(
+      {
+        packageName: "@opentray/darwin-arm64",
+        binaryRelativePath: "bin/opentray",
+      },
+      {
+        platform: "darwin",
+        resolvePackageJson: () =>
+          "/node_modules/@opentray/darwin-arm64/package.json",
+        assertBinaryAccessible: async () => {},
+      }
+    );
+
+    expect(result).toEqual({
+      binary: "/node_modules/@opentray/darwin-arm64/bin/opentray",
+      binaryPath: "/node_modules/@opentray/darwin-arm64/bin/opentray",
+    });
+  });
+
+  it("returns the expected binary path when the package exists but the binary is missing", async () => {
+    const result = await resolveInstalledBrokerBinary(
+      {
+        packageName: "@opentray/darwin-arm64",
+        binaryRelativePath: "bin/opentray",
+      },
+      {
+        platform: "darwin",
+        resolvePackageJson: () =>
+          "/node_modules/@opentray/darwin-arm64/package.json",
+        assertBinaryAccessible: async () => {
+          throw errno("ENOENT");
+        },
+      }
+    );
+
+    expect(result).toEqual({
+      binaryPath: "/node_modules/@opentray/darwin-arm64/bin/opentray",
+    });
+  });
+
+  it("returns no binary when the platform package is not installed", async () => {
+    const result = await resolveInstalledBrokerBinary(
+      {
+        packageName: "@opentray/darwin-arm64",
+        binaryRelativePath: "bin/opentray",
+      },
+      {
+        platform: "darwin",
+        resolvePackageJson: () => {
+          throw errno("MODULE_NOT_FOUND");
+        },
+      }
+    );
+
+    expect(result).toEqual({});
   });
 });
 
@@ -124,3 +219,6 @@ describe("broker native target", () => {
     });
   });
 });
+
+const errno = (code: string): NodeJS.ErrnoException =>
+  Object.assign(new Error(code), { code });

@@ -125,7 +125,7 @@ pnpm run npm:cp-bin -- --target debug
 pnpm run npm:cp-bin:webview -- -t debug
 ```
 
-By default, `createTray()` routes through the local runtime host and starts it on first use when needed. The executable host remains the source of truth for tray lifecycle, session cleanup, and native event routing on supported platforms.
+By default, `createTray()` routes through the local runtime host and starts it on first use when needed. It resolves the broker executable from the installed current-platform package first; source-tree contributors can either stage fresh package artifacts with `npm:cp-bin*` or point directly at a debug broker with `OPENTRAY_BROKER_BIN`. The executable host remains the source of truth for tray lifecycle, session cleanup, and native event routing on supported platforms.
 
 Runtime options may also carry app identity facts:
 
@@ -143,6 +143,7 @@ The runtime host reports those facts as `appId` and `appName` in `runtime-host-h
 Run the quickstart example and the protocol-only example:
 
 ```bash
+pnpm run npm:cp-bin:runtime -- --target debug
 pnpm --filter opentray example:first-app
 pnpm --filter opentray example:basic
 ```
@@ -157,7 +158,7 @@ pnpm --filter opentray example:matrix -- --row webview-control
 Run human-visible tray and extension examples from a source checkout:
 
 ```bash
-cargo build -p opentray-bin
+pnpm run npm:cp-bin:runtime -- --target debug
 pnpm --filter opentray example:debug-runtime-tray
 pnpm --filter opentray example:webview-control
 pnpm --filter opentray example:tray-panel
@@ -166,4 +167,4 @@ pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The example matrix warms the runtime executable before `first-app`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app example exercises the default package runtime. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.
+The example matrix stages the packaged runtime executable before `first-app`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app example exercises the default package runtime. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

@@ -1,11 +1,13 @@
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import type { DaemonPaths } from "./paths";
 import {
+  type BrokerNativeTarget,
   MissingPlatformBrokerBinaryError,
   resolveBrokerNativeTarget,
 } from "./native-target";
@@ -17,12 +19,31 @@ export interface BrokerCommand {
 }
 
 const sourceUrl = import.meta.url;
+const requireFromSource = createRequire(sourceUrl);
+
+export interface InstalledBrokerBinaryResolution {
+  binary?: string;
+  binaryPath?: string;
+}
+
+export interface ResolveInstalledBrokerBinaryOptions {
+  platform?: NodeJS.Platform;
+  resolvePackageJson?: (specifier: string) => string;
+  assertBinaryAccessible?: (
+    binaryPath: string,
+    platform: NodeJS.Platform
+  ) => Promise<void>;
+}
 
 export interface ResolveBrokerCommandOptions {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   arch?: string;
   sourceDir?: string;
+  resolveInstalledBrokerBinary?: (
+    target: BrokerNativeTarget,
+    options: ResolveInstalledBrokerBinaryOptions
+  ) => Promise<InstalledBrokerBinaryResolution>;
   findWorkspaceRoot?: (start: string) => Promise<string | undefined>;
   ensureDevBrokerBinary?: (workspaceRoot: string) => Promise<string>;
 }
@@ -37,6 +58,16 @@ export const resolveBrokerCommand = async (
     return commandForBinary(explicit, paths);
   }
 
+  const platform = options.platform ?? process.platform;
+  const arch = options.arch ?? process.arch;
+  const target = resolveBrokerNativeTarget(platform, arch);
+  const installed = await (
+    options.resolveInstalledBrokerBinary ?? resolveInstalledBrokerBinary
+  )(target, { platform });
+  if (installed.binary !== undefined) {
+    return commandForBinary(installed.binary, paths);
+  }
+
   const sourceDir = options.sourceDir ?? dirname(fileURLToPath(sourceUrl));
   const workspaceRoot = await (options.findWorkspaceRoot ?? findWorkspaceRoot)(
     sourceDir
@@ -48,15 +79,55 @@ export const resolveBrokerCommand = async (
     return commandForBinary(binary, paths);
   }
 
-  const platform = options.platform ?? process.platform;
-  const arch = options.arch ?? process.arch;
-  const target = resolveBrokerNativeTarget(platform, arch);
   throw new MissingPlatformBrokerBinaryError(
-    `unable to resolve OpenTray debug broker binary for ${platform}/${arch}; run from the source workspace or set OPENTRAY_BROKER_BIN`,
+    installed.binaryPath === undefined
+      ? `unable to resolve OpenTray broker binary for ${platform}/${arch}; install "${target.packageName}" for this platform or set OPENTRAY_BROKER_BIN`
+      : `unable to resolve OpenTray broker binary for ${platform}/${arch}; package "${target.packageName}" was found but binary "${installed.binaryPath}" is not accessible; restage the runtime package or set OPENTRAY_BROKER_BIN`,
     platform,
     arch,
-    { packageName: target.packageName }
+    {
+      packageName: target.packageName,
+      ...(installed.binaryPath === undefined
+        ? {}
+        : { binaryPath: installed.binaryPath }),
+    }
   );
+};
+
+export const resolveInstalledBrokerBinary = async (
+  target: BrokerNativeTarget,
+  options: ResolveInstalledBrokerBinaryOptions = {}
+): Promise<InstalledBrokerBinaryResolution> => {
+  const platform = options.platform ?? process.platform;
+  let packageJsonPath: string;
+  try {
+    packageJsonPath = (
+      options.resolvePackageJson ?? requireFromSource.resolve.bind(requireFromSource)
+    )(`${target.packageName}/package.json`);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "MODULE_NOT_FOUND") {
+      return {};
+    }
+    throw error;
+  }
+
+  const binaryPath = join(dirname(packageJsonPath), target.binaryRelativePath);
+  try {
+    await (
+      options.assertBinaryAccessible ?? assertInstalledBrokerBinaryAccessible
+    )(binaryPath, platform);
+    return { binary: binaryPath, binaryPath };
+  } catch (error) {
+    if (
+      isNodeError(error) &&
+      (error.code === "ENOENT" ||
+        error.code === "EACCES" ||
+        error.code === "EPERM")
+    ) {
+      return { binaryPath };
+    }
+    throw error;
+  }
 };
 
 const commandForBinary = (
@@ -218,8 +289,19 @@ foreach ($process in $processes) {
     });
   });
 
+const binaryAccessMode = (platform: NodeJS.Platform): number =>
+  platform === "win32" ? constants.F_OK : constants.X_OK;
+
+const assertInstalledBrokerBinaryAccessible = async (
+  binaryPath: string,
+  platform: NodeJS.Platform
+): Promise<void> => {
+  await access(binaryPath, binaryAccessMode(platform));
+};
+
 const powerShellString = (value: string): string =>
   `'${value.replace(/'/g, "''")}'`;
 
-const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
-  error instanceof Error && "code" in error;
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
