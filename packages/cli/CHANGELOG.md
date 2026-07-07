@@ -1,5 +1,16 @@
 # opentray
 
+## 0.11.1
+
+### Patch Changes
+
+- 4282a1c: Fix broker binary resolution so installed platform packages are checked before
+  workspace fallback. This prevents npm consumers from failing to start the
+  runtime when the matching `@opentray/<platform>` package is installed, and it
+  updates source-checkout examples to stage the packaged runtime artifact
+  explicitly for default-runtime smoke paths.
+  - @opentray/spec@0.11.1
+
 ## 0.11.0
 
 ### Patch Changes
