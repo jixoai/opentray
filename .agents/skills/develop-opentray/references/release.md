@@ -33,7 +33,7 @@ Tokens created with bypass-2FA may authenticate package access but fail trusted-
 
 ## Changeset Rule
 
-Release-worthy package API/runtime changes must include a `.changeset/*.md` note for affected npm packages. The current public OpenTray packages are one fixed release line; when the release intent is line-wide alignment, the changeset must name the full public package closure so versioning, native release planning, and publishing see the same source of action. Do not bump placeholder packages just because docs mention them unless the user explicitly requests a whole-line release.
+Release-worthy package API/runtime changes must include a `.changeset/*.md` note for the affected public package or family entrypoint. The release planner expands `.changeset/config.json` fixed groups into the real publish closure before native staging, validation, and publishing run, so package sets cannot silently drift between versioning and release jobs. Keep fixed groups intentional: if a family should stop publishing with the shared line, remove it from the fixed group instead of relying on partial changeset text to suppress it.
 
 Changesets must only bump peer dependents when their peer dependency range is out of range. Keep `___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH.onlyUpdatePeerDependentsWhenOutOfRange` enabled so roadmap extension placeholders do not get stable releases from an `opentray` peer bump alone.
 

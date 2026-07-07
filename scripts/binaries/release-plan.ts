@@ -61,15 +61,9 @@ export async function resolveReleaseNativePlan(
   registry: PackageVersionRegistry = npmRegistry
 ): Promise<ReleaseNativePlan> {
   const pendingChangesetFiles = await listPendingChangesetFiles(root);
-
-  const releasePackages = new Set<string>();
-  for (const relativePath of pendingChangesetFiles) {
-    const content = await readOptionalWorkspaceFile(root, relativePath);
-    if (content === undefined) {
-      continue;
-    }
-    extractChangesetReleasePackages(content).forEach((pkg) => releasePackages.add(pkg));
-  }
+  const releasePackages = new Set(
+    await resolvePendingReleasePackagesFromChangesets(root, pendingChangesetFiles)
+  );
 
   const unpublishedWorkspacePackages = await resolveUnpublishedWorkspacePackages(
     root,
@@ -138,6 +132,13 @@ export async function resolveReleaseNativePlan(
   };
 }
 
+export async function resolvePendingReleasePackages(
+  root: string
+): Promise<readonly string[]> {
+  const pendingChangesetFiles = await listPendingChangesetFiles(root);
+  return resolvePendingReleasePackagesFromChangesets(root, pendingChangesetFiles);
+}
+
 export async function listPublicWorkspacePackages(
   root: string
 ): Promise<WorkspacePackageManifest[]> {
@@ -159,7 +160,7 @@ export async function listPublicWorkspacePackages(
     try {
       content = await readFile(manifestPath, "utf8");
     } catch (error) {
-      if (isErrnoException(error, "ENOENT")) {
+      if (isErrnoException(error, "ENOENT") || isErrnoException(error, "ENOTDIR")) {
         continue;
       }
       throw error;
@@ -189,6 +190,80 @@ export async function resolveUnpublishedWorkspacePackages(
     .filter((pkg) => !pkg.exists)
     .map((pkg) => pkg.name)
     .sort((left, right) => left.localeCompare(right));
+}
+
+interface ChangesetsConfig {
+  readonly fixed?: readonly (readonly string[])[];
+}
+
+async function expandFixedReleasePackages(
+  root: string,
+  packageNames: ReadonlySet<string>
+): Promise<readonly string[]> {
+  if (packageNames.size === 0) {
+    return [];
+  }
+  const expanded = new Set(packageNames);
+  const fixedReleaseGroups = await readFixedReleaseGroups(root);
+  for (const group of fixedReleaseGroups) {
+    if (!group.some((name) => packageNames.has(name))) {
+      continue;
+    }
+    group.forEach((name) => expanded.add(name));
+  }
+  return [...expanded].sort((left, right) => left.localeCompare(right));
+}
+
+async function resolvePendingReleasePackagesFromChangesets(
+  root: string,
+  pendingChangesetFiles: readonly string[]
+): Promise<readonly string[]> {
+  const directlyRequestedReleasePackages = new Set<string>();
+  for (const relativePath of pendingChangesetFiles) {
+    const content = await readOptionalWorkspaceFile(root, relativePath);
+    if (content === undefined) {
+      continue;
+    }
+    extractChangesetReleasePackages(content).forEach((pkg) =>
+      directlyRequestedReleasePackages.add(pkg)
+    );
+  }
+  return expandFixedReleasePackages(root, directlyRequestedReleasePackages);
+}
+
+async function readFixedReleaseGroups(
+  root: string
+): Promise<readonly (readonly string[])[]> {
+  const configPath = join(root, ".changeset", "config.json");
+  let content: string;
+  try {
+    content = await readFile(configPath, "utf8");
+  } catch (error) {
+    if (isErrnoException(error, "ENOENT")) {
+      return [];
+    }
+    throw error;
+  }
+
+  const parsed: unknown = JSON.parse(content);
+  if (!isRecord(parsed)) {
+    throw new Error(`invalid changesets config: ${configPath}`);
+  }
+  const config = parsed as ChangesetsConfig;
+  if (config.fixed === undefined) {
+    return [];
+  }
+  if (
+    !Array.isArray(config.fixed) ||
+    config.fixed.some(
+      (group) =>
+        !Array.isArray(group) ||
+        group.some((packageName) => typeof packageName !== "string")
+    )
+  ) {
+    throw new Error(`invalid changesets fixed release groups: ${configPath}`);
+  }
+  return config.fixed;
 }
 
 const npmRegistry: PackageVersionRegistry = {

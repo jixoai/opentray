@@ -826,6 +826,33 @@ mod tests {
     }
 
     #[test]
+    fn discovery_resolves_badge_platform_library_from_package_candidates() {
+        let discovery = ExtensionDiscovery::for_test(
+            PathBuf::from("/app/node_modules/@opentray/darwin-arm64/bin/opentray"),
+            None,
+            Vec::new(),
+        );
+        let request = ExtensionLoadRequest {
+            app_id: "app-1".to_string(),
+            name: "badge".to_string(),
+            path: "@opentray/ext-badge".to_string(),
+            mount_id: None,
+        };
+
+        let candidates = discovery.candidates(&request);
+
+        assert_eq!(
+            candidates[0],
+            PathBuf::from("/app/node_modules/@opentray").join(format!(
+                "ext-badge-{}-{}/{}",
+                current_package_os(),
+                current_arch(),
+                dynamic_library_relative_path("badge").display()
+            ))
+        );
+    }
+
+    #[test]
     fn discovery_prefers_explicit_extension_path_over_package_candidates() {
         let discovery = ExtensionDiscovery::for_test_with_node_module_roots(
             PathBuf::from("/app/node_modules/.pnpm/opentray@0.2.0/node_modules/@opentray/darwin-arm64/bin/opentray"),

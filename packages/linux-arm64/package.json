@@ -14,7 +14,12 @@
     "arm64"
   ],
   "files": [
-    "bin",
+    "bin/opentray",
     "README.md"
-  ]
+  ],
+  "publishConfig": {
+    "executableFiles": [
+      "bin/opentray"
+    ]
+  }
 }
