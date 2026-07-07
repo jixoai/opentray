@@ -27,6 +27,7 @@ export type NativeBuildComponent =
   | "lynx-runtime";
 export type NativeArtifactKind = NativeStageKind;
 export const lynxRuntimeArtifactName = "OpenTrayLynxRuntime.app.zip";
+export const badgeDynamicLibraryArtifactName = "libopentray_ext_badge.dylib";
 
 export interface NativeBuildTargetConfig {
   readonly id: NativeBuildTargetName;
@@ -438,22 +439,11 @@ export const executeNativeBuildExecution = async (
         ["scripts/release/build-lynx-runtime.sh", runtimeOutput],
         workspaceRoot
       );
-      copiedFiles.push(runtimeOutput);
+      copiedFiles.push(basename(runtimeOutput));
       continue;
     }
 
     if (kind === "badge") {
-      if (target.packageOs === "darwin") {
-        const badgeOutput = join(outputDir, badgeDockHelperArtifactName);
-        await runCommand(
-          "bash",
-          ["scripts/release/build-badge-dock-helper.sh", badgeOutput],
-          workspaceRoot
-        );
-        copiedFiles.push(badgeOutput);
-        continue;
-      }
-
       const source = join(
         workspaceRoot,
         "target",
@@ -465,7 +455,16 @@ export const executeNativeBuildExecution = async (
       if (!destination.endsWith(".dll")) {
         await chmod(destination, 0o755);
       }
-      copiedFiles.push(destination);
+      copiedFiles.push(basename(destination));
+      if (target.packageOs === "darwin") {
+        const badgeOutput = join(outputDir, badgeDockHelperArtifactName);
+        await runCommand(
+          "bash",
+          ["scripts/release/build-badge-dock-helper.sh", badgeOutput],
+          workspaceRoot
+        );
+        copiedFiles.push(basename(badgeOutput));
+      }
       continue;
     }
 
@@ -480,7 +479,7 @@ export const executeNativeBuildExecution = async (
     if (!destination.endsWith(".dll")) {
       await chmod(destination, 0o755);
     }
-    copiedFiles.push(destination);
+    copiedFiles.push(basename(destination));
   }
 
   const manifest: NativeBuildManifest = {
@@ -543,7 +542,7 @@ export const releaseArtifactName = (
         return "opentray_ext_badge.dll";
       }
       if (packageOs === "darwin") {
-        return badgeDockHelperArtifactName;
+        return badgeDynamicLibraryArtifactName;
       }
       throw new Error(
         "badge native artifacts are not published for linux targets"

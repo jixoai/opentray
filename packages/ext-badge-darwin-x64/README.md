@@ -1,10 +1,15 @@
 # @opentray/ext-badge-darwin-x64
 
-macOS x64 Dock helper app package for `@opentray/ext-badge`.
+macOS x64 native package for `@opentray/ext-badge`.
 
-This package owns the Dock-facing helper bundle used to present badge state with a real
-application identity. The helper is intentionally separate from the OpenTray runtime host.
-It currently projects badge text, overlay, attention, and click/quit lifecycle only; progress is not a Dock projection on this helper.
+This package stages two Darwin-owned artifacts:
+
+- `lib/libopentray_ext_badge.dylib` for the OpenTray dynamic extension ABI
+- `app/OpenTrayBadgeHelper.app.zip` for the Dock-facing helper bundle
+
+The helper is intentionally separate from the OpenTray runtime host. It currently projects badge
+text, overlay, attention, and click/quit lifecycle only; progress is not a Dock projection on this
+helper.
 
 ## Build
 

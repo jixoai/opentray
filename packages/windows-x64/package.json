@@ -14,7 +14,7 @@
     "x64"
   ],
   "files": [
-    "bin",
+    "bin/opentray.exe",
     "README.md"
   ]
 }

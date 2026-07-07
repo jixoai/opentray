@@ -1,18 +1,16 @@
 #!/usr/bin/env bun
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
 import {
   resolveNativePackageTarget,
-  resolveStageDestination,
+  resolveStageDestinationForArtifactFile,
   stageArtifact,
 } from "./artifacts";
 import {
   parseNativeBuildTargetName,
-  releaseArtifactName,
-  lynxRuntimeArtifactName,
   resolveNativeBuildTarget,
-  type NativeArtifactKind,
 } from "./native-build-graph";
 
 interface StagePlanEntry {
@@ -63,14 +61,18 @@ for (const entry of stagePlan) {
     entry.artifactName ?? `native-${targetName}`
   );
 
-  for (const rawKind of entry.artifactKinds) {
-    const kind = parseArtifactKind(rawKind);
-    const fileName =
-      kind === "lynx-runtime"
-        ? lynxRuntimeArtifactName
-        : releaseArtifactName(kind, target.packageOs);
+  const manifest = await readNativeBuildManifest(artifactDirectory);
+  if (manifest.target !== entry.target) {
+    throw new Error(
+      `artifact manifest target mismatch: expected ${entry.target}, received ${manifest.target}`
+    );
+  }
+  for (const fileName of manifest.files) {
     const source = join(artifactDirectory, fileName);
-    const destination = resolveStageDestination(packageTarget, kind);
+    const destination = resolveStageDestinationForArtifactFile(
+      packageTarget,
+      fileName
+    );
     await stageArtifact(values.root ?? process.cwd(), source, destination);
   }
 }
@@ -112,15 +114,30 @@ function parseStagePlan(value: string): StagePlanEntry[] {
   });
 }
 
-function parseArtifactKind(value: string): NativeArtifactKind {
+interface NativeBuildManifest {
+  readonly target: string;
+  readonly files: readonly string[];
+}
+
+async function readNativeBuildManifest(
+  artifactDirectory: string
+): Promise<NativeBuildManifest> {
+  const manifestPath = join(artifactDirectory, "manifest.json");
+  const content = await readFile(manifestPath, "utf8");
+  const parsed: unknown = JSON.parse(content);
   if (
-    value === "runtime" ||
-    value === "webview" ||
-    value === "badge" ||
-    value === "lynx" ||
-    value === "lynx-runtime"
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("target" in parsed) ||
+    !("files" in parsed) ||
+    typeof parsed.target !== "string" ||
+    !Array.isArray(parsed.files) ||
+    parsed.files.some((file) => typeof file !== "string")
   ) {
-    return value;
+    throw new Error(`invalid native build manifest: ${manifestPath}`);
   }
-  throw new Error(`unsupported native artifact kind: ${value}`);
+  return {
+    target: parsed.target,
+    files: parsed.files,
+  };
 }

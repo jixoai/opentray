@@ -1,5 +1,5 @@
 import { chmod, copyFile, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 export type PackageOs = "darwin" | "linux" | "windows";
 export type NpmOs = "darwin" | "linux" | "win32";
@@ -26,6 +26,7 @@ export interface NativeTarget {
   badgePackageName?: string;
   badgePackageDir?: string;
   badgeArtifact?: string;
+  badgeHelperArtifact?: string;
   lynxPackageName?: string;
   lynxPackageDir?: string;
   lynxArtifact?: string;
@@ -60,6 +61,10 @@ export function createNativeTarget(
       ? undefined
       : packageOs === "windows"
       ? `${badgePackageDir}/bin/opentray_ext_badge.dll`
+      : `${badgePackageDir}/lib/libopentray_ext_badge.dylib`;
+  const badgeHelperArtifact =
+    badgePackageDir === undefined || packageOs !== "darwin"
+      ? undefined
       : `${badgePackageDir}/app/${badgeDockHelperArtifactName}`;
   const badgePackageName =
     badgePackageDir === undefined
@@ -93,6 +98,7 @@ export function createNativeTarget(
     badgePackageName,
     badgePackageDir,
     badgeArtifact,
+    badgeHelperArtifact,
     lynxPackageName:
       lynxPackageDir === undefined
         ? undefined
@@ -211,4 +217,28 @@ export const stageArtifact = async (
   if (!destination.endsWith(".dll")) {
     await chmod(absoluteDestination, 0o755);
   }
+};
+
+export const resolveStageDestinationForArtifactFile = (
+  target: NativeTarget,
+  fileName: string
+): string => {
+  const candidates = [
+    target.runtimeArtifact,
+    target.webviewArtifact,
+    target.badgeArtifact,
+    target.badgeHelperArtifact,
+    target.lynxArtifact,
+    target.lynxRuntimeArtifact,
+  ].filter((candidate): candidate is string => candidate !== undefined);
+
+  const destination = candidates.find(
+    (candidate) => basename(candidate) === fileName
+  );
+  if (destination === undefined) {
+    throw new Error(
+      `target ${target.packageOs}-${target.arch} does not publish an artifact named ${fileName}`
+    );
+  }
+  return destination;
 };

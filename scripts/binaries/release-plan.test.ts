@@ -34,7 +34,7 @@ describe("Feature: selective native release planner", () => {
     expect(plan.jobs).toEqual([]);
   });
 
-  test("Scenario: Given WebView pending changesets When the planner runs Then Lynx work is excluded", async () => {
+  test("Scenario: Given WebView pending changesets on the shared release line When the planner runs Then runtime and badge siblings are staged but Lynx remains excluded", async () => {
     const root = await createTempChangeset(
       "webview.md",
       `---
@@ -47,11 +47,11 @@ describe("Feature: selective native release planner", () => {
 
     expect(plan.enabled).toBe(true);
     expect(plan.publishEnabled).toBe(true);
-    expect(plan.components).toEqual(["webview"]);
-    expect(plan.jobs).toHaveLength(4);
-    expect(plan.jobs.every((job) => job.componentsCsv === "webview")).toBe(
-      true
-    );
+    expect(plan.components).toEqual(["runtime", "webview", "badge"]);
+    expect(plan.jobs).toHaveLength(14);
+    expect(plan.jobs.some((job) => job.componentsCsv === "runtime")).toBe(true);
+    expect(plan.jobs.some((job) => job.componentsCsv === "webview")).toBe(true);
+    expect(plan.jobs.some((job) => job.componentsCsv === "badge")).toBe(true);
     expect(plan.jobs.map((job) => job.artifactName)).toContain(
       "native-darwin-arm64-webview"
     );
@@ -61,10 +61,20 @@ describe("Feature: selective native release planner", () => {
     expect(artifactKinds).not.toContain("lynx");
     expect(artifactKinds).not.toContain("lynx-runtime");
     expect(plan.validatePackageDirs).toEqual([
+      "packages/darwin-arm64",
+      "packages/darwin-x64",
+      "packages/ext-badge-darwin-arm64",
+      "packages/ext-badge-darwin-x64",
+      "packages/ext-badge-windows-arm64",
+      "packages/ext-badge-windows-x64",
       "packages/ext-webview-darwin-arm64",
       "packages/ext-webview-darwin-x64",
       "packages/ext-webview-windows-arm64",
       "packages/ext-webview-windows-x64",
+      "packages/linux-arm64",
+      "packages/linux-x64",
+      "packages/windows-arm64",
+      "packages/windows-x64",
     ]);
   });
 
@@ -110,7 +120,7 @@ describe("Feature: selective native release planner", () => {
     ]);
   });
 
-  test("Scenario: Given core runtime pending changesets When the planner runs Then Node runtime bindings are selected", async () => {
+  test("Scenario: Given core runtime pending changesets on the shared release line When the planner runs Then runtime, WebView, and badge native families are staged together while Lynx stays paused", async () => {
     const root = await createTempChangeset(
       "runtime.md",
       `---
@@ -122,19 +132,31 @@ describe("Feature: selective native release planner", () => {
     const plan = await resolveReleaseNativePlan(root);
 
     expect(plan.enabled).toBe(true);
-    expect(plan.components).toEqual(["runtime"]);
-    expect(plan.jobs).toHaveLength(6);
-    expect(plan.jobs.every((job) => job.componentsCsv === "runtime")).toBe(
-      true
-    );
+    expect(plan.components).toEqual(["runtime", "webview", "badge"]);
+    expect(plan.jobs).toHaveLength(14);
+    expect(plan.jobs.some((job) => job.componentsCsv === "runtime")).toBe(true);
+    expect(plan.jobs.some((job) => job.componentsCsv === "webview")).toBe(true);
+    expect(plan.jobs.some((job) => job.componentsCsv === "badge")).toBe(true);
     expect(
-      plan.stageEntries.every((entry) =>
-        entry.artifactKinds.includes("runtime")
-      )
+      plan.stageEntries.some((entry) => entry.artifactKinds.includes("runtime"))
+    ).toBe(true);
+    expect(
+      plan.stageEntries.some((entry) => entry.artifactKinds.includes("webview"))
+    ).toBe(true);
+    expect(
+      plan.stageEntries.some((entry) => entry.artifactKinds.includes("badge"))
     ).toBe(true);
     expect(plan.validatePackageDirs).toEqual([
       "packages/darwin-arm64",
       "packages/darwin-x64",
+      "packages/ext-badge-darwin-arm64",
+      "packages/ext-badge-darwin-x64",
+      "packages/ext-badge-windows-arm64",
+      "packages/ext-badge-windows-x64",
+      "packages/ext-webview-darwin-arm64",
+      "packages/ext-webview-darwin-x64",
+      "packages/ext-webview-windows-arm64",
+      "packages/ext-webview-windows-x64",
       "packages/linux-arm64",
       "packages/linux-x64",
       "packages/windows-arm64",
@@ -177,7 +199,7 @@ describe("Feature: selective native release planner", () => {
     ]);
   });
 
-  test("Scenario: Given badge pending changesets When the planner runs Then macOS and Windows badge package dirs are validated", async () => {
+  test("Scenario: Given badge pending changesets on the shared release line When the planner runs Then runtime and WebView siblings are staged with badge", async () => {
     const root = await createTempChangeset(
       "badge.md",
       `---
@@ -189,19 +211,42 @@ describe("Feature: selective native release planner", () => {
     const plan = await resolveReleaseNativePlan(root);
 
     expect(plan.enabled).toBe(true);
-    expect(plan.components).toEqual(["badge"]);
-    expect(plan.jobs.map((job) => job.artifactName)).toEqual([
-      "native-darwin-arm64-badge",
-      "native-darwin-x64-badge",
-      "native-windows-arm64-badge",
-      "native-windows-x64-badge",
-    ]);
+    expect(plan.components).toEqual(["runtime", "webview", "badge"]);
+    expect(plan.jobs.some((job) => job.artifactName === "native-darwin-arm64-badge")).toBe(
+      true
+    );
+    expect(plan.jobs.some((job) => job.artifactName === "native-darwin-arm64-runtime")).toBe(
+      true
+    );
+    expect(plan.jobs.some((job) => job.artifactName === "native-darwin-arm64-webview")).toBe(
+      true
+    );
     expect(plan.validatePackageDirs).toEqual([
+      "packages/darwin-arm64",
+      "packages/darwin-x64",
       "packages/ext-badge-darwin-arm64",
       "packages/ext-badge-darwin-x64",
       "packages/ext-badge-windows-arm64",
       "packages/ext-badge-windows-x64",
+      "packages/ext-webview-darwin-arm64",
+      "packages/ext-webview-darwin-x64",
+      "packages/ext-webview-windows-arm64",
+      "packages/ext-webview-windows-x64",
+      "packages/linux-arm64",
+      "packages/linux-x64",
+      "packages/windows-arm64",
+      "packages/windows-x64",
     ]);
+  });
+
+  test("Scenario: Given Finder metadata under packages When the planner lists workspace manifests Then non-directory entries are ignored", async () => {
+    const root = await createTempWorkspace();
+    await writeFile(join(root, "packages", ".DS_Store"), "finder", "utf8");
+
+    const plan = await resolveReleaseNativePlan(root, publishedRegistry());
+
+    expect(plan.enabled).toBe(false);
+    expect(plan.publishEnabled).toBe(false);
   });
 
   test("Scenario: Given line-wide native changesets When the planner runs Then sibling extensions compile in separate jobs", async () => {
@@ -262,6 +307,17 @@ async function createTempWorkspace(): Promise<string> {
   tempDirs.push(root);
   await mkdir(join(root, ".changeset"), { recursive: true });
   await mkdir(join(root, "packages"), { recursive: true });
+  await writeFile(
+    join(root, ".changeset", "config.json"),
+    `${JSON.stringify(
+      {
+        fixed: [defaultFixedReleaseGroup],
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
   return root;
 }
 
@@ -287,3 +343,24 @@ async function writeManifest(
     "utf8"
   );
 }
+
+const defaultFixedReleaseGroup = [
+  "opentray",
+  "@opentray/spec",
+  "@opentray/darwin-arm64",
+  "@opentray/darwin-x64",
+  "@opentray/linux-arm64",
+  "@opentray/linux-x64",
+  "@opentray/windows-arm64",
+  "@opentray/windows-x64",
+  "@opentray/ext-webview",
+  "@opentray/ext-webview-darwin-arm64",
+  "@opentray/ext-webview-darwin-x64",
+  "@opentray/ext-webview-windows-arm64",
+  "@opentray/ext-webview-windows-x64",
+  "@opentray/ext-badge",
+  "@opentray/ext-badge-darwin-arm64",
+  "@opentray/ext-badge-darwin-x64",
+  "@opentray/ext-badge-windows-arm64",
+  "@opentray/ext-badge-windows-x64",
+] as const;

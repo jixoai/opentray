@@ -37,7 +37,7 @@ The release workflow should:
 2. upload them as artifacts,
 3. download them into the release job,
 4. stage them into npm package directories,
-5. validate package contents with `npm pack --dry-run`,
+5. validate the real packed tarball with `pnpm pack` plus tar inspection,
 6. publish via trusted publishing.
 
 The repo already demonstrates this shape in `.github/workflows/release.yml`.

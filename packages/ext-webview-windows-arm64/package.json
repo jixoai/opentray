@@ -8,7 +8,7 @@
     "url": "https://github.com/jixoai/opentray"
   },
   "files": [
-    "bin",
+    "bin/opentray_ext_webview.dll",
     "README.md"
   ],
   "os": [

@@ -8,8 +8,9 @@
     "url": "https://github.com/jixoai/opentray"
   },
   "files": [
-    "README.md",
-    "app"
+    "lib/libopentray_ext_badge.dylib",
+    "app/OpenTrayBadgeHelper.app.zip",
+    "README.md"
   ],
   "os": [
     "darwin"

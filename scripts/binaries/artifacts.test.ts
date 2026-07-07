@@ -8,6 +8,7 @@ import {
   resolveNativePackageTarget,
   resolveNativeTarget,
   resolveStageDestination,
+  resolveStageDestinationForArtifactFile,
 } from "./artifacts";
 
 const repoRoot = resolve(import.meta.dir, "../..");
@@ -59,6 +60,9 @@ describe("Feature: native runtime artifact topology", () => {
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
     );
     expect(darwin.badgeArtifact).toBe(
+      "packages/ext-badge-darwin-arm64/lib/libopentray_ext_badge.dylib"
+    );
+    expect(darwin.badgeHelperArtifact).toBe(
       "packages/ext-badge-darwin-arm64/app/OpenTrayBadgeHelper.app.zip"
     );
     expect(darwin.lynxArtifact).toBe(
@@ -122,6 +126,11 @@ describe("Feature: native runtime artifact topology", () => {
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
     );
     expect(resolveStageDestination(target, "badge")).toBe(
+      "packages/ext-badge-darwin-arm64/lib/libopentray_ext_badge.dylib"
+    );
+    expect(
+      resolveStageDestinationForArtifactFile(target, badgeDockHelperArtifactName)
+    ).toBe(
       `packages/ext-badge-darwin-arm64/app/${badgeDockHelperArtifactName}`
     );
     expect(resolveStageDestination(target, "lynx-runtime")).toBe(
@@ -129,10 +138,13 @@ describe("Feature: native runtime artifact topology", () => {
     );
   });
 
-  test("Scenario: Given badge release artifacts When the release name is resolved Then the macOS helper zip stays stable", () => {
+  test("Scenario: Given badge release artifacts When the release name is resolved Then the macOS dylib and helper zip stay stable", () => {
     const target = resolveNativePackageTarget("darwin", "x64");
 
     expect(target.badgeArtifact).toBe(
+      "packages/ext-badge-darwin-x64/lib/libopentray_ext_badge.dylib"
+    );
+    expect(target.badgeHelperArtifact).toBe(
       `packages/ext-badge-darwin-x64/app/${badgeDockHelperArtifactName}`
     );
   });
