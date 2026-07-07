@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 import {
   describeReleaseStagePlan,
+  inferNativeBuildComponentsFromReleasePackages,
   materializeIndependentNativeBuildExecutions,
   resolveReleaseTargetsForComponents,
   type NativeBuildComponent,
   type NativeBuildExecution,
 } from "./native-build-graph";
+import { resolvePendingReleasePackages } from "./release-plan";
 
 const verifyNativeComponents: readonly NativeBuildComponent[] = [
   "runtime",
@@ -41,16 +43,24 @@ export interface VerifyNativeJob
   readonly artifactKinds: readonly string[];
 }
 
-export function resolveVerifyNativePlan(): VerifyNativePlan {
-  const targets = resolveReleaseTargetsForComponents(verifyNativeComponents);
+export async function resolveVerifyNativePlan(
+  root = process.cwd()
+): Promise<VerifyNativePlan> {
+  const pendingReleasePackages = await resolvePendingReleasePackages(root);
+  const scopedComponents = inferNativeBuildComponentsFromReleasePackages(
+    pendingReleasePackages
+  );
+  const components =
+    scopedComponents.length > 0 ? scopedComponents : verifyNativeComponents;
+  const targets = resolveReleaseTargetsForComponents(components);
   const executions = materializeIndependentNativeBuildExecutions(
-    verifyNativeComponents,
+    components,
     targets
   );
   const stagePlan = describeReleaseStagePlan(executions);
 
   return {
-    components: verifyNativeComponents,
+    components,
     jobs: executions.map((execution) => ({
       target: execution.target,
       runner: execution.runner,
@@ -68,5 +78,5 @@ export function resolveVerifyNativePlan(): VerifyNativePlan {
 }
 
 if (import.meta.main) {
-  console.log(JSON.stringify(resolveVerifyNativePlan(), null, 2));
+  console.log(JSON.stringify(await resolveVerifyNativePlan(), null, 2));
 }

@@ -61,19 +61,8 @@ export async function resolveReleaseNativePlan(
   registry: PackageVersionRegistry = npmRegistry
 ): Promise<ReleaseNativePlan> {
   const pendingChangesetFiles = await listPendingChangesetFiles(root);
-
-  const directlyRequestedReleasePackages = new Set<string>();
-  for (const relativePath of pendingChangesetFiles) {
-    const content = await readOptionalWorkspaceFile(root, relativePath);
-    if (content === undefined) {
-      continue;
-    }
-    extractChangesetReleasePackages(content).forEach((pkg) =>
-      directlyRequestedReleasePackages.add(pkg)
-    );
-  }
   const releasePackages = new Set(
-    await expandFixedReleasePackages(root, directlyRequestedReleasePackages)
+    await resolvePendingReleasePackagesFromChangesets(root, pendingChangesetFiles)
   );
 
   const unpublishedWorkspacePackages = await resolveUnpublishedWorkspacePackages(
@@ -141,6 +130,13 @@ export async function resolveReleaseNativePlan(
     stageEntries: stagePlan.stageEntries,
     validatePackageDirs: stagePlan.validatePackageDirs,
   };
+}
+
+export async function resolvePendingReleasePackages(
+  root: string
+): Promise<readonly string[]> {
+  const pendingChangesetFiles = await listPendingChangesetFiles(root);
+  return resolvePendingReleasePackagesFromChangesets(root, pendingChangesetFiles);
 }
 
 export async function listPublicWorkspacePackages(
@@ -216,6 +212,23 @@ async function expandFixedReleasePackages(
     group.forEach((name) => expanded.add(name));
   }
   return [...expanded].sort((left, right) => left.localeCompare(right));
+}
+
+async function resolvePendingReleasePackagesFromChangesets(
+  root: string,
+  pendingChangesetFiles: readonly string[]
+): Promise<readonly string[]> {
+  const directlyRequestedReleasePackages = new Set<string>();
+  for (const relativePath of pendingChangesetFiles) {
+    const content = await readOptionalWorkspaceFile(root, relativePath);
+    if (content === undefined) {
+      continue;
+    }
+    extractChangesetReleasePackages(content).forEach((pkg) =>
+      directlyRequestedReleasePackages.add(pkg)
+    );
+  }
+  return expandFixedReleasePackages(root, directlyRequestedReleasePackages);
 }
 
 async function readFixedReleaseGroups(
