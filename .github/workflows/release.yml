@@ -15,7 +15,9 @@ on:
         default: stable
 
 concurrency:
-  group: release-${{ github.ref }}
+  # Include the source SHA so a jobless queued run cannot permanently block
+  # later release attempts on the same branch after an Actions outage.
+  group: release-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 env:
