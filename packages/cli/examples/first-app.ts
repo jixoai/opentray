@@ -1,4 +1,7 @@
 import { createTray } from "../src/index";
+import { prepareExampleBrokerBinary } from "./_support/example-runtime-mode";
+
+await prepareExampleBrokerBinary(import.meta.url);
 
 const tray = await createTray({
   id: "com.example.first-app",

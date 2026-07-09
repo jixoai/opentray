@@ -18,6 +18,7 @@ import {
 } from "./index";
 import type {
   WebviewCommand,
+  WebviewWindowDevtools,
   WebviewNavigatorIpc,
   WebviewNavigatorNamespace,
   WebviewNavigatorPermissions,
@@ -803,6 +804,70 @@ describe("@opentray/ext-webview", () => {
             background: { kind: "semantic", token: "blur", state: "active" },
           },
         },
+      },
+    ]);
+  });
+
+  it("routes host-side devtools verbs through the WebView command path", async () => {
+    const transport = new WebviewResultTransport((command) => {
+      if (isWebviewCommand(command) && command.type === "isDevtoolsOpen") {
+        return true;
+      }
+      return { type: "ok" };
+    });
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+        width: 300,
+        height: 200,
+        devtools: true,
+      });
+
+    await webviewWindow.show();
+    await webviewWindow.devtools.open();
+    await webviewWindow.devtools.close();
+    await expect(webviewWindow.devtools.isOpen()).resolves.toBe(true);
+
+    expect(transport.frames.slice(1)).toEqual([
+      {
+        type: "ext-command",
+        requestId: "opentray-2",
+        appId: "app-1",
+        trayId: "tray-1",
+        ext: "webview.tray-1",
+        data: {
+          type: "show",
+          html: "<main />",
+          width: 300,
+          height: 200,
+          devtools: true,
+        },
+      },
+      {
+        type: "ext-command",
+        requestId: "opentray-3",
+        appId: "app-1",
+        trayId: "tray-1",
+        ext: "webview.tray-1",
+        data: { type: "openDevtools" },
+      },
+      {
+        type: "ext-command",
+        requestId: "opentray-4",
+        appId: "app-1",
+        trayId: "tray-1",
+        ext: "webview.tray-1",
+        data: { type: "closeDevtools" },
+      },
+      {
+        type: "ext-command",
+        requestId: "opentray-5",
+        appId: "app-1",
+        trayId: "tray-1",
+        ext: "webview.tray-1",
+        data: { type: "isDevtoolsOpen" },
       },
     ]);
   });
@@ -1930,6 +1995,12 @@ describe("@opentray/ext-webview", () => {
       (() => Promise<WebviewScreenDetails>) | undefined
     >();
     expectTypeOf<WebviewNavigatorWindow["invoke"]>().toBeFunction();
+    expectTypeOf<WebviewNavigatorWindow["devtools"]>().toMatchTypeOf<
+      WebviewWindowDevtools
+    >();
+    expectTypeOf<WebviewNavigatorWindow["devtools"]["isOpen"]>().returns.toEqualTypeOf<
+      Promise<boolean>
+    >();
     expectTypeOf<WebviewNavigatorWindow["show"]>().returns.toEqualTypeOf<
       Promise<WebviewWindowState>
     >();

@@ -164,6 +164,7 @@ const webview = tray.createWebviewWindow({
   html: "<main><h1>OpenTray</h1></main>",
   width: 420,
   height: 260,
+  devtools: true,
 });
 
 await webview.show();
@@ -214,6 +215,7 @@ const webview = tray.createWebviewWindow({
     faviconToWindow: true,
     windowToFavicon: true,
   },
+  devtools: true,
   nativeApiPolicy: {
     defaultSrc: ["'local'"],
     window: ["https://example.com"],
@@ -308,6 +310,7 @@ The injected capability follows a typed facade, with a raw `invoke(cmd, payload)
 - `await navigator.window.minimize()`, `maximize()`, and `restore()`
 - `await navigator.window.getWindowState()`, `isMaximized()`, and `isMinimized()`
 - `await navigator.window.setStyle({ frameless: true, opacity: 0.82, platform: { macos: { cornerRadius: 18 } } })`
+- `await navigator.window.devtools.open()`, `close()`, and `isOpen()` when the session was created with `devtools: true`
 - `await navigator.opentrayWindow.overlay.getTitlebarAreaRect()`
 - `await navigator.opentrayWindow.startAppRegionDrag()`
 - `await navigator.window.setTitle("OpenTray Status")`
@@ -325,7 +328,10 @@ From the host side, keep the lifecycle verbs explicit:
 - `await webview.setContent({ type: "setContent", html })` to replace local HTML content explicitly
 - `await webview.navigate("https://example.com/status")` as the URL-focused content replacement alias
 - `await webview.resizeTo(360, 240)` and `await webview.moveTo(10, 20)` for host-owned geometry changes
+- `await webview.devtools.open()`, `close()`, and `isOpen()` for the instance-owned devtools channel when `devtools: true` was declared before the first show
 - `await webview.destroy()` to destroy the tray-scoped session
+
+`devtools` is a WebView creation setting, not a late-bound toggle. Set `devtools: true` on the first `show({ ... })` / `createWebviewWindow({ ... })` if that session should admit inspector commands. Repeated `show()` does not rebuild the underlying WebView, so changing `devtools` later requires `destroy()` and a fresh show. Read `getCapabilities()` before showing close/state UI: macOS can expose open/close/state, while Windows currently exposes open only. Release builds still compile the native inspector API; windows that omit `devtools: true` keep devtools unavailable by default. Wry does not expose a cross-platform native switch for hiding only the DevTools context-menu item while preserving normal page/input context menus.
 
 For common placement, use `WebviewPlacementKit` rather than a special panel API:
 
@@ -357,6 +363,7 @@ Current native support:
 
 - macOS: `close`, `moveTo`, `resizeTo`, `getCapabilities`, `getStyle`, `setStyle`
 - macOS: `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, `isMinimized`, and native app-region drag
+- macOS: instance-scoped devtools open/close/state through `devtools: true` plus `navigator.window.devtools` / `webview.devtools`
 - macOS: `keepOnTop` through `setStyle({ keepOnTop: true })`
 - macOS: whole-window opacity through `setStyle({ opacity: 0.82 })`
 - macOS: `style.platform.macos.cornerRadius` through layer-backed theme-frame clipping
@@ -368,7 +375,10 @@ Current native support:
 - macOS: global override binding through `bindWindowGlobals` and `bindScreenGlobals`
 - Windows: visible WebView2-backed windows, lifecycle verbs, content replacement/navigation, `evaluate`, `postMessage`, common window bridge commands, title/icon sync, current-monitor screen snapshot, tray bounds projection, and global override binding through `bindWindowGlobals` / `bindScreenGlobals`
 - Windows: `frameless`, `background`, `keepOnTop`, `opacity`, and `style.platform.windows.cornerPreference`
+- Windows: instance-scoped devtools open through `devtools: true`; close/state remain typed unsupported because current Wry/WebView2 does not expose honest runtime state there
 - Linux: no official native WebView runtime package is published. A custom `path` may still be used for private experiments, but the official package treats Linux WebView as unsupported.
+
+Release builds include the native inspector API by default so downstream developers can debug release-mode examples and apps through the explicit host/page API. This does not make every WebView inspectable: the per-window `devtools: true` gate is still required, so ordinary release windows keep devtools unavailable by default.
 
 Keep the unsupported taxonomy explicit:
 

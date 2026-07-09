@@ -104,6 +104,7 @@ pub(super) struct NavigatorWindowBridge {
     navigator_tray: NavigatorTraySettings,
     metadata: WindowMetadataState,
     app_region_drag: AppRegionDragState,
+    devtools_enabled: bool,
     download: WebviewDownloadSettings,
     native_api_policy: WebviewNativeApiPolicy,
     browser_permission_policy: WebviewBrowserPermissionPolicy,
@@ -145,6 +146,9 @@ struct WindowCapabilities {
     opacity: bool,
     title: bool,
     icon: bool,
+    devtools: bool,
+    devtools_closable: bool,
+    devtools_state_queryable: bool,
     screen: bool,
     tray: bool,
     global_bindings_enabled: bool,
@@ -375,6 +379,42 @@ impl MacosWebviewRuntime {
                     })?;
                 let events: Vec<Value> = slot.bridge.borrow_mut().window_events.drain(..).collect();
                 Ok(json!({ "type": "windowEvents", "events": events }))
+            }
+            WebviewCommand::OpenDevtools => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "openDevtools requires an active WebView window".into(),
+                        )
+                    })?;
+                open_devtools(&slot.bridge)
+            }
+            WebviewCommand::CloseDevtools => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "closeDevtools requires an active WebView window".into(),
+                        )
+                    })?;
+                close_devtools(&slot.bridge)
+            }
+            WebviewCommand::IsDevtoolsOpen => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "isDevtoolsOpen requires an active WebView window".into(),
+                        )
+                    })?;
+                devtools_open_state(&slot.bridge)
             }
             WebviewCommand::SetStyle { style } => {
                 let slot = self
@@ -631,6 +671,7 @@ impl MacosWebviewRuntime {
                 sync_icon: show_settings.window.sync.icon,
             },
             app_region_drag: AppRegionDragState::default(),
+            devtools_enabled: show_settings.window.devtools,
             download: show_settings.download,
             native_api_policy: show_settings.native_api_policy.clone(),
             browser_permission_policy: show_settings.browser_permission_policy.clone(),
@@ -685,6 +726,7 @@ impl MacosWebviewRuntime {
             })
             .with_download_started_handler(|_, _| true)
             .with_download_completed_handler(|_, _, _| {})
+            .with_devtools(show_settings.window.devtools)
             // `style.background` is mutable after the WebView is created. Keep WKWebView
             // alpha-capable from creation time, then let `apply_window_style` choose the
             // actual opaque or clear backing color for the current style.
@@ -1015,8 +1057,52 @@ fn clamp_window_axis(value: f64, min: f64, max: f64) -> f64 {
     value.clamp(min, max)
 }
 
+fn ensure_devtools_ready(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<NonNull<WebView>, WebviewRuntimeError> {
+    let bridge_state = bridge.borrow();
+    if !bridge_state.devtools_enabled {
+        return Err(WebviewRuntimeError::Unsupported(
+            "devtools are not enabled for this WebView window".into(),
+        ));
+    }
+    bridge_state.webview.ok_or_else(|| {
+        WebviewRuntimeError::Rejected("devtools require an active WebView window".into())
+    })
+}
+
+pub(super) fn open_devtools(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<Value, WebviewRuntimeError> {
+    let webview = ensure_devtools_ready(bridge)?;
+    unsafe {
+        webview.as_ref().open_devtools();
+    }
+    Ok(Value::Null)
+}
+
+pub(super) fn close_devtools(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<Value, WebviewRuntimeError> {
+    let webview = ensure_devtools_ready(bridge)?;
+    unsafe {
+        webview.as_ref().close_devtools();
+    }
+    Ok(Value::Null)
+}
+
+pub(super) fn devtools_open_state(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<Value, WebviewRuntimeError> {
+    let webview = ensure_devtools_ready(bridge)?;
+    unsafe {
+        return Ok(Value::Bool(webview.as_ref().is_devtools_open()));
+    }
+}
+
 impl NavigatorWindowBridge {
     fn capabilities_json(&self) -> Result<Value, WebviewRuntimeError> {
+        let devtools = self.devtools_enabled;
         serde_json::to_value(WindowCapabilities {
             close: true,
             r#move: true,
@@ -1032,6 +1118,9 @@ impl NavigatorWindowBridge {
             opacity: true,
             title: true,
             icon: true,
+            devtools,
+            devtools_closable: devtools,
+            devtools_state_queryable: devtools,
             screen: self.page_access.screen,
             tray: self.page_access.tray,
             global_bindings_enabled: self.page_access.window_globals,

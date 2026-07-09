@@ -68,6 +68,7 @@ export interface WebviewShowCommand {
   browserPermissionPolicy?: WebviewBrowserPermissionPolicy;
   permissionManagerPolicy?: WebviewPermissionManagerPolicy;
   download?: WebviewDownloadOptions;
+  devtools?: boolean;
 }
 
 export type WebviewWindowOptions = Omit<WebviewShowCommand, "type">;
@@ -196,6 +197,9 @@ export interface WebviewWindowCapabilities {
   opacity: boolean;
   title: boolean;
   icon: boolean;
+  devtools: boolean;
+  devtoolsClosable: boolean;
+  devtoolsStateQueryable: boolean;
   screen: boolean;
   tray: boolean;
   globalBindingsEnabled: boolean;
@@ -321,8 +325,15 @@ export interface WebviewWindowOverlay {
   ): void;
 }
 
+export interface WebviewWindowDevtools {
+  open(): Promise<void>;
+  close(): Promise<void>;
+  isOpen(): Promise<boolean>;
+}
+
 export interface WebviewNavigatorWindow {
   readonly overlay?: WebviewWindowOverlay;
+  readonly devtools: WebviewWindowDevtools;
   invoke<TResponse = unknown>(
     cmd: string,
     payload?: unknown,
@@ -479,6 +490,9 @@ export type WebviewCommand =
       result: WebviewPermissionState;
     }
   | { type: "drainWindowEvents" }
+  | { type: "openDevtools" }
+  | { type: "closeDevtools" }
+  | { type: "isDevtoolsOpen" }
   | { type: "setStyle"; style: WebviewWindowStylePatch }
   | {
       type: "setMinimumSize";
@@ -538,6 +552,7 @@ export interface WebviewHandle {
 }
 
 export interface WebviewWindowHandle {
+  readonly devtools: WebviewWindowDevtools;
   show(command?: Partial<WebviewWindowOptions>): Promise<void>;
   hide(): Promise<void>;
   destroy(): Promise<void>;
@@ -925,6 +940,23 @@ const createWebviewWindowHandle = (
   };
 
   return {
+    devtools: {
+      open() {
+        return endpoint.command<void>({
+          type: "openDevtools",
+        } satisfies WebviewCommand);
+      },
+      close() {
+        return endpoint.command<void>({
+          type: "closeDevtools",
+        } satisfies WebviewCommand);
+      },
+      isOpen() {
+        return endpoint.command<boolean>({
+          type: "isDevtoolsOpen",
+        } satisfies WebviewCommand);
+      },
+    },
     async show(command = {}) {
       const showCommand = {
         type: "show",

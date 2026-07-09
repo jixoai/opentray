@@ -1,17 +1,16 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import type {
   WebviewIpcMessage,
   WebviewTrayCapability,
   WebviewWindowHandle,
+  WebviewWindowOptions,
 } from "../../../ext-webview/src/index";
 import { WebviewExt } from "../../../ext-webview/src/index";
-import { terminateWorkspaceDevBrokerProcess } from "../../src/daemon/broker-command";
 import {
   createClient,
   type EventfulTrayHandle,
@@ -21,6 +20,13 @@ import {
   connectLocalBroker,
   type LocalBrokerClient,
 } from "../../src/local-broker";
+import {
+  type ExampleRuntimeMode,
+  resolveExampleRuntimeMode,
+  resolveSourceWorkspaceRoot,
+  runSourceTreeCargoBuild,
+  sourceTreeArtifactPath,
+} from "./example-runtime-mode";
 import { createVisibleTrayIcon } from "./visible-tray-icon";
 
 export { createVisibleTrayIcon };
@@ -37,6 +43,7 @@ export interface WebviewExampleRuntimeOptions {
     };
     menu: Menu;
   };
+  runtimeMode?: ExampleRuntimeMode;
 }
 
 export interface WebviewExampleRuntime {
@@ -54,8 +61,10 @@ export interface WebviewPageMessageWatch {
 export async function createWebviewExampleRuntime(
   options: WebviewExampleRuntimeOptions
 ): Promise<WebviewExampleRuntime> {
+  const runtimeMode = options.runtimeMode ?? resolveExampleRuntimeMode();
   const localWebviewExtension = await prepareLocalWebviewExtensionPath(
-    options.importMetaUrl
+    options.importMetaUrl,
+    { mode: runtimeMode },
   );
   const homeDir =
     process.env.OPENTRAY_HOME ?? createShortExampleHome(options.homePrefix);
@@ -68,6 +77,7 @@ export async function createWebviewExampleRuntime(
     `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
   );
   console.log(`runtime home: ${homeDir}`);
+  console.log(`runtime mode: ${runtimeMode}`);
   if (localWebviewExtension !== undefined) {
     console.log(`webview dylib: ${localWebviewExtension}`);
   }
@@ -102,12 +112,29 @@ export function mountExampleWebview(
   runtime: Pick<WebviewExampleRuntime, "localWebviewExtension" | "tray">,
   mountId: string
 ): WebviewTrayCapability {
-  return runtime.tray.extend(WebviewExt, {
+  const capability = runtime.tray.extend(WebviewExt, {
     mountId,
     ...(runtime.localWebviewExtension === undefined
       ? {}
       : { path: runtime.localWebviewExtension }),
   });
+  return {
+    ...capability,
+    createWebviewWindow(options: WebviewWindowOptions): WebviewWindowHandle {
+      return capability.createWebviewWindow(
+        withExampleWebviewWindowDefaults(options),
+      );
+    },
+  };
+}
+
+export function withExampleWebviewWindowDefaults(
+  options: WebviewWindowOptions,
+): WebviewWindowOptions {
+  return {
+    ...options,
+    devtools: true,
+  };
 }
 
 export function createShortExampleHome(homePrefix: string): string {
@@ -157,11 +184,14 @@ export function listenWebviewIpcMessages(
 }
 
 export async function prepareLocalWebviewExtensionPath(
-  importMetaUrl: string
+  importMetaUrl: string,
+  options: { mode?: ExampleRuntimeMode } = {},
 ): Promise<string | undefined> {
   await prepareLocalWindowsAppRuntimeEnvironment();
+  const mode = options.mode ?? resolveExampleRuntimeMode();
   const localWebviewExtension = await resolveLocalWebviewExtension(
-    importMetaUrl
+    importMetaUrl,
+    mode,
   );
   if (
     process.env.OPENTRAY_EXT_PATH === undefined &&
@@ -173,9 +203,13 @@ export async function prepareLocalWebviewExtensionPath(
 }
 
 export async function prepareLocalBadgeExtensionPath(
-  importMetaUrl: string
+  importMetaUrl: string,
+  options: { mode?: ExampleRuntimeMode } = {},
 ): Promise<string | undefined> {
-  const localBadgeExtension = await resolveLocalBadgeExtension(importMetaUrl);
+  const localBadgeExtension = await resolveLocalBadgeExtension(
+    importMetaUrl,
+    options.mode ?? resolveExampleRuntimeMode(),
+  );
   if (
     process.env.OPENTRAY_BADGE_EXT_PATH === undefined &&
     localBadgeExtension !== undefined
@@ -186,33 +220,35 @@ export async function prepareLocalBadgeExtensionPath(
 }
 
 async function resolveLocalWebviewExtension(
-  importMetaUrl: string
+  importMetaUrl: string,
+  mode: ExampleRuntimeMode,
 ): Promise<string | undefined> {
   const artifactName = localWebviewArtifactName();
   if (artifactName === undefined) {
     return undefined;
   }
 
-  const workspaceCargoToml = fileURLToPath(
-    new URL("../../../Cargo.toml", importMetaUrl)
-  );
-  try {
-    await access(workspaceCargoToml, constants.R_OK);
-  } catch {
+  const workspaceRoot = resolveSourceWorkspaceRoot(importMetaUrl);
+  if (workspaceRoot === undefined) {
     // Not running from the workspace root layout, so skip the source-build path.
     return undefined;
   }
-  await runSourceTreeExampleBuild(
-    fileURLToPath(new URL("../../../", importMetaUrl))
+  await runSourceTreeCargoBuild(
+    workspaceRoot,
+    ["opentray-bin", "opentray-ext-webview"],
+    mode,
   );
+  const brokerBinary = sourceTreeArtifactPath(
+    workspaceRoot,
+    mode,
+    localRuntimeArtifactName(),
+  );
+  if (process.env.OPENTRAY_BROKER_BIN === undefined) {
+    process.env.OPENTRAY_BROKER_BIN = brokerBinary;
+  }
 
   const candidates = [
-    fileURLToPath(
-      new URL(`../../../target/debug/${artifactName}`, importMetaUrl)
-    ),
-    fileURLToPath(
-      new URL(`../../../target/release/${artifactName}`, importMetaUrl)
-    ),
+    sourceTreeArtifactPath(workspaceRoot, mode, artifactName),
   ];
 
   for (const candidate of candidates) {
@@ -227,62 +263,27 @@ async function resolveLocalWebviewExtension(
   return undefined;
 }
 
-async function runSourceTreeExampleBuild(workspaceRoot: string): Promise<void> {
-  await terminateWorkspaceDevBrokerProcess(workspaceRoot);
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      "cargo",
-      ["build", "-p", "opentray-bin", "-p", "opentray-ext-webview"],
-      {
-        cwd: workspaceRoot,
-        stdio:
-          process.env.OPENTRAY_EXT_BUILD_LOGS === "1" ? "inherit" : "ignore",
-      }
-    );
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(
-        new Error(
-          `cargo build -p opentray-bin -p opentray-ext-webview failed with code ${
-            code ?? "unknown"
-          }`
-        )
-      );
-    });
-  });
-}
-
 async function resolveLocalBadgeExtension(
-  importMetaUrl: string
+  importMetaUrl: string,
+  mode: ExampleRuntimeMode,
 ): Promise<string | undefined> {
   const artifactName = localBadgeArtifactName();
   if (artifactName === undefined) {
     return undefined;
   }
 
-  const workspaceCargoToml = fileURLToPath(
-    new URL("../../../Cargo.toml", importMetaUrl)
-  );
-  try {
-    await access(workspaceCargoToml, constants.R_OK);
-  } catch {
+  const workspaceRoot = resolveSourceWorkspaceRoot(importMetaUrl);
+  if (workspaceRoot === undefined) {
     return undefined;
   }
-  await runSourceTreeBadgeBuild(
-    fileURLToPath(new URL("../../../", importMetaUrl))
+  await runSourceTreeCargoBuild(
+    workspaceRoot,
+    ["opentray-bin", "opentray-ext-badge"],
+    mode,
   );
 
   const candidates = [
-    fileURLToPath(
-      new URL(`../../../target/debug/${artifactName}`, importMetaUrl)
-    ),
-    fileURLToPath(
-      new URL(`../../../target/release/${artifactName}`, importMetaUrl)
-    ),
+    sourceTreeArtifactPath(workspaceRoot, mode, artifactName),
   ];
   for (const candidate of candidates) {
     try {
@@ -293,34 +294,6 @@ async function resolveLocalBadgeExtension(
     }
   }
   return undefined;
-}
-
-async function runSourceTreeBadgeBuild(workspaceRoot: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      "cargo",
-      ["build", "-p", "opentray-bin", "-p", "opentray-ext-badge"],
-      {
-        cwd: workspaceRoot,
-        stdio:
-          process.env.OPENTRAY_EXT_BUILD_LOGS === "1" ? "inherit" : "ignore",
-      }
-    );
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(
-        new Error(
-          `cargo build -p opentray-bin -p opentray-ext-badge failed with code ${
-            code ?? "unknown"
-          }`
-        )
-      );
-    });
-  });
 }
 
 function localWebviewArtifactName(): string | undefined {
@@ -341,6 +314,10 @@ function localBadgeArtifactName(): string | undefined {
     return "libopentray_ext_badge.dylib";
   }
   return undefined;
+}
+
+function localRuntimeArtifactName(): string {
+  return process.platform === "win32" ? "opentray.exe" : "opentray";
 }
 
 async function prepareLocalWindowsAppRuntimeEnvironment(): Promise<void> {

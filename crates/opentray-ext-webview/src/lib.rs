@@ -245,6 +245,7 @@ pub(crate) enum WebviewWindowIcon {
 pub(crate) struct WebviewWindowOptions {
     pub title: Option<String>,
     pub icon: Option<WebviewWindowIcon>,
+    pub devtools: bool,
     pub style_requested: bool,
     pub style: WebviewInitialStyle,
     pub sync: WebviewMetadataSyncSettings,
@@ -268,6 +269,7 @@ pub(crate) struct WebviewSessionBootstrapSettings {
     pub navigator_window: NavigatorWindowSettings,
     pub navigator_screen: NavigatorScreenSettings,
     pub navigator_tray: NavigatorTraySettings,
+    pub devtools: bool,
     pub sync: WebviewMetadataSyncSettings,
     pub download: WebviewDownloadSettings,
     pub native_api_policy: WebviewNativeApiPolicy,
@@ -281,6 +283,7 @@ impl WebviewShowSettings {
             navigator_window: self.navigator_window,
             navigator_screen: self.navigator_screen,
             navigator_tray: self.navigator_tray,
+            devtools: self.window.devtools,
             sync: self.window.sync,
             download: self.download,
             native_api_policy: self.native_api_policy.clone(),
@@ -360,6 +363,9 @@ enum WebviewCommand {
         result: Value,
     },
     DrainWindowEvents,
+    OpenDevtools,
+    CloseDevtools,
+    IsDevtoolsOpen,
     SetStyle {
         style: Value,
     },
@@ -404,6 +410,7 @@ struct ShowCommandData {
     browser_permission_policy: Option<BrowserPermissionPolicyInput>,
     permission_manager_policy: Option<PermissionManagerPolicyInput>,
     download: Option<DownloadCommandData>,
+    devtools: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -762,6 +769,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                     window: WebviewWindowOptions {
                         title: parsed.title,
                         icon: parsed.icon,
+                        devtools: parsed.devtools.unwrap_or(false),
                         style_requested: style.is_some(),
                         style: WebviewInitialStyle {
                             frameless: style.and_then(|style| style.frameless).unwrap_or(false),
@@ -875,6 +883,9 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
             })
         }
         "drainWindowEvents" => Ok(WebviewCommand::DrainWindowEvents),
+        "openDevtools" => Ok(WebviewCommand::OpenDevtools),
+        "closeDevtools" => Ok(WebviewCommand::CloseDevtools),
+        "isDevtoolsOpen" => Ok(WebviewCommand::IsDevtoolsOpen),
         "setStyle" => {
             let style = data
                 .get("style")
@@ -951,6 +962,7 @@ fn show_bootstrap_requested(data: &Value) -> bool {
         || data.get("bindScreenGlobals").is_some()
         || data.get("nativeTrayApi").is_some()
         || data.get("windowControlsOverlay").is_some()
+        || data.get("devtools").is_some()
         || data.get("titleSync").is_some()
         || data.get("iconSync").is_some()
         || data.get("nativeApiPolicy").is_some()
@@ -1471,6 +1483,7 @@ mod tests {
             "nativeScreenApi": true,
             "bindScreenGlobals": true,
             "nativeTrayApi": true,
+            "devtools": true,
             "title": "OpenTray Status",
             "icon": {
               "type": "href",
@@ -1533,6 +1546,7 @@ mod tests {
                         icon: Some(WebviewWindowIcon::Href {
                             href: "data:image/png;base64,abc".to_string(),
                         }),
+                        devtools: true,
                         style_requested: true,
                         style: WebviewInitialStyle {
                             frameless: true,
@@ -1581,6 +1595,25 @@ mod tests {
                     bootstrap_requested: true,
                 },
             }
+        );
+    }
+
+    #[test]
+    fn parse_devtools_commands_use_extension_owned_protocol() {
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({ "type": "openDevtools" }))
+                .expect("openDevtools command"),
+            WebviewCommand::OpenDevtools
+        );
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({ "type": "closeDevtools" }))
+                .expect("closeDevtools command"),
+            WebviewCommand::CloseDevtools
+        );
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({ "type": "isDevtoolsOpen" }))
+                .expect("isDevtoolsOpen command"),
+            WebviewCommand::IsDevtoolsOpen
         );
     }
 

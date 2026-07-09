@@ -13,6 +13,7 @@ Use these examples to verify the delivered window contract in this branch:
 - title/icon sync
 - overlay geometry and native drag
 - window-state controls
+- host/page devtools commands gated by `devtools: true`
 - tray-owned placement projection through `tray.getBounds()` and `navigator.opentray.tray.getBounds()`
 - source-tree auto-discovery of the local `opentray-ext-webview` native library
 - WebView examples mount `WebviewExt` on a tray and rely on automatic extension loading, not a hand-authored `load-ext` request
@@ -28,7 +29,7 @@ Current maturity truth for these examples:
 - the placement demo is the focused `WebviewPlacementKit` visual surface
 - the media query demo is the focused `mediaQueryKit` + `styleKit` visual surface
 
-This guide does **not** prove future bootstrap families such as managed `window.open()`, localhost asset origin hosting, profile/partition control, or host/page devtools APIs.
+This guide does **not** prove future bootstrap families such as managed `window.open()`, localhost asset origin hosting, or profile/partition control.
 
 ## Unified SvelteKit App
 
@@ -38,14 +39,14 @@ Pages are pure CSR (SSR and prerendering are off because they read `navigator.op
 
 Each example launcher (`*-panel.ts`) spawns the shared dev server via `_support/dev-server.ts`, parses the assigned port, and loads its own route through `createWebviewWindow({ url })`. Routes:
 
-| Route | Example launcher |
-| --- | --- |
-| `/download` | `example:download` |
-| `/webview-control` | `example:webview-control` |
-| `/tray-panel` | `example:tray-panel` |
-| `/placement` | `example:placement` |
-| `/media-query` | `example:mediaQuery` |
-| `/badge` | `example:badge` |
+| Route                 | Example launcher             |
+| --------------------- | ---------------------------- |
+| `/download`           | `example:download`           |
+| `/webview-control`    | `example:webview-control`    |
+| `/tray-panel`         | `example:tray-panel`         |
+| `/placement`          | `example:placement`          |
+| `/media-query`        | `example:mediaQuery`         |
+| `/badge`              | `example:badge`              |
 | `/debug-runtime-tray` | `example:debug-runtime-tray` |
 
 First-time setup (one-off, shared by all WebView examples):
@@ -82,6 +83,21 @@ export OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1
 export OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE=1
 ```
 
+Every example entrypoint accepts `--release` / `-r` to use source-tree release
+artifacts instead of debug artifacts:
+
+```bash
+pnpm --filter opentray example:webview-control -r
+pnpm --filter opentray example:matrix -r -- --row webview-control
+```
+
+Debug remains the default. `-r` builds the relevant native packages with
+`cargo build --release`, points the local broker at `target/release/opentray`,
+and resolves extension libraries from `target/release`. Release mode still
+keeps the explicit devtools API available; our WebView examples always opt the
+instance in with `devtools: true` so downstream developers can debug through
+`navigator.opentrayWindow.devtools.open()`.
+
 ## Example 0: First App
 
 Command:
@@ -117,12 +133,14 @@ Expected checks:
 7. By default, the custom titlebar and overlay drag test area can drag the native window through `startAppRegionDrag()`.
 8. `navigator.screen.getScreenDetails()` returns the current screen snapshot.
 9. Title/icon controls update both the page state and native state.
-10. By default, `getTitlebarAreaRect()` refreshes overlay geometry, and the explicit `Listen geometrychange` button controls whether `overlay.geometrychange` appears in the event log. With `--no-overlay`, the overlay panel should show the launch switch unchecked and report that `windowControlsOverlay` is disabled for this run.
+10. The Devtools section opens the native inspector through `navigator.opentrayWindow.devtools.open()`. On macOS, close/state buttons are enabled when supported in both debug and release mode; on Windows, close/state stay disabled because the runtime exposes only honest open support.
+11. By default, `getTitlebarAreaRect()` refreshes overlay geometry, and the explicit `Listen geometrychange` button controls whether `overlay.geometrychange` appears in the event log. With `--no-overlay`, the overlay panel should show the launch switch unchecked and report that `windowControlsOverlay` is disabled for this run.
 
 Overlay is a show-time capability gate, not a runtime style. The control demo enables it by default because this is the overlay acceptance surface. You can force it on with `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=1` or force it off with `--no-overlay` / `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=0`.
 
 On Windows, macOS corner controls remain unsupported, while `style.platform.windows.cornerPreference` is the native DWM corner family. Windows DWM material choice lives in `style.background`.
 Whole-window opacity lives in `style.opacity` on both supported WebView runtimes and composes with the current background mode.
+Devtools are creation-time gated in examples through `devtools: true`. Release native artifacts still compile the inspector API, but ordinary app windows that omit `devtools: true` keep devtools unavailable by default.
 
 ## Example 2: Download
 
@@ -262,7 +280,7 @@ pnpm --filter opentray example:matrix
 pnpm --filter opentray example:matrix -- --row webview-control
 ```
 
-The matrix does not depend on shell wildcard expansion. It stages the packaged runtime executable before `first-app`, labels WebView/Badge/Lynx rows as contributor-only `extension-debug-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts.
+The matrix does not depend on shell wildcard expansion. It stages the packaged runtime executable before `first-app`, labels WebView/Badge/Lynx rows as contributor-only `extension-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts. Pass `-r` to make the whole matrix use release-mode native artifacts.
 
 These are useful for quick regression passes:
 
@@ -280,7 +298,7 @@ OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=2500 pnpm
 
 ## Failure Hints
 
-- If an example cannot find the native library, confirm `cargo build -p opentray-ext-webview` succeeded and `target/debug` contains the platform artifact.
+- If an example cannot find the native library, confirm `cargo build -p opentray-ext-webview` succeeded and `target/debug` contains the platform artifact. For `-r`, confirm `cargo build --release -p opentray-ext-webview` succeeded and `target/release` contains it.
 - If the debug runtime returns a generic `unsupported` or `internal` error, rerun with:
 
 ```bash
@@ -294,6 +312,7 @@ This lets the debug runtime print the native ext-webview error message directly 
 
 ```bash
 OPENTRAY_BROKER_BIN="$PWD/target/debug/opentray" pnpm --filter opentray example:debug-runtime-tray
+OPENTRAY_BROKER_BIN="$PWD/target/release/opentray" pnpm --filter opentray example:debug-runtime-tray -r
 ```
 
 - If glass looks opaque, inspect both native style and page content:

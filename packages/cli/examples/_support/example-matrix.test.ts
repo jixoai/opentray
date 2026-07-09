@@ -72,6 +72,29 @@ describe("Feature: opentray example matrix planning", () => {
     ]);
   });
 
+  it("Scenario: Given release runtime mode When rows are planned Then example commands receive the release flag", () => {
+    const workspaceRoot = "/repo";
+    const rows = createExampleMatrix({
+      platform: "darwin",
+      arch: "arm64",
+      workspaceRoot,
+      runtimeMode: "release",
+    });
+
+    expect(rowById(rows, "first-app").preflight).toEqual([
+      {
+        command: "pnpm",
+        args: ["run", "npm:cp-bin:runtime", "--", "--target", "release"],
+      },
+    ]);
+    expect(rowById(rows, "webview-control").command.args).toEqual([
+      "--filter",
+      "opentray",
+      "example:webview-control",
+      "-r",
+    ]);
+  });
+
   it("Scenario: Given an unsupported extension host When planned Then the row reports a typed skip reason", () => {
     const row = rowById(
       createExampleMatrix({
@@ -138,7 +161,39 @@ describe("Feature: opentray example matrix planning", () => {
     });
   });
 
-  it("Scenario: Given native extension rows are planned When output is reviewed Then source-tree debug runtime coverage is explicit", () => {
+  it("Scenario: Given the Lynx row is planned for release When preflight runs Then release artifacts are staged", () => {
+    const workspaceRoot = "/repo";
+    const row = rowById(
+      createExampleMatrix({
+        platform: "darwin",
+        arch: "arm64",
+        workspaceRoot,
+        runtimeMode: "release",
+      }),
+      "lynx",
+    );
+
+    expect(row.preflight).toEqual([
+      {
+        command: "cargo",
+        args: ["build", "--release", "-p", "opentray-ext-lynx"],
+      },
+      {
+        command: "bun",
+        args: [
+          "run",
+          "scripts/binaries/stage-local.ts",
+          "--kind",
+          "lynx",
+          "--source",
+          lynxExtensionSourcePath("darwin", workspaceRoot, "release"),
+        ],
+      },
+    ]);
+    expect(row.command.args).toContain("-r");
+  });
+
+  it("Scenario: Given native extension rows are planned When output is reviewed Then source-tree runtime coverage is explicit", () => {
     const rows = createExampleMatrix({
       platform: "darwin",
       arch: "arm64",
@@ -157,7 +212,7 @@ describe("Feature: opentray example matrix planning", () => {
 
     expect(
       extensionRows.every(
-        (row) => row.coverage === "extension-debug-runtime",
+        (row) => row.coverage === "extension-runtime",
       ),
     ).toBe(true);
   });

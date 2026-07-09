@@ -457,6 +457,9 @@ fn dispatch_navigator_window_command(
             Ok(response)
         }
         "getCapabilities" => bridge.borrow().capabilities_json(),
+        "openDevtools" => super::open_devtools(bridge),
+        "closeDevtools" => super::close_devtools(bridge),
+        "isDevtoolsOpen" => super::devtools_open_state(bridge),
         "getTitle" => Ok(Value::String(bridge.borrow().metadata.title.clone())),
         "setTitle" => {
             let payload: TitlePayload = serde_json::from_value(payload).map_err(|error| {

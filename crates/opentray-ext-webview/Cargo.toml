@@ -29,7 +29,7 @@ objc2-web-kit = { version = "0.3.2", features = ["WKDownload", "WKNavigation", "
 png = "0.17.16"
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 window-vibrancy = "0.7.1"
-wry = { version = "0.55.1", default-features = false, features = ["os-webview", "transparent"] }
+wry = { version = "0.55.1", default-features = false, features = ["devtools", "os-webview", "transparent"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 base64 = "0.22.1"
@@ -41,7 +41,7 @@ windows = { version = "0.61", features = ["Win32_Foundation"] }
 windows-core = "0.61.2"
 webview2-com = "0.38.2"
 window-vibrancy = "0.7.1"
-wry = { version = "0.55.1", default-features = false, features = ["os-webview", "transparent"] }
+wry = { version = "0.55.1", default-features = false, features = ["devtools", "os-webview", "transparent"] }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]
 tao = { version = "0.35.3", default-features = false, features = ["rwh_06"] }

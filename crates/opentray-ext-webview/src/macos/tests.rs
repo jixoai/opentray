@@ -216,6 +216,9 @@ fn navigator_window_script_exposes_tauri_like_async_methods() {
     assert!(script.contains("getStyle()"));
     assert!(script.contains("setStyle(style)"));
     assert!(script.contains("getCapabilities()"));
+    assert!(script.contains("openDevtools"));
+    assert!(script.contains("closeDevtools"));
+    assert!(script.contains("isDevtoolsOpen"));
     assert!(script.contains("getTitle()"));
     assert!(script.contains("setTitle(title)"));
     assert!(script.contains("getIcon()"));
@@ -1320,6 +1323,7 @@ fn navigator_window_bridge_tracks_listener_ids() {
             sync_icon: MetadataSyncSettings::default(),
         },
         app_region_drag: AppRegionDragState::default(),
+        devtools_enabled: false,
         download: WebviewDownloadSettings::default(),
         native_api_policy: WebviewNativeApiPolicy::default(),
         browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
@@ -1441,6 +1445,7 @@ fn emit_window_event_ignores_unlistened_download_events_on_macos() {
             sync_icon: MetadataSyncSettings::default(),
         },
         app_region_drag: AppRegionDragState::default(),
+        devtools_enabled: false,
         download: WebviewDownloadSettings::default(),
         native_api_policy: WebviewNativeApiPolicy::default(),
         browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
@@ -1501,6 +1506,7 @@ fn app_region_drag_interaction_window_event_conserves_native_source() {
             sync_icon: MetadataSyncSettings::default(),
         },
         app_region_drag: AppRegionDragState::default(),
+        devtools_enabled: false,
         download: WebviewDownloadSettings::default(),
         native_api_policy: WebviewNativeApiPolicy::default(),
         browser_permission_policy: WebviewBrowserPermissionPolicy::default(),

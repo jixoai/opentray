@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 
 import { createClient } from "../../src/client";
 import { connectLocalBroker } from "../../src/local-broker";
+import {
+  type ExampleRuntimeMode,
+  resolveExampleRuntimeMode,
+  sourceTreeArtifactPath,
+} from "./example-runtime-mode";
 
 const menuLabels = new Map<number, string>([
   [1, "Show Window"],
@@ -61,6 +66,7 @@ export interface DebugRuntimeLynxSmokeOptions {
 export interface PrepareLocalLynxExtensionPathOptions {
   platform?: NodeJS.Platform;
   arch?: string;
+  mode?: ExampleRuntimeMode;
 }
 
 export const runDebugRuntimeLynxSmoke = async (
@@ -233,7 +239,8 @@ export const prepareLocalLynxExtensionPath = (
   const localLynxExtension = resolveLocalLynxExtensionPath(
     moduleUrl,
     options.platform ?? process.platform,
-    options.arch ?? process.arch
+    options.arch ?? process.arch,
+    options.mode ?? resolveExampleRuntimeMode(),
   );
   if (
     process.env.OPENTRAY_EXT_PATH === undefined &&
@@ -337,7 +344,8 @@ export const resolveBundledReviewBundlePath = (
 const resolveLocalLynxExtensionPath = (
   moduleUrl: string,
   platform: NodeJS.Platform,
-  arch: string
+  arch: string,
+  mode: ExampleRuntimeMode,
 ): string | undefined => {
   if (platform !== "darwin") {
     return undefined;
@@ -359,7 +367,12 @@ const resolveLocalLynxExtensionPath = (
   if (!existsSync(library) || !existsSync(runtimeZip)) {
     return undefined;
   }
-  return library;
+  const sourceLibrary = sourceTreeArtifactPath(
+    workspaceRoot,
+    mode,
+    "libopentray_ext_lynx.dylib",
+  );
+  return existsSync(sourceLibrary) ? sourceLibrary : library;
 };
 
 const resolveWorkspaceRoot = (moduleUrl: string): string | undefined => {

@@ -57,10 +57,17 @@ export interface WindowState {
 // Window style patches used by setStyle/setBackground.
 export type StylePatch = Record<string, unknown>;
 
+export interface NavigatorWindowDevtools {
+  open(): Promise<void>;
+  close(): Promise<void>;
+  isOpen(): Promise<boolean>;
+}
+
 // Full navigator.window bridge surface (the opentrayWindow / window object).
 // Covers everything webview-control exercises; pages that only need listen()
 // can use the narrower WebviewBridge type.
 export interface NavigatorWindow extends WebviewBridge {
+  readonly devtools: NavigatorWindowDevtools;
   getCapabilities(): Promise<Record<string, unknown>>;
   getStyle(): Promise<Record<string, unknown>>;
   setStyle(style: StylePatch): Promise<Record<string, unknown>>;

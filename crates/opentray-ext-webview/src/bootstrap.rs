@@ -286,6 +286,17 @@ pub(crate) fn navigator_window_bootstrap_script(
         const overlayEnabled = Boolean(config.windowControlsOverlay);
         const api = {
         invoke,
+        devtools: Object.freeze({
+          open() {
+            return invoke("openDevtools");
+          },
+          close() {
+            return invoke("closeDevtools");
+          },
+          isOpen() {
+            return invoke("isDevtoolsOpen");
+          }
+        }),
         async listen(event, handler) {
           const handlerId = registerCallback((eventData) => {
             if (typeof handler === "function") handler(eventData);

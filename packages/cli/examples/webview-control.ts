@@ -1,5 +1,5 @@
 import type { WebviewWindowOptions } from "../../ext-webview/src/index";
-import { createExampleLifecycle } from "./_support/example-lifecycle";
+import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
   createVisibleTrayIcon,
@@ -10,14 +10,16 @@ import {
 // windowControlsOverlay is a show-time bridge gate; the page can test it, not enable it later.
 const overlayEnabled = resolveOverlayEnabled(
   process.argv.slice(2),
-  process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY,
+  process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY
 );
 // --frameless strips the native title bar (and with it the native window
 // controls), so the page must draw its own. Useful for verifying the
 // self-drawn control cluster appears when native controls are gone.
 const frameless = resolveFrameless(process.argv.slice(2));
 console.log(
-  `windowControlsOverlay: ${overlayEnabled ? "enabled" : "disabled"} · frameless: ${frameless}`,
+  `windowControlsOverlay: ${
+    overlayEnabled ? "enabled" : "disabled"
+  } · frameless: ${frameless}`
 );
 
 ensureAppInstalled();
@@ -54,7 +56,7 @@ const lifecycle = createExampleLifecycle({
 
 const webview = mountExampleWebview(
   runtime,
-  "webview-control-webview",
+  "webview-control-webview"
 ).createWebviewWindow({
   url: devServer.url,
   width: 960,
@@ -76,8 +78,12 @@ const webview = mountExampleWebview(
             state: "followsWindowActiveState",
           }
         : process.platform === "win32"
-          ? { kind: "platformMaterial", material: "mica", state: "followsWindowActiveState" }
-          : { kind: "opaque" },
+        ? {
+            kind: "platformMaterial",
+            material: "mica",
+            state: "followsWindowActiveState",
+          }
+        : { kind: "opaque" },
     platform:
       process.platform === "darwin"
         ? {
@@ -88,8 +94,8 @@ const webview = mountExampleWebview(
             },
           }
         : process.platform === "win32"
-          ? { windows: { cornerPreference: "round" } }
-          : {},
+        ? { windows: { cornerPreference: "round" } }
+        : {},
   },
   windowControlsOverlay: overlayEnabled,
   fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
@@ -112,7 +118,7 @@ const webview = mountExampleWebview(
 await webview.show();
 
 console.log(
-  "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, screen, and navigation behavior.",
+  "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, devtools, screen, and navigation behavior."
 );
 
 if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
@@ -124,6 +130,17 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
         throw new Error("navigator.window bridge is unavailable");
       }
       const capabilities = await bridge.getCapabilities();
+      if (!capabilities.devtools) {
+        throw new Error("devtools capability is unavailable for the example window");
+      }
+      await bridge.devtools.open();
+      let devtoolsOpen = null;
+      if (capabilities.devtoolsStateQueryable) {
+        devtoolsOpen = await bridge.devtools.isOpen();
+      }
+      if (capabilities.devtoolsClosable) {
+        await bridge.devtools.close();
+      }
       const originalStyle = await bridge.getStyle();
       const originalWindowState = await bridge.getWindowState();
       if (capabilities.platform === "windows") {
@@ -166,11 +183,29 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
         state.state,
         Boolean(screenDetails?.currentScreen)
       ].join(":");
+      await navigator.opentray?.ipc?.postMessage?.({
+        type: "bridgeSmoke",
+        ok: true,
+        title: document.title,
+        devtoolsOpen
+      });
     })().catch((error) => {
       document.title = "opentray-bridge-fail:" + String(error?.message ?? error);
+      void navigator.opentray?.ipc?.postMessage?.({
+        type: "bridgeSmoke",
+        ok: false,
+        title: document.title
+      });
     });
   `);
   console.log("bridge smoke evaluate injected");
+  const bridgeSmoke = await waitForBridgeSmoke(webview, 5_000);
+  if (bridgeSmoke?.ok !== true) {
+    throw new Error(
+      `bridge smoke failed: ${bridgeSmoke?.title ?? "missing result"}`
+    );
+  }
+  console.log(`bridge smoke result: ${bridgeSmoke.title}`);
 }
 
 tray.onMenuClick(({ itemId }) => {
@@ -183,7 +218,7 @@ await lifecycle.wait;
 
 function resolveOverlayEnabled(
   args: readonly string[],
-  envValue: string | undefined,
+  envValue: string | undefined
 ): boolean {
   let enabled = parseBooleanEnv(envValue) ?? true;
   for (const arg of args) {
@@ -221,4 +256,44 @@ function parseBooleanEnv(value: string | undefined): boolean | undefined {
 
 function resolveFrameless(args: readonly string[]): boolean {
   return args.some((arg) => arg === "--frameless");
+}
+
+type BridgeSmokePayload = {
+  type: "bridgeSmoke";
+  ok: boolean;
+  title: string;
+};
+
+type BridgeSmokeWindow = {
+  drainIpcMessages(): Promise<readonly { payload: unknown }[]>;
+};
+
+async function waitForBridgeSmoke(
+  window: BridgeSmokeWindow,
+  timeoutMs: number
+): Promise<BridgeSmokePayload | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const bridgeSmoke = (await window.drainIpcMessages())
+      .map((message) => message.payload)
+      .find(isBridgeSmokePayload);
+    if (bridgeSmoke) {
+      return bridgeSmoke;
+    }
+    await sleep(100);
+  }
+  return undefined;
+}
+
+function isBridgeSmokePayload(payload: unknown): payload is BridgeSmokePayload {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    "type" in payload &&
+    "ok" in payload &&
+    "title" in payload &&
+    payload.type === "bridgeSmoke" &&
+    typeof payload.ok === "boolean" &&
+    typeof payload.title === "string"
+  );
 }

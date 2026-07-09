@@ -6,10 +6,17 @@ import {
   type ExampleCommand,
   type PlannedExampleMatrixRow,
 } from "./_support/example-matrix";
+import {
+  resolveExampleRuntimeMode,
+  stripExampleRuntimeModeArgs,
+} from "./_support/example-runtime-mode";
 
 const workspaceRoot = fileURLToPath(new URL("../../..", import.meta.url));
-const selectedRows = parseSelectedRows(process.argv.slice(2));
-const rows = createExampleMatrix({ workspaceRoot }).filter(
+const runtimeMode = resolveExampleRuntimeMode();
+const selectedRows = parseSelectedRows(
+  stripExampleRuntimeModeArgs(process.argv.slice(2)),
+);
+const rows = createExampleMatrix({ workspaceRoot, runtimeMode }).filter(
   (row) => selectedRows.size === 0 || selectedRows.has(row.id),
 );
 
@@ -22,6 +29,7 @@ const results: MatrixResult[] = [];
 for (const row of rows) {
   console.log(`\n[example:${row.id}] ${row.description}`);
   console.log(`coverage: ${row.coverage}`);
+  console.log(`runtime mode: ${runtimeMode}`);
   if (row.skipped) {
     const reason = row.skipReason ?? "unspecified skip";
     console.log(`skip: ${reason}`);

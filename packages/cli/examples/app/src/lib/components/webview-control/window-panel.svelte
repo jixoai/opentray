@@ -25,10 +25,14 @@
   let backgroundStateValue = $state("followsWindowActiveState");
   let cornerRadiusInput = $state(0);
   let windowsCornerValue = $state("default");
+  let devtoolsState = $state<boolean | null>(null);
 
   // Sync selects when style/capabilities change.
   const bgOptions = $derived(backgroundOptionsForPlatform(store.platform));
   const bgStateOptions = $derived(backgroundStateOptions(store.style));
+  const devtoolsAvailable = $derived(readCapability("devtools"));
+  const devtoolsClosable = $derived(readCapability("devtoolsClosable"));
+  const devtoolsStateQueryable = $derived(readCapability("devtoolsStateQueryable"));
 
   async function refreshCapabilities(): Promise<void> {
     try {
@@ -154,6 +158,35 @@
   async function nativeClose(): Promise<void> {
     await bridge.close();
   }
+  function readCapability(name: string): boolean {
+    return store.capabilities?.[name] === true;
+  }
+  async function openDevtools(): Promise<void> {
+    try {
+      await bridge.devtools.open();
+      store.appendEvent("devtools.open", { ok: true });
+      if (devtoolsStateQueryable) await refreshDevtoolsState();
+    } catch (error) {
+      store.appendEvent("devtools.open:error", { error: formatError(error) });
+    }
+  }
+  async function closeDevtools(): Promise<void> {
+    try {
+      await bridge.devtools.close();
+      store.appendEvent("devtools.close", { ok: true });
+      if (devtoolsStateQueryable) await refreshDevtoolsState();
+    } catch (error) {
+      store.appendEvent("devtools.close:error", { error: formatError(error) });
+    }
+  }
+  async function refreshDevtoolsState(): Promise<void> {
+    try {
+      devtoolsState = await bridge.devtools.isOpen();
+      store.appendEvent("devtools.state", { open: devtoolsState });
+    } catch (error) {
+      store.appendEvent("devtools.state:error", { error: formatError(error) });
+    }
+  }
 </script>
 
 <Card>
@@ -251,6 +284,25 @@
       <Button size="sm" variant="outline" onclick={move}>Move 120,120</Button>
       <Button size="sm" variant="outline" onclick={() => execCommand("clearWhiteBlock")}>clearWhiteBlock</Button>
       <Button size="sm" variant="destructive" onclick={nativeClose}>Close</Button>
+    </div>
+
+    <div class="grid gap-2 rounded-md border border-border/60 p-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <Label class="mr-auto">Devtools</Label>
+        <Badge variant={devtoolsAvailable ? "success" : "muted"}>
+          {devtoolsAvailable ? "enabled" : "unavailable"}
+        </Badge>
+        {#if devtoolsState !== null}
+          <Badge variant={devtoolsState ? "success" : "muted"}>
+            {devtoolsState ? "open" : "closed"}
+          </Badge>
+        {/if}
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <Button size="sm" disabled={!devtoolsAvailable} onclick={openDevtools}>Open devtools</Button>
+        <Button size="sm" variant="outline" disabled={!devtoolsClosable} onclick={closeDevtools}>Close devtools</Button>
+        <Button size="sm" variant="outline" disabled={!devtoolsStateQueryable} onclick={refreshDevtoolsState}>Refresh state</Button>
+      </div>
     </div>
 
     {#if store.capabilities}

@@ -1,10 +1,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
+import type { ExampleRuntimeMode } from "./example-runtime-mode";
+
 export type ExampleMatrixCoverage =
   | "protocol"
   | "default-runtime"
-  | "extension-debug-runtime";
+  | "extension-runtime";
 
 export interface ExampleCommand {
   readonly command: string;
@@ -31,6 +33,7 @@ export interface CreateExampleMatrixOptions {
   readonly platform?: NodeJS.Platform;
   readonly arch?: string;
   readonly workspaceRoot: string;
+  readonly runtimeMode?: ExampleRuntimeMode;
 }
 
 const WEBVIEW_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "win32"];
@@ -40,12 +43,14 @@ export const createExampleMatrix = ({
   platform = process.platform,
   arch = process.arch,
   workspaceRoot,
+  runtimeMode = "debug",
 }: CreateExampleMatrixOptions): PlannedExampleMatrixRow[] => {
-  const lynxSource = lynxExtensionSourcePath(platform, workspaceRoot);
+  const lynxSource = lynxExtensionSourcePath(platform, workspaceRoot, runtimeMode);
   const rows = createRows({
     platform,
     arch,
     lynxSource,
+    runtimeMode,
   });
   return rows.map((row) => planRow(row, platform, workspaceRoot));
 };
@@ -54,16 +59,18 @@ const createRows = ({
   platform,
   arch,
   lynxSource,
+  runtimeMode,
 }: {
   readonly platform: NodeJS.Platform;
   readonly arch: string;
   readonly lynxSource: string | undefined;
+  readonly runtimeMode: ExampleRuntimeMode;
 }): ExampleMatrixRow[] => [
   {
     id: "basic",
     coverage: "protocol",
     description: "protocol-only tray/client example",
-    command: pnpmExample("example:basic"),
+    command: pnpmExample("example:basic", runtimeMode),
   },
   {
     id: "first-app",
@@ -76,86 +83,91 @@ const createRows = ({
         "npm:cp-bin:runtime",
         "--",
         "--target",
-        "debug",
+        runtimeMode,
       ]),
     ],
-    command: pnpmExample("example:first-app"),
+    command: pnpmExample("example:first-app", runtimeMode),
   },
   {
     id: "webview-control",
-    coverage: "extension-debug-runtime",
-    description: "ext-webview control window through debug runtime",
+    coverage: "extension-runtime",
+    description: "ext-webview control window through source-tree runtime",
     platforms: WEBVIEW_PLATFORMS,
-    command: pnpmExample("example:webview-control", {
+    command: pnpmExample("example:webview-control", runtimeMode, {
       OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "1200",
     }),
   },
   {
     id: "debug-runtime-tray",
-    coverage: "extension-debug-runtime",
+    coverage: "extension-runtime",
     description: "single-primary tray event routed to ext-webview",
     platforms: WEBVIEW_PLATFORMS,
-    command: pnpmExample("example:debug-runtime-tray", {
+    command: pnpmExample("example:debug-runtime-tray", runtimeMode, {
       OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
     }),
   },
   {
     id: "download",
-    coverage: "extension-debug-runtime",
+    coverage: "extension-runtime",
     description:
       "ext-webview native download lifecycle through a Svelte 5 SPA + real blob export",
     platforms: WEBVIEW_PLATFORMS,
-    command: pnpmExample("example:download", {
+    command: pnpmExample("example:download", runtimeMode, {
       OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
       OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "90000",
     }),
   },
   {
     id: "tray-panel",
-    coverage: "extension-debug-runtime",
+    coverage: "extension-runtime",
     description: "tray-anchored ext-webview panel",
     platforms: WEBVIEW_PLATFORMS,
-    command: pnpmExample("example:tray-panel", {
+    command: pnpmExample("example:tray-panel", runtimeMode, {
       OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
     }),
   },
   {
     id: "placement",
-    coverage: "extension-debug-runtime",
+    coverage: "extension-runtime",
     description: "ext-webview placement kit panel",
     platforms: WEBVIEW_PLATFORMS,
-    command: pnpmExample("example:placement", {
+    command: pnpmExample("example:placement", runtimeMode, {
       OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
     }),
   },
   {
     id: "media-query",
-    coverage: "extension-debug-runtime",
+    coverage: "extension-runtime",
     description: "ext-webview media query kit panel",
     platforms: WEBVIEW_PLATFORMS,
-    command: pnpmExample("example:mediaQuery", {
+    command: pnpmExample("example:mediaQuery", runtimeMode, {
       OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
     }),
   },
   {
     id: "badge",
-    coverage: "extension-debug-runtime",
+    coverage: "extension-runtime",
     description: "ext-badge debug panel projected through ext-webview IPC",
     platforms: WEBVIEW_PLATFORMS,
-    command: pnpmExample("example:badge", {
+    command: pnpmExample("example:badge", runtimeMode, {
       OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
     }),
   },
   {
     id: "lynx",
-    coverage: "extension-debug-runtime",
-    description: "ext-lynx debug runtime smoke with packaged review bundle",
+    coverage: "extension-runtime",
+    description: "ext-lynx runtime smoke with packaged review bundle",
     platforms: LYNX_PLATFORMS,
     ...preflight(
       lynxSource === undefined
         ? undefined
         : [
-            command("cargo", ["build", "-p", "opentray-ext-lynx"]),
+            command("cargo", [
+              "build",
+              ...(runtimeMode === "release" ? ["--release"] : []),
+              "-p",
+              "opentray-ext-lynx",
+            ]),
             command("bun", [
               "run",
               "scripts/binaries/stage-local.ts",
@@ -168,13 +180,14 @@ const createRows = ({
     ),
     ...requiredPaths(lynxRequiredCarrierPaths(platform, arch)),
     command: {
-      ...pnpmExample("example:debug-runtime-lynx", {
+      ...pnpmExample("example:debug-runtime-lynx", runtimeMode, {
         OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "1200",
       }),
       args: [
         "--filter",
         "opentray",
         "example:debug-runtime-lynx",
+        ...runtimeModeArgs(runtimeMode),
         "--",
         "--bundle",
         "packages/cli/assets/lynx-review/main.lynx.bundle",
@@ -210,8 +223,17 @@ const planRow = (
 
 const pnpmExample = (
   script: string,
+  runtimeMode: ExampleRuntimeMode,
   env?: Readonly<Record<string, string>>,
-): ExampleCommand => pnpm("pnpm", ["--filter", "opentray", script], env);
+): ExampleCommand =>
+  pnpm(
+    "pnpm",
+    ["--filter", "opentray", script, ...runtimeModeArgs(runtimeMode)],
+    env,
+  );
+
+const runtimeModeArgs = (runtimeMode: ExampleRuntimeMode): readonly string[] =>
+  runtimeMode === "release" ? ["-r"] : [];
 
 const pnpm = (
   executable: string,
@@ -242,9 +264,13 @@ const requiredPaths = (
 export const lynxExtensionSourcePath = (
   platform: NodeJS.Platform,
   workspaceRoot: string,
+  runtimeMode: ExampleRuntimeMode = "debug",
 ): string | undefined => {
   if (platform === "darwin") {
-    return join(workspaceRoot, "target/debug/libopentray_ext_lynx.dylib");
+    return join(
+      workspaceRoot,
+      `target/${runtimeMode}/libopentray_ext_lynx.dylib`,
+    );
   }
   return undefined;
 };
