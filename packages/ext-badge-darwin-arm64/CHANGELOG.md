@@ -1,5 +1,7 @@
 # @opentray/ext-badge-darwin-arm64
 
+## 0.12.0
+
 ## 0.11.2
 
 ## 0.11.1

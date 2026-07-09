@@ -1,5 +1,17 @@
 # opentray
 
+## 0.12.0
+
+### Minor Changes
+
+- 4353688: Add instance-scoped WebView devtools commands for host code and injected page code.
+
+  Windows and macOS release builds now compile the native devtools API while preserving the per-window `devtools: true` capability gate. The source examples also support `--release` / `-r` and keep their own WebView instances devtools-enabled so release binaries remain debuggable through explicit APIs.
+
+### Patch Changes
+
+- @opentray/spec@0.12.0
+
 ## 0.11.2
 
 ### Patch Changes
