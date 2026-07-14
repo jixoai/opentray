@@ -112,7 +112,6 @@ const webview = mountExampleWebview(
         ? {
             windows: {
               cornerPreference: "round",
-              showInSwitchers: true,
             },
           }
         : {},

@@ -50,6 +50,7 @@ Orthogonal intents (2026-07-14, user input):
 - [x] 3.14 Apply native caption-button background/symbol colors through `AppWindowTitleBar` on the HWND-owning STA.
 - [x] 3.15 Restore owner-thread AppWindow titlebar measurements without reintroducing cross-apartment `Send`/`Sync`.
 - [x] 3.16 Update the Windows visual example, public README, `AGENTS.md`, and `i18n.zh.md` with the overlay-color and safe-area authorities.
+- [x] 3.17 Keep `example:webview-control` as a tray-utility acceptance surface by inheriting the default Windows switcher exclusion.
 
 ## 4. Verification
 
@@ -66,6 +67,7 @@ Orthogonal intents (2026-07-14, user input):
 - [x] 4.11 Run focused Rust interaction-state tests proving pure moves cannot authorize the white-block reset while real resize remains eligible.
 - [x] 4.12 Run parser, ABI boxing, and AppWindow-metric unit tests plus the facade typecheck.
 - [x] 4.13 Smoke `example:webview-control` with a visibly non-default Windows button background and verify the titlebar safe-area right edge against native controls.
+- [x] 4.14 Verify the default `example:webview-control` extended style contains `WS_EX_TOOLWINDOW` and excludes `WS_EX_APPWINDOW`.
 
 ## 5. Self-Review Loop
 
@@ -77,4 +79,4 @@ Orthogonal intents (2026-07-14, user input):
 - [x] 5.6 Refresh the self-review for source-example broker isolation; record the focused test, visible smoke, and unrelated Windows baseline-test failure.
 - [x] 5.7 Refresh the self-review for Vite server-API ownership and record the occupied-port retry, created native window, and listener-release evidence.
 - [x] 5.8 Refresh the self-review with native drag acceptance after user validation.
-- [ ] 5.9 Refresh the self-review with overlay color and AppWindow geometry evidence after user validation.
+- [x] 5.9 Refresh the self-review with overlay color, AppWindow geometry, and default-switcher evidence after user validation.
