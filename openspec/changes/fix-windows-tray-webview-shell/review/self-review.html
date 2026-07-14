@@ -1,0 +1,74 @@
+<!--
+Orthogonal intents (2026-07-14, original user input):
+1. Present Windows self-review evidence in a compact visual artifact.
+2. Keep findings, evidence, and residual risk directly inspectable.
+3. Present source-example broker isolation evidence.
+4. Present source-example Vite lifecycle evidence.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenTray Windows Shell Self Review</title>
+    <style>
+      :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+      body { margin: 0; background: Canvas; color: CanvasText; }
+      main { max-width: 1080px; margin: 0 auto; padding: 32px 24px 48px; }
+      h1 { margin: 0 0 8px; font-size: 30px; }
+      h2 { margin: 28px 0 10px; font-size: 18px; }
+      p { line-height: 1.55; }
+      table { width: 100%; border-collapse: collapse; font-size: 14px; }
+      th, td { padding: 10px 12px; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); text-align: left; vertical-align: top; }
+      th { background: color-mix(in srgb, CanvasText 7%, Canvas); }
+      code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .ok { color: #16803a; font-weight: 700; }
+      .risk { border-left: 3px solid #b7791f; padding-left: 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Windows Tray WebView Shell</h1>
+      <p class="ok">Self review: native drag is user-accepted; overlay colors and AppWindow geometry have independent-DLL visual evidence. Final overlay acceptance is pending.</p>
+
+      <h2>Corrected Root Causes</h2>
+      <table>
+        <thead><tr><th>Surface</th><th>Incorrect model</th><th>Final authority</th></tr></thead>
+        <tbody>
+          <tr><td>Runtime</td><td>CBS directory supplies all DLLs</td><td>Bootstrapper discovers; package graph selects matching runtime DLLs</td></tr>
+          <tr><td>Overlay</td><td>MTA fire-and-forget worker</td><td>HWND-owning STA, synchronous before show</td></tr>
+          <tr><td>Taskbar</td><td><code>WM_GETICON</code></td><td><code>showInSwitchers</code> extended-style policy</td></tr>
+          <tr><td>Placement</td><td>GUID registration plus numeric bounds query</td><td>Consistent <code>(HWND, uID)</code> shell identity</td></tr>
+          <tr><td>Geometry</td><td>Raw <code>GetWindowRect</code></td><td>DWM visible frame plus setter compensation</td></tr>
+          <tr><td>Source example</td><td>Neutral <code>opentray</code> broker label</td><td>Per-invocation <code>example-&lt;pid&gt;-&lt;name&gt;</code> caller label</td></tr>
+          <tr><td>Source Vite</td><td>Formatted CLI output and dual-stack <code>localhost</code></td><td>Vite Node API: <code>listen()</code>, <code>resolvedUrls.local</code>, <code>close()</code>, fixed <code>127.0.0.1</code></td></tr>
+          <tr><td>Native drag</td><td><code>WM_EXITSIZEMOVE</code> treated as resize-only</td><td>Observed <code>WM_SIZE</code> authorizes white-block repair; pure move preserves shell state</td></tr>
+          <tr><td>Overlay colors</td><td>Boolean-only overlay gate</td><td>Typed opaque colors boxed as WinRT <code>IReference&lt;Color&gt;</code> for <code>AppWindowTitleBar</code></td></tr>
+          <tr><td>Overlay width</td><td>DWM caption-button rectangle reconstruction</td><td>HWND-owner <code>AppWindowTitleBar.LeftInset</code>, <code>RightInset</code>, and <code>Height</code></td></tr>
+        </tbody>
+      </table>
+
+      <h2>Acceptance Evidence</h2>
+      <table>
+        <thead><tr><th>Probe</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Overlay geometry</td><td><code>gap=2x1</code>, safe area <code>769x27</code></td></tr>
+          <tr><td>Frameless geometry</td><td><code>gap=0x0</code></td></tr>
+          <tr><td>Placement</td><td><code>backend.nativeTrayBounds</code>, no screen-center fallback</td></tr>
+          <tr><td>pnpm-pub switcher</td><td><code>WS_EX_TOOLWINDOW=true</code>, <code>WS_EX_APPWINDOW=false</code></td></tr>
+          <tr><td>pnpm-pub visual</td><td>Native caption controls and notification icon rendered</td></tr>
+          <tr><td>Source example startup</td><td>Focused test passed; source broker used <code>example-13988-opentray-webview-control</code> and visible bridge smoke reported <code>gap=2x1</code></td></tr>
+          <tr><td>Occupied-port retry</td><td>With <code>127.0.0.1:5173</code> reserved, the unmodified command selected <code>http://127.0.0.1:5174/webview-control</code> and its caller-scoped broker created the visible <code>OpenTray Examples</code> window</td></tr>
+          <tr><td>Listener release</td><td>Direct <code>startDevServer()</code> selected <code>5173</code>; <code>close()</code> left neither <code>5173</code> nor <code>5174</code> listening</td></tr>
+          <tr><td>Pure-drag guard</td><td>64 Windows WebView tests passed; interaction without <code>WM_SIZE</code> cannot authorize the <code>ShowWindow</code> minimize/restore workaround. User accepted the drag behavior.</td></tr>
+          <tr><td>Isolated overlay DLL</td><td>Broker PID <code>7172</code> loaded the distinct <code>%TEMP%/opentray-overlay-controls/debug/opentray_ext_webview.dll</code> rather than the locked source DLL.</td></tr>
+          <tr><td>Configured button color</td><td>Captured native window has exact <code>#0F6CBD</code> caption-button pixels from screenshot x=748 through x=885.</td></tr>
+          <tr><td>Control boundary</td><td>Client origin x=8 and first blue button pixel x=748 yield client x=740, equal to bridge result <code>overlay=740x32</code>.</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Residual Risk</h2>
+      <p class="risk">Vendored tray-icon maintenance, intentional Windows default change, broader example/broker teardown behavior, unverified macOS runtime visuals, two pre-existing Windows path assertions in the broad CLI test command, and pending user overlay acceptance remain explicit non-blocking risks.</p>
+    </main>
+  </body>
+</html>
