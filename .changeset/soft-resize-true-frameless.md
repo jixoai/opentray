@@ -1,5 +1,5 @@
 ---
-@opentray/ext-webview: minor
+"@opentray/ext-webview": minor
 opentray: minor
 ---
 
