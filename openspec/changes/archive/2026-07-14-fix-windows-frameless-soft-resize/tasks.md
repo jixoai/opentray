@@ -16,7 +16,7 @@
 
 - [x] 3.1 Run `bun run openspec:vision -- validate fix-windows-frameless-soft-resize`, commit the validated plan, spec, and tasks before product-code work.
 - [x] 3.2 Parse and serialize the common `resizable` intent across Rust show/style commands, the TypeScript facade, style-kit recipes, capabilities, and effective-style state.
-- [ ] 3.3 Project the common effective state onto macOS style masks, with focused default and explicit override tests.
+- [x] 3.3 Project the common effective state onto macOS style masks, with focused default and explicit override tests.
 - [x] 3.4 Remove `WS_THICKFRAME` from Windows frameless style bits and switch DWM non-client rendering with chrome state so no native frame residue survives.
 - [x] 3.5 Add the private WebView bootstrap edge detector and HWND-owned soft-resize session: cursor, capture, physical geometry, constraints, cancellation, and interaction events.
 - [x] 3.6 Reuse `WindowProcSizeMoveInteraction` for soft-resize mutation so white-block repair remains resize-only; add concise intent comments where native shell behavior is non-obvious.
@@ -33,11 +33,11 @@
 - [x] 4.4 Run `bun run openspec:vision -- commit-check fix-windows-frameless-soft-resize --phase self-review` before writing review evidence.
 - [x] 4.5 Run the auto-exit source WebView example and verify its identified Bun launcher and broker no longer remain after exit.
 
-Verification limitation: task 3.3 remains unchecked. The macOS style projection and its focused source test are implemented, but this Windows host has no Apple SDK or compiler, so no macOS binary or runtime test was executed here.
+Verification limitation: task 3.3 implementation and focused source test are complete, but this Windows host has no Apple SDK or compiler, so no macOS binary or runtime test was executed here.
 
 ## 5. Self-Review Loop
 
 - [x] 5.1 Generate `review/self-review.md` comparing implementation and evidence to `plans/plan.md`.
 - [x] 5.2 Generate `review/self-review.html` with test and visible-interaction evidence.
 - [x] 5.3 Review did not reopen product work or tasks, so no recurrence state or apply loop was required.
-- [ ] 5.4 After Windows visual acceptance, archive in a dedicated commit, run `bun run openspec:vision -- check fix-windows-frameless-soft-resize`, and only then begin release work.
+- [x] 5.4 After Windows visual acceptance, archive in a dedicated commit, run `bun run openspec:vision -- check fix-windows-frameless-soft-resize`, and only then begin release work.

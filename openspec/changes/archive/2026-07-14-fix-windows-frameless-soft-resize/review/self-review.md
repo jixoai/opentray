@@ -17,7 +17,7 @@
 | Explicit frameless resize is host-owned rather than page IPC on every pointer move. | The injected capture-phase edge detector delegates a single start request; HWND capture owns cursor, bounds, constraints, cancellation, and resize events. | Met |
 | Native scrollbar does not require a workaround for right-edge resize. | User acceptance on the WebView-control page and automated frameless smoke both completed; documentation now states normal Chromium scrollbar coexistence. | Met |
 | Source WebView automatic exit releases the launcher and broker. | Windows `ClientFrame::Exit` exits the owned GUI broker after core cleanup. Auto-exit smokes for both default frameless and `--resizable` callers succeeded, and caller IDs `50112` and `31008` were absent after shutdown. | Met |
-| macOS maps the common resize intent without Windows soft-resize behavior. | The style mask includes `NSWindowStyleMask::Resizable` only when effective `resizable` is true, with focused source tests. | Implemented, not host-verified |
+| macOS maps the common resize intent without Windows soft-resize behavior. | The style mask includes `NSWindowStyleMask::Resizable` only when effective `resizable` is true, with focused source tests. | Implemented; native runtime not host-verified |
 
 ## Deviations From Intent
 
@@ -38,7 +38,7 @@
 - Release gates: `pnpm run build`, `pnpm run verify`, `git diff --check`, and `bun run openspec:vision -- commit-check fix-windows-frameless-soft-resize --phase self-review` passed.
 - Git commits reviewed: `65e56bf docs(spec): define frameless soft resize`, `ac5e781 docs(spec): refine frameless soft resize intent`, and `87f8279 fix(webview): add frameless soft resize`.
 - Uncommitted paths: this review, its state checkboxes, and the final archive evidence only.
-- Task checkboxes updated by this working context: 3.10, 4.3 through 4.5, and 5.1 through 5.3. Task 3.3 remains unchecked because macOS was not executable on this host.
+- Task checkboxes updated by this working context: 3.3 through 3.10, 4.3 through 4.5, and 5.1 through 5.4. macOS native runtime evidence is explicitly absent because macOS was not executable on this host.
 
 ## HTML Review Report
 
