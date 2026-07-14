@@ -1,9 +1,14 @@
 ---
-"@opentray/ext-webview": patch
-"opentray": patch
+"@opentray/ext-webview": minor
+"opentray": minor
 ---
 
 Repair the Windows tray-owned WebView shell and notification icon path.
+
+## Breaking on Windows
+
+- WebViews no longer enter the taskbar or Alt+Tab by default. Normal application windows must opt in with `style.platform.windows.showInSwitchers: true`.
+- `getBounds`, `moveTo`, and `resizeTo` now use the DWM visible frame rather than the raw Win32 frame with invisible resize borders. Coordinate results can shift by the border delta.
 
 - Discover a CBS-installed Windows App Runtime bootstrapper, then resolve runtime DLLs from the package graph selected by `MddBootstrapInitialize` so `FrameworkUdk` and `Windowing.Core` cannot be mixed across builds.
 - Initialize WinRT on the HWND-owning thread and complete `AppWindowTitleBar.ExtendsContentIntoTitleBar` before the first visible show.
