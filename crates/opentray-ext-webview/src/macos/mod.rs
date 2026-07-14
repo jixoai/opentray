@@ -620,6 +620,11 @@ impl MacosWebviewRuntime {
                 NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height)),
                 framed_window_style_mask(
                     show_settings.window.style.frameless,
+                    show_settings
+                        .window
+                        .style
+                        .resizable
+                        .unwrap_or(!show_settings.window.style.frameless),
                     show_settings.navigator_window.window_controls_overlay,
                 ),
                 NSBackingStoreType::Buffered,
@@ -648,6 +653,12 @@ impl MacosWebviewRuntime {
             next_permission_message_id: 1,
             style: WindowStyleState {
                 frameless: show_settings.window.style.frameless,
+                resizable: show_settings
+                    .window
+                    .style
+                    .resizable
+                    .unwrap_or(!show_settings.window.style.frameless),
+                resizable_override: show_settings.window.style.resizable,
                 keep_on_top: show_settings.window.style.keep_on_top,
                 opacity: show_settings.window.style.opacity,
                 background: show_settings.window.style.background.clone(),
@@ -703,6 +714,7 @@ impl MacosWebviewRuntime {
         let builder = WebViewBuilder::new()
             .with_initialization_script(navigator_window_bootstrap_script(
                 show_settings.navigator_window,
+                false,
                 show_settings.navigator_screen,
                 show_settings.navigator_tray,
                 show_settings.window.sync.title,
@@ -943,6 +955,12 @@ fn apply_reused_show_updates(
     if show_settings.window.style_requested {
         let requested_style = WindowStyleState {
             frameless: show_settings.window.style.frameless,
+            resizable: show_settings
+                .window
+                .style
+                .resizable
+                .unwrap_or(!show_settings.window.style.frameless),
+            resizable_override: show_settings.window.style.resizable,
             keep_on_top: show_settings.window.style.keep_on_top,
             opacity: show_settings.window.style.opacity,
             background: show_settings.window.style.background.clone(),
@@ -1107,6 +1125,7 @@ impl NavigatorWindowBridge {
             close: true,
             r#move: true,
             resize: true,
+            resizable: true,
             maximize: true,
             minimize: true,
             restore: true,

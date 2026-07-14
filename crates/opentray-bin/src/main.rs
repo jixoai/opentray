@@ -7,7 +7,9 @@ mod windows_transport;
 
 use std::{env, error::Error, path::PathBuf, time::Duration};
 
-use opentray_spec::{sanitize_caller_label, AppOptions, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION};
+use opentray_spec::{
+    sanitize_caller_label, AppOptions, ClientFrame, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION,
+};
 
 #[derive(Debug, Clone)]
 pub struct BrokerOptions {
@@ -201,6 +203,17 @@ pub(crate) fn broker_disconnect_action(
     }
 }
 
+pub(crate) fn broker_frame_action(
+    frame: &ClientFrame,
+    session_was_initialized: bool,
+) -> BrokerDisconnectAction {
+    if matches!(frame, ClientFrame::Exit) && session_was_initialized {
+        BrokerDisconnectAction::ExitOwnedBroker
+    } else {
+        BrokerDisconnectAction::WaitForIdle
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod native_broker {
     use std::{collections::HashMap, error::Error, time::Duration};
@@ -221,7 +234,7 @@ mod native_broker {
     #[cfg(target_os = "windows")]
     use super::windows_transport as broker_transport;
     use super::{
-        broker_disconnect_action, dynamic_extension::DynamicExtensionLoader,
+        broker_disconnect_action, broker_frame_action, dynamic_extension::DynamicExtensionLoader,
         BrokerDisconnectAction, BrokerOptions,
     };
 
@@ -394,6 +407,8 @@ mod native_broker {
                     let Some(session) = self.sessions.get_mut(&id) else {
                         return BrokerDisconnectAction::WaitForIdle;
                     };
+                    let session_was_initialized = session.broker.session_id().is_some();
+                    let exit_action = broker_frame_action(&frame, session_was_initialized);
                     let mut extension_host = UnsupportedExtensionHostContext;
                     let frames = self.broker.handle_frame_with_extension_host(
                         &mut session.broker,
@@ -402,6 +417,15 @@ mod native_broker {
                         &mut extension_host,
                     );
                     session.write_frames(frames);
+                    if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
+                        // Windows named-pipe half-close may defer `Disconnected` indefinitely.
+                        // `Exit` already performed kernel cleanup above, so the dedicated broker
+                        // must leave its GUI event loop without waiting for that transport event.
+                        self.sessions.remove(&id);
+                        self.bump_idle_generation();
+                        self.schedule_idle_if_empty();
+                        return exit_action;
+                    }
                     BrokerDisconnectAction::WaitForIdle
                 }
                 broker_transport::TransportEvent::Disconnected { id } => {
@@ -520,9 +544,10 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        broker_disconnect_action, parse_broker_options, parse_daemon_idle_timeout,
-        BrokerDisconnectAction, DEFAULT_DAEMON_IDLE_TIMEOUT_MS,
+        broker_disconnect_action, broker_frame_action, parse_broker_options,
+        parse_daemon_idle_timeout, BrokerDisconnectAction, DEFAULT_DAEMON_IDLE_TIMEOUT_MS,
     };
+    use opentray_spec::ClientFrame;
 
     #[test]
     fn daemon_idle_timeout_defaults_to_short_release_window() {
@@ -558,6 +583,18 @@ mod tests {
         assert_eq!(
             broker_disconnect_action(true),
             BrokerDisconnectAction::ExitOwnedBroker
+        );
+    }
+
+    #[test]
+    fn initialized_session_exit_frame_exits_owned_broker() {
+        assert_eq!(
+            broker_frame_action(&ClientFrame::Exit, true),
+            BrokerDisconnectAction::ExitOwnedBroker
+        );
+        assert_eq!(
+            broker_frame_action(&ClientFrame::Exit, false),
+            BrokerDisconnectAction::WaitForIdle
         );
     }
 

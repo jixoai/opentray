@@ -508,6 +508,21 @@ pub(super) fn apply_window_style_patch(
             changed = true;
         }
     }
+    if let Some(resizable) = payload.resizable {
+        if bridge_state.style.resizable != resizable
+            || bridge_state.style.resizable_override != Some(resizable)
+        {
+            bridge_state.style.resizable = resizable;
+            bridge_state.style.resizable_override = Some(resizable);
+            changed = true;
+        }
+    } else if bridge_state.style.resizable_override.is_none() {
+        let resizable = !bridge_state.style.frameless;
+        if bridge_state.style.resizable != resizable {
+            bridge_state.style.resizable = resizable;
+            changed = true;
+        }
+    }
     if let Some(keep_on_top) = payload.keep_on_top {
         if bridge_state.style.keep_on_top != keep_on_top {
             bridge_state.style.keep_on_top = keep_on_top;

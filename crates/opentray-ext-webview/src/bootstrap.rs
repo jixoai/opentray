@@ -7,6 +7,7 @@ use crate::{
 
 pub(crate) fn navigator_window_bootstrap_script(
     window_settings: NavigatorWindowSettings,
+    soft_resize_enabled: bool,
     screen_settings: NavigatorScreenSettings,
     tray_settings: NavigatorTraySettings,
     title_sync: MetadataSyncSettings,
@@ -15,6 +16,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     permission_manager_policy: &WebviewPermissionManagerPolicy,
 ) -> String {
     let window_enabled = js_bool(window_settings.enabled);
+    let soft_resize_enabled = js_bool(soft_resize_enabled);
     let bind_window_globals = js_bool(window_settings.bind_window_globals);
     let window_controls_overlay = js_bool(window_settings.window_controls_overlay);
     let screen_enabled = js_bool(screen_settings.enabled);
@@ -28,6 +30,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     let permission_manager_policy_json = permission_manager_policy_json(permission_manager_policy);
     r#"(function () {
   const requestedWindowEnabled = __OPENTRAY_WINDOW_ENABLED__;
+  const requestedSoftResizeEnabled = __OPENTRAY_SOFT_RESIZE_ENABLED__;
   const requestedBindWindowGlobals = __OPENTRAY_BIND_GLOBALS__;
   const requestedWindowControlsOverlay = __OPENTRAY_WINDOW_CONTROLS_OVERLAY__;
   const requestedScreenEnabled = __OPENTRAY_SCREEN_ENABLED__;
@@ -111,6 +114,64 @@ pub(crate) fn navigator_window_bootstrap_script(
     let lastObservedFaviconHref;
     let faviconObserver;
     let faviconDomReadyListener;
+    let softResizeEnabled = false;
+    const softResizeEdgeAt = (event) => {
+      if (!softResizeEnabled) return null;
+      const x = finiteNumber(event?.clientX);
+      const y = finiteNumber(event?.clientY);
+      const width = finiteNumber(window.innerWidth);
+      const height = finiteNumber(window.innerHeight);
+      if (x === undefined || y === undefined || !width || !height) return null;
+      const left = x <= 6;
+      const right = x >= width - 6;
+      const top = y <= 6;
+      const bottom = y >= height - 6;
+      if (top) {
+        if (left) return 'topLeft';
+        if (right) return 'topRight';
+        return 'top';
+      }
+      if (bottom) {
+        if (left) return 'bottomLeft';
+        if (right) return 'bottomRight';
+        return 'bottom';
+      }
+      if (left) return 'left';
+      if (right) return 'right';
+      return null;
+    };
+    const softResizeCursor = (edge) => {
+      if (edge === 'topLeft' || edge === 'bottomRight') return 'nwse-resize';
+      if (edge === 'topRight' || edge === 'bottomLeft') return 'nesw-resize';
+      if (edge === 'left' || edge === 'right') return 'ew-resize';
+      if (edge === 'top' || edge === 'bottom') return 'ns-resize';
+      return '';
+    };
+    const setSoftResizeCursor = (edge) => {
+      const root = document.documentElement;
+      if (!root || !root.style) return;
+      root.style.cursor = softResizeCursor(edge);
+    };
+    const postSoftResizeStart = (edge) => {
+      window.ipc.postMessage(JSON.stringify({
+        namespace: 'opentray.window.internal',
+        cmd: 'startSoftResize',
+        callback: 0,
+        error: 0,
+        payload: { edge }
+      }));
+    };
+    document.addEventListener('pointermove', (event) => {
+      setSoftResizeCursor(softResizeEdgeAt(event));
+    }, true);
+    document.addEventListener('pointerdown', (event) => {
+      if (event.isTrusted !== true || event.isPrimary === false || event.button !== 0) return;
+      const edge = softResizeEdgeAt(event);
+      if (!edge) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      postSoftResizeStart(edge);
+    }, true);
     const originalWindowFns = {
       close: window.close,
       moveTo: window.moveTo,
@@ -752,6 +813,10 @@ pub(crate) fn navigator_window_bootstrap_script(
           if (!titleSyncNativeToPage || typeof title !== "string") return;
           document.title = title;
         },
+        setSoftResizeEnabled(enabled) {
+          softResizeEnabled = enabled === true;
+          if (!softResizeEnabled) setSoftResizeCursor(null);
+        },
         setPageIconHref,
         install,
         uninstall
@@ -760,6 +825,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     });
   }
   const internals = window[INTERNALS_KEY];
+  internals.setSoftResizeEnabled(requestedSoftResizeEnabled);
   if (
     windowEnabled ||
     screenEnabled ||
@@ -784,6 +850,7 @@ pub(crate) fn navigator_window_bootstrap_script(
   }
 })();"#
         .replace("__OPENTRAY_WINDOW_ENABLED__", window_enabled)
+        .replace("__OPENTRAY_SOFT_RESIZE_ENABLED__", soft_resize_enabled)
         .replace("__OPENTRAY_BIND_GLOBALS__", bind_window_globals)
         .replace("__OPENTRAY_WINDOW_CONTROLS_OVERLAY__", window_controls_overlay)
         .replace("__OPENTRAY_SCREEN_ENABLED__", screen_enabled)
@@ -992,6 +1059,7 @@ return await rectPromise;
                 bind_window_globals: false,
                 window_controls_overlay: true,
             },
+            false,
             NavigatorScreenSettings::default(),
             NavigatorTraySettings::default(),
             MetadataSyncSettings::default(),

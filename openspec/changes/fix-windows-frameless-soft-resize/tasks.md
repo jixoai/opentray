@@ -15,21 +15,25 @@
 ## 3. Implementation
 
 - [x] 3.1 Run `bun run openspec:vision -- validate fix-windows-frameless-soft-resize`, commit the validated plan, spec, and tasks before product-code work.
-- [ ] 3.2 Parse and serialize the common `resizable` intent across Rust show/style commands, the TypeScript facade, style-kit recipes, capabilities, and effective-style state.
+- [x] 3.2 Parse and serialize the common `resizable` intent across Rust show/style commands, the TypeScript facade, style-kit recipes, capabilities, and effective-style state.
 - [ ] 3.3 Project the common effective state onto macOS style masks, with focused default and explicit override tests.
-- [ ] 3.4 Remove `WS_THICKFRAME` from Windows frameless style bits and switch DWM non-client rendering with chrome state so no native frame residue survives.
-- [ ] 3.5 Add the private WebView bootstrap edge detector and HWND-owned soft-resize session: cursor, capture, physical geometry, constraints, cancellation, and interaction events.
-- [ ] 3.6 Reuse `WindowProcSizeMoveInteraction` for soft-resize mutation so white-block repair remains resize-only; add concise intent comments where native shell behavior is non-obvious.
-- [ ] 3.7 Extend the WebView-control example with `--resizable`, visible effective-style information, and interaction-oriented smoke probes.
-- [ ] 3.8 Update `AGENTS.md` and `i18n.zh.md` with the durable Windows shell law and user vocabulary.
-- [ ] 3.9 Update only completed current-context task checkboxes and commit implementation, tests, and matching task state together.
+- [x] 3.4 Remove `WS_THICKFRAME` from Windows frameless style bits and switch DWM non-client rendering with chrome state so no native frame residue survives.
+- [x] 3.5 Add the private WebView bootstrap edge detector and HWND-owned soft-resize session: cursor, capture, physical geometry, constraints, cancellation, and interaction events.
+- [x] 3.6 Reuse `WindowProcSizeMoveInteraction` for soft-resize mutation so white-block repair remains resize-only; add concise intent comments where native shell behavior is non-obvious.
+- [x] 3.7 Extend the WebView-control example with `--resizable`, visible effective-style information, and interaction-oriented smoke probes.
+- [x] 3.8 Update `AGENTS.md` and `i18n.zh.md` with the durable Windows shell law and user vocabulary.
+- [x] 3.9 Update only completed current-context task checkboxes and commit implementation, tests, and matching task state together.
+- [x] 3.10 Scenario: Given a source WebView example has a live Vite page connection When automatic shutdown begins Then its runtime session closes before Vite and no broker/launcher process remains; document that a regular native scrollbar coexists with right-edge soft resize, while custom edge hit testing remains a page-owned layout choice.
 
 ## 4. Verification
 
-- [ ] 4.1 Run targeted Rust protocol/bootstrap/native-style tests and the ext-webview TypeScript test/typecheck surface.
-- [ ] 4.2 Run `bun run openspec:vision -- validate fix-windows-frameless-soft-resize` and `git diff --check`.
-- [ ] 4.3 Build the Windows WebView extension and run the source example with frameless default and `--resizable` variants.
-- [ ] 4.4 Run `bun run openspec:vision -- commit-check fix-windows-frameless-soft-resize --phase self-review` before writing review evidence.
+- [x] 4.1 Run targeted Rust protocol/bootstrap/native-style tests and the ext-webview TypeScript test/typecheck surface.
+- [x] 4.2 Run `bun run openspec:vision -- validate fix-windows-frameless-soft-resize` and `git diff --check`.
+- [x] 4.3 Build the Windows WebView extension and run the source example with frameless default and `--resizable` variants.
+- [x] 4.4 Run `bun run openspec:vision -- commit-check fix-windows-frameless-soft-resize --phase self-review` before writing review evidence.
+- [x] 4.5 Run the auto-exit source WebView example and verify its identified Bun launcher and broker no longer remain after exit.
+
+Verification limitation: task 3.3 remains unchecked. The macOS style projection and its focused source test are implemented, but this Windows host has no Apple SDK or compiler, so no macOS binary or runtime test was executed here.
 
 ## 5. Self-Review Loop
 

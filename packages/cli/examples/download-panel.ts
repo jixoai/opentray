@@ -19,6 +19,7 @@ import {
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
   mountExampleWebview,
+  shutdownWebviewExample,
 } from "./_support/webview-example-support";
 
 const smokeEnabled = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE === "1";
@@ -53,8 +54,7 @@ console.log(`download panel: ${devServer.url}`);
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
-    await devServer.close();
-    await runtime.shutdown();
+    await shutdownWebviewExample(runtime, devServer);
   },
 });
 

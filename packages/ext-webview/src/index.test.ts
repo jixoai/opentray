@@ -754,6 +754,7 @@ describe("@opentray/ext-webview", () => {
       if (isWebviewCommand(command) && command.type === "setStyle") {
         return {
           frameless: true,
+          resizable: true,
           keepOnTop: true,
           opacity: command.style.opacity ?? 1,
           background: { kind: "semantic", token: "blur", state: "active" },
@@ -1696,6 +1697,7 @@ describe("@opentray/ext-webview", () => {
         calls.push(["setStyle", style]);
         return {
           frameless: true,
+          resizable: true,
           keepOnTop: true,
           opacity: 0.88,
           background: { kind: "opaque" },
@@ -1711,6 +1713,7 @@ describe("@opentray/ext-webview", () => {
         calls.push(["setBackground", background, options]);
         return {
           frameless: true,
+          resizable: true,
           keepOnTop: true,
           opacity: 0.88,
           background: { kind: "semantic", token: "blur", state: "active" },
@@ -1731,6 +1734,7 @@ describe("@opentray/ext-webview", () => {
       minHeight: 180,
       maxHeight: null,
       frameless: true,
+      resizable: true,
       keepOnTop: true,
       opacity: 0.88,
       background: "blur",
@@ -1746,6 +1750,7 @@ describe("@opentray/ext-webview", () => {
         "setStyle",
         {
           frameless: true,
+          resizable: true,
           keepOnTop: true,
           opacity: 0.88,
           platform: { windows: { cornerPreference: "round" } },

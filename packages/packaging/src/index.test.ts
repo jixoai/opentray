@@ -145,7 +145,7 @@ describe("@opentray/packaging", () => {
     expect(resolved.runtimeHostPath).toBe(join(outDir, staged.manifest.runtimeHost.path));
   });
 
-  it("Scenario: Given executable runtime host When packaging stages artifacts Then executable mode is applied", async () => {
+  it("Scenario: Given executable runtime host When packaging stages artifacts Then it is executable on POSIX and present on Windows", async () => {
     const root = await mkdtemp(join(tmpdir(), "opentray-packaging-"));
     const outDir = join(root, "dist");
     const runtimeSource = join(root, "host-bin");
@@ -159,7 +159,12 @@ describe("@opentray/packaging", () => {
       runtimeHost: { source: runtimeSource, executable: true },
     });
 
-    const mode = (await stat(join(outDir, staged.manifest.runtimeHost.path))).mode;
+    const stagedHostPath = join(outDir, staged.manifest.runtimeHost.path);
+    const mode = (await stat(stagedHostPath)).mode;
+    expect(mode).toBeGreaterThan(0);
+    if (process.platform === "win32") {
+      return;
+    }
     expect(mode & 0o111).toBe(0o111);
   });
 });

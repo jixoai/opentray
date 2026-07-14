@@ -1,6 +1,7 @@
-// Orthogonal intents (2026-07-14; original user request: add a Windows-only switcher policy):
+// Orthogonal intents (2026-07-15; original user request: repair Windows frameless chrome and add common resizable style):
 // 1. Keep macOS style parsing explicit and reject Windows `showInSwitchers` payloads.
 // 2. Preserve existing AppKit window/background projection.
+// 3. Project common `resizable` intent through `NSWindowStyleMask::Resizable`.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -26,6 +27,9 @@ use super::{AppKitViewHandle, NavigatorWindowBridge, CLEAR_BACKGROUND, OPAQUE_BA
 #[serde(rename_all = "camelCase")]
 pub(super) struct WindowStyleState {
     pub(super) frameless: bool,
+    pub(super) resizable: bool,
+    #[serde(skip)]
+    pub(super) resizable_override: Option<bool>,
     pub(super) keep_on_top: bool,
     pub(super) opacity: f64,
     pub(super) background: WebviewWindowBackground,
@@ -48,6 +52,8 @@ impl Default for WindowStyleState {
     fn default() -> Self {
         Self {
             frameless: false,
+            resizable: true,
+            resizable_override: None,
             keep_on_top: false,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
@@ -64,6 +70,7 @@ impl Default for WindowStyleState {
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetStylePayload {
     pub(super) frameless: Option<bool>,
+    pub(super) resizable: Option<bool>,
     pub(super) keep_on_top: Option<bool>,
     pub(super) opacity: Option<f64>,
     pub(super) background: Option<WebviewBackgroundInput>,
@@ -147,6 +154,7 @@ pub(super) fn validate_initial_style(
 
     validate_style_request(&SetStylePayload {
         frameless: Some(show_settings.window.style.frameless),
+        resizable: show_settings.window.style.resizable,
         keep_on_top: Some(show_settings.window.style.keep_on_top),
         opacity: Some(show_settings.window.style.opacity),
         background: None,
@@ -161,14 +169,24 @@ pub(super) fn validate_initial_style(
     validate_background(&show_settings.window.style.background)
 }
 
-pub(super) fn framed_window_style_mask(frameless: bool, overlay: bool) -> NSWindowStyleMask {
+pub(super) fn framed_window_style_mask(
+    frameless: bool,
+    resizable: bool,
+    overlay: bool,
+) -> NSWindowStyleMask {
     if frameless {
-        NSWindowStyleMask::Borderless
+        let mut mask = NSWindowStyleMask::Borderless;
+        if resizable {
+            mask |= NSWindowStyleMask::Resizable;
+        }
+        mask
     } else {
         let mut mask = NSWindowStyleMask::Titled
             | NSWindowStyleMask::Closable
-            | NSWindowStyleMask::Miniaturizable
-            | NSWindowStyleMask::Resizable;
+            | NSWindowStyleMask::Miniaturizable;
+        if resizable {
+            mask |= NSWindowStyleMask::Resizable;
+        }
         if overlay {
             mask |= NSWindowStyleMask::FullSizeContentView;
         }
@@ -269,7 +287,11 @@ pub(super) fn apply_window_style(
     };
     let wants_clear_background =
         requires_clear_backing(&style) || style.platform.macos.corner_radius.is_some();
-    window.setStyleMask(framed_window_style_mask(style.frameless, overlay_enabled));
+    window.setStyleMask(framed_window_style_mask(
+        style.frameless,
+        style.resizable,
+        overlay_enabled,
+    ));
     window.setLevel(if style.keep_on_top {
         NSFloatingWindowLevel
     } else {
@@ -374,6 +396,14 @@ mod tests {
     }
 
     #[test]
+    fn borderless_resizability_requires_explicit_style_intent() {
+        assert!(
+            !framed_window_style_mask(true, false, false).contains(NSWindowStyleMask::Resizable)
+        );
+        assert!(framed_window_style_mask(true, true, false).contains(NSWindowStyleMask::Resizable));
+    }
+
+    #[test]
     fn corner_radius_targets_theme_frame_layer_not_content_layer() {
         let Some(mtm) = MainThreadMarker::new() else {
             eprintln!("skipping AppKit layer test outside the main thread");
@@ -383,7 +413,7 @@ mod tests {
             NSWindow::initWithContentRect_styleMask_backing_defer(
                 NSWindow::alloc(mtm),
                 NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(320.0, 200.0)),
-                framed_window_style_mask(true, false),
+                framed_window_style_mask(true, false, false),
                 NSBackingStoreType::Buffered,
                 true,
             )

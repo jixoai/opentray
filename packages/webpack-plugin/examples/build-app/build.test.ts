@@ -2,6 +2,7 @@ import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -28,7 +29,7 @@ describe("webpack real build", () => {
     const config = {
       mode: "production" as const,
       target: "node" as const,
-      entry: { main: entryFile.pathname },
+      entry: { main: fileURLToPath(entryFile) },
       output: { path: outDir, filename: "[name].js" },
       plugins: [plugin as never],
     };

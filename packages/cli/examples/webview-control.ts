@@ -12,17 +12,19 @@ import {
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
   mountExampleWebview,
+  shutdownWebviewExample,
 } from "./_support/webview-example-support";
 
 // windowControlsOverlay is a show-time bridge gate; the page can test it, not enable it later.
 const overlayEnabled = resolveOverlayEnabled(
   process.argv.slice(2),
-  process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY
+  process.env.OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY,
 );
 // --frameless strips the native title bar (and with it the native window
 // controls), so the page must draw its own. Useful for verifying the
 // self-drawn control cluster appears when native controls are gone.
 const frameless = resolveFrameless(process.argv.slice(2));
+const resizable = resolveResizable(process.argv.slice(2));
 const windowControlsOverlay: WebviewWindowControlsOverlay = overlayEnabled
   ? process.platform === "win32"
     ? {
@@ -34,7 +36,7 @@ const windowControlsOverlay: WebviewWindowControlsOverlay = overlayEnabled
 console.log(
   `windowControlsOverlay: ${
     overlayEnabled ? "enabled" : "disabled"
-  } · frameless: ${frameless}`
+  } · frameless: ${frameless} · resizable: ${resizable ?? "default"}`,
 );
 
 ensureAppInstalled();
@@ -64,14 +66,18 @@ console.log(`webview-control panel: ${devServer.url}`);
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
-    await devServer.close();
-    await runtime.shutdown();
+    try {
+      await webview.destroy();
+    } catch {
+      // Session shutdown remains authoritative if the window is already gone.
+    }
+    await shutdownWebviewExample(runtime, devServer);
   },
 });
 
 const webview = mountExampleWebview(
   runtime,
-  "webview-control-webview"
+  "webview-control-webview",
 ).createWebviewWindow({
   url: devServer.url,
   width: 960,
@@ -80,6 +86,7 @@ const webview = mountExampleWebview(
   icon,
   style: {
     frameless,
+    ...(resizable === undefined ? {} : { resizable }),
     keepOnTop: false,
     // Translucent native material so the page's own translucent background
     // (bg-background/80 in the route) composes with the window vibrancy. The
@@ -93,12 +100,12 @@ const webview = mountExampleWebview(
             state: "followsWindowActiveState",
           }
         : process.platform === "win32"
-        ? {
-            kind: "platformMaterial",
-            material: "mica",
-            state: "followsWindowActiveState",
-          }
-        : { kind: "opaque" },
+          ? {
+              kind: "platformMaterial",
+              material: "mica",
+              state: "followsWindowActiveState",
+            }
+          : { kind: "opaque" },
     platform:
       process.platform === "darwin"
         ? {
@@ -109,12 +116,12 @@ const webview = mountExampleWebview(
             },
           }
         : process.platform === "win32"
-        ? {
-            windows: {
-              cornerPreference: "round",
-            },
-          }
-        : {},
+          ? {
+              windows: {
+                cornerPreference: "round",
+              },
+            }
+          : {},
   },
   windowControlsOverlay,
   fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
@@ -137,7 +144,7 @@ const webview = mountExampleWebview(
 await webview.show();
 
 console.log(
-  "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, devtools, screen, and navigation behavior."
+  "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, devtools, screen, and navigation behavior.",
 );
 
 if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
@@ -161,6 +168,18 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
         await bridge.devtools.close();
       }
       const originalStyle = await bridge.getStyle();
+      if (${frameless}) {
+        const expectedResizable = ${JSON.stringify(resizable ?? false)};
+        if (originalStyle.resizable !== expectedResizable) {
+          throw new Error(
+            "frameless resizable style did not match effective default: " +
+              JSON.stringify({ expectedResizable, actual: originalStyle.resizable })
+          );
+        }
+        if (!capabilities.resizable) {
+          throw new Error("user resize capability is unavailable for the example window");
+        }
+      }
       const originalWindowState = await bridge.getWindowState();
       if (capabilities.platform === "windows") {
         await bridge.maximize();
@@ -239,7 +258,7 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
   const bridgeSmoke = await waitForBridgeSmoke(webview, 5_000);
   if (bridgeSmoke?.ok !== true) {
     throw new Error(
-      `bridge smoke failed: ${bridgeSmoke?.title ?? "missing result"}`
+      `bridge smoke failed: ${bridgeSmoke?.title ?? "missing result"}`,
     );
   }
   console.log(`bridge smoke result: ${bridgeSmoke.title}`);
@@ -255,7 +274,7 @@ await lifecycle.wait;
 
 function resolveOverlayEnabled(
   args: readonly string[],
-  envValue: string | undefined
+  envValue: string | undefined,
 ): boolean {
   let enabled = parseBooleanEnv(envValue) ?? true;
   for (const arg of args) {
@@ -295,6 +314,18 @@ function resolveFrameless(args: readonly string[]): boolean {
   return args.some((arg) => arg === "--frameless");
 }
 
+function resolveResizable(args: readonly string[]): boolean | undefined {
+  let value: boolean | undefined;
+  for (const arg of args) {
+    if (arg === "--resizable") {
+      value = true;
+    } else if (arg === "--no-resizable") {
+      value = false;
+    }
+  }
+  return value;
+}
+
 type BridgeSmokePayload = {
   type: "bridgeSmoke";
   ok: boolean;
@@ -307,7 +338,7 @@ type BridgeSmokeWindow = {
 
 async function waitForBridgeSmoke(
   window: BridgeSmokeWindow,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<BridgeSmokePayload | undefined> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

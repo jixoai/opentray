@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -26,7 +26,7 @@ describe("esbuild real build", () => {
 
     const { build } = await import("esbuild");
     await build({
-      entryPoints: [pathToFileURL(entryFile.pathname).pathname],
+      entryPoints: [fileURLToPath(entryFile)],
       outdir: outDir,
       bundle: true,
       format: "esm",
@@ -61,7 +61,7 @@ describe("esbuild real build", () => {
     await expect(stat(bundleOutput)).resolves.toBeTruthy();
     const compiledCode = await readFile(bundleOutput, "utf8");
     expect(compiledCode).toMatch(/opentray-esbuild-build-example/);
-    const imported = (await import(pathToFileURL(bundleOutput).pathname)) as {
+    const imported = (await import(pathToFileURL(bundleOutput).href)) as {
       main: () => string;
     };
     expect(imported.main()).toBe("opentray-esbuild-build-example");

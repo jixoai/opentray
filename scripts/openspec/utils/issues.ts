@@ -92,6 +92,7 @@ const ALLOWED_FRONT_KEYS = new Set([
 const REQUIRED_SECTIONS = ["## Summary", "## Impact", "## Evidence"];
 
 const basename = (path: string): string => path.split(/[\\/]/).pop() ?? path;
+const relativePath = (from: string, to: string): string => relative(from, to).replaceAll("\\", "/");
 
 /** Recursively walk a directory yielding absolute file paths. */
 const walk = async function* (dir: string): AsyncGenerator<string> {
@@ -373,7 +374,7 @@ const listIssueFiles = async (changeDir: string, includeClosed: boolean): Promis
     }
     files.push({
       path: file,
-      relativePath: relative(changeDir, file),
+      relativePath: relativePath(changeDir, file),
       issueId: issueIdFromFilename(filename),
       filename,
     });

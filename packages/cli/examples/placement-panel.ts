@@ -16,6 +16,7 @@ import {
   createWebviewExampleRuntime,
   listenWebviewIpcMessages,
   mountExampleWebview,
+  shutdownWebviewExample,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
 
@@ -112,8 +113,7 @@ const lifecycle = createExampleLifecycle({
     } catch {
       // The panel may never have been opened; closing the runtime session is still authoritative.
     }
-    await devServer.close();
-    await runtime.shutdown();
+    await shutdownWebviewExample(runtime, devServer);
   },
 });
 

@@ -76,6 +76,7 @@ pub(crate) struct WebviewMetadataSyncSettings {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WebviewInitialStyle {
     pub frameless: bool,
+    pub resizable: Option<bool>,
     pub keep_on_top: bool,
     pub opacity: f64,
     pub background: WebviewWindowBackground,
@@ -86,6 +87,7 @@ impl Default for WebviewInitialStyle {
     fn default() -> Self {
         Self {
             frameless: false,
+            resizable: None,
             keep_on_top: false,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
@@ -473,6 +475,7 @@ struct ResolvePermissionMessageCommandData {
 #[serde(rename_all = "camelCase")]
 struct ShowWindowStyleData {
     frameless: Option<bool>,
+    resizable: Option<bool>,
     keep_on_top: Option<bool>,
     opacity: Option<f64>,
     background: Option<WebviewBackgroundInput>,
@@ -812,6 +815,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                         style_requested: style.is_some(),
                         style: WebviewInitialStyle {
                             frameless: style.and_then(|style| style.frameless).unwrap_or(false),
+                            resizable: style.and_then(|style| style.resizable),
                             opacity: style
                                 .and_then(|style| style.opacity)
                                 .map(normalize_opacity)
@@ -1606,6 +1610,7 @@ mod tests {
             },
             "style": {
               "frameless": true,
+              "resizable": true,
               "opacity": 0.72,
               "background": {
                 "kind": "platformMaterial",
@@ -1669,6 +1674,7 @@ mod tests {
                         style_requested: true,
                         style: WebviewInitialStyle {
                             frameless: true,
+                            resizable: Some(true),
                             keep_on_top: true,
                             opacity: 0.72,
                             background: WebviewWindowBackground::PlatformMaterial {

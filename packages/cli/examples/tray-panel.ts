@@ -5,6 +5,7 @@ import {
   createWebviewExampleRuntime,
   createVisibleTrayIcon,
   mountExampleWebview,
+  shutdownWebviewExample,
 } from "./_support/webview-example-support";
 
 ensureAppInstalled();
@@ -64,8 +65,7 @@ let panelVisible = false;
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
-    await devServer.close();
-    await runtime.shutdown();
+    await shutdownWebviewExample(runtime, devServer);
   },
 });
 

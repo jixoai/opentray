@@ -43,6 +43,7 @@ fn bootstrap_script_with_policy(
 ) -> String {
     navigator_window_bootstrap_script(
         window_settings,
+        false,
         screen_settings,
         tray_settings,
         title_sync,
@@ -58,6 +59,7 @@ fn bootstrap_script_with_permission_policy(
 ) -> String {
     navigator_window_bootstrap_script(
         NavigatorWindowSettings::default(),
+        false,
         NavigatorScreenSettings::default(),
         NavigatorTraySettings::default(),
         MetadataSyncSettings::default(),
@@ -1187,6 +1189,7 @@ fn navigator_window_callback_scripts_use_private_run_callback() {
 fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
     validate_style_request(&SetStylePayload {
         frameless: None,
+        resizable: None,
         keep_on_top: Some(true),
         opacity: Some(0.82),
         background: Some(WebviewBackgroundInput::Keyword("transparent".to_string())),
@@ -1196,6 +1199,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
 
     validate_style_request(&SetStylePayload {
         frameless: None,
+        resizable: None,
         keep_on_top: None,
         opacity: None,
         background: Some(WebviewBackgroundInput::Keyword("hudWindow".to_string())),
@@ -1211,6 +1215,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
 
     let blur_error = validate_style_request(&SetStylePayload {
         frameless: None,
+        resizable: None,
         keep_on_top: None,
         opacity: None,
         background: Some(WebviewBackgroundInput::Keyword("mica".to_string())),
@@ -1224,6 +1229,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
 
     let windows_error = validate_style_request(&SetStylePayload {
         frameless: None,
+        resizable: None,
         keep_on_top: None,
         opacity: None,
         background: None,
@@ -1253,6 +1259,8 @@ fn validate_initial_style_ignores_default_placeholder_platform_families() {
 fn window_style_state_serializes_keep_on_top() {
     let value = serde_json::to_value(WindowStyleState {
         frameless: false,
+        resizable: true,
+        resizable_override: None,
         keep_on_top: true,
         opacity: 0.82,
         background: WebviewWindowBackground::PlatformMaterial {
@@ -1301,6 +1309,8 @@ fn navigator_window_bridge_tracks_listener_ids() {
         next_permission_message_id: 1,
         style: WindowStyleState {
             frameless: false,
+            resizable: true,
+            resizable_override: None,
             keep_on_top: false,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
@@ -1423,6 +1433,8 @@ fn emit_window_event_ignores_unlistened_download_events_on_macos() {
         next_permission_message_id: 1,
         style: WindowStyleState {
             frameless: false,
+            resizable: true,
+            resizable_override: None,
             keep_on_top: false,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
@@ -1484,6 +1496,8 @@ fn app_region_drag_interaction_window_event_conserves_native_source() {
         next_permission_message_id: 1,
         style: WindowStyleState {
             frameless: false,
+            resizable: true,
+            resizable_override: None,
             keep_on_top: false,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,

@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -29,7 +29,7 @@ describe("tsdown real build", () => {
     // The adapter is a structural Rolldown plugin (name/configResolved/writeBundle).
     // tsdown accepts Rolldown plugins natively; cast only to bridge the local Like types.
     await build({
-      entry: [pathToFileURL(entryFile.pathname).pathname],
+      entry: [fileURLToPath(entryFile)],
       outDir,
       format: "esm",
       plugins: [plugin as never],
@@ -60,7 +60,7 @@ describe("tsdown real build", () => {
     await expect(stat(bundleOutput)).resolves.toBeTruthy();
     const compiledCode = await readFile(bundleOutput, "utf8");
     expect(compiledCode).toMatch(/opentray-tsdown-build-example/);
-    const imported = (await import(pathToFileURL(bundleOutput).pathname)) as {
+    const imported = (await import(pathToFileURL(bundleOutput).href)) as {
       main: () => string;
     };
     expect(imported.main()).toBe("opentray-tsdown-build-example");

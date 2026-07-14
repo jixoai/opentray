@@ -74,6 +74,7 @@ const usage = (): string =>
 const interviewPlanPathOf = (change: string): string => join(changeDirOf(projectRoot, change), "interview_plan.md");
 const tasksPathOf = (change: string): string => join(changeDirOf(projectRoot, change), "tasks.md");
 const tocPathOf = (change: string): string => join(changeDirOf(projectRoot, change), "toc.md");
+const relativePath = (from: string, to: string): string => relative(from, to).replaceAll("\\", "/");
 const handoffPathOf = (change: string): string => join(changeDirOf(projectRoot, change), "HANDOFF.md");
 
 interface ArchivedIssueMove {
@@ -327,7 +328,7 @@ const createIssueFromTemplate = async (change: string, changeDir: string, args: 
   };
   const templatePath = join(projectRoot, "openspec", "schemas", SCHEMA, "templates", "issues", `${options.type}.md`);
   if (!existsSync(templatePath)) {
-    throw new Error(`missing issue template: ${relative(projectRoot, templatePath)}`);
+    throw new Error(`missing issue template: ${relativePath(projectRoot, templatePath)}`);
   }
 
   const filename = await nextIssueFilename(changeDir, options.title);
@@ -359,7 +360,7 @@ const createIssueFromTemplate = async (change: string, changeDir: string, args: 
         ok: true,
         change,
         created: {
-          relativePath: relative(changeDir, issuePath),
+          relativePath: relativePath(changeDir, issuePath),
           issueId,
           template: options.type,
           title: options.title,
@@ -392,7 +393,7 @@ const parseFootnoteRefs = (tocContent: string): Set<string> => {
   const re = /^\[\^[^\]]+\]:\s*(\S+)/gm;
   let match: RegExpExecArray | null;
   while ((match = re.exec(tocContent)) !== null) {
-    refs.add(match[1]);
+    refs.add(match[1].replaceAll("\\", "/"));
   }
   return refs;
 };
@@ -405,7 +406,7 @@ const listSpecFiles = async (changeDir: string): Promise<string[]> => {
   }
   const files: string[] = [];
   for await (const file of new Bun.Glob("**/*.md").scan({ cwd: specsDir, absolute: true })) {
-    files.push(relative(changeDir, file));
+    files.push(relativePath(changeDir, file));
   }
   return files.sort();
 };
@@ -491,7 +492,7 @@ const listOrValidateIssues = async (change: string, args: string[]): Promise<voi
       const validation = validateIssueFile(text, basename(file));
       if (validation.errors.length > 0 || !validation.record) {
         validationErrors.push({
-          relativePath: relative(changeDir, file),
+          relativePath: relativePath(changeDir, file),
           errors: validation.errors,
         });
         continue;
@@ -518,8 +519,8 @@ const listOrValidateIssues = async (change: string, args: string[]): Promise<voi
       const target = join(archiveDir, basename(source));
       await moveIssueFile(source, target);
       archived.push({
-        from: relative(changeDir, source),
-        to: relative(changeDir, target),
+        from: relativePath(changeDir, source),
+        to: relativePath(changeDir, target),
       });
     }
 

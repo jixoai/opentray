@@ -3,6 +3,7 @@ Orthogonal intents (2026-07-14; original user request):
 1. Expose native WebView window controls and their measurable overlay geometry.
 2. Let Windows overlay caption controls use explicit opaque background and symbol colors.
 3. Keep macOS controls native and transparent rather than emulating Windows composition.
+4. Keep frameless shell ownership and explicit user-resize intent consistent across macOS and Windows.
 -->
 
 # @opentray/ext-webview
@@ -112,7 +113,7 @@ Windows support includes:
 - `show`, `hide`, `destroy`, `setContent`, `navigate`, `evaluate`, and `postMessage`
 - `navigator.window` / `navigator.opentrayWindow` bridge injection with source-scoped `nativeApiPolicy`
 - `close`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, and `isMinimized`
-- `getStyle` / `setStyle` for common `frameless`, `background`, `keepOnTop`, and `opacity`
+- `getStyle` / `setStyle` for common `frameless`, `resizable`, `background`, `keepOnTop`, and `opacity`
 - `windowControlsOverlay` geometry, Windows caption-button `backgroundColor` / `symbolColor`, `startAppRegionDrag()`, and subscription-driven bridge events
 - title sync and native window/taskbar icon projection for RGBA icons, local icon files, and PNG data URLs
 - Windows DWM background materials through `style.background`: `auto`, `mica`, `acrylic`, and `tabbed`
@@ -130,6 +131,20 @@ For glass or blur-style surfaces, two things must line up at once:
 - the page must leave some regions genuinely transparent instead of covering the whole window with opaque HTML or CSS blur overlays
 
 `style.opacity` is a separate whole-window shell alpha from `0` through `1`. It composes with `style.background`, but it does not choose a backing mode: `opacity: 0.72` keeps an opaque background opaque unless you also request `background: "transparent"`, semantic blur, or a platform material.
+
+`style.resizable` controls user-driven resizing and is independent from programmatic `resizeTo(...)`:
+
+- framed windows default to `resizable: true`
+- frameless windows default to `resizable: false`
+- an explicit `resizable` value survives later `frameless` changes
+- Windows frameless windows with `resizable: true` reserve a six-CSS-pixel edge/corner band and resize through the native HWND; pages do not implement a pointer-move `resizeTo()` loop
+- macOS maps the same intent to `NSWindowStyleMask::Resizable`
+
+### Frameless Resize And Native Scrollbars
+
+On Windows, a regular Chromium vertical scrollbar coexists with the `right` and `bottomRight` soft-resize gestures of a frameless WebView. The injected capture-phase detector measures the six-CSS-pixel edge band against `window.innerWidth`, then the native HWND owns the resize interaction. A normal page scrollbar does not require a reserved outer gutter or a custom scrollbar for right-edge resizing to work.
+
+An application may still make its scrolling container narrower than the viewport, or use a custom/overlay scrollbar, when its own edge controls or layout must avoid the reserved six-pixel resize band. That is a product layout choice, not an OpenTray workaround for normal native scrollbars. Smoke-test nonstandard page hit testing and scrollbar implementations with the target interaction.
 
 Treat `style.background` as the single source of truth for native backing and material composition:
 
@@ -485,6 +500,7 @@ await webview.show({
   windowControlsOverlay: true,
   style: {
     frameless: true,
+    resizable: true,
     background: {
       kind: "platformMaterial",
       material: "hudWindow",

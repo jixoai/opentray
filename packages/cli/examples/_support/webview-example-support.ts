@@ -2,6 +2,7 @@
 // 1. Build and connect a source-tree WebView example runtime.
 // 2. Mount the typed WebView capability on the example tray.
 // 3. Isolate each example invocation from other same-version CLI brokers.
+// 4. Close the native runtime before Vite so automatic example exit cannot retain WebView clients.
 
 import { spawnSync } from "node:child_process";
 import { constants, existsSync } from "node:fs";
@@ -57,6 +58,18 @@ export interface WebviewExampleRuntime {
   connection: LocalBrokerClient;
   tray: EventfulTrayHandle;
   shutdown(): Promise<void>;
+}
+
+/** Close a source WebView example without leaving its Vite server or broker behind. */
+export async function shutdownWebviewExample(
+  runtime: Pick<WebviewExampleRuntime, "shutdown">,
+  devServer: { close(): Promise<void> },
+): Promise<void> {
+  try {
+    await runtime.shutdown();
+  } finally {
+    await devServer.close();
+  }
 }
 
 export interface WebviewPageMessageWatch {

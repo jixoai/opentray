@@ -1,12 +1,14 @@
 // Orthogonal intents (2026-07-14; original user request: `example:webview-control` cannot start):
 // 1. Verify example window defaults remain explicit.
 // 2. Verify source examples receive a caller-scoped broker identity.
+// 3. Verify runtime shutdown releases WebView connections before Vite closes.
 
 import { describe, expect, it } from "vitest";
 
 import {
   createExampleCallerLabel,
   hasConfiguredWebviewExtensionPath,
+  shutdownWebviewExample,
   withExampleWebviewWindowDefaults,
 } from "./webview-example-support";
 
@@ -35,5 +37,46 @@ describe("Feature: WebView example support", () => {
     expect(hasConfiguredWebviewExtensionPath({ OPENTRAY_EXT_PATH: "   " })).toBe(
       false,
     );
+  });
+
+  it("Scenario: Given a source WebView example When shutdown begins Then its runtime closes before Vite", async () => {
+    const calls: string[] = [];
+
+    await shutdownWebviewExample(
+      {
+        async shutdown() {
+          calls.push("runtime");
+        },
+      },
+      {
+        async close() {
+          calls.push("vite");
+        },
+      },
+    );
+
+    expect(calls).toEqual(["runtime", "vite"]);
+  });
+
+  it("Scenario: Given runtime cleanup fails When shutdown begins Then Vite still closes", async () => {
+    const calls: string[] = [];
+
+    await expect(
+      shutdownWebviewExample(
+        {
+          async shutdown() {
+            calls.push("runtime");
+            throw new Error("runtime close failed");
+          },
+        },
+        {
+          async close() {
+            calls.push("vite");
+          },
+        },
+      ),
+    ).rejects.toThrow("runtime close failed");
+
+    expect(calls).toEqual(["runtime", "vite"]);
   });
 });

@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
@@ -80,7 +89,6 @@ const runBun = async (
   env: Record<string, string | undefined> = process.env,
   stdin?: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
-  const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
   const pathEnvKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   const spawnEnv: Record<string, string> = {};
   for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "USER", "SHELL", "SYSTEMROOT", "SystemRoot", "ComSpec"]) {
@@ -101,22 +109,25 @@ const runBun = async (
   if (stdin !== undefined) {
     writeFileSync(stdinPath, stdin);
   }
-  const command = [process.execPath, ...args].map(shellQuote).join(" ");
-  const stdinRedirect = stdin === undefined ? "" : ` < ${shellQuote(stdinPath)}`;
+  const stdinFd = stdin === undefined ? undefined : openSync(stdinPath, "r");
+  const stdoutFd = openSync(stdoutPath, "w");
+  const stderrFd = openSync(stderrPath, "w");
   try {
-    const result = spawnSync(
-      "/bin/sh",
-      ["-c", `${command}${stdinRedirect} > ${shellQuote(stdoutPath)} 2> ${shellQuote(stderrPath)}`],
-      {
-        cwd,
-        encoding: "utf8",
-        env: spawnEnv,
-      },
-    );
+    const result = spawnSync(process.execPath, args, {
+      cwd,
+      encoding: "utf8",
+      env: spawnEnv,
+      stdio: [stdinFd ?? "ignore", stdoutFd, stderrFd],
+    });
     const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
     const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
     return { exitCode: result.status ?? 1, stdout, stderr };
   } finally {
+    if (stdinFd !== undefined) {
+      closeSync(stdinFd);
+    }
+    closeSync(stdoutFd);
+    closeSync(stderrFd);
     rmSync(captureDir, { recursive: true, force: true });
   }
 };

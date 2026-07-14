@@ -2,6 +2,7 @@
 // 1. Expose typed WebView extension contracts, including Windows overlay-control colors and showInSwitchers.
 // 2. Provide tray-scoped window handles and capability facades.
 // 3. Re-export placement, responsive, style, and permission helpers.
+// 4. Declare common chrome-derived user-resize intent without page-managed resize loops.
 // Compromise: this established public entrypoint aggregates more than five API families; splitting
 // it would be a separate package-surface change and is outside this repair.
 
@@ -164,6 +165,8 @@ export interface WebviewWindowPlatformStyle {
 
 export interface WebviewWindowStyle {
   frameless: boolean;
+  /** Whether the operator can resize the native window with pointer input. */
+  resizable: boolean;
   keepOnTop: boolean;
   opacity: number;
   background: WebviewWindowBackground;
@@ -172,6 +175,8 @@ export interface WebviewWindowStyle {
 
 export interface WebviewWindowStylePatch {
   frameless?: boolean;
+  /** Explicitly overrides the chrome-derived user-resize default. */
+  resizable?: boolean;
   keepOnTop?: boolean;
   opacity?: number;
   background?: WebviewWindowBackgroundInput;
@@ -211,6 +216,7 @@ export interface WebviewWindowCapabilities {
   close: boolean;
   move: boolean;
   resize: boolean;
+  resizable: boolean;
   maximize: boolean;
   minimize: boolean;
   restore: boolean;

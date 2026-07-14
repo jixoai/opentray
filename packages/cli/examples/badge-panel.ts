@@ -11,6 +11,7 @@ import {
   listenWebviewIpcMessages,
   mountExampleWebview,
   prepareLocalBadgeExtensionPath,
+  shutdownWebviewExample,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
 import {
@@ -130,8 +131,7 @@ const lifecycle = createExampleLifecycle({
     dockClickWatch.close();
     dockQuitWatch.close();
     pageMessageWatch.stop();
-    await devServer.close();
-    await runtime.shutdown();
+    await shutdownWebviewExample(runtime, devServer);
   },
 });
 if (process.platform === "darwin") {

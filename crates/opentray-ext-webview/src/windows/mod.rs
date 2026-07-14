@@ -1,8 +1,8 @@
-// Orthogonal intents (2026-07-14; original user request: repair Windows overlay, taskbar,
-// tray placement, and frameless geometry):
+// Orthogonal intents (2026-07-15; original user request: repair Windows frameless chrome and add
+// application-level soft resizing):
 // 1. Host the Windows WebView2 window and bridge.
 // 2. Project switcher, overlay, background, and full-client native style.
-// 3. Keep public window geometry in DWM visible-frame logical pixels.
+// 3. Keep public window geometry in DWM visible-frame logical pixels, including frameless soft resize.
 // 4. Route native window/screen/tray commands and events.
 // 5. Preserve download, permission, metadata, and lifecycle behavior.
 // Compromise: this legacy platform module already exceeds the five-intent/300-line limits.
@@ -35,14 +35,14 @@ use window_vibrancy::{
     Error as WindowVibrancyError,
 };
 use windows::Win32::Foundation::{HWND as WebView2Hwnd, RECT as WebView2Rect};
-use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
     DwmEnableBlurBehindWindow, DwmExtendFrameIntoClientArea, DwmGetWindowAttribute,
-    DwmSetWindowAttribute, DWMSBT_AUTO, DWMSBT_NONE, DWMWA_EXTENDED_FRAME_BOUNDS,
-    DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_USE_IMMERSIVE_DARK_MODE,
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUND,
-    DWMWCP_ROUNDSMALL, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND, DWM_SYSTEMBACKDROP_TYPE,
-    DWM_WINDOW_CORNER_PREFERENCE,
+    DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMSBT_AUTO, DWMSBT_NONE,
+    DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_NCRENDERING_POLICY, DWMWA_SYSTEMBACKDROP_TYPE,
+    DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWCP_ROUNDSMALL, DWM_BB_BLURREGION,
+    DWM_BB_ENABLE, DWM_BLURBEHIND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows_sys::Win32::Graphics::Gdi::{
     CreateRectRgn, DeleteObject, GetMonitorInfoW, InvalidateRect, MonitorFromWindow, UpdateWindow,
@@ -52,22 +52,25 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, ReleaseCapture, SetCapture, VK_LBUTTON,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
-    GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible, IsZoomed,
-    LoadCursorW, LoadImageW, RegisterClassW, SendMessageW, SetForegroundWindow,
-    SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
-    CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON,
-    HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON,
-    LR_DEFAULTSIZE, LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-    SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_ENTERSIZEMOVE,
-    WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE,
-    WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED,
-    WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED,
-    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE,
-    WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+    GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible,
+    IsZoomed, LoadCursorW, LoadImageW, RegisterClassW, SendMessageW, SetCursor,
+    SetForegroundWindow, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
+    SetWindowTextW, ShowWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA,
+    GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL,
+    IDC_ARROW, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, IMAGE_ICON, LR_DEFAULTSIZE,
+    LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED,
+    WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON,
+    WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE,
+    WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -107,6 +110,7 @@ const PAGE_IPC_NAMESPACE: &str = "opentray.ipc";
 const PERMISSIONS_NAMESPACE: &str = "opentray.permissions";
 const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
+const PRIVATE_SOFT_RESIZE_NAMESPACE: &str = "opentray.window.internal";
 const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
 const OPAQUE_BACKGROUND: RGBA = (255, 255, 255, 255);
 const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
@@ -143,6 +147,7 @@ struct WindowProcState {
     backdrop_state_policy: WindowsBackdropStatePolicy,
     size_constraints: WindowSizeConstraints,
     size_move_interaction: WindowProcSizeMoveInteraction,
+    soft_resize_interaction: Option<WindowProcSoftResizeInteraction>,
 }
 
 /// Tracks one native `WM_ENTERSIZEMOVE` interaction. Windows sends that message for both
@@ -153,6 +158,54 @@ struct WindowProcSizeMoveInteraction {
     active: bool,
     saw_resize: bool,
     last_artifact_clear_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SoftResizeEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl SoftResizeEdge {
+    fn adjusts_left(self) -> bool {
+        matches!(self, Self::Left | Self::TopLeft | Self::BottomLeft)
+    }
+
+    fn adjusts_right(self) -> bool {
+        matches!(self, Self::Right | Self::TopRight | Self::BottomRight)
+    }
+
+    fn adjusts_top(self) -> bool {
+        matches!(self, Self::Top | Self::TopLeft | Self::TopRight)
+    }
+
+    fn adjusts_bottom(self) -> bool {
+        matches!(self, Self::Bottom | Self::BottomLeft | Self::BottomRight)
+    }
+
+    fn cursor_resource(self) -> *const u16 {
+        match self {
+            Self::TopLeft | Self::BottomRight => IDC_SIZENWSE,
+            Self::TopRight | Self::BottomLeft => IDC_SIZENESW,
+            Self::Left | Self::Right => IDC_SIZEWE,
+            Self::Top | Self::Bottom => IDC_SIZENS,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct WindowProcSoftResizeInteraction {
+    edge: SoftResizeEdge,
+    initial_cursor: POINT,
+    initial_raw_rect: RECT,
+    initial_visible_rect: RECT,
+    initial_bounds: Rect,
 }
 
 impl WindowProcSizeMoveInteraction {
@@ -238,6 +291,9 @@ struct NavigatorWindowListener {
 #[serde(rename_all = "camelCase")]
 struct WindowStyleState {
     frameless: bool,
+    resizable: bool,
+    #[serde(skip)]
+    resizable_override: Option<bool>,
     keep_on_top: bool,
     opacity: f64,
     background: WebviewWindowBackground,
@@ -356,6 +412,11 @@ struct ResizePayload {
 }
 
 #[derive(Debug, Deserialize)]
+struct SoftResizePayload {
+    edge: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ExecCommandPayload {
     command: String,
 }
@@ -382,6 +443,7 @@ struct PageIconChangedPayload {
 #[serde(rename_all = "camelCase")]
 struct SetStylePayload {
     frameless: Option<bool>,
+    resizable: Option<bool>,
     keep_on_top: Option<bool>,
     opacity: Option<f64>,
     background: Option<WebviewBackgroundInput>,
@@ -420,6 +482,7 @@ struct WindowCapabilities {
     close: bool,
     r#move: bool,
     resize: bool,
+    resizable: bool,
     maximize: bool,
     minimize: bool,
     restore: bool,
@@ -1092,6 +1155,7 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
             | PERMISSIONS_NAMESPACE
             | COMMAND_NAMESPACE
             | PRIVATE_SYNC_NAMESPACE
+            | PRIVATE_SOFT_RESIZE_NAMESPACE
     ) {
         return;
     }
@@ -1134,6 +1198,9 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
         COMMAND_NAMESPACE => dispatch_page_exec_command(bridge, &request.cmd, request.payload),
         PRIVATE_SYNC_NAMESPACE => {
             dispatch_private_sync_command(bridge, &request.cmd, request.payload)
+        }
+        PRIVATE_SOFT_RESIZE_NAMESPACE => {
+            dispatch_private_soft_resize_command(bridge, &request.cmd, request.payload)
         }
         _ => return,
     };
@@ -1286,6 +1353,7 @@ fn show_bridge_window(
 
 fn hide_bridge_window(bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
     let hwnd = bridge.borrow().hwnd;
+    finish_window_proc_soft_resize(hwnd, true);
     unsafe {
         ShowWindow(hwnd, SW_HIDE);
     }
@@ -1538,6 +1606,40 @@ fn dispatch_private_sync_command(
     }
 }
 
+fn dispatch_private_soft_resize_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    cmd: &str,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    match cmd {
+        "startSoftResize" => {
+            let payload: SoftResizePayload = serde_json::from_value(payload).map_err(|error| {
+                WebviewRuntimeError::Rejected(format!("startSoftResize requires edge: {error}"))
+            })?;
+            start_window_soft_resize(bridge, parse_soft_resize_edge(&payload.edge)?)
+        }
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported private soft resize command: {other}"
+        ))),
+    }
+}
+
+fn parse_soft_resize_edge(value: &str) -> Result<SoftResizeEdge, WebviewRuntimeError> {
+    match value {
+        "left" => Ok(SoftResizeEdge::Left),
+        "right" => Ok(SoftResizeEdge::Right),
+        "top" => Ok(SoftResizeEdge::Top),
+        "bottom" => Ok(SoftResizeEdge::Bottom),
+        "topLeft" => Ok(SoftResizeEdge::TopLeft),
+        "topRight" => Ok(SoftResizeEdge::TopRight),
+        "bottomLeft" => Ok(SoftResizeEdge::BottomLeft),
+        "bottomRight" => Ok(SoftResizeEdge::BottomRight),
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported soft resize edge: {other}"
+        ))),
+    }
+}
+
 fn ensure_session_reuse_allowed(
     current_bootstrap: WebviewSessionBootstrapSettings,
     requested_bootstrap: WebviewSessionBootstrapSettings,
@@ -1610,9 +1712,14 @@ fn build_webview(
     let bridge_for_ipc = Rc::clone(bridge);
     let bridge_for_title = Rc::clone(bridge);
     let bridge_for_page_load = Rc::clone(bridge);
+    let soft_resize_enabled = {
+        let state = bridge.borrow();
+        state.style.frameless && state.style.resizable
+    };
     let builder = WebViewBuilder::new()
         .with_initialization_script(navigator_window_bootstrap_script(
             navigator_window,
+            soft_resize_enabled,
             navigator_screen,
             navigator_tray,
             sync_title,
@@ -2075,6 +2182,8 @@ fn window_style_from_initial(
     reject_macos_style(&style.platform.macos)?;
     Ok(WindowStyleState {
         frameless: style.frameless,
+        resizable: style.resizable.unwrap_or(!style.frameless),
+        resizable_override: style.resizable,
         keep_on_top: style.keep_on_top,
         opacity: normalize_opacity(style.opacity)?,
         background: normalize_windows_background(&style.background)?,
@@ -2206,12 +2315,11 @@ fn apply_style_patch(
 ) -> Result<bool, WebviewRuntimeError> {
     let mut bridge_state = bridge.borrow_mut();
     let mut changed = false;
-    if let Some(frameless) = payload.frameless {
-        if bridge_state.style.frameless != frameless {
-            bridge_state.style.frameless = frameless;
-            changed = true;
-        }
-    }
+    changed |= apply_resizable_style_patch(
+        &mut bridge_state.style,
+        payload.frameless,
+        payload.resizable,
+    );
     if let Some(keep_on_top) = payload.keep_on_top {
         if bridge_state.style.keep_on_top != keep_on_top {
             bridge_state.style.keep_on_top = keep_on_top;
@@ -2251,6 +2359,34 @@ fn apply_style_patch(
         }
     }
     Ok(changed)
+}
+
+fn apply_resizable_style_patch(
+    style: &mut WindowStyleState,
+    frameless: Option<bool>,
+    resizable: Option<bool>,
+) -> bool {
+    let mut changed = false;
+    if let Some(frameless) = frameless {
+        if style.frameless != frameless {
+            style.frameless = frameless;
+            changed = true;
+        }
+    }
+    if let Some(resizable) = resizable {
+        if style.resizable != resizable || style.resizable_override != Some(resizable) {
+            style.resizable = resizable;
+            style.resizable_override = Some(resizable);
+            changed = true;
+        }
+    } else if style.resizable_override.is_none() {
+        let resizable = !style.frameless;
+        if style.resizable != resizable {
+            style.resizable = resizable;
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn host_surface_kind(background: &WebviewWindowBackground) -> WindowsHostSurfaceKind {
@@ -2386,6 +2522,10 @@ fn apply_window_style(
     // already correct.
     apply_webview_background_color(webview, wants_clear_background(&style))?;
     apply_native_window_style(hwnd, &style)?;
+    if !style.frameless || !style.resizable {
+        finish_window_proc_soft_resize(hwnd, true);
+    }
+    sync_soft_resize_enabled(bridge)?;
     sync_transparent_host_surface(bridge, &style)?;
     // AppWindow belongs to the host HWND, so apply the overlay synchronously on its owning thread
     // before the window is made visible and before WebView client bounds are fitted.
@@ -2435,11 +2575,41 @@ fn apply_native_window_style(
     }
     apply_window_opacity(hwnd, style.opacity)?;
     apply_native_window_theme(hwnd, dark_mode)?;
+    apply_dwm_nc_rendering_policy(hwnd, !style.frameless);
     apply_dwm_client_frame(hwnd, wants_dwm_extended_client_frame(style))?;
     apply_dwm_transparency(hwnd, wants_dwm_transparent_host(style))?;
     apply_dwm_backdrop(hwnd, &style.background, dark_mode)?;
     apply_dwm_corner_preference(hwnd, style.platform.windows.corner_preference.as_deref())?;
     Ok(())
+}
+
+fn sync_soft_resize_enabled(
+    bridge: &RefCell<NavigatorWindowBridge>,
+) -> Result<(), WebviewRuntimeError> {
+    let enabled = {
+        let state = bridge.borrow();
+        state.style.frameless && state.style.resizable
+    };
+    evaluate_bridge_script(
+        bridge,
+        format!("{WINDOW_INTERNALS_GLOBAL}.setSoftResizeEnabled({enabled});"),
+    )
+}
+
+fn apply_dwm_nc_rendering_policy(hwnd: HWND, enabled: bool) {
+    let policy = if enabled {
+        DWMNCRP_ENABLED
+    } else {
+        DWMNCRP_DISABLED
+    };
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_NCRENDERING_POLICY as u32,
+            std::ptr::addr_of!(policy).cast(),
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
 }
 
 fn sync_transparent_host_surface(
@@ -2525,6 +2695,7 @@ fn sync_window_proc_state(
                 backdrop_state_policy,
                 size_constraints,
                 size_move_interaction: previous.size_move_interaction,
+                soft_resize_interaction: previous.soft_resize_interaction,
             },
         );
     });
@@ -2567,6 +2738,72 @@ fn finish_window_proc_size_move(hwnd: HWND) -> Option<NonNull<RefCell<NavigatorW
             .then_some(state.bridge)
             .flatten()
     })
+}
+
+fn finish_window_proc_soft_resize(hwnd: HWND, release_capture: bool) -> bool {
+    let Some((interaction, bridge, should_clear)) = WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let state = states.get_mut(&(hwnd as isize))?;
+        let interaction = state.soft_resize_interaction.take()?;
+        Some((
+            interaction,
+            state.bridge,
+            state.size_move_interaction.exit(),
+        ))
+    }) else {
+        return false;
+    };
+    if release_capture {
+        unsafe {
+            ReleaseCapture();
+        }
+    }
+    emit_window_interaction_change(hwnd, false);
+    if let Some(bridge) = bridge {
+        let bridge = unsafe { bridge.as_ref() };
+        if should_clear {
+            if let Err(error) = maybe_auto_clear_windows_white_block_artifact(bridge) {
+                eprintln!(
+                    "opentray-ext-webview failed to clear Windows soft-resize artifact: {error}"
+                );
+            }
+        }
+        emit_soft_resize_geometry_changes(hwnd, bridge, interaction.initial_bounds);
+    }
+    true
+}
+
+fn emit_soft_resize_geometry_changes(
+    hwnd: HWND,
+    bridge: &RefCell<NavigatorWindowBridge>,
+    initial_bounds: Rect,
+) {
+    let Ok(bounds) = window_bounds(hwnd) else {
+        return;
+    };
+    let moved = bounds.x != initial_bounds.x || bounds.y != initial_bounds.y;
+    let resized = bounds.width != initial_bounds.width || bounds.height != initial_bounds.height;
+    if moved {
+        let payload = json!({ "x": bounds.x, "y": bounds.y });
+        bridge
+            .borrow_mut()
+            .window_events
+            .push_back(json!({ "type": "moved", "x": bounds.x, "y": bounds.y }));
+        if let Err(error) = emit_window_event(bridge, "moved", payload) {
+            eprintln!("opentray-ext-webview failed to emit Windows soft-resize move: {error}");
+        }
+    }
+    if resized {
+        let payload = json!({ "width": bounds.width, "height": bounds.height });
+        bridge.borrow_mut().window_events.push_back(json!({
+            "type": "resized",
+            "width": bounds.width,
+            "height": bounds.height,
+        }));
+        if let Err(error) = emit_window_event(bridge, "resized", payload) {
+            eprintln!("opentray-ext-webview failed to emit Windows soft-resize resize: {error}");
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2693,7 +2930,10 @@ fn window_style_bits(style: &WindowStyleState, current_style: u32) -> u32 {
     let state_style = current_style & (WS_VISIBLE | WS_MAXIMIZE | WS_MINIMIZE);
     let child_safe_style = WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
     if style.frameless {
-        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | child_safe_style | state_style
+        // `WS_THICKFRAME` preserves DWM's legacy resize border even when `WM_NCCALCSIZE`
+        // exposes a full client area. Frameless owns chrome, so its resize behavior lives in
+        // the explicit soft-resize state machine instead of a residual native frame.
+        WS_POPUP | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | child_safe_style | state_style
     } else {
         WS_OVERLAPPEDWINDOW | child_safe_style | state_style
     }
@@ -3746,6 +3986,205 @@ fn start_app_region_drag(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
     Ok(json!({ "active": true }))
 }
 
+fn start_window_soft_resize(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    edge: SoftResizeEdge,
+) -> Result<Value, WebviewRuntimeError> {
+    let (hwnd, enabled) = {
+        let state = bridge.borrow();
+        (state.hwnd, state.style.frameless && state.style.resizable)
+    };
+    if !enabled || unsafe { IsWindowVisible(hwnd) == 0 || IsZoomed(hwnd) != 0 } {
+        return Ok(json!({ "active": false }));
+    }
+    if unsafe { GetAsyncKeyState(VK_LBUTTON as i32) } >= 0 {
+        return Ok(json!({ "active": false }));
+    }
+    let (initial_raw_rect, initial_visible_rect) = raw_and_visible_window_rects(hwnd)?;
+    let Some(initial_cursor) = current_cursor_position() else {
+        return Ok(json!({ "active": false }));
+    };
+    let initial_bounds = physical_rect_to_public_window_rect(hwnd, initial_visible_rect);
+    let started = WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let Some(state) = states.get_mut(&(hwnd as isize)) else {
+            return false;
+        };
+        state.soft_resize_interaction = Some(WindowProcSoftResizeInteraction {
+            edge,
+            initial_cursor,
+            initial_raw_rect,
+            initial_visible_rect,
+            initial_bounds,
+        });
+        state.size_move_interaction.enter();
+        true
+    });
+    if !started {
+        return Err(WebviewRuntimeError::Internal(
+            "soft resize requires an attached native window".into(),
+        ));
+    }
+    unsafe {
+        SetCapture(hwnd);
+    }
+    set_soft_resize_cursor(edge);
+    emit_window_interaction_change(hwnd, true);
+    Ok(json!({ "active": true }))
+}
+
+fn current_cursor_position() -> Option<POINT> {
+    let mut point = POINT { x: 0, y: 0 };
+    if unsafe { GetCursorPos(std::ptr::addr_of_mut!(point)) } == 0 {
+        return None;
+    }
+    Some(point)
+}
+
+fn set_soft_resize_cursor(edge: SoftResizeEdge) {
+    unsafe {
+        SetCursor(LoadCursorW(null_mut(), edge.cursor_resource()));
+    }
+}
+
+fn update_window_proc_soft_resize(hwnd: HWND) -> bool {
+    let Some((interaction, constraints)) = WINDOW_PROC_STATES.with(|states| {
+        states.borrow().get(&(hwnd as isize)).and_then(|state| {
+            state
+                .soft_resize_interaction
+                .map(|session| (session, state.size_constraints))
+        })
+    }) else {
+        return false;
+    };
+    let Some(cursor) = current_cursor_position() else {
+        return true;
+    };
+    let next = soft_resize_raw_rect(hwnd, interaction, constraints, cursor);
+    if same_raw_rect(next, interaction.initial_raw_rect) {
+        return true;
+    }
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            next.left,
+            next.top,
+            next.right.saturating_sub(next.left).max(1),
+            next.bottom.saturating_sub(next.top).max(1),
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+    true
+}
+
+fn soft_resize_raw_rect(
+    hwnd: HWND,
+    interaction: WindowProcSoftResizeInteraction,
+    constraints: WindowSizeConstraints,
+    cursor: POINT,
+) -> RECT {
+    let mut rect = interaction.initial_raw_rect;
+    let delta_x = cursor.x.saturating_sub(interaction.initial_cursor.x);
+    let delta_y = cursor.y.saturating_sub(interaction.initial_cursor.y);
+    let min_width = soft_resize_raw_width_limit(hwnd, interaction, constraints.min_width, 1);
+    let min_height = soft_resize_raw_height_limit(hwnd, interaction, constraints.min_height, 1);
+    let max_width = constraints
+        .max_width
+        .map(|width| soft_resize_raw_width_limit(hwnd, interaction, Some(width), i32::MAX))
+        .unwrap_or(i32::MAX);
+    let max_height = constraints
+        .max_height
+        .map(|height| soft_resize_raw_height_limit(hwnd, interaction, Some(height), i32::MAX))
+        .unwrap_or(i32::MAX);
+    if interaction.edge.adjusts_left() {
+        let width = interaction
+            .initial_raw_rect
+            .right
+            .saturating_sub(interaction.initial_raw_rect.left.saturating_add(delta_x))
+            .clamp(min_width, max_width);
+        rect.left = interaction.initial_raw_rect.right.saturating_sub(width);
+    } else if interaction.edge.adjusts_right() {
+        let width = interaction
+            .initial_raw_rect
+            .right
+            .saturating_add(delta_x)
+            .saturating_sub(interaction.initial_raw_rect.left)
+            .clamp(min_width, max_width);
+        rect.right = interaction.initial_raw_rect.left.saturating_add(width);
+    }
+    if interaction.edge.adjusts_top() {
+        let height = interaction
+            .initial_raw_rect
+            .bottom
+            .saturating_sub(interaction.initial_raw_rect.top.saturating_add(delta_y))
+            .clamp(min_height, max_height);
+        rect.top = interaction.initial_raw_rect.bottom.saturating_sub(height);
+    } else if interaction.edge.adjusts_bottom() {
+        let height = interaction
+            .initial_raw_rect
+            .bottom
+            .saturating_add(delta_y)
+            .saturating_sub(interaction.initial_raw_rect.top)
+            .clamp(min_height, max_height);
+        rect.bottom = interaction.initial_raw_rect.top.saturating_add(height);
+    }
+    rect
+}
+
+fn soft_resize_raw_width_limit(
+    hwnd: HWND,
+    interaction: WindowProcSoftResizeInteraction,
+    logical: Option<i32>,
+    fallback: i32,
+) -> i32 {
+    let Some(logical) = logical else {
+        return fallback;
+    };
+    let visible = logical_to_physical_i32(hwnd, logical);
+    let invisible = interaction
+        .initial_raw_rect
+        .right
+        .saturating_sub(interaction.initial_raw_rect.left)
+        .saturating_sub(
+            interaction
+                .initial_visible_rect
+                .right
+                .saturating_sub(interaction.initial_visible_rect.left),
+        );
+    visible.saturating_add(invisible).max(1)
+}
+
+fn soft_resize_raw_height_limit(
+    hwnd: HWND,
+    interaction: WindowProcSoftResizeInteraction,
+    logical: Option<i32>,
+    fallback: i32,
+) -> i32 {
+    let Some(logical) = logical else {
+        return fallback;
+    };
+    let visible = logical_to_physical_i32(hwnd, logical);
+    let invisible = interaction
+        .initial_raw_rect
+        .bottom
+        .saturating_sub(interaction.initial_raw_rect.top)
+        .saturating_sub(
+            interaction
+                .initial_visible_rect
+                .bottom
+                .saturating_sub(interaction.initial_visible_rect.top),
+        );
+    visible.saturating_add(invisible).max(1)
+}
+
+fn same_raw_rect(left: RECT, right: RECT) -> bool {
+    left.left == right.left
+        && left.top == right.top
+        && left.right == right.right
+        && left.bottom == right.bottom
+}
+
 fn set_window_title(hwnd: HWND, title: &str) -> Result<(), WebviewRuntimeError> {
     let title = wide_null(title);
     if unsafe { SetWindowTextW(hwnd, title.as_ptr()) } == 0 {
@@ -4161,6 +4600,7 @@ impl NavigatorWindowBridge {
             close: true,
             r#move: true,
             resize: true,
+            resizable: true,
             maximize: true,
             minimize: true,
             restore: true,
@@ -4469,6 +4909,7 @@ unsafe extern "system" fn window_proc(
 ) -> LRESULT {
     match msg {
         WM_CLOSE => {
+            finish_window_proc_soft_resize(hwnd, true);
             ShowWindow(hwnd, SW_HIDE);
             0
         }
@@ -4516,6 +4957,22 @@ unsafe extern "system" fn window_proc(
             apply_minmax_info(hwnd, lparam);
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
+        WM_MOUSEMOVE => {
+            if update_window_proc_soft_resize(hwnd) {
+                return 0;
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_LBUTTONUP => {
+            if finish_window_proc_soft_resize(hwnd, true) {
+                return 0;
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_CANCELMODE | WM_CAPTURECHANGED => {
+            finish_window_proc_soft_resize(hwnd, false);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_ENTERSIZEMOVE => {
             enter_window_proc_size_move(hwnd);
             emit_window_interaction_change(hwnd, true);
@@ -4544,6 +5001,9 @@ unsafe extern "system" fn window_proc(
         WM_SIZE => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
             refresh_attached_window_surface(hwnd);
+            if IsIconic(hwnd) != 0 || IsZoomed(hwnd) != 0 {
+                finish_window_proc_soft_resize(hwnd, true);
+            }
             if let Err(error) =
                 maybe_auto_clear_windows_white_block_artifact_during_live_resize(hwnd)
             {
@@ -4689,6 +5149,7 @@ fn wide_null(value: &str) -> Vec<u16> {
 mod tests {
     use super::*;
     use crate::WebviewBrowserPermissionRule;
+    use windows_sys::Win32::UI::WindowsAndMessaging::WS_THICKFRAME;
 
     #[test]
     fn windows_white_block_auto_clear_only_targets_translucent_backgrounds() {
@@ -4755,6 +5216,7 @@ mod tests {
     fn validate_style_request_accepts_windows_background_family() {
         validate_style_request(&SetStylePayload {
             frameless: None,
+            resizable: None,
             keep_on_top: None,
             opacity: Some(0.64),
             background: Some(WebviewBackgroundInput::Keyword("mica".to_string())),
@@ -4771,6 +5233,7 @@ mod tests {
 
         validate_style_request(&SetStylePayload {
             frameless: None,
+            resizable: None,
             keep_on_top: None,
             opacity: None,
             background: Some(WebviewBackgroundInput::Keyword("sidebar".to_string())),
@@ -4780,6 +5243,7 @@ mod tests {
 
         validate_style_request(&SetStylePayload {
             frameless: None,
+            resizable: None,
             keep_on_top: None,
             opacity: None,
             background: Some(WebviewBackgroundInput::Object(
@@ -4799,6 +5263,7 @@ mod tests {
     fn validate_style_request_rejects_invalid_opacity() {
         let error = validate_style_request(&SetStylePayload {
             frameless: None,
+            resizable: None,
             keep_on_top: None,
             opacity: Some(1.1),
             background: None,
@@ -4910,6 +5375,8 @@ mod tests {
     fn semantic_blur_resolves_to_windows_acrylic() {
         let style = WindowStyleState {
             frameless: false,
+            resizable: true,
+            resizable_override: None,
             keep_on_top: false,
             opacity: 1.0,
             background: crate::WebviewWindowBackground::Semantic {
@@ -5151,6 +5618,75 @@ mod tests {
         assert!(wants_full_client_area(&style, true));
         style.frameless = true;
         assert!(wants_full_client_area(&style, false));
+    }
+
+    #[test]
+    fn frameless_style_uses_no_native_resize_border() {
+        let mut initial = crate::WebviewInitialStyle::default();
+        initial.frameless = true;
+        let style = window_style_from_initial(&initial).expect("frameless style");
+        let bits = window_style_bits(&style, 0);
+
+        assert_eq!(bits & WS_THICKFRAME, 0);
+        assert!(!style.resizable);
+    }
+
+    #[test]
+    fn resizable_style_defaults_follow_chrome_until_explicitly_overridden() {
+        let mut style = window_style_from_initial(&crate::WebviewInitialStyle::default())
+            .expect("framed style");
+        assert!(style.resizable);
+        assert_eq!(style.resizable_override, None);
+
+        assert!(apply_resizable_style_patch(&mut style, Some(true), None));
+        assert!(style.frameless);
+        assert!(!style.resizable);
+
+        assert!(apply_resizable_style_patch(&mut style, None, Some(true)));
+        assert!(style.resizable);
+        assert_eq!(style.resizable_override, Some(true));
+
+        assert!(apply_resizable_style_patch(&mut style, Some(false), None));
+        assert!(!style.frameless);
+        assert!(style.resizable);
+        assert_eq!(style.resizable_override, Some(true));
+    }
+
+    #[test]
+    fn soft_resize_preserves_opposite_edges() {
+        let interaction = WindowProcSoftResizeInteraction {
+            edge: SoftResizeEdge::TopLeft,
+            initial_cursor: POINT { x: 100, y: 100 },
+            initial_raw_rect: RECT {
+                left: 100,
+                top: 120,
+                right: 500,
+                bottom: 420,
+            },
+            initial_visible_rect: RECT {
+                left: 100,
+                top: 120,
+                right: 500,
+                bottom: 420,
+            },
+            initial_bounds: Rect {
+                x: 100,
+                y: 120,
+                width: 400,
+                height: 300,
+            },
+        };
+        let resized = soft_resize_raw_rect(
+            null_mut(),
+            interaction,
+            WindowSizeConstraints::default(),
+            POINT { x: 64, y: 70 },
+        );
+
+        assert_eq!(resized.left, 64);
+        assert_eq!(resized.top, 90);
+        assert_eq!(resized.right, 500);
+        assert_eq!(resized.bottom, 420);
     }
 
     #[test]

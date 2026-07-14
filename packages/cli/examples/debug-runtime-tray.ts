@@ -3,6 +3,7 @@ import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
   createWebviewExampleRuntime,
   mountExampleWebview,
+  shutdownWebviewExample,
 } from "./_support/webview-example-support";
 
 ensureAppInstalled();
@@ -53,8 +54,7 @@ console.log("press Ctrl-C to exit the tray demo");
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
-    await devServer.close();
-    await runtime.shutdown();
+    await shutdownWebviewExample(runtime, devServer);
   },
 });
 

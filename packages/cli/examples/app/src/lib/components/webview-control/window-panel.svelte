@@ -91,6 +91,11 @@
     await bridge.setStyle({ frameless: !style.frameless });
     await refreshStyle();
   }
+  async function toggleResizable(): Promise<void> {
+    const style = (await bridge.getStyle()) as Record<string, unknown>;
+    await bridge.setStyle({ resizable: style.resizable !== true });
+    await refreshStyle();
+  }
   async function toggleTopmost(): Promise<void> {
     const style = (await bridge.getStyle()) as Record<string, unknown>;
     await bridge.setStyle({ keepOnTop: !style.keepOnTop });
@@ -201,6 +206,7 @@
       <Button size="sm" onclick={refreshCapabilities}>Capabilities</Button>
       <Button size="sm" variant="outline" onclick={refreshStyle}>Refresh style</Button>
       <Button size="sm" variant="outline" onclick={toggleFrameless}>Toggle frameless</Button>
+      <Button size="sm" variant="outline" onclick={toggleResizable}>Toggle resizable</Button>
       <Button size="sm" variant="outline" onclick={toggleTopmost}>Toggle topmost</Button>
     </div>
 

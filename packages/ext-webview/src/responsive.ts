@@ -38,6 +38,7 @@ export interface WebviewWindowStyleRecipe {
   background?: WebviewWindowBackgroundInput;
   state?: WebviewBackgroundEffectState;
   frameless?: boolean;
+  resizable?: boolean;
   keepOnTop?: boolean;
   opacity?: number;
   platform?: WebviewWindowStylePatch["platform"];
@@ -169,6 +170,7 @@ const stylePatchFromRecipe = (
 ): WebviewWindowStylePatch | null => {
   const patch: WebviewWindowStylePatch = {
     ...(style.frameless === undefined ? {} : { frameless: style.frameless }),
+    ...(style.resizable === undefined ? {} : { resizable: style.resizable }),
     ...(style.keepOnTop === undefined ? {} : { keepOnTop: style.keepOnTop }),
     ...(style.opacity === undefined ? {} : { opacity: style.opacity }),
     ...(style.platform === undefined ? {} : { platform: style.platform }),

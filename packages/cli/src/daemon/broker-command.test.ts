@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -153,6 +153,8 @@ describe("broker command resolver", () => {
 
 describe("installed broker package resolution", () => {
   it("derives the binary path from the resolved package root", async () => {
+    const packageJsonPath = "/node_modules/@opentray/darwin-arm64/package.json";
+    const binaryPath = join(dirname(packageJsonPath), "bin/opentray");
     const result = await resolveInstalledBrokerBinary(
       {
         packageName: "@opentray/darwin-arm64",
@@ -160,19 +162,20 @@ describe("installed broker package resolution", () => {
       },
       {
         platform: "darwin",
-        resolvePackageJson: () =>
-          "/node_modules/@opentray/darwin-arm64/package.json",
+        resolvePackageJson: () => packageJsonPath,
         assertBinaryAccessible: async () => {},
       }
     );
 
     expect(result).toEqual({
-      binary: "/node_modules/@opentray/darwin-arm64/bin/opentray",
-      binaryPath: "/node_modules/@opentray/darwin-arm64/bin/opentray",
+      binary: binaryPath,
+      binaryPath,
     });
   });
 
   it("returns the expected binary path when the package exists but the binary is missing", async () => {
+    const packageJsonPath = "/node_modules/@opentray/darwin-arm64/package.json";
+    const binaryPath = join(dirname(packageJsonPath), "bin/opentray");
     const result = await resolveInstalledBrokerBinary(
       {
         packageName: "@opentray/darwin-arm64",
@@ -180,8 +183,7 @@ describe("installed broker package resolution", () => {
       },
       {
         platform: "darwin",
-        resolvePackageJson: () =>
-          "/node_modules/@opentray/darwin-arm64/package.json",
+        resolvePackageJson: () => packageJsonPath,
         assertBinaryAccessible: async () => {
           throw errno("ENOENT");
         },
@@ -189,7 +191,7 @@ describe("installed broker package resolution", () => {
     );
 
     expect(result).toEqual({
-      binaryPath: "/node_modules/@opentray/darwin-arm64/bin/opentray",
+      binaryPath,
     });
   });
 
