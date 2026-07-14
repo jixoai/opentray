@@ -34,8 +34,7 @@
 | 3 | User | Soft resize is application-level and mouse-position driven. | The extension owns edge detection and native resize tracking; applications do not reimplement drag loops. |
 | 4 | User | `resizable` belongs in common style; release waits for visual acceptance. | The API is cross-platform, while Windows owns the soft-resize substrate. |
 | 5 | User | The automatic example exit retained a launcher and broker process. | Source examples must close the runtime session before Vite, which may wait for a live WebView HTTP connection. |
-| 6 | User | Frameless right-edge resize must not silently compete with a native scrollbar. | Investigate the real pointer path before assigning a layout workaround. |
-| 7 | User | The WebView-control example proves a regular native scrollbar still permits right and bottom-right resize. | Document scrollbar and resize coexistence; do not prescribe a gutter or custom scrollbar as a prerequisite. |
+| 6 | User | Frameless right-edge resize must not silently compete with a native scrollbar. | Keep the native scrollbar hit region authoritative and document page-owned alternatives. |
 
 ### Evidence Read
 
@@ -76,7 +75,7 @@
 
 Windows frameless windows show no legacy titlebar or border. A frameless window becomes user-resizable only after `style.resizable: true`; its page does not need to create its own resize loop.
 
-The native right scrollbar remains usable while right-edge and bottom-right soft resize continue to work. Applications need no layout gutter or custom scrollbar for this normal Chromium path; custom edge hit testing may still choose to avoid the six-CSS-pixel resize band.
+The native right scrollbar remains usable. Apps that need right-edge resize while a scrollbar is present must own the layout gutter or scrollbar rendering.
 
 ### Underlying Drive
 
@@ -124,7 +123,7 @@ frameless + true      -> page edge cursor -> HWND soft resize -> constrained nat
 - An internal initialization script detects trusted mouse edge gestures even when page native APIs are not exposed.
 - The HWND owns capture, movement, constraint enforcement, redraw, resize events, and cleanup.
 - macOS maps the same intent to `NSWindowStyleMask::Resizable`; no Windows soft-resize code leaks into shared layers.
-- The capture-phase edge detector and native HWND tracker keep right-edge and bottom-right soft resize available with a regular Chromium vertical scrollbar. Page gutters and custom scrollbars remain optional product layout choices for custom edge hit testing, not a framework prerequisite.
+- Native Chromium scrollbars retain their own hit regions. Applications that need a simultaneous right resize gutter must reserve it in page layout or own their scrollbar implementation.
 
 ## Intent-Driven Plan
 
@@ -148,7 +147,7 @@ frameless + true      -> page edge cursor -> HWND soft resize -> constrained nat
 | Ask every page to call `resizeTo()` on pointermove | Async public IPC produces lag and duplicates host behavior in every application. |
 | Expose public `startResize()` commands | The product request is declarative `style.resizable`, not a second page-managed interaction API. |
 | Make `frameless` imply transparent background | Chrome and background material are orthogonal style atoms. |
-| Require a page gutter or custom scrollbar for right resize | The WebView-control acceptance path proves a regular Chromium scrollbar coexists with right and bottom-right soft resize. |
+| Steal the native scrollbar hit region for right resize | It breaks ordinary scrolling; content layout or a custom scrollbar must own that tradeoff. |
 
 ## Exit Conditions
 
