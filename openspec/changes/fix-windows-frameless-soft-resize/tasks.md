@@ -37,7 +37,7 @@ Verification limitation: task 3.3 remains unchecked. The macOS style projection 
 
 ## 5. Self-Review Loop
 
-- [ ] 5.1 Generate `review/self-review.md` comparing implementation and evidence to `plans/plan.md`.
-- [ ] 5.2 Generate `review/self-review.html` with test and visible-interaction evidence.
-- [ ] 5.3 If review updates artifacts or reopens tasks, commit them before the next apply loop and persist real recurrence state with `review-state`.
+- [x] 5.1 Generate `review/self-review.md` comparing implementation and evidence to `plans/plan.md`.
+- [x] 5.2 Generate `review/self-review.html` with test and visible-interaction evidence.
+- [x] 5.3 Review did not reopen product work or tasks, so no recurrence state or apply loop was required.
 - [ ] 5.4 After Windows visual acceptance, archive in a dedicated commit, run `bun run openspec:vision -- check fix-windows-frameless-soft-resize`, and only then begin release work.

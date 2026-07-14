@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OpenTray Frameless Soft Resize Review</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 32px; color: #172033; background: #f8fafc; }
+      main { max-width: 980px; margin: 0 auto; }
+      h1, h2 { margin: 0 0 12px; }
+      section { margin-top: 24px; }
+      table { width: 100%; border-collapse: collapse; background: #fff; }
+      th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: left; vertical-align: top; }
+      th { background: #e2e8f0; }
+      .pass { color: #166534; font-weight: 700; }
+      .limit { color: #92400e; font-weight: 700; }
+      code { font-family: ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Frameless Soft Resize Review</h1>
+      <p>Change: <code>fix-windows-frameless-soft-resize</code>. Review iteration 1.</p>
+      <section>
+        <h2>Windows Evidence</h2>
+        <table>
+          <thead>
+            <tr><th>Scenario</th><th>Evidence</th><th>Result</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>True frameless shell</td><td>User visibly accepted the Windows WebView-control window after removal of legacy native chrome.</td><td class="pass">Accepted</td></tr>
+            <tr><td>Explicit soft resize</td><td>User visibly accepted <code>--frameless --resizable</code>, including right and bottom-right behavior beside a normal scrollbar.</td><td class="pass">Accepted</td></tr>
+            <tr><td>Default frameless resize</td><td>Bridge smoke checked the effective default is <code>false</code>.</td><td class="pass">Passed</td></tr>
+            <tr><td>Opt-in frameless resize</td><td>Bridge smoke checked the effective value is <code>true</code>.</td><td class="pass">Passed</td></tr>
+            <tr><td>Automatic exit</td><td>Caller-specific checks found no process for IDs <code>50112</code> and <code>31008</code> after shutdown.</td><td class="pass">Passed</td></tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Release Gates</h2>
+        <table>
+          <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td><code>pnpm run build</code></td><td class="pass">Passed</td></tr>
+            <tr><td><code>pnpm run verify</code></td><td class="pass">Passed</td></tr>
+            <tr><td>OpenSpec self-review commit check</td><td class="pass">Passed</td></tr>
+            <tr><td>macOS runtime verification</td><td class="limit">Not run: Windows host has no Apple SDK or compiler.</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>
