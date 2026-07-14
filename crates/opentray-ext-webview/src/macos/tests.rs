@@ -1345,6 +1345,11 @@ fn navigator_window_bridge_tracks_listener_ids() {
         size_constraints: WindowSizeConstraints::default(),
     };
 
+    let capabilities = bridge
+        .capabilities_json()
+        .expect("macOS capabilities should serialize");
+    assert_eq!(capabilities["resizable"], Value::Bool(true));
+
     let event_id = bridge.add_listener("resized".to_string(), 42);
     assert_eq!(event_id, 1);
     assert_eq!(bridge.listeners_for("resized").len(), 1);

@@ -135,6 +135,7 @@ struct WindowCapabilities {
     close: bool,
     r#move: bool,
     resize: bool,
+    resizable: bool,
     maximize: bool,
     minimize: bool,
     restore: bool,

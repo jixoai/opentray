@@ -10,17 +10,19 @@
 
 ## 3. Implementation
 
-- [ ] 3.1 Run `bun run openspec:vision -- validate fix-macos-resizable-capability`, commit this plan, spec, and tasks before product code.
-- [ ] 3.2 Add the missing macOS `WindowCapabilities.resizable` field beside the existing common resize capability.
-- [ ] 3.3 Add focused macOS source-level coverage for the serialized common capability field where the local test surface can reach it.
-- [ ] 3.4 Update the durable agent law for common native capability DTO parity.
-- [ ] 3.5 Commit the implementation, test, task state, and only current-context evidence together.
+- [x] 3.1 Run `bun run openspec:vision -- validate fix-macos-resizable-capability`, commit this plan, spec, and tasks before product code.
+- [x] 3.2 Add the missing macOS `WindowCapabilities.resizable` field beside the existing common resize capability.
+- [x] 3.3 Add focused macOS source-level coverage for the serialized common capability field where the local test surface can reach it.
+- [x] 3.4 Update the durable agent law for common native capability DTO parity.
+- [x] 3.5 Commit the implementation, test, task state, and only current-context evidence together.
 
 ## 4. Verification
 
-- [ ] 4.1 Run the narrow local Rust test/build surface available on Windows and `git diff --check`.
+- [x] 4.1 Run the narrow local Rust test/build surface available on Windows and `git diff --check`.
 - [ ] 4.2 Push the repair and confirm the Darwin arm64 and x64 WebView release artifact jobs succeed.
 - [ ] 4.3 Confirm the release workflow versions and publishes the pending stable packages.
+
+Host limitation: `cargo check --target aarch64-apple-darwin` reaches the Objective-C dependency build and stops because this Windows host has no Apple `cc` or SDK. The Darwin release jobs remain the required native compiler evidence.
 
 ## 5. Self-Review Loop
 
