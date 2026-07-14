@@ -28,5 +28,5 @@ Host limitation: `cargo check --target aarch64-apple-darwin` reaches the Objecti
 
 - [x] 5.1 Generate `review/self-review.md` comparing the DTO repair and CI evidence to `plans/plan.md`.
 - [x] 5.2 Generate `review/self-review.html` with release-job evidence.
-- [ ] 5.3 Persist review state only if a real unresolved recurrence requires another loop.
-- [ ] 5.4 Archive after release evidence and `bun run openspec:vision -- check fix-macos-resizable-capability` pass.
+- [x] 5.3 Persist review state for the completed first review iteration.
+- [x] 5.4 Archive after release evidence and `bun run openspec:vision -- check fix-macos-resizable-capability` pass.
