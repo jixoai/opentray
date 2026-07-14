@@ -1,3 +1,8 @@
+// Orthogonal intents (2026-07-14; original user request: `example:webview-control` exits after Vite prints readiness):
+// 1. Keep the examples app reachable from a native Local origin.
+// 2. Bind one deterministic loopback address across Vite and WebView.
+// 3. Serve deterministic slow-download test data without a remote dependency.
+
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite";
@@ -5,15 +10,16 @@ import { defineConfig, type Plugin } from "vite";
 // Loopback-only dev/preview server. The host the WebView connects to must
 // classify as Local (localhost/127.0.0.1/::1) so the default
 // nativeApiPolicy.defaultSrc: ["'local'"] admits every capability without
-// per-route policy overrides.
+// per-route policy overrides. Use one IPv4 address so Windows localhost DNS
+// ordering cannot split the selected port and the WebView connection.
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit(), slowDownloadMiddleware()],
   server: {
-    host: "localhost",
+    host: "127.0.0.1",
     strictPort: false,
   },
   preview: {
-    host: "localhost",
+    host: "127.0.0.1",
     strictPort: false,
   },
   build: {

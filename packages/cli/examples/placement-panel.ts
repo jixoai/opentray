@@ -1,3 +1,7 @@
+// Orthogonal intents (2026-07-14; original user request: prove tray-relative placement):
+// 1. Exercise placement modes through native tray and screen authorities.
+// 2. Assert tray smoke provenance does not fall back to screen center.
+
 import {
   WebviewPlacementKit,
   type WebviewPlacement,
@@ -136,6 +140,21 @@ if (smoke === "show" || smoke === "1") {
 }
 if (smoke === "1") {
   await sleep(500);
+  lastPlacement = placementWatch
+    ? await placementWatch.refresh()
+    : lastPlacement;
+  const trayBounds = await tray.getBounds();
+  console.log(`placement smoke tray bounds: ${JSON.stringify(trayBounds)}`);
+  console.log(`placement smoke result: ${JSON.stringify(lastPlacement)}`);
+  if (
+    trayBounds.kind !== "native" ||
+    trayBounds.source !== "backend.nativeTrayBounds" ||
+    trayBounds.rect === null ||
+    lastPlacement?.kind !== "native" ||
+    !lastPlacement.source.startsWith("backend.nativeTrayBounds")
+  ) {
+    throw new Error("placement smoke did not resolve from native tray bounds");
+  }
   await lifecycle.shutdown();
 }
 

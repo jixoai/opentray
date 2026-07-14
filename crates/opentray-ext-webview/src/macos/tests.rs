@@ -1231,6 +1231,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
             macos: None,
             windows: Some(SetStyleWindowsPayload {
                 corner_preference: Some(Some("round".to_string())),
+                show_in_switchers: None,
             }),
             linux: None,
         }),

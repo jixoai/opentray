@@ -5,9 +5,9 @@
   "type": "module",
   "description": "OpenTray examples — unified SvelteKit SPA hosting every WebView example as a route.",
   "scripts": {
-    "dev": "vite dev --host localhost",
+    "dev": "vite dev --host 127.0.0.1",
     "build": "vite build",
-    "preview": "vite preview --host localhost",
+    "preview": "vite preview --host 127.0.0.1",
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {

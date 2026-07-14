@@ -1,4 +1,11 @@
-import type { WebviewWindowOptions } from "../../ext-webview/src/index";
+// Orthogonal intents (2026-07-14; original user request: Chrome-PWA-like Windows overlay controls):
+// 1. Exercise native window controls, explicit Windows caption-button colors, and bridge capabilities.
+// 2. Assert overlay and frameless native/browser geometry.
+
+import type {
+  WebviewWindowControlsOverlay,
+  WebviewWindowOptions,
+} from "../../ext-webview/src/index";
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
@@ -16,6 +23,14 @@ const overlayEnabled = resolveOverlayEnabled(
 // controls), so the page must draw its own. Useful for verifying the
 // self-drawn control cluster appears when native controls are gone.
 const frameless = resolveFrameless(process.argv.slice(2));
+const windowControlsOverlay: WebviewWindowControlsOverlay = overlayEnabled
+  ? process.platform === "win32"
+    ? {
+        backgroundColor: "#0F6CBD",
+        symbolColor: "#FFFFFF",
+      }
+    : true
+  : false;
 console.log(
   `windowControlsOverlay: ${
     overlayEnabled ? "enabled" : "disabled"
@@ -94,10 +109,15 @@ const webview = mountExampleWebview(
             },
           }
         : process.platform === "win32"
-        ? { windows: { cornerPreference: "round" } }
+        ? {
+            windows: {
+              cornerPreference: "round",
+              showInSwitchers: true,
+            },
+          }
         : {},
   },
-  windowControlsOverlay: overlayEnabled,
+  windowControlsOverlay,
   fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
   nativeWindowApi: true,
   bindWindowGlobals: true,
@@ -177,11 +197,29 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
       await bridge.moveTo(120, 120);
       const state = await bridge.getWindowState();
       const screenDetails = await screen?.getScreenDetails?.();
+      const bounds = await bridge.getBounds();
+      const widthGap = Math.abs(bounds.width - window.outerWidth);
+      const heightGap = Math.abs(bounds.height - window.outerHeight);
+      if (widthGap > 4 || heightGap > 4) {
+        throw new Error(
+          "native/browser outer bounds diverged: " +
+            JSON.stringify({ bounds, outerWidth: window.outerWidth, outerHeight: window.outerHeight })
+        );
+      }
+      let overlayRect = null;
+      if (capabilities.overlay) {
+        overlayRect = await bridge.overlay?.getTitlebarAreaRect?.();
+        if (!overlayRect || overlayRect.width <= 0 || overlayRect.height <= 0) {
+          throw new Error("Windows overlay titlebar geometry is unavailable");
+        }
+      }
       document.title = [
         "opentray-bridge-ok",
         capabilities.platform,
         state.state,
-        Boolean(screenDetails?.currentScreen)
+        Boolean(screenDetails?.currentScreen),
+        "gap=" + widthGap + "x" + heightGap,
+        "overlay=" + (overlayRect ? overlayRect.width + "x" + overlayRect.height : "off")
       ].join(":");
       await navigator.opentray?.ipc?.postMessage?.({
         type: "bridgeSmoke",

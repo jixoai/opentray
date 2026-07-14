@@ -8,16 +8,43 @@ The product goal is not "show a tray icon". The goal is to give lightweight tool
 
 ## Platform Laws
 
-OpenTray is tray-first (v0.9). Application code calls `createTray()` directly and owns its own foreground/background lifetime.
+OpenTray uses the current tray-first model. Application code calls `createTray()` directly and owns its own foreground/background lifetime.
 
 - `App` is the caller-owned runtime identity and isolation boundary (passed through `createTray(options, { appId, appName })`, not a separate `createApp` call).
 - `Tray` is one desktop status atom owned by that app/runtime.
 - `Session` is the live source of authority for tray events and mutations; closing a session removes its tray contributions.
 - Extensions add native capabilities, but they must attach through tray/session contracts (e.g. `tray.extend(...)` or `attachWebview(tray)`), not by reaching into broker internals.
 - Do not make one CLI directly own another CLI's menu, events, popup, or lifecycle.
+- Windows named-pipe endpoints do not include `homeDir`. Source examples must pass an explicit per-invocation caller label so they cannot attach to a same-version neutral-label broker through the neutral `opentray` endpoint.
+- Source WebView examples own a Vite server instance through Vite's Node API. `server.listen()`, `resolvedUrls.local`, and `server.close()` are the lifecycle authority; never parse formatted CLI output. Bind example servers to `127.0.0.1` so Windows `localhost` DNS order cannot split the selected listener from the WebView request.
 - Do not add platform special cases into shared layers; expose capability contracts instead.
 
-OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Older docs that still mention them are pre-v0.9 history.
+OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Older docs that still mention them describe an earlier surface model.
+
+## Windows Tray WebView Laws
+
+The following laws were established from the 2026-07-14 pnpm-pub repair and its native evidence:
+
+```text
+CBS bootstrapper discovery
+          |
+          v
+MddBootstrapInitialize package graph
+          |
+          v
+matching FrameworkUdk + Windowing.Core
+```
+
+- A CBS directory may supply `Microsoft.WindowsAppRuntime.Bootstrap.dll`; it is not the selected runtime identity. Resolve runtime DLLs by bare name through the package graph unless `OPENTRAY_WINDOWS_APP_RUNTIME_DIR` explicitly supplies a complete runtime.
+- AppWindow objects are HWND-thread-affine for this host path. Initialize WinRT and mutate `AppWindowTitleBar` synchronously on the HWND-owning thread before first show; do not move the call to an MTA worker or send AppWindow interfaces across apartments.
+- `style.platform.windows.showInSwitchers` owns taskbar/Alt+Tab projection. Default `false` means `WS_EX_TOOLWINDOW` and no `WS_EX_APPWINDOW`; title and icon metadata do not decide switcher membership.
+- Public Windows window bounds are DWM visible-frame logical pixels. `moveTo` and `resizeTo` must compensate the raw invisible-border delta before `SetWindowPos`.
+- Frameless and overlay windows use full-client `WM_NCCALCSIZE`. For Windows overlays, `AppWindowTitleBar.LeftInset`, `RightInset`, and `Height` are the safe-area authority and must be read synchronously on the HWND-owning STA; DWM caption-button bounds are only a lower-level rectangle, not an equivalent width contract.
+- `windowControlsOverlay: true` uses system colors. Its Windows object form accepts opaque `backgroundColor` and `symbolColor`; box them as WinRT `IReference<Color>` and apply them through `AppWindowTitleBar` before first show. macOS keeps transparent native controls and does not emulate these colors.
+- `WM_ENTERSIZEMOVE` / `WM_EXITSIZEMOVE` delimit both dragging and resizing. A white-block workaround that changes shell state may run only after `WM_SIZE` was observed in that same interaction; a pure move must not minimize, restore, or emit a synthetic state change.
+- Tray registration and `Shell_NotifyIconGetRect` must address the same identity. The vendored dependency keeps `(HWND, uID)` and contains only the minimal RGBA AND-mask correction.
+
+Windows-visible acceptance must include the overlay and frameless geometry smoke, native tray provenance, real extended-window styles, and a consumer-app run against local broker/extension artifacts. Do not infer macOS acceptance from this evidence.
 
 ## Monorepo Law
 

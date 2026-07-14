@@ -1,6 +1,36 @@
+// Orthogonal intents (2026-07-14; original user request: `example:webview-control` exits before Vite readiness):
+// 1. Verify Vite Local URL resolution does not parse terminal output.
+// 2. Verify loopback readiness retries remain deterministic.
+
 import { describe, expect, it } from "vitest";
 
-import { waitForUrlReady } from "./dev-server";
+import { resolveViteLocalUrl, waitForUrlReady } from "./dev-server";
+
+describe("Vite local URL", () => {
+  it("uses Vite's resolved IPv4 loopback URL instead of formatted terminal output", () => {
+    expect(resolveViteLocalUrl(["http://127.0.0.1:5174/"])).toBe(
+      "http://127.0.0.1:5174",
+    );
+  });
+
+  it("rejects a server that did not resolve a loopback URL", () => {
+    expect(() => resolveViteLocalUrl([])).toThrow(
+      "Vite did not expose a loopback URL",
+    );
+  });
+
+  it("does not accept a network URL", () => {
+    expect(() => resolveViteLocalUrl(["http://192.168.1.20:5173/"])).toThrow(
+      "Vite did not expose a loopback URL",
+    );
+  });
+
+  it("does not leak a parser error for a malformed dynamic URL", () => {
+    expect(() => resolveViteLocalUrl(["not a URL"])).toThrow(
+      "Vite did not expose a loopback URL",
+    );
+  });
+});
 
 describe("waitForUrlReady", () => {
   it("returns true once the route responds", async () => {

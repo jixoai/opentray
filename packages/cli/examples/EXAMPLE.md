@@ -162,7 +162,7 @@ Then run the example from the repo root. The launcher spawns the SvelteKit dev s
 
 Expected checks:
 
-1. The terminal prints `download panel: http://localhost:<port>/download` and `panel url: ...` before the window appears.
+1. The terminal prints `download panel: http://127.0.0.1:<port>/download` and `panel url: ...` before the window appears.
 2. The window opens with a three-section control panel: trigger controls, active downloads, and the live event stream.
 3. The header shows a green `bridge ready` badge and the page origin (loopback).
 4. `Download report` triggers a real blob download and writes a JSON file into the operating system Downloads directory; the page updates through `downloadstarted`, `downloadprogress`, and `downloadcompleted`.

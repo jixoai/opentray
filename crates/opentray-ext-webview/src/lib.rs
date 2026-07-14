@@ -1,3 +1,8 @@
+// Orthogonal intents (2026-07-14; original user request: Chrome-PWA-like Windows overlay controls):
+// 1. Parse the extension-owned WebView protocol, including typed overlay control colors, into platform-neutral runtime settings.
+// 2. Keep platform style families typed and reject foreign-family payloads consistently.
+// 3. Export the stable dynamic extension ABI.
+
 mod bootstrap;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -23,6 +28,20 @@ type WebviewRuntime = windows::WindowsWebviewRuntime;
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 type WebviewRuntime = UnsupportedWebviewRuntime;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct WebviewOverlayColor {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct WebviewWindowControlsOverlaySettings {
+    pub enabled: bool,
+    pub button_background_color: Option<WebviewOverlayColor>,
+    pub button_symbol_color: Option<WebviewOverlayColor>,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct NavigatorWindowSettings {
@@ -90,6 +109,7 @@ pub(crate) struct WebviewInitialMacosStyle {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct WebviewInitialWindowsStyle {
     pub corner_preference: Option<String>,
+    pub show_in_switchers: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -245,6 +265,7 @@ pub(crate) enum WebviewWindowIcon {
 pub(crate) struct WebviewWindowOptions {
     pub title: Option<String>,
     pub icon: Option<WebviewWindowIcon>,
+    pub window_controls_overlay: WebviewWindowControlsOverlaySettings,
     pub devtools: bool,
     pub style_requested: bool,
     pub style: WebviewInitialStyle,
@@ -400,7 +421,7 @@ struct ShowCommandData {
     native_screen_api: Option<bool>,
     bind_screen_globals: Option<bool>,
     native_tray_api: Option<bool>,
-    window_controls_overlay: Option<bool>,
+    window_controls_overlay: Option<WindowControlsOverlayInput>,
     title: Option<String>,
     icon: Option<WebviewWindowIcon>,
     style: Option<ShowWindowStyleData>,
@@ -477,11 +498,26 @@ struct ShowWindowMacosStyleData {
 #[serde(rename_all = "camelCase")]
 struct ShowWindowWindowsStyleData {
     corner_preference: Option<String>,
+    show_in_switchers: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ShowWindowLinuxStyleData {}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum WindowControlsOverlayInput {
+    Enabled(bool),
+    Options(WindowControlsOverlayOptionsInput),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WindowControlsOverlayOptionsInput {
+    background_color: Option<String>,
+    symbol_color: Option<String>,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -724,6 +760,8 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
             )?;
             let bind_window_globals = parsed.bind_window_globals.unwrap_or(false);
             let bind_screen_globals = parsed.bind_screen_globals.unwrap_or(false);
+            let window_controls_overlay =
+                parse_window_controls_overlay(parsed.window_controls_overlay)?;
             let style = parsed.style.as_ref();
             let macos_style = style
                 .and_then(|style| style.platform.as_ref())
@@ -755,9 +793,9 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                     navigator_window: NavigatorWindowSettings {
                         enabled: parsed.native_window_api.unwrap_or(false)
                             || bind_window_globals
-                            || parsed.window_controls_overlay.unwrap_or(false),
+                            || window_controls_overlay.enabled,
                         bind_window_globals,
-                        window_controls_overlay: parsed.window_controls_overlay.unwrap_or(false),
+                        window_controls_overlay: window_controls_overlay.enabled,
                     },
                     navigator_screen: NavigatorScreenSettings {
                         enabled: parsed.native_screen_api.unwrap_or(false) || bind_screen_globals,
@@ -769,6 +807,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                     window: WebviewWindowOptions {
                         title: parsed.title,
                         icon: parsed.icon,
+                        window_controls_overlay,
                         devtools: parsed.devtools.unwrap_or(false),
                         style_requested: style.is_some(),
                         style: WebviewInitialStyle {
@@ -795,6 +834,9 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                                     corner_preference: windows_style
                                         .and_then(|style| style.corner_preference.clone())
                                         .filter(|preference| !preference.is_empty()),
+                                    show_in_switchers: windows_style
+                                        .and_then(|style| style.show_in_switchers)
+                                        .unwrap_or(false),
                                 },
                                 linux: WebviewInitialLinuxStyle,
                             },
@@ -968,6 +1010,79 @@ fn show_bootstrap_requested(data: &Value) -> bool {
         || data.get("nativeApiPolicy").is_some()
         || data.get("browserPermissionPolicy").is_some()
         || data.get("permissionManagerPolicy").is_some()
+}
+
+fn parse_window_controls_overlay(
+    input: Option<WindowControlsOverlayInput>,
+) -> Result<WebviewWindowControlsOverlaySettings, WebviewRuntimeError> {
+    match input {
+        None | Some(WindowControlsOverlayInput::Enabled(false)) => {
+            Ok(WebviewWindowControlsOverlaySettings::default())
+        }
+        Some(WindowControlsOverlayInput::Enabled(true)) => {
+            Ok(WebviewWindowControlsOverlaySettings {
+                enabled: true,
+                ..WebviewWindowControlsOverlaySettings::default()
+            })
+        }
+        Some(WindowControlsOverlayInput::Options(input)) => {
+            Ok(WebviewWindowControlsOverlaySettings {
+                enabled: true,
+                button_background_color: input
+                    .background_color
+                    .as_deref()
+                    .map(|color| parse_window_controls_overlay_color(color, "backgroundColor"))
+                    .transpose()?,
+                button_symbol_color: input
+                    .symbol_color
+                    .as_deref()
+                    .map(|color| parse_window_controls_overlay_color(color, "symbolColor"))
+                    .transpose()?,
+            })
+        }
+    }
+}
+
+fn parse_window_controls_overlay_color(
+    value: &str,
+    field: &str,
+) -> Result<WebviewOverlayColor, WebviewRuntimeError> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 7 || bytes.first() != Some(&b'#') {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "windowControlsOverlay.{field} must be an opaque #RRGGBB color"
+        )));
+    }
+    let parse_component = |offset: usize| {
+        let high = parse_hex_digit(bytes[offset]);
+        let low = parse_hex_digit(bytes[offset + 1]);
+        high.zip(low).map(|(high, low)| high * 16 + low)
+    };
+    let Some(red) = parse_component(1) else {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "windowControlsOverlay.{field} must be an opaque #RRGGBB color"
+        )));
+    };
+    let Some(green) = parse_component(3) else {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "windowControlsOverlay.{field} must be an opaque #RRGGBB color"
+        )));
+    };
+    let Some(blue) = parse_component(5) else {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "windowControlsOverlay.{field} must be an opaque #RRGGBB color"
+        )));
+    };
+    Ok(WebviewOverlayColor { red, green, blue })
+}
+
+fn parse_hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1546,6 +1661,10 @@ mod tests {
                         icon: Some(WebviewWindowIcon::Href {
                             href: "data:image/png;base64,abc".to_string(),
                         }),
+                        window_controls_overlay: WebviewWindowControlsOverlaySettings {
+                            enabled: true,
+                            ..WebviewWindowControlsOverlaySettings::default()
+                        },
                         devtools: true,
                         style_requested: true,
                         style: WebviewInitialStyle {
@@ -1596,6 +1715,53 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn parse_show_command_reads_window_controls_overlay_colors() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "windowControlsOverlay": {
+                "backgroundColor": "#0F6CBD",
+                "symbolColor": "#FFFFFF"
+            }
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show { show_settings, .. } = command else {
+            panic!("expected show command");
+        };
+        assert_eq!(
+            show_settings.window.window_controls_overlay,
+            WebviewWindowControlsOverlaySettings {
+                enabled: true,
+                button_background_color: Some(WebviewOverlayColor {
+                    red: 15,
+                    green: 108,
+                    blue: 189,
+                }),
+                button_symbol_color: Some(WebviewOverlayColor {
+                    red: 255,
+                    green: 255,
+                    blue: 255,
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_show_command_rejects_non_opaque_window_controls_overlay_colors() {
+        let error = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "windowControlsOverlay": { "backgroundColor": "#0F6CBD80" }
+        }))
+        .expect_err("transparent color must be rejected");
+
+        assert!(matches!(
+            error,
+            WebviewRuntimeError::Rejected(message)
+                if message == "windowControlsOverlay.backgroundColor must be an opaque #RRGGBB color"
+        ));
     }
 
     #[test]
@@ -1858,7 +2024,8 @@ mod tests {
                   "cornerRadius": 12
                 },
                 "windows": {
-                  "cornerPreference": "round"
+                  "cornerPreference": "round",
+                  "showInSwitchers": true
                 },
                 "linux": {}
               }
@@ -1887,6 +2054,7 @@ mod tests {
             show_settings.window.style.platform.windows,
             WebviewInitialWindowsStyle {
                 corner_preference: Some("round".to_string()),
+                show_in_switchers: true,
             }
         );
         assert_eq!(

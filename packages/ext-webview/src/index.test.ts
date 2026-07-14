@@ -27,6 +27,7 @@ import type {
   WebviewPermissionStore,
   WebviewScreenDetails,
   WebviewWindowEventMap,
+  WebviewWindowControlsOverlayOptions,
   WebviewWindowState,
   WebviewWindowStyle,
 } from "./index";
@@ -67,6 +68,30 @@ describe("@opentray/ext-webview", () => {
         },
       },
     ]);
+  });
+
+  it("forwards typed window-controls-overlay colors during bootstrap", async () => {
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    const overlay = {
+      backgroundColor: "#0F6CBD",
+      symbolColor: "#FFFFFF",
+    } satisfies WebviewWindowControlsOverlayOptions;
+    const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
+      html: "<main />",
+      windowControlsOverlay: overlay,
+    });
+
+    await webviewWindow.show();
+
+    expect(transport.frames[1]).toMatchObject({
+      type: "ext-command",
+      data: {
+        type: "show",
+        html: "<main />",
+        windowControlsOverlay: overlay,
+      },
+    });
   });
 
   it("treats repeated window show as visibility restore instead of bootstrap replay", async () => {
@@ -175,6 +200,9 @@ describe("@opentray/ext-webview", () => {
           macos: {
             cornerRadius: null,
           },
+          windows: {
+            showInSwitchers: true,
+          },
         },
       },
       titleSync: {
@@ -232,6 +260,9 @@ describe("@opentray/ext-webview", () => {
             platform: {
               macos: {
                 cornerRadius: null,
+              },
+              windows: {
+                showInSwitchers: true,
               },
             },
           },
@@ -726,7 +757,12 @@ describe("@opentray/ext-webview", () => {
           keepOnTop: true,
           opacity: command.style.opacity ?? 1,
           background: { kind: "semantic", token: "blur", state: "active" },
-          platform: { windows: { cornerPreference: "round" } },
+          platform: {
+            windows: {
+              cornerPreference: "round",
+              showInSwitchers: false,
+            },
+          },
         };
       }
       return { type: "ok" };
@@ -1663,7 +1699,12 @@ describe("@opentray/ext-webview", () => {
           keepOnTop: true,
           opacity: 0.88,
           background: { kind: "opaque" },
-          platform: { windows: { cornerPreference: "round" } },
+          platform: {
+            windows: {
+              cornerPreference: "round",
+              showInSwitchers: false,
+            },
+          },
         } satisfies WebviewWindowStyle;
       },
       async setBackground(background: unknown, options: unknown) {
@@ -1673,7 +1714,12 @@ describe("@opentray/ext-webview", () => {
           keepOnTop: true,
           opacity: 0.88,
           background: { kind: "semantic", token: "blur", state: "active" },
-          platform: { windows: { cornerPreference: "round" } },
+          platform: {
+            windows: {
+              cornerPreference: "round",
+              showInSwitchers: false,
+            },
+          },
         } satisfies WebviewWindowStyle;
       },
     };

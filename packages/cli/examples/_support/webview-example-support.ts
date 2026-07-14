@@ -1,3 +1,8 @@
+// Orthogonal intents (2026-07-14; original user request: `example:webview-control` cannot start):
+// 1. Build and connect a source-tree WebView example runtime.
+// 2. Mount the typed WebView capability on the example tray.
+// 3. Isolate each example invocation from other same-version CLI brokers.
+
 import { spawnSync } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
@@ -68,7 +73,8 @@ export async function createWebviewExampleRuntime(
   );
   const homeDir =
     process.env.OPENTRAY_HOME ?? createShortExampleHome(options.homePrefix);
-  const connection = await connectLocalBroker({ homeDir });
+  const callerLabel = createExampleCallerLabel(options.homePrefix);
+  const connection = await connectLocalBroker({ homeDir, callerLabel });
   const client = createClient(connection, {
     requestIdPrefix: options.requestIdPrefix,
   });
@@ -77,6 +83,7 @@ export async function createWebviewExampleRuntime(
     `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
   );
   console.log(`runtime home: ${homeDir}`);
+  console.log(`runtime caller: ${connection.callerLabel}`);
   console.log(`runtime mode: ${runtimeMode}`);
   if (localWebviewExtension !== undefined) {
     console.log(`webview dylib: ${localWebviewExtension}`);
@@ -147,6 +154,18 @@ export function createShortExampleHome(homePrefix: string): string {
   return join("/tmp", `${homePrefix}-${process.pid}`);
 }
 
+/**
+ * Derives a caller-scoped broker identity for one source-example invocation.
+ * Windows pipe names do not include the home directory, so the process id must
+ * remain in the label to avoid attaching to a concurrently running neutral-label runtime.
+ */
+export function createExampleCallerLabel(
+  homePrefix: string,
+  pid: number = process.pid,
+): string {
+  return `example-${pid}-${homePrefix}`;
+}
+
 export function listenWebviewIpcMessages(
   window: Pick<WebviewWindowHandle, "drainIpcMessages">,
   handler: (message: WebviewIpcMessage) => void | Promise<void>,
@@ -188,6 +207,12 @@ export async function prepareLocalWebviewExtensionPath(
   options: { mode?: ExampleRuntimeMode } = {},
 ): Promise<string | undefined> {
   await prepareLocalWindowsAppRuntimeEnvironment();
+  // An explicit loader override must remain authoritative. Returning no mount
+  // path lets the spawned broker resolve OPENTRAY_EXT_PATH itself instead of
+  // having the source-example default override it in tray.extend(...).
+  if (hasConfiguredWebviewExtensionPath()) {
+    return undefined;
+  }
   const mode = options.mode ?? resolveExampleRuntimeMode();
   const localWebviewExtension = await resolveLocalWebviewExtension(
     importMetaUrl,
@@ -200,6 +225,12 @@ export async function prepareLocalWebviewExtensionPath(
     process.env.OPENTRAY_EXT_PATH = localWebviewExtension;
   }
   return localWebviewExtension;
+}
+
+export function hasConfiguredWebviewExtensionPath(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (env.OPENTRAY_EXT_PATH?.trim().length ?? 0) > 0;
 }
 
 export async function prepareLocalBadgeExtensionPath(

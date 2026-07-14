@@ -1,3 +1,10 @@
+<!--
+Orthogonal intents (2026-07-14; original user request):
+1. Expose native WebView window controls and their measurable overlay geometry.
+2. Let Windows overlay caption controls use explicit opaque background and symbol colors.
+3. Keep macOS controls native and transparent rather than emulating Windows composition.
+-->
+
 # @opentray/ext-webview
 
 Official rich popup extension for OpenTray.
@@ -106,7 +113,7 @@ Windows support includes:
 - `navigator.window` / `navigator.opentrayWindow` bridge injection with source-scoped `nativeApiPolicy`
 - `close`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, and `isMinimized`
 - `getStyle` / `setStyle` for common `frameless`, `background`, `keepOnTop`, and `opacity`
-- `windowControlsOverlay` geometry, `startAppRegionDrag()`, and subscription-driven bridge events
+- `windowControlsOverlay` geometry, Windows caption-button `backgroundColor` / `symbolColor`, `startAppRegionDrag()`, and subscription-driven bridge events
 - title sync and native window/taskbar icon projection for RGBA icons, local icon files, and PNG data URLs
 - Windows DWM background materials through `style.background`: `auto`, `mica`, `acrylic`, and `tabbed`
 - Windows 11 corner preference through `style.platform.windows.cornerPreference`: `default`, `doNotRound`, `round`, and `roundSmall`
@@ -439,12 +446,21 @@ await webview.show({
   width: 680,
   height: 420,
   nativeWindowApi: true,
-  windowControlsOverlay: true,
+  windowControlsOverlay: {
+    backgroundColor: "#0F6CBD",
+    symbolColor: "#FFFFFF",
+  },
   style: {
     background: { kind: "semantic", token: "blur" },
   },
 });
 ```
+
+`windowControlsOverlay: true` remains the system-color form. On Windows, the object form
+accepts opaque `#RRGGBB` colors for the native minimize/maximize/close control cluster. macOS
+keeps its native transparent controls and accepts the same declaration without emulating opaque
+Windows buttons. The overlay safe area always comes from native titlebar insets; do not estimate
+its width from a fixed caption-button count.
 
 In the page, use overlay geometry to avoid native window controls and start native dragging from your custom titlebar:
 

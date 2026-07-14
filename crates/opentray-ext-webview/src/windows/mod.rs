@@ -1,3 +1,13 @@
+// Orthogonal intents (2026-07-14; original user request: repair Windows overlay, taskbar,
+// tray placement, and frameless geometry):
+// 1. Host the Windows WebView2 window and bridge.
+// 2. Project switcher, overlay, background, and full-client native style.
+// 3. Keep public window geometry in DWM visible-frame logical pixels.
+// 4. Route native window/screen/tray commands and events.
+// 5. Preserve download, permission, metadata, and lifecycle behavior.
+// Compromise: this legacy platform module already exceeds the five-intent/300-line limits.
+// Splitting it is a separate architecture change that requires explicit user approval.
+
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
@@ -25,23 +35,23 @@ use window_vibrancy::{
     Error as WindowVibrancyError,
 };
 use windows::Win32::Foundation::{HWND as WebView2Hwnd, RECT as WebView2Rect};
-use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
     DwmEnableBlurBehindWindow, DwmExtendFrameIntoClientArea, DwmGetWindowAttribute,
-    DwmSetWindowAttribute, DWMSBT_AUTO, DWMSBT_NONE, DWMWA_CAPTION_BUTTON_BOUNDS,
+    DwmSetWindowAttribute, DWMSBT_AUTO, DWMSBT_NONE, DWMWA_EXTENDED_FRAME_BOUNDS,
     DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_USE_IMMERSIVE_DARK_MODE,
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUND,
     DWMWCP_ROUNDSMALL, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND, DWM_SYSTEMBACKDROP_TYPE,
     DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateRectRgn, DeleteObject, GetMonitorInfoW, InvalidateRect,
-    MonitorFromWindow, UpdateWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    CreateRectRgn, DeleteObject, GetMonitorInfoW, InvalidateRect, MonitorFromWindow, UpdateWindow,
+    MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 use windows_sys::Win32::UI::Controls::MARGINS;
-use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
@@ -50,14 +60,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
     CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON,
     HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, IDC_ARROW, IMAGE_ICON,
-    LR_DEFAULTSIZE, LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SM_CXSIZE, SM_CYSIZE, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE,
-    WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE,
+    LR_DEFAULTSIZE, LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_ENTERSIZEMOVE,
+    WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE,
     WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED,
-    WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
-    WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP,
-    WS_THICKFRAME, WS_VISIBLE,
+    WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED,
+    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE,
+    WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -68,6 +78,7 @@ mod appwindow;
 mod appwindow_abi;
 mod downloads;
 mod geometry;
+mod winrt_color_reference;
 
 use self::appwindow::{
     apply_windows_titlebar_overlay, titlebar_metrics as appwindow_titlebar_metrics,
@@ -84,7 +95,7 @@ use crate::{
     WebviewInitialMacosStyle, WebviewInitialWindowsStyle, WebviewNativeApiPolicy,
     WebviewNativeApiSource, WebviewPermissionManagerPolicy, WebviewRuntimeError,
     WebviewSessionBootstrapSettings, WebviewShowSettings, WebviewWindowBackground,
-    WebviewWindowIcon,
+    WebviewWindowControlsOverlaySettings, WebviewWindowIcon,
 };
 
 const CLASS_NAME: &str = "OpenTrayWebViewWindow";
@@ -131,8 +142,45 @@ struct WindowProcState {
     host_surface_fill_color: Option<u32>,
     backdrop_state_policy: WindowsBackdropStatePolicy,
     size_constraints: WindowSizeConstraints,
-    resize_interaction_active: bool,
-    last_resize_artifact_clear_at: Option<Instant>,
+    size_move_interaction: WindowProcSizeMoveInteraction,
+}
+
+/// Tracks one native `WM_ENTERSIZEMOVE` interaction. Windows sends that message for both
+/// dragging and resizing, so only an observed `WM_SIZE` may authorize the resize-only artifact
+/// workaround when the interaction exits.
+#[derive(Clone, Copy, Default)]
+struct WindowProcSizeMoveInteraction {
+    active: bool,
+    saw_resize: bool,
+    last_artifact_clear_at: Option<Instant>,
+}
+
+impl WindowProcSizeMoveInteraction {
+    fn enter(&mut self) {
+        self.active = true;
+        self.saw_resize = false;
+        self.last_artifact_clear_at = None;
+    }
+
+    fn observe_resize(&mut self, now: Instant) -> bool {
+        if !self.active {
+            return false;
+        }
+        self.saw_resize = true;
+        if !should_run_live_resize_artifact_clear(self.last_artifact_clear_at, now) {
+            return false;
+        }
+        self.last_artifact_clear_at = Some(now);
+        true
+    }
+
+    fn exit(&mut self) -> bool {
+        let should_clear = self.active && self.saw_resize;
+        self.active = false;
+        self.saw_resize = false;
+        self.last_artifact_clear_at = None;
+        should_clear
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -164,6 +212,7 @@ pub(super) struct NavigatorWindowBridge {
     next_ipc_message_id: u32,
     next_permission_message_id: u32,
     style: WindowStyleState,
+    window_controls_overlay: WebviewWindowControlsOverlaySettings,
     navigator_window: NavigatorWindowSettings,
     navigator_screen: NavigatorScreenSettings,
     navigator_tray: NavigatorTraySettings,
@@ -205,6 +254,7 @@ struct WindowPlatformStyleState {
 #[serde(rename_all = "camelCase")]
 struct WindowsWindowStyleState {
     corner_preference: Option<String>,
+    show_in_switchers: bool,
 }
 
 #[derive(Debug)]
@@ -357,6 +407,7 @@ struct SetStyleMacosPayload {
 #[serde(rename_all = "camelCase")]
 struct SetStyleWindowsPayload {
     corner_preference: Option<Option<String>>,
+    show_in_switchers: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -407,6 +458,7 @@ struct WindowsWindowCapabilities {
     semantic_backgrounds: Vec<String>,
     background_states: Vec<String>,
     corner_preference: bool,
+    show_in_switchers: bool,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
@@ -808,7 +860,6 @@ impl WindowsWebviewRuntime {
         slot.bridge.borrow_mut().tray_bounds = tray_bounds;
         apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
         apply_reused_show_updates(slot, &show_settings)?;
-        slot.window.show();
         Ok(slot)
     }
 
@@ -883,6 +934,7 @@ impl WindowsWebviewRuntime {
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
             style,
+            window_controls_overlay: show_settings.window.window_controls_overlay,
             navigator_window: show_settings.navigator_window,
             navigator_screen: show_settings.navigator_screen,
             navigator_tray: show_settings.navigator_tray,
@@ -949,7 +1001,6 @@ impl WindowsWebviewRuntime {
         apply_window_style(&slot.bridge, None)?;
         apply_window_icon_from_bridge(&slot.bridge)?;
         apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
-        slot.window.show();
         maybe_auto_clear_windows_white_block_artifact(&slot.bridge)?;
 
         Ok(slot)
@@ -984,14 +1035,12 @@ impl WindowsWebviewRuntime {
         let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) else {
             return Ok(());
         };
-        slot.window.show();
-        slot.window.focus();
-        Ok(())
+        show_bridge_window(&slot.bridge, true)
     }
 
     fn hide(&self, tray_id: &str) {
         if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
-            slot.window.hide();
+            hide_bridge_window(&slot.bridge);
         }
     }
 
@@ -1221,6 +1270,27 @@ fn dispatch_page_exec_command(
     }
 }
 
+fn show_bridge_window(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    focus: bool,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    unsafe {
+        ShowWindow(hwnd, if focus { SW_SHOWNORMAL } else { SW_SHOW });
+        if focus {
+            SetForegroundWindow(hwnd);
+        }
+    }
+    Ok(())
+}
+
+fn hide_bridge_window(bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
+    let hwnd = bridge.borrow().hwnd;
+    unsafe {
+        ShowWindow(hwnd, SW_HIDE);
+    }
+}
+
 fn dispatch_navigator_window_command(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     cmd: &str,
@@ -1249,18 +1319,13 @@ fn dispatch_navigator_window_command(
             Ok(Value::Null)
         }
         "close" => {
-            let hwnd = bridge.borrow().hwnd;
             emit_window_event(bridge, "closed", json!({ "visible": false }))?;
-            unsafe {
-                ShowWindow(hwnd, SW_HIDE);
-            }
+            hide_bridge_window(bridge);
             Ok(Value::Null)
         }
         "show" => {
             let hwnd = bridge.borrow().hwnd;
-            unsafe {
-                ShowWindow(hwnd, SW_SHOW);
-            }
+            show_bridge_window(bridge, false)?;
             let response = window_state_json(hwnd)?;
             emit_window_event(bridge, "windowstatechange", response.clone())?;
             emit_overlay_geometry_change_if_enabled(bridge)?;
@@ -1268,9 +1333,7 @@ fn dispatch_navigator_window_command(
         }
         "hide" => {
             let hwnd = bridge.borrow().hwnd;
-            unsafe {
-                ShowWindow(hwnd, SW_HIDE);
-            }
+            hide_bridge_window(bridge);
             let response = window_state_json(hwnd)?;
             emit_window_event(bridge, "windowstatechange", response.clone())?;
             Ok(response)
@@ -1741,12 +1804,9 @@ fn maybe_auto_clear_windows_white_block_artifact_during_live_resize(
         let Some(state) = states.get_mut(&(hwnd as isize)) else {
             return None;
         };
-        if !state.resize_interaction_active
-            || !should_run_live_resize_artifact_clear(state.last_resize_artifact_clear_at, now)
-        {
+        if !state.size_move_interaction.observe_resize(now) {
             return None;
         }
-        state.last_resize_artifact_clear_at = Some(now);
         state.bridge
     });
     let Some(bridge) = bridge else {
@@ -2027,6 +2087,7 @@ fn window_style_from_initial(
                     .as_deref()
                     .map(normalize_windows_corner_preference)
                     .transpose()?,
+                show_in_switchers: style.platform.windows.show_in_switchers,
             },
         },
     })
@@ -2182,6 +2243,12 @@ fn apply_style_patch(
                 changed = true;
             }
         }
+        if let Some(show_in_switchers) = windows_payload.show_in_switchers {
+            if bridge_state.style.platform.windows.show_in_switchers != show_in_switchers {
+                bridge_state.style.platform.windows.show_in_switchers = show_in_switchers;
+                changed = true;
+            }
+        }
     }
     Ok(changed)
 }
@@ -2208,7 +2275,16 @@ fn needs_host_window_rebuild_for_background_transition(
 fn rebuild_host_window_for_background_transition(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (hwnd, window, webview, style, title, tray_bounds, size_constraints) = {
+    let (
+        hwnd,
+        window,
+        webview,
+        style,
+        title,
+        tray_bounds,
+        size_constraints,
+        window_controls_overlay,
+    ) = {
         let state = bridge.borrow();
         (
             state.hwnd,
@@ -2218,6 +2294,7 @@ fn rebuild_host_window_for_background_transition(
             state.metadata.title.clone(),
             state.tray_bounds,
             state.size_constraints,
+            state.window_controls_overlay,
         )
     };
     let window =
@@ -2239,6 +2316,7 @@ fn rebuild_host_window_for_background_transition(
     set_window_physical_position(rebuilt_window.hwnd, snapshot.rect.left, snapshot.rect.top)?;
     set_window_physical_size(rebuilt_window.hwnd, outer_width, outer_height)?;
     apply_native_window_style(rebuilt_window.hwnd, &style)?;
+    apply_windows_titlebar_overlay(rebuilt_window.hwnd, window_controls_overlay)?;
     let was_active = unsafe { GetForegroundWindow() == hwnd };
     unsafe {
         let old_window = replace_boxed_value_in_place(window, rebuilt_window);
@@ -2275,13 +2353,13 @@ fn apply_window_style(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     previous_background: Option<&WebviewWindowBackground>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (hwnd, webview, style, overlay_enabled) = {
+    let (hwnd, webview, style, window_controls_overlay) = {
         let state = bridge.borrow();
         (
             state.hwnd,
             state.webview,
             state.style.clone(),
-            state.navigator_window.window_controls_overlay,
+            state.window_controls_overlay,
         )
     };
     let was_maximized = is_window_maximized(hwnd);
@@ -2309,7 +2387,9 @@ fn apply_window_style(
     apply_webview_background_color(webview, wants_clear_background(&style))?;
     apply_native_window_style(hwnd, &style)?;
     sync_transparent_host_surface(bridge, &style)?;
-    apply_windows_titlebar_overlay(hwnd, overlay_enabled)?;
+    // AppWindow belongs to the host HWND, so apply the overlay synchronously on its owning thread
+    // before the window is made visible and before WebView client bounds are fitted.
+    apply_windows_titlebar_overlay(hwnd, window_controls_overlay)?;
     refresh_dwm_backdrop_activation_state(hwnd);
 
     if was_maximized {
@@ -2444,8 +2524,7 @@ fn sync_window_proc_state(
                 host_surface_fill_color,
                 backdrop_state_policy,
                 size_constraints,
-                resize_interaction_active: previous.resize_interaction_active,
-                last_resize_artifact_clear_at: previous.last_resize_artifact_clear_at,
+                size_move_interaction: previous.size_move_interaction,
             },
         );
     });
@@ -2470,15 +2549,24 @@ fn sync_window_proc_size_constraints(hwnd: HWND, size_constraints: WindowSizeCon
     });
 }
 
-fn set_window_proc_resize_interaction(hwnd: HWND, active: bool) {
+fn enter_window_proc_size_move(hwnd: HWND) {
     WINDOW_PROC_STATES.with(|states| {
         if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
-            state.resize_interaction_active = active;
-            if active {
-                state.last_resize_artifact_clear_at = None;
-            }
+            state.size_move_interaction.enter();
         }
     });
+}
+
+fn finish_window_proc_size_move(hwnd: HWND) -> Option<NonNull<RefCell<NavigatorWindowBridge>>> {
+    WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let state = states.get_mut(&(hwnd as isize))?;
+        state
+            .size_move_interaction
+            .exit()
+            .then_some(state.bridge)
+            .flatten()
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2619,11 +2707,24 @@ fn window_ex_style_bits(style: &WindowStyleState, current_ex_style: isize) -> is
     } else {
         current_ex_style & !no_redirection_bitmap
     };
-    if wants_layered_opacity(style) {
+    let with_opacity = if wants_layered_opacity(style) {
         with_redirection | layered
     } else {
         with_redirection & !layered
+    };
+    let tool_window = WS_EX_TOOLWINDOW as isize;
+    let app_window = WS_EX_APPWINDOW as isize;
+    // Tray-owned WebViews are utility windows by default. Switcher participation is an explicit
+    // Windows style fact and must not be inferred from title/icon metadata.
+    if style.platform.windows.show_in_switchers {
+        (with_opacity & !tool_window) | app_window
+    } else {
+        (with_opacity | tool_window) & !app_window
     }
+}
+
+fn wants_full_client_area(style: &WindowStyleState, overlay_enabled: bool) -> bool {
+    style.frameless || overlay_enabled
 }
 
 fn wants_no_redirection_bitmap(style: &WindowStyleState) -> bool {
@@ -3427,18 +3528,40 @@ fn window_bounds_json(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
 }
 
 fn window_bounds(hwnd: HWND) -> Result<Rect, WebviewRuntimeError> {
-    let mut rect = RECT {
+    let (_, rect) = raw_and_visible_window_rects(hwnd)?;
+    Ok(physical_rect_to_public_window_rect(hwnd, rect))
+}
+
+fn raw_and_visible_window_rects(hwnd: HWND) -> Result<(RECT, RECT), WebviewRuntimeError> {
+    let mut raw = RECT {
         left: 0,
         top: 0,
         right: 0,
         bottom: 0,
     };
-    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+    if unsafe { GetWindowRect(hwnd, &mut raw) } == 0 {
         return Err(WebviewRuntimeError::Internal(
             std::io::Error::last_os_error().to_string(),
         ));
     }
-    Ok(physical_rect_to_public_window_rect(hwnd, rect))
+    let mut visible = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    let result = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS as u32,
+            (&mut visible as *mut RECT).cast(),
+            std::mem::size_of::<RECT>() as u32,
+        )
+    };
+    if hresult_failed(result) || visible.right <= visible.left || visible.bottom <= visible.top {
+        visible = raw;
+    }
+    Ok((raw, visible))
 }
 
 fn snapshot_window_host_rebuild_state(
@@ -3557,7 +3680,7 @@ fn current_monitor_detail(hwnd: HWND) -> Option<ScreenDetailState> {
 }
 
 fn titlebar_area_rect_json(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
-    serde_json::to_value(titlebar_area_rect_payload(hwnd))
+    serde_json::to_value(titlebar_area_rect_payload(hwnd)?)
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
 }
 
@@ -3573,9 +3696,11 @@ struct WindowsTitlebarAreaRectPayload {
     client_height: u32,
 }
 
-fn titlebar_area_rect_payload(hwnd: HWND) -> WindowsTitlebarAreaRectPayload {
+fn titlebar_area_rect_payload(
+    hwnd: HWND,
+) -> Result<WindowsTitlebarAreaRectPayload, WebviewRuntimeError> {
     let Some((client_width, client_height)) = physical_client_size(hwnd) else {
-        return WindowsTitlebarAreaRectPayload {
+        return Ok(WindowsTitlebarAreaRectPayload {
             unit: "physical",
             x: 0,
             y: 0,
@@ -3583,19 +3708,13 @@ fn titlebar_area_rect_payload(hwnd: HWND) -> WindowsTitlebarAreaRectPayload {
             height: 0,
             client_width: 0,
             client_height: 0,
-        };
+        });
     };
-    // AppWindowTitleBar insets are the official overlay layout contract. DWM caption bounds are a
-    // system-derived fallback for runtimes that can extend content but cannot expose AppWindow.
-    // Keep these values physical. The bootstrap script converts them to the page's CSS px after
-    // WebView2, page zoom, DPR, and viewport rules have settled.
-    let metrics = appwindow_titlebar_metrics(hwnd)
-        .ok()
-        .filter(|metrics| metrics.right_inset > 0.0 || metrics.left_inset > 0.0)
-        .or_else(|| dwm_caption_button_titlebar_metrics(hwnd, client_width))
-        .unwrap_or_else(|| fallback_titlebar_metrics(hwnd));
+    // AppWindowTitleBar owns the overlay safe-area contract. Read it in physical pixels on the
+    // HWND owner; the bootstrap converts the payload to the page's CSS pixels.
+    let metrics = appwindow_titlebar_metrics(hwnd)?;
     let rect = titlebar_area_rect_from_metrics(client_width, metrics);
-    WindowsTitlebarAreaRectPayload {
+    Ok(WindowsTitlebarAreaRectPayload {
         unit: "physical",
         x: rect.x,
         y: rect.y,
@@ -3603,7 +3722,7 @@ fn titlebar_area_rect_payload(hwnd: HWND) -> WindowsTitlebarAreaRectPayload {
         height: rect.height,
         client_width: client_width.max(0) as u32,
         client_height: client_height.max(0) as u32,
-    }
+    })
 }
 
 fn titlebar_area_rect_from_metrics(client_width: i32, metrics: WindowsTitlebarMetrics) -> Rect {
@@ -3617,91 +3736,6 @@ fn titlebar_area_rect_from_metrics(client_width: i32, metrics: WindowsTitlebarMe
         width,
         height: metrics.height.round().max(1.0) as u32,
     }
-}
-
-fn dwm_caption_button_titlebar_metrics(
-    hwnd: HWND,
-    client_width: i32,
-) -> Option<WindowsTitlebarMetrics> {
-    let mut bounds = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-    };
-    let result = unsafe {
-        DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_CAPTION_BUTTON_BOUNDS as u32,
-            (&mut bounds as *mut RECT).cast(),
-            std::mem::size_of::<RECT>() as u32,
-        )
-    };
-    if hresult_failed(result) {
-        return None;
-    }
-    let (client_left, client_top) = client_origin_in_window_coordinates(hwnd)?;
-    let (left, top, right, bottom) =
-        client_rect_from_window_relative_rect(bounds, (client_left, client_top))?;
-    if right <= left || bottom <= top {
-        return None;
-    }
-    Some(WindowsTitlebarMetrics {
-        left_inset: 0.0,
-        right_inset: ((client_width as f64) - left).max(right - left).max(0.0),
-        height: (bottom - top).max(1.0),
-    })
-}
-
-fn client_rect_from_window_relative_rect(
-    rect: RECT,
-    client_origin: (i32, i32),
-) -> Option<(f64, f64, f64, f64)> {
-    let raw_left = (rect.left - client_origin.0) as f64;
-    let raw_top = (rect.top - client_origin.1) as f64;
-    let raw_right = (rect.right - client_origin.0) as f64;
-    let raw_bottom = (rect.bottom - client_origin.1) as f64;
-    Some((
-        raw_left.min(raw_right),
-        raw_top.min(raw_bottom),
-        raw_left.max(raw_right),
-        raw_top.max(raw_bottom),
-    ))
-}
-
-fn client_origin_in_window_coordinates(hwnd: HWND) -> Option<(i32, i32)> {
-    let mut window = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-    };
-    if unsafe { GetWindowRect(hwnd, &mut window) } == 0 {
-        return None;
-    }
-    let mut client_origin = POINT { x: 0, y: 0 };
-    if unsafe { ClientToScreen(hwnd, &mut client_origin) } == 0 {
-        return None;
-    }
-    Some((client_origin.x - window.left, client_origin.y - window.top))
-}
-
-fn fallback_titlebar_metrics(hwnd: HWND) -> WindowsTitlebarMetrics {
-    let dpi = unsafe { GetDpiForWindow(hwnd) };
-    let dpi = if dpi == 0 { 96 } else { dpi };
-    WindowsTitlebarMetrics {
-        left_inset: 0.0,
-        right_inset: physical_system_metric(SM_CXSIZE, dpi) * 3.0,
-        height: physical_system_metric(SM_CYSIZE, dpi).max(40.0),
-    }
-}
-
-fn physical_system_metric(index: i32, dpi: u32) -> f64 {
-    let value = unsafe { GetSystemMetricsForDpi(index, dpi) };
-    if value <= 0 {
-        return 0.0;
-    }
-    (value as f64).max(0.0)
 }
 
 fn start_app_region_drag(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
@@ -3731,12 +3765,14 @@ fn set_window_position(hwnd: HWND, x: i32, y: i32) -> Result<(), WebviewRuntimeE
 }
 
 fn set_window_physical_position(hwnd: HWND, x: i32, y: i32) -> Result<(), WebviewRuntimeError> {
+    let (raw, visible) = raw_and_visible_window_rects(hwnd)?;
+    let (raw_x, raw_y) = raw_origin_for_visible_position(raw, visible, x, y);
     if unsafe {
         SetWindowPos(
             hwnd,
             null_mut(),
-            x,
-            y,
+            raw_x,
+            raw_y,
             0,
             0,
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
@@ -3763,14 +3799,16 @@ fn set_window_physical_size(
     width: i32,
     height: i32,
 ) -> Result<(), WebviewRuntimeError> {
+    let (raw, visible) = raw_and_visible_window_rects(hwnd)?;
+    let (raw_width, raw_height) = raw_size_for_visible_size(raw, visible, width, height);
     if unsafe {
         SetWindowPos(
             hwnd,
             null_mut(),
             0,
             0,
-            width,
-            height,
+            raw_width,
+            raw_height,
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
         )
     } == 0
@@ -3780,6 +3818,32 @@ fn set_window_physical_size(
         ));
     }
     Ok(())
+}
+
+fn raw_origin_for_visible_position(
+    raw: RECT,
+    visible: RECT,
+    visible_x: i32,
+    visible_y: i32,
+) -> (i32, i32) {
+    (
+        visible_x - (visible.left - raw.left),
+        visible_y - (visible.top - raw.top),
+    )
+}
+
+fn raw_size_for_visible_size(
+    raw: RECT,
+    visible: RECT,
+    visible_width: i32,
+    visible_height: i32,
+) -> (i32, i32) {
+    let invisible_width = (raw.right - raw.left) - (visible.right - visible.left);
+    let invisible_height = (raw.bottom - raw.top) - (visible.bottom - visible.top);
+    (
+        (visible_width + invisible_width).max(1),
+        (visible_height + invisible_height).max(1),
+    )
 }
 
 fn window_dpi(hwnd: HWND) -> u32 {
@@ -4131,6 +4195,7 @@ impl NavigatorWindowBridge {
                         .map(|state| (*state).to_string())
                         .collect(),
                     corner_preference: true,
+                    show_in_switchers: true,
                 },
             },
         })
@@ -4250,25 +4315,6 @@ impl Win32HostWindow {
             window.present_host_surface(0)?;
         }
         Ok(window)
-    }
-
-    fn show(&self) {
-        unsafe {
-            ShowWindow(self.hwnd, SW_SHOW);
-        }
-    }
-
-    fn hide(&self) {
-        unsafe {
-            ShowWindow(self.hwnd, SW_HIDE);
-        }
-    }
-
-    fn focus(&self) {
-        unsafe {
-            ShowWindow(self.hwnd, SW_SHOWNORMAL);
-            SetForegroundWindow(self.hwnd);
-        }
     }
 
     fn resize_to(&self, width: i32, height: i32) -> Result<(), WebviewRuntimeError> {
@@ -4439,6 +4485,29 @@ unsafe extern "system" fn window_proc(
             });
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
+        WM_NCCALCSIZE => {
+            // Frameless and AppWindow-overlay windows expose the full host rect as client area so
+            // WebView2 reaches the native edges. AppWindow still owns the caption controls for the
+            // overlay case; ordinary framed windows retain DefWindowProcW non-client geometry.
+            let full_client = with_window_proc_state(hwnd, |state| {
+                state
+                    .bridge
+                    .and_then(|bridge| {
+                        unsafe { bridge.as_ref() }.try_borrow().ok().map(|bridge| {
+                            wants_full_client_area(
+                                &bridge.style,
+                                bridge.navigator_window.window_controls_overlay,
+                            )
+                        })
+                    })
+                    .unwrap_or(false)
+            });
+            if wparam != 0 && full_client {
+                0
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+        }
         WM_ACTIVATE => {
             emit_window_focus_change(hwnd, (wparam & 0xffff) != WA_INACTIVE as usize);
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -4448,24 +4517,22 @@ unsafe extern "system" fn window_proc(
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_ENTERSIZEMOVE => {
-            set_window_proc_resize_interaction(hwnd, true);
+            enter_window_proc_size_move(hwnd);
             emit_window_interaction_change(hwnd, true);
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_EXITSIZEMOVE => {
-            set_window_proc_resize_interaction(hwnd, false);
+            let resize_bridge = finish_window_proc_size_move(hwnd);
             emit_window_interaction_change(hwnd, false);
-            with_window_proc_state(hwnd, |state| {
-                if let Some(bridge) = state.bridge {
-                    if let Err(error) =
-                        maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
-                    {
-                        eprintln!(
-                            "opentray-ext-webview failed to auto-clear Windows resize artifact: {error}"
-                        );
-                    }
+            if let Some(bridge) = resize_bridge {
+                if let Err(error) =
+                    maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
+                {
+                    eprintln!(
+                        "opentray-ext-webview failed to auto-clear Windows resize artifact: {error}"
+                    );
                 }
-            });
+            }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_WINDOWPOSCHANGED => {
@@ -4621,6 +4688,7 @@ fn wide_null(value: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WebviewBrowserPermissionRule;
 
     #[test]
     fn windows_white_block_auto_clear_only_targets_translucent_backgrounds() {
@@ -4660,6 +4728,30 @@ mod tests {
     }
 
     #[test]
+    fn windows_white_block_auto_clear_ignores_pure_window_move() {
+        let mut interaction = WindowProcSizeMoveInteraction::default();
+
+        interaction.enter();
+
+        assert!(!interaction.exit());
+        assert!(!interaction.active);
+        assert!(!interaction.saw_resize);
+    }
+
+    #[test]
+    fn windows_white_block_auto_clear_requires_observed_resize() {
+        let now = Instant::now();
+        let mut interaction = WindowProcSizeMoveInteraction::default();
+
+        interaction.enter();
+        assert!(interaction.observe_resize(now));
+        assert!(!interaction.observe_resize(now + Duration::from_millis(30)));
+
+        assert!(interaction.exit());
+        assert!(interaction.last_artifact_clear_at.is_none());
+    }
+
+    #[test]
     fn validate_style_request_accepts_windows_background_family() {
         validate_style_request(&SetStylePayload {
             frameless: None,
@@ -4670,6 +4762,7 @@ mod tests {
                 macos: None,
                 windows: Some(SetStyleWindowsPayload {
                     corner_preference: Some(Some("round".to_string())),
+                    show_in_switchers: Some(true),
                 }),
                 linux: None,
             }),
@@ -4742,6 +4835,7 @@ mod tests {
             state.platform.windows,
             WindowsWindowStyleState {
                 corner_preference: Some("roundSmall".to_string()),
+                show_in_switchers: false,
             }
         );
 
@@ -4825,6 +4919,7 @@ mod tests {
             platform: WindowPlatformStyleState {
                 windows: WindowsWindowStyleState {
                     corner_preference: None,
+                    show_in_switchers: false,
                 },
             },
         };
@@ -5027,6 +5122,63 @@ mod tests {
     }
 
     #[test]
+    fn default_windows_style_excludes_task_switchers() {
+        let style = window_style_from_initial(&crate::WebviewInitialStyle::default())
+            .expect("default style");
+        let bits = window_ex_style_bits(&style, WS_EX_APPWINDOW as isize);
+
+        assert_ne!(bits & WS_EX_TOOLWINDOW as isize, 0);
+        assert_eq!(bits & WS_EX_APPWINDOW as isize, 0);
+    }
+
+    #[test]
+    fn explicit_windows_style_participates_in_task_switchers() {
+        let mut initial = crate::WebviewInitialStyle::default();
+        initial.platform.windows.show_in_switchers = true;
+        let style = window_style_from_initial(&initial).expect("switcher style");
+        let bits = window_ex_style_bits(&style, WS_EX_TOOLWINDOW as isize);
+
+        assert_eq!(bits & WS_EX_TOOLWINDOW as isize, 0);
+        assert_ne!(bits & WS_EX_APPWINDOW as isize, 0);
+    }
+
+    #[test]
+    fn frameless_and_overlay_windows_use_the_full_client_area() {
+        let mut style = window_style_from_initial(&crate::WebviewInitialStyle::default())
+            .expect("default style");
+
+        assert!(!wants_full_client_area(&style, false));
+        assert!(wants_full_client_area(&style, true));
+        style.frameless = true;
+        assert!(wants_full_client_area(&style, false));
+    }
+
+    #[test]
+    fn public_visible_frame_targets_compensate_for_invisible_dwm_borders() {
+        let raw = RECT {
+            left: 100,
+            top: 200,
+            right: 980,
+            bottom: 840,
+        };
+        let visible = RECT {
+            left: 107,
+            top: 200,
+            right: 973,
+            bottom: 833,
+        };
+
+        assert_eq!(
+            raw_origin_for_visible_position(raw, visible, 120, 140),
+            (113, 140)
+        );
+        assert_eq!(
+            raw_size_for_visible_size(raw, visible, 880, 640),
+            (894, 647)
+        );
+    }
+
+    #[test]
     fn titlebar_area_rect_reserves_right_caption_control_inset() {
         let rect = titlebar_area_rect_from_metrics(
             800,
@@ -5134,21 +5286,6 @@ mod tests {
         assert_eq!(logical_to_physical_i32_for_dpi(144, 300), 450);
         assert_eq!(physical_to_logical_i32_for_dpi(144, 630), 420);
         assert_eq!(physical_to_logical_i32_for_dpi(144, 450), 300);
-    }
-
-    #[test]
-    fn window_relative_rect_converts_to_physical_client_rect() {
-        let rect = client_rect_from_window_relative_rect(
-            RECT {
-                left: 175,
-                top: 14,
-                right: 245,
-                bottom: 44,
-            },
-            (10, 8),
-        );
-
-        assert_eq!(rect, Some((165.0, 6.0, 235.0, 36.0)));
     }
 
     #[test]

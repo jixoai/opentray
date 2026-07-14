@@ -1,3 +1,7 @@
+// Orthogonal intents (2026-07-14; original user request: add a Windows-only switcher policy):
+// 1. Keep macOS style parsing explicit and reject Windows `showInSwitchers` payloads.
+// 2. Preserve existing AppKit window/background projection.
+
 use std::{cell::RefCell, rc::Rc};
 
 use objc2::rc::Retained;
@@ -85,6 +89,7 @@ pub(super) struct SetStyleMacosPayload {
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetStyleWindowsPayload {
     pub(super) corner_preference: Option<Option<String>>,
+    pub(super) show_in_switchers: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -97,7 +102,7 @@ pub(super) fn validate_style_request(payload: &SetStylePayload) -> Result<(), We
         .as_ref()
         .and_then(|platform| platform.windows.as_ref());
     if windows_payload
-        .map(|payload| payload.corner_preference.is_some())
+        .map(|payload| payload.corner_preference.is_some() || payload.show_in_switchers.is_some())
         .unwrap_or(false)
     {
         // A cross-platform contract may carry multiple family placeholders, but the macOS
@@ -125,24 +130,16 @@ pub(super) fn validate_style_request(payload: &SetStylePayload) -> Result<(), We
 pub(super) fn validate_initial_style(
     show_settings: &WebviewShowSettings,
 ) -> Result<(), WebviewRuntimeError> {
-    let windows_payload = if show_settings
-        .window
-        .style
-        .platform
-        .windows
-        .corner_preference
-        .is_some()
+    let initial_windows_style = &show_settings.window.style.platform.windows;
+    let windows_payload = if initial_windows_style.corner_preference.is_some()
+        || initial_windows_style.show_in_switchers
     {
         Some(SetStyleWindowsPayload {
-            corner_preference: Some(
-                show_settings
-                    .window
-                    .style
-                    .platform
-                    .windows
-                    .corner_preference
-                    .clone(),
-            ),
+            corner_preference: initial_windows_style
+                .corner_preference
+                .as_ref()
+                .map(|preference| Some(preference.clone())),
+            show_in_switchers: initial_windows_style.show_in_switchers.then_some(true),
         })
     } else {
         None

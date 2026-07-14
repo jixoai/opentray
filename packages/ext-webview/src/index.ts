@@ -1,3 +1,10 @@
+// Orthogonal intents (2026-07-14; original user request: Chrome-PWA-like Windows overlay controls):
+// 1. Expose typed WebView extension contracts, including Windows overlay-control colors and showInSwitchers.
+// 2. Provide tray-scoped window handles and capability facades.
+// 3. Re-export placement, responsive, style, and permission helpers.
+// Compromise: this established public entrypoint aggregates more than five API families; splitting
+// it would be a separate package-surface change and is outside this repair.
+
 import type {
   ExtensionEnvelope,
   Icon,
@@ -44,6 +51,21 @@ export interface WebviewDownloadOptions {
   saveAs?: boolean;
 }
 
+/** An opaque RGB color accepted by native Windows overlay caption controls. */
+export type WebviewWindowControlsOverlayColor = `#${string}`;
+
+/** Native caption-control colors for a Windows window-controls overlay. */
+export interface WebviewWindowControlsOverlayOptions {
+  /** Opaque `#RRGGBB` background for native minimize, maximize, and close controls. */
+  backgroundColor?: WebviewWindowControlsOverlayColor;
+  /** Opaque `#RRGGBB` symbol color for native minimize, maximize, and close controls. */
+  symbolColor?: WebviewWindowControlsOverlayColor;
+}
+
+export type WebviewWindowControlsOverlay =
+  | boolean
+  | WebviewWindowControlsOverlayOptions;
+
 export interface WebviewShowCommand {
   type: "show";
   html?: string;
@@ -56,7 +78,7 @@ export interface WebviewShowCommand {
   nativeScreenApi?: boolean;
   bindScreenGlobals?: boolean;
   nativeTrayApi?: boolean;
-  windowControlsOverlay?: boolean;
+  windowControlsOverlay?: WebviewWindowControlsOverlay;
   title?: string;
   icon?: WebviewWindowIcon;
   style?: WebviewWindowStylePatch;
@@ -130,6 +152,8 @@ export type WebviewWindowsCornerPreference =
 
 export interface WebviewWindowsWindowStyle {
   cornerPreference: WebviewWindowsCornerPreference | null;
+  /** Whether the native window participates in the Windows taskbar and Alt+Tab switcher. */
+  showInSwitchers: boolean;
 }
 
 export interface WebviewWindowPlatformStyle {
@@ -170,6 +194,7 @@ export interface WebviewWindowsWindowCapabilities {
   semanticBackgrounds: string[];
   backgroundStates: WebviewBackgroundEffectState[];
   cornerPreference: boolean;
+  showInSwitchers: boolean;
 }
 
 export interface WebviewLinuxWindowCapabilities {

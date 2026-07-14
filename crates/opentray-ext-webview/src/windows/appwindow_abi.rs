@@ -1,6 +1,14 @@
+// Orthogonal intents (2026-07-14; original user request: restore Windows overlay controls):
+// 1. Keep the minimal generated-equivalent AppWindow ABI needed by the owner-thread overlay path.
+// 2. Apply typed WinRT button colors without passing raw RGBA through a COM ABI.
+// 3. Read AppWindow titlebar insets only on the calling HWND-owner thread.
+
+use windows::UI::Color;
 use windows_core::Interface;
 
-use crate::WebviewRuntimeError;
+use crate::{WebviewOverlayColor, WebviewRuntimeError};
+
+use super::winrt_color_reference::box_color_reference;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -80,9 +88,6 @@ impl WindowsAppWindow {
     }
 }
 
-unsafe impl Send for WindowsAppWindow {}
-unsafe impl Sync for WindowsAppWindow {}
-
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct WindowsAppWindowTitleBar(windows_core::IUnknown);
@@ -108,6 +113,28 @@ impl windows_core::RuntimeName for WindowsAppWindowTitleBar {
 }
 
 impl WindowsAppWindowTitleBar {
+    pub(super) fn set_button_background_color(
+        &self,
+        color: WebviewOverlayColor,
+    ) -> Result<(), WebviewRuntimeError> {
+        self.set_button_color(
+            color,
+            Interface::vtable(self).set_button_background_color,
+            "background",
+        )
+    }
+
+    pub(super) fn set_button_foreground_color(
+        &self,
+        color: WebviewOverlayColor,
+    ) -> Result<(), WebviewRuntimeError> {
+        self.set_button_color(
+            color,
+            Interface::vtable(self).set_button_foreground_color,
+            "foreground",
+        )
+    }
+
     pub(super) fn set_extends_content_into_titlebar(
         &self,
         enabled: bool,
@@ -124,6 +151,30 @@ impl WindowsAppWindowTitleBar {
                 "Windows AppWindow titlebar overlay could not be applied: {error}"
             ))
         })
+    }
+
+    fn set_button_color(
+        &self,
+        color: WebviewOverlayColor,
+        setter: unsafe extern "system" fn(
+            *mut core::ffi::c_void,
+            *mut core::ffi::c_void,
+        ) -> windows_core::HRESULT,
+        property: &str,
+    ) -> Result<(), WebviewRuntimeError> {
+        let color = box_color_reference(Color {
+            A: 255,
+            R: color.red,
+            G: color.green,
+            B: color.blue,
+        });
+        unsafe { setter(Interface::as_raw(self), Interface::as_raw(&color)).ok() }.map_err(
+            |error| {
+                WebviewRuntimeError::Unsupported(format!(
+                    "Windows AppWindow titlebar button {property} color could not be applied: {error}"
+                ))
+            },
+        )
     }
 
     pub(super) fn height(&self) -> Result<i32, WebviewRuntimeError> {
@@ -164,9 +215,6 @@ impl WindowsAppWindowTitleBar {
         })
     }
 }
-
-unsafe impl Send for WindowsAppWindowTitleBar {}
-unsafe impl Sync for WindowsAppWindowTitleBar {}
 
 windows_core::imp::define_interface!(
     IWindowsAppWindow,
@@ -242,9 +290,15 @@ pub struct IWindowsAppWindowTitleBar_Vtbl {
     background_color: usize,
     set_background_color: usize,
     button_background_color: usize,
-    set_button_background_color: usize,
+    set_button_background_color: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
     button_foreground_color: usize,
-    set_button_foreground_color: usize,
+    set_button_foreground_color: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
     button_hover_background_color: usize,
     set_button_hover_background_color: usize,
     button_hover_foreground_color: usize,
