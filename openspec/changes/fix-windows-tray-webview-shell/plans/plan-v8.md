@@ -11,9 +11,9 @@ Orthogonal intents (2026-07-14, original user input):
 
 ## Current Round
 
-- Round: 8
-- Status: User acceptance confirms the native drag, configured caption colors, and AppWindow geometry. `example:webview-control` is classified as a tray-utility acceptance surface and therefore inherits the default switcher exclusion.
-- Previous plan backup: `plans/plan-v8.md`
+- Round: 7
+- Status: Native drag acceptance is confirmed by the user. Typed Windows caption-button colors and AppWindow-authoritative overlay geometry are implemented and visually verified through an isolated DLL; final user overlay acceptance remains pending.
+- Previous plan backup: `plans/plan-v7.md`
 
 ## Original User Input
 
@@ -213,7 +213,6 @@ example shutdown
 | Source Vite server API | With `127.0.0.1:5173` reserved, the unmodified source command selected `http://127.0.0.1:5174/webview-control`; its caller-scoped broker created the `OpenTray Examples` window. A direct `startDevServer()` close left no `5173` or `5174` listener. |
 | Pure-drag white-block guard | Rust interaction-state tests prove an enter/exit pair without `WM_SIZE` cannot authorize the `ShowWindow` white-block reset; observed resize still preserves the throttled path. |
 | Overlay colors and safe-area | A caller-scoped broker loaded the isolated `%TEMP%/opentray-overlay-controls/debug/opentray_ext_webview.dll` rather than the locked source DLL. Bridge smoke reported `gap=2x1:overlay=740x32`; the captured native button background contains exact `#0F6CBD` pixels beginning at screenshot x=748 with client origin x=8, proving the native control boundary is client x=740. |
-| Control-example switcher default | With the example's explicit opt-in removed, its live window has `WS_EX_TOOLWINDOW=true` and `WS_EX_APPWINDOW=false`; user acceptance confirms the taskbar entry is gone. |
 
 ## Residual Risks
 

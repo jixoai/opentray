@@ -29,7 +29,7 @@ Orthogonal intents (2026-07-14, original user input):
   <body>
     <main>
       <h1>Windows Tray WebView Shell</h1>
-      <p class="ok">Self review: native drag is user-accepted; overlay colors and AppWindow geometry have independent-DLL visual evidence. Final overlay acceptance is pending.</p>
+      <p class="ok">Self review: native drag, overlay colors, AppWindow geometry, and the tray-utility control-example default are accepted. Archive and release may proceed.</p>
 
       <h2>Corrected Root Causes</h2>
       <table>
@@ -64,11 +64,12 @@ Orthogonal intents (2026-07-14, original user input):
           <tr><td>Isolated overlay DLL</td><td>Broker PID <code>7172</code> loaded the distinct <code>%TEMP%/opentray-overlay-controls/debug/opentray_ext_webview.dll</code> rather than the locked source DLL.</td></tr>
           <tr><td>Configured button color</td><td>Captured native window has exact <code>#0F6CBD</code> caption-button pixels from screenshot x=748 through x=885.</td></tr>
           <tr><td>Control boundary</td><td>Client origin x=8 and first blue button pixel x=748 yield client x=740, equal to bridge result <code>overlay=740x32</code>.</td></tr>
+          <tr><td>Control example switcher</td><td>After removing the explicit opt-in, live styles were <code>WS_EX_TOOLWINDOW=true</code> and <code>WS_EX_APPWINDOW=false</code>; user confirmed the taskbar entry disappeared.</td></tr>
         </tbody>
       </table>
 
       <h2>Residual Risk</h2>
-      <p class="risk">Vendored tray-icon maintenance, intentional Windows default change, broader example/broker teardown behavior, unverified macOS runtime visuals, two pre-existing Windows path assertions in the broad CLI test command, and pending user overlay acceptance remain explicit non-blocking risks.</p>
+      <p class="risk">Vendored tray-icon maintenance, intentional Windows default change, broader example/broker teardown behavior, unverified macOS runtime visuals, and two pre-existing Windows path assertions in the broad CLI test command remain explicit non-blocking risks.</p>
     </main>
   </body>
 </html>

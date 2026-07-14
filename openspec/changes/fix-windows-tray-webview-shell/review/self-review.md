@@ -10,10 +10,10 @@ Orthogonal intents (2026-07-14, original user input):
 ## Review State
 
 - Change: `fix-windows-tray-webview-shell`
-- Iteration: 6 (Round 7 Windows overlay colors and AppWindow metrics)
-- Recurring issue counts: source broker identity 0; source Vite lifecycle 2 resolved; native drag state reset 1 accepted by user; Windows overlay color/measurement 1 implemented with independent-DLL visual evidence; Windows full-suite path assertions 1, pre-existing and outside this change
-- Exit-condition judgment: Automated contracts and a real Windows render pass. Final overlay interaction acceptance remains with the user.
-- Next loop action: User verifies the `example:webview-control` caption controls against their Chrome PWA expectation.
+- Iteration: 7 (Round 8 final user acceptance and tray-utility example default)
+- Recurring issue counts: source broker identity 0; source Vite lifecycle 2 resolved; native drag state reset 1 accepted by user; Windows overlay color/measurement 1 accepted by user; control-example switcher policy 1 corrected and accepted; Windows full-suite path assertions 1, pre-existing and outside this change
+- Exit-condition judgment: All Windows exit conditions are met. Archive and release are the next operations.
+- Next loop action: Archive the accepted change, publish OpenTray, then upgrade and verify pnpm-pub.
 
 ## Intent Alignment
 
@@ -29,6 +29,7 @@ Orthogonal intents (2026-07-14, original user input):
 | Pure native drag preserves shell state | An interaction without `WM_SIZE` cannot authorize the white-block `ShowWindow` reset; observed resize retains the throttled repair path. | Met; user accepted the visible drag repair. |
 | Configured Windows caption colors reach the native buttons | The isolated extension DLL was loaded by the broker; a captured window contains the requested `#0F6CBD` pixels across the native caption-button cluster. | Met. |
 | Overlay safe-area width matches native controls | Bridge geometry reported `overlay=740x32`; the blue native button background begins at screenshot x=748 while the client origin is x=8, yielding the same client x=740 control boundary. | Met. |
+| Control example inherits tray switcher default | After removing its explicit opt-in, the live `example:webview-control` window has `WS_EX_TOOLWINDOW=true` and `WS_EX_APPWINDOW=false`. | Met; user accepted the visible result. |
 
 ## Deviations From Intent
 
@@ -51,10 +52,11 @@ Orthogonal intents (2026-07-14, original user input):
 - Facade and example gates: `pnpm --filter @opentray/ext-webview test` passed 37 tests; both `pnpm --filter @opentray/ext-webview typecheck` and `pnpm --filter opentray typecheck` passed; focused example support tests passed 3 tests.
 - Isolated DLL evidence: `cargo build -p opentray-ext-webview` under `CARGO_TARGET_DIR=%TEMP%/opentray-overlay-controls` produced `opentray_ext_webview.dll` with SHA-256 `7BA86967...537ACED`, distinct from source `target/debug` SHA-256 `E5F11877...4F0C6`.
 - Visible overlay evidence: caller-scoped broker PID `7172` loaded the isolated DLL path. Bridge smoke returned `opentray-bridge-ok:windows:normal:true:gap=2x1:overlay=740x32`. The captured native window at `%TEMP%/opentray-overlay-controls/window-controls-overlay.png` contains exact `#0F6CBD` pixels from x=748 through x=885; its client origin is x=8, so the native button boundary is client x=740, equal to the bridge safe-area right edge.
+- Default control-example evidence: caller-scoped broker PID `27184` used `WS_EX_TOOLWINDOW=true` and `WS_EX_APPWINDOW=false` after the explicit `showInSwitchers` opt-in was removed. The user confirmed the taskbar entry disappeared.
 - Full package test note: `pnpm --filter opentray test -- examples/_support/webview-example-support.test.ts` ran the whole package because the script did not forward the filter. Two existing `broker-command.test.ts` assertions expected POSIX paths but received Windows paths; the direct focused Vitest command passed.
 - Git commit reviewed: `b0d36ae chore: version packages`.
 - Uncommitted paths: existing Windows shell repair, OpenSpec artifacts, vendored `tray-icon`, and source-example support changes remain uncommitted.
-- Task checkboxes updated by this working context: 1.6, 1.7, 2.10, 2.11, 3.11-3.16, 4.10-4.13, 5.7, and 5.8. Task 5.9 waits for user overlay acceptance.
+- Task checkboxes updated by this working context: 1.6, 1.7, 2.10, 2.11, 3.11-3.17, 4.10-4.14, and 5.7-5.9.
 
 ## HTML Review Report
 
@@ -64,4 +66,4 @@ Orthogonal intents (2026-07-14, original user input):
 
 - No intent/spec deviation remains for the native interaction or overlay repair.
 - Native rendering evidence is captured from the caller-scoped broker that loaded the isolated extension DLL; it is not inferred from the locked source DLL.
-- Archive is intentionally deferred until the user accepts the overlay color and control-boundary behavior.
+- User acceptance is complete; archive and release may proceed.
