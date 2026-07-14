@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 1
-- Status: approved release-blocker repair
+- Status: completed and released
 - Previous plan backup: none
 
 ## Workflow Command Surface
@@ -123,7 +123,7 @@ Darwin WebView build compiles and release can publish
 - [x] 2. Write specs from the intent.
 - [x] 3. Write BDD tasks from specs.
 - [x] 4. Implement tasks.
-- [ ] 5. Self-review against intent and decide whether to loop.
+- [x] 5. Self-review against intent and decide whether to loop.
 
 ## Open Questions
 

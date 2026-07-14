@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang='en'>
+  <head>
+    <meta charset='utf-8'>
+    <title>OpenTray macOS resizable capability review</title>
+    <style>
+      body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem; color: #202124; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #c8cdd3; padding: .6rem; text-align: left; vertical-align: top; }
+      th { background: #f3f5f7; }
+      .pass { color: #137333; font-weight: 700; }
+      .limit { color: #8a4b08; }
+      code { background: #f3f5f7; padding: .1rem .25rem; }
+    </style>
+  </head>
+  <body>
+    <h1>macOS resizable capability review</h1>
+    <p>Change: <code>fix-macos-resizable-capability</code>. Review iteration: 1. Exit: normal archive.</p>
+    <table>
+      <thead><tr><th>Requirement</th><th>Evidence</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>macOS DTO emits <code>resizable: true</code></td><td>Commit <code>6b89b0a</code> plus focused macOS source test</td><td class='pass'>Pass</td></tr>
+        <tr><td>Darwin WebView jobs compile</td><td>Release run <code>29366437945</code> completed arm64 and x64 WebView artifacts</td><td class='pass'>Pass</td></tr>
+        <tr><td>Stable packages publish</td><td>Release run completed and npm registry returned <code>0.14.0</code> for core and WebView facade</td><td class='pass'>Pass</td></tr>
+      </tbody>
+    </table>
+    <h2>Evidence boundary</h2>
+    <p class='limit'>The review has no macOS visual-runtime screenshot. Windows cannot supply Apple SDK runtime evidence; Darwin CI proves compilation and packaged artifacts, not visible macOS behavior.</p>
+  </body>
+</html>
