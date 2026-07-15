@@ -129,12 +129,13 @@ Expected checks:
 3. `Toggle Frameless`, `Apply Background`, `Toggle Topmost`, and opacity changes update `getStyle()` and emit `stylechange`.
 4. `Apply Background` updates the single `style.background` mode. Platform material names are accepted only on the matching substrate, while semantic `blur` maps to the runtime's platform material. `style.opacity` is separate whole-window alpha and does not choose or mutate the background mode.
 5. `Apply Corner` updates only the active platform corner API, while `System Corner` clears that platform corner setting.
-6. `Minimize`, `Maximize`, and `Restore` update `windowstatechange`.
-7. By default, the custom titlebar and overlay drag test area can drag the native window through `startAppRegionDrag()`.
-8. `navigator.screen.getScreenDetails()` returns the current screen snapshot.
-9. Title/icon controls update both the page state and native state.
-10. The Devtools section opens the native inspector through `navigator.opentrayWindow.devtools.open()`. On macOS, close/state buttons are enabled when supported in both debug and release mode; on Windows, close/state stay disabled because the runtime exposes only honest open support.
-11. By default, `getTitlebarAreaRect()` refreshes overlay geometry, and the explicit `Listen geometrychange` button controls whether `overlay.geometrychange` appears in the event log. With `--no-overlay`, the overlay panel should show the launch switch unchecked and report that `windowControlsOverlay` is disabled for this run.
+6. `Minimize`, `Maximize`, and `Restore` update `windowstatechange`; minimizing makes operational `visible` false until restore.
+7. With `frameless: true, resizable: true`, drag every edge and corner continuously, then minimize and restore. No native titlebar/frame pixels or minimize/restore flicker may appear.
+8. By default, the custom titlebar and overlay drag test area can drag the native window through `startAppRegionDrag()`.
+9. `navigator.screen.getScreenDetails()` returns the current screen snapshot.
+10. Title/icon controls update both the page state and native state.
+11. The Devtools section opens the native inspector through `navigator.opentrayWindow.devtools.open()`. On macOS, close/state buttons are enabled when supported in both debug and release mode; on Windows, close/state stay disabled because the runtime exposes only honest open support.
+12. By default, `getTitlebarAreaRect()` refreshes overlay geometry, and the explicit `Listen geometrychange` button controls whether `overlay.geometrychange` appears in the event log. With `--no-overlay`, the overlay panel should show the launch switch unchecked and report that `windowControlsOverlay` is disabled for this run.
 
 Overlay is a show-time capability gate, not a runtime style. The control demo enables it by default because this is the overlay acceptance surface. You can force it on with `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=1` or force it off with `--no-overlay` / `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=0`.
 

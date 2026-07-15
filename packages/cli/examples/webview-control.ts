@@ -1,6 +1,8 @@
-// Orthogonal intents (2026-07-14; original user request: Chrome-PWA-like Windows overlay controls):
+// Orthogonal intents (2026-07-15; original user requests: Chrome-PWA-like Windows overlay controls,
+// frameless repair, and operational visibility):
 // 1. Exercise native window controls, explicit Windows caption-button colors, and bridge capabilities.
-// 2. Assert overlay and frameless native/browser geometry.
+// 2. Assert overlay and frameless native/browser geometry, including resizable frameless behavior.
+// 3. Smoke operational visibility queries without rebuilding the page session.
 
 import type {
   WebviewWindowControlsOverlay,
@@ -181,6 +183,13 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
         }
       }
       const originalWindowState = await bridge.getWindowState();
+      if (await bridge.isClosed()) {
+        throw new Error("newly shown example window must not report closed");
+      }
+      if (!(await bridge.isVisible())) {
+        throw new Error("newly shown example window must report visible");
+      }
+      await bridge.toVisible();
       if (capabilities.platform === "windows") {
         await bridge.maximize();
         const maximizedBeforeMaterial = await bridge.getWindowState();

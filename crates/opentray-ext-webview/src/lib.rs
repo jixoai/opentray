@@ -355,6 +355,7 @@ enum WebviewCommand {
         show_settings: WebviewShowSettings,
     },
     Hide,
+    Close,
     Destroy,
     SetContent {
         html: Option<String>,
@@ -377,6 +378,9 @@ enum WebviewCommand {
         width: f64,
         height: f64,
     },
+    IsClosed,
+    IsVisible,
+    ToVisible,
     GetBounds,
     GetScreenDetails,
     DrainIpcMessages,
@@ -863,6 +867,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
             })
         }
         "hide" => Ok(WebviewCommand::Hide),
+        "close" => Ok(WebviewCommand::Close),
         "destroy" => Ok(WebviewCommand::Destroy),
         "setContent" => {
             let parsed: SetContentCommandData =
@@ -912,6 +917,9 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                 height: finite_number(parsed.height.max(80.0), "height")?,
             })
         }
+        "isClosed" => Ok(WebviewCommand::IsClosed),
+        "isVisible" => Ok(WebviewCommand::IsVisible),
+        "toVisible" => Ok(WebviewCommand::ToVisible),
         "getBounds" => Ok(WebviewCommand::GetBounds),
         "getScreenDetails" => Ok(WebviewCommand::GetScreenDetails),
         "drainIpcMessages" | "drainPageMessages" => Ok(WebviewCommand::DrainIpcMessages),
@@ -1786,6 +1794,29 @@ mod tests {
             parse_webview_command(&serde_json::json!({ "type": "isDevtoolsOpen" }))
                 .expect("isDevtoolsOpen command"),
             WebviewCommand::IsDevtoolsOpen
+        );
+    }
+
+    #[test]
+    fn parse_visibility_commands_use_extension_owned_protocol() {
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({ "type": "close" })).expect("close command"),
+            WebviewCommand::Close
+        );
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({ "type": "isClosed" }))
+                .expect("isClosed command"),
+            WebviewCommand::IsClosed
+        );
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({ "type": "isVisible" }))
+                .expect("isVisible command"),
+            WebviewCommand::IsVisible
+        );
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({ "type": "toVisible" }))
+                .expect("toVisible command"),
+            WebviewCommand::ToVisible
         );
     }
 

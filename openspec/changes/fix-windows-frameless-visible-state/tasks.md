@@ -5,31 +5,31 @@
 
 ## 2. BDD Contract
 
-- [ ] 2.1 Add facade tests proving host `isClosed`, `isVisible`, and `toVisible` send the extension commands and expose typed `visibleChange` listeners.
-- [ ] 2.2 Add bootstrap tests proving page `isClosed`, `isVisible`, `toVisible`, and DOM-style `visibleChange` subscription use the existing authorized bridge path.
-- [ ] 2.3 Add native unit tests for operational visibility projection, idempotent reveal selection, full-client frameless non-client handling, and soft-resize exclusion from shell-state cleanup.
-- [ ] 2.4 Add macOS bridge tests proving the page command surface remains shape-aligned with Windows; do not claim macOS visual acceptance from this Windows session.
+- [x] 2.1 Add facade tests proving host `isClosed`, `isVisible`, and `toVisible` send the extension commands and expose typed `visibleChange` listeners.
+- [x] 2.2 Add bootstrap tests proving page `isClosed`, `isVisible`, `toVisible`, and DOM-style `visibleChange` subscription use the existing authorized bridge path.
+- [x] 2.3 Add native unit tests for operational visibility projection, idempotent reveal selection, full-client frameless non-client handling, and soft-resize exclusion from shell-state cleanup.
+- [x] 2.4 Add macOS bridge tests proving the page command surface remains shape-aligned with Windows; do not claim macOS visual acceptance from this Windows session.
 - [x] 2.5 Only check off a task after its code and its stated verification completed in this working context.
 
 ## 3. Implementation
 
-- [ ] 3.1 Run `bun run openspec:vision -- commit-check fix-windows-frameless-visible-state --phase research-plan` and commit the ready OpenSpec artifacts before product-code work.
-- [ ] 3.2 Add `IsClosed`, `IsVisible`, and `ToVisible` to the extension command model and route them through both native platforms without adding WebView branches to core.
-- [ ] 3.3 Add cross-platform operational visibility state projection and `visibleChange` emission for close/hide/minimize/show/restore/toVisible transitions.
-- [ ] 3.4 Extend host/page TypeScript interfaces, bootstrap injection, browser-global types, and event maps with the visibility contract.
-- [ ] 3.5 Make Windows frameless `WM_NCCALCSIZE` return full client geometry for every message form and retain explicit DWM/no-`WS_THICKFRAME` style projection.
-- [ ] 3.6 Isolate frameless soft resize from `WindowProcSizeMoveInteraction` white-block shell-state clearing; preserve synchronous bounds and repaint after pointer-driven resize.
-- [ ] 3.7 Add concise intent comments at the Windows full-client and soft-resize isolation boundaries.
-- [ ] 3.8 Update `README.md`, WebView extension README, and relevant agent skill/reference guidance with the operational visibility and frameless laws.
-- [ ] 3.9 Commit current-context task checkboxes with the matching implementation and BDD evidence.
+- [x] 3.1 Run `bun run openspec:vision -- commit-check fix-windows-frameless-visible-state --phase research-plan` and commit the ready OpenSpec artifacts before product-code work.
+- [x] 3.2 Add `IsClosed`, `IsVisible`, and `ToVisible` to the extension command model and route them through both native platforms without adding WebView branches to core.
+- [x] 3.3 Add cross-platform operational visibility state projection and `visibleChange` emission for close/hide/minimize/show/restore/toVisible transitions.
+- [x] 3.4 Extend host/page TypeScript interfaces, bootstrap injection, browser-global types, and event maps with the visibility contract.
+- [x] 3.5 Make Windows frameless `WM_NCCALCSIZE` return full client geometry for every message form and retain explicit DWM/no-`WS_THICKFRAME` style projection.
+- [x] 3.6 Isolate frameless soft resize from `WindowProcSizeMoveInteraction` white-block shell-state clearing; preserve synchronous bounds and repaint after pointer-driven resize.
+- [x] 3.7 Add concise intent comments at the Windows full-client and soft-resize isolation boundaries.
+- [x] 3.8 Update `README.md`, WebView extension README, and relevant agent skill/reference guidance with the operational visibility and frameless laws.
+- [x] 3.9 Commit current-context task checkboxes with the matching implementation and BDD evidence.
 
 ## 4. Verification
 
-- [ ] 4.1 Run `cargo test -p opentray-ext-webview`.
-- [ ] 4.2 Run `pnpm --filter @opentray/ext-webview test`.
-- [ ] 4.3 Run the narrow CLI/example tests affected by the facade and documentation changes.
+- [x] 4.1 Run `cargo test -p opentray-ext-webview`.
+- [x] 4.2 Run `pnpm --filter @opentray/ext-webview test`.
+- [x] 4.3 Run the narrow CLI/example tests affected by the facade and documentation changes.
 - [ ] 4.4 Run `pnpm --filter opentray example:webview-control -- --resizable` as the Windows human-visible smoke path, then require user acceptance for frameless resize/minimize/restore.
-- [ ] 4.5 Run `bun run openspec:vision -- validate fix-windows-frameless-visible-state` and `git diff --check`.
+- [x] 4.5 Run `bun run openspec:vision -- validate fix-windows-frameless-visible-state` and `git diff --check`.
 
 ## 5. Consumer Release Follow-up
 

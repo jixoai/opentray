@@ -1,5 +1,5 @@
-// Orthogonal intents (2026-07-15; original user request: repair Windows frameless chrome and add
-// application-level soft resizing):
+// Orthogonal intents (2026-07-15; original user requests: repair Windows frameless chrome,
+// add application-level soft resizing, and expose operational window visibility):
 // 1. Host the Windows WebView2 window and bridge.
 // 2. Project switcher, overlay, background, and full-client native style.
 // 3. Keep public window geometry in DWM visible-frame logical pixels, including frameless soft resize.
@@ -583,6 +583,12 @@ impl WindowsWebviewRuntime {
                 fallback_rect,
                 show_settings,
             } => {
+                let was_visible = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .map(|slot| window_is_visible(slot.window.hwnd))
+                    .unwrap_or(false);
                 self.ensure_slot(
                     tray_id,
                     html,
@@ -593,11 +599,24 @@ impl WindowsWebviewRuntime {
                     show_settings,
                 )?;
                 self.focus(tray_id)?;
+                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
+                    emit_visible_change_if_needed(&slot.bridge, was_visible)?;
+                }
                 Ok(json!({ "type": "shown" }))
             }
             WebviewCommand::Hide => {
-                self.hide(tray_id);
+                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
+                    let was_visible = window_is_visible(slot.window.hwnd);
+                    hide_bridge_window(&slot.bridge);
+                    emit_visible_change_if_needed(&slot.bridge, was_visible)?;
+                }
                 Ok(json!({ "type": "hidden" }))
+            }
+            WebviewCommand::Close => {
+                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
+                    close_bridge_window(&slot.bridge)?;
+                }
+                Ok(json!({ "type": "closed" }))
             }
             WebviewCommand::Destroy => {
                 self.destroy_slot(tray_id);
@@ -671,6 +690,46 @@ impl WindowsWebviewRuntime {
                 emit_window_event(&slot.bridge, "resized", response.clone())?;
                 emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
                 Ok(response)
+            }
+            WebviewCommand::IsClosed => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "isClosed requires an active WebView window".into(),
+                        )
+                    })?;
+                Ok(Value::Bool(window_is_closed(slot.window.hwnd)))
+            }
+            WebviewCommand::IsVisible => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "isVisible requires an active WebView window".into(),
+                        )
+                    })?;
+                Ok(Value::Bool(window_is_visible(slot.window.hwnd)))
+            }
+            WebviewCommand::ToVisible => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "toVisible requires an active WebView window".into(),
+                        )
+                    })?;
+                let was_visible = window_is_visible(slot.window.hwnd);
+                show_bridge_window(&slot.bridge, false)?;
+                emit_window_state_change(&slot.bridge, was_visible)?;
+                emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
+                Ok(Value::Null)
             }
             WebviewCommand::GetBounds => {
                 let slot = self
@@ -1101,12 +1160,6 @@ impl WindowsWebviewRuntime {
         show_bridge_window(&slot.bridge, true)
     }
 
-    fn hide(&self, tray_id: &str) {
-        if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
-            hide_bridge_window(&slot.bridge);
-        }
-    }
-
     fn destroy_slot(&mut self, tray_id: &str) {
         let matches_tray = self
             .slot
@@ -1343,7 +1396,14 @@ fn show_bridge_window(
 ) -> Result<(), WebviewRuntimeError> {
     let hwnd = bridge.borrow().hwnd;
     unsafe {
-        ShowWindow(hwnd, if focus { SW_SHOWNORMAL } else { SW_SHOW });
+        let command = if IsIconic(hwnd) != 0 {
+            SW_RESTORE
+        } else if focus {
+            SW_SHOWNORMAL
+        } else {
+            SW_SHOW
+        };
+        ShowWindow(hwnd, command);
         if focus {
             SetForegroundWindow(hwnd);
         }
@@ -1357,6 +1417,41 @@ fn hide_bridge_window(bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
     unsafe {
         ShowWindow(hwnd, SW_HIDE);
     }
+}
+
+fn close_bridge_window(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<(), WebviewRuntimeError> {
+    let was_visible = window_is_visible(bridge.borrow().hwnd);
+    hide_bridge_window(bridge);
+    emit_window_event(bridge, "closed", json!({ "visible": false }))?;
+    emit_visible_change_if_needed(bridge, was_visible)
+}
+
+fn emit_window_state_change(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    was_visible: bool,
+) -> Result<Value, WebviewRuntimeError> {
+    let response = window_state_json(bridge.borrow().hwnd)?;
+    emit_window_event(bridge, "windowstatechange", response.clone())?;
+    emit_visible_change_if_needed(bridge, was_visible)?;
+    Ok(response)
+}
+
+fn emit_visible_change_if_needed(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    was_visible: bool,
+) -> Result<(), WebviewRuntimeError> {
+    let visible = window_is_visible(bridge.borrow().hwnd);
+    if visible == was_visible {
+        return Ok(());
+    }
+    let payload = json!({ "visible": visible });
+    bridge
+        .borrow_mut()
+        .window_events
+        .push_back(json!({ "type": "visibleChange", "visible": visible }));
+    emit_window_event(bridge, "visibleChange", payload)
 }
 
 fn dispatch_navigator_window_command(
@@ -1387,57 +1482,62 @@ fn dispatch_navigator_window_command(
             Ok(Value::Null)
         }
         "close" => {
-            emit_window_event(bridge, "closed", json!({ "visible": false }))?;
-            hide_bridge_window(bridge);
+            close_bridge_window(bridge)?;
             Ok(Value::Null)
         }
         "show" => {
-            let hwnd = bridge.borrow().hwnd;
+            let was_visible = window_is_visible(bridge.borrow().hwnd);
             show_bridge_window(bridge, false)?;
-            let response = window_state_json(hwnd)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            let response = emit_window_state_change(bridge, was_visible)?;
             emit_overlay_geometry_change_if_enabled(bridge)?;
             Ok(response)
         }
         "hide" => {
-            let hwnd = bridge.borrow().hwnd;
+            let was_visible = window_is_visible(bridge.borrow().hwnd);
             hide_bridge_window(bridge);
-            let response = window_state_json(hwnd)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            let response = emit_window_state_change(bridge, was_visible)?;
             Ok(response)
         }
         "minimize" => {
             let hwnd = bridge.borrow().hwnd;
+            let was_visible = window_is_visible(hwnd);
             unsafe {
                 ShowWindow(hwnd, SW_MINIMIZE);
             }
-            let response = window_state_json(hwnd)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
-            Ok(response)
+            emit_window_state_change(bridge, was_visible)
         }
         "maximize" => {
             let hwnd = bridge.borrow().hwnd;
+            let was_visible = window_is_visible(hwnd);
             unsafe {
                 ShowWindow(hwnd, SW_MAXIMIZE);
             }
             apply_webview_client_bounds_from_bridge(bridge)?;
-            let response = window_state_json(hwnd)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            let response = emit_window_state_change(bridge, was_visible)?;
             emit_overlay_geometry_change_if_enabled(bridge)?;
             Ok(response)
         }
         "restore" => {
             let hwnd = bridge.borrow().hwnd;
+            let was_visible = window_is_visible(hwnd);
             unsafe {
                 ShowWindow(hwnd, SW_RESTORE);
             }
             apply_webview_client_bounds_from_bridge(bridge)?;
-            let response = window_state_json(hwnd)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            let response = emit_window_state_change(bridge, was_visible)?;
             emit_overlay_geometry_change_if_enabled(bridge)?;
             Ok(response)
         }
         "getWindowState" => window_state_json(bridge.borrow().hwnd),
+        "isClosed" => Ok(Value::Bool(window_is_closed(bridge.borrow().hwnd))),
+        "isVisible" => Ok(Value::Bool(window_is_visible(bridge.borrow().hwnd))),
+        "toVisible" => {
+            let was_visible = window_is_visible(bridge.borrow().hwnd);
+            show_bridge_window(bridge, false)?;
+            emit_window_state_change(bridge, was_visible)?;
+            emit_overlay_geometry_change_if_enabled(bridge)?;
+            Ok(Value::Null)
+        }
         "isMaximized" => Ok(Value::Bool(unsafe { IsZoomed(bridge.borrow().hwnd) != 0 })),
         "isMinimized" => Ok(Value::Bool(unsafe { IsIconic(bridge.borrow().hwnd) != 0 })),
         "getBounds" => window_bounds_json(bridge.borrow().hwnd),
@@ -1911,7 +2011,11 @@ fn maybe_auto_clear_windows_white_block_artifact_during_live_resize(
         let Some(state) = states.get_mut(&(hwnd as isize)) else {
             return None;
         };
-        if !state.size_move_interaction.observe_resize(now) {
+        if !should_clear_windows_artifact_during_live_resize(
+            state.soft_resize_interaction.is_some(),
+            &mut state.size_move_interaction,
+            now,
+        ) {
             return None;
         }
         state.bridge
@@ -1920,6 +2024,14 @@ fn maybe_auto_clear_windows_white_block_artifact_during_live_resize(
         return Ok(());
     };
     maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
+}
+
+fn should_clear_windows_artifact_during_live_resize(
+    soft_resize_active: bool,
+    interaction: &mut WindowProcSizeMoveInteraction,
+    now: Instant,
+) -> bool {
+    !soft_resize_active && interaction.observe_resize(now)
 }
 
 fn should_run_live_resize_artifact_clear(last: Option<Instant>, now: Instant) -> bool {
@@ -2741,15 +2853,11 @@ fn finish_window_proc_size_move(hwnd: HWND) -> Option<NonNull<RefCell<NavigatorW
 }
 
 fn finish_window_proc_soft_resize(hwnd: HWND, release_capture: bool) -> bool {
-    let Some((interaction, bridge, should_clear)) = WINDOW_PROC_STATES.with(|states| {
+    let Some((interaction, bridge)) = WINDOW_PROC_STATES.with(|states| {
         let mut states = states.borrow_mut();
         let state = states.get_mut(&(hwnd as isize))?;
         let interaction = state.soft_resize_interaction.take()?;
-        Some((
-            interaction,
-            state.bridge,
-            state.size_move_interaction.exit(),
-        ))
+        Some((interaction, state.bridge))
     }) else {
         return false;
     };
@@ -2761,12 +2869,11 @@ fn finish_window_proc_soft_resize(hwnd: HWND, release_capture: bool) -> bool {
     emit_window_interaction_change(hwnd, false);
     if let Some(bridge) = bridge {
         let bridge = unsafe { bridge.as_ref() };
-        if should_clear {
-            if let Err(error) = maybe_auto_clear_windows_white_block_artifact(bridge) {
-                eprintln!(
-                    "opentray-ext-webview failed to clear Windows soft-resize artifact: {error}"
-                );
-            }
+        // Shell-state white-block repair would revoke this pointer capture. Keep the soft resize
+        // entirely in place: synchronize the child surface and invalidate the host instead.
+        refresh_attached_window_surface(hwnd);
+        if let Err(error) = refresh_native_window_surface(hwnd) {
+            eprintln!("opentray-ext-webview failed to refresh Windows soft resize: {error}");
         }
         emit_soft_resize_geometry_changes(hwnd, bridge, interaction.initial_bounds);
     }
@@ -3862,8 +3969,20 @@ fn window_state_snapshot(hwnd: HWND) -> WindowStateSnapshot {
         state,
         minimized,
         maximized,
-        visible: unsafe { IsWindowVisible(hwnd) != 0 },
+        visible: window_is_visible(hwnd),
     }
+}
+
+fn window_is_closed(hwnd: HWND) -> bool {
+    unsafe { IsWindowVisible(hwnd) == 0 }
+}
+
+fn window_is_visible(hwnd: HWND) -> bool {
+    window_visibility_from_native_state(window_is_closed(hwnd), unsafe { IsIconic(hwnd) != 0 })
+}
+
+fn window_visibility_from_native_state(closed: bool, minimized: bool) -> bool {
+    !closed && !minimized
 }
 
 fn is_window_maximized(hwnd: HWND) -> bool {
@@ -4017,7 +4136,6 @@ fn start_window_soft_resize(
             initial_visible_rect,
             initial_bounds,
         });
-        state.size_move_interaction.enter();
         true
     });
     if !started {
@@ -4943,7 +5061,10 @@ unsafe extern "system" fn window_proc(
                     })
                     .unwrap_or(false)
             });
-            if wparam != 0 && full_client {
+            // A frameless window owns all non-client geometry. Win32 uses both wParam forms
+            // across style and minimized-state transitions; allowing either form through
+            // reintroduces a residual native titlebar.
+            if full_client {
                 0
             } else {
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -5186,6 +5307,33 @@ mod tests {
             Some(now - Duration::from_millis(200)),
             now
         ));
+    }
+
+    #[test]
+    fn windows_soft_resize_skips_shell_state_white_block_cleanup() {
+        let now = Instant::now();
+        let mut interaction = WindowProcSizeMoveInteraction::default();
+
+        interaction.enter();
+        assert!(!should_clear_windows_artifact_during_live_resize(
+            true,
+            &mut interaction,
+            now,
+        ));
+        assert!(!interaction.saw_resize);
+        assert!(should_clear_windows_artifact_during_live_resize(
+            false,
+            &mut interaction,
+            now,
+        ));
+    }
+
+    #[test]
+    fn windows_operational_visibility_excludes_closed_and_minimized_windows() {
+        assert!(window_visibility_from_native_state(false, false));
+        assert!(!window_visibility_from_native_state(true, false));
+        assert!(!window_visibility_from_native_state(false, true));
+        assert!(!window_visibility_from_native_state(true, true));
     }
 
     #[test]

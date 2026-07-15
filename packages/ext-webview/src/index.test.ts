@@ -171,6 +171,61 @@ describe("@opentray/ext-webview", () => {
     ]);
   });
 
+  it("routes host operational visibility verbs and polls visibleChange", async () => {
+    let drained = false;
+    const transport = new WebviewResultTransport((command) => {
+      if (!isWebviewCommand(command)) {
+        return { type: "unknown" };
+      }
+      if (command.type === "isClosed") return true;
+      if (command.type === "isVisible") return false;
+      if (command.type === "drainWindowEvents") {
+        if (drained) return { type: "windowEvents", events: [] };
+        drained = true;
+        return {
+          type: "windowEvents",
+          events: [{ type: "visibleChange", visible: true }],
+        };
+      }
+      return { type: "ok" };
+    });
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
+      html: "<main />",
+    });
+    const events: WebviewWindowEventMap["visibleChange"][] = [];
+    const unlisten = webviewWindow.listen("visibleChange", ({ payload }) => {
+      events.push(payload);
+    });
+
+    await webviewWindow.show();
+    await expect(webviewWindow.isClosed()).resolves.toBe(true);
+    await expect(webviewWindow.isVisible()).resolves.toBe(false);
+    await webviewWindow.toVisible();
+    await webviewWindow.close();
+    await eventually(() => Promise.resolve(events[0]));
+    unlisten();
+
+    expect(events).toEqual([{ visible: true }]);
+    expect(
+      transport.frames
+        .flatMap((frame) =>
+          frame.type === "ext-command" && isWebviewCommand(frame.data)
+            ? [frame.data.type]
+            : []
+        )
+    ).toEqual(
+      expect.arrayContaining([
+        "show",
+        "isClosed",
+        "isVisible",
+        "toVisible",
+        "close",
+        "drainWindowEvents",
+      ])
+    );
+  });
+
   it("keeps attachWebview on the legacy webview mount and auto-loads once", async () => {
     const transport = new RecordingTransport();
     const tray = createTrayHandle(transport, "app-1", "tray-1");
@@ -2058,6 +2113,15 @@ describe("@opentray/ext-webview", () => {
     expectTypeOf<WebviewNavigatorWindow["hide"]>().returns.toEqualTypeOf<
       Promise<WebviewWindowState>
     >();
+    expectTypeOf<WebviewNavigatorWindow["isClosed"]>().returns.toEqualTypeOf<
+      Promise<boolean>
+    >();
+    expectTypeOf<WebviewNavigatorWindow["isVisible"]>().returns.toEqualTypeOf<
+      Promise<boolean>
+    >();
+    expectTypeOf<WebviewNavigatorWindow["toVisible"]>().returns.toEqualTypeOf<
+      Promise<void>
+    >();
     expectTypeOf<
       Parameters<WebviewNavigatorWindow["listen"]>[0]
     >().toMatchTypeOf<string>();
@@ -2081,6 +2145,9 @@ describe("@opentray/ext-webview", () => {
       filename: string;
       suggestedFilename: string | null;
       success: boolean;
+    }>();
+    expectTypeOf<WebviewWindowEventMap["visibleChange"]>().toEqualTypeOf<{
+      visible: boolean;
     }>();
     expectTypeOf<WebviewPermissionStore["namespace"]>().toEqualTypeOf<string>();
     expect(webviewBrowserPermissionFamilies).toContain("camera");

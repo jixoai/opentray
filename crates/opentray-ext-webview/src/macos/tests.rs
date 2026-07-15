@@ -205,6 +205,9 @@ fn navigator_window_script_exposes_tauri_like_async_methods() {
     assert!(script.contains("close()"));
     assert!(script.contains("show()"));
     assert!(script.contains("hide()"));
+    assert!(script.contains("isClosed()"));
+    assert!(script.contains("isVisible()"));
+    assert!(script.contains("toVisible()"));
     assert!(script.contains("minimize()"));
     assert!(script.contains("maximize()"));
     assert!(script.contains("restore()"));
@@ -427,6 +430,34 @@ window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(hideRequest.callback, {
 });
 const hidden = await hidePromise;
 
+const isClosedPromise = navigator.opentrayWindow.isClosed();
+const isClosedRequest = takeMessage("isClosed");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(isClosedRequest.callback, false);
+const isClosed = await isClosedPromise;
+
+const isVisiblePromise = navigator.opentrayWindow.isVisible();
+const isVisibleRequest = takeMessage("isVisible");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(isVisibleRequest.callback, true);
+const isVisible = await isVisiblePromise;
+
+const toVisiblePromise = navigator.opentrayWindow.toVisible();
+const toVisibleRequest = takeMessage("toVisible");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(toVisibleRequest.callback, null);
+await toVisiblePromise;
+
+let visibleChange = null;
+navigator.opentrayWindow.addEventListener("visibleChange", (event) => {
+  visibleChange = event.payload.visible;
+});
+const visibleListenRequest = takeMessage("listen");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(visibleListenRequest.callback, { eventId: 8 });
+await Promise.resolve();
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(visibleListenRequest.payload.handler, {
+  event: "visibleChange",
+  id: 8,
+  payload: { visible: false }
+});
+
 const minimizePromise = navigator.opentrayWindow.minimize();
 const minimizeRequest = takeMessage("minimize");
 window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(minimizeRequest.callback, {
@@ -482,6 +513,12 @@ return {
   shownVisible: shown.visible,
   hideCmd: hideRequest.cmd,
   hiddenVisible: hidden.visible,
+  isClosedCmd: isClosedRequest.cmd,
+  isClosed,
+  isVisibleCmd: isVisibleRequest.cmd,
+  isVisible,
+  toVisibleCmd: toVisibleRequest.cmd,
+  visibleChange,
   minimizeCmd: minimizeRequest.cmd,
   minimizedState: minimized.state,
   maximizeCmd: maximizeRequest.cmd,
@@ -512,6 +549,21 @@ return {
     assert_eq!(runtime["shownVisible"], Value::Bool(true));
     assert_eq!(runtime["hideCmd"], Value::String("hide".to_string()));
     assert_eq!(runtime["hiddenVisible"], Value::Bool(false));
+    assert_eq!(
+        runtime["isClosedCmd"],
+        Value::String("isClosed".to_string())
+    );
+    assert_eq!(runtime["isClosed"], Value::Bool(false));
+    assert_eq!(
+        runtime["isVisibleCmd"],
+        Value::String("isVisible".to_string())
+    );
+    assert_eq!(runtime["isVisible"], Value::Bool(true));
+    assert_eq!(
+        runtime["toVisibleCmd"],
+        Value::String("toVisible".to_string())
+    );
+    assert_eq!(runtime["visibleChange"], Value::Bool(false));
     assert_eq!(
         runtime["minimizeCmd"],
         Value::String("minimize".to_string())

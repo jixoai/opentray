@@ -99,6 +99,7 @@ macOS support includes:
 - titlebar overlay geometry through `navigator.opentrayWindow.overlay`
 - native app-region dragging through `startAppRegionDrag()`
 - minimize, maximize, and restore window-state controls
+- operational visibility through `isClosed()`, `isVisible()`, `toVisible()`, and `visibleChange`
 - adjustable native window-frame corner radius through `style.platform.macos.cornerRadius`
 - native title and icon state
 - declarative `document.title` / native-title synchronization
@@ -112,7 +113,7 @@ Windows support includes:
 - visible WebView2-backed windows through Wry
 - `show`, `hide`, `destroy`, `setContent`, `navigate`, `evaluate`, and `postMessage`
 - `navigator.window` / `navigator.opentrayWindow` bridge injection with source-scoped `nativeApiPolicy`
-- `close`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, and `isMinimized`
+- `close`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isClosed`, `isVisible`, `toVisible`, `isMaximized`, and `isMinimized`
 - `getStyle` / `setStyle` for common `frameless`, `resizable`, `background`, `keepOnTop`, and `opacity`
 - `windowControlsOverlay` geometry, Windows caption-button `backgroundColor` / `symbolColor`, `startAppRegionDrag()`, and subscription-driven bridge events
 - title sync and native window/taskbar icon projection for RGBA icons, local icon files, and PNG data URLs
@@ -143,6 +144,8 @@ For glass or blur-style surfaces, two things must line up at once:
 ### Frameless Resize And Native Scrollbars
 
 On Windows, a regular Chromium vertical scrollbar coexists with the `right` and `bottomRight` soft-resize gestures of a frameless WebView. The injected capture-phase detector measures the six-CSS-pixel edge band against `window.innerWidth`, then the native HWND owns the resize interaction. A normal page scrollbar does not require a reserved outer gutter or a custom scrollbar for right-edge resizing to work.
+
+During that soft-resize interaction the runtime only updates the HWND/WebView bounds and repaints in place. It never applies the Windows transparent white-block reset because that reset changes shell state and would terminate pointer capture. Frameless `WM_NCCALCSIZE` handling owns every message form, so resize, minimize, and restore do not reintroduce a native titlebar.
 
 An application may still make its scrolling container narrower than the viewport, or use a custom/overlay scrollbar, when its own edge controls or layout must avoid the reserved six-pixel resize band. That is a product layout choice, not an OpenTray workaround for normal native scrollbars. Smoke-test nonstandard page hit testing and scrollbar implementations with the target interaction.
 
@@ -257,6 +260,7 @@ Window session law:
 - the first `show(...)` for a tray creates the native window session
 - `hide()` only hides that session; it does not destroy the page runtime
 - after the first successful show, `show()` restores visibility and does not replay bootstrap width, height, style, content, or native API flags
+- `visible` means the session is neither closed/hidden nor minimized; use `isClosed()` and `isVisible()` to query those facts, and use `toVisible()` to show a hidden session or restore a minimized session without rebuilding it
 - explicit content replacement belongs to `setContent({ type: "setContent", html | url })` or `navigate(url)`
 - explicit size and style changes belong to `resizeTo(...)`, `moveTo(...)`, `setStyle(...)`, `setBackground(...)`, `setMinimumSize(...)`, and `setMaximumSize(...)`
 - explicit session teardown belongs to `destroy()`
@@ -328,6 +332,7 @@ The injected capability follows a typed facade, with a raw `invoke(cmd, payload)
 - `await navigator.window.getCapabilities()`
 - `await navigator.window.listen("resized", handler)`
 - `await navigator.window.show()` and `await navigator.window.hide()` to control visibility without replacing content
+- `await navigator.window.isClosed()`, `isVisible()`, and `toVisible()` for operational tray visibility
 - `await navigator.window.resizeTo(520, 320)`
 - `await navigator.window.minimize()`, `maximize()`, and `restore()`
 - `await navigator.window.getWindowState()`, `isMaximized()`, and `isMinimized()`
@@ -347,6 +352,8 @@ From the host side, keep the lifecycle verbs explicit:
 - `await webview.show({ ... })` to create-or-show the tray session
 - `await webview.show()` to restore an already-created session without resetting page, size, style, or native bridge state
 - `await webview.hide()` to hide without destroying the page runtime
+- `await webview.close()` to close/hide the retained session, or `await webview.toVisible()` to reveal or restore it
+- `await webview.isClosed()` / `await webview.isVisible()` when a tray menu needs one operational Show/Hide predicate
 - `await webview.setContent({ type: "setContent", html })` to replace local HTML content explicitly
 - `await webview.navigate("https://example.com/status")` as the URL-focused content replacement alias
 - `await webview.resizeTo(360, 240)` and `await webview.moveTo(10, 20)` for host-owned geometry changes
@@ -431,7 +438,8 @@ Common event names:
 - `stylechange`: emitted after `setStyle(...)` changes the native style state
 - `titlechange`: emitted after `setTitle(...)` or enabled document-title sync changes native title state
 - `iconchange`: emitted after `setIcon(...)` or enabled favicon sync changes native icon state
-- `windowstatechange`: emitted after `minimize()`, `maximize()`, or `restore()`
+- `windowstatechange`: emitted after page visibility and standard state commands
+- `visibleChange`: emitted only when operational visibility changes between visible and closed/hidden or minimized
 - `moved` / `resized`: emitted after extension-owned move or resize requests
 - `overlay.geometrychange`: emitted through `navigator.opentrayWindow.overlay.listen("geometrychange", ...)`
 

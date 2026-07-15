@@ -387,6 +387,15 @@ pub(crate) fn navigator_window_bootstrap_script(
         hide() {
           return invoke("hide");
         },
+        isClosed() {
+          return invoke("isClosed");
+        },
+        isVisible() {
+          return invoke("isVisible");
+        },
+        toVisible() {
+          return invoke("toVisible");
+        },
         minimize() {
           return invoke("minimize");
         },

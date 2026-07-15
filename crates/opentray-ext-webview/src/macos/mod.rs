@@ -41,8 +41,9 @@ use crate::{
 
 use self::app_menu::ensure_standard_edit_menu;
 use self::bridge::{
-    apply_window_size_constraint_options, apply_window_style_patch, emit_window_event,
-    handle_navigator_window_request, window_bounds_json, SizeConstraintKind,
+    apply_window_size_constraint_options, apply_window_style_patch, close_window,
+    emit_visible_change_if_needed, emit_window_event, emit_window_state_change,
+    handle_navigator_window_request, to_visible, window_bounds_json, SizeConstraintKind,
 };
 use self::demo_html::default_webview_html;
 use self::downloads::{install_download_navigation_delegate, DownloadNavigationDelegate};
@@ -59,6 +60,7 @@ use self::style::{
     apply_window_style, framed_window_style_mask, supported_background_effects,
     validate_initial_style, WindowStyleState,
 };
+use self::window_state::{window_is_closed, window_is_visible};
 use crate::bootstrap::navigator_window_bootstrap_script;
 
 const WINDOW_NAMESPACE: &str = "opentray.window";
@@ -217,6 +219,12 @@ impl MacosWebviewRuntime {
                 fallback_rect,
                 show_settings,
             } => {
+                let was_visible = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .map(|slot| window_is_visible(&slot.window))
+                    .unwrap_or(false);
                 self.ensure_slot(
                     tray_id,
                     html,
@@ -227,11 +235,24 @@ impl MacosWebviewRuntime {
                     show_settings,
                 )?;
                 self.focus()?;
+                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
+                    emit_visible_change_if_needed(&slot.bridge, &slot.window, was_visible)?;
+                }
                 Ok(json!({ "type": "shown" }))
             }
             WebviewCommand::Hide => {
-                self.hide(tray_id)?;
+                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
+                    let was_visible = window_is_visible(&slot.window);
+                    slot.window.orderOut(None);
+                    emit_visible_change_if_needed(&slot.bridge, &slot.window, was_visible)?;
+                }
                 Ok(json!({ "type": "hidden" }))
+            }
+            WebviewCommand::Close => {
+                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
+                    close_window(&slot.bridge, &slot.window)?;
+                }
+                Ok(json!({ "type": "closed" }))
             }
             WebviewCommand::Destroy => {
                 self.destroy_slot(tray_id);
@@ -298,6 +319,45 @@ impl MacosWebviewRuntime {
                 emit_window_event(&slot.bridge, "resized", response.clone())?;
                 emit_overlay_geometry_change_if_enabled(&slot.bridge, &slot.window)?;
                 Ok(response)
+            }
+            WebviewCommand::IsClosed => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "isClosed requires an active WebView window".into(),
+                        )
+                    })?;
+                Ok(Value::Bool(window_is_closed(&slot.window)))
+            }
+            WebviewCommand::IsVisible => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "isVisible requires an active WebView window".into(),
+                        )
+                    })?;
+                Ok(Value::Bool(window_is_visible(&slot.window)))
+            }
+            WebviewCommand::ToVisible => {
+                let slot = self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .ok_or_else(|| {
+                        WebviewRuntimeError::Rejected(
+                            "toVisible requires an active WebView window".into(),
+                        )
+                    })?;
+                let was_visible = window_is_visible(&slot.window);
+                to_visible(&slot.window);
+                emit_window_state_change(&slot.bridge, &slot.window, was_visible)?;
+                Ok(Value::Null)
             }
             WebviewCommand::GetBounds => {
                 let slot = self
@@ -802,20 +862,12 @@ impl MacosWebviewRuntime {
             #[allow(deprecated)]
             app.activateIgnoringOtherApps(true);
             focus_webview_responder(&slot.window, slot.webview.as_ref());
+            if slot.window.isMiniaturized() {
+                slot.window.deminiaturize(None);
+            }
             slot.window.makeKeyAndOrderFront(None);
             slot.window.orderFrontRegardless();
         }
-        Ok(())
-    }
-
-    fn hide(&mut self, tray_id: &str) -> Result<(), WebviewRuntimeError> {
-        let Some(slot) = self.slot.as_ref() else {
-            return Ok(());
-        };
-        if slot.tray_id != tray_id {
-            return Ok(());
-        }
-        slot.window.orderOut(None);
         Ok(())
     }
 

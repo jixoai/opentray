@@ -18,7 +18,7 @@ use super::{
     overlay::{emit_overlay_geometry_change_if_enabled, titlebar_area_rect_json},
     screen::screen_details_json,
     style::{apply_window_style, normalize_corner_radius, validate_style_request, SetStylePayload},
-    window_state::window_state_json,
+    window_state::{window_is_closed, window_is_visible, window_state_json},
     NavigatorWindowBridge, WindowSizeConstraints, COMMAND_NAMESPACE, PAGE_IPC_NAMESPACE,
     PERMISSIONS_NAMESPACE, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE,
     WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
@@ -332,52 +332,57 @@ fn dispatch_navigator_window_command(
             Ok(Value::Null)
         }
         "close" => {
-            emit_window_event(bridge, "closed", json!({ "visible": false }))?;
-            bridge.borrow_mut().app_region_drag.stop();
-            window.orderOut(None);
+            close_window(bridge, window)?;
             Ok(Value::Null)
         }
         "show" => {
-            window.makeKeyAndOrderFront(None);
-            let response = window_state_json(window)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            let was_visible = window_is_visible(window);
+            to_visible(window);
+            let response = emit_window_state_change(bridge, window, was_visible)?;
             emit_overlay_geometry_change_if_enabled(bridge, window)?;
             Ok(response)
         }
         "hide" => {
+            let was_visible = window_is_visible(window);
             window.orderOut(None);
-            let response = window_state_json(window)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
-            Ok(response)
+            emit_window_state_change(bridge, window, was_visible)
         }
         "minimize" => {
+            let was_visible = window_is_visible(window);
             window.miniaturize(None);
-            let response = window_state_json(window)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
-            Ok(response)
+            emit_window_state_change(bridge, window, was_visible)
         }
         "maximize" => {
+            let was_visible = window_is_visible(window);
             if !window.isZoomed() {
                 window.zoom(None);
             }
-            let response = window_state_json(window)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            let response = emit_window_state_change(bridge, window, was_visible)?;
             emit_overlay_geometry_change_if_enabled(bridge, window)?;
             Ok(response)
         }
         "restore" => {
+            let was_visible = window_is_visible(window);
             if window.isMiniaturized() {
                 window.deminiaturize(None);
             }
             if window.isZoomed() {
                 window.zoom(None);
             }
-            let response = window_state_json(window)?;
-            emit_window_event(bridge, "windowstatechange", response.clone())?;
+            let response = emit_window_state_change(bridge, window, was_visible)?;
             emit_overlay_geometry_change_if_enabled(bridge, window)?;
             Ok(response)
         }
         "getWindowState" => window_state_json(window),
+        "isClosed" => Ok(Value::Bool(window_is_closed(window))),
+        "isVisible" => Ok(Value::Bool(window_is_visible(window))),
+        "toVisible" => {
+            let was_visible = window_is_visible(window);
+            to_visible(window);
+            emit_window_state_change(bridge, window, was_visible)?;
+            emit_overlay_geometry_change_if_enabled(bridge, window)?;
+            Ok(Value::Null)
+        }
         "isMaximized" => Ok(Value::Bool(window.isZoomed() && !window.isMiniaturized())),
         "isMinimized" => Ok(Value::Bool(window.isMiniaturized())),
         "getBounds" => window_bounds_json(window),
@@ -483,6 +488,52 @@ fn dispatch_navigator_window_command(
             "unsupported navigator window command: {other}"
         ))),
     }
+}
+
+pub(super) fn to_visible(window: &Retained<NSWindow>) {
+    if window.isMiniaturized() {
+        window.deminiaturize(None);
+    }
+    window.makeKeyAndOrderFront(None);
+}
+
+pub(super) fn emit_window_state_change(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    window: &Retained<NSWindow>,
+    was_visible: bool,
+) -> Result<Value, WebviewRuntimeError> {
+    let response = window_state_json(window)?;
+    emit_window_event(bridge, "windowstatechange", response.clone())?;
+    emit_visible_change_if_needed(bridge, window, was_visible)?;
+    Ok(response)
+}
+
+pub(super) fn emit_visible_change_if_needed(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    window: &Retained<NSWindow>,
+    was_visible: bool,
+) -> Result<(), WebviewRuntimeError> {
+    let visible = window_is_visible(window);
+    if visible == was_visible {
+        return Ok(());
+    }
+    let payload = json!({ "visible": visible });
+    bridge
+        .borrow_mut()
+        .window_events
+        .push_back(super::window_event_payload("visibleChange", &payload));
+    emit_window_event(bridge, "visibleChange", payload)
+}
+
+pub(super) fn close_window(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    window: &Retained<NSWindow>,
+) -> Result<(), WebviewRuntimeError> {
+    let was_visible = window_is_visible(window);
+    bridge.borrow_mut().app_region_drag.stop();
+    window.orderOut(None);
+    emit_window_event(bridge, "closed", json!({ "visible": false }))?;
+    emit_visible_change_if_needed(bridge, window, was_visible)
 }
 
 pub(super) fn parse_set_icon_payload(

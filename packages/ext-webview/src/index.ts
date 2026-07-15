@@ -255,6 +255,11 @@ export interface WebviewWindowState {
   state: WebviewWindowStateKind;
   minimized: boolean;
   maximized: boolean;
+  /** True only when the session is neither closed/hidden nor minimized. */
+  visible: boolean;
+}
+
+export interface WebviewWindowVisibilityChange {
   visible: boolean;
 }
 
@@ -318,6 +323,7 @@ export interface WebviewDownloadCompleted extends WebviewDownloadStarted {
 
 export interface WebviewWindowEventMap {
   closed: { visible: false };
+  visibleChange: WebviewWindowVisibilityChange;
   focus: WebviewWindowFocusChange;
   blur: WebviewWindowFocusChange;
   moved: WebviewWindowPositionChange;
@@ -373,6 +379,9 @@ export interface WebviewNavigatorWindow {
   close(): Promise<void>;
   show(): Promise<WebviewWindowState>;
   hide(): Promise<WebviewWindowState>;
+  isClosed(): Promise<boolean>;
+  isVisible(): Promise<boolean>;
+  toVisible(): Promise<void>;
   minimize(): Promise<WebviewWindowState>;
   maximize(): Promise<WebviewWindowState>;
   restore(): Promise<WebviewWindowState>;
@@ -504,6 +513,7 @@ export interface WebviewNavigatorIpc {
 export type WebviewCommand =
   | WebviewShowCommand
   | { type: "hide" }
+  | { type: "close" }
   | { type: "destroy" }
   | WebviewSetContentCommand
   | { type: "navigate"; url: string }
@@ -511,6 +521,9 @@ export type WebviewCommand =
   | { type: "postMessage"; payload: unknown }
   | { type: "moveTo"; x: number; y: number }
   | { type: "resizeTo"; width: number; height: number }
+  | { type: "isClosed" }
+  | { type: "isVisible" }
+  | { type: "toVisible" }
   | { type: "getBounds" }
   | { type: "getScreenDetails" }
   | { type: "drainIpcMessages" }
@@ -586,7 +599,11 @@ export interface WebviewWindowHandle {
   readonly devtools: WebviewWindowDevtools;
   show(command?: Partial<WebviewWindowOptions>): Promise<void>;
   hide(): Promise<void>;
+  close(): Promise<void>;
   destroy(): Promise<void>;
+  isClosed(): Promise<boolean>;
+  isVisible(): Promise<boolean>;
+  toVisible(): Promise<void>;
   moveTo(x: number, y: number): Promise<void>;
   resizeTo(width: number, height: number): Promise<void>;
   getBounds(): Promise<Rect>;
@@ -661,6 +678,7 @@ const WINDOW_EVENT_POLL_INTERVAL_MS = 16;
 const POLLED_WINDOW_EVENTS = new Set([
   "focus",
   "blur",
+  "visibleChange",
   "windowinteractionchange",
   "downloadstarted",
   "downloadprogress",
@@ -1000,6 +1018,9 @@ const createWebviewWindowHandle = (
     hide() {
       return endpoint.command<void>({ type: "hide" } satisfies WebviewCommand);
     },
+    close() {
+      return endpoint.command<void>({ type: "close" } satisfies WebviewCommand);
+    },
     async destroy() {
       await endpoint.command<void>({
         type: "destroy",
@@ -1009,6 +1030,21 @@ const createWebviewWindowHandle = (
         clearInterval(permissionPoll);
         permissionPoll = undefined;
       }
+    },
+    isClosed() {
+      return endpoint.command<boolean>({
+        type: "isClosed",
+      } satisfies WebviewCommand);
+    },
+    isVisible() {
+      return endpoint.command<boolean>({
+        type: "isVisible",
+      } satisfies WebviewCommand);
+    },
+    toVisible() {
+      return endpoint.command<void>({
+        type: "toVisible",
+      } satisfies WebviewCommand);
     },
     moveTo(x, y) {
       return endpoint.command<void>({

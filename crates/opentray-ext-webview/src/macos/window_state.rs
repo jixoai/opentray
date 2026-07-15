@@ -36,8 +36,16 @@ pub(super) fn window_state_snapshot(window: &Retained<NSWindow>) -> WindowStateS
         state,
         minimized,
         maximized,
-        visible: window.isVisible(),
+        visible: window_is_visible(window),
     }
+}
+
+pub(super) fn window_is_closed(window: &Retained<NSWindow>) -> bool {
+    !window.isVisible()
+}
+
+pub(super) fn window_is_visible(window: &Retained<NSWindow>) -> bool {
+    !window_is_closed(window) && !window.isMiniaturized()
 }
 
 pub(super) fn window_state_json(window: &Retained<NSWindow>) -> Result<Value, WebviewRuntimeError> {
