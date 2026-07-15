@@ -81,7 +81,7 @@ Transparent white-block cleanup remains available for ordinary native resize and
 
 ### Requirement: WebView tray-primary examples SHALL project operational visibility
 
-Every runnable CLI example that owns a retained `WebviewWindowHandle` SHALL declare one `primaryEvent` menu item. The item SHALL read `Show Example` while the retained session is not operationally visible and `Hide Example` while it is visible. Its handler SHALL use `show()` only to bootstrap the first native session, `toVisible()` to reveal an existing hidden or minimized session, and `close()` to hide the retained session. The example SHALL subscribe to `visibleChange` and update the menu from that event so page/native visibility changes cannot leave a stale action label.
+Every runnable CLI example that owns a retained `WebviewWindowHandle` SHALL declare one `primaryEvent` menu item. The item SHALL read `Show Example` while the retained session is not operationally visible and `Hide Example` while it is visible. Its handler SHALL use `show()` only to bootstrap the first native session, `toVisible()` to reveal an existing hidden or minimized session, and `close()` to hide the retained session. The example SHALL subscribe to `visibleChange` and update the menu from that event so page/native visibility changes cannot leave a stale action label. It SHALL register that listener only after the first successful `show()` creates the native session, and it SHALL stop the listener before closing its tray/runtime connection.
 
 #### Scenario: A primary tray action reveals and hides one retained example window
 
@@ -93,6 +93,14 @@ Every runnable CLI example that owns a retained `WebviewWindowHandle` SHALL decl
 - **AND** the primary item changes to `Show Example`
 - **WHEN** the operator activates `Show Example` again
 - **THEN** the example calls `toVisible()` on the retained session instead of recreating content or replaying bootstrap options.
+
+#### Scenario: An example listener does not outlive its native session
+
+- **GIVEN** a WebView example has constructed a retained handle but has not shown it yet
+- **WHEN** it performs the first successful `show()`
+- **THEN** it registers `visibleChange` and any other native window listener after that native session exists
+- **AND** it stops every returned listener, destroys the native session, and then closes the runtime
+- **AND** no extension command is sent before the native session exists or after the connection ends.
 
 ### Requirement: Windows frameless artifact clear SHALL occur after safe terminal transitions
 

@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 4
-- Status: primary visibility implementation verified; listener lifecycle is now an explicit native-session law.
-- Previous plan backup: `plans/plan-v3.md`
+- Round: 3
+- Status: extend accepted WebView window laws with primary visibility toggles and post-completion frameless rendering-artifact cleanup.
+- Previous plan backup: `plans/plan-v2.md`
 
 ## Workflow Command Surface
 
@@ -58,7 +58,6 @@
 | `packages/cli/examples/*.ts` | Several WebView examples only show a panel or keep a local visibility boolean; others have no primary item. | Examples do not yet teach one retained-session Show/Hide pattern. |
 | `pnpm-pub/src/daemon/tray-host.ts` | Its primary menu item relabels to the action it will perform. | Reuse the operator-facing menu rule, but project visibility through the public WebView APIs. |
 | `crates/opentray-ext-webview/src/windows/mod.rs` | Automatic artifact clear is background-gated and soft resize deliberately skips it while capture is active. | Generalize the post-completion predicate so frameless opaque windows clean after entry/resize without regressing capture. |
-| Windows source smoke | A `WebviewWindowHandle.listen(...)` call before first `show()` is rejected because no native session exists; leaving a listener active after runtime shutdown writes to a closed broker connection. | Register native window listeners after first show, stop them before teardown, then destroy the native session before closing the runtime. |
 | `crates/opentray-ext-webview/src/windows/mod.rs` | The existing state snapshot exposes raw native visibility, while minimization is separate. | Public `visible` needs a deliberate semantic projection instead of raw `IsWindowVisible`. |
 | `crates/opentray-ext-webview/src/bootstrap.rs` and `packages/ext-webview/src/index.ts` | Page and host APIs are separately typed and command-backed; event subscriptions already exist. | Visibility remains an extension-owned, cross-platform facade contract. |
 | `openspec/changes/archive/2026-06-20-tray-dynamic-state-and-webview-placement-kit` | WebView show/hide and resize cleanup are existing extension laws. | Extend the same atom; do not introduce a core/runtime special case. |
@@ -118,8 +117,6 @@ The native layer must stop using a compositor workaround as a general window-sta
 On Windows, a frameless WebView remains free of native titlebar/frame pixels after resize, minimize, restore, hide, and show. Dragging any supported soft-resize edge continuously tracks the pointer without flicker. A tray host can ask one `isVisible()` question, render Show or Hide accurately, call `toVisible()` to reveal a hidden/minimized window, and receive `visibleChange` only when that operational state changes.
 
 Every runnable source WebView example exposes that same operation through its primary tray item: `Show Example` when the retained session is not operationally visible, `Hide Example` when it is. On Windows, a frameless window clears rendering residue after it becomes visible and after a successful soft-resize interaction releases capture.
-
-Examples create native window event listeners only after first show and tear down in this order: unlisten, destroy the retained native session, then close the runtime and Vite server. No example leaves a broker poller or HWND behind after automatic smoke exit.
 
 ## Platform Diagnosis
 
