@@ -41,12 +41,22 @@ Visibility commands, state projection, and page bridge injection SHALL remain in
 
 For a Windows WebView whose effective style is frameless, every `WM_NCCALCSIZE` path SHALL expose the full host rectangle as client area. The result SHALL NOT depend on the message `wParam` form. Frameless style projection SHALL continue to remove `WS_THICKFRAME` and disable DWM non-client rendering.
 
+The host SHALL apply its DWM non-client policy and DWM client-surface attributes before its final `SetWindowPos(..., SWP_FRAMECHANGED, ...)` recalculation. That recalculation SHALL preserve z-order, position, size, and shell visibility state. The host SHALL NOT depend on a synthetic resize, minimize, restore, hide/show, or window rebuild to remove native titlebar pixels.
+
 #### Scenario: A frameless window survives a non-client recalculation
 
 - **GIVEN** a Windows WebView window has `style.frameless: true`
 - **WHEN** Win32 recalculates non-client geometry during style, resize, minimize, or restore handling
 - **THEN** the native titlebar/frame is not reintroduced into the client projection
 - **AND** the page still reaches the host outer edges.
+
+#### Scenario: A frameless style change repaints native chrome without a shell-state reset
+
+- **GIVEN** a Windows WebView transitions to `style.frameless: true`
+- **WHEN** the host applies the native window style
+- **THEN** DWM non-client rendering is disabled before the final frame recalculation
+- **AND** no minimize, restore, hide/show, synthetic resize, or host rebuild occurs
+- **AND** residual native titlebar pixels are not visible after the transition.
 
 ### Requirement: Windows frameless soft resize SHALL not change shell state
 

@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 2
-- Status: reopened by Windows visual acceptance; soft resize is accepted, but frameless still leaves residual native titlebar pixels.
-- Previous plan backup: `plans/plan-v1.md`
+- Round: 1
+- Status: researched, ready for specification
+- Previous plan backup: none
 
 ## Workflow Command Surface
 
@@ -28,8 +28,6 @@
 > 3. 如果你同意 visible 这套提案，那么是实现后， pnpm-pub 这里需要适配：托盘这里在判断 Show window|hide Window，底层全部改成 visible 系列的能力：show window 就是调用 toVisible， hide window和原来一样，调用close
 > 4. 如果不同意或者觉得有歧义，请先进行讨论
 
-> resize正常了，但是仍然有native-titlebar
-
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -40,7 +38,6 @@
 | 2026-07-15 | User | Frameless `resizable: true` must resize continuously without flicker. | Soft-resize may not invoke shell-state white-block clearing. |
 | 2026-07-15 | User | `visible` is the product state formed from closed plus minimized, with `toVisible()` rather than a general setter. | Add typed host/page visibility queries and a transition-only command. |
 | 2026-07-15 | User | pnpm-pub tray Show/Hide must use the new visibility model. | Consumer adaptation is a required follow-up after OpenTray publishes the public API. |
-| 2026-07-15 | User | Frameless soft resize is now normal, but native titlebar residue remains. | Reopen the non-client projection task without changing the accepted soft-resize path. |
 
 ### Evidence Read
 
@@ -48,8 +45,6 @@
 | ------ | ---- | -------------- |
 | `crates/opentray-ext-webview/src/windows/mod.rs` | Frameless windows return full client area only when `WM_NCCALCSIZE.wParam != 0`. | The `wParam == 0` path can retain native non-client/titlebar geometry. |
 | `crates/opentray-ext-webview/src/windows/mod.rs` | Soft resize starts `WindowProcSizeMoveInteraction`; its `WM_SIZE` cleanup runs `SW_SHOWMINNOACTIVE -> SW_RESTORE`. | That shell transition can revoke mouse capture and restore a minimized frameless window. |
-| `crates/opentray-ext-webview/src/windows/mod.rs` | `apply_native_window_style` applies `SWP_FRAMECHANGED` before DWM non-client policy and DWM client attributes. | The compositor can retain prior native titlebar pixels until a later native resize causes another redraw. |
-| Windows user acceptance | Continuous frameless resize now works; residual native titlebar remains. | The diagnosis is narrowed to initial/state-change non-client projection, not soft-resize capture. |
 | `crates/opentray-ext-webview/src/windows/mod.rs` | The existing state snapshot exposes raw native visibility, while minimization is separate. | Public `visible` needs a deliberate semantic projection instead of raw `IsWindowVisible`. |
 | `crates/opentray-ext-webview/src/bootstrap.rs` and `packages/ext-webview/src/index.ts` | Page and host APIs are separately typed and command-backed; event subscriptions already exist. | Visibility remains an extension-owned, cross-platform facade contract. |
 | `openspec/changes/archive/2026-06-20-tray-dynamic-state-and-webview-placement-kit` | WebView show/hide and resize cleanup are existing extension laws. | Extend the same atom; do not introduce a core/runtime special case. |
@@ -58,7 +53,7 @@
 
 | Checkpoint | Expected commit evidence | Current status |
 | ---------- | ------------------------ | -------------- |
-| OpenSpec rework artifacts before reapply | Commit containing the reopened `plans/plan.md`, specs, and `tasks.md` before correcting native projection | pending |
+| OpenSpec artifacts before apply | Commit containing `plans/plan.md`, specs, and `tasks.md` before product-code work starts | pending |
 | Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | pending |
 | Self-review updates | Commit containing review output before archive | pending |
 | Normal archive | Commit containing archived OpenSpec result | pending after acceptance |
@@ -133,19 +128,6 @@ No ShowWindow state change occurs during this interaction.
 ```
 
 ```text
-SetWindowLongPtr(style/ex-style)
-        |
-        v
-apply DWM non-client policy + DWM host attributes
-        |
-        v
-SetWindowPos(SWP_FRAMECHANGED, no move, no size, no shell state change)
-        |
-        v
-WM_NCCALCSIZE returns full client area for frameless
-```
-
-```text
 closed/hidden ----- toVisible() -----> shown
 minimized --------- toVisible() -----> restored
 shown ------------- toVisible() -----> unchanged
@@ -190,7 +172,6 @@ No `opentray-core` branch, broker special case, or consumer-specific behavior is
 - [ ] 5. Implement Windows repair and cross-platform visibility contract.
 - [ ] 6. Adapt pnpm-pub after the OpenTray package is published.
 - [ ] 7. Verify, self-review, and obtain human Windows acceptance before release/archive.
-- [ ] 8. Reapply DWM non-client policy and related DWM attributes before one final non-shell frame recalculation, then obtain renewed Windows visual acceptance.
 
 ## Open Questions
 
@@ -203,12 +184,11 @@ No `opentray-core` branch, broker special case, or consumer-specific behavior is
 | Path | Why rejected |
 | ---- | ------------ |
 | Keep shell-state white-block clear in soft resize with stronger capture recovery | The workaround changes the very native state the resize interaction depends on and causes flicker. |
-| Clear the residual titlebar through minimize/restore or a synthetic resize | It hides a stale compositor projection by changing shell state, regresses frameless behavior, and cannot be the normal style-application path. |
 | Make `visible` a mutable boolean setter | It conflates hidden/closed and minimized states and cannot define a correct inverse transition. |
 | Move visibility into `opentray-core` | Visibility belongs to the WebView native-window capability, not generic tray state. |
 
 ## Exit Conditions
 
 - Default max review iterations: 2
-- Issue recurrence threshold: any observed titlebar residue, capture loss, or minimize failure reopens the Windows task; this round was reopened by residual native titlebar after soft-resize acceptance.
+- Issue recurrence threshold: any observed titlebar residue, capture loss, or minimize failure reopens the Windows task.
 - Custom exit condition from intent: user visually verifies `example:webview-control` frameless resize/minimize/restore and then authorizes release/pnpm-pub adaptation.
