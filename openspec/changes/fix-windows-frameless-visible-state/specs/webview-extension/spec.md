@@ -78,3 +78,40 @@ Transparent white-block cleanup remains available for ordinary native resize and
 - **WHEN** the operator or page minimizes the window
 - **THEN** it remains minimized until an explicit restore or `toVisible()`
 - **AND** no native titlebar residue is projected.
+
+### Requirement: WebView tray-primary examples SHALL project operational visibility
+
+Every runnable CLI example that owns a retained `WebviewWindowHandle` SHALL declare one `primaryEvent` menu item. The item SHALL read `Show Example` while the retained session is not operationally visible and `Hide Example` while it is visible. Its handler SHALL use `show()` only to bootstrap the first native session, `toVisible()` to reveal an existing hidden or minimized session, and `close()` to hide the retained session. The example SHALL subscribe to `visibleChange` and update the menu from that event so page/native visibility changes cannot leave a stale action label.
+
+#### Scenario: A primary tray action reveals and hides one retained example window
+
+- **GIVEN** a source WebView example has created its window handle but has not shown it yet
+- **WHEN** the operator activates `Show Example`
+- **THEN** the example bootstraps the window once and the primary item changes to `Hide Example`
+- **WHEN** the operator activates `Hide Example`
+- **THEN** the example closes the native projection without destroying the session
+- **AND** the primary item changes to `Show Example`
+- **WHEN** the operator activates `Show Example` again
+- **THEN** the example calls `toVisible()` on the retained session instead of recreating content or replaying bootstrap options.
+
+### Requirement: Windows frameless artifact clear SHALL occur after safe terminal transitions
+
+When Windows auto artifact clearing is enabled, a visible non-maximized frameless WebView SHALL run the existing rendering-artifact clear after it has been projected frameless and after a completed application-level soft-resize releases pointer capture. The cleanup applies regardless of opaque versus translucent background because native chrome residue is independent of the WebView backing family.
+
+The host SHALL NOT run the shell-state artifact clear while a frameless soft-resize interaction owns pointer capture, during a minimized state, or while maximized. It SHALL continue to use the existing background-gated behavior for framed windows.
+
+#### Scenario: Frameless entry clears opaque native-chrome residue
+
+- **GIVEN** a visible normal Windows WebView is changed to `style.frameless: true`
+- **AND** its background is opaque
+- **WHEN** the native style projection completes
+- **THEN** the runtime runs the rendering-artifact clear
+- **AND** the window remains operationally visible with no native titlebar residue.
+
+#### Scenario: Frameless soft resize clears only after capture ends
+
+- **GIVEN** a visible non-maximized frameless Windows WebView with `resizable: true`
+- **WHEN** the operator completes a soft-resize drag
+- **THEN** pointer capture is released before artifact cleanup begins
+- **AND** the runtime clears the rendering artifact after the interaction
+- **AND** no shell-state repair runs during the drag.

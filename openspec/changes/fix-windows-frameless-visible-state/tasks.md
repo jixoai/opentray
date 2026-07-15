@@ -3,6 +3,7 @@
 - [x] 1.1 Confirm `plans/plan.md` captures the 2026-07-15 user input, the Windows message-path survey, prior WebView OpenSpec law, and the accepted operational visibility model.
 - [x] 1.2 Confirm this is additive API work with no destructive migration or session reset requirement.
 - [x] 1.3 Record the renewed user visual report: soft resize is accepted, but frameless still has residual native titlebar pixels.
+- [x] 1.4 Record the primary `Show Example` / `Hide Example` requirement and safe frameless post-transition artifact-clear boundary.
 
 ## 2. BDD Contract
 
@@ -12,6 +13,7 @@
 - [x] 2.4 Add macOS bridge tests proving the page command surface remains shape-aligned with Windows; do not claim macOS visual acceptance from this Windows session.
 - [x] 2.5 Only check off a task after its code and its stated verification completed in this working context.
 - [x] 2.6 Add a native unit test for the frameless DWM non-client policy selection; retain the existing full-client and no-shell-state tests.
+- [ ] 2.7 Add native predicate tests for frameless post-transition artifact clear and TypeScript tests for dynamic primary example menus.
 
 ## 3. Implementation
 
@@ -25,6 +27,9 @@
 - [x] 3.8 Update `README.md`, WebView extension README, and relevant agent skill/reference guidance with the operational visibility and frameless laws.
 - [x] 3.9 Commit current-context task checkboxes with the matching implementation and BDD evidence.
 - [x] 3.10 Apply DWM non-client policy and DWM surface attributes before the final non-shell `SWP_FRAMECHANGED` projection; do not alter the accepted soft-resize lifecycle.
+- [ ] 3.11 Make every runnable retained-session CLI WebView example use one dynamic `Show Example` / `Hide Example` primary item backed by `isVisible`, `toVisible`, `close`, and `visibleChange`.
+- [ ] 3.12 Generalize Windows automatic artifact clearing to visible non-maximized frameless windows after style projection and after soft-resize capture release, without clearing during capture.
+- [ ] 3.13 Update ext-webview README, WebView window-pattern skill guidance, and AGENTS platform laws with the tray-primary and frameless artifact-clear practices.
 
 ## 4. Verification
 
@@ -33,6 +38,7 @@
 - [x] 4.3 Run the narrow CLI/example tests affected by the facade and documentation changes.
 - [ ] 4.4 Run `pnpm --filter opentray example:webview-control -- --frameless --resizable` as the Windows human-visible smoke path, then require renewed user acceptance that initial display, resize, minimize, and restore leave no native titlebar residue.
 - [x] 4.5 Run `bun run openspec:vision -- validate fix-windows-frameless-visible-state` and `git diff --check`.
+- [ ] 4.6 Run the focused Rust/TypeScript tests and a Windows `--frameless --resizable` source smoke; require renewed visual acceptance for primary labels and post-resize cleanup.
 
 ## 5. Consumer Release Follow-up
 
