@@ -3,11 +3,13 @@ import type { Menu } from "../src/index";
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
+  createExamplePrimaryMenu,
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
   listenWebviewIpcMessages,
   mountExampleWebview,
   shutdownWebviewExample,
+  syncExamplePrimaryMenu,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
 
@@ -34,7 +36,7 @@ const runtime = await createWebviewExampleRuntime({
       title: "OpenTray Media Query Demo",
       description: "mediaQueryKit + styleKit native window recipes",
     },
-    menu: createMenu(),
+    menu: createMenu(false),
   },
 });
 const { tray } = runtime;
@@ -57,6 +59,8 @@ const panel = webviewTray.createWebviewWindow({
 
 let panelShown = false;
 let panelBootstrapped = false;
+let visibilitySubscribed = false;
+let stopVisibleChange: (() => void) | undefined;
 let mediaWatch: Awaited<ReturnType<typeof mediaQueryKit.match>> | undefined;
 let pageMessageWatch: WebviewPageMessageWatch | undefined;
 let panelLifecycleUnlisten: (() => void) | undefined;
@@ -66,6 +70,7 @@ const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
     stopPanelWatches();
+    stopVisibleChange?.();
     try {
       await panel.destroy();
     } catch {
@@ -78,7 +83,7 @@ const lifecycle = createExampleLifecycle({
 
 tray.onMenuClick(({ itemId }) => {
   if (itemId === OPEN_ITEM_ID) {
-    void openPanel();
+    void toggleExampleVisibility();
     return;
   }
   if (itemId === QUIT_ITEM_ID) {
@@ -86,7 +91,7 @@ tray.onMenuClick(({ itemId }) => {
   }
 });
 
-console.log("Use tray menu item 'Open Media Query Kit' to review responsive native-window style.");
+console.log("Use the primary tray action to Show Example or Hide Example.");
 
 const smoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
 if (smoke === "1") {
@@ -106,6 +111,8 @@ async function openPanel(): Promise<void> {
     await panel.show({ fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 } });
     panelShown = true;
     panelBootstrapped = true;
+    subscribeVisibility();
+    await syncPrimaryMenu(true);
     await styleKit.apply(panel, {
       initWidth: PANEL_WIDTH,
       initHeight: PANEL_HEIGHT,
@@ -124,7 +131,7 @@ async function openPanel(): Promise<void> {
     return;
   }
 
-  await panel.show();
+  await panel.toVisible();
   panelShown = true;
   await startPanelWatches();
   await broadcastPanelState();
@@ -249,7 +256,7 @@ async function handlePanelIpcMessage(message: { payload: unknown }): Promise<voi
   if (payload.type === "hide") {
     stopPanelWatches();
     panelShown = false;
-    await panel.hide();
+    await panel.close();
   }
 }
 
@@ -270,14 +277,40 @@ async function broadcastPanelState(): Promise<void> {
   }
 }
 
-function createMenu(): Menu {
-  return {
-    items: [
-      { type: "item", id: OPEN_ITEM_ID, title: "Open Media Query Kit", primaryEvent: true },
-      { type: "separator" },
-      { type: "item", id: QUIT_ITEM_ID, title: "Quit Demo" },
-    ],
-  };
+async function toggleExampleVisibility(): Promise<void> {
+  if (panelBootstrapped && (await panel.isVisible())) {
+    stopPanelWatches();
+    panelShown = false;
+    await panel.close();
+    return;
+  }
+  await openPanel();
+}
+
+async function syncPrimaryMenu(visible: boolean): Promise<void> {
+  await syncExamplePrimaryMenu(tray, {
+    visible,
+    primaryItemId: OPEN_ITEM_ID,
+    trailingItems: [{ type: "separator" }, { type: "item", id: QUIT_ITEM_ID, title: "Quit Demo" }],
+  });
+}
+
+function subscribeVisibility(): void {
+  if (visibilitySubscribed) {
+    return;
+  }
+  visibilitySubscribed = true;
+  stopVisibleChange = panel.listen("visibleChange", ({ payload }) => {
+    void syncPrimaryMenu(payload.visible);
+  });
+}
+
+function createMenu(visible: boolean): Menu {
+  return createExamplePrimaryMenu({
+    visible,
+    primaryItemId: OPEN_ITEM_ID,
+    trailingItems: [{ type: "separator" }, { type: "item", id: QUIT_ITEM_ID, title: "Quit Demo" }],
+  });
 }
 
 type MediaIntent =

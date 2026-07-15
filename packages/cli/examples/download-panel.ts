@@ -16,10 +16,13 @@ import {
   startDevServer,
 } from "./_support/dev-server";
 import {
+  createExamplePrimaryMenu,
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
+  EXAMPLE_PRIMARY_ITEM_ID,
   mountExampleWebview,
   shutdownWebviewExample,
+  syncExamplePrimaryMenu,
 } from "./_support/webview-example-support";
 
 const smokeEnabled = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE === "1";
@@ -42,18 +45,28 @@ const runtime = await createWebviewExampleRuntime({
       title: "OpenTray",
       description: "WebView download lifecycle demo",
     },
-    menu: {
-      items: [{ type: "item", id: 99, title: "Quit Demo" }],
-    },
+    menu: createExamplePrimaryMenu({
+      visible: false,
+      trailingItems: [{ type: "separator" }, { type: "item", id: 99, title: "Quit Demo" }],
+    }),
   },
 });
 
 const devServer = await startDevServer("/download");
 console.log(`download panel: ${devServer.url}`);
 
+let stopVisibleChange: (() => void) | undefined;
+let stopDownloadLogging: Array<() => void> = [];
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
+    stopVisibleChange?.();
+    stopDownloadLogging.forEach((stop) => stop());
+    try {
+      await webview.destroy();
+    } catch {
+      // The session may already be gone; runtime shutdown still owns final cleanup.
+    }
     await shutdownWebviewExample(runtime, devServer);
   },
 });
@@ -88,13 +101,21 @@ const webview = mountExampleWebview(
 } satisfies WebviewWindowOptions);
 
 await webview.show();
+stopVisibleChange = webview.listen("visibleChange", ({ payload }) => {
+  void syncPrimaryMenu(payload.visible);
+});
+await syncPrimaryMenu(true);
 console.log(`panel url: ${devServer.url}`);
 console.log(
   "Use the page controls to trigger single, collision, and concurrent downloads.",
 );
 
-const unlisten = attachDownloadLogging(webview);
+stopDownloadLogging = attachDownloadLogging(webview);
 runtime.tray.onMenuClick(({ itemId }) => {
+  if (itemId === EXAMPLE_PRIMARY_ITEM_ID) {
+    void toggleExampleVisibility();
+    return;
+  }
   if (itemId === 99) {
     void lifecycle.shutdown();
   }
@@ -113,7 +134,21 @@ if (smokeEnabled) {
 }
 
 await lifecycle.wait;
-for (const stop of unlisten) stop();
+
+async function toggleExampleVisibility(): Promise<void> {
+  if (await webview.isVisible()) {
+    await webview.close();
+    return;
+  }
+  await webview.toVisible();
+}
+
+async function syncPrimaryMenu(visible: boolean): Promise<void> {
+  await syncExamplePrimaryMenu(runtime.tray, {
+    visible,
+    trailingItems: [{ type: "separator" }, { type: "item", id: 99, title: "Quit Demo" }],
+  });
+}
 
 function attachDownloadLogging(
   window: Pick<WebviewWindowHandle, "listen">,

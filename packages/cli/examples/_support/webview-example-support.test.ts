@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createExamplePrimaryMenu,
   createExampleCallerLabel,
   hasConfiguredWebviewExtensionPath,
   shutdownWebviewExample,
@@ -13,6 +14,22 @@ import {
 } from "./webview-example-support";
 
 describe("Feature: WebView example support", () => {
+  it("Scenario: Given a retained example window When operational visibility changes Then the primary menu states the next action", () => {
+    expect(createExamplePrimaryMenu({ visible: false }).items).toEqual([
+      { type: "item", id: 1, title: "Show Example", primaryEvent: true },
+    ]);
+    expect(
+      createExamplePrimaryMenu({
+        visible: true,
+        trailingItems: [{ type: "separator" }, { type: "item", id: 99, title: "Quit Demo" }],
+      }).items,
+    ).toEqual([
+      { type: "item", id: 1, title: "Hide Example", primaryEvent: true },
+      { type: "separator" },
+      { type: "item", id: 99, title: "Quit Demo" },
+    ]);
+  });
+
   it("Scenario: Given any WebView example window When defaults are applied Then devtools are always enabled", () => {
     expect(
       withExampleWebviewWindowDefaults({

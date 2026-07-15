@@ -37,6 +37,8 @@ Every WebView example is a route in a single private SvelteKit SPA at `packages/
 
 Pages are pure CSR (SSR and prerendering are off because they read `navigator.opentrayWindow`). The dev server binds to loopback only, so the native runtime classifies the page origin as `Local` and the default `nativeApiPolicy.defaultSrc: ["'local'"]` admits every capability — no per-route policy override is needed.
 
+Every runnable WebView example has one dynamic `primaryEvent` item. It reads `Show Example` while its retained window is hidden/minimized and `Hide Example` while visible. First use calls `show()`, later reveal calls `toVisible()`, hiding calls `close()`, and `visibleChange` refreshes the label. Native window listeners are installed only after first show and are removed before the example destroys its window and closes the runtime.
+
 Each example launcher (`*-panel.ts`) spawns the shared dev server via `_support/dev-server.ts`, parses the assigned port, and loads its own route through `createWebviewWindow({ url })`. Routes:
 
 | Route                 | Example launcher             |
@@ -244,7 +246,7 @@ Expected checks:
    - `background: "mica"` and `cornerPreference: "round"` on Windows
 4. `html` and `body` stay reset and transparent; padding belongs to inner content only.
 5. The panel positions from `fallbackRect: trayBounds.rect ?? ...`.
-6. Repeated tray clicks toggle the same WebView handle with `show()` / `hide()`. Because this example uses `keepOnTop`, native `blur` is logged but does not auto-hide.
+6. Repeated tray clicks toggle the same WebView handle with `toVisible()` / `close()` after the first `show()`, and the item relabels between `Show Example` and `Hide Example`. Because this example uses `keepOnTop`, native `blur` is logged but does not auto-hide.
 7. The in-page tray API returns a provenance-bearing object:
 
 ```json
@@ -267,7 +269,7 @@ pnpm --filter opentray example:debug-runtime-tray
 
 Expected checks:
 
-1. The tray exposes a single `primaryEvent` launcher item.
+1. The tray exposes a single `primaryEvent` item that relabels between `Show Example` and `Hide Example`.
 2. The runtime logs show `menuClick` when the primary action is triggered.
 3. The opened WebView uses `tray.getBounds().rect` for `fallbackRect`.
 4. The page projection `navigator.opentray.tray.getBounds()` returns the same provenance-bearing result family.

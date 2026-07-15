@@ -18,6 +18,8 @@ The WebView extension owns window protocol, native projection, page injection, a
 
 Events are subscription-driven. Do not add polling loops or unconditional page pushes for window state. If a native observer becomes necessary, install it only when a relevant listener exists and tear it down when the last listener is removed.
 
+Retained WebView tray surfaces use one `primaryEvent` item whose label states the next action: `Show Example` while `isVisible()` is false and `Hide Example` while true. Bootstrap only once with `show()`, reveal a retained hidden/minimized session with `toVisible()`, hide it with `close()`, and update the menu from `visibleChange`. Do not keep a parallel local visibility boolean.
+
 Native APIs exposed to a page are a security boundary. Keep the CSP-like `nativeApiPolicy` model: grant each capability family explicitly, keep local-only defaults for remote content, and avoid hidden broad grants.
 
 ## Maturity Truth
@@ -139,7 +141,7 @@ Windows transparent first-show law: create plain transparent WebView2 host HWNDs
 
 Windows background reset law: treat `style.background` as a host-surface family selector, not a paint-only toggle. The real families are plain opaque/transparent with `WS_EX_NOREDIRECTIONBITMAP` plus a tiny host surface fill, and material/semantic blur with the DWM redirection surface enabled. Runtime changes must be transactional and in-place: clear existing `window-vibrancy` families, clear host backdrop best-effort, set `DWMWA_SYSTEMBACKDROP_TYPE` to `DWMSBT_NONE`, update WebView backing color, apply the target host transparency/material mode, re-fit the WebView child, refresh the native surface, and restore maximized shell state if style/frame changes disturbed it. Do not rebuild the HWND/WebView pair for background changes; rebuilding while WebView2 is attached reintroduces the `tauri#10318` / `#8632` white-block artifact class. That white block is a host-window composition artifact, not a DOM repaint bug.
 
-Windows white-block reset law: do not expose white-block repair as `navigator.opentrayWindow` methods or route it through `navigator.opentray.ipc.postMessage(...)`; IPC remains app message transport. The manual page-side escape hatch is `navigator.opentray.execCommand("clearWhiteBlock")`, a fire-and-forget command channel for low-level runtime commands that do not return values and still requires the page to have window native API access. On Windows, `clearWhiteBlock` uses the proven `SW_SHOWMINNOACTIVE -> SW_RESTORE` shell-state reset, because repaint, hide/show, frame nudges, decoration nudges, and DWM cloak/uncloak did not clear the artifact reliably. The runtime may automatically apply the same reset after first show, during a native `WM_ENTERSIZEMOVE` resize with a short throttle, and after that native resize completes when auto clear is enabled and the background is transparent, semantic blur, or a platform material. Frameless application-level soft resize owns pointer capture and MUST NOT run this shell-state reset; it synchronizes bounds and repaints in place instead. Default auto clear is enabled unless `OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK=0|false|off|no`. Do not include Windows energy-saver state in this decision: it is not a stable capability predicate for visual correctness. Maximized windows are a known hard limitation: all tested shell reset variants failed to clear the maximized artifact, so automatic repair must skip maximized state instead of fighting the user with maximize/restore loops.
+Windows white-block reset law: do not expose white-block repair as `navigator.opentrayWindow` methods or route it through `navigator.opentray.ipc.postMessage(...)`; IPC remains app message transport. The manual page-side escape hatch is `navigator.opentray.execCommand("clearWhiteBlock")`, a fire-and-forget command channel for low-level runtime commands that do not return values and still requires the page to have window native API access. On Windows, `clearWhiteBlock` uses the proven `SW_SHOWMINNOACTIVE -> SW_RESTORE` shell-state reset, because repaint, hide/show, frame nudges, decoration nudges, and DWM cloak/uncloak did not clear the artifact reliably. The runtime may automatically apply the same reset after first show, during a native `WM_ENTERSIZEMOVE` resize with a short throttle, and after that native resize completes when auto clear is enabled and the background is transparent, semantic blur, or a platform material. A visible non-maximized frameless window also clears after frameless projection and after soft-resize capture is released, including opaque backing where native-chrome residue is unrelated to background family. Frameless application-level soft resize owns pointer capture and MUST NOT run this shell-state reset until that terminal completion point. Default auto clear is enabled unless `OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK=0|false|off|no`. Do not include Windows energy-saver state in this decision: it is not a stable capability predicate for visual correctness. Maximized windows are a known hard limitation: all tested shell reset variants failed to clear the maximized artifact, so automatic repair must skip maximized state instead of fighting the user with maximize/restore loops.
 
 Cross-platform command law: keep `navigator.opentray.execCommand(...)` protocol-compatible on macOS and Windows. macOS should parse and authorize the same command payloads even when a command is a Windows-only substrate repair and therefore no-ops on macOS. Do not make app IPC carry these commands, and do not expose command-specific methods on `navigator.opentrayWindow`.
 
@@ -404,8 +406,8 @@ See also:
 
 Choose one dismissal law before writing app code:
 
-- Pinned panel: set `style.keepOnTop: true`; tray primary click toggles `show()` / `hide()` on the same handle; do not blur-auto-hide.
-- Non-pinned panel: leave `keepOnTop` false; listen for native `blur` and call `hide()` when no blocking work is pending.
+- Pinned panel: set `style.keepOnTop: true`; tray primary click toggles `toVisible()` / `close()` on the same retained handle; do not blur-auto-hide.
+- Non-pinned panel: leave `keepOnTop` false; listen for native `blur` and call `close()` when no blocking work is pending.
 
 Minimal pinned-panel shape:
 
@@ -413,7 +415,7 @@ Minimal pinned-panel shape:
 const tray = await createTray({
   id: "com.example.status",
   menu: {
-    items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }],
+    items: [{ type: "item", id: 1, title: "Show Example", primaryEvent: true }],
   },
 });
 
@@ -424,25 +426,52 @@ const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
   style: { keepOnTop: true },
 });
 
-let visible = false;
+let bootstrapped = false;
+let visibilitySubscribed = false;
+let stopVisibleChange: (() => void) | undefined;
 
-tray.onMenuClick(({ itemId }) => {
+const syncMenu = (visible: boolean) =>
+  tray.setMenu({
+    items: [
+      {
+        type: "item",
+        id: 1,
+        title: visible ? "Hide Example" : "Show Example",
+        primaryEvent: true,
+      },
+    ],
+  });
+
+const subscribeVisibility = () => {
+  if (visibilitySubscribed) return;
+  visibilitySubscribed = true;
+  stopVisibleChange = webviewWindow.listen("visibleChange", ({ payload }) =>
+    void syncMenu(payload.visible),
+  );
+};
+
+tray.onMenuClick(async ({ itemId }) => {
   if (itemId !== 1) return;
-  if (visible) {
-    visible = false;
-    void webviewWindow.hide();
+  if (!bootstrapped) {
+    await webviewWindow.show();
+    bootstrapped = true;
+    subscribeVisibility();
+    await syncMenu(true);
+  } else if (await webviewWindow.isVisible()) {
+    await webviewWindow.close();
   } else {
-    visible = true;
-    void webviewWindow.show();
+    await webviewWindow.toVisible();
   }
 });
 ```
+
+Keep the returned `stopVisibleChange` callback, plus every other native-window listener callback, in the host lifecycle. On final teardown invoke them first, then call `destroy()` on the retained handle, then close the tray/runtime connection. Subscribing before the first `show()` is invalid because no native WebView session exists yet.
 
 Minimal non-pinned dismissal:
 
 ```ts
 webviewWindow.listen("blur", () => {
-  if (!hasBlockingWork()) void webviewWindow.hide();
+  if (!hasBlockingWork()) void webviewWindow.close();
 });
 ```
 

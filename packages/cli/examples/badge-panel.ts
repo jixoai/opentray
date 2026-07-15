@@ -6,12 +6,15 @@ import { fileURLToPath } from "node:url";
 import { createExampleLifecycle } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
+  createExamplePrimaryMenu,
   createWebviewExampleRuntime,
   createVisibleTrayIcon,
+  EXAMPLE_PRIMARY_ITEM_ID,
   listenWebviewIpcMessages,
   mountExampleWebview,
   prepareLocalBadgeExtensionPath,
   shutdownWebviewExample,
+  syncExamplePrimaryMenu,
   type WebviewPageMessageWatch,
 } from "./_support/webview-example-support";
 import {
@@ -33,9 +36,13 @@ const runtime = await createWebviewExampleRuntime({
       title: "OpenTray Badge Debug Panel",
       description: "Badge status debugger driven through ext-webview IPC",
     },
-    menu: {
-      items: [{ type: "item", id: 99, title: "Quit Badge Debug Panel" }],
-    },
+    menu: createExamplePrimaryMenu({
+      visible: false,
+      trailingItems: [
+        { type: "separator" },
+        { type: "item", id: 99, title: "Quit Badge Debug Panel" },
+      ],
+    }),
   },
 });
 
@@ -102,6 +109,7 @@ const panelState: BadgePanelEnvelope = {
     ...(snapshot.reason === undefined ? [] : [`reason: ${snapshot.reason}`]),
   ],
 };
+let stopVisibleChange: (() => void) | undefined;
 
 console.log(`badge helper home: ${homeDir}`);
 console.log(`badge panel platform: ${process.platform}`);
@@ -114,9 +122,7 @@ const pageMessageWatch: WebviewPageMessageWatch = listenWebviewIpcMessages(
 const dockClickWatch = watchDockClickSignal(dockClickSignalPath, async () => {
   panelState.log.unshift("dock click -> open debug panel");
   panelState.log = panelState.log.slice(0, 8);
-  await panel.show({
-    fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
-  });
+  await panel.toVisible();
   await broadcastState("dock click");
 });
 const dockQuitWatch = watchDockQuitSignal(dockHelperQuitNotifyPath, async () => {
@@ -130,7 +136,13 @@ const lifecycle = createExampleLifecycle({
     await signalBadgeDockHelperQuit();
     dockClickWatch.close();
     dockQuitWatch.close();
+    stopVisibleChange?.();
     pageMessageWatch.stop();
+    try {
+      await panel.destroy();
+    } catch {
+      // The panel may already be gone; runtime shutdown still owns final cleanup.
+    }
     await shutdownWebviewExample(runtime, devServer);
   },
 });
@@ -144,6 +156,10 @@ if (process.platform === "darwin") {
 }
 
 tray.onMenuClick(({ itemId }) => {
+  if (itemId === EXAMPLE_PRIMARY_ITEM_ID) {
+    void toggleExampleVisibility();
+    return;
+  }
   if (itemId === 99) {
     void lifecycle.shutdown();
   }
@@ -154,6 +170,10 @@ await badge.showPanel();
 await panel.show({
   fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
 });
+stopVisibleChange = panel.listen("visibleChange", ({ payload }) => {
+  void syncPrimaryMenu(payload.visible);
+});
+await syncPrimaryMenu(true);
 await panel.setMinimumSize(820, 620);
 await broadcastState("panel opened");
 
@@ -180,7 +200,7 @@ async function handlePanelIpcMessage(message: { payload: unknown }): Promise<voi
       await runBadgeAction("reset", () => badge.reset());
       return;
     case "hide":
-      await panel.hide();
+      await panel.close();
       panelState.log.unshift("panel hidden");
       return;
     case "badge:set":
@@ -205,6 +225,24 @@ async function handlePanelIpcMessage(message: { payload: unknown }): Promise<voi
       panelState.log.unshift(`unknown intent: ${payload.type}`);
       await broadcastState("unknown intent");
   }
+}
+
+async function toggleExampleVisibility(): Promise<void> {
+  if (await panel.isVisible()) {
+    await panel.close();
+    return;
+  }
+  await panel.toVisible();
+}
+
+async function syncPrimaryMenu(visible: boolean): Promise<void> {
+  await syncExamplePrimaryMenu(tray, {
+    visible,
+    trailingItems: [
+      { type: "separator" },
+      { type: "item", id: 99, title: "Quit Badge Debug Panel" },
+    ],
+  });
 }
 
 async function runBadgeAction(op: string, action: () => Promise<BadgeCapabilities>): Promise<void> {

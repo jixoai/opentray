@@ -1,9 +1,12 @@
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
+  createExamplePrimaryMenu,
   createWebviewExampleRuntime,
+  EXAMPLE_PRIMARY_ITEM_ID,
   mountExampleWebview,
   shutdownWebviewExample,
+  syncExamplePrimaryMenu,
 } from "./_support/webview-example-support";
 
 ensureAppInstalled();
@@ -19,11 +22,7 @@ const runtime = await createWebviewExampleRuntime({
       description:
         "Single primary tray action; macOS direct-triggers without opening a menu",
     },
-    menu: {
-      items: [
-        { type: "item", id: 1, title: "Open WebView", primaryEvent: true },
-      ],
-    },
+    menu: createExamplePrimaryMenu({ visible: false }),
   },
 });
 const { tray } = runtime;
@@ -40,10 +39,15 @@ const webview = mountExampleWebview(
   bindWindowGlobals: true,
   nativeTrayApi: true,
 });
+let webviewBootstrapped = false;
+let visibilitySubscribed = false;
+let stopVisibleChange: (() => void) | undefined;
 
 tray.onMenuClick(({ itemId }) => {
   console.log(`menu click: ${itemId}`);
-  void handleMenuClick(itemId);
+  if (itemId === EXAMPLE_PRIMARY_ITEM_ID) {
+    void toggleExampleVisibility();
+  }
 });
 console.log("webview window mounted through tray.extend(WebviewExt)");
 console.log(
@@ -54,13 +58,19 @@ console.log("press Ctrl-C to exit the tray demo");
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
+    stopVisibleChange?.();
+    try {
+      await webview.destroy();
+    } catch {
+      // The session may never have been shown; runtime shutdown is still authoritative.
+    }
     await shutdownWebviewExample(runtime, devServer);
   },
 });
 
 const webviewSmoke = process.env.OPENTRAY_EXAMPLE_WEBVIEW_SMOKE;
 if (webviewSmoke === "show" || webviewSmoke === "1") {
-  await handleMenuClick(1);
+  await showExample();
 }
 if (webviewSmoke === "1") {
   lifecycle.clearExitTimer();
@@ -68,17 +78,42 @@ if (webviewSmoke === "1") {
   await lifecycle.shutdown();
 }
 
-async function handleMenuClick(itemId: number): Promise<void> {
-  if (itemId === 1) {
-    const trayBounds = await tray.getBounds();
-    console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
-
-    await webview.show({
-      fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
-    });
-    console.log("webview command: show");
+async function toggleExampleVisibility(): Promise<void> {
+  if (webviewBootstrapped && (await webview.isVisible())) {
+    await webview.close();
     return;
   }
+  await showExample();
+}
+
+async function showExample(): Promise<void> {
+  if (webviewBootstrapped) {
+    await webview.toVisible();
+    return;
+  }
+  const trayBounds = await tray.getBounds();
+  console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
+  await webview.show({
+    fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
+  });
+  webviewBootstrapped = true;
+  subscribeVisibility();
+  await syncPrimaryMenu(true);
+  console.log("webview command: show");
+}
+
+function subscribeVisibility(): void {
+  if (visibilitySubscribed) {
+    return;
+  }
+  visibilitySubscribed = true;
+  stopVisibleChange = webview.listen("visibleChange", ({ payload }) => {
+    void syncPrimaryMenu(payload.visible);
+  });
+}
+
+async function syncPrimaryMenu(visible: boolean): Promise<void> {
+  await syncExamplePrimaryMenu(tray, { visible });
 }
 
 await lifecycle.wait;

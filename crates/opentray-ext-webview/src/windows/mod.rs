@@ -1408,6 +1408,7 @@ fn show_bridge_window(
             SetForegroundWindow(hwnd);
         }
     }
+    maybe_auto_clear_windows_white_block_artifact(bridge)?;
     Ok(())
 }
 
@@ -1996,10 +1997,32 @@ fn maybe_auto_clear_windows_white_block_artifact(
     if !windows_auto_clear_white_block_enabled() {
         return Ok(());
     }
-    if !bridge_background_needs_white_block_clear(bridge) {
+    let (background, frameless, hwnd) = {
+        let state = bridge.borrow();
+        (
+            state.style.background.clone(),
+            state.style.frameless,
+            state.hwnd,
+        )
+    };
+    if !should_auto_clear_windows_white_block_artifact(
+        background_needs_white_block_clear(&background),
+        frameless,
+        window_is_visible(hwnd),
+        is_window_maximized(hwnd),
+    ) {
         return Ok(());
     }
     clear_windows_white_block_artifact(bridge)
+}
+
+fn should_auto_clear_windows_white_block_artifact(
+    background_needs_clear: bool,
+    frameless: bool,
+    visible: bool,
+    maximized: bool,
+) -> bool {
+    (background_needs_clear || frameless) && visible && !maximized
 }
 
 fn maybe_auto_clear_windows_white_block_artifact_during_live_resize(
@@ -2055,11 +2078,6 @@ fn clear_windows_white_block_artifact(
     }
     show_window_clear_white_block(hwnd, SW_SHOWMINNOACTIVE, SW_RESTORE);
     finish_shell_state_clear_white_block(bridge)
-}
-
-fn bridge_background_needs_white_block_clear(bridge: &RefCell<NavigatorWindowBridge>) -> bool {
-    let background = bridge.borrow().style.background.clone();
-    background_needs_white_block_clear(&background)
 }
 
 fn background_needs_white_block_clear(background: &WebviewWindowBackground) -> bool {
@@ -2654,6 +2672,7 @@ fn apply_window_style(
     }
     notify_webview_parent_window_position_changed_from_bridge(bridge)?;
     refresh_native_window_surface(hwnd)?;
+    maybe_auto_clear_windows_white_block_artifact(bridge)?;
     Ok(())
 }
 
@@ -2895,6 +2914,15 @@ fn finish_window_proc_soft_resize(hwnd: HWND, release_capture: bool) -> bool {
             eprintln!("opentray-ext-webview failed to refresh Windows soft resize: {error}");
         }
         emit_soft_resize_geometry_changes(hwnd, bridge, interaction.initial_bounds);
+        if release_capture {
+            // The native capture lifecycle is now over. Frameless chrome residue can use the
+            // normal terminal artifact repair without terminating the resize interaction.
+            if let Err(error) = maybe_auto_clear_windows_white_block_artifact(bridge) {
+                eprintln!(
+                    "opentray-ext-webview failed to clear Windows frameless resize artifact: {error}"
+                );
+            }
+        }
     }
     true
 }
@@ -5310,6 +5338,25 @@ mod tests {
                 token: "blur".to_string(),
                 state: WebviewBackgroundEffectState::Active,
             }
+        ));
+    }
+
+    #[test]
+    fn frameless_auto_clear_includes_opaque_windows_only_after_safe_completion() {
+        assert!(should_auto_clear_windows_white_block_artifact(
+            false, true, true, false
+        ));
+        assert!(should_auto_clear_windows_white_block_artifact(
+            true, false, true, false
+        ));
+        assert!(!should_auto_clear_windows_white_block_artifact(
+            false, false, true, false
+        ));
+        assert!(!should_auto_clear_windows_white_block_artifact(
+            false, true, false, false
+        ));
+        assert!(!should_auto_clear_windows_white_block_artifact(
+            false, true, true, true
         ));
     }
 

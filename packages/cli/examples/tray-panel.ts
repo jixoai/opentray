@@ -2,10 +2,13 @@ import type { WebviewWindowStylePatch } from "../../ext-webview/src/index";
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
+  createExamplePrimaryMenu,
   createWebviewExampleRuntime,
   createVisibleTrayIcon,
+  EXAMPLE_PRIMARY_ITEM_ID,
   mountExampleWebview,
   shutdownWebviewExample,
+  syncExamplePrimaryMenu,
 } from "./_support/webview-example-support";
 
 ensureAppInstalled();
@@ -22,11 +25,7 @@ const runtime = await createWebviewExampleRuntime({
       description:
         "Single primary tray action launching a custom WebView tray panel",
     },
-    menu: {
-      items: [
-        { type: "item", id: 1, title: "Open Tray Panel", primaryEvent: true },
-      ],
-    },
+    menu: createExamplePrimaryMenu({ visible: false }),
   },
 });
 const { tray } = runtime;
@@ -56,34 +55,39 @@ const webview = webviewTray.createWebviewWindow({
   },
 });
 console.log(
-  "click the tray icon: platforms with primary tray events should toggle the WebView panel"
+  "click the tray icon: the primary action toggles Show Example and Hide Example"
 );
 console.log("press Ctrl-C to exit the tray demo");
 
-let panelVisible = false;
+let panelBootstrapped = false;
+let visibilitySubscribed = false;
+let stopVisibleChange: (() => void) | undefined;
+let stopBlur: (() => void) | undefined;
 
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
+    stopVisibleChange?.();
+    stopBlur?.();
+    try {
+      await webview.destroy();
+    } catch {
+      // The panel may already be gone; runtime shutdown still owns final cleanup.
+    }
     await shutdownWebviewExample(runtime, devServer);
   },
 });
 
 tray.onMenuClick(({ itemId }) => {
   console.log(`menu click: ${itemId}`);
-  if (itemId === 1) {
+  if (itemId === EXAMPLE_PRIMARY_ITEM_ID) {
     void toggleTrayPanel();
   }
 });
 
-webview.listen("blur", () => {
-  console.log("tray panel blur: ignored because keepOnTop panels use click-toggle dismissal");
-});
-
 async function toggleTrayPanel(): Promise<void> {
-  if (panelVisible) {
-    await webview.hide();
-    panelVisible = false;
+  if (panelBootstrapped && (await webview.isVisible())) {
+    await webview.close();
     console.log("tray panel command: hide");
     return;
   }
@@ -97,7 +101,7 @@ if (webviewSmoke === "show" || webviewSmoke === "1") {
 if (webviewSmoke === "reopen") {
   await openTrayPanel();
   await sleep(250);
-  await webview.hide();
+  await webview.close();
   await sleep(250);
   await openTrayPanel();
 }
@@ -137,14 +141,37 @@ async function openTrayPanel(): Promise<void> {
   console.log(`tray bounds: ${JSON.stringify(trayBounds)}`);
 
   try {
-    await webview.show({
-      fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
-    });
-    panelVisible = true;
+    if (panelBootstrapped) {
+      await webview.toVisible();
+    } else {
+      await webview.show({
+        fallbackRect: trayBounds.rect ?? { x: 0, y: 0, width: 1, height: 1 },
+      });
+      panelBootstrapped = true;
+      subscribeVisibility();
+      await syncPrimaryMenu(true);
+    }
     console.log("tray panel command: show");
   } catch (error) {
     console.error("tray panel show failed:", String(error));
   }
+}
+
+function subscribeVisibility(): void {
+  if (visibilitySubscribed) {
+    return;
+  }
+  visibilitySubscribed = true;
+  stopVisibleChange = webview.listen("visibleChange", ({ payload }) => {
+    void syncPrimaryMenu(payload.visible);
+  });
+  stopBlur = webview.listen("blur", () => {
+    console.log("tray panel blur: ignored because keepOnTop panels use click-toggle dismissal");
+  });
+}
+
+async function syncPrimaryMenu(visible: boolean): Promise<void> {
+  await syncExamplePrimaryMenu(tray, { visible });
 }
 
 await lifecycle.wait;

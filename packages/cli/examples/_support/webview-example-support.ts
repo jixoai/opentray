@@ -37,6 +37,37 @@ import { createVisibleTrayIcon } from "./visible-tray-icon";
 
 export { createVisibleTrayIcon };
 
+export const EXAMPLE_PRIMARY_ITEM_ID = 1;
+
+export interface ExamplePrimaryMenuOptions {
+  readonly visible: boolean;
+  readonly primaryItemId?: number;
+  readonly trailingItems?: Menu["items"];
+}
+
+/** Builds the standard retained-WebView primary action for runnable source examples. */
+export function createExamplePrimaryMenu(options: ExamplePrimaryMenuOptions): Menu {
+  return {
+    items: [
+      {
+        type: "item",
+        id: options.primaryItemId ?? EXAMPLE_PRIMARY_ITEM_ID,
+        title: options.visible ? "Hide Example" : "Show Example",
+        primaryEvent: true,
+      },
+      ...(options.trailingItems ?? []),
+    ],
+  };
+}
+
+/** Projects operational window visibility back into the example's primary tray action. */
+export async function syncExamplePrimaryMenu(
+  tray: Pick<EventfulTrayHandle, "setMenu">,
+  options: ExamplePrimaryMenuOptions,
+): Promise<void> {
+  await tray.setMenu(createExamplePrimaryMenu(options));
+}
+
 export interface WebviewExampleRuntimeOptions {
   importMetaUrl: string;
   requestIdPrefix: string;

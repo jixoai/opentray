@@ -13,7 +13,8 @@
 - [x] 2.4 Add macOS bridge tests proving the page command surface remains shape-aligned with Windows; do not claim macOS visual acceptance from this Windows session.
 - [x] 2.5 Only check off a task after its code and its stated verification completed in this working context.
 - [x] 2.6 Add a native unit test for the frameless DWM non-client policy selection; retain the existing full-client and no-shell-state tests.
-- [ ] 2.7 Add native predicate tests for frameless post-transition artifact clear and TypeScript tests for dynamic primary example menus.
+- [x] 2.7 Add native predicate tests for frameless post-transition artifact clear and TypeScript tests for dynamic primary example menus.
+- [x] 2.8 Prove primary visibility listeners are attached only after first `show()` and disposed before example runtime shutdown.
 
 ## 3. Implementation
 
@@ -27,9 +28,9 @@
 - [x] 3.8 Update `README.md`, WebView extension README, and relevant agent skill/reference guidance with the operational visibility and frameless laws.
 - [x] 3.9 Commit current-context task checkboxes with the matching implementation and BDD evidence.
 - [x] 3.10 Apply DWM non-client policy and DWM surface attributes before the final non-shell `SWP_FRAMECHANGED` projection; do not alter the accepted soft-resize lifecycle.
-- [ ] 3.11 Make every runnable retained-session CLI WebView example use one dynamic `Show Example` / `Hide Example` primary item backed by `isVisible`, `toVisible`, `close`, and `visibleChange`.
-- [ ] 3.12 Generalize Windows automatic artifact clearing to visible non-maximized frameless windows after style projection and after soft-resize capture release, without clearing during capture.
-- [ ] 3.13 Update ext-webview README, WebView window-pattern skill guidance, and AGENTS platform laws with the tray-primary and frameless artifact-clear practices.
+- [x] 3.11 Make every runnable retained-session CLI WebView example use one dynamic `Show Example` / `Hide Example` primary item backed by `isVisible`, `toVisible`, `close`, and `visibleChange`.
+- [x] 3.12 Generalize Windows automatic artifact clearing to visible non-maximized frameless windows after style projection and after soft-resize capture release, without clearing during capture.
+- [x] 3.13 Update ext-webview README, WebView window-pattern skill guidance, and AGENTS platform laws with the tray-primary and frameless artifact-clear practices.
 
 ## 4. Verification
 

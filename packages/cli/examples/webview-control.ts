@@ -11,10 +11,13 @@ import type {
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
+  createExamplePrimaryMenu,
   createVisibleTrayIcon,
   createWebviewExampleRuntime,
+  EXAMPLE_PRIMARY_ITEM_ID,
   mountExampleWebview,
   shutdownWebviewExample,
+  syncExamplePrimaryMenu,
 } from "./_support/webview-example-support";
 
 // windowControlsOverlay is a show-time bridge gate; the page can test it, not enable it later.
@@ -54,9 +57,10 @@ const runtime = await createWebviewExampleRuntime({
       description:
         "Native WebView control demo launched directly from the page",
     },
-    menu: {
-      items: [{ type: "item", id: 99, title: "Quit Demo" }],
-    },
+    menu: createExamplePrimaryMenu({
+      visible: false,
+      trailingItems: [{ type: "separator" }, { type: "item", id: 99, title: "Quit Demo" }],
+    }),
   },
 });
 const { tray } = runtime;
@@ -65,9 +69,11 @@ const icon = createVisibleTrayIcon();
 const devServer = await startDevServer("/webview-control");
 console.log(`webview-control panel: ${devServer.url}`);
 
+let stopVisibleChange: (() => void) | undefined;
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
+    stopVisibleChange?.();
     try {
       await webview.destroy();
     } catch {
@@ -144,6 +150,10 @@ const webview = mountExampleWebview(
   },
 } satisfies WebviewWindowOptions);
 await webview.show();
+stopVisibleChange = webview.listen("visibleChange", ({ payload }) => {
+  void syncPrimaryMenu(payload.visible);
+});
+await syncPrimaryMenu(true);
 
 console.log(
   "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, devtools, screen, and navigation behavior.",
@@ -274,6 +284,10 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
 }
 
 tray.onMenuClick(({ itemId }) => {
+  if (itemId === EXAMPLE_PRIMARY_ITEM_ID) {
+    void toggleExampleVisibility();
+    return;
+  }
   if (itemId === 99) {
     void lifecycle.shutdown();
   }
@@ -297,6 +311,21 @@ function resolveOverlayEnabled(
     }
   }
   return enabled;
+}
+
+async function toggleExampleVisibility(): Promise<void> {
+  if (await webview.isVisible()) {
+    await webview.close();
+    return;
+  }
+  await webview.toVisible();
+}
+
+async function syncPrimaryMenu(visible: boolean): Promise<void> {
+  await syncExamplePrimaryMenu(tray, {
+    visible,
+    trailingItems: [{ type: "separator" }, { type: "item", id: 99, title: "Quit Demo" }],
+  });
 }
 
 function parseBooleanEnv(value: string | undefined): boolean | undefined {

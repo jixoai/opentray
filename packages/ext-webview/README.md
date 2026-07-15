@@ -4,6 +4,8 @@ Orthogonal intents (2026-07-14; original user request):
 2. Let Windows overlay caption controls use explicit opaque background and symbol colors.
 3. Keep macOS controls native and transparent rather than emulating Windows composition.
 4. Keep frameless shell ownership and explicit user-resize intent consistent across macOS and Windows.
+5. Teach retained WebView tray primary actions through operational visibility, not local booleans.
+6. Clear Windows frameless rendering residue only after safe projection or resize completion.
 -->
 
 # @opentray/ext-webview
@@ -38,20 +40,30 @@ Use `alpha-A-B` for alpha packages on the same protocol line. Do not install pla
 
 ## First Panel
 
-Call `createTray()` directly and mount WebView through `tray.extend(WebviewExt)`. The first `show()` loads the native extension:
+Call `createTray()` directly and mount WebView through `tray.extend(WebviewExt)`. The first `show()` loads the native extension. A primary tray item should always state its next action, use `toVisible()` for a retained session, and use `close()` to hide without destroying page state:
 
 ```ts
 import { createTray } from "opentray";
 import { WebviewExt } from "@opentray/ext-webview";
+
+const primaryItemId = 1;
+const menu = (visible: boolean) => ({
+  items: [
+    {
+      type: "item" as const,
+      id: primaryItemId,
+      title: visible ? "Hide Example" : "Show Example",
+      primaryEvent: true,
+    },
+  ],
+});
 
 const tray = (
   await createTray(
     {
       id: "com.example.panel",
       icon: { "text-only": "OT" },
-      menu: {
-        items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }],
-      },
+      menu: menu(false),
     },
     { appId: "com.example.panel", appName: "Panel" }
   )
@@ -61,8 +73,33 @@ const panel = tray.createWebviewWindow({
   width: 360,
   height: 220,
 });
-tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
+
+let bootstrapped = false;
+let visibilitySubscribed = false;
+let stopVisibleChange: (() => void) | undefined;
+const subscribeVisibility = () => {
+  if (visibilitySubscribed) return;
+  visibilitySubscribed = true;
+  stopVisibleChange = panel.listen("visibleChange", ({ payload }) =>
+    void tray.setMenu(menu(payload.visible)),
+  );
+};
+tray.onMenuClick(async ({ itemId }) => {
+  if (itemId !== primaryItemId) return;
+  if (!bootstrapped) {
+    await panel.show();
+    bootstrapped = true;
+    subscribeVisibility();
+    await tray.setMenu(menu(true));
+  } else if (await panel.isVisible()) {
+    await panel.close();
+  } else {
+    await panel.toVisible();
+  }
+});
 ```
+
+Register any native window listener only after the first successful `show()`. During final teardown, invoke every unlisten callback, call `destroy()` on the WebView handle, then close the tray/runtime connection. This prevents event polling and native sessions from outliving the example process.
 
 `createTray()` is the public creation entrypoint. The runtime ships as a packaged executable (`bin/opentray`); `createTray()` spawns it on demand and talks the OpenTray newline-JSON protocol over a socket. Application code does not import a Node binding, host a native main loop, or wrap tray creation in a worker — the calling process is the caller, and the executable owns the native event loop and session lifecycle.
 
@@ -145,7 +182,7 @@ For glass or blur-style surfaces, two things must line up at once:
 
 On Windows, a regular Chromium vertical scrollbar coexists with the `right` and `bottomRight` soft-resize gestures of a frameless WebView. The injected capture-phase detector measures the six-CSS-pixel edge band against `window.innerWidth`, then the native HWND owns the resize interaction. A normal page scrollbar does not require a reserved outer gutter or a custom scrollbar for right-edge resizing to work.
 
-During that soft-resize interaction the runtime only updates the HWND/WebView bounds and repaints in place. It never applies the Windows transparent white-block reset because that reset changes shell state and would terminate pointer capture. Frameless `WM_NCCALCSIZE` handling owns every message form, so resize, minimize, and restore do not reintroduce a native titlebar.
+During that soft-resize interaction the runtime only updates the HWND/WebView bounds and repaints in place. It never applies the Windows transparent white-block reset because that reset changes shell state and would terminate pointer capture. After capture is released, a visible non-maximized frameless window automatically runs the rendering-artifact cleanup, including opaque windows where residual native chrome is independent of the backing family. Frameless `WM_NCCALCSIZE` handling owns every message form, so resize, minimize, and restore do not reintroduce a native titlebar.
 
 An application may still make its scrolling container narrower than the viewport, or use a custom/overlay scrollbar, when its own edge controls or layout must avoid the reserved six-pixel resize band. That is a product layout choice, not an OpenTray workaround for normal native scrollbars. Smoke-test nonstandard page hit testing and scrollbar implementations with the target interaction.
 
