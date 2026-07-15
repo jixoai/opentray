@@ -123,3 +123,27 @@ The host SHALL NOT run the shell-state artifact clear while a frameless soft-res
 - **THEN** pointer capture is released before artifact cleanup begins
 - **AND** the runtime clears the rendering artifact after the interaction
 - **AND** no shell-state repair runs during the drag.
+
+### Requirement: Windows operational visibility SHALL follow native state completion
+
+The Windows host SHALL maintain one authoritative operational-visibility projection for command paths and native state messages. It SHALL update that projection after a native `WM_SIZE` transition so minimize/restore initiated by a page control, system command, or shell path emits exactly one `visibleChange` after the Win32 state is observable. A command-side check MAY emit earlier when the state is already observable, but it SHALL update the same projection and SHALL NOT duplicate a native completion event.
+
+#### Scenario: A page minimizes a retained window
+
+- **GIVEN** a runnable source WebView example has a visible retained session and a `visibleChange` listener
+- **WHEN** the page calls `minimize()`
+- **THEN** the native `WM_SIZE` completion projects `visible: false`
+- **AND** the primary tray item changes to `Show Example`
+- **AND** no second false visibility transition is emitted.
+
+### Requirement: Windows frameless reveal cleanup SHALL wait for post-reveal composition
+
+When `show()` or `toVisible()` reveals a normal frameless Windows window, the runtime SHALL enqueue at most one private HWND cleanup message instead of invoking the shell-state artifact repair inside the `ShowWindow` call stack. When that message is handled, it SHALL clear the pending marker before checking the current artifact predicate. It SHALL skip repair when the window is hidden/minimized, maximized, or an application-level soft-resize capture remains active.
+
+#### Scenario: Restoring a frameless material window clears residue without user resize
+
+- **GIVEN** a retained frameless Windows WebView with a material background is minimized
+- **WHEN** the tray calls `toVisible()`
+- **THEN** the runtime restores the same native session
+- **AND** one queued post-reveal cleanup runs only after the next HWND message turn
+- **AND** the material is visible without requiring the user to resize the window.

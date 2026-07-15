@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 5
-- Status: remediation in progress for native minimize visibility projection and post-reveal DWM cleanup.
-- Previous plan backup: `plans/plan-v4.md`
+- Round: 4
+- Status: primary visibility implementation verified; listener lifecycle is now an explicit native-session law.
+- Previous plan backup: `plans/plan-v3.md`
 
 ## Workflow Command Surface
 
@@ -46,7 +46,6 @@
 | 2026-07-15 | User | Frameless soft resize is now normal, but native titlebar residue remains. | Reopen the non-client projection task without changing the accepted soft-resize path. |
 | 2026-07-15 | User | WebView examples must expose a primary `Show Example` / `Hide Example` action like pnpm-pub. | Make operational visibility, `toVisible()`, `close()`, and `visibleChange` the executable tray-primary recipe. |
 | 2026-07-15 | User | Frameless entry and completed frameless resize must clean rendering residue. | Run Windows shell-state artifact repair only after a frameless window is visible or soft-resize capture has ended. |
-| 2026-07-15 | User | Minimizing still leaves the example primary item on `Hide Example`; revealing the minimized frameless material window leaves residue until a later resize. | Treat Win32 minimize completion as a visibility projection source and defer reveal cleanup until a later HWND message turn. |
 
 ### Evidence Read
 
@@ -61,8 +60,6 @@
 | `crates/opentray-ext-webview/src/windows/mod.rs` | Automatic artifact clear is background-gated and soft resize deliberately skips it while capture is active. | Generalize the post-completion predicate so frameless opaque windows clean after entry/resize without regressing capture. |
 | Windows source smoke | A `WebviewWindowHandle.listen(...)` call before first `show()` is rejected because no native session exists; leaving a listener active after runtime shutdown writes to a closed broker connection. | Register native window listeners after first show, stop them before teardown, then destroy the native session before closing the runtime. |
 | `crates/opentray-ext-webview/src/windows/mod.rs` | The existing state snapshot exposes raw native visibility, while minimization is separate. | Public `visible` needs a deliberate semantic projection instead of raw `IsWindowVisible`. |
-| Windows user acceptance | The page minimize control reaches `ShowWindow(SW_MINIMIZE)`, but the host primary item can retain `Hide Example`. | The command-side state query is not a sufficient transition boundary; synchronize the same projection from native `WM_SIZE` completion. |
-| Windows user acceptance | `show_bridge_window` clears artifacts in the same call stack as `ShowWindow`. | Queue one post-reveal HWND message and re-evaluate the clear predicate after Windows/WebView composition advances. |
 | `crates/opentray-ext-webview/src/bootstrap.rs` and `packages/ext-webview/src/index.ts` | Page and host APIs are separately typed and command-backed; event subscriptions already exist. | Visibility remains an extension-owned, cross-platform facade contract. |
 | `openspec/changes/archive/2026-06-20-tray-dynamic-state-and-webview-placement-kit` | WebView show/hide and resize cleanup are existing extension laws. | Extend the same atom; do not introduce a core/runtime special case. |
 
@@ -199,27 +196,6 @@ shown ------------- toVisible() -----> unchanged
 visible = !closed && !minimized
 ```
 
-```text
-ShowWindow(SW_MINIMIZE / SW_RESTORE)
-        |
-        v
-WM_SIZE completes native state
-        |
-        v
-shared visible projection -> visibleChange -> tray primary label
-
-ShowWindow(SW_SHOW / SW_RESTORE)
-        |
-        v
-queue one private HWND message
-        |
-        v
-next message turn: re-check frameless + visible + normal + no soft capture
-        |
-        v
-artifact clear
-```
-
 ### Interface Shape
 
 - Page `navigator.opentrayWindow` and optional `navigator.window` gain `isClosed(): Promise<boolean>`, `isVisible(): Promise<boolean>`, `toVisible(): Promise<void>`, and typed `visibleChange` listeners.
@@ -259,7 +235,6 @@ No `opentray-core` branch, broker special case, or consumer-specific behavior is
 - [ ] 7. Verify, self-review, and obtain human Windows acceptance before release/archive.
 - [ ] 8. Reapply DWM non-client policy and related DWM attributes before one final non-shell frame recalculation, then obtain renewed Windows visual acceptance.
 - [ ] 9. Turn operational visibility into the canonical WebView tray-primary example pattern and clear frameless rendering residue only at safe post-transition boundaries.
-- [ ] 10. Synchronize `visibleChange` after native minimization and defer frameless reveal artifact cleanup until post-reveal composition completes.
 
 ## Open Questions
 

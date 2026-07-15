@@ -40,6 +40,7 @@
 - [ ] 4.4 Run `pnpm --filter opentray example:webview-control -- --frameless --resizable` as the Windows human-visible smoke path, then require renewed user acceptance that initial display, resize, minimize, and restore leave no native titlebar residue.
 - [x] 4.5 Run `bun run openspec:vision -- validate fix-windows-frameless-visible-state` and `git diff --check`.
 - [ ] 4.6 Run the focused Rust/TypeScript tests and a Windows `--frameless --resizable` source smoke; require renewed visual acceptance for primary labels and post-resize cleanup.
+- [ ] 4.7 Run focused native tests for `WM_SIZE` visibility synchronization and queued post-reveal cleanup, then verify a minimized `example:webview-control -- --frameless --resizable` changes to `Show Example` and restores acrylic without a manual resize.
 
 ## 5. Consumer Release Follow-up
 
@@ -51,3 +52,9 @@
 - [ ] 6.1 Generate `review/self-review.md` against `plans/plan.md` after verification and visual acceptance.
 - [ ] 6.2 Commit any self-review artifact updates before another implementation loop.
 - [ ] 6.3 After user acceptance and release decisions, archive the OpenSpec change in a dedicated archive commit and run `bun run openspec:vision -- check fix-windows-frameless-visible-state`.
+
+## 7. Native Completion Repair
+
+- [ ] 7.1 Add one shared Windows operational-visibility tracker used by command emission and `WM_SIZE` completion; ensure a minimized window emits one false transition.
+- [ ] 7.2 Queue frameless artifact cleanup after `show()` / `toVisible()` and frameless style projection; clear the pending flag before predicate evaluation and skip active soft-resize capture.
+- [ ] 7.3 Update Windows-facing README, agent skill guidance, and `AGENTS.md` with the native-completion and post-reveal laws.
