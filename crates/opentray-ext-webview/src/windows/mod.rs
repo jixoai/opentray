@@ -2671,27 +2671,18 @@ fn apply_native_window_style(
         if ex_style_bits != current_ex_style {
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style_bits);
         }
-        SetWindowPos(
-            hwnd,
-            if style.keep_on_top {
-                HWND_TOPMOST
-            } else {
-                HWND_NOTOPMOST
-            },
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE,
-        );
     }
+    // DWM must observe the new non-client policy and client surface before Win32 performs its
+    // final frame recalculation. Applying either after `SWP_FRAMECHANGED` leaves stale native
+    // titlebar pixels until an unrelated native resize happens to redraw the compositor surface.
+    apply_dwm_nc_rendering_policy(hwnd, style.frameless);
     apply_window_opacity(hwnd, style.opacity)?;
     apply_native_window_theme(hwnd, dark_mode)?;
-    apply_dwm_nc_rendering_policy(hwnd, !style.frameless);
     apply_dwm_client_frame(hwnd, wants_dwm_extended_client_frame(style))?;
     apply_dwm_transparency(hwnd, wants_dwm_transparent_host(style))?;
     apply_dwm_backdrop(hwnd, &style.background, dark_mode)?;
     apply_dwm_corner_preference(hwnd, style.platform.windows.corner_preference.as_deref())?;
+    refresh_native_window_frame(hwnd, style.keep_on_top);
     Ok(())
 }
 
@@ -2708,13 +2699,9 @@ fn sync_soft_resize_enabled(
     )
 }
 
-fn apply_dwm_nc_rendering_policy(hwnd: HWND, enabled: bool) {
-    let policy = if enabled {
-        DWMNCRP_ENABLED
-    } else {
-        DWMNCRP_DISABLED
-    };
-    let _ = unsafe {
+fn apply_dwm_nc_rendering_policy(hwnd: HWND, frameless: bool) {
+    let policy = dwm_nc_rendering_policy(frameless);
+    let result = unsafe {
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_NCRENDERING_POLICY as u32,
@@ -2722,6 +2709,38 @@ fn apply_dwm_nc_rendering_policy(hwnd: HWND, enabled: bool) {
             std::mem::size_of::<i32>() as u32,
         )
     };
+    if hresult_failed(result) {
+        eprintln!(
+            "opentray-ext-webview failed to apply Windows non-client rendering policy: {}",
+            format_hresult(result)
+        );
+    }
+}
+
+fn dwm_nc_rendering_policy(frameless: bool) -> i32 {
+    if frameless {
+        DWMNCRP_DISABLED
+    } else {
+        DWMNCRP_ENABLED
+    }
+}
+
+fn refresh_native_window_frame(hwnd: HWND, keep_on_top: bool) {
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            if keep_on_top {
+                HWND_TOPMOST
+            } else {
+                HWND_NOTOPMOST
+            },
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE,
+        );
+    }
 }
 
 fn sync_transparent_host_surface(
@@ -5777,6 +5796,12 @@ mod tests {
 
         assert_eq!(bits & WS_THICKFRAME, 0);
         assert!(!style.resizable);
+    }
+
+    #[test]
+    fn frameless_style_disables_dwm_non_client_rendering() {
+        assert_eq!(dwm_nc_rendering_policy(true), DWMNCRP_DISABLED);
+        assert_eq!(dwm_nc_rendering_policy(false), DWMNCRP_ENABLED);
     }
 
     #[test]

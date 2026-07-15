@@ -11,7 +11,7 @@
 - [x] 2.3 Add native unit tests for operational visibility projection, idempotent reveal selection, full-client frameless non-client handling, and soft-resize exclusion from shell-state cleanup.
 - [x] 2.4 Add macOS bridge tests proving the page command surface remains shape-aligned with Windows; do not claim macOS visual acceptance from this Windows session.
 - [x] 2.5 Only check off a task after its code and its stated verification completed in this working context.
-- [ ] 2.6 Add a native unit test for the frameless DWM non-client policy selection; retain the existing full-client and no-shell-state tests.
+- [x] 2.6 Add a native unit test for the frameless DWM non-client policy selection; retain the existing full-client and no-shell-state tests.
 
 ## 3. Implementation
 
@@ -24,7 +24,7 @@
 - [x] 3.7 Add concise intent comments at the Windows full-client and soft-resize isolation boundaries.
 - [x] 3.8 Update `README.md`, WebView extension README, and relevant agent skill/reference guidance with the operational visibility and frameless laws.
 - [x] 3.9 Commit current-context task checkboxes with the matching implementation and BDD evidence.
-- [ ] 3.10 Apply DWM non-client policy and DWM surface attributes before the final non-shell `SWP_FRAMECHANGED` projection; do not alter the accepted soft-resize lifecycle.
+- [x] 3.10 Apply DWM non-client policy and DWM surface attributes before the final non-shell `SWP_FRAMECHANGED` projection; do not alter the accepted soft-resize lifecycle.
 
 ## 4. Verification
 
