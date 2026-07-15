@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 6
-- Status: source-backed composition report is ready; no further cleanup-timing change is authorized before the A/B plan is reviewed.
-- Previous plan backup: `plans/plan-v5.md`
+- Round: 5
+- Status: native completion remediation is verified by focused tests and source smoke; Windows visual material acceptance remains pending.
+- Previous plan backup: `plans/plan-v4.md`
 
 ## Workflow Command Surface
 
@@ -47,7 +47,6 @@
 | 2026-07-15 | User | WebView examples must expose a primary `Show Example` / `Hide Example` action like pnpm-pub. | Make operational visibility, `toVisible()`, `close()`, and `visibleChange` the executable tray-primary recipe. |
 | 2026-07-15 | User | Frameless entry and completed frameless resize must clean rendering residue. | Run Windows shell-state artifact repair only after a frameless window is visible or soft-resize capture has ended. |
 | 2026-07-15 | User | Minimizing still leaves the example primary item on `Hide Example`; revealing the minimized frameless material window leaves residue until a later resize. | Treat Win32 minimize completion as a visibility projection source and defer reveal cleanup until a later HWND message turn. |
-| 2026-07-15 | User | Residue cleanup causes frequent refreshes, especially during resize; investigate whether this is OpenTray, Windows/WebView2, or Rust, compare the official Mica experience, and preserve a formal report before choosing a debounce. | Freeze cleanup policy changes until the host/composition stack and current clear cadence are measured and classified. |
 
 ### Evidence Read
 
@@ -64,9 +63,6 @@
 | `crates/opentray-ext-webview/src/windows/mod.rs` | The existing state snapshot exposes raw native visibility, while minimization is separate. | Public `visible` needs a deliberate semantic projection instead of raw `IsWindowVisible`. |
 | Windows user acceptance | The page minimize control reaches `ShowWindow(SW_MINIMIZE)`, but the host primary item can retain `Hide Example`. | The command-side state query is not a sufficient transition boundary; synchronize the same projection from native `WM_SIZE` completion. |
 | Windows user acceptance | `show_bridge_window` clears artifacts in the same call stack as `ShowWindow`. | Queue one post-reveal HWND message and re-evaluate the clear predicate after Windows/WebView composition advances. |
-| `crates/opentray-ext-webview/src/windows/mod.rs` | Ordinary native resize may invoke the shell-state repair from `WM_SIZE` every 120ms; the repair itself is `SW_SHOWMINNOACTIVE -> SW_RESTORE`. | The immediate refresh problem is directly attributable to OpenTray's recovery cadence, independently of the original residue trigger. |
-| Wry `0.55.1` local source | The Windows backend constructs `ICoreWebView2Controller` through `CreateCoreWebView2Controller[WithOptions]`, not a composition controller; it does set initial background through `ICoreWebView2ControllerOptions3`. | The host uses the simpler HWND mode while already adopting the current first-load background API; the remaining artifact cannot be blamed on missing that initialization API alone. |
-| Microsoft WebView2 hosting and background documentation | Windowed, Window-to-Visual, and Visual hosting have materially different composition/input ownership; WebView2 explicitly documents white-flash and background-color behavior. | A composition-hosting spike is a legitimate candidate, but it is not a one-line library switch and a timer cannot prove it unnecessary. |
 | `crates/opentray-ext-webview/src/bootstrap.rs` and `packages/ext-webview/src/index.ts` | Page and host APIs are separately typed and command-backed; event subscriptions already exist. | Visibility remains an extension-owned, cross-platform facade contract. |
 | `openspec/changes/archive/2026-06-20-tray-dynamic-state-and-webview-placement-kit` | WebView show/hide and resize cleanup are existing extension laws. | Extend the same atom; do not introduce a core/runtime special case. |
 
@@ -97,9 +93,6 @@
 | `toVisible` | Restore the existing session to an operable visible state; do not create a generic state setter. | Idempotent reveal. |
 | `show|hide Example` | The tray's primary label states the action the next click will perform. | Dynamic operational visibility action. |
 | `渲染残影的清理` | Clear compositor residue after a safe terminal transition, not during pointer capture. | Post-completion artifact repair. |
-| `频繁的刷新` | The recovery itself becomes visible and harms interaction quality. | Recovery churn. |
-| `官方的应用很少出现类似的问题` | Compare our host/composition topology with the native Mica baseline, not only API names. | Composition parity. |
-| `难道是 rust 的问题` | Separate language bindings from the native hosting architecture and runtime behavior. | Ownership diagnosis. |
 
 ### Demo / Spike Code
 
@@ -138,13 +131,6 @@ Examples create native window event listeners only after first show and tear dow
 - Does this require law upgrade: yes, define operational visibility separately from raw native visibility and prohibit shell-state cleanup during application-level soft resize.
 - Breaking update stance: additive API. Existing `show`, `hide`, `getWindowState`, and raw state fields remain available.
 - User confirmations still required: none before implementation. Release and pnpm-pub publication remain after visual acceptance.
-
-### Composition Investigation Boundary
-
-- Confirmed: the current live resize path invokes an invasive `ShowWindow` minimize/restore repair on a 120ms throttle. It is an OpenTray policy choice and is sufficient to explain visible churn.
-- Confirmed: WebView2 and its official release notes document white flash, transparent-background defects, and separate Windowed/Visual hosting modes. The platform has real composition edge cases.
-- Inference: OpenTray's custom frameless DWM host plus Wry's HWND controller has a more difficult composition boundary than a native WinUI/Mica surface. This is not evidence that the Rust language or the `windows` projection is at fault.
-- Decision pending evidence: do not add a continuously reset 100ms debounce. The existing 120ms behavior is a throttle, not a trailing debounce; the platform already supplies `WM_EXITSIZEMOVE` as a terminal interaction boundary.
 
 ## Reverse-Inferred Design
 
@@ -274,9 +260,6 @@ No `opentray-core` branch, broker special case, or consumer-specific behavior is
 - [ ] 8. Reapply DWM non-client policy and related DWM attributes before one final non-shell frame recalculation, then obtain renewed Windows visual acceptance.
 - [ ] 9. Turn operational visibility into the canonical WebView tray-primary example pattern and clear frameless rendering residue only at safe post-transition boundaries.
 - [ ] 10. Synchronize `visibleChange` after native minimization and defer frameless reveal artifact cleanup until post-reveal composition completes.
-- [x] 11. Write and commit a source-backed Windows WebView2/DWM composition investigation before changing cleanup timing again.
-- [ ] 12. Instrument clear reasons/counts and run a terminal-only versus live-clear A/B matrix; treat a trailing 100ms delay as one experiment, not the default diagnosis.
-- [ ] 13. Decide between terminal-only recovery, startup/background changes, and a Window-to-Visual/composition-hosting spike from evidence; request user approval before an architectural host change.
 
 ## Open Questions
 
