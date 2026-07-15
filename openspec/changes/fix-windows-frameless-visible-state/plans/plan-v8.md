@@ -3,8 +3,8 @@
 ## Current Round
 
 - Round: 7
-- Status: native resize acceptance removed the refresh churn, but retained-session `close() -> toVisible()` still leaves reveal residue; a reveal-only delayed recovery is pending.
-- Previous plan backup: `plans/plan-v8.md`
+- Status: terminal-only recovery, focused verification, and source smoke are complete; renewed Windows visual acceptance is pending.
+- Previous plan backup: `plans/plan-v7.md`
 
 ## Workflow Command Surface
 
@@ -49,7 +49,6 @@
 | 2026-07-15 | User | Minimizing still leaves the example primary item on `Hide Example`; revealing the minimized frameless material window leaves residue until a later resize. | Treat Win32 minimize completion as a visibility projection source and defer reveal cleanup until a later HWND message turn. |
 | 2026-07-15 | User | Residue cleanup causes frequent refreshes, especially during resize; investigate whether this is OpenTray, Windows/WebView2, or Rust, compare the official Mica experience, and preserve a formal report before choosing a debounce. | Freeze cleanup policy changes until the host/composition stack and current clear cadence are measured and classified. |
 | 2026-07-15 | User | Implement the recommended approach first, then let the user test. | Apply terminal-only shell recovery without a C#/WinUI rewrite, composition-hosting migration, or new distribution package. |
-| 2026-07-16 | User | Continuous resize no longer flickers, but `Hide Example` then `Show Example` leaves rendering residue. | The one-private-message reveal cleanup can run before DWM/WebView2 presents the restored surface; trial one delayed reveal-only recovery without changing native resize cadence. |
 
 ### Evidence Read
 
@@ -147,8 +146,7 @@ Examples create native window event listeners only after first show and tear dow
 - Confirmed: WebView2 and its official release notes document white flash, transparent-background defects, and separate Windowed/Visual hosting modes. The platform has real composition edge cases.
 - Inference: OpenTray's custom frameless DWM host plus Wry's HWND controller has a more difficult composition boundary than a native WinUI/Mica surface. This is not evidence that the Rust language or the `windows` projection is at fault.
 - Decision pending evidence: do not add a continuously reset 100ms debounce. The existing 120ms behavior is a throttle, not a trailing debounce; the platform already supplies `WM_EXITSIZEMOVE` as a terminal interaction boundary.
-- User-approved terminal policy: the continuous ordinary-`WM_SIZE` reset remains removed. `WM_SIZE` records an observed native resize only; one queued recovery remains after `WM_EXITSIZEMOVE`, while the existing soft-resize release path remains terminal-only.
-- User acceptance result: resize churn is fixed, but the current one-message `close() -> toVisible()` recovery runs too early to clear reveal residue. The next bounded experiment is one 100ms HWND timer after retained-session reveal only; it must not run during native resize, soft resize, or a hidden session.
+- User-approved experiment: the continuous ordinary-`WM_SIZE` reset is removed. `WM_SIZE` records an observed native resize only; one queued recovery remains after `WM_EXITSIZEMOVE`, while the existing soft-resize release path remains terminal-only. Focused automated verification and the source smoke passed; Windows visual acceptance is pending.
 
 ## Reverse-Inferred Design
 

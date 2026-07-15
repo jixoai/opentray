@@ -84,6 +84,24 @@ A `WM_EXITSIZEMOVE` after a pure move has no observed resize and therefore no
 recovery. The implementation still requires Windows visual acceptance before
 this becomes the permanent policy.
 
+### 1a. Retained-session reveal needs a different terminal boundary
+
+Windows acceptance on 2026-07-16 confirmed that terminal-only native resize
+removes the visible refresh churn. The same acceptance found a separate failure:
+after `close()` hides a frameless window, `toVisible()` can leave residue even
+though the existing private post-reveal HWND message runs.
+
+That message is only a queue-turn boundary. It does not prove DWM and the
+windowed WebView2 controller have presented the restored surface. This is a
+reveal-composition timing issue, not evidence to restore the removed live
+`WM_SIZE` throttle.
+
+The next bounded experiment is a one-shot 100ms HWND timer only after a
+retained session is shown or restored. It must be canceled when the session is
+hidden, re-check normal visible state at fire time, and remain separate from
+native-resize and soft-resize cleanup. This tests a trailing reveal boundary
+without turning resize back into a periodic shell-state transition.
+
 ### 2. The active host is windowed WebView2, not a native WinUI composition tree
 
 ```text
