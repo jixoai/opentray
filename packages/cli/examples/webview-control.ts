@@ -181,14 +181,24 @@ if (process.env.OPENTRAY_EXAMPLE_VISIBILITY_SMOKE === "1") {
   if (!(await webview.isVisible())) {
     throw new Error("toVisible must restore the minimized example window");
   }
-  await sleep(100);
+  await webview.close();
+  await waitForPrimaryMenuVisibility(false, 2_000);
+  if (!(await webview.isClosed())) {
+    throw new Error("closed example window must report closed before retained reveal");
+  }
+  await webview.toVisible();
+  await waitForPrimaryMenuVisibility(true, 2_000);
+  if (!(await webview.isVisible())) {
+    throw new Error("toVisible must reveal the retained closed example window");
+  }
+  await sleep(150);
   const transitions = observedVisibleChanges.slice(transitionStart);
-  if (JSON.stringify(transitions) !== JSON.stringify([false, true])) {
+  if (JSON.stringify(transitions) !== JSON.stringify([false, true, false, true])) {
     throw new Error(
-      `visibility smoke expected one minimize/restore transition, received ${JSON.stringify(transitions)}`,
+      `visibility smoke expected minimize/restore and retained reveal transitions, received ${JSON.stringify(transitions)}`,
     );
   }
-  console.log("visibility smoke: primary menu followed minimize and restore");
+  console.log("visibility smoke: primary menu followed minimize, restore, hide, and retained reveal");
 }
 
 console.log(

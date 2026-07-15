@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 7
-- Status: native resize acceptance removed the refresh churn, but retained-session `close() -> toVisible()` still leaves reveal residue; a reveal-only delayed recovery is pending.
+- Status: native resize and retained-session delayed-reveal recovery are implemented and source-smoked; renewed Windows material/frameless visual acceptance is pending.
 - Previous plan backup: `plans/plan-v8.md`
 
 ## Workflow Command Surface
@@ -148,7 +148,7 @@ Examples create native window event listeners only after first show and tear dow
 - Inference: OpenTray's custom frameless DWM host plus Wry's HWND controller has a more difficult composition boundary than a native WinUI/Mica surface. This is not evidence that the Rust language or the `windows` projection is at fault.
 - Decision pending evidence: do not add a continuously reset 100ms debounce. The existing 120ms behavior is a throttle, not a trailing debounce; the platform already supplies `WM_EXITSIZEMOVE` as a terminal interaction boundary.
 - User-approved terminal policy: the continuous ordinary-`WM_SIZE` reset remains removed. `WM_SIZE` records an observed native resize only; one queued recovery remains after `WM_EXITSIZEMOVE`, while the existing soft-resize release path remains terminal-only.
-- User acceptance result: resize churn is fixed, but the current one-message `close() -> toVisible()` recovery runs too early to clear reveal residue. The next bounded experiment is one 100ms HWND timer after retained-session reveal only; it must not run during native resize, soft resize, or a hidden session.
+- User acceptance result: resize churn is fixed, but the prior one-message `close() -> toVisible()` recovery ran too early to clear reveal residue. It is replaced by one cancelable 100ms HWND timer after retained-session reveal only; it does not run during native resize, soft resize, or a hidden session. Focused verification and source smoke pass; Windows visual acceptance is pending.
 
 ## Reverse-Inferred Design
 

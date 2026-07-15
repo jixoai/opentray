@@ -102,6 +102,10 @@ hidden, re-check normal visible state at fire time, and remain separate from
 native-resize and soft-resize cleanup. This tests a trailing reveal boundary
 without turning resize back into a periodic shell-state transition.
 
+The experiment is now implemented. The source smoke covers both
+minimize/restore and retained `close() -> toVisible()` transitions, then waits
+past the timer boundary. Human material/frameless acceptance remains required.
+
 ### 2. The active host is windowed WebView2, not a native WinUI composition tree
 
 ```text

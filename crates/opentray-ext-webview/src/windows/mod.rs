@@ -57,17 +57,17 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
     GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible,
-    IsZoomed, LoadCursorW, LoadImageW, PostMessageW, RegisterClassW, SendMessageW, SetCursor,
-    SetForegroundWindow, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, ShowWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA,
-    GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL,
-    IDC_ARROW, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, IMAGE_ICON, LR_DEFAULTSIZE,
-    LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-    SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CANCELMODE,
-    WM_CAPTURECHANGED, WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
+    IsZoomed, KillTimer, LoadCursorW, LoadImageW, PostMessageW, RegisterClassW, SendMessageW,
+    SetCursor, SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, SetWindowTextW, ShowWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT,
+    GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
+    ICON_BIG, ICON_SMALL, IDC_ARROW, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE,
+    IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
+    SW_RESTORE, SW_SHOW, SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_APP,
+    WM_CANCELMODE, WM_CAPTURECHANGED, WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
     WM_GETMINMAXINFO, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN,
-    WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW,
+    WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSW,
     WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
     WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX,
     WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
@@ -119,6 +119,8 @@ const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
 const WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV: &str = "OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK";
 const WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL: u32 = WM_APP + 0x51;
+const WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID: usize = 0x4F54_5743;
+const WINDOWS_REVEAL_ARTIFACT_CLEAR_DELAY_MS: u32 = 100;
 
 thread_local! {
     static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
@@ -149,8 +151,14 @@ struct WindowProcState {
     size_move_interaction: WindowProcSizeMoveInteraction,
     soft_resize_interaction: Option<WindowProcSoftResizeInteraction>,
     operational_visible: Option<bool>,
-    artifact_clear_after_reveal_pending: bool,
+    artifact_clear_schedule: Option<WindowsArtifactClearSchedule>,
     visibility_sync_suppressed: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WindowsArtifactClearSchedule {
+    NextMessage,
+    RevealDelay,
 }
 
 /// Tracks one native `WM_ENTERSIZEMOVE` interaction. Windows sends that message for both
@@ -1389,6 +1397,7 @@ fn show_bridge_window(
     focus: bool,
 ) -> Result<(), WebviewRuntimeError> {
     let hwnd = bridge.borrow().hwnd;
+    let needs_reveal_recovery = !window_is_visible(hwnd);
     unsafe {
         let command = if IsIconic(hwnd) != 0 {
             SW_RESTORE
@@ -1402,12 +1411,15 @@ fn show_bridge_window(
             SetForegroundWindow(hwnd);
         }
     }
-    maybe_auto_clear_windows_white_block_artifact_after_reveal(bridge)?;
+    if needs_reveal_recovery {
+        maybe_auto_clear_windows_white_block_artifact_after_delayed_reveal(bridge)?;
+    }
     Ok(())
 }
 
 fn hide_bridge_window(bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
     let hwnd = bridge.borrow().hwnd;
+    cancel_queued_windows_artifact_clear(hwnd);
     finish_window_proc_soft_resize(hwnd, true);
     unsafe {
         ShowWindow(hwnd, SW_HIDE);
@@ -2063,10 +2075,26 @@ fn maybe_auto_clear_windows_white_block_artifact_after_reveal(
     if !bridge.borrow().style.frameless {
         return maybe_auto_clear_windows_white_block_artifact(bridge);
     }
-    queue_windows_artifact_clear_after_reveal(bridge)
+    queue_windows_artifact_clear_after_next_message(bridge)
 }
 
-fn queue_windows_artifact_clear_after_reveal(
+fn maybe_auto_clear_windows_white_block_artifact_after_delayed_reveal(
+    bridge: &RefCell<NavigatorWindowBridge>,
+) -> Result<(), WebviewRuntimeError> {
+    if !windows_auto_clear_white_block_enabled() {
+        return Ok(());
+    }
+    let should_clear = {
+        let state = bridge.borrow();
+        background_needs_white_block_clear(&state.style.background) || state.style.frameless
+    };
+    if !should_clear {
+        return Ok(());
+    }
+    schedule_windows_artifact_clear_after_delayed_reveal(bridge)
+}
+
+fn queue_windows_artifact_clear_after_next_message(
     bridge: &RefCell<NavigatorWindowBridge>,
 ) -> Result<(), WebviewRuntimeError> {
     if !windows_auto_clear_white_block_enabled() {
@@ -2078,10 +2106,10 @@ fn queue_windows_artifact_clear_after_reveal(
         let Some(state) = states.get_mut(&(hwnd as isize)) else {
             return None;
         };
-        if state.artifact_clear_after_reveal_pending {
+        if state.artifact_clear_schedule.is_some() {
             return Some(false);
         }
-        state.artifact_clear_after_reveal_pending = true;
+        state.artifact_clear_schedule = Some(WindowsArtifactClearSchedule::NextMessage);
         Some(true)
     });
     let Some(should_post) = queue_result else {
@@ -2091,11 +2119,7 @@ fn queue_windows_artifact_clear_after_reveal(
         return Ok(());
     }
     if unsafe { PostMessageW(hwnd, WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL, 0, 0) } == 0 {
-        WINDOW_PROC_STATES.with(|states| {
-            if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
-                state.artifact_clear_after_reveal_pending = false;
-            }
-        });
+        clear_queued_windows_artifact_schedule(hwnd, WindowsArtifactClearSchedule::NextMessage);
         return Err(WebviewRuntimeError::Internal(
             std::io::Error::last_os_error().to_string(),
         ));
@@ -2103,24 +2127,100 @@ fn queue_windows_artifact_clear_after_reveal(
     Ok(())
 }
 
+fn schedule_windows_artifact_clear_after_delayed_reveal(
+    bridge: &RefCell<NavigatorWindowBridge>,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    let schedule_result = WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let Some(state) = states.get_mut(&(hwnd as isize)) else {
+            return None;
+        };
+        state.artifact_clear_schedule = Some(WindowsArtifactClearSchedule::RevealDelay);
+        Some(())
+    });
+    if schedule_result.is_none() {
+        return maybe_auto_clear_windows_white_block_artifact(bridge);
+    }
+
+    unsafe {
+        KillTimer(hwnd, WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID);
+    }
+    if unsafe {
+        SetTimer(
+            hwnd,
+            WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID,
+            WINDOWS_REVEAL_ARTIFACT_CLEAR_DELAY_MS,
+            None,
+        )
+    } == 0
+    {
+        clear_queued_windows_artifact_schedule(hwnd, WindowsArtifactClearSchedule::RevealDelay);
+        return Err(WebviewRuntimeError::Internal(
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn cancel_queued_windows_artifact_clear(hwnd: HWND) {
+    let should_cancel_timer = WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let Some(state) = states.get_mut(&(hwnd as isize)) else {
+            return false;
+        };
+        let should_cancel_timer = matches!(
+            state.artifact_clear_schedule,
+            Some(WindowsArtifactClearSchedule::RevealDelay)
+        );
+        state.artifact_clear_schedule = None;
+        should_cancel_timer
+    });
+    if should_cancel_timer {
+        unsafe {
+            KillTimer(hwnd, WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID);
+        }
+    }
+}
+
+fn clear_queued_windows_artifact_schedule(hwnd: HWND, expected: WindowsArtifactClearSchedule) {
+    WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        if let Some(state) = states.get_mut(&(hwnd as isize)) {
+            if state.artifact_clear_schedule == Some(expected) {
+                state.artifact_clear_schedule = None;
+            }
+        }
+    });
+}
+
 fn take_queued_windows_artifact_clear(
     hwnd: HWND,
+    expected: WindowsArtifactClearSchedule,
 ) -> Option<NonNull<RefCell<NavigatorWindowBridge>>> {
     WINDOW_PROC_STATES.with(|states| {
         let mut states = states.borrow_mut();
         let state = states.get_mut(&(hwnd as isize))?;
-        if !state.artifact_clear_after_reveal_pending {
+        if state.artifact_clear_schedule != Some(expected) {
             return None;
         }
-        state.artifact_clear_after_reveal_pending = false;
-        should_run_queued_windows_artifact_clear(true, state.soft_resize_interaction.is_some())
-            .then_some(state.bridge)
-            .flatten()
+        state.artifact_clear_schedule = None;
+        should_run_queued_windows_artifact_clear(
+            Some(expected),
+            expected,
+            state.soft_resize_interaction.is_some(),
+        )
+        .then_some(state.bridge)
+        .flatten()
     })
 }
 
-fn should_run_queued_windows_artifact_clear(pending: bool, soft_resize_active: bool) -> bool {
-    pending && !soft_resize_active
+fn should_run_queued_windows_artifact_clear(
+    scheduled: Option<WindowsArtifactClearSchedule>,
+    expected: WindowsArtifactClearSchedule,
+    soft_resize_active: bool,
+) -> bool {
+    scheduled == Some(expected) && !soft_resize_active
 }
 
 fn should_auto_clear_windows_white_block_artifact(
@@ -2931,7 +3031,7 @@ fn sync_window_proc_state(
                 operational_visible: previous
                     .operational_visible
                     .or(Some(window_is_visible(hwnd))),
-                artifact_clear_after_reveal_pending: previous.artifact_clear_after_reveal_pending,
+                artifact_clear_schedule: previous.artifact_clear_schedule,
                 visibility_sync_suppressed: previous.visibility_sync_suppressed,
             },
         );
@@ -5268,12 +5368,31 @@ unsafe extern "system" fn window_proc(
             result
         }
         WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL => {
-            if let Some(bridge) = take_queued_windows_artifact_clear(hwnd) {
+            if let Some(bridge) =
+                take_queued_windows_artifact_clear(hwnd, WindowsArtifactClearSchedule::NextMessage)
+            {
                 if let Err(error) =
                     maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
                 {
                     eprintln!(
                         "opentray-ext-webview failed to clear Windows post-reveal artifact: {error}"
+                    );
+                }
+            }
+            0
+        }
+        WM_TIMER if wparam == WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID => {
+            unsafe {
+                KillTimer(hwnd, WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID);
+            }
+            if let Some(bridge) =
+                take_queued_windows_artifact_clear(hwnd, WindowsArtifactClearSchedule::RevealDelay)
+            {
+                if let Err(error) =
+                    maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
+                {
+                    eprintln!(
+                        "opentray-ext-webview failed to clear Windows delayed reveal artifact: {error}"
                     );
                 }
             }
@@ -5475,9 +5594,35 @@ mod tests {
 
     #[test]
     fn queued_frameless_artifact_clear_waits_for_capture_release() {
-        assert!(should_run_queued_windows_artifact_clear(true, false));
-        assert!(!should_run_queued_windows_artifact_clear(false, false));
-        assert!(!should_run_queued_windows_artifact_clear(true, true));
+        assert!(should_run_queued_windows_artifact_clear(
+            Some(WindowsArtifactClearSchedule::NextMessage),
+            WindowsArtifactClearSchedule::NextMessage,
+            false,
+        ));
+        assert!(!should_run_queued_windows_artifact_clear(
+            None,
+            WindowsArtifactClearSchedule::NextMessage,
+            false,
+        ));
+        assert!(!should_run_queued_windows_artifact_clear(
+            Some(WindowsArtifactClearSchedule::NextMessage),
+            WindowsArtifactClearSchedule::NextMessage,
+            true,
+        ));
+    }
+
+    #[test]
+    fn windows_delayed_reveal_clear_supersedes_next_message_clear() {
+        assert!(!should_run_queued_windows_artifact_clear(
+            Some(WindowsArtifactClearSchedule::RevealDelay),
+            WindowsArtifactClearSchedule::NextMessage,
+            false,
+        ));
+        assert!(should_run_queued_windows_artifact_clear(
+            Some(WindowsArtifactClearSchedule::RevealDelay),
+            WindowsArtifactClearSchedule::RevealDelay,
+            false,
+        ));
     }
 
     #[test]
