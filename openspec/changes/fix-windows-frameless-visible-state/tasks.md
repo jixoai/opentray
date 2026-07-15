@@ -64,5 +64,5 @@
 - [x] 8.1 Write a source-backed report that separates confirmed OpenTray recovery churn, documented WebView2 behavior, and unproven composition hypotheses.
 - [ ] 8.2 Add temporary observability for cleanup reason/count/cost and run the terminal-only, trailing-delay, and existing-live-clear A/B matrix on material and opaque cases.
 - [ ] 8.3 Decide the next repair policy with user approval before changing the native hosting architecture or removing an accepted residue workaround.
-- [ ] 8.4 Implement the approved terminal-only native resize recovery: record `WM_SIZE`, queue one recovery after observed `WM_EXITSIZEMOVE`, and remove the 120ms live shell-reset throttle.
+- [x] 8.4 Implement the approved terminal-only native resize recovery: record `WM_SIZE`, queue one recovery after observed `WM_EXITSIZEMOVE`, and remove the 120ms live shell-reset throttle.
 - [ ] 8.5 Add focused native tests and run the Windows material/frameless resize smoke; require user visual acceptance before testing a trailing delay or composition host.

@@ -18,7 +18,6 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::{null, null_mut, NonNull};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use opentray_spec::Rect;
@@ -119,7 +118,6 @@ const WINDOWS_BACKGROUND_MATERIALS: &[&str] = &["auto", "mica", "acrylic", "tabb
 const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active", "inactive"];
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
 const WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV: &str = "OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK";
-const WINDOWS_LIVE_RESIZE_ARTIFACT_CLEAR_INTERVAL: Duration = Duration::from_millis(120);
 const WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL: u32 = WM_APP + 0x51;
 
 thread_local! {
@@ -162,7 +160,6 @@ struct WindowProcState {
 struct WindowProcSizeMoveInteraction {
     active: bool,
     saw_resize: bool,
-    last_artifact_clear_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,26 +214,18 @@ impl WindowProcSizeMoveInteraction {
     fn enter(&mut self) {
         self.active = true;
         self.saw_resize = false;
-        self.last_artifact_clear_at = None;
     }
 
-    fn observe_resize(&mut self, now: Instant) -> bool {
-        if !self.active {
-            return false;
+    fn observe_resize(&mut self) {
+        if self.active {
+            self.saw_resize = true;
         }
-        self.saw_resize = true;
-        if !should_run_live_resize_artifact_clear(self.last_artifact_clear_at, now) {
-            return false;
-        }
-        self.last_artifact_clear_at = Some(now);
-        true
     }
 
     fn exit(&mut self) -> bool {
         let should_clear = self.active && self.saw_resize;
         self.active = false;
         self.saw_resize = false;
-        self.last_artifact_clear_at = None;
         should_clear
     }
 }
@@ -2143,43 +2132,14 @@ fn should_auto_clear_windows_white_block_artifact(
     (background_needs_clear || frameless) && visible && !maximized
 }
 
-fn maybe_auto_clear_windows_white_block_artifact_during_live_resize(
-    hwnd: HWND,
-) -> Result<(), WebviewRuntimeError> {
-    let bridge = WINDOW_PROC_STATES.with(|states| {
-        let now = Instant::now();
-        let mut states = states.borrow_mut();
-        let Some(state) = states.get_mut(&(hwnd as isize)) else {
-            return None;
-        };
-        if !should_clear_windows_artifact_during_live_resize(
-            state.soft_resize_interaction.is_some(),
-            &mut state.size_move_interaction,
-            now,
-        ) {
-            return None;
+fn observe_window_proc_native_resize(hwnd: HWND) {
+    WINDOW_PROC_STATES.with(|states| {
+        if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
+            // `WM_SIZE` owns geometry and surface synchronization. Shell-state recovery waits
+            // for `WM_EXITSIZEMOVE`, so a continuous native resize never performs hide/restore.
+            state.size_move_interaction.observe_resize();
         }
-        state.bridge
     });
-    let Some(bridge) = bridge else {
-        return Ok(());
-    };
-    maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
-}
-
-fn should_clear_windows_artifact_during_live_resize(
-    soft_resize_active: bool,
-    interaction: &mut WindowProcSizeMoveInteraction,
-    now: Instant,
-) -> bool {
-    !soft_resize_active && interaction.observe_resize(now)
-}
-
-fn should_run_live_resize_artifact_clear(last: Option<Instant>, now: Instant) -> bool {
-    match last {
-        Some(last) => now.duration_since(last) >= WINDOWS_LIVE_RESIZE_ARTIFACT_CLEAR_INTERVAL,
-        None => true,
-    }
 }
 
 fn clear_windows_white_block_artifact(
@@ -5304,13 +5264,7 @@ unsafe extern "system" fn window_proc(
             // Win32 does not guarantee that `IsIconic` is observable in the same command call
             // that requested minimize. Reconcile the shared operational projection after size.
             emit_window_visible_change_from_native_state(hwnd);
-            if let Err(error) =
-                maybe_auto_clear_windows_white_block_artifact_during_live_resize(hwnd)
-            {
-                eprintln!(
-                    "opentray-ext-webview failed to auto-clear Windows live resize artifact: {error}"
-                );
-            }
+            observe_window_proc_native_resize(hwnd);
             result
         }
         WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL => {
@@ -5505,40 +5459,6 @@ mod tests {
     }
 
     #[test]
-    fn windows_live_resize_white_block_clear_is_throttled() {
-        let now = Instant::now();
-
-        assert!(should_run_live_resize_artifact_clear(None, now));
-        assert!(!should_run_live_resize_artifact_clear(
-            Some(now - Duration::from_millis(30)),
-            now
-        ));
-        assert!(should_run_live_resize_artifact_clear(
-            Some(now - Duration::from_millis(200)),
-            now
-        ));
-    }
-
-    #[test]
-    fn windows_soft_resize_skips_shell_state_white_block_cleanup() {
-        let now = Instant::now();
-        let mut interaction = WindowProcSizeMoveInteraction::default();
-
-        interaction.enter();
-        assert!(!should_clear_windows_artifact_during_live_resize(
-            true,
-            &mut interaction,
-            now,
-        ));
-        assert!(!interaction.saw_resize);
-        assert!(should_clear_windows_artifact_during_live_resize(
-            false,
-            &mut interaction,
-            now,
-        ));
-    }
-
-    #[test]
     fn windows_operational_visibility_excludes_closed_and_minimized_windows() {
         assert!(window_visibility_from_native_state(false, false));
         assert!(!window_visibility_from_native_state(true, false));
@@ -5572,16 +5492,19 @@ mod tests {
     }
 
     #[test]
-    fn windows_white_block_auto_clear_requires_observed_resize() {
-        let now = Instant::now();
+    fn windows_native_resize_records_one_terminal_repair() {
         let mut interaction = WindowProcSizeMoveInteraction::default();
 
+        interaction.observe_resize();
+        assert!(!interaction.exit());
+
         interaction.enter();
-        assert!(interaction.observe_resize(now));
-        assert!(!interaction.observe_resize(now + Duration::from_millis(30)));
+        interaction.observe_resize();
+        interaction.observe_resize();
 
         assert!(interaction.exit());
-        assert!(interaction.last_artifact_clear_at.is_none());
+        assert!(!interaction.active);
+        assert!(!interaction.saw_resize);
     }
 
     #[test]

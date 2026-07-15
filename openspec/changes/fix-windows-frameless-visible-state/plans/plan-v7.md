@@ -3,8 +3,8 @@
 ## Current Round
 
 - Round: 7
-- Status: terminal-only recovery, focused verification, and source smoke are complete; renewed Windows visual acceptance is pending.
-- Previous plan backup: `plans/plan-v7.md`
+- Status: user authorized the terminal-only recovery experiment; implementation and renewed Windows visual acceptance are pending.
+- Previous plan backup: `plans/plan-v6.md`
 
 ## Workflow Command Surface
 
@@ -146,7 +146,7 @@ Examples create native window event listeners only after first show and tear dow
 - Confirmed: WebView2 and its official release notes document white flash, transparent-background defects, and separate Windowed/Visual hosting modes. The platform has real composition edge cases.
 - Inference: OpenTray's custom frameless DWM host plus Wry's HWND controller has a more difficult composition boundary than a native WinUI/Mica surface. This is not evidence that the Rust language or the `windows` projection is at fault.
 - Decision pending evidence: do not add a continuously reset 100ms debounce. The existing 120ms behavior is a throttle, not a trailing debounce; the platform already supplies `WM_EXITSIZEMOVE` as a terminal interaction boundary.
-- User-approved experiment: the continuous ordinary-`WM_SIZE` reset is removed. `WM_SIZE` records an observed native resize only; one queued recovery remains after `WM_EXITSIZEMOVE`, while the existing soft-resize release path remains terminal-only. Focused automated verification and the source smoke passed; Windows visual acceptance is pending.
+- User-approved experiment: remove the continuous ordinary-`WM_SIZE` reset now; retain one queued recovery after an observed terminal native resize and retain the existing soft-resize release path.
 
 ## Reverse-Inferred Design
 

@@ -31,19 +31,22 @@ DWM/WebView2 redraws correctly, but interaction visibly refreshes
 
 Do not add a generic `100ms` debounce yet.
 
-The current implementation already has a `120ms` live-resize **throttle** for
+The previous implementation had a `120ms` live-resize **throttle** for
 ordinary native resize. A throttle performs the invasive repair repeatedly
 during a drag. A true debounce would instead perform one trailing repair after
 the interaction settles. Windows already provides `WM_EXITSIZEMOVE` for that
-terminal boundary, and OpenTray already performs a terminal repair there.
+terminal boundary, so the first A/B change is terminal-only recovery.
 
-The first A/B change should therefore be **terminal-only recovery**, not a new
-timer in the continuous `WM_SIZE` path. A single delayed terminal repair is a
-separate experiment only if the next-message repair proves too early.
+Terminal-only recovery is implemented in this round: `WM_SIZE` now synchronizes
+surfaces and records an observed resize, while `WM_EXITSIZEMOVE` may queue one
+recovery. Focused automated tests and the isolated Windows source smoke pass;
+Windows material/frameless visual acceptance remains pending. A single delayed
+terminal repair is a separate experiment only if the next-message recovery
+proves too early.
 
 ## What Is Confirmed
 
-### 1. The visible refresh is directly caused by OpenTray recovery policy
+### 1. The historical visible refresh was directly caused by OpenTray recovery policy
 
 ```text
 WM_ENTERSIZEMOVE
@@ -56,16 +59,30 @@ WM_SIZE ------------ every 120ms while ordinary resize continues
 WM_EXITSIZEMOVE ------------------+--> another terminal repair
 ```
 
-`crates/opentray-ext-webview/src/windows/mod.rs` calls
+The previous `crates/opentray-ext-webview/src/windows/mod.rs` implementation called
 `maybe_auto_clear_windows_white_block_artifact_during_live_resize()` from
 `WM_SIZE`. The helper permits the repair when the interaction is not the
 frameless soft-resize path and its 120ms throttle fires. The repair calls
 `ShowWindow(SW_SHOWMINNOACTIVE)` then `ShowWindow(SW_RESTORE)`.
 
-That means the interaction cost is not mysterious: OpenTray deliberately asks
+That historical interaction cost is not mysterious: OpenTray deliberately asked
 the shell to change the window state up to about eight times per second during
-one native resize. This is sufficient to explain the refresh/flicker feeling,
+one native resize. This was sufficient to explain the refresh/flicker feeling,
 even if the underlying residue bug originates below OpenTray.
+
+The current terminal-only path is:
+
+```text
+WM_ENTERSIZEMOVE
+        |
+WM_SIZE -> synchronize host/WebView surfaces and record resize
+        |
+WM_EXITSIZEMOVE -> queue at most one shell-state recovery
+```
+
+A `WM_EXITSIZEMOVE` after a pure move has no observed resize and therefore no
+recovery. The implementation still requires Windows visual acceptance before
+this becomes the permanent policy.
 
 ### 2. The active host is windowed WebView2, not a native WinUI composition tree
 
@@ -194,8 +211,8 @@ The diagnostic must be off by default and must not alter the message ordering.
 
 | Variant | During continuous `WM_SIZE` | After terminal boundary | Expected result |
 | ------- | --------------------------- | ----------------------- | --------------- |
-| A: current baseline | 120ms shell reset | yes | residue lowest, refresh cost highest |
-| B: terminal-only | none | `WM_EXITSIZEMOVE` / soft-release | preferred interaction baseline |
+| A: historical baseline | 120ms shell reset | yes | residue lowest, refresh cost highest |
+| B: terminal-only (implemented; visual acceptance pending) | none | `WM_EXITSIZEMOVE` / soft-release | preferred interaction baseline |
 | C: trailing 100ms | none | one timer after terminal boundary | tests whether next-message repair is too early |
 | D: no shell reset | none | none | isolates whether repaint/bounds work alone now |
 
@@ -234,7 +251,7 @@ runtime style setter.
 ## Decision Gates
 
 ```text
-terminal-only A/B clean?
+terminal-only smoke and human acceptance clean?
         |
    yes  +--> remove live WM_SIZE shell reset
         |
