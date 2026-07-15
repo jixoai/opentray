@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 7
-- Status: user authorized the terminal-only recovery experiment; implementation and renewed Windows visual acceptance are pending.
-- Previous plan backup: `plans/plan-v6.md`
+- Round: 6
+- Status: source-backed composition report is ready; no further cleanup-timing change is authorized before the A/B plan is reviewed.
+- Previous plan backup: `plans/plan-v5.md`
 
 ## Workflow Command Surface
 
@@ -48,7 +48,6 @@
 | 2026-07-15 | User | Frameless entry and completed frameless resize must clean rendering residue. | Run Windows shell-state artifact repair only after a frameless window is visible or soft-resize capture has ended. |
 | 2026-07-15 | User | Minimizing still leaves the example primary item on `Hide Example`; revealing the minimized frameless material window leaves residue until a later resize. | Treat Win32 minimize completion as a visibility projection source and defer reveal cleanup until a later HWND message turn. |
 | 2026-07-15 | User | Residue cleanup causes frequent refreshes, especially during resize; investigate whether this is OpenTray, Windows/WebView2, or Rust, compare the official Mica experience, and preserve a formal report before choosing a debounce. | Freeze cleanup policy changes until the host/composition stack and current clear cadence are measured and classified. |
-| 2026-07-15 | User | Implement the recommended approach first, then let the user test. | Apply terminal-only shell recovery without a C#/WinUI rewrite, composition-hosting migration, or new distribution package. |
 
 ### Evidence Read
 
@@ -146,7 +145,6 @@ Examples create native window event listeners only after first show and tear dow
 - Confirmed: WebView2 and its official release notes document white flash, transparent-background defects, and separate Windowed/Visual hosting modes. The platform has real composition edge cases.
 - Inference: OpenTray's custom frameless DWM host plus Wry's HWND controller has a more difficult composition boundary than a native WinUI/Mica surface. This is not evidence that the Rust language or the `windows` projection is at fault.
 - Decision pending evidence: do not add a continuously reset 100ms debounce. The existing 120ms behavior is a throttle, not a trailing debounce; the platform already supplies `WM_EXITSIZEMOVE` as a terminal interaction boundary.
-- User-approved experiment: remove the continuous ordinary-`WM_SIZE` reset now; retain one queued recovery after an observed terminal native resize and retain the existing soft-resize release path.
 
 ## Reverse-Inferred Design
 
@@ -279,7 +277,6 @@ No `opentray-core` branch, broker special case, or consumer-specific behavior is
 - [x] 11. Write and commit a source-backed Windows WebView2/DWM composition investigation before changing cleanup timing again.
 - [ ] 12. Instrument clear reasons/counts and run a terminal-only versus live-clear A/B matrix; treat a trailing 100ms delay as one experiment, not the default diagnosis.
 - [ ] 13. Decide between terminal-only recovery, startup/background changes, and a Window-to-Visual/composition-hosting spike from evidence; request user approval before an architectural host change.
-- [ ] 14. Implement the user-approved terminal-only recovery experiment and obtain Windows resize/material acceptance before considering a trailing delay or hosting-model spike.
 
 ## Open Questions
 

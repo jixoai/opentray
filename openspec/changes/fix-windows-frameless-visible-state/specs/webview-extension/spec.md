@@ -147,3 +147,23 @@ When `show()` or `toVisible()` reveals a normal frameless Windows window, the ru
 - **THEN** the runtime restores the same native session
 - **AND** one queued post-reveal cleanup runs only after the next HWND message turn
 - **AND** the material is visible without requiring the user to resize the window.
+
+### Requirement: Windows native resize recovery SHALL be terminal-only
+
+The Windows host SHALL treat continuous `WM_SIZE` as geometry/surface work, not as authority to run the shell-state artifact repair. During a native `WM_ENTERSIZEMOVE` interaction it SHALL only record whether a size change occurred. After `WM_EXITSIZEMOVE`, one observed resize MAY queue one artifact repair through the existing post-transition boundary. A pure native move SHALL queue no repair.
+
+This rule applies to ordinary framed and material-backed windows as well as the existing frameless soft-resize exclusion. The host SHALL NOT run `SW_SHOWMINNOACTIVE -> SW_RESTORE` on a recurring timer or throttle while the operator is continuously resizing.
+
+#### Scenario: A material-backed native resize does not repeatedly refresh the shell
+
+- **GIVEN** a visible normal WebView has a material or transparent background
+- **WHEN** the operator drags a native resize edge across many `WM_SIZE` messages
+- **THEN** each message updates geometry and native surfaces without a shell-state reset
+- **AND** one repair is queued only after `WM_EXITSIZEMOVE` when the interaction observed a resize
+- **AND** the operator does not see recurring minimize/restore refreshes during the drag.
+
+#### Scenario: A native move does not request terminal repair
+
+- **GIVEN** a visible normal WebView begins and ends a native move interaction without resizing
+- **WHEN** the host receives `WM_ENTERSIZEMOVE` and then `WM_EXITSIZEMOVE`
+- **THEN** it does not queue an artifact repair.
