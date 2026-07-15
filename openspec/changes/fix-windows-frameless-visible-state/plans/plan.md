@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 5
-- Status: remediation in progress for native minimize visibility projection and post-reveal DWM cleanup.
+- Status: native completion remediation is verified by focused tests and source smoke; Windows visual material acceptance remains pending.
 - Previous plan backup: `plans/plan-v4.md`
 
 ## Workflow Command Surface

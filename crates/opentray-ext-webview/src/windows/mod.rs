@@ -58,19 +58,20 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
     GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible,
-    IsZoomed, LoadCursorW, LoadImageW, RegisterClassW, SendMessageW, SetCursor,
+    IsZoomed, LoadCursorW, LoadImageW, PostMessageW, RegisterClassW, SendMessageW, SetCursor,
     SetForegroundWindow, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
     SetWindowTextW, ShowWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA,
     GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL,
     IDC_ARROW, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, IMAGE_ICON, LR_DEFAULTSIZE,
     LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-    SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED,
-    WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON,
-    WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-    WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE,
-    WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
+    SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CANCELMODE,
+    WM_CAPTURECHANGED, WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
+    WM_GETMINMAXINFO, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN,
+    WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW,
+    WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
+    WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX,
+    WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -119,6 +120,7 @@ const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
 const WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV: &str = "OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK";
 const WINDOWS_LIVE_RESIZE_ARTIFACT_CLEAR_INTERVAL: Duration = Duration::from_millis(120);
+const WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL: u32 = WM_APP + 0x51;
 
 thread_local! {
     static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
@@ -148,6 +150,9 @@ struct WindowProcState {
     size_constraints: WindowSizeConstraints,
     size_move_interaction: WindowProcSizeMoveInteraction,
     soft_resize_interaction: Option<WindowProcSoftResizeInteraction>,
+    operational_visible: Option<bool>,
+    artifact_clear_after_reveal_pending: bool,
+    visibility_sync_suppressed: bool,
 }
 
 /// Tracks one native `WM_ENTERSIZEMOVE` interaction. Windows sends that message for both
@@ -685,7 +690,7 @@ impl WindowsWebviewRuntime {
                 let height = finite_i32(height, "height")?;
                 set_window_size(slot.window.hwnd, width, height)?;
                 refresh_after_explicit_resize(&slot.bridge)?;
-                maybe_auto_clear_windows_white_block_artifact(&slot.bridge)?;
+                maybe_auto_clear_windows_white_block_artifact_after_reveal(&slot.bridge)?;
                 let response = json!({ "width": width, "height": height });
                 emit_window_event(&slot.bridge, "resized", response.clone())?;
                 emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
@@ -1123,7 +1128,7 @@ impl WindowsWebviewRuntime {
         apply_window_style(&slot.bridge, None)?;
         apply_window_icon_from_bridge(&slot.bridge)?;
         apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
-        maybe_auto_clear_windows_white_block_artifact(&slot.bridge)?;
+        maybe_auto_clear_windows_white_block_artifact_after_reveal(&slot.bridge)?;
 
         Ok(slot)
     }
@@ -1408,7 +1413,7 @@ fn show_bridge_window(
             SetForegroundWindow(hwnd);
         }
     }
-    maybe_auto_clear_windows_white_block_artifact(bridge)?;
+    maybe_auto_clear_windows_white_block_artifact_after_reveal(bridge)?;
     Ok(())
 }
 
@@ -1440,11 +1445,14 @@ fn emit_window_state_change(
 }
 
 fn emit_visible_change_if_needed(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
-    was_visible: bool,
+    bridge: &RefCell<NavigatorWindowBridge>,
+    fallback_previous: bool,
 ) -> Result<(), WebviewRuntimeError> {
-    let visible = window_is_visible(bridge.borrow().hwnd);
-    if visible == was_visible {
+    let (hwnd, visible) = {
+        let state = bridge.borrow();
+        (state.hwnd, window_is_visible(state.hwnd))
+    };
+    if !update_window_proc_operational_visibility(hwnd, fallback_previous, visible) {
         return Ok(());
     }
     let payload = json!({ "visible": visible });
@@ -1453,6 +1461,50 @@ fn emit_visible_change_if_needed(
         .window_events
         .push_back(json!({ "type": "visibleChange", "visible": visible }));
     emit_window_event(bridge, "visibleChange", payload)
+}
+
+fn update_window_proc_operational_visibility(
+    hwnd: HWND,
+    fallback_previous: bool,
+    visible: bool,
+) -> bool {
+    WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let Some(state) = states.get_mut(&(hwnd as isize)) else {
+            return fallback_previous != visible;
+        };
+        let previous = state.operational_visible.unwrap_or(fallback_previous);
+        state.operational_visible = Some(visible);
+        operational_visibility_changed(previous, visible)
+    })
+}
+
+fn operational_visibility_changed(previous: bool, visible: bool) -> bool {
+    previous != visible
+}
+
+fn emit_window_visible_change_from_native_state(hwnd: HWND) {
+    let bridge = with_window_proc_state(hwnd, |state| {
+        (!state.visibility_sync_suppressed)
+            .then_some(state.bridge)
+            .flatten()
+    });
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let bridge = unsafe { bridge.as_ref() };
+    let visible = window_is_visible(hwnd);
+    if let Err(error) = emit_visible_change_if_needed(bridge, visible) {
+        eprintln!("opentray-ext-webview failed to emit Windows visible change: {error}");
+    }
+}
+
+fn set_window_proc_visibility_sync_suppressed(hwnd: HWND, suppressed: bool) {
+    WINDOW_PROC_STATES.with(|states| {
+        if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
+            state.visibility_sync_suppressed = suppressed;
+        }
+    });
 }
 
 fn dispatch_navigator_window_command(
@@ -2016,6 +2068,72 @@ fn maybe_auto_clear_windows_white_block_artifact(
     clear_windows_white_block_artifact(bridge)
 }
 
+fn maybe_auto_clear_windows_white_block_artifact_after_reveal(
+    bridge: &RefCell<NavigatorWindowBridge>,
+) -> Result<(), WebviewRuntimeError> {
+    if !bridge.borrow().style.frameless {
+        return maybe_auto_clear_windows_white_block_artifact(bridge);
+    }
+    queue_windows_artifact_clear_after_reveal(bridge)
+}
+
+fn queue_windows_artifact_clear_after_reveal(
+    bridge: &RefCell<NavigatorWindowBridge>,
+) -> Result<(), WebviewRuntimeError> {
+    if !windows_auto_clear_white_block_enabled() {
+        return Ok(());
+    }
+    let hwnd = bridge.borrow().hwnd;
+    let queue_result = WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let Some(state) = states.get_mut(&(hwnd as isize)) else {
+            return None;
+        };
+        if state.artifact_clear_after_reveal_pending {
+            return Some(false);
+        }
+        state.artifact_clear_after_reveal_pending = true;
+        Some(true)
+    });
+    let Some(should_post) = queue_result else {
+        return maybe_auto_clear_windows_white_block_artifact(bridge);
+    };
+    if !should_post {
+        return Ok(());
+    }
+    if unsafe { PostMessageW(hwnd, WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL, 0, 0) } == 0 {
+        WINDOW_PROC_STATES.with(|states| {
+            if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
+                state.artifact_clear_after_reveal_pending = false;
+            }
+        });
+        return Err(WebviewRuntimeError::Internal(
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn take_queued_windows_artifact_clear(
+    hwnd: HWND,
+) -> Option<NonNull<RefCell<NavigatorWindowBridge>>> {
+    WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let state = states.get_mut(&(hwnd as isize))?;
+        if !state.artifact_clear_after_reveal_pending {
+            return None;
+        }
+        state.artifact_clear_after_reveal_pending = false;
+        should_run_queued_windows_artifact_clear(true, state.soft_resize_interaction.is_some())
+            .then_some(state.bridge)
+            .flatten()
+    })
+}
+
+fn should_run_queued_windows_artifact_clear(pending: bool, soft_resize_active: bool) -> bool {
+    pending && !soft_resize_active
+}
+
 fn should_auto_clear_windows_white_block_artifact(
     background_needs_clear: bool,
     frameless: bool,
@@ -2076,7 +2194,11 @@ fn clear_windows_white_block_artifact(
         // limitation explicit until a deeper DComp/AppWindow fix exists.
         return Ok(());
     }
+    // The repair intentionally minimizes and restores the HWND. Suppress its internal WM_SIZE
+    // messages so they cannot masquerade as user-driven operational visibility changes.
+    set_window_proc_visibility_sync_suppressed(hwnd, true);
     show_window_clear_white_block(hwnd, SW_SHOWMINNOACTIVE, SW_RESTORE);
+    set_window_proc_visibility_sync_suppressed(hwnd, false);
     finish_shell_state_clear_white_block(bridge)
 }
 
@@ -2672,7 +2794,7 @@ fn apply_window_style(
     }
     notify_webview_parent_window_position_changed_from_bridge(bridge)?;
     refresh_native_window_surface(hwnd)?;
-    maybe_auto_clear_windows_white_block_artifact(bridge)?;
+    maybe_auto_clear_windows_white_block_artifact_after_reveal(bridge)?;
     Ok(())
 }
 
@@ -2846,6 +2968,11 @@ fn sync_window_proc_state(
                 size_constraints,
                 size_move_interaction: previous.size_move_interaction,
                 soft_resize_interaction: previous.soft_resize_interaction,
+                operational_visible: previous
+                    .operational_visible
+                    .or(Some(window_is_visible(hwnd))),
+                artifact_clear_after_reveal_pending: previous.artifact_clear_after_reveal_pending,
+                visibility_sync_suppressed: previous.visibility_sync_suppressed,
             },
         );
     });
@@ -2917,7 +3044,7 @@ fn finish_window_proc_soft_resize(hwnd: HWND, release_capture: bool) -> bool {
         if release_capture {
             // The native capture lifecycle is now over. Frameless chrome residue can use the
             // normal terminal artifact repair without terminating the resize interaction.
-            if let Err(error) = maybe_auto_clear_windows_white_block_artifact(bridge) {
+            if let Err(error) = maybe_auto_clear_windows_white_block_artifact_after_reveal(bridge) {
                 eprintln!(
                     "opentray-ext-webview failed to clear Windows frameless resize artifact: {error}"
                 );
@@ -3061,7 +3188,7 @@ fn enforce_current_window_size_constraints(
     }
     set_window_size(hwnd, width, height)?;
     refresh_after_explicit_resize(bridge)?;
-    maybe_auto_clear_windows_white_block_artifact(bridge)?;
+    maybe_auto_clear_windows_white_block_artifact_after_reveal(bridge)?;
     let response = json!({ "width": width, "height": height });
     emit_window_event(bridge, "resized", response)?;
     emit_overlay_geometry_change_if_enabled(bridge)
@@ -5151,7 +5278,9 @@ unsafe extern "system" fn window_proc(
             emit_window_interaction_change(hwnd, false);
             if let Some(bridge) = resize_bridge {
                 if let Err(error) =
-                    maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
+                    maybe_auto_clear_windows_white_block_artifact_after_reveal(unsafe {
+                        bridge.as_ref()
+                    })
                 {
                     eprintln!(
                         "opentray-ext-webview failed to auto-clear Windows resize artifact: {error}"
@@ -5172,6 +5301,9 @@ unsafe extern "system" fn window_proc(
             if IsIconic(hwnd) != 0 || IsZoomed(hwnd) != 0 {
                 finish_window_proc_soft_resize(hwnd, true);
             }
+            // Win32 does not guarantee that `IsIconic` is observable in the same command call
+            // that requested minimize. Reconcile the shared operational projection after size.
+            emit_window_visible_change_from_native_state(hwnd);
             if let Err(error) =
                 maybe_auto_clear_windows_white_block_artifact_during_live_resize(hwnd)
             {
@@ -5180,6 +5312,18 @@ unsafe extern "system" fn window_proc(
                 );
             }
             result
+        }
+        WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL => {
+            if let Some(bridge) = take_queued_windows_artifact_clear(hwnd) {
+                if let Err(error) =
+                    maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
+                {
+                    eprintln!(
+                        "opentray-ext-webview failed to clear Windows post-reveal artifact: {error}"
+                    );
+                }
+            }
+            0
         }
         WM_PAINT => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -5400,6 +5544,20 @@ mod tests {
         assert!(!window_visibility_from_native_state(true, false));
         assert!(!window_visibility_from_native_state(false, true));
         assert!(!window_visibility_from_native_state(true, true));
+    }
+
+    #[test]
+    fn windows_native_minimize_visibility_transition_is_emitted_once() {
+        assert!(operational_visibility_changed(true, false));
+        assert!(!operational_visibility_changed(false, false));
+        assert!(operational_visibility_changed(false, true));
+    }
+
+    #[test]
+    fn queued_frameless_artifact_clear_waits_for_capture_release() {
+        assert!(should_run_queued_windows_artifact_clear(true, false));
+        assert!(!should_run_queued_windows_artifact_clear(false, false));
+        assert!(!should_run_queued_windows_artifact_clear(true, true));
     }
 
     #[test]

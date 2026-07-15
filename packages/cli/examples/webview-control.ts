@@ -70,6 +70,8 @@ const devServer = await startDevServer("/webview-control");
 console.log(`webview-control panel: ${devServer.url}`);
 
 let stopVisibleChange: (() => void) | undefined;
+let primaryMenuVisibility: boolean | undefined;
+const observedVisibleChanges: boolean[] = [];
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
@@ -151,9 +153,43 @@ const webview = mountExampleWebview(
 } satisfies WebviewWindowOptions);
 await webview.show();
 stopVisibleChange = webview.listen("visibleChange", ({ payload }) => {
-  void syncPrimaryMenu(payload.visible);
+  observedVisibleChanges.push(payload.visible);
+  void syncPrimaryMenu(payload.visible).catch((error: unknown) => {
+    console.error("failed to synchronize example primary menu:", error);
+  });
 });
 await syncPrimaryMenu(true);
+
+if (process.env.OPENTRAY_EXAMPLE_VISIBILITY_SMOKE === "1") {
+  await sleep(100);
+  const transitionStart = observedVisibleChanges.length;
+  await webview.evaluate(`
+    (() => {
+      const bridge = navigator.opentrayWindow ?? navigator.window;
+      if (!bridge) {
+        throw new Error("navigator.window bridge is unavailable");
+      }
+      void bridge.minimize();
+    })();
+  `);
+  await waitForPrimaryMenuVisibility(false, 2_000);
+  if (await webview.isVisible()) {
+    throw new Error("minimized example window must not report operational visibility");
+  }
+  await webview.toVisible();
+  await waitForPrimaryMenuVisibility(true, 2_000);
+  if (!(await webview.isVisible())) {
+    throw new Error("toVisible must restore the minimized example window");
+  }
+  await sleep(100);
+  const transitions = observedVisibleChanges.slice(transitionStart);
+  if (JSON.stringify(transitions) !== JSON.stringify([false, true])) {
+    throw new Error(
+      `visibility smoke expected one minimize/restore transition, received ${JSON.stringify(transitions)}`,
+    );
+  }
+  console.log("visibility smoke: primary menu followed minimize and restore");
+}
 
 console.log(
   "Use the page controls to test overlay titlebar geometry, app-region drag, background modes, rounded corners, title, icon, devtools, screen, and navigation behavior.",
@@ -326,6 +362,23 @@ async function syncPrimaryMenu(visible: boolean): Promise<void> {
     visible,
     trailingItems: [{ type: "separator" }, { type: "item", id: 99, title: "Quit Demo" }],
   });
+  primaryMenuVisibility = visible;
+}
+
+async function waitForPrimaryMenuVisibility(
+  expected: boolean,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (primaryMenuVisibility === expected) {
+      return;
+    }
+    await sleep(25);
+  }
+  throw new Error(
+    `example primary menu did not change to ${expected ? "Hide" : "Show"}`,
+  );
 }
 
 function parseBooleanEnv(value: string | undefined): boolean | undefined {

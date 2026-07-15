@@ -55,6 +55,6 @@
 
 ## 7. Native Completion Repair
 
-- [ ] 7.1 Add one shared Windows operational-visibility tracker used by command emission and `WM_SIZE` completion; ensure a minimized window emits one false transition.
-- [ ] 7.2 Queue frameless artifact cleanup after `show()` / `toVisible()` and frameless style projection; clear the pending flag before predicate evaluation and skip active soft-resize capture.
-- [ ] 7.3 Update Windows-facing README, agent skill guidance, and `AGENTS.md` with the native-completion and post-reveal laws.
+- [x] 7.1 Add one shared Windows operational-visibility tracker used by command emission and `WM_SIZE` completion; ensure a minimized window emits one false transition.
+- [x] 7.2 Queue frameless artifact cleanup after `show()` / `toVisible()` and frameless style projection; clear the pending flag before predicate evaluation and skip active soft-resize capture.
+- [x] 7.3 Update Windows-facing README, agent skill guidance, and `AGENTS.md` with the native-completion and post-reveal laws.
