@@ -147,13 +147,15 @@
     box-sizing: border-box;
     width: 180px;
     height: 34px;
-    padding: 0 10px;
+    padding: 0 4px;
     border: 1px solid color-mix(in srgb, ButtonText 36%, ButtonFace);
     border-radius: 2px;
     background: ButtonFace;
     color: ButtonText;
-    font: 13px "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+    font: 12px "Segoe UI", system-ui, sans-serif;
     letter-spacing: 0;
+    white-space: nowrap;
     cursor: default;
   }
 
@@ -178,9 +180,4 @@
     width: 240px;
   }
 
-  @media (max-width: 620px), (max-height: 260px) {
-    .probe-grid {
-      transform: scale(0.82);
-    }
-  }
 </style>

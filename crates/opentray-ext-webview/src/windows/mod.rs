@@ -2827,12 +2827,15 @@ fn apply_initial_window_host_style(
         sync_transparent_host_surface(bridge, &style)?;
         apply_windows_titlebar_overlay(hwnd, window_controls_overlay)?;
         refresh_dwm_backdrop_activation_state(hwnd);
-        // CreateWindowExW already received the requested size. This correction exists for public
-        // visible-frame geometry, but it must run only after WndProc owns the native material base.
-        set_window_size(hwnd, width, height)?;
-        if tray_bounds.is_some() {
-            let (x, y) = initial_window_position(width, height, tray_bounds);
-            set_window_position(hwnd, x, y)?;
+        // Ordinary windows correct the requested public visible-frame geometry only after WndProc
+        // owns the native material base. Probe mode preserves the native executable's raw
+        // CreateWindowExW 900x620 dimensions and CW_USEDEFAULT position as an A/B invariant.
+        if should_correct_initial_window_geometry(windows_native_material_probe_enabled()) {
+            set_window_size(hwnd, width, height)?;
+            if tray_bounds.is_some() {
+                let (x, y) = initial_window_position(width, height, tray_bounds);
+                set_window_position(hwnd, x, y)?;
+            }
         }
         Ok(())
     })?;
@@ -5195,7 +5198,12 @@ impl Win32HostWindow {
 
         let class_name = wide_null(CLASS_NAME);
         let title = wide_null(title);
-        let (x, y) = initial_window_position(width, height, tray_bounds);
+        let (x, y) = initial_host_window_position(
+            width,
+            height,
+            tray_bounds,
+            windows_native_material_probe_enabled(),
+        );
         // Plain opaque/transparent host backgrounds share the same no-redirection substrate on
         // Windows. Material backdrops still need the redirection surface so DWM can own the
         // backdrop composition path.
@@ -5750,6 +5758,23 @@ fn emit_window_focus_change(hwnd: HWND, focused: bool) {
     });
 }
 
+fn should_correct_initial_window_geometry(native_material_probe: bool) -> bool {
+    !native_material_probe
+}
+
+fn initial_host_window_position(
+    width: i32,
+    height: i32,
+    tray_bounds: Option<Rect>,
+    native_material_probe: bool,
+) -> (i32, i32) {
+    if native_material_probe {
+        (CW_USEDEFAULT, CW_USEDEFAULT)
+    } else {
+        initial_window_position(width, height, tray_bounds)
+    }
+}
+
 fn initial_window_position(width: i32, height: i32, tray_bounds: Option<Rect>) -> (i32, i32) {
     let Some(bounds) = tray_bounds else {
         return (CW_USEDEFAULT, CW_USEDEFAULT);
@@ -6034,6 +6059,27 @@ mod tests {
         assert!(wants_clear_background(&style));
         assert!(wants_dwm_extended_client_frame(&style));
         assert!(!wants_dwm_transparent_host(&style));
+    }
+
+    #[test]
+    fn native_material_probe_preserves_raw_creation_geometry() {
+        let tray_bounds = Some(Rect {
+            x: 1800,
+            y: 1000,
+            width: 24,
+            height: 24,
+        });
+
+        assert_eq!(
+            initial_host_window_position(900, 620, tray_bounds, true),
+            (CW_USEDEFAULT, CW_USEDEFAULT)
+        );
+        assert!(!should_correct_initial_window_geometry(true));
+        assert!(should_correct_initial_window_geometry(false));
+        assert_ne!(
+            initial_host_window_position(900, 620, tray_bounds, false),
+            (CW_USEDEFAULT, CW_USEDEFAULT)
+        );
     }
 
     #[test]
