@@ -83,6 +83,23 @@ The probe SHALL retain the existing `clearWhiteBlock` command as a control basel
 - **AND** automatic shell recovery does not run during either explicit resize
 - **AND** the operator can compare the same window/session before deciding whether either operation visibly cleared residue.
 
+### Requirement: Frameless diagnostics SHALL expose transparent page-owned chrome
+
+When `/win32-bug` is frameless, it SHALL render a transparent top titlebar above the diagnostic content. Pointer input in the non-interactive titlebar region SHALL call the existing typed `startAppRegionDrag` bridge command. The titlebar SHALL remain transparent over the active native background material; it SHALL NOT add an opaque page fill or CSS backdrop layer.
+
+The residue probe SHALL let the operator show or hide the self-drawn control cluster. When enabled in frameless mode, the cluster SHALL expose icon controls for minimize, maximize or restore according to the current native state, and close. The controls SHALL invoke the existing typed bridge commands and SHALL NOT start an app-region drag. Framed windows SHALL keep native controls authoritative and SHALL NOT display the self-drawn cluster.
+
+#### Scenario: An operator controls frameless diagnostic chrome
+
+- **GIVEN** the Windows diagnostic window is frameless
+- **WHEN** the operator presses in an unoccupied titlebar region
+- **THEN** the native window drag begins through `startAppRegionDrag`
+- **WHEN** the operator enables self-drawn controls
+- **THEN** icon controls appear without an opaque titlebar fill
+- **AND** minimize, maximize or restore, and close target the existing bridge commands
+- **WHEN** the operator returns to framed mode
+- **THEN** the page does not duplicate native caption controls.
+
 ### Requirement: Candidate recovery SHALL remain evidence-gated
 
 The production `clearWhiteBlock` mechanism SHALL remain the current shell-state control baseline during this change. A non-shell candidate such as `SWP_NOCOPYBITS`, host geometry pulse, WebView parent reattachment, or composition-root reattachment SHALL be introduced only as one named diagnostic candidate at a time after the baseline matrix is captured.

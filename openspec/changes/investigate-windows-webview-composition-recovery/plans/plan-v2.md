@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 3
+- Round: 2
 - Status: research-plan in progress; no replacement for the shell-state recovery is approved.
-- Previous plan backup: `plans/plan-v2.md`
+- Previous plan backup: `plans/plan-v1.md`
 
 ## Workflow Command Surface
 
@@ -41,7 +41,6 @@
 | 2026-07-16 | User | A minimal real resize clears the same residue. | Reproduce the exact contrast between a non-geometry clear and a one-pixel geometry mutation in the real host. |
 | 2026-07-16 | User | Create a dedicated `example:win32-bug`, based on all controls in WebView Control's first Window card. | Add a Windows-only source example plus a focused app route; do not overload the product demo with diagnostic-only controls. |
 | 2026-07-16 | User | Perform dedicated research into a genuine `clearWhiteBlock` technique. | Instrument actual OpenTray HWND/WebView2/DWM state and compare candidates one at a time before replacing the current baseline. |
-| 2026-07-16 | User | Frameless diagnostic mode needs a transparent custom titlebar, native drag, and operator-controlled self-drawn window controls. | Make frameless reproduction operable without relying on obsolete native chrome or permanently forcing page controls into every state. |
 
 ### Evidence Read
 
@@ -104,7 +103,7 @@
 
 ### Surface Intent
 
-Create a Windows-only `example:win32-bug` that reproduces rendering residue in the real OpenTray WebView host. It must provide every control from WebView Control's first Window card, plus direct probes for `clearWhiteBlock`, frameless transition, and a one-pixel resize pulse. Frameless mode must expose a transparent, draggable diagnostic titlebar with optional self-drawn controls.
+Create a Windows-only `example:win32-bug` that reproduces rendering residue in the real OpenTray WebView host. It must provide every control from WebView Control's first Window card, plus direct probes for `clearWhiteBlock`, frameless transition, and a one-pixel resize pulse.
 
 ### Underlying Drive
 
@@ -112,7 +111,7 @@ The current repair changes shell state, but the operator can see it fail while a
 
 ### Final Visible Effect
 
-An operator launches one tray-owned diagnostic window, selects opaque/Mica/Acrylic, toggles frameless, invokes `clearWhiteBlock`, and runs a one-pixel resize pulse. In frameless mode, a transparent page titlebar starts native dragging and can reveal self-drawn minimize, maximize/restore, and close controls. The page and console show which action was requested; the Windows host emits opt-in snapshot/timing evidence for the same HWND. The user can truthfully compare whether the stale pixels clear, whether input/focus survives, and whether shell state visibly changes.
+An operator launches one tray-owned diagnostic window, selects opaque/Mica/Acrylic, toggles frameless, invokes `clearWhiteBlock`, and runs a one-pixel resize pulse. The page and console show which action was requested; the Windows host emits opt-in snapshot/timing evidence for the same HWND. The user can truthfully compare whether the stale pixels clear, whether input/focus survives, and whether shell state visibly changes.
 
 ## Platform Diagnosis
 
@@ -172,7 +171,6 @@ human-visible result table
 - The probe adds bounded commands only: manual clear, frameless transition guidance, and a one-pixel native resize pulse.
 - `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` enables native process logging. It is not a product API.
 - The launcher disables automatic white-block recovery so the pulse is geometry-only; the manual command remains the explicit shell-state control.
-- Frameless mode shows a transparent titlebar; the residue probe owns whether its self-drawn control cluster is visible.
 
 ### Data Shape
 
@@ -193,7 +191,6 @@ Svelte /win32-bug page
         |
         +-- existing WindowPanel
         +-- residue probe controls
-        +-- transparent frameless titlebar + optional controls
         |
         v
 @opentray/ext-webview Windows host

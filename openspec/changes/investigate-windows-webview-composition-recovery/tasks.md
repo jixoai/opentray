@@ -23,6 +23,7 @@
 - [x] 3.6 Add concise intent comments at the one-pixel pulse and native diagnostic emission boundaries; keep candidate repairs out of this first implementation.
 - [x] 3.7 Update `AGENTS.md`, WebView Window Patterns, and the diagnostic README/example guidance so human and AI workflows share the same evidence rules.
 - [x] 3.8 Update only completed task checkboxes and commit them with matching implementation and BDD evidence.
+- [ ] 3.9 Add transparent frameless diagnostic chrome with native app-region drag and an operator-controlled self-drawn control cluster.
 
 ## 4. Verification
 
