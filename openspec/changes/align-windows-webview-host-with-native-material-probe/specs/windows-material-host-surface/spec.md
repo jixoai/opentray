@@ -46,6 +46,26 @@ The probe state SHALL be disabled when the environment switch is absent. Product
 - **THEN** DWM material and client-frame projection change in place
 - **AND** the host HWND is not rebuilt and the WebView child is not reparented.
 
+### Requirement: Probe frameless shell SHALL match the standalone comparator
+
+When the native material probe switch is enabled and the retained window enters frameless mode, the comparator SHALL preserve the standalone probe's native resize frame and system-menu style, leave DWM non-client rendering under window-style policy, delegate non-client geometry to the default window procedure, and use native resizing. Copied client bits MAY be discarded only in this comparator path.
+
+This probe-only shell SHALL NOT replace the production frameless procedure. Production frameless windows SHALL continue to own full-client geometry, disabled DWM non-client rendering, and application-level soft resize.
+
+#### Scenario: Frameless comparison does not add an OpenTray-only outer frame
+
+- **GIVEN** the standalone native probe and `example:win32-bug` use Acrylic and handled-without-fill host paint
+- **WHEN** both retained windows enter frameless mode and are repeatedly resized
+- **THEN** the WebView-controlled comparator uses the same native shell projection as the standalone probe
+- **AND** it does not introduce an additional classic Windows outer-frame residue.
+
+#### Scenario: Production frameless remains independent
+
+- **GIVEN** an ordinary OpenTray window without the native material probe switch
+- **WHEN** it enters frameless mode
+- **THEN** its established full-client and soft-resize behavior remains unchanged
+- **AND** comparator-only copied-bit and native-frame policies do not apply.
+
 ## MODIFIED Requirements
 
 ### Requirement: Production SHALL contain no legacy recovery scheduler or diagnostic protocol

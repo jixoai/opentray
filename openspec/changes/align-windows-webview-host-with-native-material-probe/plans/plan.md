@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 1
-- Status: constructor diagnosis complete; implementation intent locked
+- Status: user visual acceptance complete; comparator frameless residue isolated
 - Previous plan backup: none
 
 ## Workflow Command Surface
@@ -48,6 +48,9 @@
 | OpenTray Windows runtime | Class includes `CS_OWNDC`; WebView2 is built before `apply_window_style`. | Cold start currently creates the child/controller before DWM material completion. |
 | Wry 0.55.1 source | `with_transparent(true)` configures a transparent WebView2 controller at creation. | The page can be a transparent child without dynamic background switching. |
 | archived composition change | Complete black host painting removed residue in the previous visual round. | Retain the black base; correct its cold-start ownership and probe parity instead of reverting to no paint. |
+| User Win7-frame observation | OpenTray no-paint plus custom frameless produced a classic outer frame residue that the standalone probe did not show. | Separate material-host residue from stale non-client-frame residue. |
+| SWP_NOCOPYBITS experiment | Adding copied-bit discard alone did not remove the outer frame. | Do not promote copied-bit discard as a production repair. |
+| Native-shell parity experiment | Probe-only frameless retained the native resize frame/system menu, style-derived DWM non-client policy, default non-client geometry, and native resize; the user confirmed the Win7-style outer frame disappeared. | Keep this shell topology inside the comparator while preserving production full-client frameless behavior. |
 
 ### Git Evidence
 
@@ -107,7 +110,7 @@
 - Does this fit as a regular atom: yes, inside the Windows ext-webview host and its regression example.
 - Does this require law upgrade: yes; cold-start order becomes a separate invariant from runtime style updates.
 - Breaking update stance: remove `CS_OWNDC`; reorder initial host construction; replace the existing win32-bug UI.
-- User confirmations still required: final visual equivalence only.
+- User confirmations still required: none; final visual equivalence was accepted.
 
 ## Reverse-Inferred Design
 
@@ -139,7 +142,7 @@ Cold-start construction is physically separated from retained style projection. 
 
 | Gate | Why confirmation is required | Default until user answers |
 | ---- | ---------------------------- | -------------------------- |
-| Visual parity | Automated tests cannot see native DWM residue. | Build and launch exact source artifacts, then wait for user's visual result. |
+| Visual parity | Automated tests cannot see native DWM residue. | Accepted by the user after the probe-only native frameless shell removed the OpenTray-only Win7-style outer frame. |
 
 ## Intent-Driven Plan
 
@@ -147,7 +150,7 @@ Cold-start construction is physically separated from retained style projection. 
 - [x] 2. Write specs from the intent.
 - [x] 3. Write BDD tasks from specs.
 - [x] 4. Implement tasks.
-- [ ] 5. Self-review against intent and decide whether to loop.
+- [ ] 5. Self-review against intent and close after accepted visual parity.
 
 ## Open Questions
 
@@ -163,9 +166,11 @@ Cold-start construction is physically separated from retained style projection. 
 | Dynamically toggle WebView transparency/background | User already observed those transitions can create residue and they add a second surface variable. |
 | Keep generic WindowPanel/cards | They are not present in the native probe and obstruct direct visual comparison. |
 | Reintroduce shell recovery or one-pixel pulses | They mutate unrelated shell/geometry state and were already disproven as the root fix. |
+| Promote `SWP_NOCOPYBITS` to production cleanup | The single-variable visual experiment did not remove the Win7-style outer frame; production must not inherit an ineffective discard policy. |
+| Replace production frameless with the probe shell | The accepted probe topology is a comparator requirement, while production still owns full-client chrome and application-level soft resize. |
 
 ## Exit Conditions
 
 - Default max review iterations: 2
 - Issue recurrence threshold: one user-observed residue mismatch reopens constructor diagnosis
-- Custom exit condition from intent: source-built win32-bug matches the native probe except that its controls are WebView-rendered
+- Custom exit condition from intent: met; source-built win32-bug matches the native probe shell and material behavior except that its controls are WebView-rendered
