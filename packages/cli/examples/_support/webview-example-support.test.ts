@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   createExamplePrimaryMenu,
   createExampleCallerLabel,
+  hasConfiguredBrokerBinaryPath,
   hasConfiguredWebviewExtensionPath,
   requireWindowsExample,
   shutdownWebviewExample,
@@ -15,9 +16,9 @@ import {
 } from "./webview-example-support";
 
 describe("Feature: WebView example support", () => {
-  it("Scenario: Given a Windows-only composition diagnostic When another platform invokes it Then it fails truthfully", () => {
+  it("Scenario: Given a Windows-only composition regression example When another platform invokes it Then it fails truthfully", () => {
     expect(() => requireWindowsExample("example:win32-bug", "darwin")).toThrow(
-      "example:win32-bug is a Windows-only composition diagnostic",
+      "example:win32-bug is a Windows-only composition regression example",
     );
     expect(() => requireWindowsExample("example:win32-bug", "win32")).not.toThrow();
   });
@@ -62,6 +63,18 @@ describe("Feature: WebView example support", () => {
     expect(hasConfiguredWebviewExtensionPath({ OPENTRAY_EXT_PATH: "   " })).toBe(
       false,
     );
+  });
+
+  it("Scenario: Given an explicit extension DLL When no broker override is supplied Then the source broker remains selectable", () => {
+    expect(hasConfiguredBrokerBinaryPath({})).toBe(false);
+    expect(hasConfiguredBrokerBinaryPath({ OPENTRAY_BROKER_BIN: "   " })).toBe(
+      false,
+    );
+    expect(
+      hasConfiguredBrokerBinaryPath({
+        OPENTRAY_BROKER_BIN: "E:\\artifacts\\opentray.exe",
+      }),
+    ).toBe(true);
   });
 
   it("Scenario: Given a source WebView example When shutdown begins Then its runtime closes before Vite", async () => {

@@ -5,7 +5,7 @@ Orthogonal intents (2026-07-14; original user request):
 3. Keep macOS controls native and transparent rather than emulating Windows composition.
 4. Keep frameless shell ownership and explicit user-resize intent consistent across macOS and Windows.
 5. Teach retained WebView tray primary actions through operational visibility, not local booleans.
-6. Clear Windows frameless rendering residue only after safe projection or resize completion.
+6. Prevent Windows native host/DWM residue through persistent parent-surface ownership and ordered child commits.
 -->
 
 # @opentray/ext-webview
@@ -182,7 +182,7 @@ For glass or blur-style surfaces, two things must line up at once:
 
 On Windows, a regular Chromium vertical scrollbar coexists with the `right` and `bottomRight` soft-resize gestures of a frameless WebView. The injected capture-phase detector measures the six-CSS-pixel edge band against `window.innerWidth`, then the native HWND owns the resize interaction. A normal page scrollbar does not require a reserved outer gutter or a custom scrollbar for right-edge resizing to work.
 
-During that soft-resize interaction the runtime only updates the HWND/WebView bounds and repaints in place. It never applies the Windows transparent white-block reset because that reset changes shell state and would terminate pointer capture. After capture is released, or after a normal frameless style projection, the runtime queues one later HWND message before it runs rendering-artifact cleanup. This lets WebView2 and DWM finish composition first, including opaque windows where residual native chrome is independent of the backing family. A retained `close()` followed by `show()` or `toVisible()` uses one cancelable 100ms HWND timer instead: one queue turn is not enough to guarantee DWM/WebView2 has presented the restored surface. The timer is canceled if the session hides again and rechecks visible normal state before clearing. For ordinary native resizing, each `WM_SIZE` only synchronizes the host/WebView surfaces and records that a resize occurred; after `WM_EXITSIZEMOVE`, the runtime queues at most one cleanup. A pure window move has no cleanup. The cleanup's internal minimize/restore is not exposed as `visibleChange`; actual page, shell, and native-control minimize/restore transitions update `visible` after Win32 state completion. Frameless `WM_NCCALCSIZE` handling owns every message form, so resize, minimize, and restore do not reintroduce a native titlebar.
+During that soft-resize interaction the runtime updates the HWND/WebView bounds and repaints in place. It does not run a shell transition, synthetic geometry pulse, timer, or private recovery message. Material `WM_SIZE` ordering is native host paint first, then WebView2 controller bounds, WRY child bounds, and parent-position notification. A pure window move only notifies the WebView parent. Retained reveal recommits the parent surface immediately after the window becomes visible; style/background changes complete the parent before committing the WebView child. Frameless `WM_NCCALCSIZE` handling owns every message form, so resize, minimize, and restore do not reintroduce a native titlebar.
 
 An application may still make its scrolling container narrower than the viewport, or use a custom/overlay scrollbar, when its own edge controls or layout must avoid the reserved six-pixel resize band. That is a product layout choice, not an OpenTray workaround for normal native scrollbars. Smoke-test nonstandard page hit testing and scrollbar implementations with the target interaction.
 
@@ -238,7 +238,8 @@ Run a runtime-host-free protocol example that sends WebView `show`, `navigate`, 
 pnpm --filter @opentray/ext-webview example:webview
 ```
 
-Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe. `pnpm --filter opentray example:win32-bug` is a Windows-only composition diagnostic: it compares manual `clearWhiteBlock` with a reversible one-pixel resize pulse in the real OpenTray host. It disables automatic white-block recovery so the pulse stays geometry-only; manual clear remains the shell-state baseline. Frameless runs add transparent, draggable page chrome with an operator-controlled self-drawn control cluster. Its opt-in native logs describe requested host policy and timing only; they do not claim that a visible artifact was cleared.
+Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe. `pnpm --filter opentray example:win32-bug` is the Windows A/B comparator for `native-material-host-paint-probe-20260716.exe`: it enables an environment-gated native probe state and renders only the equivalent centered buttons in a fully transparent WebView. The hidden HWND completes material and initial geometry before WebView2 creation; ordinary windows keep the production `BLACK_BRUSH` material base and reject probe commands. Production `clearWhiteBlock` still recommits only the configured native host surface and never mutates shell state, focus, geometry, or WebView bounds.
+
 The manual walkthrough for all three CLI examples lives in [../cli/examples/EXAMPLE.md](../cli/examples/EXAMPLE.md).
 
 To expose the injected page API, enable it on the window options before the first `show()`:

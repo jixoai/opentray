@@ -28,6 +28,7 @@ import {
 } from "../../src/local-broker";
 import {
   type ExampleRuntimeMode,
+  prepareExampleBrokerBinary,
   resolveExampleRuntimeMode,
   resolveSourceWorkspaceRoot,
   runSourceTreeCargoBuild,
@@ -39,13 +40,13 @@ export { createVisibleTrayIcon };
 
 export const EXAMPLE_PRIMARY_ITEM_ID = 1;
 
-/** Reject a source diagnostic whose native evidence only exists on Windows. */
+/** Reject a Windows-only native composition regression example on other platforms. */
 export function requireWindowsExample(
   exampleName: string,
   platform: NodeJS.Platform = process.platform,
 ): void {
   if (platform !== "win32") {
-    throw new Error(`${exampleName} is a Windows-only composition diagnostic`);
+    throw new Error(`${exampleName} is a Windows-only composition regression example`);
   }
 }
 
@@ -139,6 +140,9 @@ export async function createWebviewExampleRuntime(
   console.log(`runtime home: ${homeDir}`);
   console.log(`runtime caller: ${connection.callerLabel}`);
   console.log(`runtime mode: ${runtimeMode}`);
+  if (process.env.OPENTRAY_BROKER_BIN !== undefined) {
+    console.log(`broker binary: ${process.env.OPENTRAY_BROKER_BIN}`);
+  }
   if (localWebviewExtension !== undefined) {
     console.log(`webview dylib: ${localWebviewExtension}`);
   }
@@ -261,13 +265,18 @@ export async function prepareLocalWebviewExtensionPath(
   options: { mode?: ExampleRuntimeMode } = {},
 ): Promise<string | undefined> {
   await prepareLocalWindowsAppRuntimeEnvironment();
+  const mode = options.mode ?? resolveExampleRuntimeMode();
   // An explicit loader override must remain authoritative. Returning no mount
   // path lets the spawned broker resolve OPENTRAY_EXT_PATH itself instead of
-  // having the source-example default override it in tray.extend(...).
+  // having the source-example default override it in tray.extend(...). It must
+  // still prepare the current source broker: otherwise a source DLL can be
+  // paired with an older packaged broker and its native tray event loop.
   if (hasConfiguredWebviewExtensionPath()) {
+    if (!hasConfiguredBrokerBinaryPath()) {
+      await prepareExampleBrokerBinary(importMetaUrl, mode);
+    }
     return undefined;
   }
-  const mode = options.mode ?? resolveExampleRuntimeMode();
   const localWebviewExtension = await resolveLocalWebviewExtension(
     importMetaUrl,
     mode,
@@ -285,6 +294,13 @@ export function hasConfiguredWebviewExtensionPath(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return (env.OPENTRAY_EXT_PATH?.trim().length ?? 0) > 0;
+}
+
+/** An explicitly selected broker remains authoritative over source-example defaults. */
+export function hasConfiguredBrokerBinaryPath(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (env.OPENTRAY_BROKER_BIN?.trim().length ?? 0) > 0;
 }
 
 export async function prepareLocalBadgeExtensionPath(

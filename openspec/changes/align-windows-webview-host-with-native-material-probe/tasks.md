@@ -15,35 +15,35 @@
 ## 3. OpenSpec Apply Gate
 
 - [x] 3.1 Run `bun run openspec:vision -- validate align-windows-webview-host-with-native-material-probe`.
-- [ ] 3.2 Run `bun run openspec:vision -- commit-check align-windows-webview-host-with-native-material-probe --phase research-plan` and commit the ready OpenSpec artifacts before product-code work.
+- [x] 3.2 Run `bun run openspec:vision -- commit-check align-windows-webview-host-with-native-material-probe --phase research-plan` and commit the ready OpenSpec artifacts before product-code work.
 
 ## 4. Native Host Implementation
 
-- [ ] 4.1 Remove `CS_OWNDC` from the OpenTray top-level WebView window class and add a regression assertion for the class style.
-- [ ] 4.2 Split cold-start host projection from retained style updates so initial native style/material/geometry completes before WebView2 construction.
-- [ ] 4.3 Prevent the pre-material initial SetWindowPos resize and keep later native resize ordering parent-before-child.
-- [ ] 4.4 Keep production material host paint Black while adding environment-gated native probe material/paint state and commands.
-- [ ] 4.5 Add concise intent comments at cold-start, DWM projection, and WndProc ownership boundaries.
+- [x] 4.1 Remove `CS_OWNDC` from the OpenTray top-level WebView window class and add a regression assertion for the class style.
+- [x] 4.2 Split cold-start host projection from retained style updates so initial native style/material/geometry completes before WebView2 construction.
+- [x] 4.3 Prevent the pre-material initial SetWindowPos resize and keep later native resize ordering parent-before-child.
+- [x] 4.4 Keep production material host paint Black while adding environment-gated native probe material/paint state and commands.
+- [x] 4.5 Add concise intent comments at cold-start, DWM projection, and WndProc ownership boundaries.
 
 ## 5. Probe-Equivalent Example
 
-- [ ] 5.1 Start win32-bug at 900x620, framed, resizable, Acrylic, with the native probe environment switch enabled.
-- [ ] 5.2 Replace WindowPanel/cards/titlebar/event-log UI with the centered 3x3+1 probe control matrix.
-- [ ] 5.3 Implement the probe keyboard shortcuts and typed bridge actions while keeping the page substrate transparent.
-- [ ] 5.4 Remove obsolete win32-bug components and update smoke assertions for the new controls.
+- [x] 5.1 Start win32-bug at 900x620, framed, resizable, Acrylic, with the native probe environment switch enabled.
+- [x] 5.2 Replace WindowPanel/cards/titlebar/event-log UI with the centered 3x3+1 probe control matrix.
+- [x] 5.3 Implement the probe keyboard shortcuts and typed bridge actions while keeping the page substrate transparent.
+- [x] 5.4 Remove obsolete win32-bug components and update smoke assertions for the new controls.
 
 ## 6. Domain Records
 
-- [ ] 6.1 Update `AGENTS.md` with the cold-start parent-before-WebView law and probe/production boundary.
-- [ ] 6.2 Update `i18n.zh.md` with the user's phrases `??????????` and `webview?????`.
-- [ ] 6.3 Update the main Windows material-host spec so the durable law no longer depends only on the archived delta.
+- [x] 6.1 Update `AGENTS.md` with the cold-start parent-before-WebView law and probe/production boundary.
+- [x] 6.2 Update `i18n.zh.md` with the user's phrases `??????????` and `webview?????`.
+- [x] 6.3 Update the main Windows material-host spec so the durable law no longer depends only on the archived delta.
 
 ## 7. Verification
 
-- [ ] 7.1 Run Rust formatting, targeted Windows ext-webview tests, and `cargo check -p opentray-ext-webview`.
-- [ ] 7.2 Run the Svelte example check, CLI typecheck, and focused example support tests.
-- [ ] 7.3 Build matching source broker and extension DLL and smoke `example:win32-bug`.
-- [ ] 7.4 Run `bun run openspec:vision -- validate align-windows-webview-host-with-native-material-probe` and `git diff --check`.
+- [x] 7.1 Run Rust formatting, targeted Windows ext-webview tests, and `cargo check -p opentray-ext-webview`.
+- [x] 7.2 Run the Svelte example check, CLI typecheck, and focused example support tests.
+- [x] 7.3 Build matching source broker and extension DLL and smoke `example:win32-bug`.
+- [x] 7.4 Run `bun run openspec:vision -- validate align-windows-webview-host-with-native-material-probe` and `git diff --check`.
 - [ ] 7.5 Hand the exact source-built example to the user for visual equivalence testing; do not claim pixel acceptance from logs.
 
 ## 8. Self-Review Loop

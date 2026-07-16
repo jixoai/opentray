@@ -146,7 +146,7 @@ On Windows, macOS corner controls remain unsupported, while `style.platform.wind
 Whole-window opacity lives in `style.opacity` on both supported WebView runtimes and composes with the current background mode.
 Devtools are creation-time gated in examples through `devtools: true`. Release native artifacts still compile the inspector API, but ordinary app windows that omit `devtools: true` keep devtools unavailable by default.
 
-## Example 1A: Windows Composition Diagnostic
+## Example 1A: Windows Native Material Probe
 
 Windows only:
 
@@ -154,23 +154,24 @@ Windows only:
 pnpm --filter opentray example:win32-bug
 ```
 
-This is the real OpenTray HWND + windowed WebView2 + DWM host used to reproduce retained pixels. It is not a rendering repair or a replacement acceptance path. The page reuses every control in the Control Surface Window card, then adds a focused `Residue Probe` card.
+When testing a separately built DLL, set only `OPENTRAY_EXT_PATH`. The source launcher still builds and selects `target/debug/opentray.exe` so tray events and the extension share the same source revision. Set `OPENTRAY_BROKER_BIN` only when deliberately testing a different broker binary.
 
-Run the same retained session through this matrix and record the visible result outside the terminal log:
+This example is the WebView-controlled counterpart of `native-material-host-paint-probe-20260716.exe`. It starts the same 900x620 framed Acrylic host and enables an environment-gated native probe state. The only page content is the centered 3x3+1 control matrix; html, body, root, and every pixel outside the buttons remain transparent.
 
-| Background | Trigger | Control | Record |
-| ---------- | ------- | ------- | ------ |
-| opaque | `Toggle frameless` | `clearWhiteBlock`, then `Pulse width +1px` | residue, flash, focus/input |
-| mica | `Hide Example` then `Show Example`; `Toggle frameless` | `clearWhiteBlock`, then `Pulse width +1px` | residue, flash, focus/input |
-| acrylic | `Hide Example` then `Show Example`; `Toggle frameless` | `clearWhiteBlock`, then `Pulse width +1px` | residue, flash, focus/input |
+Use the same controls and shortcuts as the native probe:
 
-`clearWhiteBlock` is the current shell-state baseline. `Pulse width +1px` reads trusted native bounds, resizes by one logical pixel, then restores the original width. The pulse is deliberately a comparison control because the user has observed that a real resize can clear pixels that shell recovery does not.
+| Keys | Native action |
+| ---- | ------------- |
+| `1` / `2` / `3` | handled no-fill / Black / Gray host paint |
+| `A` / `M` / `N` | Acrylic / Mica / no backdrop |
+| `F` | toggle framed/frameless |
+| `R` | reset and reproject the current native backdrop |
+| `P` | `InvalidateRect + UpdateWindow` without changing WebView pixels |
+| `Escape` | hide the retained example window |
 
-The example enables `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` and forces `OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK=0`. Native records report requested background/backing policy, HWND styles/state/bounds, operation reason, and shell-clear timing. They do not establish that the visible artifact cleared; only the human matrix can establish that result. Do not test a new non-shell recovery candidate until this baseline matrix is recorded.
+The probe environment removes constructor-only variables that differ from the native executable: the top-level class has no `CS_OWNDC`, the hidden HWND completes material and final initial geometry before WebView2 creation, material startup does not add DWM blur-behind, and the probe window does not force tool/app extended styles. Ordinary OpenTray windows keep the production Black material painter and reject `win32Probe*` commands.
 
-When `Toggle frameless` is active, the diagnostic page renders a transparent top titlebar. Drag its unoccupied region to move the native window. The `Frameless chrome` control in `Residue Probe` shows or hides self-drawn icon controls for minimize, maximize or restore, and close. Returning to framed mode removes the page controls so the native caption controls remain the only authority.
-
-For an automated source-host lifecycle smoke, which cannot judge pixels:
+For an automated source-host lifecycle smoke, which verifies bridge and transparency contracts but cannot judge DWM residue pixels:
 
 ```bash
 OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=6000 pnpm --filter opentray example:win32-bug

@@ -1,12 +1,16 @@
-// Orthogonal intents (2026-07-15; original user requests: repair Windows frameless chrome,
-// add application-level soft resizing, and expose operational window visibility):
+// Orthogonal intents (2026-07-16; original user requests: repair Windows frameless chrome,
+// add application-level soft resizing, expose operational visibility, and fix native HWND residue):
 // 1. Host the Windows WebView2 window and bridge.
-// 2. Project switcher, overlay, background, and full-client native style.
+// 2. Project switcher, overlay, background, full-client native style, and host-surface ownership.
 // 3. Keep public window geometry in DWM visible-frame logical pixels, including frameless soft resize.
 // 4. Route native window/screen/tray commands and events.
 // 5. Preserve download, permission, metadata, and lifecycle behavior.
-// Compromise: this legacy platform module already exceeds the five-intent/300-line limits.
-// Splitting it is a separate architecture change that requires explicit user approval.
+// Compromise: this legacy platform module already exceeds the five-intent/300-line limits. The
+// HWND-thread state, WebView2 pointers, and message procedure remain physically coupled in this
+// fix; splitting them while concurrent uncommitted work exists would expand the verification scope.
+// Rendering invariant (2026-07-16; user evidence): material residue belongs to the top-level
+// HWND/DWM redirection surface, not page pixels. Material hosts paint a complete black native base
+// before WebView2 background/bounds commit; opaque/plain-transparent hosts retain Softbuffer.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -18,8 +22,6 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::{null, null_mut, NonNull};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use opentray_spec::Rect;
@@ -38,7 +40,7 @@ use window_vibrancy::{
 use windows::Win32::Foundation::{HWND as WebView2Hwnd, RECT as WebView2Rect};
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
-    DwmEnableBlurBehindWindow, DwmExtendFrameIntoClientArea, DwmGetWindowAttribute,
+    DwmEnableBlurBehindWindow, DwmExtendFrameIntoClientArea, DwmFlush, DwmGetWindowAttribute,
     DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMSBT_AUTO, DWMSBT_NONE,
     DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_NCRENDERING_POLICY, DWMWA_SYSTEMBACKDROP_TYPE,
     DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -46,8 +48,10 @@ use windows_sys::Win32::Graphics::Dwm::{
     DWM_BB_ENABLE, DWM_BLURBEHIND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateRectRgn, DeleteObject, GetMonitorInfoW, InvalidateRect, MonitorFromWindow, UpdateWindow,
-    MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    BeginPaint, CreateRectRgn, DeleteObject, EndPaint, FillRect, GetMonitorInfoW, GetStockObject,
+    InvalidateRect, MonitorFromWindow, RedrawWindow, UpdateWindow, BLACK_BRUSH, GRAY_BRUSH, HBRUSH,
+    HDC, MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT, RDW_ERASE, RDW_INVALIDATE,
+    RDW_NOCHILDREN, RDW_UPDATENOW,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
@@ -59,20 +63,19 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateIcon, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, GetClientRect,
     GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible,
-    IsZoomed, KillTimer, LoadCursorW, LoadImageW, PostMessageW, RegisterClassW, SendMessageW,
-    SetCursor, SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW,
-    SetWindowPos, SetWindowTextW, ShowWindow, CS_HREDRAW, CS_OWNDC, CS_VREDRAW, CW_USEDEFAULT,
-    GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST,
-    ICON_BIG, ICON_SMALL, IDC_ARROW, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE,
-    IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, SW_SHOWMINNOACTIVE, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_APP,
-    WM_CANCELMODE, WM_CAPTURECHANGED, WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE,
-    WM_GETMINMAXINFO, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN,
-    WM_PAINT, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSW,
-    WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
-    WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX,
-    WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
+    IsZoomed, LoadCursorW, LoadImageW, RegisterClassW, SendMessageW, SetCursor,
+    SetForegroundWindow, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
+    SetWindowTextW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, GWL_EXSTYLE,
+    GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, IDC_ARROW,
+    IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, IMAGE_ICON, LR_DEFAULTSIZE,
+    LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CLOSE,
+    WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE,
+    WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_APPWINDOW, WS_EX_LAYERED,
+    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE,
+    WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -119,13 +122,7 @@ const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
 const WINDOWS_BACKGROUND_MATERIALS: &[&str] = &["auto", "mica", "acrylic", "tabbed"];
 const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active", "inactive"];
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
-const WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV: &str = "OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK";
-const WINDOWS_COMPOSITION_DIAGNOSTICS_ENV: &str = "OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS";
-const WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL: u32 = WM_APP + 0x51;
-const WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID: usize = 0x4F54_5743;
-const WINDOWS_REVEAL_ARTIFACT_CLEAR_DELAY_MS: u32 = 100;
-static WINDOWS_COMPOSITION_DIAGNOSTIC_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-
+const WINDOWS_NATIVE_MATERIAL_PROBE_ENV: &str = "OPENTRAY_WINDOWS_NATIVE_MATERIAL_PROBE";
 thread_local! {
     static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
 }
@@ -150,61 +147,13 @@ struct WindowProcState {
     window: Option<NonNull<Win32HostWindow>>,
     webview: Option<NonNull<WebView>>,
     host_surface_fill_color: Option<u32>,
+    native_host_paint: WindowsNativeHostPaint,
+    native_material_probe: Option<WindowsNativeMaterialProbeState>,
     backdrop_state_policy: WindowsBackdropStatePolicy,
     size_constraints: WindowSizeConstraints,
-    size_move_interaction: WindowProcSizeMoveInteraction,
     soft_resize_interaction: Option<WindowProcSoftResizeInteraction>,
     operational_visible: Option<bool>,
-    artifact_clear_schedule: Option<WindowsArtifactClearRequest>,
-    visibility_sync_suppressed: bool,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WindowsArtifactClearSchedule {
-    NextMessage,
-    RevealDelay,
-}
-
-#[derive(Clone, Copy)]
-struct WindowsArtifactClearRequest {
-    schedule: WindowsArtifactClearSchedule,
-    operation: WindowsCompositionOperation,
-}
-
-#[derive(Clone, Copy)]
-enum WindowsCompositionOperation {
-    InitialShow,
-    ManualClear,
-    ExplicitResize,
-    StyleProjection,
-    SoftResizeTerminal,
-    NativeResizeTerminal,
-    NextMessageClear,
-    DelayedRevealClear,
-}
-
-impl WindowsCompositionOperation {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::InitialShow => "initial-show",
-            Self::ManualClear => "manual-clear",
-            Self::ExplicitResize => "explicit-resize",
-            Self::StyleProjection => "style-projection",
-            Self::SoftResizeTerminal => "soft-resize-terminal",
-            Self::NativeResizeTerminal => "native-resize-terminal",
-            Self::NextMessageClear => "next-message-clear",
-            Self::DelayedRevealClear => "delayed-reveal-clear",
-        }
-    }
-}
-
-/// Tracks one native `WM_ENTERSIZEMOVE` interaction. Windows sends that message for both
-/// dragging and resizing, so only an observed `WM_SIZE` may authorize the resize-only artifact
-/// workaround when the interaction exits.
-#[derive(Clone, Copy, Default)]
-struct WindowProcSizeMoveInteraction {
-    active: bool,
-    saw_resize: bool,
+    surface_refresh_suppressed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,26 +202,6 @@ struct WindowProcSoftResizeInteraction {
     initial_raw_rect: RECT,
     initial_visible_rect: RECT,
     initial_bounds: Rect,
-}
-
-impl WindowProcSizeMoveInteraction {
-    fn enter(&mut self) {
-        self.active = true;
-        self.saw_resize = false;
-    }
-
-    fn observe_resize(&mut self) {
-        if self.active {
-            self.saw_resize = true;
-        }
-    }
-
-    fn exit(&mut self) -> bool {
-        let should_clear = self.active && self.saw_resize;
-        self.active = false;
-        self.saw_resize = false;
-        should_clear
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -386,6 +315,62 @@ enum MetadataSource {
 enum WindowsHostSurfaceKind {
     RedirectionSurface,
     TransparentNoRedirection,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum WindowsNativeHostPaint {
+    #[default]
+    None,
+    NoPaint,
+    Black,
+    Gray,
+}
+
+impl WindowsNativeHostPaint {
+    fn label(self) -> &'static str {
+        match self {
+            Self::None => "NO HOST SURFACE",
+            Self::NoPaint => "NO HOST PAINT (OpenTray-like)",
+            Self::Black => "BLACK HOST PAINT",
+            Self::Gray => "GRAY HOST PAINT",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowsNativeMaterialProbeMaterial {
+    Acrylic,
+    Mica,
+    None,
+}
+
+impl WindowsNativeMaterialProbeMaterial {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Acrylic => "Acrylic",
+            Self::Mica => "Mica",
+            Self::None => "None",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WindowsNativeMaterialProbeState {
+    material: WindowsNativeMaterialProbeMaterial,
+    paint: WindowsNativeHostPaint,
+    resize_sessions: u32,
+    paint_messages: u64,
+}
+
+impl Default for WindowsNativeMaterialProbeState {
+    fn default() -> Self {
+        Self {
+            material: WindowsNativeMaterialProbeMaterial::Acrylic,
+            paint: WindowsNativeHostPaint::Black,
+            resize_sessions: 0,
+            paint_messages: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -724,10 +709,6 @@ impl WindowsWebviewRuntime {
                 let height = finite_i32(height, "height")?;
                 set_window_size(slot.window.hwnd, width, height)?;
                 refresh_after_explicit_resize(&slot.bridge)?;
-                maybe_auto_clear_windows_white_block_artifact_after_reveal(
-                    &slot.bridge,
-                    WindowsCompositionOperation::ExplicitResize,
-                )?;
                 let response = json!({ "width": width, "height": height });
                 emit_window_event(&slot.bridge, "resized", response.clone())?;
                 emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
@@ -1069,25 +1050,17 @@ impl WindowsWebviewRuntime {
             .as_deref()
             .unwrap_or(DEFAULT_TITLE);
         let style = window_style_from_initial(&show_settings.window.style)?;
-        let window = Win32HostWindow::create(
+        let mut window = Box::new(Win32HostWindow::create(
             title,
             width,
             height,
             tray_bounds,
             wants_no_redirection_bitmap(&style),
-        )?;
+        )?);
         let page_access = resolve_page_access(&show_settings, &page_source);
-        let webview_bounds = client_webview_bounds(window.hwnd).unwrap_or(WryRect {
-            position: PhysicalPosition::new(0, 0).into(),
-            size: PhysicalSize::new(
-                logical_to_physical_i32(window.hwnd, width.max(1)),
-                logical_to_physical_i32(window.hwnd, height.max(1)),
-            )
-            .into(),
-        });
         let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
             hwnd: window.hwnd,
-            window: None,
+            window: Some(NonNull::from(window.as_mut())),
             webview: None,
             content_descriptor: content_descriptor.clone(),
             listeners: HashMap::new(),
@@ -1124,8 +1097,31 @@ impl WindowsWebviewRuntime {
             size_constraints: WindowSizeConstraints::default(),
         }));
 
+        // Cold start is not a retained style transaction. Complete the hidden native material host
+        // and its final initial geometry before WebView2 allocates a controller or child surface.
+        sync_window_proc_state(
+            window.hwnd,
+            Some(NonNull::from(bridge.as_ref())),
+            Some(NonNull::from(window.as_mut())),
+            None,
+            None,
+            native_host_paint_policy(&bridge.borrow().style),
+            backdrop_state_policy(&bridge.borrow().style.background),
+            bridge.borrow().size_constraints,
+        );
+        apply_initial_window_host_style(&bridge, width, height, tray_bounds)?;
+        apply_window_icon_from_bridge(&bridge)?;
+
+        let webview_bounds = client_webview_bounds(window.hwnd).unwrap_or(WryRect {
+            position: PhysicalPosition::new(0, 0).into(),
+            size: PhysicalSize::new(
+                logical_to_physical_i32(window.hwnd, width.max(1)),
+                logical_to_physical_i32(window.hwnd, height.max(1)),
+            )
+            .into(),
+        });
         let webview = build_webview(
-            &window,
+            window.as_ref(),
             &bridge,
             show_settings.navigator_window,
             show_settings.navigator_screen,
@@ -1142,33 +1138,25 @@ impl WindowsWebviewRuntime {
         let mut slot = WindowsWebviewSlot {
             tray_id,
             webview,
-            window: Box::new(window),
+            window,
             bridge,
             content_descriptor,
             show_settings,
         };
         slot.window.attach_webview(&slot.webview);
-        {
-            let mut bridge = slot.bridge.borrow_mut();
-            bridge.window = Some(NonNull::from(slot.window.as_mut()));
-            bridge.webview = Some(NonNull::from(slot.webview.as_mut()));
-        }
+        slot.bridge.borrow_mut().webview = Some(NonNull::from(slot.webview.as_mut()));
         sync_window_proc_state(
             slot.window.hwnd,
             Some(NonNull::from(slot.bridge.as_ref())),
             Some(NonNull::from(slot.window.as_mut())),
             Some(NonNull::from(slot.webview.as_mut())),
             None,
+            native_host_paint_policy(&slot.bridge.borrow().style),
             backdrop_state_policy(&slot.bridge.borrow().style.background),
             slot.bridge.borrow().size_constraints,
         );
-        apply_window_style(&slot.bridge, None)?;
-        apply_window_icon_from_bridge(&slot.bridge)?;
-        apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
-        maybe_auto_clear_windows_white_block_artifact_after_reveal(
-            &slot.bridge,
-            WindowsCompositionOperation::InitialShow,
-        )?;
+        complete_initial_webview_attachment(&slot.bridge)?;
+        update_native_material_probe_title(slot.window.hwnd);
 
         Ok(slot)
     }
@@ -1229,6 +1217,7 @@ impl Drop for WindowsWebviewSlot {
             None,
             None,
             None,
+            WindowsNativeHostPaint::None,
             WindowsBackdropStatePolicy::FollowWindowActivation,
             WindowSizeConstraints::default(),
         );
@@ -1450,19 +1439,22 @@ fn show_bridge_window(
             SW_SHOW
         };
         ShowWindow(hwnd, command);
-        if focus {
-            SetForegroundWindow(hwnd);
-        }
     }
     if needs_reveal_recovery {
-        maybe_auto_clear_windows_white_block_artifact_after_delayed_reveal(bridge)?;
+        // A retained window can expose its previous redirection contents immediately. Recommit the
+        // native parent before focus; this does not resize or repaint the WebView child.
+        refresh_native_host_surface(hwnd)?;
+    }
+    if focus {
+        unsafe {
+            SetForegroundWindow(hwnd);
+        }
     }
     Ok(())
 }
 
 fn hide_bridge_window(bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
     let hwnd = bridge.borrow().hwnd;
-    cancel_queued_windows_artifact_clear(hwnd);
     finish_window_proc_soft_resize(hwnd, true);
     unsafe {
         ShowWindow(hwnd, SW_HIDE);
@@ -1528,11 +1520,7 @@ fn operational_visibility_changed(previous: bool, visible: bool) -> bool {
 }
 
 fn emit_window_visible_change_from_native_state(hwnd: HWND) {
-    let bridge = with_window_proc_state(hwnd, |state| {
-        (!state.visibility_sync_suppressed)
-            .then_some(state.bridge)
-            .flatten()
-    });
+    let bridge = with_window_proc_state(hwnd, |state| state.bridge);
     let Some(bridge) = bridge else {
         return;
     };
@@ -1543,12 +1531,59 @@ fn emit_window_visible_change_from_native_state(hwnd: HWND) {
     }
 }
 
-fn set_window_proc_visibility_sync_suppressed(hwnd: HWND, suppressed: bool) {
+fn window_proc_surface_refresh_suppressed(hwnd: HWND) -> bool {
+    WINDOW_PROC_STATES.with(|states| {
+        states
+            .borrow()
+            .get(&(hwnd as isize))
+            .map(|state| state.surface_refresh_suppressed)
+            .unwrap_or_default()
+    })
+}
+
+fn set_window_proc_surface_refresh_suppressed(hwnd: HWND, suppressed: bool) -> bool {
     WINDOW_PROC_STATES.with(|states| {
         if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
-            state.visibility_sync_suppressed = suppressed;
+            let previous = state.surface_refresh_suppressed;
+            state.surface_refresh_suppressed = previous || suppressed;
+            return previous;
+        }
+        false
+    })
+}
+
+fn restore_window_proc_surface_refresh_suppressed(hwnd: HWND, suppressed: bool) {
+    WINDOW_PROC_STATES.with(|states| {
+        if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
+            state.surface_refresh_suppressed = suppressed;
         }
     });
+}
+
+struct WindowProcSurfaceRefreshSuppression {
+    hwnd: HWND,
+    previous: bool,
+}
+
+impl WindowProcSurfaceRefreshSuppression {
+    fn new(hwnd: HWND) -> Self {
+        let previous = set_window_proc_surface_refresh_suppressed(hwnd, true);
+        Self { hwnd, previous }
+    }
+}
+
+impl Drop for WindowProcSurfaceRefreshSuppression {
+    fn drop(&mut self) {
+        restore_window_proc_surface_refresh_suppressed(self.hwnd, self.previous);
+    }
+}
+
+fn without_window_proc_surface_refresh<T>(
+    hwnd: HWND,
+    operation: impl FnOnce() -> Result<T, WebviewRuntimeError>,
+) -> Result<T, WebviewRuntimeError> {
+    let _suppression = WindowProcSurfaceRefreshSuppression::new(hwnd);
+    operation()
 }
 
 fn dispatch_navigator_window_command(
@@ -1693,7 +1728,7 @@ fn dispatch_navigator_window_command(
         }
         "startAppRegionDrag" => {
             // SendMessageW enters the native move loop and re-enters WndProc; drop the bridge
-            // borrow first so WM_ENTERSIZEMOVE can queue its interaction event without panicking.
+            // borrow first so WM_ENTERSIZEMOVE can emit its interaction event without panicking.
             let hwnd = { bridge.borrow().hwnd };
             start_app_region_drag(hwnd)
         }
@@ -1984,15 +2019,13 @@ fn physical_client_size(hwnd: HWND) -> Option<(i32, i32)> {
     Some((client_width, client_height))
 }
 
-fn apply_webview_client_bounds(webview: &WebView, hwnd: HWND) -> Result<(), WebviewRuntimeError> {
+fn apply_webview_controller_bounds(
+    webview: &WebView,
+    hwnd: HWND,
+) -> Result<(), WebviewRuntimeError> {
     let Some((width, height)) = physical_client_size(hwnd) else {
         return Ok(());
     };
-    // The Win32 host client rect is already in physical pixels. Apply it directly to WebView2 and
-    // synchronously resize WRY_WEBVIEW; Wry's public set_bounds path uses an async child HWND move.
-    // Chromium/WebView2 may still visually trail by one compositor frame during live interactive
-    // resize. Treat that as a lower-level composition limitation unless the host switches to a
-    // deeper resize/composition integration.
     let bounds = webview_controller_rect(width, height);
     unsafe {
         webview
@@ -2000,9 +2033,44 @@ fn apply_webview_client_bounds(webview: &WebView, hwnd: HWND) -> Result<(), Webv
             .SetBounds(bounds)
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     }
+    Ok(())
+}
+
+fn apply_webview_client_bounds_from_wm_size(
+    webview: &WebView,
+    hwnd: HWND,
+) -> Result<(), WebviewRuntimeError> {
+    let Some((width, height)) = physical_client_size(hwnd) else {
+        return Ok(());
+    };
+    unsafe {
+        webview
+            .controller()
+            .SetBounds(webview_controller_rect(width, height))
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    }
+    apply_webview_child_bounds(webview, hwnd)?;
+    notify_webview_parent_window_position_changed(webview)
+}
+
+fn apply_webview_child_bounds(webview: &WebView, hwnd: HWND) -> Result<(), WebviewRuntimeError> {
+    let Some((width, height)) = physical_client_size(hwnd) else {
+        return Ok(());
+    };
     if let Some(child_hwnd) = webview_parent_hwnd(webview) {
         set_child_window_bounds(child_hwnd, width, height)?;
     }
+    Ok(())
+}
+
+fn apply_webview_client_bounds(webview: &WebView, hwnd: HWND) -> Result<(), WebviewRuntimeError> {
+    // The Win32 host client rect is already in physical pixels. Apply it directly to WebView2 and
+    // synchronously resize WRY_WEBVIEW; Wry's public set_bounds path uses an async child HWND move.
+    // Chromium/WebView2 may still visually trail by one compositor frame during live interactive
+    // resize. Treat that as a lower-level composition limitation unless the host switches to a
+    // deeper resize/composition integration.
+    apply_webview_controller_bounds(webview, hwnd)?;
+    apply_webview_child_bounds(webview, hwnd)?;
     notify_webview_parent_window_position_changed(webview)
 }
 
@@ -2064,19 +2132,110 @@ fn refresh_after_explicit_resize(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<(), WebviewRuntimeError> {
     let hwnd = bridge.borrow().hwnd;
-    apply_webview_client_bounds_from_bridge(bridge)?;
-    // Explicit resize commands can expose the same stale host redirection surface family as the
-    // transparent white-block issue (`tauri#10318`). Re-present the host surface in-place and let
-    // WM_PAINT/WM_SIZE reuse the same path; do not hide/show, maximize, or rebuild the WebView.
-    refresh_attached_window_surface(hwnd);
-    let result = refresh_native_window_surface(hwnd);
-    emit_windows_composition_diagnostic(
-        bridge,
-        WindowsCompositionOperation::ExplicitResize,
-        if result.is_ok() { "applied" } else { "failed" },
-        None,
-    );
-    result
+    // SetWindowPos normally delivers WM_SIZE first. Keep the command fallback deterministic:
+    // finish the native parent surface before committing WebView2 and WRY child geometry.
+    refresh_native_host_surface(hwnd)?;
+    apply_webview_client_bounds_from_bridge(bridge)
+}
+
+fn set_native_material_probe_paint(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    paint: WindowsNativeHostPaint,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    let updated = WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let Some(state) = states.get_mut(&(hwnd as isize)) else {
+            return false;
+        };
+        let Some(probe) = state.native_material_probe.as_mut() else {
+            return false;
+        };
+        probe.paint = paint;
+        state.native_host_paint = paint;
+        true
+    });
+    if !updated {
+        return Err(WebviewRuntimeError::Unsupported(
+            "Windows native material probe is not enabled".into(),
+        ));
+    }
+    unsafe {
+        InvalidateRect(hwnd, null(), 1);
+        UpdateWindow(hwnd);
+    }
+    update_native_material_probe_title(hwnd);
+    Ok(())
+}
+
+fn set_native_material_probe_material(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    material: WindowsNativeMaterialProbeMaterial,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    let updated = WINDOW_PROC_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let Some(probe) = states
+            .get_mut(&(hwnd as isize))
+            .and_then(|state| state.native_material_probe.as_mut())
+        else {
+            return false;
+        };
+        probe.material = material;
+        true
+    });
+    if !updated {
+        return Err(WebviewRuntimeError::Unsupported(
+            "Windows native material probe is not enabled".into(),
+        ));
+    }
+    let dark_mode = current_windows_dark_mode();
+    apply_native_window_theme(hwnd, dark_mode)?;
+    apply_native_material_probe_backdrop(hwnd, material, dark_mode, true)?;
+    apply_dwm_client_frame(hwnd, material != WindowsNativeMaterialProbeMaterial::None)?;
+    refresh_native_window_frame(hwnd, bridge.borrow().style.keep_on_top);
+    refresh_native_host_surface(hwnd)?;
+    update_native_material_probe_title(hwnd);
+    Ok(())
+}
+
+fn reproject_native_material_probe(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    let probe = window_proc_native_material_probe(hwnd).ok_or_else(|| {
+        WebviewRuntimeError::Unsupported("Windows native material probe is not enabled".into())
+    })?;
+    apply_dwm_system_backdrop(hwnd, DWMSBT_NONE)?;
+    apply_native_material_probe_backdrop(hwnd, probe.material, current_windows_dark_mode(), false)?;
+    apply_dwm_client_frame(
+        hwnd,
+        probe.material != WindowsNativeMaterialProbeMaterial::None,
+    )?;
+    refresh_native_window_frame(hwnd, bridge.borrow().style.keep_on_top);
+    refresh_native_host_surface(hwnd)?;
+    unsafe {
+        let _ = DwmFlush();
+    }
+    update_native_material_probe_title(hwnd);
+    Ok(())
+}
+
+fn invalidate_native_material_probe(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<(), WebviewRuntimeError> {
+    let hwnd = bridge.borrow().hwnd;
+    if window_proc_native_material_probe(hwnd).is_none() {
+        return Err(WebviewRuntimeError::Unsupported(
+            "Windows native material probe is not enabled".into(),
+        ));
+    }
+    unsafe {
+        InvalidateRect(hwnd, null(), 1);
+        UpdateWindow(hwnd);
+    }
+    update_native_material_probe_title(hwnd);
+    Ok(())
 }
 
 fn exec_page_command(
@@ -2087,402 +2246,49 @@ fn exec_page_command(
         "clearWhiteBlock"
         | "clear-white-block"
         | "clearWindowArtifacts"
-        | "clear-window-artifacts" => {
-            clear_windows_white_block_artifact(bridge, WindowsCompositionOperation::ManualClear)
+        | "clear-window-artifacts" => clear_windows_white_block_artifact(bridge),
+        "win32ProbeNoHostPaint" => {
+            set_native_material_probe_paint(bridge, WindowsNativeHostPaint::NoPaint)
         }
+        "win32ProbeBlackHostPaint" => {
+            set_native_material_probe_paint(bridge, WindowsNativeHostPaint::Black)
+        }
+        "win32ProbeGrayHostPaint" => {
+            set_native_material_probe_paint(bridge, WindowsNativeHostPaint::Gray)
+        }
+        "win32ProbeAcrylic" => {
+            set_native_material_probe_material(bridge, WindowsNativeMaterialProbeMaterial::Acrylic)
+        }
+        "win32ProbeMica" => {
+            set_native_material_probe_material(bridge, WindowsNativeMaterialProbeMaterial::Mica)
+        }
+        "win32ProbeNoBackdrop" => {
+            set_native_material_probe_material(bridge, WindowsNativeMaterialProbeMaterial::None)
+        }
+        "win32ProbeReproject" => reproject_native_material_probe(bridge),
+        "win32ProbeInvalidate" => invalidate_native_material_probe(bridge),
         other => Err(WebviewRuntimeError::Rejected(format!(
             "unsupported page command: {other}"
         ))),
     }
 }
 
-fn maybe_auto_clear_windows_white_block_artifact(
-    bridge: &RefCell<NavigatorWindowBridge>,
-    operation: WindowsCompositionOperation,
-) -> Result<(), WebviewRuntimeError> {
-    if !windows_auto_clear_white_block_enabled() {
-        emit_windows_composition_diagnostic(bridge, operation, "skipped:auto-disabled", None);
-        return Ok(());
-    }
-    let (background, frameless, hwnd) = {
-        let state = bridge.borrow();
-        (
-            state.style.background.clone(),
-            state.style.frameless,
-            state.hwnd,
-        )
-    };
-    if !should_auto_clear_windows_white_block_artifact(
-        background_needs_white_block_clear(&background),
-        frameless,
-        window_is_visible(hwnd),
-        is_window_maximized(hwnd),
-    ) {
-        emit_windows_composition_diagnostic(bridge, operation, "skipped:predicate", None);
-        return Ok(());
-    }
-    clear_windows_white_block_artifact(bridge, operation)
-}
-
-fn maybe_auto_clear_windows_white_block_artifact_after_reveal(
-    bridge: &RefCell<NavigatorWindowBridge>,
-    operation: WindowsCompositionOperation,
-) -> Result<(), WebviewRuntimeError> {
-    if !bridge.borrow().style.frameless {
-        return maybe_auto_clear_windows_white_block_artifact(bridge, operation);
-    }
-    queue_windows_artifact_clear_after_next_message(bridge, operation)
-}
-
-fn maybe_auto_clear_windows_white_block_artifact_after_delayed_reveal(
-    bridge: &RefCell<NavigatorWindowBridge>,
-) -> Result<(), WebviewRuntimeError> {
-    if !windows_auto_clear_white_block_enabled() {
-        emit_windows_composition_diagnostic(
-            bridge,
-            WindowsCompositionOperation::DelayedRevealClear,
-            "skipped:auto-disabled",
-            None,
-        );
-        return Ok(());
-    }
-    let should_clear = {
-        let state = bridge.borrow();
-        background_needs_white_block_clear(&state.style.background) || state.style.frameless
-    };
-    if !should_clear {
-        emit_windows_composition_diagnostic(
-            bridge,
-            WindowsCompositionOperation::DelayedRevealClear,
-            "skipped:predicate",
-            None,
-        );
-        return Ok(());
-    }
-    schedule_windows_artifact_clear_after_delayed_reveal(bridge)
-}
-
-fn queue_windows_artifact_clear_after_next_message(
-    bridge: &RefCell<NavigatorWindowBridge>,
-    operation: WindowsCompositionOperation,
-) -> Result<(), WebviewRuntimeError> {
-    if !windows_auto_clear_white_block_enabled() {
-        emit_windows_composition_diagnostic(bridge, operation, "skipped:auto-disabled", None);
-        return Ok(());
-    }
-    let hwnd = bridge.borrow().hwnd;
-    let queue_result = WINDOW_PROC_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let Some(state) = states.get_mut(&(hwnd as isize)) else {
-            return None;
-        };
-        if state.artifact_clear_schedule.is_some() {
-            return Some(false);
-        }
-        state.artifact_clear_schedule = Some(WindowsArtifactClearRequest {
-            schedule: WindowsArtifactClearSchedule::NextMessage,
-            operation,
-        });
-        Some(true)
-    });
-    let Some(should_post) = queue_result else {
-        return maybe_auto_clear_windows_white_block_artifact(bridge, operation);
-    };
-    if !should_post {
-        emit_windows_composition_diagnostic(bridge, operation, "coalesced", None);
-        return Ok(());
-    }
-    emit_windows_composition_diagnostic(bridge, operation, "queued:next-message", None);
-    if unsafe { PostMessageW(hwnd, WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL, 0, 0) } == 0 {
-        clear_queued_windows_artifact_schedule(hwnd, WindowsArtifactClearSchedule::NextMessage);
-        return Err(WebviewRuntimeError::Internal(
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn schedule_windows_artifact_clear_after_delayed_reveal(
-    bridge: &RefCell<NavigatorWindowBridge>,
-) -> Result<(), WebviewRuntimeError> {
-    let hwnd = bridge.borrow().hwnd;
-    let schedule_result = WINDOW_PROC_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let Some(state) = states.get_mut(&(hwnd as isize)) else {
-            return None;
-        };
-        state.artifact_clear_schedule = Some(WindowsArtifactClearRequest {
-            schedule: WindowsArtifactClearSchedule::RevealDelay,
-            operation: WindowsCompositionOperation::DelayedRevealClear,
-        });
-        Some(())
-    });
-    if schedule_result.is_none() {
-        return maybe_auto_clear_windows_white_block_artifact(
-            bridge,
-            WindowsCompositionOperation::DelayedRevealClear,
-        );
-    }
-
-    unsafe {
-        KillTimer(hwnd, WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID);
-    }
-    if unsafe {
-        SetTimer(
-            hwnd,
-            WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID,
-            WINDOWS_REVEAL_ARTIFACT_CLEAR_DELAY_MS,
-            None,
-        )
-    } == 0
-    {
-        clear_queued_windows_artifact_schedule(hwnd, WindowsArtifactClearSchedule::RevealDelay);
-        return Err(WebviewRuntimeError::Internal(
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    emit_windows_composition_diagnostic(
-        bridge,
-        WindowsCompositionOperation::DelayedRevealClear,
-        "queued:timer",
-        None,
-    );
-    Ok(())
-}
-
-fn cancel_queued_windows_artifact_clear(hwnd: HWND) {
-    let should_cancel_timer = WINDOW_PROC_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let Some(state) = states.get_mut(&(hwnd as isize)) else {
-            return false;
-        };
-        let should_cancel_timer = matches!(
-            state.artifact_clear_schedule,
-            Some(WindowsArtifactClearRequest {
-                schedule: WindowsArtifactClearSchedule::RevealDelay,
-                ..
-            })
-        );
-        state.artifact_clear_schedule = None;
-        should_cancel_timer
-    });
-    if should_cancel_timer {
-        unsafe {
-            KillTimer(hwnd, WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID);
-        }
-    }
-}
-
-fn clear_queued_windows_artifact_schedule(hwnd: HWND, expected: WindowsArtifactClearSchedule) {
-    WINDOW_PROC_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        if let Some(state) = states.get_mut(&(hwnd as isize)) {
-            if state
-                .artifact_clear_schedule
-                .is_some_and(|request| request.schedule == expected)
-            {
-                state.artifact_clear_schedule = None;
-            }
-        }
-    });
-}
-
-fn take_queued_windows_artifact_clear(
-    hwnd: HWND,
-    expected: WindowsArtifactClearSchedule,
-) -> Option<(
-    NonNull<RefCell<NavigatorWindowBridge>>,
-    WindowsCompositionOperation,
-)> {
-    WINDOW_PROC_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let state = states.get_mut(&(hwnd as isize))?;
-        let Some(request) = state.artifact_clear_schedule else {
-            return None;
-        };
-        if request.schedule != expected {
-            return None;
-        }
-        state.artifact_clear_schedule = None;
-        if !should_run_queued_windows_artifact_clear(
-            Some(request.schedule),
-            expected,
-            state.soft_resize_interaction.is_some(),
-        ) {
-            return None;
-        }
-        state.bridge.map(|bridge| (bridge, request.operation))
-    })
-}
-
-fn should_run_queued_windows_artifact_clear(
-    scheduled: Option<WindowsArtifactClearSchedule>,
-    expected: WindowsArtifactClearSchedule,
-    soft_resize_active: bool,
-) -> bool {
-    scheduled == Some(expected) && !soft_resize_active
-}
-
-fn should_auto_clear_windows_white_block_artifact(
-    background_needs_clear: bool,
-    frameless: bool,
-    visible: bool,
-    maximized: bool,
-) -> bool {
-    (background_needs_clear || frameless) && visible && !maximized
-}
-
-fn observe_window_proc_native_resize(hwnd: HWND) {
-    WINDOW_PROC_STATES.with(|states| {
-        if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
-            // `WM_SIZE` owns geometry and surface synchronization. Shell-state recovery waits
-            // for `WM_EXITSIZEMOVE`, so a continuous native resize never performs hide/restore.
-            state.size_move_interaction.observe_resize();
-        }
-    });
-}
-
 fn clear_windows_white_block_artifact(
     bridge: &RefCell<NavigatorWindowBridge>,
-    operation: WindowsCompositionOperation,
 ) -> Result<(), WebviewRuntimeError> {
-    let hwnd = bridge.borrow().hwnd;
-    let started_at = Instant::now();
-    emit_windows_composition_diagnostic(bridge, operation, "requested", None);
-    if is_window_maximized(hwnd) {
-        // Windows DWM keeps the stale redirection artifact in maximized mode even after every
-        // tested shell-state reset probe. The normal-window repair path uses the verified
-        // `SW_SHOWMINNOACTIVE -> SW_RESTORE` reset, but that reset does not clear maximized
-        // artifacts. Do not fight the user with maximize/restore loops here; leave the known
-        // limitation explicit until a deeper DComp/AppWindow fix exists.
-        emit_windows_composition_diagnostic(bridge, operation, "skipped:maximized", None);
-        return Ok(());
-    }
-    // The repair intentionally minimizes and restores the HWND. Suppress its internal WM_SIZE
-    // messages so they cannot masquerade as user-driven operational visibility changes.
-    set_window_proc_visibility_sync_suppressed(hwnd, true);
-    show_window_clear_white_block(hwnd, SW_SHOWMINNOACTIVE, SW_RESTORE);
-    set_window_proc_visibility_sync_suppressed(hwnd, false);
-    let result = finish_shell_state_clear_white_block(bridge);
-    emit_windows_composition_diagnostic(
-        bridge,
-        operation,
-        if result.is_ok() {
-            "completed"
-        } else {
-            "failed"
-        },
-        Some(started_at.elapsed()),
-    );
-    result
+    // Compatibility command only: recommit the configured top-level host surface. It must never
+    // mutate shell state, focus, HWND geometry, WebView2 bounds, or WRY child bounds.
+    refresh_native_host_surface(bridge.borrow().hwnd)
 }
 
-fn background_needs_white_block_clear(background: &WebviewWindowBackground) -> bool {
-    !matches!(background, WebviewWindowBackground::Opaque)
-}
-
-fn windows_auto_clear_white_block_enabled() -> bool {
-    let value = std::env::var(WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV).ok();
-    windows_auto_clear_white_block_enabled_from_value(value.as_deref())
-}
-
-fn windows_auto_clear_white_block_enabled_from_value(value: Option<&str>) -> bool {
-    !value.is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "0" | "false" | "off" | "no"
-        )
-    })
-}
-
-fn windows_composition_diagnostics_enabled() -> bool {
-    let value = std::env::var(WINDOWS_COMPOSITION_DIAGNOSTICS_ENV).ok();
-    windows_composition_diagnostics_enabled_from_value(value.as_deref())
-}
-
-fn windows_composition_diagnostics_enabled_from_value(value: Option<&str>) -> bool {
-    value.is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
-
-fn emit_windows_composition_diagnostic(
-    bridge: &RefCell<NavigatorWindowBridge>,
-    operation: WindowsCompositionOperation,
-    phase: &str,
-    elapsed: Option<Duration>,
-) {
-    if !windows_composition_diagnostics_enabled() {
-        return;
-    }
-    let (hwnd, style) = {
-        let state = bridge.borrow();
-        (state.hwnd, state.style.clone())
-    };
-    let soft_resize_active = WINDOW_PROC_STATES.with(|states| {
-        states
-            .borrow()
-            .get(&(hwnd as isize))
-            .map(|state| state.soft_resize_interaction.is_some())
-            .unwrap_or(false)
-    });
-    let bounds = window_bounds(hwnd)
-        .map(|rect| format!("{}x{}@{},{}", rect.width, rect.height, rect.x, rect.y))
-        .unwrap_or_else(|_| "unavailable".to_string());
-    let elapsed_ms = elapsed
-        .map(|duration| duration.as_millis().to_string())
-        .unwrap_or_else(|| "-".to_string());
-    let sequence = WINDOWS_COMPOSITION_DIAGNOSTIC_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    eprintln!(
-        "opentray-ext-webview composition seq={sequence} operation={} phase={phase} background={} clear_backing={} host_fill=0x{:08X} frameless={} resizable={} style=0x{:08X} ex_style=0x{:X} visible={} minimized={} maximized={} soft_resize={} bounds={bounds} elapsed_ms={elapsed_ms}",
-        operation.as_str(),
-        windows_composition_background_label(&style.background),
-        wants_clear_background(&style),
-        host_surface_fill_color(&style.background),
-        style.frameless,
-        style.resizable,
-        unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 },
-        unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) },
-        window_is_visible(hwnd),
-        unsafe { IsIconic(hwnd) != 0 },
-        is_window_maximized(hwnd),
-        soft_resize_active,
-    );
-}
-
-fn windows_composition_background_label(background: &WebviewWindowBackground) -> String {
-    match background {
-        WebviewWindowBackground::Opaque => "opaque".to_string(),
-        WebviewWindowBackground::Transparent => "transparent".to_string(),
-        WebviewWindowBackground::PlatformMaterial { material, .. } => {
-            format!("platform:{material}")
-        }
-        WebviewWindowBackground::Semantic { token, .. } => format!("semantic:{token}"),
+fn webview_background_rgba(clear: bool) -> RGBA {
+    if clear {
+        CLEAR_BACKGROUND
+    } else {
+        OPAQUE_BACKGROUND
     }
 }
 
-fn show_window_clear_white_block(hwnd: HWND, first: i32, second: i32) {
-    unsafe {
-        ShowWindow(hwnd, first);
-        ShowWindow(hwnd, second);
-    }
-}
-
-fn finish_shell_state_clear_white_block(
-    bridge: &RefCell<NavigatorWindowBridge>,
-) -> Result<(), WebviewRuntimeError> {
-    let hwnd = bridge.borrow().hwnd;
-    apply_webview_client_bounds_from_bridge(bridge)?;
-    notify_webview_parent_window_position_changed_from_bridge(bridge)?;
-    let response = window_state_json(hwnd)?;
-    emit_window_event(bridge, "windowstatechange", response)?;
-    emit_overlay_geometry_change_if_enabled(bridge)?;
-    refresh_attached_window_surface(hwnd);
-    refresh_native_window_surface(hwnd)
-}
 fn notify_webview_parent_window_position_changed(
     webview: &WebView,
 ) -> Result<(), WebviewRuntimeError> {
@@ -2899,6 +2705,20 @@ fn host_surface_kind(background: &WebviewWindowBackground) -> WindowsHostSurface
     }
 }
 
+fn native_host_paint_policy(style: &WindowStyleState) -> WindowsNativeHostPaint {
+    // User evidence isolated the stale pixels to the top-level DWM redirection surface, including
+    // regions never covered by the WebView child. Black is the material composition base below
+    // Mica/Acrylic/Tabbed, not a visible overlay and not an optional recovery mode.
+    if matches!(
+        &style.background,
+        WebviewWindowBackground::PlatformMaterial { .. } | WebviewWindowBackground::Semantic { .. }
+    ) {
+        WindowsNativeHostPaint::Black
+    } else {
+        WindowsNativeHostPaint::None
+    }
+}
+
 fn needs_host_window_rebuild_for_background_transition(
     _previous: &WebviewWindowBackground,
     _next: &WebviewWindowBackground,
@@ -2968,21 +2788,65 @@ fn rebuild_host_window_for_background_transition(
             Some(window),
             Some(webview),
             None,
+            native_host_paint_policy(&style),
             backdrop_state_policy(&style.background),
             size_constraints,
         );
-        apply_webview_client_bounds(webview.as_ref(), window.as_ref().hwnd)?;
         sync_transparent_host_surface(bridge, &style)?;
+        refresh_native_host_surface(window.as_ref().hwnd)?;
+        apply_webview_background_color(bridge, wants_clear_background(&style))?;
+        apply_webview_client_bounds(webview.as_ref(), window.as_ref().hwnd)?;
         restore_rebuilt_window_host_state(window.as_ref().hwnd, snapshot, was_active);
         drop(old_window);
     }
     notify_webview_parent_window_position_changed_from_bridge(bridge)?;
-    refresh_native_window_surface(bridge.borrow().hwnd)?;
     Ok(())
 }
 
 unsafe fn replace_boxed_value_in_place<T>(target: NonNull<T>, replacement: Box<T>) -> T {
     std::ptr::replace(target.as_ptr(), *replacement)
+}
+
+fn apply_initial_window_host_style(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    width: i32,
+    height: i32,
+    tray_bounds: Option<Rect>,
+) -> Result<(), WebviewRuntimeError> {
+    let (hwnd, style, window_controls_overlay) = {
+        let state = bridge.borrow();
+        (
+            state.hwnd,
+            state.style.clone(),
+            state.window_controls_overlay,
+        )
+    };
+    set_window_proc_native_host_paint(hwnd, native_host_paint_policy(&style));
+    without_window_proc_surface_refresh(hwnd, || {
+        apply_initial_native_window_style(hwnd, &style)?;
+        sync_transparent_host_surface(bridge, &style)?;
+        apply_windows_titlebar_overlay(hwnd, window_controls_overlay)?;
+        refresh_dwm_backdrop_activation_state(hwnd);
+        // CreateWindowExW already received the requested size. This correction exists for public
+        // visible-frame geometry, but it must run only after WndProc owns the native material base.
+        set_window_size(hwnd, width, height)?;
+        if tray_bounds.is_some() {
+            let (x, y) = initial_window_position(width, height, tray_bounds);
+            set_window_position(hwnd, x, y)?;
+        }
+        Ok(())
+    })?;
+    refresh_native_host_surface(hwnd)
+}
+
+fn complete_initial_webview_attachment(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<(), WebviewRuntimeError> {
+    let style = bridge.borrow().style.clone();
+    sync_soft_resize_enabled(bridge)?;
+    apply_webview_background_color(bridge, wants_clear_background(&style))?;
+    apply_webview_client_bounds_from_bridge(bridge)?;
+    notify_webview_parent_window_position_changed_from_bridge(bridge)
 }
 
 fn apply_window_style(
@@ -2999,6 +2863,10 @@ fn apply_window_style(
         )
     };
     let was_maximized = is_window_maximized(hwnd);
+    let native_host_paint = native_host_paint_policy(&style);
+    // Publish the target paint policy before frame/style APIs can synchronously deliver a paint.
+    // This keeps a material HWND backed by a real base even while its DWM attributes transition.
+    set_window_proc_native_host_paint(hwnd, native_host_paint);
     let needs_rebuild = previous_background
         .map(|background| {
             needs_host_window_rebuild_for_background_transition(background, &style.background)
@@ -3020,44 +2888,64 @@ fn apply_window_style(
     // the visible window substrate on Windows; flipping the controller backing between opaque and
     // transparent at runtime can leave stale child-surface content behind even when the host is
     // already correct.
-    apply_webview_background_color(webview, wants_clear_background(&style))?;
-    apply_native_window_style(hwnd, &style)?;
     if !style.frameless || !style.resizable {
         finish_window_proc_soft_resize(hwnd, true);
     }
     sync_soft_resize_enabled(bridge)?;
-    sync_transparent_host_surface(bridge, &style)?;
-    // AppWindow belongs to the host HWND, so apply the overlay synchronously on its owning thread
-    // before the window is made visible and before WebView client bounds are fitted.
-    apply_windows_titlebar_overlay(hwnd, window_controls_overlay)?;
-    refresh_dwm_backdrop_activation_state(hwnd);
+    // Native style/frame APIs can synchronously deliver WM_WINDOWPOSCHANGED/WM_SIZE. Keep those
+    // messages from committing WebView2 while the parent DWM surface is still transitioning.
+    without_window_proc_surface_refresh(hwnd, || {
+        apply_native_window_style(hwnd, &style)?;
+        sync_transparent_host_surface(bridge, &style)?;
+        // AppWindow belongs to the host HWND, so apply the overlay synchronously on its owning
+        // thread before the window is made visible and before WebView client bounds are fitted.
+        apply_windows_titlebar_overlay(hwnd, window_controls_overlay)?;
+        refresh_dwm_backdrop_activation_state(hwnd);
 
-    if was_maximized {
-        unsafe {
-            ShowWindow(hwnd, SW_MAXIMIZE);
+        if was_maximized {
+            unsafe {
+                ShowWindow(hwnd, SW_MAXIMIZE);
+            }
         }
-    }
+        Ok(())
+    })?;
+    // Complete the parent surface before WebView2 receives the client rectangle. The WebView child
+    // must be composed over a finished native material base, not over an HWND that only reports an
+    // erase message as handled.
+    refresh_native_host_surface(hwnd)?;
+    apply_webview_background_color(bridge, wants_clear_background(&style))?;
     if let Some(webview) = webview {
         apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd)?;
     }
     notify_webview_parent_window_position_changed_from_bridge(bridge)?;
-    refresh_native_window_surface(hwnd)?;
-    emit_windows_composition_diagnostic(
-        bridge,
-        WindowsCompositionOperation::StyleProjection,
-        "applied",
-        None,
-    );
-    maybe_auto_clear_windows_white_block_artifact_after_reveal(
-        bridge,
-        WindowsCompositionOperation::StyleProjection,
-    )?;
+    update_native_material_probe_title(hwnd);
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum WindowsStyleProjection {
+    Initial,
+    Update,
 }
 
 fn apply_native_window_style(
     hwnd: HWND,
     style: &WindowStyleState,
+) -> Result<(), WebviewRuntimeError> {
+    apply_native_window_style_for_projection(hwnd, style, WindowsStyleProjection::Update)
+}
+
+fn apply_initial_native_window_style(
+    hwnd: HWND,
+    style: &WindowStyleState,
+) -> Result<(), WebviewRuntimeError> {
+    apply_native_window_style_for_projection(hwnd, style, WindowsStyleProjection::Initial)
+}
+
+fn apply_native_window_style_for_projection(
+    hwnd: HWND,
+    style: &WindowStyleState,
+    projection: WindowsStyleProjection,
 ) -> Result<(), WebviewRuntimeError> {
     let dark_mode = current_windows_dark_mode();
     let current_style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 };
@@ -3070,15 +2958,17 @@ fn apply_native_window_style(
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style_bits);
         }
     }
-    // DWM must observe the new non-client policy and client surface before Win32 performs its
-    // final frame recalculation. Applying either after `SWP_FRAMECHANGED` leaves stale native
-    // titlebar pixels until an unrelated native resize happens to redraw the compositor surface.
     apply_dwm_nc_rendering_policy(hwnd, style.frameless);
     apply_window_opacity(hwnd, style.opacity)?;
     apply_native_window_theme(hwnd, dark_mode)?;
-    apply_dwm_client_frame(hwnd, wants_dwm_extended_client_frame(style))?;
-    apply_dwm_transparency(hwnd, wants_dwm_transparent_host(style))?;
-    apply_dwm_backdrop(hwnd, &style.background, dark_mode)?;
+    if wants_dwm_transparent_host(style) {
+        apply_dwm_transparency(hwnd, true)?;
+    } else if matches!(projection, WindowsStyleProjection::Update) {
+        apply_dwm_transparency(hwnd, false)?;
+    }
+    let reset_backdrop = matches!(projection, WindowsStyleProjection::Update);
+    apply_effective_dwm_backdrop(hwnd, &style.background, dark_mode, reset_backdrop)?;
+    apply_dwm_client_frame(hwnd, wants_effective_dwm_client_frame(hwnd, style))?;
     apply_dwm_corner_preference(hwnd, style.platform.windows.corner_preference.as_deref())?;
     refresh_native_window_frame(hwnd, style.keep_on_top);
     Ok(())
@@ -3167,6 +3057,7 @@ fn sync_transparent_host_surface(
         Some(NonNull::from(window)),
         bridge.borrow().webview,
         host_surface_fill_color,
+        native_host_paint_policy(style),
         backdrop_state_policy(&style.background),
         bridge.borrow().size_constraints,
     );
@@ -3183,19 +3074,22 @@ fn host_surface_fill_color(background: &WebviewWindowBackground) -> u32 {
 }
 
 fn apply_webview_background_color(
-    webview: Option<NonNull<WebView>>,
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     clear: bool,
 ) -> Result<(), WebviewRuntimeError> {
+    let webview = bridge.borrow().webview;
     let Some(webview) = webview else {
         return Ok(());
     };
+    let color = webview_background_rgba(clear);
     unsafe { webview.as_ref() }
-        .set_background_color(if clear {
-            CLEAR_BACKGROUND
-        } else {
-            OPAQUE_BACKGROUND
-        })
-        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+        .set_background_color(color)
+        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    Ok(())
+}
+
+fn windows_native_material_probe_enabled() -> bool {
+    std::env::var_os(WINDOWS_NATIVE_MATERIAL_PROBE_ENV).is_some()
 }
 
 fn sync_window_proc_state(
@@ -3204,6 +3098,7 @@ fn sync_window_proc_state(
     window: Option<NonNull<Win32HostWindow>>,
     webview: Option<NonNull<WebView>>,
     host_surface_fill_color: Option<u32>,
+    native_host_paint: WindowsNativeHostPaint,
     backdrop_state_policy: WindowsBackdropStatePolicy,
     size_constraints: WindowSizeConstraints,
 ) {
@@ -3214,6 +3109,13 @@ fn sync_window_proc_state(
             return;
         }
         let previous = states.get(&(hwnd as isize)).copied().unwrap_or_default();
+        let native_material_probe = previous.native_material_probe.or_else(|| {
+            windows_native_material_probe_enabled()
+                .then_some(WindowsNativeMaterialProbeState::default())
+        });
+        let native_host_paint = native_material_probe
+            .map(|probe| probe.paint)
+            .unwrap_or(native_host_paint);
         states.insert(
             hwnd as isize,
             WindowProcState {
@@ -3221,15 +3123,15 @@ fn sync_window_proc_state(
                 window,
                 webview,
                 host_surface_fill_color,
+                native_host_paint,
+                native_material_probe,
                 backdrop_state_policy,
                 size_constraints,
-                size_move_interaction: previous.size_move_interaction,
                 soft_resize_interaction: previous.soft_resize_interaction,
                 operational_visible: previous
                     .operational_visible
                     .or(Some(window_is_visible(hwnd))),
-                artifact_clear_schedule: previous.artifact_clear_schedule,
-                visibility_sync_suppressed: previous.visibility_sync_suppressed,
+                surface_refresh_suppressed: previous.surface_refresh_suppressed,
             },
         );
     });
@@ -3254,26 +3156,6 @@ fn sync_window_proc_size_constraints(hwnd: HWND, size_constraints: WindowSizeCon
     });
 }
 
-fn enter_window_proc_size_move(hwnd: HWND) {
-    WINDOW_PROC_STATES.with(|states| {
-        if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
-            state.size_move_interaction.enter();
-        }
-    });
-}
-
-fn finish_window_proc_size_move(hwnd: HWND) -> Option<NonNull<RefCell<NavigatorWindowBridge>>> {
-    WINDOW_PROC_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let state = states.get_mut(&(hwnd as isize))?;
-        state
-            .size_move_interaction
-            .exit()
-            .then_some(state.bridge)
-            .flatten()
-    })
-}
-
 fn finish_window_proc_soft_resize(hwnd: HWND, release_capture: bool) -> bool {
     let Some((interaction, bridge)) = WINDOW_PROC_STATES.with(|states| {
         let mut states = states.borrow_mut();
@@ -3291,25 +3173,11 @@ fn finish_window_proc_soft_resize(hwnd: HWND, release_capture: bool) -> bool {
     emit_window_interaction_change(hwnd, false);
     if let Some(bridge) = bridge {
         let bridge = unsafe { bridge.as_ref() };
-        // Shell-state white-block repair would revoke this pointer capture. Keep the soft resize
-        // entirely in place: synchronize the child surface and invalidate the host instead.
+        if let Err(error) = refresh_native_host_surface(hwnd) {
+            eprintln!("opentray-ext-webview failed to paint Windows soft resize host: {error}");
+        }
         refresh_attached_window_surface(hwnd);
-        if let Err(error) = refresh_native_window_surface(hwnd) {
-            eprintln!("opentray-ext-webview failed to refresh Windows soft resize: {error}");
-        }
         emit_soft_resize_geometry_changes(hwnd, bridge, interaction.initial_bounds);
-        if release_capture {
-            // The native capture lifecycle is now over. Frameless chrome residue can use the
-            // normal terminal artifact repair without terminating the resize interaction.
-            if let Err(error) = maybe_auto_clear_windows_white_block_artifact_after_reveal(
-                bridge,
-                WindowsCompositionOperation::SoftResizeTerminal,
-            ) {
-                eprintln!(
-                    "opentray-ext-webview failed to clear Windows frameless resize artifact: {error}"
-                );
-            }
-        }
     }
     true
 }
@@ -3448,10 +3316,6 @@ fn enforce_current_window_size_constraints(
     }
     set_window_size(hwnd, width, height)?;
     refresh_after_explicit_resize(bridge)?;
-    maybe_auto_clear_windows_white_block_artifact_after_reveal(
-        bridge,
-        WindowsCompositionOperation::ExplicitResize,
-    )?;
     let response = json!({ "width": width, "height": height });
     emit_window_event(bridge, "resized", response)?;
     emit_overlay_geometry_change_if_enabled(bridge)
@@ -3472,7 +3336,17 @@ fn size_constraints_json(constraints: WindowSizeConstraints) -> Value {
 
 fn window_style_bits(style: &WindowStyleState, current_style: u32) -> u32 {
     let state_style = current_style & (WS_VISIBLE | WS_MAXIMIZE | WS_MINIMIZE);
-    let child_safe_style = WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+    // A material parent must paint the redirection bitmap below the transparent WebView child.
+    // WS_CLIPCHILDREN would remove that child-covered region from BeginPaint's visible region.
+    let child_clipping =
+        if host_surface_kind(&style.background) == WindowsHostSurfaceKind::RedirectionSurface {
+            0
+        } else {
+            WS_CLIPCHILDREN
+        };
+    // This is a top-level HWND. WS_CLIPSIBLINGS changes sibling clipping but does not protect
+    // the WebView child; leaving it off also matches the native material probe constructor.
+    let child_safe_style = child_clipping;
     if style.frameless {
         // `WS_THICKFRAME` preserves DWM's legacy resize border even when `WM_NCCALCSIZE`
         // exposes a full client area. Frameless owns chrome, so its resize behavior lives in
@@ -3498,6 +3372,9 @@ fn window_ex_style_bits(style: &WindowStyleState, current_ex_style: isize) -> is
     };
     let tool_window = WS_EX_TOOLWINDOW as isize;
     let app_window = WS_EX_APPWINDOW as isize;
+    if windows_native_material_probe_enabled() {
+        return with_opacity & !tool_window & !app_window;
+    }
     // Tray-owned WebViews are utility windows by default. Switcher participation is an explicit
     // Windows style fact and must not be inferred from title/icon metadata.
     if style.platform.windows.show_in_switchers {
@@ -3556,12 +3433,14 @@ fn wants_dwm_extended_client_frame(style: &WindowStyleState) -> bool {
     wants_clear_background(style)
 }
 
-fn wants_dwm_transparent_host(style: &WindowStyleState) -> bool {
-    wants_clear_host_background(style)
+fn wants_effective_dwm_client_frame(hwnd: HWND, style: &WindowStyleState) -> bool {
+    window_proc_native_material_probe(hwnd)
+        .map(|probe| probe.material != WindowsNativeMaterialProbeMaterial::None)
+        .unwrap_or_else(|| wants_dwm_extended_client_frame(style))
 }
 
-fn wants_clear_host_background(style: &WindowStyleState) -> bool {
-    wants_clear_background(style)
+fn wants_dwm_transparent_host(style: &WindowStyleState) -> bool {
+    matches!(style.background, WebviewWindowBackground::Transparent)
 }
 
 fn current_windows_dark_mode() -> Option<bool> {
@@ -3668,15 +3547,16 @@ fn apply_dwm_client_frame(hwnd: HWND, enabled: bool) -> Result<(), WebviewRuntim
     Ok(())
 }
 
-fn refresh_native_window_surface(hwnd: HWND) -> Result<(), WebviewRuntimeError> {
-    let invalidated = unsafe { InvalidateRect(hwnd, null(), 1) };
-    if invalidated == 0 {
-        return Err(WebviewRuntimeError::Internal(
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    let updated = unsafe { UpdateWindow(hwnd) };
-    if updated == 0 {
+fn redraw_native_window_client_surface(hwnd: HWND) -> Result<(), WebviewRuntimeError> {
+    let redrawn = unsafe {
+        RedrawWindow(
+            hwnd,
+            null(),
+            null_mut(),
+            RDW_ERASE | RDW_INVALIDATE | RDW_NOCHILDREN | RDW_UPDATENOW,
+        )
+    };
+    if redrawn == 0 {
         return Err(WebviewRuntimeError::Internal(
             std::io::Error::last_os_error().to_string(),
         ));
@@ -3684,12 +3564,37 @@ fn refresh_native_window_surface(hwnd: HWND) -> Result<(), WebviewRuntimeError> 
     Ok(())
 }
 
+fn refresh_native_host_surface(hwnd: HWND) -> Result<(), WebviewRuntimeError> {
+    // This is the only manual recommit primitive. Keep WebView2/WRY geometry out of this function.
+    match window_proc_native_host_paint(hwnd) {
+        WindowsNativeHostPaint::NoPaint
+        | WindowsNativeHostPaint::Black
+        | WindowsNativeHostPaint::Gray => redraw_native_window_client_surface(hwnd),
+        WindowsNativeHostPaint::None => present_attached_host_surface(hwnd),
+    }
+}
+
+fn apply_effective_dwm_backdrop(
+    hwnd: HWND,
+    background: &WebviewWindowBackground,
+    dark_mode: Option<bool>,
+    reset: bool,
+) -> Result<(), WebviewRuntimeError> {
+    if let Some(probe) = window_proc_native_material_probe(hwnd) {
+        return apply_native_material_probe_backdrop(hwnd, probe.material, dark_mode, reset);
+    }
+    apply_dwm_backdrop(hwnd, background, dark_mode, reset)
+}
+
 fn apply_dwm_backdrop(
     hwnd: HWND,
     background: &WebviewWindowBackground,
     dark_mode: Option<bool>,
+    reset: bool,
 ) -> Result<(), WebviewRuntimeError> {
-    reset_dwm_backdrop_state(hwnd)?;
+    if reset {
+        reset_dwm_backdrop_state(hwnd)?;
+    }
     match resolved_windows_backdrop(background) {
         Some("mica") => apply_window_vibrancy_backdrop(hwnd, "Windows Mica backdrop", |window| {
             apply_mica(window, dark_mode)
@@ -3709,6 +3614,30 @@ fn apply_dwm_backdrop(
         Some(other) => Err(WebviewRuntimeError::Unsupported(format!(
             "background material {other} is not supported on Windows"
         ))),
+    }
+}
+
+fn apply_native_material_probe_backdrop(
+    hwnd: HWND,
+    material: WindowsNativeMaterialProbeMaterial,
+    dark_mode: Option<bool>,
+    reset: bool,
+) -> Result<(), WebviewRuntimeError> {
+    if reset {
+        reset_dwm_backdrop_state(hwnd)?;
+    }
+    match material {
+        WindowsNativeMaterialProbeMaterial::Acrylic => {
+            apply_window_vibrancy_backdrop(hwnd, "Windows Acrylic probe backdrop", |window| {
+                apply_acrylic(window, None)
+            })
+        }
+        WindowsNativeMaterialProbeMaterial::Mica => {
+            apply_window_vibrancy_backdrop(hwnd, "Windows Mica probe backdrop", |window| {
+                apply_mica(window, dark_mode)
+            })
+        }
+        WindowsNativeMaterialProbeMaterial::None => apply_dwm_system_backdrop(hwnd, DWMSBT_NONE),
     }
 }
 
@@ -3784,7 +3713,7 @@ fn apply_dwm_corner_preference(
         Some(other) => {
             return Err(WebviewRuntimeError::Unsupported(format!(
                 "Windows cornerPreference {other} is not supported"
-            )))
+            )));
         }
     };
     set_dwm_attribute(
@@ -4057,7 +3986,7 @@ fn decode_png_rgba(bytes: &[u8]) -> Result<DecodedPngRgba, WebviewRuntimeError> 
         png::ColorType::Indexed => {
             return Err(WebviewRuntimeError::Rejected(
                 "indexed PNG window icons are not supported on Windows yet".into(),
-            ))
+            ));
         }
     };
     Ok(DecodedPngRgba {
@@ -5280,7 +5209,9 @@ impl Win32HostWindow {
                 ex_style,
                 class_name.as_ptr(),
                 title.as_ptr(),
-                WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+                // The final background projection decides whether the parent may clip children.
+                // Start unclipped while hidden so material hosts can later paint below WebView2.
+                WS_OVERLAPPEDWINDOW,
                 x,
                 y,
                 width,
@@ -5295,10 +5226,6 @@ impl Win32HostWindow {
             return Err(WebviewRuntimeError::Internal(
                 std::io::Error::last_os_error().to_string(),
             ));
-        }
-        set_window_size(hwnd, width, height)?;
-        if tray_bounds.is_some() {
-            set_window_position(hwnd, x, y)?;
         }
         let mut window = Self {
             hwnd,
@@ -5437,10 +5364,16 @@ impl HasDisplayHandle for WindowsDisplayBridge {
     }
 }
 
+fn window_class_style() -> u32 {
+    CS_HREDRAW | CS_VREDRAW
+}
+
 fn register_window_class(hinstance: HINSTANCE) {
     let class_name = wide_null(CLASS_NAME);
     let class = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW | CS_OWNDC,
+        // A persistent class DC is unnecessary for this HWND-owned GDI paint path and differs from
+        // the native material probe. Each WM_PAINT uses the HDC supplied by BeginPaint.
+        style: window_class_style(),
         lpfnWndProc: Some(window_proc),
         cbClsExtra: 0,
         cbWndExtra: 0,
@@ -5456,6 +5389,128 @@ fn register_window_class(hinstance: HINSTANCE) {
     }
 }
 
+fn window_proc_native_host_paint(hwnd: HWND) -> WindowsNativeHostPaint {
+    with_window_proc_state(hwnd, |state| state.native_host_paint)
+}
+
+fn window_proc_native_material_probe(hwnd: HWND) -> Option<WindowsNativeMaterialProbeState> {
+    with_window_proc_state(hwnd, |state| state.native_material_probe)
+}
+
+fn set_window_proc_native_host_paint(hwnd: HWND, paint: WindowsNativeHostPaint) {
+    WINDOW_PROC_STATES.with(|states| {
+        if let Some(state) = states.borrow_mut().get_mut(&(hwnd as isize)) {
+            state.native_host_paint = state
+                .native_material_probe
+                .map(|probe| probe.paint)
+                .unwrap_or(paint);
+        }
+    });
+}
+
+fn native_host_paint_brush(paint: WindowsNativeHostPaint) -> Option<i32> {
+    match paint {
+        WindowsNativeHostPaint::Black => Some(BLACK_BRUSH),
+        WindowsNativeHostPaint::Gray => Some(GRAY_BRUSH),
+        WindowsNativeHostPaint::None | WindowsNativeHostPaint::NoPaint => None,
+    }
+}
+
+// Always fill the complete client rect. The WebView may cover only part of the HWND, and
+// WS_CLIPCHILDREN is deliberately removed for material hosts so this parent base remains complete.
+fn fill_native_client_surface(hwnd: HWND, hdc: HDC, paint: WindowsNativeHostPaint) -> bool {
+    if hdc.is_null() {
+        return false;
+    }
+    let Some(stock_brush) = native_host_paint_brush(paint) else {
+        return false;
+    };
+    let mut client = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    if unsafe { GetClientRect(hwnd, &mut client) } == 0 {
+        return false;
+    }
+    let brush = unsafe { GetStockObject(stock_brush) as HBRUSH };
+    if brush.is_null() {
+        return false;
+    }
+    unsafe { FillRect(hdc, &client, brush) != 0 }
+}
+
+fn paint_native_client_surface_from_wm_paint(
+    hwnd: HWND,
+    native_host_paint: WindowsNativeHostPaint,
+) -> bool {
+    let mut paint = unsafe { std::mem::zeroed::<PAINTSTRUCT>() };
+    let hdc = unsafe { BeginPaint(hwnd, &mut paint) };
+    if hdc.is_null() {
+        return false;
+    }
+    let handled = match native_host_paint {
+        WindowsNativeHostPaint::NoPaint => true,
+        WindowsNativeHostPaint::Black | WindowsNativeHostPaint::Gray => {
+            fill_native_client_surface(hwnd, hdc, native_host_paint)
+        }
+        WindowsNativeHostPaint::None => false,
+    };
+    unsafe {
+        EndPaint(hwnd, &paint);
+    }
+    handled
+}
+
+fn record_native_material_probe_paint(hwnd: HWND) {
+    WINDOW_PROC_STATES.with(|states| {
+        if let Some(probe) = states
+            .borrow_mut()
+            .get_mut(&(hwnd as isize))
+            .and_then(|state| state.native_material_probe.as_mut())
+        {
+            probe.paint_messages = probe.paint_messages.saturating_add(1);
+        }
+    });
+}
+
+fn record_native_material_probe_resize_session(hwnd: HWND) {
+    WINDOW_PROC_STATES.with(|states| {
+        if let Some(probe) = states
+            .borrow_mut()
+            .get_mut(&(hwnd as isize))
+            .and_then(|state| state.native_material_probe.as_mut())
+        {
+            probe.resize_sessions = probe.resize_sessions.saturating_add(1);
+        }
+    });
+    update_native_material_probe_title(hwnd);
+}
+
+fn update_native_material_probe_title(hwnd: HWND) {
+    let state = with_window_proc_state(hwnd, |state| state);
+    let Some(probe) = state.native_material_probe else {
+        return;
+    };
+    let frameless = state
+        .bridge
+        .and_then(|bridge| unsafe { bridge.as_ref() }.try_borrow().ok())
+        .map(|bridge| bridge.style.frameless)
+        .unwrap_or(false);
+    let title = wide_null(&format!(
+        "WEBVIEW CONTROLS | {} | {} | {} | resize sessions={} | paint messages={}",
+        probe.material.label(),
+        probe.paint.label(),
+        if frameless { "FRAMELESS" } else { "FRAMED" },
+        probe.resize_sessions,
+        probe.paint_messages,
+    ));
+    unsafe {
+        SetWindowTextW(hwnd, title.as_ptr());
+    }
+}
+
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -5468,7 +5523,19 @@ unsafe extern "system" fn window_proc(
             ShowWindow(hwnd, SW_HIDE);
             0
         }
-        WM_ERASEBKGND => 1,
+        WM_ERASEBKGND => {
+            let state = with_window_proc_state(hwnd, |state| state);
+            match state.native_host_paint {
+                WindowsNativeHostPaint::NoPaint => 1,
+                WindowsNativeHostPaint::Black | WindowsNativeHostPaint::Gray
+                    if fill_native_client_surface(hwnd, wparam as HDC, state.native_host_paint) =>
+                {
+                    1
+                }
+                WindowsNativeHostPaint::None if state.host_surface_fill_color.is_some() => 1,
+                _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+            }
+        }
         WM_SETTINGCHANGE => {
             if let Err(error) = apply_native_window_theme(hwnd, current_windows_dark_mode()) {
                 eprintln!("opentray-ext-webview failed to update Windows native theme: {error}");
@@ -5532,85 +5599,46 @@ unsafe extern "system" fn window_proc(
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_ENTERSIZEMOVE => {
-            enter_window_proc_size_move(hwnd);
             emit_window_interaction_change(hwnd, true);
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_EXITSIZEMOVE => {
-            let resize_bridge = finish_window_proc_size_move(hwnd);
             emit_window_interaction_change(hwnd, false);
-            if let Some(bridge) = resize_bridge {
-                if let Err(error) = maybe_auto_clear_windows_white_block_artifact_after_reveal(
-                    unsafe { bridge.as_ref() },
-                    WindowsCompositionOperation::NativeResizeTerminal,
-                ) {
-                    eprintln!(
-                        "opentray-ext-webview failed to auto-clear Windows resize artifact: {error}"
-                    );
-                }
-            }
+            record_native_material_probe_resize_session(hwnd);
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_WINDOWPOSCHANGED => {
-            refresh_attached_window_surface(hwnd);
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
-            refresh_attached_window_surface(hwnd);
+            if !window_proc_surface_refresh_suppressed(hwnd) {
+                notify_attached_webview_parent_position_changed(hwnd);
+            }
             result
         }
         WM_SIZE => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
-            refresh_attached_window_surface(hwnd);
+            if !window_proc_surface_refresh_suppressed(hwnd) {
+                refresh_attached_window_surface_from_wm_size(hwnd);
+            }
             if IsIconic(hwnd) != 0 || IsZoomed(hwnd) != 0 {
                 finish_window_proc_soft_resize(hwnd, true);
             }
             // Win32 does not guarantee that `IsIconic` is observable in the same command call
             // that requested minimize. Reconcile the shared operational projection after size.
             emit_window_visible_change_from_native_state(hwnd);
-            observe_window_proc_native_resize(hwnd);
             result
         }
-        WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL => {
-            if let Some((bridge, operation)) =
-                take_queued_windows_artifact_clear(hwnd, WindowsArtifactClearSchedule::NextMessage)
-            {
-                emit_windows_composition_diagnostic(
-                    unsafe { bridge.as_ref() },
-                    WindowsCompositionOperation::NextMessageClear,
-                    "dispatch",
-                    None,
-                );
-                if let Err(error) = maybe_auto_clear_windows_white_block_artifact(
-                    unsafe { bridge.as_ref() },
-                    operation,
-                ) {
-                    eprintln!(
-                        "opentray-ext-webview failed to clear Windows post-reveal artifact: {error}"
-                    );
-                }
-            }
-            0
-        }
-        WM_TIMER if wparam == WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID => {
-            unsafe {
-                KillTimer(hwnd, WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID);
-            }
-            if let Some((bridge, operation)) =
-                take_queued_windows_artifact_clear(hwnd, WindowsArtifactClearSchedule::RevealDelay)
-            {
-                if let Err(error) = maybe_auto_clear_windows_white_block_artifact(
-                    unsafe { bridge.as_ref() },
-                    operation,
-                ) {
-                    eprintln!(
-                        "opentray-ext-webview failed to clear Windows delayed reveal artifact: {error}"
-                    );
-                }
-            }
-            0
-        }
         WM_PAINT => {
+            let native_host_paint = window_proc_native_host_paint(hwnd);
+            if native_host_paint != WindowsNativeHostPaint::None {
+                paint_native_client_surface_from_wm_paint(hwnd, native_host_paint);
+                record_native_material_probe_paint(hwnd);
+                // The material parent commit ends here. WebView2 geometry is owned by WM_SIZE.
+                return 0;
+            }
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
-            refresh_attached_window_surface(hwnd);
+            if !window_proc_surface_refresh_suppressed(hwnd) {
+                refresh_attached_window_surface(hwnd);
+            }
             result
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -5639,20 +5667,52 @@ fn apply_minmax_info(hwnd: HWND, lparam: LPARAM) {
     }
 }
 
+fn present_attached_host_surface(hwnd: HWND) -> Result<(), WebviewRuntimeError> {
+    let (window, fill_color) =
+        with_window_proc_state(hwnd, |state| (state.window, state.host_surface_fill_color));
+    let (Some(mut window), Some(fill_color)) = (window, fill_color) else {
+        return Ok(());
+    };
+    unsafe { window.as_mut() }.present_host_surface(fill_color)
+}
+
 fn refresh_attached_window_surface(hwnd: HWND) {
-    with_window_proc_state(hwnd, |state| {
-        if let (Some(mut window), Some(fill_color)) = (state.window, state.host_surface_fill_color)
+    if let Err(error) = present_attached_host_surface(hwnd) {
+        eprintln!("opentray-ext-webview failed to present Windows host surface: {error}");
+    }
+    let webview = with_window_proc_state(hwnd, |state| state.webview);
+    if let Some(webview) = webview {
+        if let Err(error) = apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd) {
+            eprintln!("opentray-ext-webview failed to resize Windows WebView child: {error}");
+        }
+    }
+}
+
+fn refresh_attached_window_surface_from_wm_size(hwnd: HWND) {
+    if let Err(error) = refresh_native_host_surface(hwnd) {
+        eprintln!("opentray-ext-webview failed to paint Windows host surface: {error}");
+    }
+    let webview = with_window_proc_state(hwnd, |state| state.webview);
+    let Some(webview) = webview else {
+        return;
+    };
+    let result = apply_webview_client_bounds_from_wm_size(unsafe { webview.as_ref() }, hwnd);
+    if let Err(error) = result {
+        eprintln!("opentray-ext-webview failed to resize Windows WebView child: {error}");
+    }
+}
+
+fn notify_attached_webview_parent_position_changed(hwnd: HWND) {
+    let webview = with_window_proc_state(hwnd, |state| state.webview);
+    if let Some(webview) = webview {
+        if let Err(error) =
+            notify_webview_parent_window_position_changed(unsafe { webview.as_ref() })
         {
-            if let Err(error) = unsafe { window.as_mut() }.present_host_surface(fill_color) {
-                eprintln!("opentray-ext-webview failed to present Windows host surface: {error}");
-            }
+            eprintln!(
+                "opentray-ext-webview failed to notify Windows WebView parent position: {error}"
+            );
         }
-        if let Some(webview) = state.webview {
-            if let Err(error) = apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd) {
-                eprintln!("opentray-ext-webview failed to resize Windows WebView child: {error}");
-            }
-        }
-    });
+    }
 }
 
 fn emit_window_interaction_change(hwnd: HWND, active: bool) {
@@ -5744,95 +5804,12 @@ fn wide_null(value: &str) -> Vec<u16> {
 mod tests {
     use super::*;
     use crate::WebviewBrowserPermissionRule;
-    use windows_sys::Win32::UI::WindowsAndMessaging::WS_THICKFRAME;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CS_OWNDC, WS_THICKFRAME};
 
     #[test]
-    fn windows_white_block_auto_clear_only_targets_translucent_backgrounds() {
-        assert!(!background_needs_white_block_clear(
-            &WebviewWindowBackground::Opaque
-        ));
-        assert!(background_needs_white_block_clear(
-            &WebviewWindowBackground::Transparent
-        ));
-        assert!(background_needs_white_block_clear(
-            &WebviewWindowBackground::PlatformMaterial {
-                material: "mica".to_string(),
-                state: WebviewBackgroundEffectState::Active,
-            }
-        ));
-        assert!(background_needs_white_block_clear(
-            &WebviewWindowBackground::Semantic {
-                token: "blur".to_string(),
-                state: WebviewBackgroundEffectState::Active,
-            }
-        ));
-    }
-
-    #[test]
-    fn windows_composition_diagnostics_are_explicitly_opt_in() {
-        assert!(!windows_composition_diagnostics_enabled_from_value(None));
-        assert!(!windows_composition_diagnostics_enabled_from_value(Some(
-            "off"
-        )));
-        assert!(windows_composition_diagnostics_enabled_from_value(Some(
-            "1"
-        )));
-        assert!(windows_composition_diagnostics_enabled_from_value(Some(
-            " true "
-        )));
-    }
-
-    #[test]
-    fn windows_auto_clear_can_be_disabled_for_an_uncontaminated_diagnostic() {
-        assert!(windows_auto_clear_white_block_enabled_from_value(None));
-        assert!(!windows_auto_clear_white_block_enabled_from_value(Some(
-            "0"
-        )));
-        assert!(!windows_auto_clear_white_block_enabled_from_value(Some(
-            " false "
-        )));
-        assert!(windows_auto_clear_white_block_enabled_from_value(Some(
-            "on"
-        )));
-    }
-
-    #[test]
-    fn windows_composition_operation_labels_stay_distinct() {
-        assert_eq!(
-            WindowsCompositionOperation::ManualClear.as_str(),
-            "manual-clear"
-        );
-        assert_eq!(
-            WindowsCompositionOperation::NativeResizeTerminal.as_str(),
-            "native-resize-terminal"
-        );
-        assert_eq!(
-            WindowsCompositionOperation::NextMessageClear.as_str(),
-            "next-message-clear"
-        );
-        assert_eq!(
-            WindowsCompositionOperation::DelayedRevealClear.as_str(),
-            "delayed-reveal-clear"
-        );
-    }
-
-    #[test]
-    fn frameless_auto_clear_includes_opaque_windows_only_after_safe_completion() {
-        assert!(should_auto_clear_windows_white_block_artifact(
-            false, true, true, false
-        ));
-        assert!(should_auto_clear_windows_white_block_artifact(
-            true, false, true, false
-        ));
-        assert!(!should_auto_clear_windows_white_block_artifact(
-            false, false, true, false
-        ));
-        assert!(!should_auto_clear_windows_white_block_artifact(
-            false, true, false, false
-        ));
-        assert!(!should_auto_clear_windows_white_block_artifact(
-            false, true, true, true
-        ));
+    fn webview_background_contract_distinguishes_clear_and_opaque() {
+        assert_eq!(webview_background_rgba(true), CLEAR_BACKGROUND);
+        assert_eq!(webview_background_rgba(false), OPAQUE_BACKGROUND);
     }
 
     #[test]
@@ -5851,63 +5828,24 @@ mod tests {
     }
 
     #[test]
-    fn queued_frameless_artifact_clear_waits_for_capture_release() {
-        assert!(should_run_queued_windows_artifact_clear(
-            Some(WindowsArtifactClearSchedule::NextMessage),
-            WindowsArtifactClearSchedule::NextMessage,
-            false,
-        ));
-        assert!(!should_run_queued_windows_artifact_clear(
-            None,
-            WindowsArtifactClearSchedule::NextMessage,
-            false,
-        ));
-        assert!(!should_run_queued_windows_artifact_clear(
-            Some(WindowsArtifactClearSchedule::NextMessage),
-            WindowsArtifactClearSchedule::NextMessage,
-            true,
-        ));
-    }
+    fn surface_refresh_suppression_releases_after_an_error() {
+        let hwnd = 0x4F54_5744isize as HWND;
+        WINDOW_PROC_STATES.with(|states| {
+            states
+                .borrow_mut()
+                .insert(hwnd as isize, WindowProcState::default());
+        });
 
-    #[test]
-    fn windows_delayed_reveal_clear_supersedes_next_message_clear() {
-        assert!(!should_run_queued_windows_artifact_clear(
-            Some(WindowsArtifactClearSchedule::RevealDelay),
-            WindowsArtifactClearSchedule::NextMessage,
-            false,
-        ));
-        assert!(should_run_queued_windows_artifact_clear(
-            Some(WindowsArtifactClearSchedule::RevealDelay),
-            WindowsArtifactClearSchedule::RevealDelay,
-            false,
-        ));
-    }
+        let result: Result<(), WebviewRuntimeError> =
+            without_window_proc_surface_refresh(hwnd, || {
+                Err(WebviewRuntimeError::Internal("expected failure".into()))
+            });
 
-    #[test]
-    fn windows_white_block_auto_clear_ignores_pure_window_move() {
-        let mut interaction = WindowProcSizeMoveInteraction::default();
-
-        interaction.enter();
-
-        assert!(!interaction.exit());
-        assert!(!interaction.active);
-        assert!(!interaction.saw_resize);
-    }
-
-    #[test]
-    fn windows_native_resize_records_one_terminal_repair() {
-        let mut interaction = WindowProcSizeMoveInteraction::default();
-
-        interaction.observe_resize();
-        assert!(!interaction.exit());
-
-        interaction.enter();
-        interaction.observe_resize();
-        interaction.observe_resize();
-
-        assert!(interaction.exit());
-        assert!(!interaction.active);
-        assert!(!interaction.saw_resize);
+        assert!(result.is_err());
+        assert!(!window_proc_surface_refresh_suppressed(hwnd));
+        WINDOW_PROC_STATES.with(|states| {
+            states.borrow_mut().remove(&(hwnd as isize));
+        });
     }
 
     #[test]
@@ -6095,7 +6033,7 @@ mod tests {
         );
         assert!(wants_clear_background(&style));
         assert!(wants_dwm_extended_client_frame(&style));
-        assert!(wants_dwm_transparent_host(&style));
+        assert!(!wants_dwm_transparent_host(&style));
     }
 
     #[test]
@@ -6187,6 +6125,7 @@ mod tests {
 
         style.background = crate::WebviewWindowBackground::Transparent;
         assert!(wants_no_redirection_bitmap(&style));
+        assert!(wants_dwm_transparent_host(&style));
 
         style.opacity = 0.5;
         assert!(!wants_no_redirection_bitmap(&style));
@@ -6199,6 +6138,39 @@ mod tests {
             state: WebviewBackgroundEffectState::FollowsWindowActiveState,
         };
         assert!(!wants_no_redirection_bitmap(&style));
+    }
+
+    #[test]
+    fn native_host_paint_is_black_only_for_material_backgrounds() {
+        let mut style = window_style_from_initial(&crate::WebviewInitialStyle::default())
+            .expect("opaque style");
+        assert_eq!(
+            native_host_paint_policy(&style),
+            WindowsNativeHostPaint::None
+        );
+
+        style.background = crate::WebviewWindowBackground::Transparent;
+        assert_eq!(
+            native_host_paint_policy(&style),
+            WindowsNativeHostPaint::None
+        );
+
+        style.background = crate::WebviewWindowBackground::PlatformMaterial {
+            material: "mica".to_string(),
+            state: WebviewBackgroundEffectState::FollowsWindowActiveState,
+        };
+        assert_eq!(
+            native_host_paint_policy(&style),
+            WindowsNativeHostPaint::Black
+        );
+        style.background = crate::WebviewWindowBackground::Semantic {
+            token: "blur".to_string(),
+            state: WebviewBackgroundEffectState::Active,
+        };
+        assert_eq!(
+            native_host_paint_policy(&style),
+            WindowsNativeHostPaint::Black
+        );
     }
 
     #[test]
@@ -6271,7 +6243,16 @@ mod tests {
 
         assert!(wants_clear_background(&style));
         assert!(wants_dwm_extended_client_frame(&style));
-        assert!(wants_dwm_transparent_host(&style));
+        assert!(!wants_dwm_transparent_host(&style));
+    }
+
+    #[test]
+    fn window_class_matches_native_material_probe_dc_policy() {
+        let bits = window_class_style();
+
+        assert_eq!(bits & CS_OWNDC, 0);
+        assert_ne!(bits & CS_HREDRAW, 0);
+        assert_ne!(bits & CS_VREDRAW, 0);
     }
 
     #[test]
@@ -6283,7 +6264,21 @@ mod tests {
         assert_eq!(bits & WS_VISIBLE, WS_VISIBLE);
         assert_eq!(bits & WS_MAXIMIZE, WS_MAXIMIZE);
         assert_eq!(bits & WS_CLIPCHILDREN, WS_CLIPCHILDREN);
-        assert_eq!(bits & WS_CLIPSIBLINGS, WS_CLIPSIBLINGS);
+    }
+
+    #[test]
+    fn material_style_allows_parent_paint_below_webview_child() {
+        let style = window_style_from_initial(&crate::WebviewInitialStyle {
+            background: crate::WebviewWindowBackground::PlatformMaterial {
+                material: "mica".to_string(),
+                state: WebviewBackgroundEffectState::FollowsWindowActiveState,
+            },
+            ..crate::WebviewInitialStyle::default()
+        })
+        .expect("material style");
+        let bits = window_style_bits(&style, 0);
+
+        assert_eq!(bits & WS_CLIPCHILDREN, 0);
     }
 
     #[test]

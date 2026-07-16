@@ -1,109 +1,186 @@
 <script lang="ts">
-  // Orthogonal intents (2026-07-16; original user request: compare the failed clearWhiteBlock
-  // path against a tiny native resize in the real Windows OpenTray host):
-  // 1. Reuse the complete Window control card without creating another style authority.
-  // 2. Keep page observations separate from native composition diagnostics.
-  // 3. Give frameless reproduction transparent, draggable page chrome.
+  // Orthogonal intents (2026-07-16; original user request: reproduce the native probe with WebView
+  // controls while leaving every non-control page pixel transparent):
+  // 1. Render the native probe's centered 3x3+1 control geometry.
+  // 2. Route material/paint actions to the environment-gated native probe state.
+  // 3. Route frameless and close actions through the typed window bridge.
+  // 4. Preserve the native probe keyboard command surface.
   import { onMount } from "svelte";
-  import { Badge } from "$lib/components/ui/badge";
-  import EventLog from "$lib/components/webview-control/event-log.svelte";
-  import WindowPanel from "$lib/components/webview-control/window-panel.svelte";
-  import FramelessTitlebar from "$lib/components/win32-bug/frameless-titlebar.svelte";
-  import ResidueProbe from "$lib/components/win32-bug/residue-probe.svelte";
-  import {
-    formatError,
-    resolveWindowBridge,
-    store,
-  } from "$lib/components/webview-control/store.svelte";
+  import { resolveWindowBridge } from "$lib/components/webview-control/store.svelte";
+  import type { NavigatorWindow } from "$lib/types";
 
-  let bridge = $state(resolveWindowBridge());
-  let selfDrawnControlsVisible = $state(true);
-  const frameless = $derived(
-    (store.style as { frameless?: boolean } | null)?.frameless === true,
-  );
+  type ProbeAction =
+    | "paint-none"
+    | "paint-black"
+    | "paint-gray"
+    | "acrylic"
+    | "mica"
+    | "backdrop-none"
+    | "frameless"
+    | "reproject"
+    | "invalidate"
+    | "exit";
+
+  type ProbeControl = {
+    action: ProbeAction;
+    label: string;
+    shortcut: string;
+    column: number;
+    row: number;
+  };
+
+  const controls: readonly ProbeControl[] = [
+    { action: "paint-none", label: "No host paint [1]", shortcut: "1", column: 1, row: 1 },
+    { action: "paint-black", label: "Black host paint [2]", shortcut: "2", column: 2, row: 1 },
+    { action: "paint-gray", label: "Gray host paint [3]", shortcut: "3", column: 3, row: 1 },
+    { action: "acrylic", label: "Acrylic [A]", shortcut: "a", column: 1, row: 2 },
+    { action: "mica", label: "Mica [M]", shortcut: "m", column: 2, row: 2 },
+    { action: "backdrop-none", label: "No backdrop [N]", shortcut: "n", column: 3, row: 2 },
+    { action: "frameless", label: "Toggle frameless [F]", shortcut: "f", column: 1, row: 3 },
+    { action: "reproject", label: "Reset native backdrop [R]", shortcut: "r", column: 2, row: 3 },
+    { action: "invalidate", label: "Invalidate + UpdateWindow [P]", shortcut: "p", column: 3, row: 3 },
+    { action: "exit", label: "Exit [Esc]", shortcut: "escape", column: 2, row: 4 },
+  ];
+
+  const shortcutActions = new Map(controls.map((control) => [control.shortcut, control.action]));
+  let bridge = $state<NavigatorWindow | null>(resolveWindowBridge() ?? null);
+  let activeAction = $state<ProbeAction | null>(null);
 
   onMount(() => {
-    if (!bridge) return;
-    const unlistens: Array<() => void> = [];
-    const subscribe = (event: string, handler: (payload: unknown) => void): void => {
-      const stop = bridge!.listen(event, (raw) => handler(raw.payload));
-      unlistens.push(() => void Promise.resolve(stop).then((fn) => fn?.()));
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const action = shortcutActions.get(event.key.toLowerCase());
+      if (!action || event.repeat) return;
+      event.preventDefault();
+      void runProbeAction(action);
     };
-
-    subscribe("stylechange", (payload) => {
-      store.setStyle(payload as Record<string, unknown>);
-      store.appendEvent("stylechange", payload);
-    });
-    subscribe("windowstatechange", (payload) => {
-      store.setWindowState(payload as Record<string, unknown>);
-      store.appendEvent("windowstatechange", payload);
-    });
-    subscribe("resized", (payload) => store.appendEvent("resized", payload));
-    subscribe("closed", (payload) => store.appendEvent("closed", payload));
-
-    void refreshNativeSnapshot();
-    return () => unlistens.forEach((unlisten) => unlisten());
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   });
 
-  async function refreshNativeSnapshot(): Promise<void> {
-    if (!bridge) return;
+  async function runProbeAction(action: ProbeAction): Promise<void> {
+    if (!bridge || activeAction) return;
+    activeAction = action;
     try {
-      const [capabilities, style, state] = await Promise.all([
-        bridge.getCapabilities(),
-        bridge.getStyle(),
-        bridge.getWindowState(),
-      ]);
-      store.setCapabilities(capabilities);
-      store.setStyle(style);
-      store.setWindowState({ ...state });
-      store.appendEvent("win32-bug:ready", { capabilities, style, state });
+      if (action === "frameless") {
+        const style = await bridge.getStyle();
+        await bridge.setStyle({ frameless: style.frameless !== true });
+        return;
+      }
+      if (action === "exit") {
+        await bridge.close();
+        return;
+      }
+      execNativeProbeCommand(
+        {
+          "paint-none": "win32ProbeNoHostPaint",
+          "paint-black": "win32ProbeBlackHostPaint",
+          "paint-gray": "win32ProbeGrayHostPaint",
+          acrylic: "win32ProbeAcrylic",
+          mica: "win32ProbeMica",
+          "backdrop-none": "win32ProbeNoBackdrop",
+          reproject: "win32ProbeReproject",
+          invalidate: "win32ProbeInvalidate",
+        }[action],
+      );
     } catch (error) {
-      store.appendEvent("win32-bug:ready:error", { error: formatError(error) });
+      console.error(`native material probe action failed: ${action}`, error);
+    } finally {
+      activeAction = null;
     }
   }
 
-  function setSelfDrawnControlsVisible(visible: boolean): void {
-    selfDrawnControlsVisible = visible;
-    store.appendEvent("win32-bug:self-drawn-controls", { visible });
+  function execNativeProbeCommand(command: string): void {
+    const nav = navigator as Navigator & {
+      opentray?: { execCommand(command: string): void };
+    };
+    nav.opentray?.execCommand(command);
   }
 </script>
 
-<div class="flex h-screen flex-col overflow-hidden bg-transparent text-foreground">
-  {#if bridge && frameless}
-    <FramelessTitlebar {bridge} controlsVisible={selfDrawnControlsVisible} />
+<main class="probe-root" data-native-material-probe>
+  {#if bridge}
+    <div class="probe-grid" role="group" aria-label="Native material host paint probe">
+      {#each controls as control (control.action)}
+        <button
+          type="button"
+          data-probe-action={control.action}
+          disabled={activeAction !== null}
+          style:grid-column={control.column}
+          style:grid-row={control.row}
+          onclick={() => runProbeAction(control.action)}
+        >
+          {control.label}
+        </button>
+      {/each}
+    </div>
+  {:else}
+    <button type="button" class="bridge-error" disabled>Native window bridge unavailable</button>
   {/if}
+</main>
 
-  <main class="flex-1 overflow-auto p-4">
-    <header class="mb-4 flex flex-wrap items-center gap-3">
-      <div>
-        <h1 class="text-lg font-semibold">Windows Composition Diagnostic</h1>
-        <p class="text-xs text-muted-foreground">OpenTray HWND, WebView2, and DWM residue probe.</p>
-      </div>
-      <div class="ml-auto flex items-center gap-2">
-        <Badge variant={bridge ? "success" : "destructive"}>
-          bridge {bridge ? "ready" : "unavailable"}
-        </Badge>
-        <Badge variant={store.platform === "windows" ? "success" : "warning"}>
-          {store.platform}
-        </Badge>
-      </div>
-    </header>
+<style>
+  :global(html),
+  :global(body),
+  :global(body > div) {
+    background: transparent !important;
+  }
 
-    {#if !bridge}
-      <p class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-        Windows native window bridge is unavailable.
-      </p>
-    {:else}
-      <div class="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
-        <WindowPanel {bridge} />
-        <ResidueProbe
-          {bridge}
-          {frameless}
-          {selfDrawnControlsVisible}
-          onSelfDrawnControlsVisibleChange={setSelfDrawnControlsVisible}
-        />
-        <EventLog />
-      </div>
-    {/if}
-  </main>
-</div>
+  .probe-root {
+    display: grid;
+    min-height: 100dvh;
+    place-items: center;
+    overflow: hidden;
+    background: transparent;
+    color-scheme: light dark;
+  }
+
+  .probe-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 180px);
+    grid-template-rows: repeat(4, 34px);
+    gap: 10px;
+    width: 560px;
+    height: 166px;
+  }
+
+  button {
+    box-sizing: border-box;
+    width: 180px;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, ButtonText 36%, ButtonFace);
+    border-radius: 2px;
+    background: ButtonFace;
+    color: ButtonText;
+    font: 13px "Segoe UI", system-ui, sans-serif;
+    letter-spacing: 0;
+    cursor: default;
+  }
+
+  button:hover:not(:disabled) {
+    border-color: Highlight;
+  }
+
+  button:active:not(:disabled) {
+    background: color-mix(in srgb, ButtonFace 82%, ButtonText);
+  }
+
+  button:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
+
+  button:disabled {
+    color: GrayText;
+  }
+
+  .bridge-error {
+    width: 240px;
+  }
+
+  @media (max-width: 620px), (max-height: 260px) {
+    .probe-grid {
+      transform: scale(0.82);
+    }
+  }
+</style>

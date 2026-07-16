@@ -146,7 +146,7 @@ Cold-start construction is physically separated from retained style projection. 
 - [x] 1. Research and align intent.
 - [x] 2. Write specs from the intent.
 - [x] 3. Write BDD tasks from specs.
-- [ ] 4. Implement tasks.
+- [x] 4. Implement tasks.
 - [ ] 5. Self-review against intent and decide whether to loop.
 
 ## Open Questions

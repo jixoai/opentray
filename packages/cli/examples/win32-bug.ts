@@ -1,15 +1,14 @@
-// Orthogonal intents (2026-07-16; original user request: reproduce Windows WebView residue
-// where clearWhiteBlock fails but a tiny resize succeeds):
-// 1. Launch the real source-tree Windows WebView host through its normal tray lifecycle.
-// 2. Load a focused page that reuses the Window control surface and adds residue probes.
-// 3. Enable opt-in native composition evidence without claiming a repair.
+// Orthogonal intents (2026-07-16; original user request: make win32-bug match the native
+// material probe except that its centered controls are rendered by a fully transparent WebView):
+// 1. Launch the matching source-tree Windows host through its retained tray lifecycle.
+// 2. Enable the native-only material/paint probe state for this example process.
+// 3. Keep the initial HWND geometry and material aligned with the native probe.
 
 import type { WebviewWindowOptions } from "../../ext-webview/src/index";
 import { createExampleLifecycle } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
   createExamplePrimaryMenu,
-  createVisibleTrayIcon,
   createWebviewExampleRuntime,
   EXAMPLE_PRIMARY_ITEM_ID,
   mountExampleWebview,
@@ -20,10 +19,8 @@ import {
 
 requireWindowsExample("example:win32-bug");
 
-process.env.OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS ??= "1";
-// The pulse must exercise geometry alone. Manual clear remains the explicit shell-state control.
-process.env.OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK = "0";
-process.env.OPENTRAY_DAEMON_STDIO ??= 'inherit';
+process.env.OPENTRAY_WINDOWS_NATIVE_MATERIAL_PROBE = "1";
+process.env.OPENTRAY_DAEMON_STDIO ??= "inherit";
 ensureAppInstalled();
 
 const runtime = await createWebviewExampleRuntime({
@@ -33,8 +30,8 @@ const runtime = await createWebviewExampleRuntime({
   tray: {
     id: "com.example.opentray.win32-bug",
     tooltip: {
-      title: "OpenTray Windows Composition",
-      description: "WebView2 residue reproduction harness",
+      title: "OpenTray Native Material Probe",
+      description: "Transparent WebView controls over the native material host",
     },
     menu: createExamplePrimaryMenu({
       visible: false,
@@ -44,8 +41,8 @@ const runtime = await createWebviewExampleRuntime({
 });
 const { tray } = runtime;
 const devServer = await startDevServer("/win32-bug");
-console.log(`win32-bug panel: ${devServer.url}`);
-console.log("Windows composition diagnostics: enabled; automatic recovery: disabled");
+console.log("win32-bug panel: " + devServer.url);
+console.log("Windows native material probe: transparent WebView controls enabled");
 
 let stopVisibleChange: (() => void) | undefined;
 const lifecycle = createExampleLifecycle({
@@ -63,23 +60,17 @@ const lifecycle = createExampleLifecycle({
 
 const webview = mountExampleWebview(runtime, "win32-bug-webview").createWebviewWindow({
   url: devServer.url,
-  width: 960,
-  height: 720,
-  title: "OpenTray Windows Composition Diagnostic",
-  icon: createVisibleTrayIcon(),
+  width: 900,
+  height: 620,
+  title: "OpenTray Native Material Probe",
   style: {
     frameless: false,
     resizable: true,
     keepOnTop: false,
     background: {
       kind: "platformMaterial",
-      material: "mica",
+      material: "acrylic",
       state: "active",
-    },
-    platform: {
-      windows: {
-        cornerPreference: "round",
-      },
     },
   },
   fallbackRect: { x: 0, y: 0, width: 1, height: 1 },
@@ -98,43 +89,41 @@ stopVisibleChange = webview.listen("visibleChange", ({ payload }) => {
 });
 await syncPrimaryMenu(true);
 
-if (process.env.OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE === '1') {
-  const bounds = await webview.getBounds();
-  await webview.resizeTo(bounds.width + 1, bounds.height);
-  await new Promise<void>((resolve) => setTimeout(resolve, 48));
-  await webview.resizeTo(bounds.width, bounds.height);
-  await webview.evaluate('navigator.opentray?.execCommand(\'clearWhiteBlock\')');
+if (process.env.OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE === "1") {
   await webview.evaluate(String.raw`
     (async () => {
       const bridge = navigator.opentrayWindow ?? navigator.window;
       if (!bridge) {
         throw new Error("navigator.window bridge is unavailable");
       }
-      await bridge.setStyle({ frameless: true });
-      await new Promise((resolve) => window.setTimeout(resolve, 64));
-      const titlebar = document.querySelector("[data-opentray-frameless-titlebar]");
-      const toggleHost = document.querySelector("[data-opentray-self-drawn-controls-toggle]");
-      const toggle = toggleHost?.querySelector("button");
-      if (!(titlebar instanceof HTMLElement) || !(toggle instanceof HTMLButtonElement)) {
-        throw new Error("frameless diagnostic chrome did not render");
+      const root = document.querySelector("[data-native-material-probe]");
+      const buttons = document.querySelectorAll("[data-probe-action]");
+      if (!(root instanceof HTMLElement) || buttons.length !== 10) {
+        throw new Error("native material probe controls did not render");
       }
-      if (!document.querySelector("[data-opentray-window-controls]")) {
-        throw new Error("frameless self-drawn controls did not render");
+      const htmlBackground = getComputedStyle(document.documentElement).backgroundColor;
+      const bodyBackground = getComputedStyle(document.body).backgroundColor;
+      const rootBackground = getComputedStyle(root).backgroundColor;
+      if (![htmlBackground, bodyBackground, rootBackground].every((value) => value === "rgba(0, 0, 0, 0)")) {
+        throw new Error("probe page substrate is not fully transparent");
       }
-      toggle.click();
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-      if (document.querySelector("[data-opentray-window-controls]")) {
-        throw new Error("frameless self-drawn controls did not hide");
+      const framelessButton = document.querySelector('[data-probe-action="frameless"]');
+      if (!(framelessButton instanceof HTMLButtonElement)) {
+        throw new Error("frameless probe control is unavailable");
       }
-      toggle.click();
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-      if (!document.querySelector("[data-opentray-window-controls]")) {
-        throw new Error("frameless self-drawn controls did not restore");
+      framelessButton.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+      if ((await bridge.getStyle()).frameless !== true) {
+        throw new Error("frameless probe control did not reach the native bridge");
+      }
+      framelessButton.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+      if ((await bridge.getStyle()).frameless === true) {
+        throw new Error("framed probe state was not restored");
       }
     })();
   `);
-  await new Promise<void>((resolve) => setTimeout(resolve, 100));
-  console.log('win32-bug smoke: residue controls and frameless chrome dispatched');
+  console.log("win32-bug smoke: transparent probe controls and frameless round-trip verified");
 }
 
 tray.onMenuClick(({ itemId }) => {
