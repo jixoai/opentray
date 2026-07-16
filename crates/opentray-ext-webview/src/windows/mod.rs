@@ -2827,10 +2827,16 @@ fn apply_initial_window_host_style(
         sync_transparent_host_surface(bridge, &style)?;
         apply_windows_titlebar_overlay(hwnd, window_controls_overlay)?;
         refresh_dwm_backdrop_activation_state(hwnd);
-        // Ordinary windows correct the requested public visible-frame geometry only after WndProc
-        // owns the native material base. Probe mode preserves the native executable's raw
-        // CreateWindowExW 900x620 dimensions and CW_USEDEFAULT position as an A/B invariant.
-        if should_correct_initial_window_geometry(windows_native_material_probe_enabled()) {
+        // Ordinary windows correct public visible-frame geometry only after WndProc owns the
+        // native material base. The native probe is DPI-virtualized; reproduce its raw 900x620
+        // outer size in this DPI-aware process without adding invisible-border compensation.
+        if windows_native_material_probe_enabled() {
+            set_window_raw_physical_size(
+                hwnd,
+                logical_to_physical_i32(hwnd, width),
+                logical_to_physical_i32(hwnd, height),
+            )?;
+        } else {
             set_window_size(hwnd, width, height)?;
             if tray_bounds.is_some() {
                 let (x, y) = initial_window_position(width, height, tray_bounds);
@@ -4720,6 +4726,30 @@ fn set_window_size(hwnd: HWND, width: i32, height: i32) -> Result<(), WebviewRun
     )
 }
 
+fn set_window_raw_physical_size(
+    hwnd: HWND,
+    width: i32,
+    height: i32,
+) -> Result<(), WebviewRuntimeError> {
+    if unsafe {
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            0,
+            0,
+            width.max(1),
+            height.max(1),
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    } == 0
+    {
+        return Err(WebviewRuntimeError::Internal(
+            std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn set_window_physical_size(
     hwnd: HWND,
     width: i32,
@@ -5758,10 +5788,6 @@ fn emit_window_focus_change(hwnd: HWND, focused: bool) {
     });
 }
 
-fn should_correct_initial_window_geometry(native_material_probe: bool) -> bool {
-    !native_material_probe
-}
-
 fn initial_host_window_position(
     width: i32,
     height: i32,
@@ -6074,8 +6100,6 @@ mod tests {
             initial_host_window_position(900, 620, tray_bounds, true),
             (CW_USEDEFAULT, CW_USEDEFAULT)
         );
-        assert!(!should_correct_initial_window_geometry(true));
-        assert!(should_correct_initial_window_geometry(false));
         assert_ne!(
             initial_host_window_position(900, 620, tray_bounds, false),
             (CW_USEDEFAULT, CW_USEDEFAULT)

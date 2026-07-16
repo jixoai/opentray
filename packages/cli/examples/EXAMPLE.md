@@ -169,7 +169,7 @@ Use the same controls and shortcuts as the native probe:
 | `P` | `InvalidateRect + UpdateWindow` without changing WebView pixels |
 | `Escape` | hide the retained example window |
 
-The probe environment removes constructor-only variables that differ from the native executable: the top-level class has no `CS_OWNDC`, the hidden HWND completes material and final initial geometry before WebView2 creation, material startup does not add DWM blur-behind, and the probe window does not force tool/app extended styles. Ordinary OpenTray windows keep the production Black material painter and reject `win32Probe*` commands.
+The probe environment removes constructor-only variables that differ from the native executable: the top-level class has no `CS_OWNDC`, the hidden HWND completes material before a DPI-equivalent raw outer-size commit and WebView2 creation, that commit does not add visible-frame border compensation, material startup does not add DWM blur-behind, and the probe window does not force tool/app extended styles. Ordinary OpenTray windows keep the production Black material painter and reject `win32Probe*` commands.
 
 For an automated source-host lifecycle smoke, which verifies bridge and transparency contracts but cannot judge DWM residue pixels:
 
