@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Windows Material Host Surface Review</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Segoe UI, system-ui, sans-serif; }
+    body { margin: 0; background: Canvas; color: CanvasText; }
+    main { max-width: 1040px; margin: 0 auto; padding: 32px 24px 48px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    h2 { font-size: 18px; margin: 28px 0 10px; }
+    p { line-height: 1.55; }
+    .status { border-left: 4px solid #16803c; padding: 12px 16px; background: color-mix(in srgb, #16803c 10%, Canvas); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas); padding: 9px 10px; text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, CanvasText 7%, Canvas); }
+    code { font-family: Cascadia Code, Consolas, monospace; font-size: 0.92em; }
+    .pass { color: #16803c; font-weight: 600; }
+    .limit { color: #a15c00; font-weight: 600; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Windows Material Host Surface Review</h1>
+  <p>Change: <code>investigate-windows-webview-composition-recovery</code></p>
+  <div class="status"><strong>Exit judgment:</strong> normal archive. The implementation matches the user-accepted parent-surface ownership law.</div>
+
+  <h2>Production Invariants</h2>
+  <table>
+    <tr><th>Invariant</th><th>Implementation evidence</th><th>Result</th></tr>
+    <tr><td>Complete material parent base</td><td>Black full-client paint in <code>WM_ERASEBKGND</code> and <code>WM_PAINT</code></td><td class="pass">Pass</td></tr>
+    <tr><td>Parent covers child region</td><td>Material styles remove parent <code>WS_CLIPCHILDREN</code></td><td class="pass">Pass</td></tr>
+    <tr><td>Parent-before-child ordering</td><td>Style transaction and <code>WM_SIZE</code> commit host, controller, WRY child, then parent notification</td><td class="pass">Pass</td></tr>
+    <tr><td>Manual recommit is host-only</td><td><code>clearWhiteBlock</code> dispatches only to <code>refresh_native_host_surface</code></td><td class="pass">Pass</td></tr>
+    <tr><td>No second recovery protocol</td><td>Diagnostic commands, automatic cleanup state, timers, shell reset, and width pulse removed</td><td class="pass">Pass</td></tr>
+  </table>
+
+  <h2>Verification</h2>
+  <table>
+    <tr><th>Gate</th><th>Observed result</th></tr>
+    <tr><td>Rust check</td><td class="pass">Passed</td></tr>
+    <tr><td>Rust tests</td><td class="pass">71 passed</td></tr>
+    <tr><td>CLI tests</td><td class="pass">85 passed, 1 skipped</td></tr>
+    <tr><td>TypeScript typecheck</td><td class="pass">Passed</td></tr>
+    <tr><td>Svelte check</td><td class="pass">0 errors, 0 warnings</td></tr>
+    <tr><td>Source broker + DLL build</td><td class="pass">Passed</td></tr>
+    <tr><td>Real source-host smoke</td><td class="pass">Matching broker/DLL; regression actions dispatched; normal exit</td></tr>
+    <tr><td>OpenSpec validation</td><td class="pass">Passed</td></tr>
+    <tr><td>Diff whitespace</td><td class="pass">Passed</td></tr>
+  </table>
+
+  <h2>Visible Evidence Boundary</h2>
+  <p class="limit">No screenshot artifact is stored in the repository.</p>
+  <p>The pixel-level conclusion is based on the user's direct Windows visual acceptance. Automated evidence proves the production host path, command ordering, source artifact affinity, and lifecycle, but does not claim pixel readback.</p>
+
+  <h2>Deviations And Questions</h2>
+  <table>
+    <tr><th>Type</th><th>Record</th></tr>
+    <tr><td>Deviation</td><td>No persisted screenshot; user visual evidence is recorded in the current plan.</td></tr>
+    <tr><td>Deviation</td><td>Historical investigation change id retained for continuity.</td></tr>
+    <tr><td>User question</td><td>None. The user requested convergence after visual acceptance.</td></tr>
+  </table>
+</main>
+</body>
+</html>
