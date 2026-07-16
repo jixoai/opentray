@@ -71,13 +71,13 @@ create hidden top-level HWND
 -> show the top-level HWND
 ```
 
-The top-level window class SHALL use `CS_HREDRAW | CS_VREDRAW` and SHALL NOT use `CS_OWNDC`. Initial geometry correction SHALL NOT run before native paint/material ownership is published. AppWindow titlebar overlay SHALL NOT initialize during the pre-WebView native-host phase. It SHALL run after WebView2 has established COM on the HWND-owning thread and before the first final WebView bounds commit or show.
+The top-level window class SHALL use `CS_HREDRAW | CS_VREDRAW` and SHALL NOT use `CS_OWNDC`. Initial geometry correction SHALL NOT run before native paint/material ownership is published. Initial Mica/Acrylic/Tabbed projection SHALL use the system backdrop and extended client frame without enabling DWM blur-behind. AppWindow titlebar overlay SHALL NOT initialize during the pre-WebView native-host phase. It SHALL run after WebView2 has established COM on the HWND-owning thread and before the first final WebView bounds commit or show.
 
 #### Scenario: First WebView frame has a complete material parent
 
 - **GIVEN** a hidden Windows host is being created with Acrylic or Mica
 - **WHEN** WebView2 creates its controller and child HWND
-- **THEN** the parent HWND already owns its final material, client-frame, and paint policy
+- **THEN** the parent HWND already owns its final material, client-frame, paint policy, and initial geometry
 - **AND** no pre-material resize message may seed an unowned redirection surface.
 
 #### Scenario: AppWindow overlay starts after WebView2 COM
