@@ -48,6 +48,8 @@ The smoke starts a Mica, framed, resizable session. It runs width +1, restores t
 | explicit resize to original width | applied then skipped:auto-disabled | no shell-clear requested or completed record |
 | manual clear | requested then completed | shell-state baseline completed in 23ms |
 
+The 2026-07-16 frameless-chrome smoke additionally set `frameless: true`, verified that the transparent diagnostic titlebar rendered, then hid and restored its self-drawn control cluster through the page control. This confirms DOM/bridge wiring only; it does not establish visual material quality or drag feel.
+
 The logged Mica contract was `background=platform:mica`, `clear_backing=true`, and `host_fill=0x00000000`. The emitted HWND was visible, non-minimized, non-maximized, and resizable for the pulse.
 
 ## Interpretation Boundary

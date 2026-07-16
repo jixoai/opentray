@@ -3,10 +3,12 @@
   // path against a tiny native resize in the real Windows OpenTray host):
   // 1. Reuse the complete Window control card without creating another style authority.
   // 2. Keep page observations separate from native composition diagnostics.
+  // 3. Give frameless reproduction transparent, draggable page chrome.
   import { onMount } from "svelte";
   import { Badge } from "$lib/components/ui/badge";
   import EventLog from "$lib/components/webview-control/event-log.svelte";
   import WindowPanel from "$lib/components/webview-control/window-panel.svelte";
+  import FramelessTitlebar from "$lib/components/win32-bug/frameless-titlebar.svelte";
   import ResidueProbe from "$lib/components/win32-bug/residue-probe.svelte";
   import {
     formatError,
@@ -15,6 +17,10 @@
   } from "$lib/components/webview-control/store.svelte";
 
   let bridge = $state(resolveWindowBridge());
+  let selfDrawnControlsVisible = $state(true);
+  const frameless = $derived(
+    (store.style as { frameless?: boolean } | null)?.frameless === true,
+  );
 
   onMount(() => {
     if (!bridge) return;
@@ -55,33 +61,49 @@
       store.appendEvent("win32-bug:ready:error", { error: formatError(error) });
     }
   }
+
+  function setSelfDrawnControlsVisible(visible: boolean): void {
+    selfDrawnControlsVisible = visible;
+    store.appendEvent("win32-bug:self-drawn-controls", { visible });
+  }
 </script>
 
-<div class="flex min-h-screen flex-col bg-transparent p-4 text-foreground">
-  <header class="mb-4 flex flex-wrap items-center gap-3">
-    <div>
-      <h1 class="text-lg font-semibold">Windows Composition Diagnostic</h1>
-      <p class="text-xs text-muted-foreground">OpenTray HWND, WebView2, and DWM residue probe.</p>
-    </div>
-    <div class="ml-auto flex items-center gap-2">
-      <Badge variant={bridge ? "success" : "destructive"}>
-        bridge {bridge ? "ready" : "unavailable"}
-      </Badge>
-      <Badge variant={store.platform === "windows" ? "success" : "warning"}>
-        {store.platform}
-      </Badge>
-    </div>
-  </header>
-
-  {#if !bridge}
-    <p class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-      Windows native window bridge is unavailable.
-    </p>
-  {:else}
-    <main class="grid flex-1 gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
-      <WindowPanel {bridge} />
-      <ResidueProbe {bridge} />
-      <EventLog />
-    </main>
+<div class="flex h-screen flex-col overflow-hidden bg-transparent text-foreground">
+  {#if bridge && frameless}
+    <FramelessTitlebar {bridge} controlsVisible={selfDrawnControlsVisible} />
   {/if}
+
+  <main class="flex-1 overflow-auto p-4">
+    <header class="mb-4 flex flex-wrap items-center gap-3">
+      <div>
+        <h1 class="text-lg font-semibold">Windows Composition Diagnostic</h1>
+        <p class="text-xs text-muted-foreground">OpenTray HWND, WebView2, and DWM residue probe.</p>
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        <Badge variant={bridge ? "success" : "destructive"}>
+          bridge {bridge ? "ready" : "unavailable"}
+        </Badge>
+        <Badge variant={store.platform === "windows" ? "success" : "warning"}>
+          {store.platform}
+        </Badge>
+      </div>
+    </header>
+
+    {#if !bridge}
+      <p class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+        Windows native window bridge is unavailable.
+      </p>
+    {:else}
+      <div class="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
+        <WindowPanel {bridge} />
+        <ResidueProbe
+          {bridge}
+          {frameless}
+          {selfDrawnControlsVisible}
+          onSelfDrawnControlsVisibleChange={setSelfDrawnControlsVisible}
+        />
+        <EventLog />
+      </div>
+    {/if}
+  </main>
 </div>

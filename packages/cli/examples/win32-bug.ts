@@ -104,8 +104,37 @@ if (process.env.OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE === '1') {
   await new Promise<void>((resolve) => setTimeout(resolve, 48));
   await webview.resizeTo(bounds.width, bounds.height);
   await webview.evaluate('navigator.opentray?.execCommand(\'clearWhiteBlock\')');
+  await webview.evaluate(String.raw`
+    (async () => {
+      const bridge = navigator.opentrayWindow ?? navigator.window;
+      if (!bridge) {
+        throw new Error("navigator.window bridge is unavailable");
+      }
+      await bridge.setStyle({ frameless: true });
+      await new Promise((resolve) => window.setTimeout(resolve, 64));
+      const titlebar = document.querySelector("[data-opentray-frameless-titlebar]");
+      const toggleHost = document.querySelector("[data-opentray-self-drawn-controls-toggle]");
+      const toggle = toggleHost?.querySelector("button");
+      if (!(titlebar instanceof HTMLElement) || !(toggle instanceof HTMLButtonElement)) {
+        throw new Error("frameless diagnostic chrome did not render");
+      }
+      if (!document.querySelector("[data-opentray-window-controls]")) {
+        throw new Error("frameless self-drawn controls did not render");
+      }
+      toggle.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      if (document.querySelector("[data-opentray-window-controls]")) {
+        throw new Error("frameless self-drawn controls did not hide");
+      }
+      toggle.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      if (!document.querySelector("[data-opentray-window-controls]")) {
+        throw new Error("frameless self-drawn controls did not restore");
+      }
+    })();
+  `);
   await new Promise<void>((resolve) => setTimeout(resolve, 100));
-  console.log('win32-bug smoke: one-pixel pulse and manual clear dispatched');
+  console.log('win32-bug smoke: residue controls and frameless chrome dispatched');
 }
 
 tray.onMenuClick(({ itemId }) => {

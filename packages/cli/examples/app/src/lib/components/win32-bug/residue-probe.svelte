@@ -10,9 +10,19 @@
   import { execCommand, formatError, store } from "$lib/components/webview-control/store.svelte";
   import type { NavigatorWindow } from "$lib/types";
 
-  type Props = { bridge: NavigatorWindow };
+  type Props = {
+    bridge: NavigatorWindow;
+    frameless: boolean;
+    selfDrawnControlsVisible: boolean;
+    onSelfDrawnControlsVisibleChange: (visible: boolean) => void;
+  };
   type Bounds = { width: number; height: number };
-  let { bridge }: Props = $props();
+  let {
+    bridge,
+    frameless,
+    selfDrawnControlsVisible,
+    onSelfDrawnControlsVisibleChange,
+  }: Props = $props();
   let lastOperation = $state("idle");
   let busy = $state(false);
 
@@ -36,6 +46,12 @@
       await wait(48);
       await bridge.resizeTo(bounds.width, bounds.height);
     });
+  }
+
+  function toggleSelfDrawnControls(): void {
+    const visible = !selfDrawnControlsVisible;
+    onSelfDrawnControlsVisibleChange(visible);
+    store.appendEvent("win32-bug:self-drawn-controls:requested", { visible });
   }
 
   async function run(label: string, action: () => Promise<void>): Promise<void> {
@@ -89,6 +105,24 @@
         <Button size="sm" variant="outline" disabled={busy} onclick={toggleFrameless}>Toggle frameless</Button>
         <Button size="sm" variant="outline" disabled={busy} onclick={manualClear}>clearWhiteBlock</Button>
         <Button size="sm" variant="secondary" disabled={busy} onclick={onePixelPulse}>Pulse width +1px</Button>
+      </div>
+    </div>
+    <div class="grid gap-2">
+      <Label>Frameless chrome</Label>
+      <div class="flex flex-wrap items-center gap-2">
+        <span data-opentray-self-drawn-controls-toggle>
+          <Button
+            size="sm"
+            variant={selfDrawnControlsVisible ? "secondary" : "outline"}
+            disabled={!frameless}
+            onclick={toggleSelfDrawnControls}
+          >
+            {selfDrawnControlsVisible ? "Hide custom controls" : "Show custom controls"}
+          </Button>
+        </span>
+        <Badge variant={frameless ? "success" : "muted"}>
+          {frameless ? "transparent titlebar" : "native frame"}
+        </Badge>
       </div>
     </div>
     <code class="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">{lastOperation}</code>

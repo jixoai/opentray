@@ -168,6 +168,8 @@ Run the same retained session through this matrix and record the visible result 
 
 The example enables `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` and forces `OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK=0`. Native records report requested background/backing policy, HWND styles/state/bounds, operation reason, and shell-clear timing. They do not establish that the visible artifact cleared; only the human matrix can establish that result. Do not test a new non-shell recovery candidate until this baseline matrix is recorded.
 
+When `Toggle frameless` is active, the diagnostic page renders a transparent top titlebar. Drag its unoccupied region to move the native window. The `Frameless chrome` control in `Residue Probe` shows or hides self-drawn icon controls for minimize, maximize or restore, and close. Returning to framed mode removes the page controls so the native caption controls remain the only authority.
+
 For an automated source-host lifecycle smoke, which cannot judge pixels:
 
 ```bash
