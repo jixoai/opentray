@@ -48,6 +48,17 @@ The probe state SHALL be disabled when the environment switch is absent. Product
 
 ## MODIFIED Requirements
 
+### Requirement: Production SHALL contain no legacy recovery scheduler or diagnostic protocol
+
+The Windows runtime SHALL NOT contain automatic artifact-cleanup flags, delayed reveal timers, private cleanup messages, shell reset helpers, raw host-width commands, runtime composition logging, or a production switch that disables material host painting. Probe-only material/paint commands SHALL require `OPENTRAY_WINDOWS_NATIVE_MATERIAL_PROBE=1` and SHALL otherwise be rejected without native mutation.
+
+#### Scenario: Probe commands are rejected outside the comparator
+
+- **GIVEN** an ordinary OpenTray window without the native material probe environment switch
+- **WHEN** a page submits a `win32Probe*` command
+- **THEN** it is rejected as unsupported
+- **AND** no native window mutation occurs.
+
 ### Requirement: win32-bug SHALL be a WebView-controlled native-probe comparator
 
 `example:win32-bug` SHALL remain Windows-only and SHALL launch the normal source-tree broker and extension with `OPENTRAY_WINDOWS_NATIVE_MATERIAL_PROBE=1`.
