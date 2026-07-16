@@ -54,8 +54,8 @@
 
 ## 8. Self-Review Loop
 
-- [ ] 8.1 Run `bun run openspec:vision -- commit-check align-windows-webview-host-with-native-material-probe --phase self-review`.
-- [ ] 8.2 Generate `review/self-review.md` and `review/self-review.html` against `plans/plan.md`.
-- [ ] 8.3 Commit reopened OpenSpec tasks before another apply loop if visual review changes intent.
-- [ ] 8.4 Archive only after user visual acceptance; otherwise back up and revise `plans/plan.md`.
+- [x] 8.1 Run `bun run openspec:vision -- commit-check align-windows-webview-host-with-native-material-probe --phase self-review`.
+- [x] 8.2 Generate `review/self-review.md` and `review/self-review.html` against `plans/plan.md`.
+- [x] 8.3 Commit reopened OpenSpec tasks before another apply loop if visual review changes intent.
+- [x] 8.4 Archive only after user visual acceptance; otherwise back up and revise `plans/plan.md`.
 - [ ] 8.5 Run `bun run openspec:vision -- check align-windows-webview-host-with-native-material-probe` at the normal exit.

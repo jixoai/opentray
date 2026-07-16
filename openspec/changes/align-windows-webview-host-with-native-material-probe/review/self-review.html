@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Windows WebView Host Alignment Review</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Segoe UI, system-ui, sans-serif; }
+    body { margin: 0; background: Canvas; color: CanvasText; }
+    main { max-width: 1080px; margin: 0 auto; padding: 32px 24px 48px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    h2 { font-size: 18px; margin: 28px 0 10px; }
+    p, li { line-height: 1.55; }
+    .status { border-left: 4px solid #16803c; padding: 12px 16px; background: color-mix(in srgb, #16803c 10%, Canvas); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas); padding: 9px 10px; text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, CanvasText 7%, Canvas); }
+    code { font-family: Cascadia Code, Consolas, monospace; font-size: 0.92em; }
+    .pass { color: #16803c; font-weight: 600; }
+    .limit { color: #9a5b00; font-weight: 600; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Windows WebView Host Alignment Review</h1>
+  <p>Change: <code>align-windows-webview-host-with-native-material-probe</code></p>
+  <div class="status"><strong>Exit judgment:</strong> normal archive. Native probe parity is user-accepted, and the reopened AppWindow overlay crash passes the complete source-built bridge smoke.</div>
+
+  <h2>Construction Topology</h2>
+  <table>
+    <tr><th>Stage</th><th>Required owner/order</th><th>Result</th></tr>
+    <tr><td>Hidden top-level HWND</td><td>No <code>CS_OWNDC</code>; publish host paint/material ownership</td><td class="pass">Pass</td></tr>
+    <tr><td>Win32/DWM parent</td><td>Project native style, material, and initial geometry before WebView2</td><td class="pass">Pass</td></tr>
+    <tr><td>WebView2 child</td><td>Create alpha-capable child after the parent substrate is complete</td><td class="pass">Pass</td></tr>
+    <tr><td>AppWindow overlay</td><td>Initialize after WebView2 establishes COM, before final child bounds/show</td><td class="pass">Pass</td></tr>
+    <tr><td>Host event polling</td><td>One in-flight drain; terminal and single-report after transport failure</td><td class="pass">Pass</td></tr>
+  </table>
+
+  <h2>Runtime Evidence</h2>
+  <table>
+    <tr><th>Gate</th><th>Observed result</th></tr>
+    <tr><td>Rust unit tests</td><td class="pass">75 passed</td></tr>
+    <tr><td>ext-webview tests</td><td class="pass">39 passed</td></tr>
+    <tr><td>CLI tests</td><td class="pass">85 passed, 1 skipped</td></tr>
+    <tr><td>TypeScript and Svelte checks</td><td class="pass">Passed; Svelte 0 errors and 0 warnings</td></tr>
+    <tr><td>Source broker + extension DLL</td><td class="pass">Built from the same checkout</td></tr>
+    <tr><td>Overlay bridge actions</td><td class="pass"><code>opentray-bridge-ok:windows:normal:true:gap=2x1:overlay=1438x63</code></td></tr>
+    <tr><td>Native comparator example</td><td class="pass">Transparent substrate and framed/frameless round trip verified</td></tr>
+    <tr><td>OpenSpec validation and diff check</td><td class="pass">Passed</td></tr>
+  </table>
+
+  <h2>Visible Evidence Boundary</h2>
+  <p class="limit">No repository screenshot is used as pixel proof.</p>
+  <p>The user's direct Windows observation is authoritative for residue appearance. Automated evidence proves process survival, bridge actions, source artifact affinity, transparent-page contracts, and construction ordering.</p>
+
+  <h2>Deviations And Questions</h2>
+  <table>
+    <tr><th>Type</th><th>Record</th></tr>
+    <tr><td>Deviation</td><td>No persisted screenshot; visual acceptance is recorded in the plan.</td></tr>
+    <tr><td>Boundary</td><td><code>--no-overlay</code> plus the overlay bridge smoke reaches a 31px titlebar geometry assertion, while the broker remains alive. This is outside the overlay acceptance gate.</td></tr>
+    <tr><td>User question</td><td>None.</td></tr>
+  </table>
+
+  <h2>Git Evidence</h2>
+  <table>
+    <tr><th>Commit</th><th>Purpose</th></tr>
+    <tr><td><code>fd1afdd</code></td><td>Specify probe-only native shell isolation</td></tr>
+    <tr><td><code>b2736fc</code></td><td>Remove OpenTray-only outer-frame residue from the comparator</td></tr>
+    <tr><td><code>db98de2</code></td><td>Specify post-WebView AppWindow ordering</td></tr>
+    <tr><td><code>9c5ce35</code></td><td>Restore overlay bridge stability and terminal single-flight polling</td></tr>
+  </table>
+</main>
+</body>
+</html>
