@@ -68,14 +68,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetWindowTextW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, GWL_EXSTYLE,
     GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, IDC_ARROW,
     IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, IMAGE_ICON, LR_DEFAULTSIZE,
-    LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOCOPYBITS,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
     SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CLOSE,
     WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONUP, WM_MOUSEMOVE,
     WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE,
     WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_APPWINDOW, WS_EX_LAYERED,
     WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE,
-    WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
+    WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -2957,8 +2957,9 @@ fn apply_native_window_style_for_projection(
     projection: WindowsStyleProjection,
 ) -> Result<(), WebviewRuntimeError> {
     let dark_mode = current_windows_dark_mode();
+    let native_material_probe = windows_native_material_probe_enabled();
     let current_style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 };
-    let style_bits = window_style_bits(style, current_style);
+    let style_bits = window_style_bits(style, current_style, native_material_probe);
     let current_ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
     let ex_style_bits = window_ex_style_bits(style, current_ex_style);
     unsafe {
@@ -2967,7 +2968,10 @@ fn apply_native_window_style_for_projection(
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style_bits);
         }
     }
-    apply_dwm_nc_rendering_policy(hwnd, style.frameless);
+    // The native comparator leaves DWMWA_NCRENDERING_POLICY at its style-derived default.
+    if !native_material_probe {
+        apply_dwm_nc_rendering_policy(hwnd, style.frameless);
+    }
     apply_window_opacity(hwnd, style.opacity)?;
     apply_native_window_theme(hwnd, dark_mode)?;
     if wants_dwm_transparent_host(style) {
@@ -2988,12 +2992,16 @@ fn sync_soft_resize_enabled(
 ) -> Result<(), WebviewRuntimeError> {
     let enabled = {
         let state = bridge.borrow();
-        state.style.frameless && state.style.resizable
+        wants_soft_resize(&state.style, windows_native_material_probe_enabled())
     };
     evaluate_bridge_script(
         bridge,
         format!("{WINDOW_INTERNALS_GLOBAL}.setSoftResizeEnabled({enabled});"),
     )
+}
+
+fn wants_soft_resize(style: &WindowStyleState, native_material_probe: bool) -> bool {
+    style.frameless && style.resizable && !native_material_probe
 }
 
 fn apply_dwm_nc_rendering_policy(hwnd: HWND, frameless: bool) {
@@ -3022,7 +3030,19 @@ fn dwm_nc_rendering_policy(frameless: bool) -> i32 {
     }
 }
 
+fn native_frame_refresh_flags(native_material_probe: bool) -> u32 {
+    let base = SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE;
+    if native_material_probe {
+        base | SWP_NOCOPYBITS
+    } else {
+        base
+    }
+}
+
 fn refresh_native_window_frame(hwnd: HWND, keep_on_top: bool) {
+    // The standalone comparator discards copied client bits; production keeps its established
+    // refresh behavior because that flag alone did not remove the observed non-client residue.
+    let flags = native_frame_refresh_flags(windows_native_material_probe_enabled());
     unsafe {
         SetWindowPos(
             hwnd,
@@ -3035,7 +3055,7 @@ fn refresh_native_window_frame(hwnd: HWND, keep_on_top: bool) {
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE,
+            flags,
         );
     }
 }
@@ -3343,7 +3363,11 @@ fn size_constraints_json(constraints: WindowSizeConstraints) -> Value {
     })
 }
 
-fn window_style_bits(style: &WindowStyleState, current_style: u32) -> u32 {
+fn window_style_bits(
+    style: &WindowStyleState,
+    current_style: u32,
+    native_material_probe: bool,
+) -> u32 {
     let state_style = current_style & (WS_VISIBLE | WS_MAXIMIZE | WS_MINIMIZE);
     // A material parent must paint the redirection bitmap below the transparent WebView child.
     // WS_CLIPCHILDREN would remove that child-covered region from BeginPaint's visible region.
@@ -3357,9 +3381,18 @@ fn window_style_bits(style: &WindowStyleState, current_style: u32) -> u32 {
     // the WebView child; leaving it off also matches the native material probe constructor.
     let child_safe_style = child_clipping;
     if style.frameless {
-        // `WS_THICKFRAME` preserves DWM's legacy resize border even when `WM_NCCALCSIZE`
-        // exposes a full client area. Frameless owns chrome, so its resize behavior lives in
-        // the explicit soft-resize state machine instead of a residual native frame.
+        if native_material_probe {
+            // Match the native comparator exactly: retain the style-derived DWM resize frame and
+            // let DefWindowProc own its non-client geometry instead of projecting full-client.
+            return WS_POPUP
+                | WS_THICKFRAME
+                | WS_SYSMENU
+                | WS_MINIMIZEBOX
+                | WS_MAXIMIZEBOX
+                | child_safe_style
+                | state_style;
+        }
+        // Production frameless owns resize gestures and has no residual native frame.
         WS_POPUP | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | child_safe_style | state_style
     } else {
         WS_OVERLAPPEDWINDOW | child_safe_style | state_style
@@ -3393,8 +3426,12 @@ fn window_ex_style_bits(style: &WindowStyleState, current_ex_style: isize) -> is
     }
 }
 
-fn wants_full_client_area(style: &WindowStyleState, overlay_enabled: bool) -> bool {
-    style.frameless || overlay_enabled
+fn wants_full_client_area(
+    style: &WindowStyleState,
+    overlay_enabled: bool,
+    native_material_probe: bool,
+) -> bool {
+    overlay_enabled || (style.frameless && !native_material_probe)
 }
 
 fn wants_no_redirection_bitmap(style: &WindowStyleState) -> bool {
@@ -5598,6 +5635,7 @@ unsafe extern "system" fn window_proc(
                             wants_full_client_area(
                                 &bridge.style,
                                 bridge.navigator_window.window_controls_overlay,
+                                windows_native_material_probe_enabled(),
                             )
                         })
                     })
@@ -5855,7 +5893,7 @@ fn wide_null(value: &str) -> Vec<u16> {
 mod tests {
     use super::*;
     use crate::WebviewBrowserPermissionRule;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{CS_OWNDC, WS_THICKFRAME};
+    use windows_sys::Win32::UI::WindowsAndMessaging::CS_OWNDC;
 
     #[test]
     fn webview_background_contract_distinguishes_clear_and_opaque() {
@@ -6329,7 +6367,7 @@ mod tests {
     fn window_style_bits_preserve_window_state_and_child_clipping() {
         let style = window_style_from_initial(&crate::WebviewInitialStyle::default())
             .expect("default style");
-        let bits = window_style_bits(&style, WS_VISIBLE | WS_MAXIMIZE);
+        let bits = window_style_bits(&style, WS_VISIBLE | WS_MAXIMIZE, false);
 
         assert_eq!(bits & WS_VISIBLE, WS_VISIBLE);
         assert_eq!(bits & WS_MAXIMIZE, WS_MAXIMIZE);
@@ -6346,7 +6384,7 @@ mod tests {
             ..crate::WebviewInitialStyle::default()
         })
         .expect("material style");
-        let bits = window_style_bits(&style, 0);
+        let bits = window_style_bits(&style, 0, false);
 
         assert_eq!(bits & WS_CLIPCHILDREN, 0);
     }
@@ -6373,14 +6411,25 @@ mod tests {
     }
 
     #[test]
+    fn native_probe_frame_refresh_matches_comparator_copy_policy() {
+        let production = native_frame_refresh_flags(false);
+        let probe = native_frame_refresh_flags(true);
+
+        assert_ne!(production & SWP_FRAMECHANGED, 0);
+        assert_eq!(production & SWP_NOCOPYBITS, 0);
+        assert_ne!(probe & SWP_NOCOPYBITS, 0);
+    }
+
+    #[test]
     fn frameless_and_overlay_windows_use_the_full_client_area() {
         let mut style = window_style_from_initial(&crate::WebviewInitialStyle::default())
             .expect("default style");
 
-        assert!(!wants_full_client_area(&style, false));
-        assert!(wants_full_client_area(&style, true));
+        assert!(!wants_full_client_area(&style, false, false));
+        assert!(wants_full_client_area(&style, true, false));
         style.frameless = true;
-        assert!(wants_full_client_area(&style, false));
+        assert!(wants_full_client_area(&style, false, false));
+        assert!(!wants_full_client_area(&style, false, true));
     }
 
     #[test]
@@ -6388,10 +6437,24 @@ mod tests {
         let mut initial = crate::WebviewInitialStyle::default();
         initial.frameless = true;
         let style = window_style_from_initial(&initial).expect("frameless style");
-        let bits = window_style_bits(&style, 0);
+        let bits = window_style_bits(&style, 0, false);
 
         assert_eq!(bits & WS_THICKFRAME, 0);
         assert!(!style.resizable);
+    }
+
+    #[test]
+    fn native_material_probe_uses_the_comparator_frameless_shell() {
+        let mut initial = crate::WebviewInitialStyle::default();
+        initial.frameless = true;
+        let mut style = window_style_from_initial(&initial).expect("frameless style");
+        style.resizable = true;
+        let bits = window_style_bits(&style, 0, true);
+
+        assert_ne!(bits & WS_THICKFRAME, 0);
+        assert_ne!(bits & WS_SYSMENU, 0);
+        assert!(!wants_full_client_area(&style, false, true));
+        assert!(!wants_soft_resize(&style, true));
     }
 
     #[test]

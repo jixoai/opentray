@@ -240,6 +240,8 @@ pnpm --filter @opentray/ext-webview example:webview
 
 Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe. `pnpm --filter opentray example:win32-bug` is the Windows A/B comparator for `native-material-host-paint-probe-20260716.exe`: it enables an environment-gated native probe state and renders only the equivalent centered buttons in a fully transparent WebView. The hidden HWND completes material and initial geometry before WebView2 creation; ordinary windows keep the production `BLACK_BRUSH` material base and reject probe commands. Production `clearWhiteBlock` still recommits only the configured native host surface and never mutates shell state, focus, geometry, or WebView bounds.
 
+The comparator's frameless toggle intentionally uses the standalone probe's native resize frame, system menu, style-derived DWM non-client policy, default non-client geometry, and native resize path. This probe-only topology removes the OpenTray-specific classic outer-frame residue from A/B observations; production frameless windows remain full-client and keep application-level soft resize.
+
 The manual walkthrough for all three CLI examples lives in [../cli/examples/EXAMPLE.md](../cli/examples/EXAMPLE.md).
 
 To expose the injected page API, enable it on the window options before the first `show()`:

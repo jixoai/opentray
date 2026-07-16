@@ -24,7 +24,7 @@
 - [x] 4.3 Prevent the pre-material initial SetWindowPos resize and keep later native resize ordering parent-before-child.
 - [x] 4.4 Keep production material host paint Black while adding environment-gated native probe material/paint state and commands.
 - [x] 4.5 Add concise intent comments at cold-start, DWM projection, and WndProc ownership boundaries.
-- [ ] 4.6 Make probe-only frameless use the standalone comparator shell while leaving production frameless unchanged.
+- [x] 4.6 Make probe-only frameless use the standalone comparator shell while leaving production frameless unchanged.
 
 ## 5. Probe-Equivalent Example
 
@@ -38,7 +38,7 @@
 - [x] 6.1 Update `AGENTS.md` with the cold-start parent-before-WebView law and probe/production boundary.
 - [x] 6.2 Update `i18n.zh.md` with the user's phrases `??????????` and `webview?????`.
 - [x] 6.3 Update the main Windows material-host spec so the durable law no longer depends only on the archived delta.
-- [ ] 6.4 Record the distinction between material-host residue and OpenTray-only non-client-frame residue.
+- [x] 6.4 Record the distinction between material-host residue and OpenTray-only non-client-frame residue.
 
 ## 7. Verification
 
@@ -46,7 +46,7 @@
 - [x] 7.2 Run the Svelte example check, CLI typecheck, and focused example support tests.
 - [x] 7.3 Build matching source broker and extension DLL and smoke `example:win32-bug`.
 - [x] 7.4 Run `bun run openspec:vision -- validate align-windows-webview-host-with-native-material-probe` and `git diff --check`.
-- [ ] 7.5 Hand the exact source-built example to the user for visual equivalence testing; do not claim pixel acceptance from logs.
+- [x] 7.5 Hand the exact source-built example to the user for visual equivalence testing; do not claim pixel acceptance from logs.
 
 ## 8. Self-Review Loop
 
