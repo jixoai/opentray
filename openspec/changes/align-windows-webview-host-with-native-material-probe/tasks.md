@@ -25,7 +25,7 @@
 - [x] 4.4 Keep production material host paint Black while adding environment-gated native probe material/paint state and commands.
 - [x] 4.5 Add concise intent comments at cold-start, DWM projection, and WndProc ownership boundaries.
 - [x] 4.6 Make probe-only frameless use the standalone comparator shell while leaving production frameless unchanged.
-- [ ] 4.7 Defer AppWindow overlay initialization until after WebView2 establishes COM while preserving parent-first Win32/DWM construction.
+- [x] 4.7 Defer AppWindow overlay initialization until after WebView2 establishes COM while preserving parent-first Win32/DWM construction.
 
 ## 5. Probe-Equivalent Example
 
@@ -40,7 +40,7 @@
 - [x] 6.2 Update `i18n.zh.md` with the user's phrases `??????????` and `webview?????`.
 - [x] 6.3 Update the main Windows material-host spec so the durable law no longer depends only on the archived delta.
 - [x] 6.4 Record the distinction between material-host residue and OpenTray-only non-client-frame residue.
-- [ ] 6.5 Record the AppWindow post-WebView ordering law and terminal single-flight event polling behavior.
+- [x] 6.5 Record the AppWindow post-WebView ordering law and terminal single-flight event polling behavior.
 
 ## 7. Verification
 
@@ -49,8 +49,8 @@
 - [x] 7.3 Build matching source broker and extension DLL and smoke `example:win32-bug`.
 - [x] 7.4 Run `bun run openspec:vision -- validate align-windows-webview-host-with-native-material-probe` and `git diff --check`.
 - [x] 7.5 Hand the exact source-built example to the user for visual equivalence testing; do not claim pixel acceptance from logs.
-- [ ] 7.6 Run the source-built webview-control overlay bridge smoke across devtools, material, style, geometry, screen, and titlebar metrics.
-- [ ] 7.7 Verify window-event polling permits one in-flight drain and stops after one transport failure.
+- [x] 7.6 Run the source-built webview-control overlay bridge smoke across devtools, material, style, geometry, screen, and titlebar metrics.
+- [x] 7.7 Verify window-event polling permits one in-flight drain and stops after one transport failure.
 
 ## 8. Self-Review Loop
 

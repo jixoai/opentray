@@ -2813,20 +2813,14 @@ fn apply_initial_window_host_style(
     height: i32,
     tray_bounds: Option<Rect>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (hwnd, style, window_controls_overlay) = {
+    let (hwnd, style) = {
         let state = bridge.borrow();
-        (
-            state.hwnd,
-            state.style.clone(),
-            state.window_controls_overlay,
-        )
+        (state.hwnd, state.style.clone())
     };
     set_window_proc_native_host_paint(hwnd, native_host_paint_policy(&style));
     without_window_proc_surface_refresh(hwnd, || {
         apply_initial_native_window_style(hwnd, &style)?;
         sync_transparent_host_surface(bridge, &style)?;
-        apply_windows_titlebar_overlay(hwnd, window_controls_overlay)?;
-        refresh_dwm_backdrop_activation_state(hwnd);
         // Ordinary windows correct public visible-frame geometry only after WndProc owns the
         // native material base. The native probe is DPI-virtualized; reproduce its raw 900x620
         // outer size in this DPI-aware process without adding invisible-border compensation.
@@ -2851,7 +2845,19 @@ fn apply_initial_window_host_style(
 fn complete_initial_webview_attachment(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<(), WebviewRuntimeError> {
-    let style = bridge.borrow().style.clone();
+    let (hwnd, style, window_controls_overlay) = {
+        let state = bridge.borrow();
+        (
+            state.hwnd,
+            state.style.clone(),
+            state.window_controls_overlay,
+        )
+    };
+    // AppWindow overlay initialization must run after WebView2 establishes COM on the HWND thread.
+    // Running it during the pre-WebView native-host phase leaves the broker unstable on the first
+    // ordinary bridge action. Bounds still follow immediately, so the child sees final titlebar geometry.
+    apply_windows_titlebar_overlay(hwnd, window_controls_overlay)?;
+    refresh_dwm_backdrop_activation_state(hwnd);
     sync_soft_resize_enabled(bridge)?;
     apply_webview_background_color(bridge, wants_clear_background(&style))?;
     apply_webview_client_bounds_from_bridge(bridge)?;

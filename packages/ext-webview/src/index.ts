@@ -3,6 +3,7 @@
 // 2. Provide tray-scoped window handles and capability facades.
 // 3. Re-export placement, responsive, style, and permission helpers.
 // 4. Declare common chrome-derived user-resize intent without page-managed resize loops.
+// 5. Keep host-side native event polling single-flight and terminal after transport failure.
 // Compromise: this established public entrypoint aggregates more than five API families; splitting
 // it would be a separate package-surface change and is outside this repair.
 
@@ -882,6 +883,8 @@ const createWebviewWindowHandle = (
   let bootstrapped = false;
   const listenerCounts = new Map<string, number>();
   let windowEventPoll: ReturnType<typeof setInterval> | undefined;
+  let windowEventPollInFlight = false;
+  let windowEventPollFailed = false;
   let permissionPoll: ReturnType<typeof setInterval> | undefined;
 
   const drainWindowEvents = async (): Promise<void> => {
@@ -896,26 +899,47 @@ const createWebviewWindowHandle = (
     }
   };
 
-  const startWindowEventPoll = (): void => {
-    if (windowEventPoll !== undefined) {
-      return;
-    }
-    void drainWindowEvents().catch((error: unknown) => {
-      console.error("WebView window event polling failed:", error);
-    });
-    windowEventPoll = setInterval(() => {
-      void drainWindowEvents().catch((error: unknown) => {
-        console.error("WebView window event polling failed:", error);
-      });
-    }, WINDOW_EVENT_POLL_INTERVAL_MS);
-  };
-
-  const stopWindowEventPollIfIdle = (): void => {
-    if (windowEventPoll === undefined || listenerCounts.size > 0) {
+  const stopWindowEventPoll = (): void => {
+    if (windowEventPoll === undefined) {
       return;
     }
     clearInterval(windowEventPoll);
     windowEventPoll = undefined;
+  };
+
+  const pollWindowEvents = async (): Promise<void> => {
+    if (windowEventPollInFlight || windowEventPollFailed) {
+      return;
+    }
+    windowEventPollInFlight = true;
+    try {
+      await drainWindowEvents();
+    } catch (error: unknown) {
+      if (!windowEventPollFailed) {
+        windowEventPollFailed = true;
+        stopWindowEventPoll();
+        console.error("WebView window event polling failed:", error);
+      }
+    } finally {
+      windowEventPollInFlight = false;
+    }
+  };
+
+  const startWindowEventPoll = (): void => {
+    if (windowEventPoll !== undefined || windowEventPollFailed) {
+      return;
+    }
+    void pollWindowEvents();
+    windowEventPoll = setInterval(() => {
+      void pollWindowEvents();
+    }, WINDOW_EVENT_POLL_INTERVAL_MS);
+  };
+
+  const stopWindowEventPollIfIdle = (): void => {
+    if (listenerCounts.size > 0) {
+      return;
+    }
+    stopWindowEventPoll();
   };
 
   const drainPermissionMessages = async (): Promise<

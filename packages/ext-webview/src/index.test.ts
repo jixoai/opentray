@@ -800,6 +800,45 @@ describe("@opentray/ext-webview", () => {
     }
   });
 
+  it("stops shared window event polling after one transport failure", async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const transport = new DeferredWindowEventTransport();
+      const tray = createTrayHandle(transport, "app-1", "tray-1");
+      const webviewWindow = tray
+        .extend(WebviewExt, { mountId: "webview.tray-1" })
+        .createWebviewWindow({
+          html: "<main />",
+          width: 300,
+          height: 200,
+        });
+
+      const unlistenFocus = webviewWindow.listen("focus", () => undefined);
+      const unlistenBlur = webviewWindow.listen("blur", () => undefined);
+      await vi.advanceTimersByTimeAsync(160);
+
+      expect(transport.windowEventRequests).toBe(1);
+      transport.rejectWindowEventDrain(new Error("broker connection closed"));
+      await vi.advanceTimersByTimeAsync(0);
+      await flushMicrotasks();
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        "WebView window event polling failed:",
+        expect.any(Error)
+      );
+      await vi.advanceTimersByTimeAsync(160);
+      expect(transport.windowEventRequests).toBe(1);
+
+      unlistenFocus();
+      unlistenBlur();
+    } finally {
+      errorSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("exposes host-side bounds, size constraints, and style verbs through extension responses", async () => {
     const bounds = { x: 10, y: 20, width: 360, height: 240 };
     const transport = new WebviewResultTransport((command) => {
@@ -2200,6 +2239,35 @@ class WebviewResultTransport extends RecordingTransport {
       };
     }
     return { type: "ack", requestId: frame.requestId };
+  }
+}
+
+class DeferredWindowEventTransport extends RecordingTransport {
+  windowEventRequests = 0;
+  #rejectWindowEventDrain: ((reason?: unknown) => void) | undefined;
+
+  override request(frame: ClientRequestFrame): Promise<ServerFrame> {
+    this.frames.push(frame);
+    if (
+      frame.type === "ext-command" &&
+      isWebviewCommand(frame.data) &&
+      frame.data.type === "drainWindowEvents"
+    ) {
+      this.windowEventRequests += 1;
+      return new Promise<ServerFrame>((_resolve, reject) => {
+        this.#rejectWindowEventDrain = reject;
+      });
+    }
+    return Promise.resolve({ type: "ack", requestId: frame.requestId });
+  }
+
+  rejectWindowEventDrain(error: Error): void {
+    const reject = this.#rejectWindowEventDrain;
+    if (reject === undefined) {
+      throw new Error("window event drain is not pending");
+    }
+    this.#rejectWindowEventDrain = undefined;
+    reject(error);
   }
 }
 
