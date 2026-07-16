@@ -17,6 +17,7 @@
 - [x] 3.1 Run `bun run openspec:vision -- commit-check investigate-windows-webview-composition-recovery --phase research-plan` and commit the ready research-plan, specs, and tasks before product-code work.
 - [ ] 3.2 Add `example:win32-bug` as a Windows-only source WebView example that owns the standard caller-scoped broker, Vite server, retained primary action, and teardown lifecycle.
 - [ ] 3.3 Add `/win32-bug` by reusing the complete `WindowPanel` control surface and add a focused residue-probe component for manual clear, frameless/background transitions, and a reversible current-bounds one-pixel pulse.
+- [ ] 3.3a Disable automatic shell recovery only for `example:win32-bug`, preserving manual `clearWhiteBlock` as the uncontaminated comparison baseline.
 - [ ] 3.4 Add Windows-only `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` records around requested WebView backing/background policy, style projection, shell clear attempts/skips/completions, and explicit resize completion.
 - [ ] 3.5 Ensure diagnostic mode is observational: it does not alter controller construction, DWM style selection, shell state, focus, capture, or cleanup scheduling.
 - [ ] 3.6 Add concise intent comments at the one-pixel pulse and native diagnostic emission boundaries; keep candidate repairs out of this first implementation.

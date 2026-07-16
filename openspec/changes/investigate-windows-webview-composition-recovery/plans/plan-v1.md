@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 2
+- Round: 1
 - Status: research-plan in progress; no replacement for the shell-state recovery is approved.
-- Previous plan backup: `plans/plan-v1.md`
+- Previous plan backup: none
 
 ## Workflow Command Surface
 
@@ -50,7 +50,6 @@
 | Same handoff | A normal resize can expose clean new pixels while prior client pixels remain stale. | The retained client/redirection surface is a stronger hypothesis than DOM repaint alone. |
 | `crates/opentray-ext-webview/src/windows/mod.rs` | `clearWhiteBlock` invokes `SW_SHOWMINNOACTIVE -> SW_RESTORE`, then refits WebView/host surfaces. | Current clear changes shell state, yet user reports it does not clear the target artifact. |
 | `crates/opentray-ext-webview/src/windows/mod.rs` | Frameless/background completion uses a queued message or retained-reveal timer; native resize is terminal-only. | Do not reintroduce continuous cleanup while researching a durable clear. |
-| Initial isolated-host smoke on 2026-07-16 | A normal `resizeTo()` invokes the existing auto shell-state recovery after the geometry update. | Disable automatic recovery in the diagnostic example, or the one-pixel control cannot isolate geometry from shell recovery. |
 | `packages/cli/examples/webview-control.ts` | The source example already owns local broker/Vite lifecycle and mounts the typed WebView capability. | Reuse the known source-tree runtime path rather than a raw Win32 probe. |
 | `packages/cli/examples/app/src/lib/components/webview-control/window-panel.svelte` | The first Window card owns the required Windows controls: style, frameless, resize, material, corner preference, state, devtools, and `clearWhiteBlock`. | Reuse this control surface directly in the diagnostic page. |
 | Microsoft WebView2 hosting documentation | Windowed, Window-to-Visual, and Visual hosting have different composition and input ownership. | The current Windowed path must be measured as its own substrate. |
@@ -170,11 +169,10 @@ human-visible result table
 - `/win32-bug` reuses the existing Window card unchanged for native controls.
 - The probe adds bounded commands only: manual clear, frameless transition guidance, and a one-pixel native resize pulse.
 - `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` enables native process logging. It is not a product API.
-- The launcher disables automatic white-block recovery so the pulse is geometry-only; the manual command remains the explicit shell-state control.
 
 ### Data Shape
 
-- `operation`: native `manual-clear`, `next-message-clear`, `delayed-reveal-clear`, and `explicit-resize`; the page separately labels its bounded `one-pixel-pulse` request.
+- `operation`: `manual-clear`, `next-message-clear`, `delayed-reveal-clear`, `native-resize`, `one-pixel-pulse`, or later candidate name.
 - `surface contract`: requested background family, whether WebView backing is clear, host fill policy, frameless/resizable state, and HWND style/ex-style.
 - `window state`: visible, minimized, maximized, bounds, and active pointer-capture state.
 - `outcome`: elapsed time, shell-state transition count, focus/input observation, and human residue result. Human result remains evidence external to automatic logs.
@@ -196,8 +194,7 @@ Svelte /win32-bug page
 @opentray/ext-webview Windows host
         |
         +-- opt-in composition snapshots
-        +-- auto recovery disabled for this diagnostic session
-        +-- explicit manual-clear baseline
+        +-- existing clear baseline
         |
         v
 Win32 HWND + Wry Windowed WebView2 + DWM material
@@ -236,7 +233,6 @@ Forbidden: raw standalone probe evidence as a product conclusion, `opentray-core
 | ---- | ------------ |
 | Reintroduce the 120ms live `WM_SIZE` shell reset | It explains resize flicker but does not prove a retained-surface repair. |
 | Add a generic debounce around `clearWhiteBlock` | Delaying a failing operation does not make it a genuine clear. |
-| Compare a one-pixel pulse while automatic recovery remains enabled | The pulse would include shell recovery and could not isolate the geometry effect. |
 | Promote standalone raw probe behavior to OpenTray law | The prior probe had unreliable input and did not reproduce OpenTray's real host contract. |
 | Start off-screen/hybrid rendering now | It is a separate rendering/input architecture before low-cost real-host evidence is exhausted. |
 

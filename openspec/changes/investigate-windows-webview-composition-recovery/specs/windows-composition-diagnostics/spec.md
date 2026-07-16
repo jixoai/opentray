@@ -24,7 +24,7 @@ The diagnostics SHALL describe the actual OpenTray host operation rather than a 
 
 Each diagnostic record SHALL include an operation reason, monotonic operation sequence, requested background family, WebView clear-backing intent, frameless/resizable state, HWND style/ex-style, visible/minimized/maximized state, and native bounds. A completed shell-state clear SHALL also include elapsed time.
 
-The operation reason SHALL distinguish at least manual `clearWhiteBlock`, next-message cleanup, delayed retained reveal cleanup, native-resize terminal cleanup, and explicit diagnostic one-pixel resize pulse. A record MAY report requested/effective host policy separately, but it SHALL NOT claim that a DWM/WebView2 internal surface was cleared unless a measurable API result exists.
+The operation reason SHALL distinguish at least manual `clearWhiteBlock`, next-message cleanup, delayed retained reveal cleanup, native-resize terminal cleanup, and explicit resize. The page SHALL separately label its bounded one-pixel pulse request. A record MAY report requested/effective host policy separately, but it SHALL NOT claim that a DWM/WebView2 internal surface was cleared unless a measurable API result exists.
 
 #### Scenario: A manual clear records a shell-state baseline
 
@@ -49,6 +49,8 @@ The operation reason SHALL distinguish at least manual `clearWhiteBlock`, next-m
 
 Its `/win32-bug` page SHALL reuse every control from WebView Control's first Window card: capability/style refresh, frameless/resizable/topmost toggles, opacity, background and background-state selection, Windows corner preference, minimize/maximize/restore, resize, move, `clearWhiteBlock`, close, and devtools controls. The page SHALL add a residue probe without duplicating a second native style authority.
 
+The diagnostic entrypoint SHALL set `OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK=0` before starting its source runtime. This confines automatic-recovery suppression to the diagnostic session so a one-pixel pulse measures its geometry path without an automatic shell-state clear. The explicit page `clearWhiteBlock` command SHALL remain available as the shell-state control baseline.
+
 #### Scenario: A Windows operator reaches the complete control baseline
 
 - **GIVEN** the operator runs `pnpm --filter opentray example:win32-bug` on Windows
@@ -56,6 +58,7 @@ Its `/win32-bug` page SHALL reuse every control from WebView Control's first Win
 - **THEN** the page exposes all first Window card controls
 - **AND** the tray primary item reflects retained operational visibility
 - **AND** the source runtime uses a caller-scoped broker and local Vite URL.
+- **AND** automatic white-block recovery is disabled before the WebView session starts.
 
 #### Scenario: A non-Windows invocation fails truthfully
 
@@ -77,6 +80,7 @@ The probe SHALL retain the existing `clearWhiteBlock` command as a control basel
 - **THEN** the page records the manual baseline request
 - **WHEN** the operator invokes the one-pixel pulse
 - **THEN** the page resizes from the current native bounds by one pixel and restores the original bounds
+- **AND** automatic shell recovery does not run during either explicit resize
 - **AND** the operator can compare the same window/session before deciding whether either operation visibly cleared residue.
 
 ### Requirement: Candidate recovery SHALL remain evidence-gated
