@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 4
+- Round: 3
 - Status: research-plan in progress; no replacement for the shell-state recovery is approved.
-- Previous plan backup: `plans/plan-v3.md`
+- Previous plan backup: `plans/plan-v2.md`
 
 ## Workflow Command Surface
 
@@ -42,7 +42,6 @@
 | 2026-07-16 | User | Create a dedicated `example:win32-bug`, based on all controls in WebView Control's first Window card. | Add a Windows-only source example plus a focused app route; do not overload the product demo with diagnostic-only controls. |
 | 2026-07-16 | User | Perform dedicated research into a genuine `clearWhiteBlock` technique. | Instrument actual OpenTray HWND/WebView2/DWM state and compare candidates one at a time before replacing the current baseline. |
 | 2026-07-16 | User | Frameless diagnostic mode needs a transparent custom titlebar, native drag, and operator-controlled self-drawn window controls. | Make frameless reproduction operable without relying on obsolete native chrome or permanently forcing page controls into every state. |
-| 2026-07-16 | User | WinUI test still cannot combine transparent WebView with Mica or Acrylic. Split the active Windowed WebView2 recovery chain into atomic buttons for operator testing. | Keep the current host path and expose only the existing shell, WebView2, host-surface, DWM, and geometry stages; do not add a new hosting model or unrelated recovery candidate. |
 
 ### Evidence Read
 
@@ -57,7 +56,6 @@
 | `packages/cli/examples/app/src/lib/components/webview-control/window-panel.svelte` | The first Window card owns the required Windows controls: style, frameless, resize, material, corner preference, state, devtools, and `clearWhiteBlock`. | Reuse this control surface directly in the diagnostic page. |
 | Microsoft WebView2 hosting documentation | Windowed, Window-to-Visual, and Visual hosting have different composition and input ownership. | The current Windowed path must be measured as its own substrate. |
 | Microsoft `SetWindowPos` documentation | `SWP_NOCOPYBITS` discards client content rather than proving a full DWM/WebView2 repair. | Treat it as a later candidate, never as an assumed fix. |
-| User WinUI test on 2026-07-16 | WinUI permits transparent or opaque WebView background, but not a Mica/Acrylic combination that satisfies the diagnostic requirement. | Do not switch host architecture as an unverified workaround. |
 
 ### Git Evidence
 
@@ -175,7 +173,6 @@ human-visible result table
 - `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` enables native process logging. It is not a product API.
 - The launcher disables automatic white-block recovery so the pulse is geometry-only; the manual command remains the explicit shell-state control.
 - Frameless mode shows a transparent titlebar; the residue probe owns whether its self-drawn control cluster is visible.
-- The residue probe exposes atomic shell, WebView2, host-surface, DWM, and raw geometry commands so the operator can vary order and timing deliberately.
 
 ### Data Shape
 
@@ -183,7 +180,6 @@ human-visible result table
 - `surface contract`: requested background family, whether WebView backing is clear, host fill policy, frameless/resizable state, and HWND style/ex-style.
 - `window state`: visible, minimized, maximized, bounds, and active pointer-capture state.
 - `outcome`: elapsed time, shell-state transition count, focus/input observation, and human residue result. Human result remains evidence external to automatic logs.
-- `atomic command`: one of shell reset, WebView client bounds, parent-position notification, host-surface present, native invalidate/update, DWM flush, host grow/shrink, or existing full resize pulse.
 
 ### Architecture Shape
 
@@ -198,7 +194,6 @@ Svelte /win32-bug page
         +-- existing WindowPanel
         +-- residue probe controls
         +-- transparent frameless titlebar + optional controls
-        +-- atomic native composition commands
         |
         v
 @opentray/ext-webview Windows host

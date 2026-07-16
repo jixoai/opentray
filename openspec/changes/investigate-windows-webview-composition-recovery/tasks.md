@@ -24,6 +24,7 @@
 - [x] 3.7 Update `AGENTS.md`, WebView Window Patterns, and the diagnostic README/example guidance so human and AI workflows share the same evidence rules.
 - [x] 3.8 Update only completed task checkboxes and commit them with matching implementation and BDD evidence.
 - [x] 3.9 Add transparent frameless diagnostic chrome with native app-region drag and an operator-controlled self-drawn control cluster.
+- [ ] 3.10 Add guarded Windows-only atomic commands and residue-probe buttons for each active recovery stage, including independent raw host-width grow/shrink operations.
 
 ## 4. Verification
 
@@ -31,8 +32,9 @@
 - [x] 4.2 Run CLI TypeScript tests/typecheck covering the Windows-only example declaration and its source lifecycle.
 - [x] 4.3 Build isolated `opentray-bin` and `opentray-ext-webview` artifacts, then smoke `example:win32-bug` with diagnostics enabled.
 - [x] 4.4 Run `bun run openspec:vision -- validate investigate-windows-webview-composition-recovery` and `git diff --check`.
+- [ ] 4.7 Run Rust and source-host smoke evidence that each diagnostic command is guarded and dispatches through the real HWND/WebView2 host.
 - [ ] 4.5 Require human Windows evidence for opaque, Mica, and Acrylic across frameless transition, manual clear, and one-pixel pulse. Record residue, flash, focus/input, timing/count, and result in the change research artifact.
-- [ ] 4.6 Do not test `SWP_NOCOPYBITS`, geometry pulse variants, controller reparenting, or composition-root reattachment until the baseline matrix is recorded and the user approves one candidate.
+- [ ] 4.6 Do not test `SWP_NOCOPYBITS`, controller reparenting, or composition-root reattachment until the baseline matrix is recorded and the user approves one candidate. The approved atomic decomposition of the existing host geometry pulse is not a new candidate.
 
 ## 5. Self-Review Loop
 

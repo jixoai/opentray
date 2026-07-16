@@ -100,6 +100,29 @@ The residue probe SHALL let the operator show or hide the self-drawn control clu
 - **WHEN** the operator returns to framed mode
 - **THEN** the page does not duplicate native caption controls.
 
+### Requirement: The diagnostic SHALL expose each current recovery stage atomically
+
+`example:win32-bug` SHALL expose Windows-only diagnostic commands for the current recovery chain without claiming that any command repairs pixels. The commands SHALL be individually invokable from the residue probe and SHALL include: shell-state reset only, WebView client-bounds apply only, parent-window-position notification only, host-surface present only, native invalidate/update only, DWM flush only, raw host-width increase only, raw host-width decrease only, and the existing full one-pixel resize pulse.
+
+Each atomic command SHALL be accepted only while `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` is active. Atomic commands SHALL be extension-owned, SHALL use the real live HWND/WebView2 host, and SHALL emit their own operation/phase records. The shell-reset-only command SHALL suppress public visibility synchronization just as the current shell baseline does. The raw geometry commands SHALL not imply WebView bounds, parent notification, host-surface present, invalidate, or DWM flush; the operator controls order and timing.
+
+#### Scenario: An operator isolates the recovery stages
+
+- **GIVEN** the Windows composition diagnostic is active
+- **WHEN** the operator invokes one atomic command from the residue probe
+- **THEN** only that named native stage runs
+- **AND** the operation log identifies the stage and result
+- **AND** no command claims visible residue was cleared
+- **WHEN** the operator combines shell reset, selected synchronization stages, and a geometry command manually
+- **THEN** the operator can compare the exact sequence against the existing full pulse.
+
+#### Scenario: A normal session cannot invoke diagnostic stages
+
+- **GIVEN** diagnostics are not enabled
+- **WHEN** a page submits an atomic diagnostic command
+- **THEN** the extension rejects it
+- **AND** it does not alter the normal recovery schedule.
+
 ### Requirement: Candidate recovery SHALL remain evidence-gated
 
 The production `clearWhiteBlock` mechanism SHALL remain the current shell-state control baseline during this change. A non-shell candidate such as `SWP_NOCOPYBITS`, host geometry pulse, WebView parent reattachment, or composition-root reattachment SHALL be introduced only as one named diagnostic candidate at a time after the baseline matrix is captured.
