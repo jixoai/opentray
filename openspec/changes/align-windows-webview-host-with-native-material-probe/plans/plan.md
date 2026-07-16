@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 1
-- Status: user visual acceptance complete; comparator frameless residue isolated
+- Status: reopened after webview-control exposed an AppWindow overlay cold-start crash
 - Previous plan backup: none
 
 ## Workflow Command Surface
@@ -51,6 +51,9 @@
 | User Win7-frame observation | OpenTray no-paint plus custom frameless produced a classic outer frame residue that the standalone probe did not show. | Separate material-host residue from stale non-client-frame residue. |
 | SWP_NOCOPYBITS experiment | Adding copied-bit discard alone did not remove the outer frame. | Do not promote copied-bit discard as a production repair. |
 | Native-shell parity experiment | Probe-only frameless retained the native resize frame/system menu, style-derived DWM non-client policy, default non-client geometry, and native resize; the user confirmed the Win7-style outer frame disappeared. | Keep this shell topology inside the comparator while preserving production full-client frameless behavior. |
+| webview-control user report | With window controls overlay enabled, any ordinary bridge action closed the broker and multiple event poll requests printed the same connection error. | The normal AppWindow path requires an independent runtime gate; win32-bug does not exercise it. |
+| Commit bisection | Current and ec32a07 binaries crashed; 21e5161 passed the full overlay bridge smoke. Disabling overlay on current binaries avoided broker exit. | The regression entered in 5a74eeb when AppWindow overlay initialization moved before WebView2 creation. |
+| Ordering repair smoke | Deferring AppWindow overlay until WebView2 attachment restored devtools, maximize, material, style, resize, move, screen, and overlay metric actions. | Preserve parent-first Win32/DWM material construction while treating AppWindow as the post-WebView COM stage. |
 
 ### Git Evidence
 
@@ -110,7 +113,7 @@
 - Does this fit as a regular atom: yes, inside the Windows ext-webview host and its regression example.
 - Does this require law upgrade: yes; cold-start order becomes a separate invariant from runtime style updates.
 - Breaking update stance: remove `CS_OWNDC`; reorder initial host construction; replace the existing win32-bug UI.
-- User confirmations still required: none; final visual equivalence was accepted.
+- User confirmations still required: none for the comparator; ordinary overlay behavior must pass source-built bridge smoke before archive.
 
 ## Reverse-Inferred Design
 
@@ -150,7 +153,7 @@ Cold-start construction is physically separated from retained style projection. 
 - [x] 2. Write specs from the intent.
 - [x] 3. Write BDD tasks from specs.
 - [x] 4. Implement tasks.
-- [ ] 5. Self-review against intent and close after accepted visual parity.
+- [ ] 5. Self-review against intent after overlay runtime stability is restored.
 
 ## Open Questions
 
@@ -168,6 +171,8 @@ Cold-start construction is physically separated from retained style projection. 
 | Reintroduce shell recovery or one-pixel pulses | They mutate unrelated shell/geometry state and were already disproven as the root fix. |
 | Promote `SWP_NOCOPYBITS` to production cleanup | The single-variable visual experiment did not remove the Win7-style outer frame; production must not inherit an ineffective discard policy. |
 | Replace production frameless with the probe shell | The accepted probe topology is a comparator requirement, while production still owns full-client chrome and application-level soft resize. |
+| Apply AppWindow overlay during the pre-WebView native-host phase | The AppWindow/WinRT stage before WebView2 COM initialization made the broker exit on the first ordinary bridge action. |
+| Let every 16 ms event tick overlap | One transport loss then reports once per in-flight request; polling must be single-flight and terminal after failure. |
 
 ## Exit Conditions
 

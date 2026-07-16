@@ -7,15 +7,16 @@ A newly created Windows WebView host SHALL use this cold-start procedure:
 ```text
 create hidden top-level HWND
 -> publish native paint/material ownership
--> project Win32 style and DWM/AppWindow material
+-> project Win32 style and DWM material
 -> apply final initial native geometry
 -> commit the complete native host client
--> create an alpha-capable WebView2 child
--> commit WebView2 background and bounds
+-> create an alpha-capable WebView2 child and establish thread COM
+-> apply AppWindow titlebar overlay when requested
+-> commit WebView2 background and final client bounds
 -> show the top-level HWND
 ```
 
-The top-level window class SHALL use `CS_HREDRAW | CS_VREDRAW` and SHALL NOT use `CS_OWNDC`. Initial geometry correction SHALL NOT run before native paint/material ownership is published.
+The top-level window class SHALL use `CS_HREDRAW | CS_VREDRAW` and SHALL NOT use `CS_OWNDC`. Initial geometry correction SHALL NOT run before native paint/material ownership is published. AppWindow titlebar overlay SHALL NOT initialize during the pre-WebView native-host phase. It SHALL run after WebView2 has established COM on the HWND-owning thread and before the first final WebView bounds commit or show.
 
 #### Scenario: First WebView frame has a complete material parent
 
@@ -23,6 +24,14 @@ The top-level window class SHALL use `CS_HREDRAW | CS_VREDRAW` and SHALL NOT use
 - **WHEN** WebView2 creates its controller and child HWND
 - **THEN** the parent HWND already owns its final material, client-frame, and paint policy
 - **AND** no pre-material resize message may seed an unowned redirection surface.
+
+#### Scenario: AppWindow overlay starts after WebView2 COM
+
+- **GIVEN** a Windows WebView requests window-controls overlay
+- **WHEN** the hidden host completes cold-start construction
+- **THEN** Win32 style, DWM material, host paint, and initial geometry complete before WebView2
+- **AND** AppWindow titlebar overlay initializes only after WebView2 exists on the HWND thread
+- **AND** the first ordinary bridge action does not terminate the broker.
 
 ### Requirement: Probe state SHALL remain native
 
@@ -67,6 +76,17 @@ This probe-only shell SHALL NOT replace the production frameless procedure. Prod
 - **AND** comparator-only copied-bit and native-frame policies do not apply.
 
 ## MODIFIED Requirements
+
+### Requirement: Host event polling SHALL be single-flight and terminal on transport failure
+
+The host-side WebView window event poller SHALL allow at most one drain request in flight. If the transport rejects a drain request, the poller SHALL stop its interval and report that failure once. Existing listeners SHALL NOT cause overlapping retries or duplicate connection-closed diagnostics after the transport has failed.
+
+#### Scenario: Broker disconnect produces one polling diagnostic
+
+- **GIVEN** multiple native window event listeners share one host-side poller
+- **WHEN** the broker connection closes while one drain request is pending
+- **THEN** that failure is reported once
+- **AND** no additional drain requests are issued after the failure.
 
 ### Requirement: Production SHALL contain no legacy recovery scheduler or diagnostic protocol
 
