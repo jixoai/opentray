@@ -39,6 +39,16 @@ export { createVisibleTrayIcon };
 
 export const EXAMPLE_PRIMARY_ITEM_ID = 1;
 
+/** Reject a source diagnostic whose native evidence only exists on Windows. */
+export function requireWindowsExample(
+  exampleName: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform !== "win32") {
+    throw new Error(`${exampleName} is a Windows-only composition diagnostic`);
+  }
+}
+
 export interface ExamplePrimaryMenuOptions {
   readonly visible: boolean;
   readonly primaryItemId?: number;

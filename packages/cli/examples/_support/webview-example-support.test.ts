@@ -9,11 +9,19 @@ import {
   createExamplePrimaryMenu,
   createExampleCallerLabel,
   hasConfiguredWebviewExtensionPath,
+  requireWindowsExample,
   shutdownWebviewExample,
   withExampleWebviewWindowDefaults,
 } from "./webview-example-support";
 
 describe("Feature: WebView example support", () => {
+  it("Scenario: Given a Windows-only composition diagnostic When another platform invokes it Then it fails truthfully", () => {
+    expect(() => requireWindowsExample("example:win32-bug", "darwin")).toThrow(
+      "example:win32-bug is a Windows-only composition diagnostic",
+    );
+    expect(() => requireWindowsExample("example:win32-bug", "win32")).not.toThrow();
+  });
+
   it("Scenario: Given a retained example window When operational visibility changes Then the primary menu states the next action", () => {
     expect(createExamplePrimaryMenu({ visible: false }).items).toEqual([
       { type: "item", id: 1, title: "Show Example", primaryEvent: true },

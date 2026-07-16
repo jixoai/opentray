@@ -161,10 +161,11 @@ Run human-visible tray and extension examples from a source checkout:
 pnpm run npm:cp-bin:runtime -- --target debug
 pnpm --filter opentray example:debug-runtime-tray
 pnpm --filter opentray example:webview-control
+pnpm --filter opentray example:win32-bug
 pnpm --filter opentray example:tray-panel
 pnpm --filter opentray example:placement
 pnpm --filter opentray example:mediaQuery
 pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
 ```
 
-The example matrix stages the packaged runtime executable before `first-app`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app example exercises the default package runtime. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. The public API they demonstrate is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.
+The example matrix stages the packaged runtime executable before `first-app`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app example exercises the default package runtime. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. `example:win32-bug` is intentionally outside the finite matrix: it is Windows-only human evidence tooling for WebView2/DWM residue, not an accepted rendering repair. It disables automatic white-block recovery so its one-pixel pulse remains a geometry-only control. The public API demonstrated by the other examples is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

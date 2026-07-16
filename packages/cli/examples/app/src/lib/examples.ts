@@ -22,6 +22,11 @@ export const EXAMPLES: readonly ExampleEntry[] = [
       "Window, style, overlay, screen, navigation, and title/icon bridge surface.",
   },
   {
+    href: "/win32-bug",
+    title: "Windows Composition",
+    description: "Windows-only WebView2 and DWM residue reproduction harness.",
+  },
+  {
     href: "/tray-panel",
     title: "Tray Panel",
     description: "Tray-anchored frameless panel with material and placement controls.",

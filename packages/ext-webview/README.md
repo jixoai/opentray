@@ -238,7 +238,7 @@ Run a runtime-host-free protocol example that sends WebView `show`, `navigate`, 
 pnpm --filter @opentray/ext-webview example:webview
 ```
 
-Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe.
+Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe. `pnpm --filter opentray example:win32-bug` is a Windows-only composition diagnostic: it compares manual `clearWhiteBlock` with a reversible one-pixel resize pulse in the real OpenTray host. It disables automatic white-block recovery so the pulse stays geometry-only; manual clear remains the shell-state baseline. Its opt-in native logs describe requested host policy and timing only; they do not claim that a visible artifact was cleared.
 The manual walkthrough for all three CLI examples lives in [../cli/examples/EXAMPLE.md](../cli/examples/EXAMPLE.md).
 
 To expose the injected page API, enable it on the window options before the first `show()`:

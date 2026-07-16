@@ -18,6 +18,8 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::{null, null_mut, NonNull};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use opentray_spec::Rect;
@@ -118,9 +120,11 @@ const WINDOWS_BACKGROUND_MATERIALS: &[&str] = &["auto", "mica", "acrylic", "tabb
 const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active", "inactive"];
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
 const WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV: &str = "OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK";
+const WINDOWS_COMPOSITION_DIAGNOSTICS_ENV: &str = "OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS";
 const WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL: u32 = WM_APP + 0x51;
 const WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID: usize = 0x4F54_5743;
 const WINDOWS_REVEAL_ARTIFACT_CLEAR_DELAY_MS: u32 = 100;
+static WINDOWS_COMPOSITION_DIAGNOSTIC_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
     static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
@@ -151,7 +155,7 @@ struct WindowProcState {
     size_move_interaction: WindowProcSizeMoveInteraction,
     soft_resize_interaction: Option<WindowProcSoftResizeInteraction>,
     operational_visible: Option<bool>,
-    artifact_clear_schedule: Option<WindowsArtifactClearSchedule>,
+    artifact_clear_schedule: Option<WindowsArtifactClearRequest>,
     visibility_sync_suppressed: bool,
 }
 
@@ -159,6 +163,39 @@ struct WindowProcState {
 enum WindowsArtifactClearSchedule {
     NextMessage,
     RevealDelay,
+}
+
+#[derive(Clone, Copy)]
+struct WindowsArtifactClearRequest {
+    schedule: WindowsArtifactClearSchedule,
+    operation: WindowsCompositionOperation,
+}
+
+#[derive(Clone, Copy)]
+enum WindowsCompositionOperation {
+    InitialShow,
+    ManualClear,
+    ExplicitResize,
+    StyleProjection,
+    SoftResizeTerminal,
+    NativeResizeTerminal,
+    NextMessageClear,
+    DelayedRevealClear,
+}
+
+impl WindowsCompositionOperation {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::InitialShow => "initial-show",
+            Self::ManualClear => "manual-clear",
+            Self::ExplicitResize => "explicit-resize",
+            Self::StyleProjection => "style-projection",
+            Self::SoftResizeTerminal => "soft-resize-terminal",
+            Self::NativeResizeTerminal => "native-resize-terminal",
+            Self::NextMessageClear => "next-message-clear",
+            Self::DelayedRevealClear => "delayed-reveal-clear",
+        }
+    }
 }
 
 /// Tracks one native `WM_ENTERSIZEMOVE` interaction. Windows sends that message for both
@@ -687,7 +724,10 @@ impl WindowsWebviewRuntime {
                 let height = finite_i32(height, "height")?;
                 set_window_size(slot.window.hwnd, width, height)?;
                 refresh_after_explicit_resize(&slot.bridge)?;
-                maybe_auto_clear_windows_white_block_artifact_after_reveal(&slot.bridge)?;
+                maybe_auto_clear_windows_white_block_artifact_after_reveal(
+                    &slot.bridge,
+                    WindowsCompositionOperation::ExplicitResize,
+                )?;
                 let response = json!({ "width": width, "height": height });
                 emit_window_event(&slot.bridge, "resized", response.clone())?;
                 emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
@@ -1125,7 +1165,10 @@ impl WindowsWebviewRuntime {
         apply_window_style(&slot.bridge, None)?;
         apply_window_icon_from_bridge(&slot.bridge)?;
         apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
-        maybe_auto_clear_windows_white_block_artifact_after_reveal(&slot.bridge)?;
+        maybe_auto_clear_windows_white_block_artifact_after_reveal(
+            &slot.bridge,
+            WindowsCompositionOperation::InitialShow,
+        )?;
 
         Ok(slot)
     }
@@ -2026,7 +2069,14 @@ fn refresh_after_explicit_resize(
     // transparent white-block issue (`tauri#10318`). Re-present the host surface in-place and let
     // WM_PAINT/WM_SIZE reuse the same path; do not hide/show, maximize, or rebuild the WebView.
     refresh_attached_window_surface(hwnd);
-    refresh_native_window_surface(hwnd)
+    let result = refresh_native_window_surface(hwnd);
+    emit_windows_composition_diagnostic(
+        bridge,
+        WindowsCompositionOperation::ExplicitResize,
+        if result.is_ok() { "applied" } else { "failed" },
+        None,
+    );
+    result
 }
 
 fn exec_page_command(
@@ -2037,7 +2087,9 @@ fn exec_page_command(
         "clearWhiteBlock"
         | "clear-white-block"
         | "clearWindowArtifacts"
-        | "clear-window-artifacts" => clear_windows_white_block_artifact(bridge),
+        | "clear-window-artifacts" => {
+            clear_windows_white_block_artifact(bridge, WindowsCompositionOperation::ManualClear)
+        }
         other => Err(WebviewRuntimeError::Rejected(format!(
             "unsupported page command: {other}"
         ))),
@@ -2046,8 +2098,10 @@ fn exec_page_command(
 
 fn maybe_auto_clear_windows_white_block_artifact(
     bridge: &RefCell<NavigatorWindowBridge>,
+    operation: WindowsCompositionOperation,
 ) -> Result<(), WebviewRuntimeError> {
     if !windows_auto_clear_white_block_enabled() {
+        emit_windows_composition_diagnostic(bridge, operation, "skipped:auto-disabled", None);
         return Ok(());
     }
     let (background, frameless, hwnd) = {
@@ -2064,24 +2118,32 @@ fn maybe_auto_clear_windows_white_block_artifact(
         window_is_visible(hwnd),
         is_window_maximized(hwnd),
     ) {
+        emit_windows_composition_diagnostic(bridge, operation, "skipped:predicate", None);
         return Ok(());
     }
-    clear_windows_white_block_artifact(bridge)
+    clear_windows_white_block_artifact(bridge, operation)
 }
 
 fn maybe_auto_clear_windows_white_block_artifact_after_reveal(
     bridge: &RefCell<NavigatorWindowBridge>,
+    operation: WindowsCompositionOperation,
 ) -> Result<(), WebviewRuntimeError> {
     if !bridge.borrow().style.frameless {
-        return maybe_auto_clear_windows_white_block_artifact(bridge);
+        return maybe_auto_clear_windows_white_block_artifact(bridge, operation);
     }
-    queue_windows_artifact_clear_after_next_message(bridge)
+    queue_windows_artifact_clear_after_next_message(bridge, operation)
 }
 
 fn maybe_auto_clear_windows_white_block_artifact_after_delayed_reveal(
     bridge: &RefCell<NavigatorWindowBridge>,
 ) -> Result<(), WebviewRuntimeError> {
     if !windows_auto_clear_white_block_enabled() {
+        emit_windows_composition_diagnostic(
+            bridge,
+            WindowsCompositionOperation::DelayedRevealClear,
+            "skipped:auto-disabled",
+            None,
+        );
         return Ok(());
     }
     let should_clear = {
@@ -2089,6 +2151,12 @@ fn maybe_auto_clear_windows_white_block_artifact_after_delayed_reveal(
         background_needs_white_block_clear(&state.style.background) || state.style.frameless
     };
     if !should_clear {
+        emit_windows_composition_diagnostic(
+            bridge,
+            WindowsCompositionOperation::DelayedRevealClear,
+            "skipped:predicate",
+            None,
+        );
         return Ok(());
     }
     schedule_windows_artifact_clear_after_delayed_reveal(bridge)
@@ -2096,8 +2164,10 @@ fn maybe_auto_clear_windows_white_block_artifact_after_delayed_reveal(
 
 fn queue_windows_artifact_clear_after_next_message(
     bridge: &RefCell<NavigatorWindowBridge>,
+    operation: WindowsCompositionOperation,
 ) -> Result<(), WebviewRuntimeError> {
     if !windows_auto_clear_white_block_enabled() {
+        emit_windows_composition_diagnostic(bridge, operation, "skipped:auto-disabled", None);
         return Ok(());
     }
     let hwnd = bridge.borrow().hwnd;
@@ -2109,15 +2179,20 @@ fn queue_windows_artifact_clear_after_next_message(
         if state.artifact_clear_schedule.is_some() {
             return Some(false);
         }
-        state.artifact_clear_schedule = Some(WindowsArtifactClearSchedule::NextMessage);
+        state.artifact_clear_schedule = Some(WindowsArtifactClearRequest {
+            schedule: WindowsArtifactClearSchedule::NextMessage,
+            operation,
+        });
         Some(true)
     });
     let Some(should_post) = queue_result else {
-        return maybe_auto_clear_windows_white_block_artifact(bridge);
+        return maybe_auto_clear_windows_white_block_artifact(bridge, operation);
     };
     if !should_post {
+        emit_windows_composition_diagnostic(bridge, operation, "coalesced", None);
         return Ok(());
     }
+    emit_windows_composition_diagnostic(bridge, operation, "queued:next-message", None);
     if unsafe { PostMessageW(hwnd, WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL, 0, 0) } == 0 {
         clear_queued_windows_artifact_schedule(hwnd, WindowsArtifactClearSchedule::NextMessage);
         return Err(WebviewRuntimeError::Internal(
@@ -2136,11 +2211,17 @@ fn schedule_windows_artifact_clear_after_delayed_reveal(
         let Some(state) = states.get_mut(&(hwnd as isize)) else {
             return None;
         };
-        state.artifact_clear_schedule = Some(WindowsArtifactClearSchedule::RevealDelay);
+        state.artifact_clear_schedule = Some(WindowsArtifactClearRequest {
+            schedule: WindowsArtifactClearSchedule::RevealDelay,
+            operation: WindowsCompositionOperation::DelayedRevealClear,
+        });
         Some(())
     });
     if schedule_result.is_none() {
-        return maybe_auto_clear_windows_white_block_artifact(bridge);
+        return maybe_auto_clear_windows_white_block_artifact(
+            bridge,
+            WindowsCompositionOperation::DelayedRevealClear,
+        );
     }
 
     unsafe {
@@ -2160,6 +2241,12 @@ fn schedule_windows_artifact_clear_after_delayed_reveal(
             std::io::Error::last_os_error().to_string(),
         ));
     }
+    emit_windows_composition_diagnostic(
+        bridge,
+        WindowsCompositionOperation::DelayedRevealClear,
+        "queued:timer",
+        None,
+    );
     Ok(())
 }
 
@@ -2171,7 +2258,10 @@ fn cancel_queued_windows_artifact_clear(hwnd: HWND) {
         };
         let should_cancel_timer = matches!(
             state.artifact_clear_schedule,
-            Some(WindowsArtifactClearSchedule::RevealDelay)
+            Some(WindowsArtifactClearRequest {
+                schedule: WindowsArtifactClearSchedule::RevealDelay,
+                ..
+            })
         );
         state.artifact_clear_schedule = None;
         should_cancel_timer
@@ -2187,7 +2277,10 @@ fn clear_queued_windows_artifact_schedule(hwnd: HWND, expected: WindowsArtifactC
     WINDOW_PROC_STATES.with(|states| {
         let mut states = states.borrow_mut();
         if let Some(state) = states.get_mut(&(hwnd as isize)) {
-            if state.artifact_clear_schedule == Some(expected) {
+            if state
+                .artifact_clear_schedule
+                .is_some_and(|request| request.schedule == expected)
+            {
                 state.artifact_clear_schedule = None;
             }
         }
@@ -2197,21 +2290,28 @@ fn clear_queued_windows_artifact_schedule(hwnd: HWND, expected: WindowsArtifactC
 fn take_queued_windows_artifact_clear(
     hwnd: HWND,
     expected: WindowsArtifactClearSchedule,
-) -> Option<NonNull<RefCell<NavigatorWindowBridge>>> {
+) -> Option<(
+    NonNull<RefCell<NavigatorWindowBridge>>,
+    WindowsCompositionOperation,
+)> {
     WINDOW_PROC_STATES.with(|states| {
         let mut states = states.borrow_mut();
         let state = states.get_mut(&(hwnd as isize))?;
-        if state.artifact_clear_schedule != Some(expected) {
+        let Some(request) = state.artifact_clear_schedule else {
+            return None;
+        };
+        if request.schedule != expected {
             return None;
         }
         state.artifact_clear_schedule = None;
-        should_run_queued_windows_artifact_clear(
-            Some(expected),
+        if !should_run_queued_windows_artifact_clear(
+            Some(request.schedule),
             expected,
             state.soft_resize_interaction.is_some(),
-        )
-        .then_some(state.bridge)
-        .flatten()
+        ) {
+            return None;
+        }
+        state.bridge.map(|bridge| (bridge, request.operation))
     })
 }
 
@@ -2244,14 +2344,18 @@ fn observe_window_proc_native_resize(hwnd: HWND) {
 
 fn clear_windows_white_block_artifact(
     bridge: &RefCell<NavigatorWindowBridge>,
+    operation: WindowsCompositionOperation,
 ) -> Result<(), WebviewRuntimeError> {
     let hwnd = bridge.borrow().hwnd;
+    let started_at = Instant::now();
+    emit_windows_composition_diagnostic(bridge, operation, "requested", None);
     if is_window_maximized(hwnd) {
         // Windows DWM keeps the stale redirection artifact in maximized mode even after every
         // tested shell-state reset probe. The normal-window repair path uses the verified
         // `SW_SHOWMINNOACTIVE -> SW_RESTORE` reset, but that reset does not clear maximized
         // artifacts. Do not fight the user with maximize/restore loops here; leave the known
         // limitation explicit until a deeper DComp/AppWindow fix exists.
+        emit_windows_composition_diagnostic(bridge, operation, "skipped:maximized", None);
         return Ok(());
     }
     // The repair intentionally minimizes and restores the HWND. Suppress its internal WM_SIZE
@@ -2259,7 +2363,18 @@ fn clear_windows_white_block_artifact(
     set_window_proc_visibility_sync_suppressed(hwnd, true);
     show_window_clear_white_block(hwnd, SW_SHOWMINNOACTIVE, SW_RESTORE);
     set_window_proc_visibility_sync_suppressed(hwnd, false);
-    finish_shell_state_clear_white_block(bridge)
+    let result = finish_shell_state_clear_white_block(bridge);
+    emit_windows_composition_diagnostic(
+        bridge,
+        operation,
+        if result.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        },
+        Some(started_at.elapsed()),
+    );
+    result
 }
 
 fn background_needs_white_block_clear(background: &WebviewWindowBackground) -> bool {
@@ -2267,12 +2382,85 @@ fn background_needs_white_block_clear(background: &WebviewWindowBackground) -> b
 }
 
 fn windows_auto_clear_white_block_enabled() -> bool {
-    match std::env::var(WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV) {
-        Ok(value) => !matches!(
+    let value = std::env::var(WINDOWS_AUTO_CLEAR_WHITE_BLOCK_ENV).ok();
+    windows_auto_clear_white_block_enabled_from_value(value.as_deref())
+}
+
+fn windows_auto_clear_white_block_enabled_from_value(value: Option<&str>) -> bool {
+    !value.is_some_and(|value| {
+        matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "0" | "false" | "off" | "no"
-        ),
-        Err(_) => true,
+        )
+    })
+}
+
+fn windows_composition_diagnostics_enabled() -> bool {
+    let value = std::env::var(WINDOWS_COMPOSITION_DIAGNOSTICS_ENV).ok();
+    windows_composition_diagnostics_enabled_from_value(value.as_deref())
+}
+
+fn windows_composition_diagnostics_enabled_from_value(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+fn emit_windows_composition_diagnostic(
+    bridge: &RefCell<NavigatorWindowBridge>,
+    operation: WindowsCompositionOperation,
+    phase: &str,
+    elapsed: Option<Duration>,
+) {
+    if !windows_composition_diagnostics_enabled() {
+        return;
+    }
+    let (hwnd, style) = {
+        let state = bridge.borrow();
+        (state.hwnd, state.style.clone())
+    };
+    let soft_resize_active = WINDOW_PROC_STATES.with(|states| {
+        states
+            .borrow()
+            .get(&(hwnd as isize))
+            .map(|state| state.soft_resize_interaction.is_some())
+            .unwrap_or(false)
+    });
+    let bounds = window_bounds(hwnd)
+        .map(|rect| format!("{}x{}@{},{}", rect.width, rect.height, rect.x, rect.y))
+        .unwrap_or_else(|_| "unavailable".to_string());
+    let elapsed_ms = elapsed
+        .map(|duration| duration.as_millis().to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let sequence = WINDOWS_COMPOSITION_DIAGNOSTIC_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    eprintln!(
+        "opentray-ext-webview composition seq={sequence} operation={} phase={phase} background={} clear_backing={} host_fill=0x{:08X} frameless={} resizable={} style=0x{:08X} ex_style=0x{:X} visible={} minimized={} maximized={} soft_resize={} bounds={bounds} elapsed_ms={elapsed_ms}",
+        operation.as_str(),
+        windows_composition_background_label(&style.background),
+        wants_clear_background(&style),
+        host_surface_fill_color(&style.background),
+        style.frameless,
+        style.resizable,
+        unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 },
+        unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) },
+        window_is_visible(hwnd),
+        unsafe { IsIconic(hwnd) != 0 },
+        is_window_maximized(hwnd),
+        soft_resize_active,
+    );
+}
+
+fn windows_composition_background_label(background: &WebviewWindowBackground) -> String {
+    match background {
+        WebviewWindowBackground::Opaque => "opaque".to_string(),
+        WebviewWindowBackground::Transparent => "transparent".to_string(),
+        WebviewWindowBackground::PlatformMaterial { material, .. } => {
+            format!("platform:{material}")
+        }
+        WebviewWindowBackground::Semantic { token, .. } => format!("semantic:{token}"),
     }
 }
 
@@ -2854,7 +3042,16 @@ fn apply_window_style(
     }
     notify_webview_parent_window_position_changed_from_bridge(bridge)?;
     refresh_native_window_surface(hwnd)?;
-    maybe_auto_clear_windows_white_block_artifact_after_reveal(bridge)?;
+    emit_windows_composition_diagnostic(
+        bridge,
+        WindowsCompositionOperation::StyleProjection,
+        "applied",
+        None,
+    );
+    maybe_auto_clear_windows_white_block_artifact_after_reveal(
+        bridge,
+        WindowsCompositionOperation::StyleProjection,
+    )?;
     Ok(())
 }
 
@@ -3104,7 +3301,10 @@ fn finish_window_proc_soft_resize(hwnd: HWND, release_capture: bool) -> bool {
         if release_capture {
             // The native capture lifecycle is now over. Frameless chrome residue can use the
             // normal terminal artifact repair without terminating the resize interaction.
-            if let Err(error) = maybe_auto_clear_windows_white_block_artifact_after_reveal(bridge) {
+            if let Err(error) = maybe_auto_clear_windows_white_block_artifact_after_reveal(
+                bridge,
+                WindowsCompositionOperation::SoftResizeTerminal,
+            ) {
                 eprintln!(
                     "opentray-ext-webview failed to clear Windows frameless resize artifact: {error}"
                 );
@@ -3248,7 +3448,10 @@ fn enforce_current_window_size_constraints(
     }
     set_window_size(hwnd, width, height)?;
     refresh_after_explicit_resize(bridge)?;
-    maybe_auto_clear_windows_white_block_artifact_after_reveal(bridge)?;
+    maybe_auto_clear_windows_white_block_artifact_after_reveal(
+        bridge,
+        WindowsCompositionOperation::ExplicitResize,
+    )?;
     let response = json!({ "width": width, "height": height });
     emit_window_event(bridge, "resized", response)?;
     emit_overlay_geometry_change_if_enabled(bridge)
@@ -5337,11 +5540,10 @@ unsafe extern "system" fn window_proc(
             let resize_bridge = finish_window_proc_size_move(hwnd);
             emit_window_interaction_change(hwnd, false);
             if let Some(bridge) = resize_bridge {
-                if let Err(error) =
-                    maybe_auto_clear_windows_white_block_artifact_after_reveal(unsafe {
-                        bridge.as_ref()
-                    })
-                {
+                if let Err(error) = maybe_auto_clear_windows_white_block_artifact_after_reveal(
+                    unsafe { bridge.as_ref() },
+                    WindowsCompositionOperation::NativeResizeTerminal,
+                ) {
                     eprintln!(
                         "opentray-ext-webview failed to auto-clear Windows resize artifact: {error}"
                     );
@@ -5368,12 +5570,19 @@ unsafe extern "system" fn window_proc(
             result
         }
         WM_OPENTRAY_CLEAR_ARTIFACT_AFTER_REVEAL => {
-            if let Some(bridge) =
+            if let Some((bridge, operation)) =
                 take_queued_windows_artifact_clear(hwnd, WindowsArtifactClearSchedule::NextMessage)
             {
-                if let Err(error) =
-                    maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
-                {
+                emit_windows_composition_diagnostic(
+                    unsafe { bridge.as_ref() },
+                    WindowsCompositionOperation::NextMessageClear,
+                    "dispatch",
+                    None,
+                );
+                if let Err(error) = maybe_auto_clear_windows_white_block_artifact(
+                    unsafe { bridge.as_ref() },
+                    operation,
+                ) {
                     eprintln!(
                         "opentray-ext-webview failed to clear Windows post-reveal artifact: {error}"
                     );
@@ -5385,12 +5594,13 @@ unsafe extern "system" fn window_proc(
             unsafe {
                 KillTimer(hwnd, WINDOWS_REVEAL_ARTIFACT_CLEAR_TIMER_ID);
             }
-            if let Some(bridge) =
+            if let Some((bridge, operation)) =
                 take_queued_windows_artifact_clear(hwnd, WindowsArtifactClearSchedule::RevealDelay)
             {
-                if let Err(error) =
-                    maybe_auto_clear_windows_white_block_artifact(unsafe { bridge.as_ref() })
-                {
+                if let Err(error) = maybe_auto_clear_windows_white_block_artifact(
+                    unsafe { bridge.as_ref() },
+                    operation,
+                ) {
                     eprintln!(
                         "opentray-ext-webview failed to clear Windows delayed reveal artifact: {error}"
                     );
@@ -5556,6 +5766,54 @@ mod tests {
                 state: WebviewBackgroundEffectState::Active,
             }
         ));
+    }
+
+    #[test]
+    fn windows_composition_diagnostics_are_explicitly_opt_in() {
+        assert!(!windows_composition_diagnostics_enabled_from_value(None));
+        assert!(!windows_composition_diagnostics_enabled_from_value(Some(
+            "off"
+        )));
+        assert!(windows_composition_diagnostics_enabled_from_value(Some(
+            "1"
+        )));
+        assert!(windows_composition_diagnostics_enabled_from_value(Some(
+            " true "
+        )));
+    }
+
+    #[test]
+    fn windows_auto_clear_can_be_disabled_for_an_uncontaminated_diagnostic() {
+        assert!(windows_auto_clear_white_block_enabled_from_value(None));
+        assert!(!windows_auto_clear_white_block_enabled_from_value(Some(
+            "0"
+        )));
+        assert!(!windows_auto_clear_white_block_enabled_from_value(Some(
+            " false "
+        )));
+        assert!(windows_auto_clear_white_block_enabled_from_value(Some(
+            "on"
+        )));
+    }
+
+    #[test]
+    fn windows_composition_operation_labels_stay_distinct() {
+        assert_eq!(
+            WindowsCompositionOperation::ManualClear.as_str(),
+            "manual-clear"
+        );
+        assert_eq!(
+            WindowsCompositionOperation::NativeResizeTerminal.as_str(),
+            "native-resize-terminal"
+        );
+        assert_eq!(
+            WindowsCompositionOperation::NextMessageClear.as_str(),
+            "next-message-clear"
+        );
+        assert_eq!(
+            WindowsCompositionOperation::DelayedRevealClear.as_str(),
+            "delayed-reveal-clear"
+        );
     }
 
     #[test]

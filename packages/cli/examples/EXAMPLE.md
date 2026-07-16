@@ -45,6 +45,7 @@ Each example launcher (`*-panel.ts`) spawns the shared dev server via `_support/
 | --------------------- | ---------------------------- |
 | `/download`           | `example:download`           |
 | `/webview-control`    | `example:webview-control`    |
+| `/win32-bug`          | `example:win32-bug`          |
 | `/tray-panel`         | `example:tray-panel`         |
 | `/placement`          | `example:placement`          |
 | `/media-query`        | `example:mediaQuery`         |
@@ -144,6 +145,34 @@ Overlay is a show-time capability gate, not a runtime style. The control demo en
 On Windows, macOS corner controls remain unsupported, while `style.platform.windows.cornerPreference` is the native DWM corner family. Windows DWM material choice lives in `style.background`.
 Whole-window opacity lives in `style.opacity` on both supported WebView runtimes and composes with the current background mode.
 Devtools are creation-time gated in examples through `devtools: true`. Release native artifacts still compile the inspector API, but ordinary app windows that omit `devtools: true` keep devtools unavailable by default.
+
+## Example 1A: Windows Composition Diagnostic
+
+Windows only:
+
+```bash
+pnpm --filter opentray example:win32-bug
+```
+
+This is the real OpenTray HWND + windowed WebView2 + DWM host used to reproduce retained pixels. It is not a rendering repair or a replacement acceptance path. The page reuses every control in the Control Surface Window card, then adds a focused `Residue Probe` card.
+
+Run the same retained session through this matrix and record the visible result outside the terminal log:
+
+| Background | Trigger | Control | Record |
+| ---------- | ------- | ------- | ------ |
+| opaque | `Toggle frameless` | `clearWhiteBlock`, then `Pulse width +1px` | residue, flash, focus/input |
+| mica | `Hide Example` then `Show Example`; `Toggle frameless` | `clearWhiteBlock`, then `Pulse width +1px` | residue, flash, focus/input |
+| acrylic | `Hide Example` then `Show Example`; `Toggle frameless` | `clearWhiteBlock`, then `Pulse width +1px` | residue, flash, focus/input |
+
+`clearWhiteBlock` is the current shell-state baseline. `Pulse width +1px` reads trusted native bounds, resizes by one logical pixel, then restores the original width. The pulse is deliberately a comparison control because the user has observed that a real resize can clear pixels that shell recovery does not.
+
+The example enables `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` and forces `OPENTRAY_WINDOWS_AUTO_CLEAR_WHITE_BLOCK=0`. Native records report requested background/backing policy, HWND styles/state/bounds, operation reason, and shell-clear timing. They do not establish that the visible artifact cleared; only the human matrix can establish that result. Do not test a new non-shell recovery candidate until this baseline matrix is recorded.
+
+For an automated source-host lifecycle smoke, which cannot judge pixels:
+
+```bash
+OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=6000 pnpm --filter opentray example:win32-bug
+```
 
 ## Example 2: Download
 
@@ -297,6 +326,7 @@ OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-contr
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control -- --overlay
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control -- --no-overlay
 OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=2500 pnpm --filter opentray example:webview-control
+OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=6000 pnpm --filter opentray example:win32-bug
 ```
 
 ## Failure Hints

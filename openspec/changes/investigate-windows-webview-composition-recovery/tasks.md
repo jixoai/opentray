@@ -15,21 +15,21 @@
 ## 3. Implementation
 
 - [x] 3.1 Run `bun run openspec:vision -- commit-check investigate-windows-webview-composition-recovery --phase research-plan` and commit the ready research-plan, specs, and tasks before product-code work.
-- [ ] 3.2 Add `example:win32-bug` as a Windows-only source WebView example that owns the standard caller-scoped broker, Vite server, retained primary action, and teardown lifecycle.
-- [ ] 3.3 Add `/win32-bug` by reusing the complete `WindowPanel` control surface and add a focused residue-probe component for manual clear, frameless/background transitions, and a reversible current-bounds one-pixel pulse.
-- [ ] 3.3a Disable automatic shell recovery only for `example:win32-bug`, preserving manual `clearWhiteBlock` as the uncontaminated comparison baseline.
-- [ ] 3.4 Add Windows-only `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` records around requested WebView backing/background policy, style projection, shell clear attempts/skips/completions, and explicit resize completion.
-- [ ] 3.5 Ensure diagnostic mode is observational: it does not alter controller construction, DWM style selection, shell state, focus, capture, or cleanup scheduling.
-- [ ] 3.6 Add concise intent comments at the one-pixel pulse and native diagnostic emission boundaries; keep candidate repairs out of this first implementation.
-- [ ] 3.7 Update `AGENTS.md`, WebView Window Patterns, and the diagnostic README/example guidance so human and AI workflows share the same evidence rules.
-- [ ] 3.8 Update only completed task checkboxes and commit them with matching implementation and BDD evidence.
+- [x] 3.2 Add `example:win32-bug` as a Windows-only source WebView example that owns the standard caller-scoped broker, Vite server, retained primary action, and teardown lifecycle.
+- [x] 3.3 Add `/win32-bug` by reusing the complete `WindowPanel` control surface and add a focused residue-probe component for manual clear, frameless/background transitions, and a reversible current-bounds one-pixel pulse.
+- [x] 3.3a Disable automatic shell recovery only for `example:win32-bug`, preserving manual `clearWhiteBlock` as the uncontaminated comparison baseline.
+- [x] 3.4 Add Windows-only `OPENTRAY_WINDOWS_COMPOSITION_DIAGNOSTICS=1` records around requested WebView backing/background policy, style projection, shell clear attempts/skips/completions, and explicit resize completion.
+- [x] 3.5 Ensure diagnostic mode is observational: it does not alter controller construction, DWM style selection, shell state, focus, capture, or cleanup scheduling.
+- [x] 3.6 Add concise intent comments at the one-pixel pulse and native diagnostic emission boundaries; keep candidate repairs out of this first implementation.
+- [x] 3.7 Update `AGENTS.md`, WebView Window Patterns, and the diagnostic README/example guidance so human and AI workflows share the same evidence rules.
+- [x] 3.8 Update only completed task checkboxes and commit them with matching implementation and BDD evidence.
 
 ## 4. Verification
 
-- [ ] 4.1 Run Rust tests covering diagnostic enablement, snapshot/reason shape, and no-op behavior when diagnostics are disabled.
-- [ ] 4.2 Run CLI TypeScript tests/typecheck covering the Windows-only example declaration and its source lifecycle.
-- [ ] 4.3 Build isolated `opentray-bin` and `opentray-ext-webview` artifacts, then smoke `example:win32-bug` with diagnostics enabled.
-- [ ] 4.4 Run `bun run openspec:vision -- validate investigate-windows-webview-composition-recovery` and `git diff --check`.
+- [x] 4.1 Run Rust tests covering diagnostic enablement, snapshot/reason shape, and no-op behavior when diagnostics are disabled.
+- [x] 4.2 Run CLI TypeScript tests/typecheck covering the Windows-only example declaration and its source lifecycle.
+- [x] 4.3 Build isolated `opentray-bin` and `opentray-ext-webview` artifacts, then smoke `example:win32-bug` with diagnostics enabled.
+- [x] 4.4 Run `bun run openspec:vision -- validate investigate-windows-webview-composition-recovery` and `git diff --check`.
 - [ ] 4.5 Require human Windows evidence for opaque, Mica, and Acrylic across frameless transition, manual clear, and one-pixel pulse. Record residue, flash, focus/input, timing/count, and result in the change research artifact.
 - [ ] 4.6 Do not test `SWP_NOCOPYBITS`, geometry pulse variants, controller reparenting, or composition-root reattachment until the baseline matrix is recorded and the user approves one candidate.
 
