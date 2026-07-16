@@ -120,7 +120,7 @@ The Windows runtime SHALL NOT contain automatic artifact-cleanup flags, delayed 
 
 `example:win32-bug` SHALL remain Windows-only and SHALL launch the normal source-tree broker and extension with `OPENTRAY_WINDOWS_NATIVE_MATERIAL_PROBE=1`.
 
-Its native window SHALL start at 900 by 620 logical pixels, framed, resizable, Acrylic, and Black host paint. Its page SHALL render the same centered 3-column control matrix as `native-material-host-paint-probe-20260716.exe`. The controls SHALL be rendered by WebView, while every page pixel outside the controls SHALL remain transparent.
+Its native window SHALL preserve the native probe's raw `CreateWindowExW` width 900, height 620, and `CW_USEDEFAULT` position; it SHALL start framed, resizable, Acrylic, and Black host paint. Its page SHALL render the same centered 3-column control matrix as `native-material-host-paint-probe-20260716.exe`. The controls SHALL be rendered by WebView, while every page pixel outside the controls SHALL remain transparent.
 
 Probe material/paint overrides SHALL exist only while the environment switch is enabled. Ordinary OpenTray windows SHALL keep the production material-host policy and SHALL reject probe commands.
 
