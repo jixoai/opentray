@@ -3,6 +3,7 @@
 // 1. Exercise native window controls, explicit Windows caption-button colors, and bridge capabilities.
 // 2. Assert overlay and frameless native/browser geometry, including resizable frameless behavior.
 // 3. Smoke operational visibility queries without rebuilding the page session.
+// 4. Run Windows on the same comparator host topology as win32-bug before optional overlay.
 
 import type {
   WebviewWindowControlsOverlay,
@@ -19,6 +20,10 @@ import {
   shutdownWebviewExample,
   syncExamplePrimaryMenu,
 } from "./_support/webview-example-support";
+
+if (process.platform === "win32") {
+  process.env.OPENTRAY_WINDOWS_NATIVE_MATERIAL_COMPARATOR = "1";
+}
 
 // windowControlsOverlay is a show-time bridge gate; the page can test it, not enable it later.
 const overlayEnabled = resolveOverlayEnabled(
@@ -283,11 +288,15 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
       const bounds = await bridge.getBounds();
       const widthGap = Math.abs(bounds.width - window.outerWidth);
       const heightGap = Math.abs(bounds.height - window.outerHeight);
-      if (widthGap > 4 || heightGap > 4) {
+      const expectsFullClientBounds = capabilities.overlay || originalStyle.frameless;
+      if (expectsFullClientBounds && (widthGap > 4 || heightGap > 4)) {
         throw new Error(
           "native/browser outer bounds diverged: " +
             JSON.stringify({ bounds, outerWidth: window.outerWidth, outerHeight: window.outerHeight })
         );
+      }
+      if (!expectsFullClientBounds && (bounds.width !== 880 || bounds.height !== 640)) {
+        throw new Error("framed native bounds did not preserve resizeTo geometry");
       }
       let overlayRect = null;
       if (capabilities.overlay) {

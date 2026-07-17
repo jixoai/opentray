@@ -142,6 +142,8 @@ Expected checks:
 
 Overlay is a show-time capability gate, not a runtime style. The control demo enables it by default because this is the overlay acceptance surface. You can force it on with `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=1` or force it off with `--no-overlay` / `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=0`.
 
+On Windows, the launcher automatically selects the same comparator HWND/DWM/style/geometry/frameless topology as `example:win32-bug` without enabling probe counters, title replacement, or `win32Probe*` commands. Use `pnpm --filter opentray example:webview-control -- --no-overlay` for the direct native-shell A/B. Default overlay uses the same base and adds only AppWindow titlebar initialization after WebView2 attachment.
+
 On Windows, macOS corner controls remain unsupported, while `style.platform.windows.cornerPreference` is the native DWM corner family. Windows DWM material choice lives in `style.background`.
 Whole-window opacity lives in `style.opacity` on both supported WebView runtimes and composes with the current background mode.
 Devtools are creation-time gated in examples through `devtools: true`. Release native artifacts still compile the inspector API, but ordinary app windows that omit `devtools: true` keep devtools unavailable by default.
@@ -157,6 +159,8 @@ pnpm --filter opentray example:win32-bug
 When testing a separately built DLL, set only `OPENTRAY_EXT_PATH`. The source launcher still builds and selects `target/debug/opentray.exe` so tray events and the extension share the same source revision. Set `OPENTRAY_BROKER_BIN` only when deliberately testing a different broker binary.
 
 This example is the WebView-controlled counterpart of `native-material-host-paint-probe-20260716.exe`. It starts the same 900x620 framed Acrylic host and enables an environment-gated native probe state. The only page content is the centered 3x3+1 control matrix; html, body, root, and every pixel outside the buttons remain transparent.
+
+Its tray uses the same retained-window contract as webview-control: the primary item reads `Hide Example` while visible and `Show Example` while hidden, followed by a separator and `Quit Demo`. Show reveals the same WebView session with `toVisible()`; Hide calls `close()`; Quit destroys the native session and closes the runtime.
 
 Use the same controls and shortcuts as the native probe:
 
@@ -174,7 +178,7 @@ The probe environment removes constructor-only variables that differ from the na
 For an automated source-host lifecycle smoke, which verifies bridge and transparency contracts but cannot judge DWM residue pixels:
 
 ```bash
-OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=6000 pnpm --filter opentray example:win32-bug
+OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=8000 pnpm --filter opentray example:win32-bug
 ```
 
 ## Example 2: Download
@@ -329,7 +333,7 @@ OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-contr
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control -- --overlay
 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control -- --no-overlay
 OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=2500 pnpm --filter opentray example:webview-control
-OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=6000 pnpm --filter opentray example:win32-bug
+OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=8000 pnpm --filter opentray example:win32-bug
 ```
 
 ## Failure Hints

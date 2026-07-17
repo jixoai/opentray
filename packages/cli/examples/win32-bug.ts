@@ -3,9 +3,10 @@
 // 1. Launch the matching source-tree Windows host through its retained tray lifecycle.
 // 2. Enable the native-only material/paint probe state for this example process.
 // 3. Keep the initial HWND geometry and material aligned with the native probe.
+// 4. Prove the retained Show/Hide Example and Quit Demo tray contract.
 
 import type { WebviewWindowOptions } from "../../ext-webview/src/index";
-import { createExampleLifecycle } from "./_support/example-lifecycle";
+import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
 import { ensureAppInstalled, startDevServer } from "./_support/dev-server";
 import {
   createExamplePrimaryMenu,
@@ -19,6 +20,7 @@ import {
 
 requireWindowsExample("example:win32-bug");
 
+process.env.OPENTRAY_WINDOWS_NATIVE_MATERIAL_COMPARATOR = "1";
 process.env.OPENTRAY_WINDOWS_NATIVE_MATERIAL_PROBE = "1";
 process.env.OPENTRAY_DAEMON_STDIO ??= "inherit";
 ensureAppInstalled();
@@ -45,6 +47,7 @@ console.log("win32-bug panel: " + devServer.url);
 console.log("Windows native material probe: transparent WebView controls enabled");
 
 let stopVisibleChange: (() => void) | undefined;
+let primaryMenuVisibility: boolean | undefined;
 const lifecycle = createExampleLifecycle({
   exitAfterMs: process.env.OPENTRAY_EXAMPLE_EXIT_AFTER_MS,
   onShutdown: async () => {
@@ -123,7 +126,27 @@ if (process.env.OPENTRAY_EXAMPLE_WIN32_BUG_SMOKE === "1") {
       }
     })();
   `);
-  console.log("win32-bug smoke: transparent probe controls and frameless round-trip verified");
+  await toggleExampleVisibility();
+  await waitForPrimaryMenuVisibility(false, 2_000);
+  if (await webview.isVisible()) {
+    throw new Error("hidden win32-bug window must project Show Example");
+  }
+  await toggleExampleVisibility();
+  await waitForPrimaryMenuVisibility(true, 2_000);
+  if (!(await webview.isVisible())) {
+    throw new Error("revealed win32-bug window must project Hide Example");
+  }
+  await webview.evaluate(String.raw`
+    (() => {
+      const root = document.querySelector("[data-native-material-probe]");
+      if (!(root instanceof HTMLElement)) {
+        throw new Error("retained probe page was rebuilt or lost");
+      }
+    })();
+  `);
+  console.log(
+    "win32-bug smoke: transparent controls, frameless round-trip, and Show/Hide tray lifecycle verified",
+  );
 }
 
 tray.onMenuClick(({ itemId }) => {
@@ -151,4 +174,21 @@ async function syncPrimaryMenu(visible: boolean): Promise<void> {
     visible,
     trailingItems: [{ type: "separator" }, { type: "item", id: 99, title: "Quit Demo" }],
   });
+  primaryMenuVisibility = visible;
+}
+
+async function waitForPrimaryMenuVisibility(
+  expected: boolean,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (primaryMenuVisibility === expected) {
+      return;
+    }
+    await sleep(25);
+  }
+  throw new Error(
+    `win32-bug primary menu did not change to ${expected ? "Hide" : "Show"} Example`,
+  );
 }

@@ -122,6 +122,7 @@ const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
 const WINDOWS_BACKGROUND_MATERIALS: &[&str] = &["auto", "mica", "acrylic", "tabbed"];
 const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active", "inactive"];
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
+const WINDOWS_NATIVE_MATERIAL_COMPARATOR_ENV: &str = "OPENTRAY_WINDOWS_NATIVE_MATERIAL_COMPARATOR";
 const WINDOWS_NATIVE_MATERIAL_PROBE_ENV: &str = "OPENTRAY_WINDOWS_NATIVE_MATERIAL_PROBE";
 thread_local! {
     static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
@@ -2821,10 +2822,9 @@ fn apply_initial_window_host_style(
     without_window_proc_surface_refresh(hwnd, || {
         apply_initial_native_window_style(hwnd, &style)?;
         sync_transparent_host_surface(bridge, &style)?;
-        // Ordinary windows correct public visible-frame geometry only after WndProc owns the
-        // native material base. The native probe is DPI-virtualized; reproduce its raw 900x620
-        // outer size in this DPI-aware process without adding invisible-border compensation.
-        if windows_native_material_probe_enabled() {
+        // Comparator examples reproduce the standalone probe's raw physical outer size. Probe
+        // instrumentation is independent so richer examples can use the same native shell.
+        if windows_native_material_comparator_enabled() {
             set_window_raw_physical_size(
                 hwnd,
                 logical_to_physical_i32(hwnd, width),
@@ -2963,19 +2963,19 @@ fn apply_native_window_style_for_projection(
     projection: WindowsStyleProjection,
 ) -> Result<(), WebviewRuntimeError> {
     let dark_mode = current_windows_dark_mode();
-    let native_material_probe = windows_native_material_probe_enabled();
+    let native_material_comparator = windows_native_material_comparator_enabled();
     let current_style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 };
-    let style_bits = window_style_bits(style, current_style, native_material_probe);
+    let style_bits = window_style_bits(style, current_style, native_material_comparator);
     let current_ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
-    let ex_style_bits = window_ex_style_bits(style, current_ex_style);
+    let ex_style_bits = window_ex_style_bits(style, current_ex_style, native_material_comparator);
     unsafe {
         SetWindowLongPtrW(hwnd, GWL_STYLE, style_bits as isize);
         if ex_style_bits != current_ex_style {
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style_bits);
         }
     }
-    // The native comparator leaves DWMWA_NCRENDERING_POLICY at its style-derived default.
-    if !native_material_probe {
+    // Comparator topology leaves DWMWA_NCRENDERING_POLICY at its style-derived default.
+    if !native_material_comparator {
         apply_dwm_nc_rendering_policy(hwnd, style.frameless);
     }
     apply_window_opacity(hwnd, style.opacity)?;
@@ -2998,7 +2998,7 @@ fn sync_soft_resize_enabled(
 ) -> Result<(), WebviewRuntimeError> {
     let enabled = {
         let state = bridge.borrow();
-        wants_soft_resize(&state.style, windows_native_material_probe_enabled())
+        wants_soft_resize(&state.style, windows_native_material_comparator_enabled())
     };
     evaluate_bridge_script(
         bridge,
@@ -3006,8 +3006,8 @@ fn sync_soft_resize_enabled(
     )
 }
 
-fn wants_soft_resize(style: &WindowStyleState, native_material_probe: bool) -> bool {
-    style.frameless && style.resizable && !native_material_probe
+fn wants_soft_resize(style: &WindowStyleState, native_material_comparator: bool) -> bool {
+    style.frameless && style.resizable && !native_material_comparator
 }
 
 fn apply_dwm_nc_rendering_policy(hwnd: HWND, frameless: bool) {
@@ -3036,9 +3036,9 @@ fn dwm_nc_rendering_policy(frameless: bool) -> i32 {
     }
 }
 
-fn native_frame_refresh_flags(native_material_probe: bool) -> u32 {
+fn native_frame_refresh_flags(native_material_comparator: bool) -> u32 {
     let base = SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE;
-    if native_material_probe {
+    if native_material_comparator {
         base | SWP_NOCOPYBITS
     } else {
         base
@@ -3048,7 +3048,7 @@ fn native_frame_refresh_flags(native_material_probe: bool) -> u32 {
 fn refresh_native_window_frame(hwnd: HWND, keep_on_top: bool) {
     // The standalone comparator discards copied client bits; production keeps its established
     // refresh behavior because that flag alone did not remove the observed non-client residue.
-    let flags = native_frame_refresh_flags(windows_native_material_probe_enabled());
+    let flags = native_frame_refresh_flags(windows_native_material_comparator_enabled());
     unsafe {
         SetWindowPos(
             hwnd,
@@ -3121,6 +3121,17 @@ fn apply_webview_background_color(
         .set_background_color(color)
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     Ok(())
+}
+
+fn native_material_comparator_enabled(comparator_requested: bool, probe_requested: bool) -> bool {
+    comparator_requested || probe_requested
+}
+
+fn windows_native_material_comparator_enabled() -> bool {
+    native_material_comparator_enabled(
+        std::env::var_os(WINDOWS_NATIVE_MATERIAL_COMPARATOR_ENV).is_some(),
+        windows_native_material_probe_enabled(),
+    )
 }
 
 fn windows_native_material_probe_enabled() -> bool {
@@ -3372,7 +3383,7 @@ fn size_constraints_json(constraints: WindowSizeConstraints) -> Value {
 fn window_style_bits(
     style: &WindowStyleState,
     current_style: u32,
-    native_material_probe: bool,
+    native_material_comparator: bool,
 ) -> u32 {
     let state_style = current_style & (WS_VISIBLE | WS_MAXIMIZE | WS_MINIMIZE);
     // A material parent must paint the redirection bitmap below the transparent WebView child.
@@ -3387,7 +3398,7 @@ fn window_style_bits(
     // the WebView child; leaving it off also matches the native material probe constructor.
     let child_safe_style = child_clipping;
     if style.frameless {
-        if native_material_probe {
+        if native_material_comparator {
             // Match the native comparator exactly: retain the style-derived DWM resize frame and
             // let DefWindowProc own its non-client geometry instead of projecting full-client.
             return WS_POPUP
@@ -3405,7 +3416,11 @@ fn window_style_bits(
     }
 }
 
-fn window_ex_style_bits(style: &WindowStyleState, current_ex_style: isize) -> isize {
+fn window_ex_style_bits(
+    style: &WindowStyleState,
+    current_ex_style: isize,
+    native_material_comparator: bool,
+) -> isize {
     let no_redirection_bitmap = WS_EX_NOREDIRECTIONBITMAP as isize;
     let layered = WS_EX_LAYERED as isize;
     let with_redirection = if wants_no_redirection_bitmap(style) {
@@ -3420,7 +3435,7 @@ fn window_ex_style_bits(style: &WindowStyleState, current_ex_style: isize) -> is
     };
     let tool_window = WS_EX_TOOLWINDOW as isize;
     let app_window = WS_EX_APPWINDOW as isize;
-    if windows_native_material_probe_enabled() {
+    if native_material_comparator {
         return with_opacity & !tool_window & !app_window;
     }
     // Tray-owned WebViews are utility windows by default. Switcher participation is an explicit
@@ -3435,9 +3450,9 @@ fn window_ex_style_bits(style: &WindowStyleState, current_ex_style: isize) -> is
 fn wants_full_client_area(
     style: &WindowStyleState,
     overlay_enabled: bool,
-    native_material_probe: bool,
+    native_material_comparator: bool,
 ) -> bool {
-    overlay_enabled || (style.frameless && !native_material_probe)
+    overlay_enabled || (style.frameless && !native_material_comparator)
 }
 
 fn wants_no_redirection_bitmap(style: &WindowStyleState) -> bool {
@@ -5275,7 +5290,7 @@ impl Win32HostWindow {
             width,
             height,
             tray_bounds,
-            windows_native_material_probe_enabled(),
+            windows_native_material_comparator_enabled(),
         );
         // Plain opaque/transparent host backgrounds share the same no-redirection substrate on
         // Windows. Material backdrops still need the redirection surface so DWM can own the
@@ -5641,7 +5656,7 @@ unsafe extern "system" fn window_proc(
                             wants_full_client_area(
                                 &bridge.style,
                                 bridge.navigator_window.window_controls_overlay,
-                                windows_native_material_probe_enabled(),
+                                windows_native_material_comparator_enabled(),
                             )
                         })
                     })
@@ -5836,9 +5851,9 @@ fn initial_host_window_position(
     width: i32,
     height: i32,
     tray_bounds: Option<Rect>,
-    native_material_probe: bool,
+    native_material_comparator: bool,
 ) -> (i32, i32) {
-    if native_material_probe {
+    if native_material_comparator {
         (CW_USEDEFAULT, CW_USEDEFAULT)
     } else {
         initial_window_position(width, height, tray_bounds)
@@ -6132,7 +6147,15 @@ mod tests {
     }
 
     #[test]
-    fn native_material_probe_preserves_raw_creation_geometry() {
+    fn probe_instrumentation_implies_comparator_topology() {
+        assert!(!native_material_comparator_enabled(false, false));
+        assert!(native_material_comparator_enabled(true, false));
+        assert!(native_material_comparator_enabled(false, true));
+        assert!(native_material_comparator_enabled(true, true));
+    }
+
+    #[test]
+    fn comparator_topology_preserves_raw_creation_geometry() {
         let tray_bounds = Some(Rect {
             x: 1800,
             y: 1000,
@@ -6399,9 +6422,23 @@ mod tests {
     fn default_windows_style_excludes_task_switchers() {
         let style = window_style_from_initial(&crate::WebviewInitialStyle::default())
             .expect("default style");
-        let bits = window_ex_style_bits(&style, WS_EX_APPWINDOW as isize);
+        let bits = window_ex_style_bits(&style, WS_EX_APPWINDOW as isize, false);
 
         assert_ne!(bits & WS_EX_TOOLWINDOW as isize, 0);
+        assert_eq!(bits & WS_EX_APPWINDOW as isize, 0);
+    }
+
+    #[test]
+    fn comparator_topology_uses_neutral_extended_window_style() {
+        let style = window_style_from_initial(&crate::WebviewInitialStyle::default())
+            .expect("default style");
+        let bits = window_ex_style_bits(
+            &style,
+            WS_EX_TOOLWINDOW as isize | WS_EX_APPWINDOW as isize,
+            true,
+        );
+
+        assert_eq!(bits & WS_EX_TOOLWINDOW as isize, 0);
         assert_eq!(bits & WS_EX_APPWINDOW as isize, 0);
     }
 
@@ -6410,14 +6447,14 @@ mod tests {
         let mut initial = crate::WebviewInitialStyle::default();
         initial.platform.windows.show_in_switchers = true;
         let style = window_style_from_initial(&initial).expect("switcher style");
-        let bits = window_ex_style_bits(&style, WS_EX_TOOLWINDOW as isize);
+        let bits = window_ex_style_bits(&style, WS_EX_TOOLWINDOW as isize, false);
 
         assert_eq!(bits & WS_EX_TOOLWINDOW as isize, 0);
         assert_ne!(bits & WS_EX_APPWINDOW as isize, 0);
     }
 
     #[test]
-    fn native_probe_frame_refresh_matches_comparator_copy_policy() {
+    fn comparator_frame_refresh_discards_copied_bits() {
         let production = native_frame_refresh_flags(false);
         let probe = native_frame_refresh_flags(true);
 
@@ -6450,7 +6487,7 @@ mod tests {
     }
 
     #[test]
-    fn native_material_probe_uses_the_comparator_frameless_shell() {
+    fn comparator_topology_uses_the_native_frameless_shell() {
         let mut initial = crate::WebviewInitialStyle::default();
         initial.frameless = true;
         let mut style = window_style_from_initial(&initial).expect("frameless style");

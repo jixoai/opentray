@@ -242,6 +242,8 @@ Inside this repo, `pnpm --filter opentray example:webview-control` is the API ex
 
 The comparator's frameless toggle intentionally uses the standalone probe's native resize frame, system menu, style-derived DWM non-client policy, default non-client geometry, and native resize path. This probe-only topology removes the OpenTray-specific classic outer-frame residue from A/B observations; production frameless windows remain full-client and keep application-level soft resize.
 
+Windows source examples now select that comparator host topology independently from probe instrumentation. `example:webview-control -- --no-overlay` is the direct native-shell A/B path against `example:win32-bug`; default webview-control overlay keeps the same pre-WebView host construction and adds only the post-WebView AppWindow titlebar stage. Ordinary applications do not inherit the comparator switch.
+
 For ordinary Windows overlay windows, cold start completes Win32/DWM material and host geometry before WebView2, then initializes AppWindow titlebar overlay after WebView2 establishes COM and before final child bounds/show. Host-side native window events use one single-flight poller; a transport failure stops polling and is reported once.
 
 The manual walkthrough for all three CLI examples lives in [../cli/examples/EXAMPLE.md](../cli/examples/EXAMPLE.md).

@@ -21,35 +21,35 @@
 
 ## 4. Native Topology Implementation
 
-- [ ] 4.1 Add an internal comparator-topology environment fact independent from native probe instrumentation.
-- [ ] 4.2 Make the existing probe environment imply comparator topology while keeping probe state and commands gated only by the probe fact.
-- [ ] 4.3 Route initial position/size, ex-style, DWM non-client policy, frame refresh, frameless style, full-client policy, and soft-resize ownership through comparator topology.
-- [ ] 4.4 Add unit tests proving comparator-only, probe-superset, and production-default policy boundaries.
-- [ ] 4.5 Add concise comments at the topology/instrumentation boundary.
+- [x] 4.1 Add an internal comparator-topology environment fact independent from native probe instrumentation.
+- [x] 4.2 Make the existing probe environment imply comparator topology while keeping probe state and commands gated only by the probe fact.
+- [x] 4.3 Route initial position/size, ex-style, DWM non-client policy, frame refresh, frameless style, full-client policy, and soft-resize ownership through comparator topology.
+- [x] 4.4 Add unit tests proving comparator-only, probe-superset, and production-default policy boundaries.
+- [x] 4.5 Add concise comments at the topology/instrumentation boundary.
 
 ## 5. Example And Tray Implementation
 
-- [ ] 5.1 Enable comparator topology before broker creation in Windows webview-control without enabling probe instrumentation.
-- [ ] 5.2 Enable the explicit comparator topology switch in win32-bug alongside probe instrumentation.
-- [ ] 5.3 Keep win32-bug on the shared `createExamplePrimaryMenu` / `syncExamplePrimaryMenu` contract.
-- [ ] 5.4 Extend win32-bug smoke to prove Hide -> Show -> Hide menu projection and retained-session reuse.
-- [ ] 5.5 Preserve the user's existing webview-control page, titlebar, and CSS changes unchanged.
+- [x] 5.1 Enable comparator topology before broker creation in Windows webview-control without enabling probe instrumentation.
+- [x] 5.2 Enable the explicit comparator topology switch in win32-bug alongside probe instrumentation.
+- [x] 5.3 Keep win32-bug on the shared `createExamplePrimaryMenu` / `syncExamplePrimaryMenu` contract.
+- [x] 5.4 Extend win32-bug smoke to prove Hide -> Show -> Hide menu projection and retained-session reuse.
+- [x] 5.5 Preserve the user's existing webview-control page, titlebar, and CSS changes unchanged.
 
 ## 6. Domain Records
 
-- [ ] 6.1 Update `AGENTS.md` with comparator-topology versus probe-instrumentation law and overlay boundary.
-- [ ] 6.2 Update `i18n.zh.md` with `完全一样的底层路径` and the retained tray wording.
-- [ ] 6.3 Update package/example guidance with the exact `--no-overlay` A/B command and overlay delta.
+- [x] 6.1 Update `AGENTS.md` with comparator-topology versus probe-instrumentation law and overlay boundary.
+- [x] 6.2 Update `i18n.zh.md` with `完全一样的底层路径` and the retained tray wording.
+- [x] 6.3 Update package/example guidance with the exact `--no-overlay` A/B command and overlay delta.
 
 ## 7. Verification
 
-- [ ] 7.1 Run Rust formatting and `cargo test -p opentray-ext-webview --lib`.
-- [ ] 7.2 Run CLI tests/typecheck and Svelte check without modifying the user's visual files.
-- [ ] 7.3 Build matching source broker and extension DLL.
-- [ ] 7.4 Run webview-control bridge smoke with overlay and without overlay using comparator topology.
-- [ ] 7.5 Run win32-bug transparency, frameless, and retained tray lifecycle smoke.
-- [ ] 7.6 Run `bun run openspec:vision -- validate unify-windows-webview-example-host-topology` and `git diff --check`.
-- [ ] 7.7 Hand the source-built webview-control command to the user for visual residue acceptance.
+- [x] 7.1 Run Rust formatting and `cargo test -p opentray-ext-webview --lib`.
+- [x] 7.2 Run CLI tests/typecheck and Svelte check without modifying the user's visual files.
+- [x] 7.3 Build matching source broker and extension DLL.
+- [x] 7.4 Run webview-control bridge smoke with overlay and without overlay using comparator topology.
+- [x] 7.5 Run win32-bug transparency, frameless, and retained tray lifecycle smoke.
+- [x] 7.6 Run `bun run openspec:vision -- validate unify-windows-webview-example-host-topology` and `git diff --check`.
+- [x] 7.7 Hand the source-built webview-control command to the user for visual residue acceptance.
 
 ## 8. Self-Review Loop
 
