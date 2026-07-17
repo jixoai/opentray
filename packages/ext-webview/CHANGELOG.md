@@ -1,5 +1,11 @@
 # @opentray/ext-webview
 
+## 0.14.4
+
+### Patch Changes
+
+- 25233c5: Use a stable, user-writable WebView2 profile path so temporary package runners such as pnpx do not fail during WebView startup.
+
 ## 0.14.3
 
 ### Patch Changes

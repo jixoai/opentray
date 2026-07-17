@@ -1,5 +1,11 @@
 # @opentray/vite-plugin
 
+## 0.14.4
+
+### Patch Changes
+
+- @opentray/packaging@0.14.4
+
 ## 0.14.3
 
 ### Patch Changes
