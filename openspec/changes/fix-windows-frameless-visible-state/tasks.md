@@ -71,8 +71,8 @@
 ## 9. Comparator Frameless Top Edge
 
 - [x] 9.1 Recover the historical `WM_NCCALCSIZE` repair and identify the comparator exclusion that restored the Win11 caption inset.
-- [ ] 9.2 Add focused tests for default, production full-client, and comparator native-frame client-area projections.
-- [ ] 9.3 Preserve comparator `WS_THICKFRAME` / native resize ownership while projecting only the top client edge to `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`.
-- [ ] 9.4 Update the Windows material-host spec, README, agent law, and Chinese terminology with the top-only projection rule.
-- [ ] 9.5 Build the source broker and extension, then run `example:webview-control -- --frameless --resizable --no-overlay` geometry smoke.
+- [x] 9.2 Add focused tests for default, production full-client, and comparator native-frame client-area projections.
+- [x] 9.3 Preserve comparator `WS_THICKFRAME` / native resize ownership while projecting only the top client edge to `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`.
+- [x] 9.4 Update the Windows material-host spec, README, agent law, and Chinese terminology with the top-only projection rule.
+- [x] 9.5 Build the source broker and extension, then run `example:webview-control -- --frameless --resizable --no-overlay` geometry smoke; the bridge reported `gap=2x2`.
 - [ ] 9.6 Require renewed Windows visual acceptance that top/side gaps are 0-4 logical pixels and native edge/corner resize remains continuous.

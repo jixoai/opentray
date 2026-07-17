@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 8
-- Status: the comparator frameless top-gap regression is diagnosed and specified as a top-only client projection; implementation, source geometry smoke, and renewed Windows visual acceptance are pending.
+- Status: the comparator frameless top-gap regression is repaired with top-only client projection; focused Rust tests and source geometry smoke pass at `gap=2x2`, while renewed Windows edge/corner resize visual acceptance is pending.
 - Previous plan backup: `plans/plan-v9.md`
 
 ## Workflow Command Surface

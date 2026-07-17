@@ -1,5 +1,5 @@
 <!--
-Orthogonal intents (2026-07-14; original user request):
+Orthogonal intents (2026-07-17; original user request):
 1. Expose native WebView window controls and their measurable overlay geometry.
 2. Let Windows overlay caption controls use explicit opaque background and symbol colors.
 3. Keep macOS controls native and transparent rather than emulating Windows composition.
@@ -240,7 +240,7 @@ pnpm --filter @opentray/ext-webview example:webview
 
 Inside this repo, `pnpm --filter opentray example:webview-control` is the API exercise demo, while `pnpm --filter opentray example:tray-panel` is the canonical tray-anchored glass recipe. `pnpm --filter opentray example:win32-bug` is the Windows A/B comparator for `native-material-host-paint-probe-20260716.exe`: it enables an environment-gated native probe state and renders only the equivalent centered buttons in a fully transparent WebView. The hidden HWND completes material and initial geometry before WebView2 creation; ordinary windows keep the production `BLACK_BRUSH` material base and reject probe commands. Production `clearWhiteBlock` still recommits only the configured native host surface and never mutates shell state, focus, geometry, or WebView bounds.
 
-The comparator's frameless toggle intentionally uses the standalone probe's native resize frame, system menu, style-derived DWM non-client policy, default non-client geometry, and native resize path. This probe-only topology removes the OpenTray-specific classic outer-frame residue from A/B observations; production frameless windows remain full-client and keep application-level soft resize.
+The comparator's frameless toggle intentionally uses the standalone probe's native resize frame, system menu, style-derived DWM non-client policy, and native resize path. Its `WM_NCCALCSIZE` handler first delegates to `DefWindowProcW`, preserves the left/right/bottom native resize insets, and then projects only the client top to the system-reported `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`. This removes the caption-height gap above WebView2 without changing the already-correct side geometry. The source geometry smoke requires both `getBounds() - window.outerWidth` and `getBounds() - window.outerHeight` to remain within 0-4 logical pixels. Production frameless windows remain full-client and keep application-level soft resize.
 
 Windows source examples now select that comparator host topology independently from probe instrumentation. `example:webview-control -- --no-overlay` is the direct native-shell A/B path against `example:win32-bug`; default webview-control overlay keeps the same pre-WebView host construction and adds only the post-WebView AppWindow titlebar stage. Ordinary applications do not inherit the comparator switch.
 

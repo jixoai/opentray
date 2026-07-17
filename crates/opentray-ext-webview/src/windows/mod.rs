@@ -1,5 +1,6 @@
-// Orthogonal intents (2026-07-16; original user requests: repair Windows frameless chrome,
-// add application-level soft resizing, expose operational visibility, and fix native HWND residue):
+// Orthogonal intents (2026-07-17; original user requests: repair Windows frameless chrome,
+// restore the frameless WebView top edge, add application-level soft resizing, expose operational
+// visibility, and fix native HWND residue):
 // 1. Host the Windows WebView2 window and bridge.
 // 2. Project switcher, overlay, background, full-client native style, and host-surface ownership.
 // 3. Keep public window geometry in DWM visible-frame logical pixels, including frameless soft resize.
@@ -43,9 +44,10 @@ use windows_sys::Win32::Graphics::Dwm::{
     DwmEnableBlurBehindWindow, DwmExtendFrameIntoClientArea, DwmFlush, DwmGetWindowAttribute,
     DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMSBT_AUTO, DWMSBT_NONE,
     DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_NCRENDERING_POLICY, DWMWA_SYSTEMBACKDROP_TYPE,
-    DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWCP_ROUNDSMALL, DWM_BB_BLURREGION,
-    DWM_BB_ENABLE, DWM_BLURBEHIND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
+    DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DWMWA_VISIBLE_FRAME_BORDER_THICKNESS, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT,
+    DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWCP_ROUNDSMALL, DWM_BB_BLURREGION, DWM_BB_ENABLE,
+    DWM_BLURBEHIND, DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE,
 };
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CreateRectRgn, DeleteObject, EndPaint, FillRect, GetMonitorInfoW, GetStockObject,
@@ -68,14 +70,15 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetWindowTextW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, GWL_EXSTYLE,
     GWL_STYLE, HICON, HTCAPTION, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, IDC_ARROW,
     IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, IMAGE_ICON, LR_DEFAULTSIZE,
-    LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOCOPYBITS,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-    SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CLOSE,
-    WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON, WM_SETTINGCHANGE,
-    WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_APPWINDOW, WS_EX_LAYERED,
-    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX, WS_MINIMIZE,
-    WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+    LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, NCCALCSIZE_PARAMS, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOCOPYBITS, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
+    SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED,
+    WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON,
+    WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_APPWINDOW,
+    WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX,
+    WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+    WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -3447,12 +3450,74 @@ fn window_ex_style_bits(
     }
 }
 
-fn wants_full_client_area(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowsClientAreaProjection {
+    Default,
+    FullClient,
+    FramelessNativeResizeFrame,
+}
+
+fn client_area_projection(
     style: &WindowStyleState,
     overlay_enabled: bool,
     native_material_comparator: bool,
-) -> bool {
-    overlay_enabled || (style.frameless && !native_material_comparator)
+) -> WindowsClientAreaProjection {
+    if overlay_enabled || (style.frameless && !native_material_comparator) {
+        WindowsClientAreaProjection::FullClient
+    } else if style.frameless {
+        WindowsClientAreaProjection::FramelessNativeResizeFrame
+    } else {
+        WindowsClientAreaProjection::Default
+    }
+}
+
+fn visible_frame_border_thickness(hwnd: HWND) -> i32 {
+    let mut thickness = 0u32;
+    let result = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_VISIBLE_FRAME_BORDER_THICKNESS as u32,
+            std::ptr::addr_of_mut!(thickness).cast(),
+            std::mem::size_of::<u32>() as u32,
+        )
+    };
+    if hresult_failed(result) {
+        return 0;
+    }
+    i32::try_from(thickness).unwrap_or(i32::MAX)
+}
+
+fn frameless_native_frame_client_top(window_top: i32, border: i32, client_bottom: i32) -> i32 {
+    window_top.saturating_add(border.max(0)).min(client_bottom)
+}
+
+unsafe fn apply_frameless_native_frame_nccalc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if lparam == 0 {
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
+    let window_top = if wparam != 0 {
+        (*(lparam as *const NCCALCSIZE_PARAMS)).rgrc[0].top
+    } else {
+        (*(lparam as *const RECT)).top
+    };
+    DefWindowProcW(hwnd, msg, wparam, lparam);
+
+    let border = visible_frame_border_thickness(hwnd);
+    if wparam != 0 {
+        let params = &mut *(lparam as *mut NCCALCSIZE_PARAMS);
+        params.rgrc[0].top =
+            frameless_native_frame_client_top(window_top, border, params.rgrc[0].bottom);
+    } else {
+        let rect = &mut *(lparam as *mut RECT);
+        rect.top = frameless_native_frame_client_top(window_top, border, rect.bottom);
+    }
+    0
 }
 
 fn wants_no_redirection_bitmap(style: &WindowStyleState) -> bool {
@@ -5645,30 +5710,29 @@ unsafe extern "system" fn window_proc(
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_NCCALCSIZE => {
-            // Frameless and AppWindow-overlay windows expose the full host rect as client area so
-            // WebView2 reaches the native edges. AppWindow still owns the caption controls for the
-            // overlay case; ordinary framed windows retain DefWindowProcW non-client geometry.
-            let full_client = with_window_proc_state(hwnd, |state| {
+            let projection = with_window_proc_state(hwnd, |state| {
                 state
                     .bridge
                     .and_then(|bridge| {
                         unsafe { bridge.as_ref() }.try_borrow().ok().map(|bridge| {
-                            wants_full_client_area(
+                            client_area_projection(
                                 &bridge.style,
                                 bridge.navigator_window.window_controls_overlay,
                                 windows_native_material_comparator_enabled(),
                             )
                         })
                     })
-                    .unwrap_or(false)
+                    .unwrap_or(WindowsClientAreaProjection::Default)
             });
-            // A frameless window owns all non-client geometry. Win32 uses both wParam forms
-            // across style and minimized-state transitions; allowing either form through
-            // reintroduces a residual native titlebar.
-            if full_client {
-                0
-            } else {
-                DefWindowProcW(hwnd, msg, wparam, lparam)
+            match projection {
+                WindowsClientAreaProjection::FullClient => 0,
+                WindowsClientAreaProjection::FramelessNativeResizeFrame => {
+                    // Keep DefWindowProc's left/right/bottom resize insets, but remove the caption
+                    // gap above WebView2. Win11's visible border remains as the system-reported
+                    // one-to-two-pixel top edge instead of a hard-coded platform guess.
+                    apply_frameless_native_frame_nccalc(hwnd, msg, wparam, lparam)
+                }
+                WindowsClientAreaProjection::Default => DefWindowProcW(hwnd, msg, wparam, lparam),
             }
         }
         WM_ACTIVATE => {
@@ -6464,15 +6528,34 @@ mod tests {
     }
 
     #[test]
-    fn frameless_and_overlay_windows_use_the_full_client_area() {
+    fn client_area_projection_preserves_only_the_comparator_resize_frame() {
         let mut style = window_style_from_initial(&crate::WebviewInitialStyle::default())
             .expect("default style");
 
-        assert!(!wants_full_client_area(&style, false, false));
-        assert!(wants_full_client_area(&style, true, false));
+        assert_eq!(
+            client_area_projection(&style, false, false),
+            WindowsClientAreaProjection::Default
+        );
+        assert_eq!(
+            client_area_projection(&style, true, true),
+            WindowsClientAreaProjection::FullClient
+        );
         style.frameless = true;
-        assert!(wants_full_client_area(&style, false, false));
-        assert!(!wants_full_client_area(&style, false, true));
+        assert_eq!(
+            client_area_projection(&style, false, false),
+            WindowsClientAreaProjection::FullClient
+        );
+        assert_eq!(
+            client_area_projection(&style, false, true),
+            WindowsClientAreaProjection::FramelessNativeResizeFrame
+        );
+    }
+
+    #[test]
+    fn comparator_frameless_client_keeps_only_the_visible_top_border() {
+        assert_eq!(frameless_native_frame_client_top(100, 2, 700), 102);
+        assert_eq!(frameless_native_frame_client_top(100, -1, 700), 100);
+        assert_eq!(frameless_native_frame_client_top(100, 8, 104), 104);
     }
 
     #[test]
@@ -6496,7 +6579,10 @@ mod tests {
 
         assert_ne!(bits & WS_THICKFRAME, 0);
         assert_ne!(bits & WS_SYSMENU, 0);
-        assert!(!wants_full_client_area(&style, false, true));
+        assert_eq!(
+            client_area_projection(&style, false, true),
+            WindowsClientAreaProjection::FramelessNativeResizeFrame
+        );
         assert!(!wants_soft_resize(&style, true));
     }
 
