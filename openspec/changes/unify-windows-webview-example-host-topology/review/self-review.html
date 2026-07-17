@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Windows Example Host Topology Review</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Segoe UI, system-ui, sans-serif; }
+    body { margin: 0; background: Canvas; color: CanvasText; }
+    main { max-width: 1080px; margin: 0 auto; padding: 32px 24px 48px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    h2 { font-size: 18px; margin: 28px 0 10px; }
+    p { line-height: 1.55; }
+    .status { border-left: 4px solid #16803c; padding: 12px 16px; background: color-mix(in srgb, #16803c 10%, Canvas); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas); padding: 9px 10px; text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, CanvasText 7%, Canvas); }
+    code { font-family: Cascadia Code, Consolas, monospace; font-size: 0.92em; }
+    .pass { color: #16803c; font-weight: 600; }
+    .limit { color: #9a5b00; font-weight: 600; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Windows Example Host Topology Review</h1>
+  <p>Change: <code>unify-windows-webview-example-host-topology</code></p>
+  <div class="status"><strong>Exit judgment:</strong> normal archive and release. The user accepted the visible result and declined further chrome API expansion.</div>
+
+  <h2>Topology Boundary</h2>
+  <table>
+    <tr><th>Surface</th><th>Comparator topology</th><th>Probe instrumentation</th><th>Additional stage</th></tr>
+    <tr><td>win32-bug</td><td class="pass">Enabled</td><td class="pass">Enabled</td><td>None</td></tr>
+    <tr><td>webview-control --no-overlay</td><td class="pass">Enabled</td><td>Disabled</td><td>None</td></tr>
+    <tr><td>webview-control overlay</td><td class="pass">Enabled</td><td>Disabled</td><td>Post-WebView AppWindow</td></tr>
+    <tr><td>Ordinary applications</td><td>Disabled</td><td>Disabled</td><td>Application choice</td></tr>
+  </table>
+
+  <h2>Verification</h2>
+  <table>
+    <tr><th>Gate</th><th>Observed result</th></tr>
+    <tr><td>Rust tests</td><td class="pass">77 passed</td></tr>
+    <tr><td>ext-webview tests</td><td class="pass">39 passed</td></tr>
+    <tr><td>CLI tests</td><td class="pass">85 passed, 1 skipped</td></tr>
+    <tr><td>TypeScript and Svelte</td><td class="pass">Passed; Svelte 0 errors and 0 warnings</td></tr>
+    <tr><td>Overlay bridge smoke</td><td class="pass"><code>gap=2x1:overlay=739x33</code></td></tr>
+    <tr><td>No-overlay bridge smoke</td><td class="pass"><code>gap=2x31:overlay=off</code></td></tr>
+    <tr><td>win32-bug retained tray smoke</td><td class="pass">Hide -> Show -> Hide; retained page preserved</td></tr>
+    <tr><td>User visual acceptance</td><td class="pass">Accepted as very good</td></tr>
+  </table>
+
+  <h2>Visible Evidence Boundary</h2>
+  <p class="limit">No repository screenshot is treated as pixel proof.</p>
+  <p>The user's Windows observation is authoritative for residue appearance. Automated checks prove construction policy, source artifact affinity, bridge actions, and tray lifecycle.</p>
+
+  <h2>Final Product Boundary</h2>
+  <table>
+    <tr><th>Decision</th><th>Result</th></tr>
+    <tr><td>Common API</td><td>Keep existing <code>frameless</code> and <code>resizable</code>; no three-mode chrome API in this release.</td></tr>
+    <tr><td>Platform-only experiment</td><td>Comparator topology remains internal evidence tooling.</td></tr>
+    <tr><td>Release readiness</td><td class="pass">Normal archive, patch changeset, CI native build, OIDC publish.</td></tr>
+  </table>
+</main>
+</body>
+</html>
