@@ -76,3 +76,14 @@
 - [x] 9.4 Update the Windows material-host spec, README, agent law, and Chinese terminology with the top-only projection rule.
 - [x] 9.5 Build the source broker and extension, then run `example:webview-control -- --frameless --resizable --no-overlay` geometry smoke; the bridge reported `gap=2x2`.
 - [ ] 9.6 Require renewed Windows visual acceptance that top/side gaps are 0-4 logical pixels and native edge/corner resize remains continuous.
+
+## 10. Operational Tray Lifecycle
+
+- [x] 10.1 Record the 2026-07-17 requirements for minimize-aware tray labels, default Windows switcher exclusion, and common focus-loss auto-hide.
+- [x] 10.2 Specify common `style.autoHide` default/override semantics and comparator-independent `showInSwitchers` projection.
+- [ ] 10.3 Add TypeScript style/capability/recipe contracts and parser defaults for `autoHide`.
+- [ ] 10.4 Implement Windows native blur auto-hide and make comparator extended styles obey `showInSwitchers`.
+- [ ] 10.5 Implement macOS native blur auto-hide with the same `autoHide && !keepOnTop` predicate.
+- [ ] 10.6 Add focused Rust and TypeScript tests, and opt diagnostic examples out with `autoHide: false`.
+- [ ] 10.7 Release the OpenTray package family, update pnpm-pub, and make its tray projection use `isVisible`, `visibleChange`, `toVisible`, and `close`.
+- [ ] 10.8 Verify the published consumer build and start pnpm-pub for renewed Windows visual acceptance.

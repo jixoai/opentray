@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 9
-- Status: the comparator top gap and classic outer-frame residue are accepted; this round closes operational visibility drift, default switcher exclusion, and tray-panel auto-hide semantics before the next release.
-- Previous plan backup: `plans/plan-v10.md`
+- Round: 8
+- Status: the comparator frameless top-gap regression is repaired with top-only client projection; focused Rust tests and source geometry smoke pass at `gap=2x2`, while renewed Windows edge/corner resize visual acceptance is pending.
+- Previous plan backup: `plans/plan-v9.md`
 
 ## Workflow Command Surface
 
@@ -33,11 +33,6 @@
 > 1. 改进一下这些 example 的 primaryEvent，参考pnpm-pub，提供 `show|hide Example`，并将这种作为 ext-webview 的普遍最佳实践
 > 2. frameless之后，或者frameless模式下resize完成之后，记得做 渲染残影的清理
 
-> 2026-07-17 follow-up:
-> 1. pnpm-pub's tray menu must use OpenTray operational visibility so native minimize changes `Hide window` to `Show window`.
-> 2. Tray WebViews must stay out of the Windows taskbar and Alt+Tab by default, including comparator topology.
-> 3. Add common `style.autoHide`, defaulting to `true`: native focus loss hides the retained tray window unless `keepOnTop: true` or `autoHide: false`. pnpm-pub keeps its page-owned exit animation because its permanent `keepOnTop: true` intentionally suppresses native auto-hide.
-
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -56,9 +51,6 @@
 | 2026-07-15 | User | Implement the recommended approach first, then let the user test. | Apply terminal-only shell recovery without a C#/WinUI rewrite, composition-hosting migration, or new distribution package. |
 | 2026-07-16 | User | Continuous resize no longer flickers, but `Hide Example` then `Show Example` leaves rendering residue. | The one-private-message reveal cleanup can run before DWM/WebView2 presents the restored surface; trial one delayed reveal-only recovery without changing native resize cadence. |
 | 2026-07-17 | User | In frameless comparator topology, public bounds are 450x506 while `window.outerWidth/outerHeight` are 448x499; width is correct but WebView2 retains an excessive top gap. The user recalls this had been repaired previously and may have been lost during rewrite. | Recover the historical full-client repair, but preserve comparator native resize ownership by projecting only the top client edge instead of removing all native frame insets. |
-| 2026-07-17 | User | Native minimize leaves pnpm-pub's tray action on `Hide window`. | Make OpenTray `visibleChange` / `isVisible()` authoritative in the consumer instead of a private visibility boolean. |
-| 2026-07-17 | User | Tray windows must not appear in the system taskbar by default, but the current comparator-backed consumer does. | Comparator topology must obey `showInSwitchers`; default false projects `WS_EX_TOOLWINDOW` and removes `WS_EX_APPWINDOW`. |
-| 2026-07-17 | User | Tray WebViews should hide when focus is lost unless kept on top or auto-hide is manually disabled. | Add common `style.autoHide`, default true, and perform native blur dismissal on Windows and macOS. |
 
 ### Evidence Read
 
@@ -82,9 +74,6 @@
 | `openspec/changes/archive/2026-06-20-tray-dynamic-state-and-webview-placement-kit` | WebView show/hide and resize cleanup are existing extension laws. | Extend the same atom; do not introduce a core/runtime special case. |
 | Git `1a3b2a3` and `b2736fc` | The earlier shell repair added full-client `WM_NCCALCSIZE`; comparator parity later excluded comparator frameless from that projection and restored the caption inset. | Split client-area projection into default, full-client, and comparator top-only modes. |
 | Windows user geometry evidence | Width differs by 2 logical pixels while height differs by 7. | Preserve side resize insets and remove only the extra top caption gap. |
-| `window_ex_style_bits` comparator branch | Comparator returns a neutral extended style before evaluating `showInSwitchers`. | The internal geometry topology accidentally creates a normal taskbar projection. |
-| Windows `WM_ACTIVATE` and macOS key-window observers | Both runtimes already receive native focus-loss completion. | Auto-hide belongs at the native focus boundary and needs no polling or page listener. |
-| `pnpm-pub/src/daemon/tray-host.ts` | Private `visibility` changes only through host methods and does not subscribe to `visibleChange`. | Native minimize cannot update the tray label until the consumer adopts operational visibility. |
 
 ### Git Evidence
 
@@ -133,7 +122,7 @@
 
 ### Surface Intent
 
-Complete the retained tray-window lifecycle: operational visibility is the single Show/Hide authority, tray WebViews are excluded from Windows switchers by default on every host topology, and common native auto-hide dismisses an unpinned tray surface when it loses focus.
+Repair the Windows frameless shell so it is genuinely frameless, continuously resizable when explicitly requested, and minimizable. Add one operational visibility model that lets tray applications restore either hidden or minimized windows without inspecting two native flags themselves.
 
 ### Underlying Drive
 
@@ -144,8 +133,6 @@ The native layer must stop using a compositor workaround as a general window-sta
 On Windows, a frameless WebView remains free of native titlebar/frame pixels after resize, minimize, restore, hide, and show. Dragging any supported soft-resize edge continuously tracks the pointer without flicker. A tray host can ask one `isVisible()` question, render Show or Hide accurately, call `toVisible()` to reveal a hidden/minimized window, and receive `visibleChange` only when that operational state changes.
 
 Every runnable source WebView example exposes that same operation through its primary tray item: `Show Example` when the retained session is not operationally visible, `Hide Example` when it is. On Windows, a frameless window clears rendering residue after it becomes visible and after a successful soft-resize interaction releases capture.
-
-A tray WebView created without an explicit override auto-hides after native focus loss. `keepOnTop: true` suppresses this policy, and `autoHide: false` explicitly opts out. The hide transition keeps the native session alive and emits `visibleChange(false)`. Windows comparator topology remains a geometry/paint implementation detail and cannot opt a default tray window into the taskbar or Alt+Tab.
 
 Examples create native window event listeners only after first show and tear down in this order: unlisten, destroy the retained native session, then close the runtime and Vite server. No example leaves a broker poller or HWND behind after automatic smoke exit.
 

@@ -167,3 +167,61 @@ This rule applies to ordinary framed and material-backed windows as well as the 
 - **GIVEN** a visible normal WebView begins and ends a native move interaction without resizing
 - **WHEN** the host receives `WM_ENTERSIZEMOVE` and then `WM_EXITSIZEMOVE`
 - **THEN** it does not queue an artifact repair.
+
+
+### Requirement: Tray WebView auto-hide SHALL be a common native style policy
+
+`WebviewWindowStyle` SHALL expose common boolean `autoHide`, with an effective default of `true`. When a visible retained WebView loses native focus, the platform runtime SHALL hide that same native projection when and only when `autoHide` is true and `keepOnTop` is false. The transition SHALL preserve the session, page state, content, and geometry, and SHALL emit operational `visibleChange` with `{ visible: false }`.
+
+`keepOnTop: true` SHALL suppress native auto-hide even when `autoHide` remains true. `autoHide: false` SHALL explicitly suppress focus-loss dismissal. Runtime style patches SHALL take effect for subsequent native focus transitions without recreating the session. The capability DTO SHALL report support for the common `autoHide` style.
+
+#### Scenario: Default tray surface hides after focus loss
+
+- **GIVEN** a visible retained WebView uses the default style with `keepOnTop: false`
+- **WHEN** the native window loses focus
+- **THEN** the native projection is hidden without destroying the session
+- **AND** operational visibility changes to false exactly once.
+
+#### Scenario: A pinned surface stays visible
+
+- **GIVEN** a visible retained WebView has `keepOnTop: true`
+- **WHEN** the native window loses focus
+- **THEN** the window remains operationally visible
+- **AND** no auto-hide visibility transition is emitted.
+
+#### Scenario: An application opts out of auto-hide
+
+- **GIVEN** a visible retained WebView has `autoHide: false` and `keepOnTop: false`
+- **WHEN** the native window loses focus
+- **THEN** the window remains visible for application-owned dismissal.
+
+### Requirement: Diagnostic WebView examples SHALL opt out of native auto-hide
+
+Runnable control/comparator examples that require interaction with DevTools or another native window SHALL explicitly set `autoHide: false`. This is an example policy override, not a different runtime default.
+
+#### Scenario: DevTools interaction does not dismiss a comparator
+
+- **GIVEN** `example:webview-control` or `example:win32-bug` is running
+- **WHEN** focus moves to DevTools or another observation surface
+- **THEN** the example window remains visible until its explicit retained-session action hides it.
+
+## MODIFIED Requirements
+
+### Requirement: Windows WebView switcher visibility SHALL be explicit
+
+The WebView extension SHALL expose Windows system-switcher visibility as `style.platform.windows.showInSwitchers`. The durable fact SHALL mean participation in normal Windows task switchers, including the taskbar and Alt+Tab projection. It SHALL default to `false` so tray-owned WebViews behave as utility windows. Setting it to `true` SHALL opt a window into switcher participation without coupling that policy to title, icon metadata, frameless state, material hosting, or internal comparator topology.
+
+When false, every Windows host topology SHALL project `WS_EX_TOOLWINDOW` and remove `WS_EX_APPWINDOW`. When true, every topology SHALL project `WS_EX_APPWINDOW` and remove `WS_EX_TOOLWINDOW`.
+
+#### Scenario: Comparator tray window stays out of switchers by default
+
+- **GIVEN** a Windows WebView uses comparator topology without `showInSwitchers`
+- **WHEN** its native extended style is projected
+- **THEN** it does not appear in the taskbar or Alt+Tab
+- **AND** comparator geometry and material behavior remain unchanged.
+
+#### Scenario: An application explicitly opts into switchers
+
+- **GIVEN** a Windows WebView sets `showInSwitchers: true`
+- **WHEN** either production or comparator topology projects the native style
+- **THEN** the window participates in the normal Windows task switchers.
