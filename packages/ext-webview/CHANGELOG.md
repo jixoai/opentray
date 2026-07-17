@@ -1,5 +1,11 @@
 # @opentray/ext-webview
 
+## 0.14.2
+
+### Patch Changes
+
+- b439f36: Restore the Windows 11 frameless WebView top edge while preserving comparator native resize insets, eliminating the retained caption-height gap without regressing native edge and corner resizing.
+
 ## 0.14.1
 
 ### Patch Changes
