@@ -4,6 +4,7 @@
 // 2. Enable the native-only material/paint probe state for this example process.
 // 3. Keep the initial HWND geometry and material aligned with the native probe.
 // 4. Prove the retained Show/Hide Example and Quit Demo tray contract.
+// 5. Disable native auto-hide so comparison against external windows remains observable.
 
 import type { WebviewWindowOptions } from "../../ext-webview/src/index";
 import { createExampleLifecycle, sleep } from "./_support/example-lifecycle";
@@ -70,6 +71,7 @@ const webview = mountExampleWebview(runtime, "win32-bug-webview").createWebviewW
     frameless: false,
     resizable: true,
     keepOnTop: false,
+    autoHide: false,
     background: {
       kind: "platformMaterial",
       material: "acrylic",

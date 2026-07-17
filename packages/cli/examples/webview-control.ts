@@ -1,9 +1,10 @@
 // Orthogonal intents (2026-07-15; original user requests: Chrome-PWA-like Windows overlay controls,
-// frameless repair, and operational visibility):
+// frameless repair, operational visibility, and diagnostic auto-hide control):
 // 1. Exercise native window controls, explicit Windows caption-button colors, and bridge capabilities.
 // 2. Assert overlay and frameless native/browser geometry, including resizable frameless behavior.
 // 3. Smoke operational visibility queries without rebuilding the page session.
 // 4. Run Windows on the same comparator host topology as win32-bug before optional overlay.
+// 5. Disable native auto-hide so DevTools and external observation do not dismiss the specimen.
 
 import type {
   WebviewWindowControlsOverlay,
@@ -103,6 +104,7 @@ const webview = mountExampleWebview(
     frameless,
     ...(resizable === undefined ? {} : { resizable }),
     keepOnTop: false,
+    autoHide: false,
     // Translucent native material so the page's own translucent background
     // (bg-background/80 in the route) composes with the window vibrancy. The
     // web theme tracks prefers-color-scheme so the native tint and the page

@@ -1,7 +1,7 @@
-// Orthogonal intents (2026-07-15; original user request: repair Windows frameless chrome and add common resizable style):
+// Orthogonal intents (2026-07-17; original user requests: common resizable and tray auto-hide styles):
 // 1. Keep macOS style parsing explicit and reject Windows `showInSwitchers` payloads.
 // 2. Preserve existing AppKit window/background projection.
-// 3. Project common `resizable` intent through `NSWindowStyleMask::Resizable`.
+// 3. Project common `resizable` and `autoHide` lifecycle intent.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -31,6 +31,7 @@ pub(super) struct WindowStyleState {
     #[serde(skip)]
     pub(super) resizable_override: Option<bool>,
     pub(super) keep_on_top: bool,
+    pub(super) auto_hide: bool,
     pub(super) opacity: f64,
     pub(super) background: WebviewWindowBackground,
     pub(super) platform: WindowPlatformStyleState,
@@ -55,6 +56,7 @@ impl Default for WindowStyleState {
             resizable: true,
             resizable_override: None,
             keep_on_top: false,
+            auto_hide: true,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
             platform: WindowPlatformStyleState {
@@ -72,6 +74,7 @@ pub(super) struct SetStylePayload {
     pub(super) frameless: Option<bool>,
     pub(super) resizable: Option<bool>,
     pub(super) keep_on_top: Option<bool>,
+    pub(super) auto_hide: Option<bool>,
     pub(super) opacity: Option<f64>,
     pub(super) background: Option<WebviewBackgroundInput>,
     pub(super) platform: Option<SetStylePlatformPayload>,
@@ -156,6 +159,7 @@ pub(super) fn validate_initial_style(
         frameless: Some(show_settings.window.style.frameless),
         resizable: show_settings.window.style.resizable,
         keep_on_top: Some(show_settings.window.style.keep_on_top),
+        auto_hide: Some(show_settings.window.style.auto_hide),
         opacity: Some(show_settings.window.style.opacity),
         background: None,
         platform: Some(SetStylePlatformPayload {

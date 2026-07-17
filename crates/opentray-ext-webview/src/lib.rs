@@ -1,7 +1,8 @@
-// Orthogonal intents (2026-07-14; original user request: Chrome-PWA-like Windows overlay controls):
-// 1. Parse the extension-owned WebView protocol, including typed overlay control colors, into platform-neutral runtime settings.
+// Orthogonal intents (2026-07-17; original user requests: typed native window styles and default tray auto-hide):
+// 1. Parse the extension-owned WebView protocol into platform-neutral runtime settings.
 // 2. Keep platform style families typed and reject foreign-family payloads consistently.
-// 3. Export the stable dynamic extension ABI.
+// 3. Define common retained-window lifecycle defaults and native blur policy.
+// 4. Export the stable dynamic extension ABI.
 
 mod bootstrap;
 #[cfg(target_os = "macos")]
@@ -78,6 +79,7 @@ pub(crate) struct WebviewInitialStyle {
     pub frameless: bool,
     pub resizable: Option<bool>,
     pub keep_on_top: bool,
+    pub auto_hide: bool,
     pub opacity: f64,
     pub background: WebviewWindowBackground,
     pub platform: WebviewInitialPlatformStyle,
@@ -89,11 +91,16 @@ impl Default for WebviewInitialStyle {
             frameless: false,
             resizable: None,
             keep_on_top: false,
+            auto_hide: true,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
             platform: WebviewInitialPlatformStyle::default(),
         }
     }
+}
+
+pub(crate) fn should_auto_hide_on_blur(auto_hide: bool, keep_on_top: bool) -> bool {
+    auto_hide && !keep_on_top
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -481,6 +488,7 @@ struct ShowWindowStyleData {
     frameless: Option<bool>,
     resizable: Option<bool>,
     keep_on_top: Option<bool>,
+    auto_hide: Option<bool>,
     opacity: Option<f64>,
     background: Option<WebviewBackgroundInput>,
     platform: Option<ShowWindowPlatformStyleData>,
@@ -831,6 +839,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                                 .transpose()?
                                 .unwrap_or_default(),
                             keep_on_top: style.and_then(|style| style.keep_on_top).unwrap_or(false),
+                            auto_hide: style.and_then(|style| style.auto_hide).unwrap_or(true),
                             platform: WebviewInitialPlatformStyle {
                                 macos: WebviewInitialMacosStyle {
                                     corner_radius: macos_style
@@ -1567,6 +1576,14 @@ mod tests {
     }
 
     #[test]
+    fn common_auto_hide_policy_requires_enabled_unpinned_style() {
+        assert!(should_auto_hide_on_blur(true, false));
+        assert!(!should_auto_hide_on_blur(false, false));
+        assert!(!should_auto_hide_on_blur(true, true));
+        assert!(!should_auto_hide_on_blur(false, true));
+    }
+
+    #[test]
     fn parse_show_command_keeps_extension_owned_protocol() {
         let command = parse_webview_command(&serde_json::json!({
             "type": "show",
@@ -1626,6 +1643,7 @@ mod tests {
                 "state": "active"
               },
               "keepOnTop": true,
+              "autoHide": false,
               "platform": {
                 "macos": {
                   "cornerRadius": 18
@@ -1684,6 +1702,7 @@ mod tests {
                             frameless: true,
                             resizable: Some(true),
                             keep_on_top: true,
+                            auto_hide: false,
                             opacity: 0.72,
                             background: WebviewWindowBackground::PlatformMaterial {
                                 material: "hudWindow".to_string(),

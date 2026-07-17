@@ -406,8 +406,9 @@ See also:
 
 Choose one dismissal law before writing app code:
 
-- Pinned panel: set `style.keepOnTop: true`; tray primary click toggles `toVisible()` / `close()` on the same retained handle; do not blur-auto-hide.
-- Non-pinned panel: leave `keepOnTop` false; listen for native `blur` and call `close()` when no blocking work is pending.
+- Pinned panel: set `style.keepOnTop: true`; tray primary click toggles `toVisible()` / `close()` on the same retained handle. `keepOnTop` suppresses native auto-hide.
+- Default non-pinned panel: leave `keepOnTop` false and `autoHide` unset; native blur hides the retained session and emits `visibleChange(false)`.
+- Application-owned dismissal: set `autoHide: false` before implementing a page exit animation, protected form, or other conditional blur policy.
 
 Minimal pinned-panel shape:
 
@@ -487,7 +488,7 @@ Benefit: developers can build custom tray menus, launchers, and compact panels w
 
 Ask the user: "Should the panel merely open from the tray, or should its HTML also react to the tray anchor for arrows, reveal animation, and edge alignment?"
 
-Lifecycle best practice: tray panels are not ordinary document popups. If the panel is `keepOnTop`, the primary tray event must toggle it; if it is not `keepOnTop`, native `blur` is the dismissal source. Do not combine both rules unless a product-specific pending/confirmation state explicitly overrides dismissal.
+Lifecycle best practice: tray panels are not ordinary document popups. If the panel is `keepOnTop`, the primary tray event must toggle it. Otherwise the default `autoHide: true` makes native blur the dismissal source. Set `autoHide: false` only when a product-specific animation, pending operation, or confirmation state must own the final `close()`.
 
 See also:
 

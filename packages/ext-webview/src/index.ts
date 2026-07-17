@@ -2,7 +2,7 @@
 // 1. Expose typed WebView extension contracts, including Windows overlay-control colors and showInSwitchers.
 // 2. Provide tray-scoped window handles and capability facades.
 // 3. Re-export placement, responsive, style, and permission helpers.
-// 4. Declare common chrome-derived user-resize intent without page-managed resize loops.
+// 4. Declare common chrome-derived resize and native blur auto-hide intent.
 // 5. Keep host-side native event polling single-flight and terminal after transport failure.
 // Compromise: this established public entrypoint aggregates more than five API families; splitting
 // it would be a separate package-surface change and is outside this repair.
@@ -169,6 +169,8 @@ export interface WebviewWindowStyle {
   /** Whether the operator can resize the native window with pointer input. */
   resizable: boolean;
   keepOnTop: boolean;
+  /** Hide the retained tray surface after native focus loss unless it is kept on top. */
+  autoHide: boolean;
   opacity: number;
   background: WebviewWindowBackground;
   platform: WebviewWindowPlatformStyle;
@@ -179,6 +181,8 @@ export interface WebviewWindowStylePatch {
   /** Explicitly overrides the chrome-derived user-resize default. */
   resizable?: boolean;
   keepOnTop?: boolean;
+  /** Defaults to true; keepOnTop suppresses native auto-hide without changing this value. */
+  autoHide?: boolean;
   opacity?: number;
   background?: WebviewWindowBackgroundInput;
   platform?: {
@@ -226,6 +230,7 @@ export interface WebviewWindowCapabilities {
   appRegionDrag: boolean;
   frameless: boolean;
   keepOnTop: boolean;
+  autoHide: boolean;
   opacity: boolean;
   title: boolean;
   icon: boolean;

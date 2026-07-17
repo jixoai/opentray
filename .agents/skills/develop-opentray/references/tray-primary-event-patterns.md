@@ -200,7 +200,7 @@ tray.onMenuClick(async ({ itemId }) => {
 });
 ```
 
-Best-practice fork: a `keepOnTop` tray panel should toggle on repeated primary clicks; a non-pinned panel should hide on the WebView window's native `blur` event. Show-only handlers leave the user with no predictable dismissal law.
+Best-practice fork: a `keepOnTop` tray panel should toggle on repeated primary clicks; a non-pinned panel inherits `autoHide: true` and hides on native blur. Set `autoHide: false` only when the application deliberately owns a conditional or animated dismissal. Show-only handlers leave the user with no predictable dismissal law.
 
 ## Common Mistakes
 

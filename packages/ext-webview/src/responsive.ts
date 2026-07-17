@@ -1,3 +1,8 @@
+// Orthogonal intents (2026-07-17; original user request: expose autoHide through declarative style recipes):
+// 1. Translate responsive recipes into typed native size/style patches.
+// 2. Keep media-query observation independent from page content.
+// 3. Preserve desktop-logical geometry and explicit lifecycle overrides.
+
 import type { Rect } from "@opentray/spec";
 
 import type {
@@ -40,6 +45,7 @@ export interface WebviewWindowStyleRecipe {
   frameless?: boolean;
   resizable?: boolean;
   keepOnTop?: boolean;
+  autoHide?: boolean;
   opacity?: number;
   platform?: WebviewWindowStylePatch["platform"];
 }
@@ -172,6 +178,7 @@ const stylePatchFromRecipe = (
     ...(style.frameless === undefined ? {} : { frameless: style.frameless }),
     ...(style.resizable === undefined ? {} : { resizable: style.resizable }),
     ...(style.keepOnTop === undefined ? {} : { keepOnTop: style.keepOnTop }),
+    ...(style.autoHide === undefined ? {} : { autoHide: style.autoHide }),
     ...(style.opacity === undefined ? {} : { opacity: style.opacity }),
     ...(style.platform === undefined ? {} : { platform: style.platform }),
   };

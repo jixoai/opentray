@@ -1,3 +1,12 @@
+// Orthogonal intents (2026-07-17; original user request: default retained tray-window auto-hide):
+// 1. Own the AppKit window/WebView lifecycle and extension bridge.
+// 2. Project common style, operational visibility, and focus-loss auto-hide.
+// 3. Preserve native metadata, permissions, downloads, screen, and tray capabilities.
+// 4. Keep injected page APIs scoped by explicit capability policy.
+// 5. Maintain retained-session show/hide semantics without rebuilding page state.
+// Compromise: this established platform module exceeds the preferred file-size limit because the
+// AppKit window, observer, and WebKit ownership graph remain one main-thread lifecycle boundary.
+
 mod app_menu;
 mod bridge;
 mod demo_html;
@@ -33,10 +42,10 @@ use serde_json::{json, Value};
 use wry::{PageLoadEvent, WebView, WebViewBuilder, WebViewExtMacOS, RGBA};
 
 use crate::{
-    NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings,
-    WebviewBrowserPermissionPolicy, WebviewCommand, WebviewDownloadSettings,
-    WebviewNativeApiPolicy, WebviewPermissionManagerPolicy, WebviewRuntimeError,
-    WebviewSessionBootstrapSettings, WebviewShowSettings,
+    should_auto_hide_on_blur, NavigatorScreenSettings, NavigatorTraySettings,
+    NavigatorWindowSettings, WebviewBrowserPermissionPolicy, WebviewCommand,
+    WebviewDownloadSettings, WebviewNativeApiPolicy, WebviewPermissionManagerPolicy,
+    WebviewRuntimeError, WebviewSessionBootstrapSettings, WebviewShowSettings,
 };
 
 use self::app_menu::ensure_standard_edit_menu;
@@ -146,6 +155,7 @@ struct WindowCapabilities {
     app_region_drag: bool,
     frameless: bool,
     keep_on_top: bool,
+    auto_hide: bool,
     opacity: bool,
     title: bool,
     icon: bool,
@@ -721,6 +731,7 @@ impl MacosWebviewRuntime {
                     .unwrap_or(!show_settings.window.style.frameless),
                 resizable_override: show_settings.window.style.resizable,
                 keep_on_top: show_settings.window.style.keep_on_top,
+                auto_hide: show_settings.window.style.auto_hide,
                 opacity: show_settings.window.style.opacity,
                 background: show_settings.window.style.background.clone(),
                 platform: self::style::WindowPlatformStyleState {
@@ -1015,6 +1026,7 @@ fn apply_reused_show_updates(
                 .unwrap_or(!show_settings.window.style.frameless),
             resizable_override: show_settings.window.style.resizable,
             keep_on_top: show_settings.window.style.keep_on_top,
+            auto_hide: show_settings.window.style.auto_hide,
             opacity: show_settings.window.style.opacity,
             background: show_settings.window.style.background.clone(),
             platform: self::style::WindowPlatformStyleState {
@@ -1187,6 +1199,7 @@ impl NavigatorWindowBridge {
             app_region_drag: self.page_access.window,
             frameless: true,
             keep_on_top: true,
+            auto_hide: true,
             opacity: true,
             title: true,
             icon: true,
@@ -1279,11 +1292,25 @@ fn install_focus_observers(
     let window_object = window.as_ref();
     let focus_bridge = Rc::downgrade(bridge);
     let blur_bridge = Rc::downgrade(bridge);
+    let blur_window = window.clone();
     let focus_block = RcBlock::new(move |_notification: NonNull<NSNotification>| {
         queue_window_event(&focus_bridge, "focus", json!({}));
     });
     let blur_block = RcBlock::new(move |_notification: NonNull<NSNotification>| {
         queue_window_event(&blur_bridge, "blur", json!({}));
+        let Some(bridge) = blur_bridge.upgrade() else {
+            return;
+        };
+        let should_hide = {
+            let state = bridge.borrow();
+            window_is_visible(&blur_window)
+                && should_auto_hide_on_blur(state.style.auto_hide, state.style.keep_on_top)
+        };
+        if should_hide {
+            if let Err(error) = close_window(&bridge, &blur_window) {
+                eprintln!("opentray-ext-webview failed to auto-hide macOS window: {error}");
+            }
+        }
     });
     unsafe {
         vec![

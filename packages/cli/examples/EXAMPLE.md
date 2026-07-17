@@ -6,7 +6,7 @@ This guide is for manual source-tree verification of the official WebView exampl
 
 Use these examples to verify the delivered window contract in this branch:
 
-- common shell traits: `frameless`, `background`, `keepOnTop`, `opacity`
+- common shell traits: `frameless`, `background`, `keepOnTop`, `autoHide`, `opacity`
 - HTML-standard download semantics through the native runtime download handlers
 - background modes: `opaque`, `transparent`, semantic `blur`, and platform material names
 - platform corner family: `style.platform.macos.cornerRadius` and `style.platform.windows.cornerPreference`
@@ -173,7 +173,7 @@ Use the same controls and shortcuts as the native probe:
 | `P` | `InvalidateRect + UpdateWindow` without changing WebView pixels |
 | `Escape` | hide the retained example window |
 
-The probe environment removes constructor-only variables that differ from the native executable: the top-level class has no `CS_OWNDC`, the hidden HWND completes material before a DPI-equivalent raw outer-size commit and WebView2 creation, that commit does not add visible-frame border compensation, material startup does not add DWM blur-behind, and the probe window does not force tool/app extended styles. Ordinary OpenTray windows keep the production Black material painter and reject `win32Probe*` commands.
+The probe environment removes constructor-only variables that differ from the native executable: the top-level class has no `CS_OWNDC`, the hidden HWND completes material before a DPI-equivalent raw outer-size commit and WebView2 creation, that commit does not add visible-frame border compensation, and material startup does not add DWM blur-behind. Switcher projection is intentionally not probe-owned: `showInSwitchers` still decides tool/app extended styles, so the default example stays out of the taskbar and Alt+Tab. Ordinary OpenTray windows keep the production Black material painter and reject `win32Probe*` commands.
 
 For an automated source-host lifecycle smoke, which verifies bridge and transparency contracts but cannot judge DWM residue pixels:
 
@@ -282,8 +282,9 @@ Expected checks:
    - `background: "mica"` and `cornerPreference: "round"` on Windows
 4. `html` and `body` stay reset and transparent; padding belongs to inner content only.
 5. The panel positions from `fallbackRect: trayBounds.rect ?? ...`.
-6. Repeated tray clicks toggle the same WebView handle with `toVisible()` / `close()` after the first `show()`, and the item relabels between `Show Example` and `Hide Example`. Because this example uses `keepOnTop`, native `blur` is logged but does not auto-hide.
-7. The in-page tray API returns a provenance-bearing object:
+6. Repeated tray clicks toggle the same WebView handle with `toVisible()` / `close()` after the first `show()`, and the item relabels between `Show Example` and `Hide Example`. `keepOnTop` suppresses the default native auto-hide.
+7. `webview-control` and `win32-bug` explicitly set `autoHide: false` so focus can move to DevTools or the standalone comparator without dismissing the observed window.
+8. The in-page tray API returns a provenance-bearing object:
 
 ```json
 {

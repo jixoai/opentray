@@ -1,3 +1,8 @@
+// Orthogonal intents (2026-07-17; original user request: common retained-window auto-hide style):
+// 1. Dispatch page window commands through the AppKit bridge.
+// 2. Apply typed common style patches, including autoHide.
+// 3. Emit operational state and listener events without recreating the session.
+
 use std::{cell::RefCell, rc::Rc};
 
 use dispatch2::DispatchQueue;
@@ -577,6 +582,12 @@ pub(super) fn apply_window_style_patch(
     if let Some(keep_on_top) = payload.keep_on_top {
         if bridge_state.style.keep_on_top != keep_on_top {
             bridge_state.style.keep_on_top = keep_on_top;
+            changed = true;
+        }
+    }
+    if let Some(auto_hide) = payload.auto_hide {
+        if bridge_state.style.auto_hide != auto_hide {
+            bridge_state.style.auto_hide = auto_hide;
             changed = true;
         }
     }

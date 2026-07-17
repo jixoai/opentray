@@ -1,6 +1,6 @@
 // Orthogonal intents (2026-07-17; original user requests: repair Windows frameless chrome,
 // restore the frameless WebView top edge, add application-level soft resizing, expose operational
-// visibility, and fix native HWND residue):
+// visibility/default auto-hide, enforce switcher exclusion, and fix native HWND residue):
 // 1. Host the Windows WebView2 window and bridge.
 // 2. Project switcher, overlay, background, full-client native style, and host-surface ownership.
 // 3. Keep public window geometry in DWM visible-frame logical pixels, including frameless soft resize.
@@ -99,14 +99,14 @@ use self::downloads::install_download_handlers;
 use self::geometry::WindowsGeometry;
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::{
-    normalize_opacity, parse_background_input, MetadataSyncSettings, NavigatorScreenSettings,
-    NavigatorTraySettings, NavigatorWindowSettings, WebviewBackgroundEffectState,
-    WebviewBackgroundInput, WebviewBrowserPermissionDecision, WebviewBrowserPermissionFamily,
-    WebviewBrowserPermissionPolicy, WebviewCommand, WebviewDownloadSettings,
-    WebviewInitialMacosStyle, WebviewInitialWindowsStyle, WebviewNativeApiPolicy,
-    WebviewNativeApiSource, WebviewPermissionManagerPolicy, WebviewRuntimeError,
-    WebviewSessionBootstrapSettings, WebviewShowSettings, WebviewWindowBackground,
-    WebviewWindowControlsOverlaySettings, WebviewWindowIcon,
+    normalize_opacity, parse_background_input, should_auto_hide_on_blur, MetadataSyncSettings,
+    NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings,
+    WebviewBackgroundEffectState, WebviewBackgroundInput, WebviewBrowserPermissionDecision,
+    WebviewBrowserPermissionFamily, WebviewBrowserPermissionPolicy, WebviewCommand,
+    WebviewDownloadSettings, WebviewInitialMacosStyle, WebviewInitialWindowsStyle,
+    WebviewNativeApiPolicy, WebviewNativeApiSource, WebviewPermissionManagerPolicy,
+    WebviewRuntimeError, WebviewSessionBootstrapSettings, WebviewShowSettings,
+    WebviewWindowBackground, WebviewWindowControlsOverlaySettings, WebviewWindowIcon,
 };
 
 const CLASS_NAME: &str = "OpenTrayWebViewWindow";
@@ -267,6 +267,7 @@ struct WindowStyleState {
     #[serde(skip)]
     resizable_override: Option<bool>,
     keep_on_top: bool,
+    auto_hide: bool,
     opacity: f64,
     background: WebviewWindowBackground,
     platform: WindowPlatformStyleState,
@@ -473,6 +474,7 @@ struct SetStylePayload {
     frameless: Option<bool>,
     resizable: Option<bool>,
     keep_on_top: Option<bool>,
+    auto_hide: Option<bool>,
     opacity: Option<f64>,
     background: Option<WebviewBackgroundInput>,
     platform: Option<SetStylePlatformPayload>,
@@ -519,6 +521,7 @@ struct WindowCapabilities {
     app_region_drag: bool,
     frameless: bool,
     keep_on_top: bool,
+    auto_hide: bool,
     opacity: bool,
     title: bool,
     icon: bool,
@@ -1457,7 +1460,7 @@ fn show_bridge_window(
     Ok(())
 }
 
-fn hide_bridge_window(bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
+fn hide_bridge_window(bridge: &RefCell<NavigatorWindowBridge>) {
     let hwnd = bridge.borrow().hwnd;
     finish_window_proc_soft_resize(hwnd, true);
     unsafe {
@@ -1465,9 +1468,7 @@ fn hide_bridge_window(bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
     }
 }
 
-fn close_bridge_window(
-    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
-) -> Result<(), WebviewRuntimeError> {
+fn close_bridge_window(bridge: &RefCell<NavigatorWindowBridge>) -> Result<(), WebviewRuntimeError> {
     let was_visible = window_is_visible(bridge.borrow().hwnd);
     hide_bridge_window(bridge);
     emit_window_event(bridge, "closed", json!({ "visible": false }))?;
@@ -2495,6 +2496,7 @@ fn window_style_from_initial(
         resizable: style.resizable.unwrap_or(!style.frameless),
         resizable_override: style.resizable,
         keep_on_top: style.keep_on_top,
+        auto_hide: style.auto_hide,
         opacity: normalize_opacity(style.opacity)?,
         background: normalize_windows_background(&style.background)?,
         platform: WindowPlatformStyleState {
@@ -2633,6 +2635,12 @@ fn apply_style_patch(
     if let Some(keep_on_top) = payload.keep_on_top {
         if bridge_state.style.keep_on_top != keep_on_top {
             bridge_state.style.keep_on_top = keep_on_top;
+            changed = true;
+        }
+    }
+    if let Some(auto_hide) = payload.auto_hide {
+        if bridge_state.style.auto_hide != auto_hide {
+            bridge_state.style.auto_hide = auto_hide;
             changed = true;
         }
     }
@@ -3422,7 +3430,7 @@ fn window_style_bits(
 fn window_ex_style_bits(
     style: &WindowStyleState,
     current_ex_style: isize,
-    native_material_comparator: bool,
+    _native_material_comparator: bool,
 ) -> isize {
     let no_redirection_bitmap = WS_EX_NOREDIRECTIONBITMAP as isize;
     let layered = WS_EX_LAYERED as isize;
@@ -3438,11 +3446,8 @@ fn window_ex_style_bits(
     };
     let tool_window = WS_EX_TOOLWINDOW as isize;
     let app_window = WS_EX_APPWINDOW as isize;
-    if native_material_comparator {
-        return with_opacity & !tool_window & !app_window;
-    }
-    // Tray-owned WebViews are utility windows by default. Switcher participation is an explicit
-    // Windows style fact and must not be inferred from title/icon metadata.
+    // Comparator topology may change non-client geometry, but switcher participation remains an
+    // explicit product style and must not be inferred from title, icon, or host construction.
     if style.platform.windows.show_in_switchers {
         (with_opacity & !tool_window) | app_window
     } else {
@@ -5249,6 +5254,7 @@ impl NavigatorWindowBridge {
             app_region_drag: self.page_access.window,
             frameless: true,
             keep_on_top: true,
+            auto_hide: true,
             opacity: true,
             title: true,
             icon: true,
@@ -5736,7 +5742,11 @@ unsafe extern "system" fn window_proc(
             }
         }
         WM_ACTIVATE => {
-            emit_window_focus_change(hwnd, (wparam & 0xffff) != WA_INACTIVE as usize);
+            let focused = (wparam & 0xffff) != WA_INACTIVE as usize;
+            emit_window_focus_change(hwnd, focused);
+            if !focused {
+                auto_hide_window_after_blur(hwnd);
+            }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_GETMINMAXINFO => {
@@ -5895,6 +5905,24 @@ fn emit_window_interaction_change(hwnd: HWND, active: bool) {
     });
 }
 
+fn auto_hide_window_after_blur(hwnd: HWND) {
+    let bridge = with_window_proc_state(hwnd, |state| state.bridge);
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let bridge = unsafe { bridge.as_ref() };
+    let should_hide = {
+        let state = bridge.borrow();
+        window_is_visible(hwnd)
+            && should_auto_hide_on_blur(state.style.auto_hide, state.style.keep_on_top)
+    };
+    if should_hide {
+        if let Err(error) = close_bridge_window(bridge) {
+            eprintln!("opentray-ext-webview failed to auto-hide Windows window: {error}");
+        }
+    }
+}
+
 fn emit_window_focus_change(hwnd: HWND, focused: bool) {
     let event = if focused { "focus" } else { "blur" };
     with_window_proc_state(hwnd, |state| {
@@ -6028,6 +6056,7 @@ mod tests {
             frameless: None,
             resizable: None,
             keep_on_top: None,
+            auto_hide: None,
             opacity: Some(0.64),
             background: Some(WebviewBackgroundInput::Keyword("mica".to_string())),
             platform: Some(SetStylePlatformPayload {
@@ -6045,6 +6074,7 @@ mod tests {
             frameless: None,
             resizable: None,
             keep_on_top: None,
+            auto_hide: None,
             opacity: None,
             background: Some(WebviewBackgroundInput::Keyword("sidebar".to_string())),
             platform: None,
@@ -6055,6 +6085,7 @@ mod tests {
             frameless: None,
             resizable: None,
             keep_on_top: None,
+            auto_hide: None,
             opacity: None,
             background: Some(WebviewBackgroundInput::Object(
                 crate::WebviewBackgroundObjectInput {
@@ -6075,6 +6106,7 @@ mod tests {
             frameless: None,
             resizable: None,
             keep_on_top: None,
+            auto_hide: None,
             opacity: Some(1.1),
             background: None,
             platform: None,
@@ -6113,6 +6145,7 @@ mod tests {
                 show_in_switchers: false,
             }
         );
+        assert!(state.auto_hide);
 
         style.background = crate::WebviewWindowBackground::PlatformMaterial {
             material: "hudWindow".to_string(),
@@ -6188,6 +6221,7 @@ mod tests {
             resizable: true,
             resizable_override: None,
             keep_on_top: false,
+            auto_hide: true,
             opacity: 1.0,
             background: crate::WebviewWindowBackground::Semantic {
                 token: "blur".to_string(),
@@ -6493,7 +6527,7 @@ mod tests {
     }
 
     #[test]
-    fn comparator_topology_uses_neutral_extended_window_style() {
+    fn comparator_topology_obeys_default_switcher_exclusion() {
         let style = window_style_from_initial(&crate::WebviewInitialStyle::default())
             .expect("default style");
         let bits = window_ex_style_bits(
@@ -6502,7 +6536,7 @@ mod tests {
             true,
         );
 
-        assert_eq!(bits & WS_EX_TOOLWINDOW as isize, 0);
+        assert_ne!(bits & WS_EX_TOOLWINDOW as isize, 0);
         assert_eq!(bits & WS_EX_APPWINDOW as isize, 0);
     }
 
@@ -6511,10 +6545,13 @@ mod tests {
         let mut initial = crate::WebviewInitialStyle::default();
         initial.platform.windows.show_in_switchers = true;
         let style = window_style_from_initial(&initial).expect("switcher style");
-        let bits = window_ex_style_bits(&style, WS_EX_TOOLWINDOW as isize, false);
+        let production_bits = window_ex_style_bits(&style, WS_EX_TOOLWINDOW as isize, false);
+        let comparator_bits = window_ex_style_bits(&style, WS_EX_TOOLWINDOW as isize, true);
 
-        assert_eq!(bits & WS_EX_TOOLWINDOW as isize, 0);
-        assert_ne!(bits & WS_EX_APPWINDOW as isize, 0);
+        for bits in [production_bits, comparator_bits] {
+            assert_eq!(bits & WS_EX_TOOLWINDOW as isize, 0);
+            assert_ne!(bits & WS_EX_APPWINDOW as isize, 0);
+        }
     }
 
     #[test]

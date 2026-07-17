@@ -137,6 +137,7 @@ macOS support includes:
 - native app-region dragging through `startAppRegionDrag()`
 - minimize, maximize, and restore window-state controls
 - operational visibility through `isClosed()`, `isVisible()`, `toVisible()`, and `visibleChange`
+- common native focus-loss dismissal through `style.autoHide`, defaulting to `true` and suppressed by `keepOnTop`
 - adjustable native window-frame corner radius through `style.platform.macos.cornerRadius`
 - native title and icon state
 - declarative `document.title` / native-title synchronization
@@ -151,7 +152,7 @@ Windows support includes:
 - `show`, `hide`, `destroy`, `setContent`, `navigate`, `evaluate`, and `postMessage`
 - `navigator.window` / `navigator.opentrayWindow` bridge injection with source-scoped `nativeApiPolicy`
 - `close`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isClosed`, `isVisible`, `toVisible`, `isMaximized`, and `isMinimized`
-- `getStyle` / `setStyle` for common `frameless`, `resizable`, `background`, `keepOnTop`, and `opacity`
+- `getStyle` / `setStyle` for common `frameless`, `resizable`, `background`, `keepOnTop`, `autoHide`, and `opacity`
 - `windowControlsOverlay` geometry, Windows caption-button `backgroundColor` / `symbolColor`, `startAppRegionDrag()`, and subscription-driven bridge events
 - title sync and native window/taskbar icon projection for RGBA icons, local icon files, and PNG data URLs
 - Windows DWM background materials through `style.background`: `auto`, `mica`, `acrylic`, and `tabbed`
@@ -242,7 +243,7 @@ Inside this repo, `pnpm --filter opentray example:webview-control` is the API ex
 
 The comparator's frameless toggle intentionally uses the standalone probe's native resize frame, system menu, style-derived DWM non-client policy, and native resize path. Its `WM_NCCALCSIZE` handler first delegates to `DefWindowProcW`, preserves the left/right/bottom native resize insets, and then projects only the client top to the system-reported `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`. This removes the caption-height gap above WebView2 without changing the already-correct side geometry. The source geometry smoke requires both `getBounds() - window.outerWidth` and `getBounds() - window.outerHeight` to remain within 0-4 logical pixels. Production frameless windows remain full-client and keep application-level soft resize.
 
-Windows source examples now select that comparator host topology independently from probe instrumentation. `example:webview-control -- --no-overlay` is the direct native-shell A/B path against `example:win32-bug`; default webview-control overlay keeps the same pre-WebView host construction and adds only the post-WebView AppWindow titlebar stage. Ordinary applications do not inherit the comparator switch.
+Windows source examples now select that comparator host topology independently from probe instrumentation. `example:webview-control -- --no-overlay` is the direct native-shell A/B path against `example:win32-bug`; default webview-control overlay keeps the same pre-WebView host construction and adds only the post-WebView AppWindow titlebar stage. Ordinary applications do not inherit the comparator switch. Comparator topology still obeys `style.platform.windows.showInSwitchers`: the default remains outside the taskbar and Alt+Tab.
 
 For ordinary Windows overlay windows, cold start completes Win32/DWM material and host geometry before WebView2, then initializes AppWindow titlebar overlay after WebView2 establishes COM and before final child bounds/show. Host-side native window events use one single-flight poller; a transport failure stops polling and is reported once.
 
@@ -437,7 +438,7 @@ Current native support:
 - macOS: `close`, `moveTo`, `resizeTo`, `getCapabilities`, `getStyle`, `setStyle`
 - macOS: `minimize`, `maximize`, `restore`, `getWindowState`, `isMaximized`, `isMinimized`, and native app-region drag
 - macOS: instance-scoped devtools open/close/state through `devtools: true` plus `navigator.window.devtools` / `webview.devtools`
-- macOS: `keepOnTop` through `setStyle({ keepOnTop: true })`
+- macOS: `keepOnTop` and common `autoHide`; native blur hides only when `autoHide && !keepOnTop`
 - macOS: whole-window opacity through `setStyle({ opacity: 0.82 })`
 - macOS: `style.platform.macos.cornerRadius` through layer-backed theme-frame clipping
 - macOS: `getTitle`, `setTitle`, `getIcon`, `setIcon`
@@ -447,7 +448,7 @@ Current native support:
 - macOS: transparent background and material effects through `style.background`, including `hudWindow`, `sidebar`, `windowBackground`, `contentBackground`, and `underWindowBackground`
 - macOS: global override binding through `bindWindowGlobals` and `bindScreenGlobals`
 - Windows: visible WebView2-backed windows, lifecycle verbs, content replacement/navigation, `evaluate`, `postMessage`, common window bridge commands, title/icon sync, current-monitor screen snapshot, tray bounds projection, and global override binding through `bindWindowGlobals` / `bindScreenGlobals`
-- Windows: `frameless`, `background`, `keepOnTop`, `opacity`, and `style.platform.windows.cornerPreference`
+- Windows: `frameless`, `background`, `keepOnTop`, `autoHide`, `opacity`, and `style.platform.windows.cornerPreference`
 - Windows: instance-scoped devtools open through `devtools: true`; close/state remain typed unsupported because current Wry/WebView2 does not expose honest runtime state there
 - Linux: no official native WebView runtime package is published. A custom `path` may still be used for private experiments, but the official package treats Linux WebView as unsupported.
 
@@ -483,11 +484,22 @@ Common event names:
 - `titlechange`: emitted after `setTitle(...)` or enabled document-title sync changes native title state
 - `iconchange`: emitted after `setIcon(...)` or enabled favicon sync changes native icon state
 - `windowstatechange`: emitted after page visibility and standard state commands
-- `visibleChange`: emitted only when operational visibility changes between visible and closed/hidden or minimized
+- `visibleChange`: emitted only when operational visibility changes between visible and closed/hidden or minimized, including native auto-hide
 - `moved` / `resized`: emitted after extension-owned move or resize requests
 - `overlay.geometrychange`: emitted through `navigator.opentrayWindow.overlay.listen("geometrychange", ...)`
 
 For favicon-to-native-icon projection, prefer a materialized PNG data URL such as a `canvas.toDataURL("image/png")` result. URL-backed or SVG favicons may remain logical icon state when the platform cannot convert them into a native image handle.
+
+Native tray-window dismissal defaults to this state machine:
+
+```text
+native blur
+  +-- autoHide: false -> remain visible
+  +-- keepOnTop: true -> remain visible
+  `-- otherwise      -> hide retained session -> visibleChange(false)
+```
+
+Use `autoHide: false` when the application owns a page exit animation, a protected confirmation flow, or a diagnostic window that must remain visible while DevTools has focus.
 
 ## Window Recipes
 

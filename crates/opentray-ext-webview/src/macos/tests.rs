@@ -1243,6 +1243,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
         frameless: None,
         resizable: None,
         keep_on_top: Some(true),
+        auto_hide: Some(false),
         opacity: Some(0.82),
         background: Some(WebviewBackgroundInput::Keyword("transparent".to_string())),
         platform: None,
@@ -1253,6 +1254,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
         frameless: None,
         resizable: None,
         keep_on_top: None,
+        auto_hide: None,
         opacity: None,
         background: Some(WebviewBackgroundInput::Keyword("hudWindow".to_string())),
         platform: Some(SetStylePlatformPayload {
@@ -1269,6 +1271,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
         frameless: None,
         resizable: None,
         keep_on_top: None,
+        auto_hide: None,
         opacity: None,
         background: Some(WebviewBackgroundInput::Keyword("mica".to_string())),
         platform: None,
@@ -1283,6 +1286,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
         frameless: None,
         resizable: None,
         keep_on_top: None,
+        auto_hide: None,
         opacity: None,
         background: None,
         platform: Some(SetStylePlatformPayload {
@@ -1314,6 +1318,7 @@ fn window_style_state_serializes_keep_on_top() {
         resizable: true,
         resizable_override: None,
         keep_on_top: true,
+        auto_hide: false,
         opacity: 0.82,
         background: WebviewWindowBackground::PlatformMaterial {
             material: "hudWindow".to_string(),
@@ -1328,6 +1333,7 @@ fn window_style_state_serializes_keep_on_top() {
     .expect("style state should serialize");
 
     assert_eq!(value["keepOnTop"], Value::Bool(true));
+    assert_eq!(value["autoHide"], Value::Bool(false));
     assert_eq!(value["opacity"], Value::from(0.82));
     assert_eq!(
         value["background"]["kind"],
@@ -1364,6 +1370,7 @@ fn navigator_window_bridge_tracks_listener_ids() {
             resizable: true,
             resizable_override: None,
             keep_on_top: false,
+            auto_hide: true,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
             platform: WindowPlatformStyleState {
@@ -1493,6 +1500,7 @@ fn emit_window_event_ignores_unlistened_download_events_on_macos() {
             resizable: true,
             resizable_override: None,
             keep_on_top: false,
+            auto_hide: true,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
             platform: WindowPlatformStyleState {
@@ -1556,6 +1564,7 @@ fn app_region_drag_interaction_window_event_conserves_native_source() {
             resizable: true,
             resizable_override: None,
             keep_on_top: false,
+            auto_hide: true,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
             platform: WindowPlatformStyleState {
