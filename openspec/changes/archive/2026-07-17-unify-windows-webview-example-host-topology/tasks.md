@@ -57,4 +57,4 @@
 - [x] 8.2 Generate `review/self-review.md` and `review/self-review.html` against `plans/plan.md`.
 - [x] 8.3 If visual review changes intent, back up the plan and commit reopened OpenSpec tasks before another apply loop.
 - [x] 8.4 Archive only after user visual acceptance; otherwise preserve a normal handoff with exact source commands.
-- [ ] 8.5 Run `bun run openspec:vision -- check unify-windows-webview-example-host-topology` at the normal exit.
+- [x] 8.5 Run `bun run openspec:vision -- check unify-windows-webview-example-host-topology` at the normal exit.
