@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 8
-- Status: the comparator frameless top-gap regression is diagnosed and specified as a top-only client projection; implementation, source geometry smoke, and renewed Windows visual acceptance are pending.
-- Previous plan backup: `plans/plan-v9.md`
+- Round: 7
+- Status: native resize and retained-session delayed-reveal recovery are implemented and source-smoked; renewed Windows material/frameless visual acceptance is pending.
+- Previous plan backup: `plans/plan-v8.md`
 
 ## Workflow Command Surface
 
@@ -50,7 +50,6 @@
 | 2026-07-15 | User | Residue cleanup causes frequent refreshes, especially during resize; investigate whether this is OpenTray, Windows/WebView2, or Rust, compare the official Mica experience, and preserve a formal report before choosing a debounce. | Freeze cleanup policy changes until the host/composition stack and current clear cadence are measured and classified. |
 | 2026-07-15 | User | Implement the recommended approach first, then let the user test. | Apply terminal-only shell recovery without a C#/WinUI rewrite, composition-hosting migration, or new distribution package. |
 | 2026-07-16 | User | Continuous resize no longer flickers, but `Hide Example` then `Show Example` leaves rendering residue. | The one-private-message reveal cleanup can run before DWM/WebView2 presents the restored surface; trial one delayed reveal-only recovery without changing native resize cadence. |
-| 2026-07-17 | User | In frameless comparator topology, public bounds are 450x506 while `window.outerWidth/outerHeight` are 448x499; width is correct but WebView2 retains an excessive top gap. The user recalls this had been repaired previously and may have been lost during rewrite. | Recover the historical full-client repair, but preserve comparator native resize ownership by projecting only the top client edge instead of removing all native frame insets. |
 
 ### Evidence Read
 
@@ -72,8 +71,6 @@
 | Microsoft WebView2 hosting and background documentation | Windowed, Window-to-Visual, and Visual hosting have materially different composition/input ownership; WebView2 explicitly documents white-flash and background-color behavior. | A composition-hosting spike is a legitimate candidate, but it is not a one-line library switch and a timer cannot prove it unnecessary. |
 | `crates/opentray-ext-webview/src/bootstrap.rs` and `packages/ext-webview/src/index.ts` | Page and host APIs are separately typed and command-backed; event subscriptions already exist. | Visibility remains an extension-owned, cross-platform facade contract. |
 | `openspec/changes/archive/2026-06-20-tray-dynamic-state-and-webview-placement-kit` | WebView show/hide and resize cleanup are existing extension laws. | Extend the same atom; do not introduce a core/runtime special case. |
-| Git `1a3b2a3` and `b2736fc` | The earlier shell repair added full-client `WM_NCCALCSIZE`; comparator parity later excluded comparator frameless from that projection and restored the caption inset. | Split client-area projection into default, full-client, and comparator top-only modes. |
-| Windows user geometry evidence | Width differs by 2 logical pixels while height differs by 7. | Preserve side resize insets and remove only the extra top caption gap. |
 
 ### Git Evidence
 

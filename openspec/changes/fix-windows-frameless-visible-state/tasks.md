@@ -67,3 +67,12 @@
 - [x] 8.4 Implement the approved terminal-only native resize recovery: record `WM_SIZE`, queue one recovery after observed `WM_EXITSIZEMOVE`, and remove the 120ms live shell-reset throttle.
 - [x] 8.5 Implement one bounded delayed reveal recovery for retained `close() -> toVisible()` sessions. The 100ms HWND timer must be one-shot, cancel on hide, and never run from `WM_SIZE`, `WM_EXITSIZEMOVE`, or active soft-resize capture.
 - [ ] 8.6 Add focused native tests and run the Windows material/frameless resize plus retained-show smoke; require user visual acceptance before testing a resize delay or composition host.
+
+## 9. Comparator Frameless Top Edge
+
+- [x] 9.1 Recover the historical `WM_NCCALCSIZE` repair and identify the comparator exclusion that restored the Win11 caption inset.
+- [ ] 9.2 Add focused tests for default, production full-client, and comparator native-frame client-area projections.
+- [ ] 9.3 Preserve comparator `WS_THICKFRAME` / native resize ownership while projecting only the top client edge to `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`.
+- [ ] 9.4 Update the Windows material-host spec, README, agent law, and Chinese terminology with the top-only projection rule.
+- [ ] 9.5 Build the source broker and extension, then run `example:webview-control -- --frameless --resizable --no-overlay` geometry smoke.
+- [ ] 9.6 Require renewed Windows visual acceptance that top/side gaps are 0-4 logical pixels and native edge/corner resize remains continuous.

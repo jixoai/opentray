@@ -200,7 +200,7 @@ The probe state SHALL be disabled when the environment switch is absent. Compara
 
 ### Requirement: Probe frameless shell SHALL match the standalone comparator
 
-When the native material probe switch is enabled and the retained window enters frameless mode, the comparator SHALL preserve the standalone probe's native resize frame and system-menu style, leave DWM non-client rendering under window-style policy, delegate non-client geometry to the default window procedure, and use native resizing. Copied client bits MAY be discarded only in this comparator path.
+When the native material probe switch is enabled and the retained window enters frameless mode, the comparator SHALL preserve the standalone probe's native resize frame and system-menu style, leave DWM non-client rendering under window-style policy, and use native resizing. It SHALL first delegate `WM_NCCALCSIZE` to the default window procedure, preserve the resulting left/right/bottom native resize insets, and then project only the client top to `window top + DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`. It SHALL NOT retain the caption-height gap above WebView2. Copied client bits MAY be discarded only in this comparator path.
 
 This probe-only shell SHALL NOT replace the production frameless procedure. Production frameless windows SHALL continue to own full-client geometry, disabled DWM non-client rendering, and application-level soft resize.
 
@@ -208,8 +208,10 @@ This probe-only shell SHALL NOT replace the production frameless procedure. Prod
 
 - **GIVEN** the standalone native probe and `example:win32-bug` use Acrylic and handled-without-fill host paint
 - **WHEN** both retained windows enter frameless mode and are repeatedly resized
-- **THEN** the WebView-controlled comparator uses the same native shell projection as the standalone probe
-- **AND** it does not introduce an additional classic Windows outer-frame residue.
+- **THEN** the WebView-controlled comparator uses the same native resize shell as the standalone probe
+- **AND** the left/right/bottom resize insets remain owned by the default window procedure
+- **AND** the WebView top edge retains only the system-reported visible frame border
+- **AND** it does not introduce an additional classic Windows outer-frame residue or caption-height gap.
 
 #### Scenario: Production frameless remains independent
 
