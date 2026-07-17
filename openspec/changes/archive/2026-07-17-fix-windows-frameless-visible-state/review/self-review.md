@@ -54,6 +54,7 @@ close <-> toVisible
 ## Evidence
 
 - HTML report: <code>review/self-review.html</code>
+- Source-backed composition report: <code>research/windows-webview2-dwm-composition.md</code>
 - OpenTray npm evidence: <code>opentray@0.14.3</code>, <code>@opentray/ext-webview@0.14.3</code>
 - OpenTray release workflow: https://github.com/jixoai/opentray/actions/runs/29569611638
 - pnpm-pub npm evidence: <code>pnpm-pub@1.4.1</code> with <code>latest=1.4.1</code>

@@ -51,7 +51,7 @@
 
 - [x] 6.1 Generate `review/self-review.md` against `plans/plan.md` after verification and visual acceptance.
 - [x] 6.2 Commit any self-review artifact updates before another implementation loop.
-- [ ] 6.3 After user acceptance and release decisions, archive the OpenSpec change in a dedicated archive commit and run `bun run openspec:vision -- check fix-windows-frameless-visible-state`.
+- [x] 6.3 After user acceptance and release decisions, archive the OpenSpec change in a dedicated archive commit and run `bun run openspec:vision -- check fix-windows-frameless-visible-state`.
 
 ## 7. Native Completion Repair
 
