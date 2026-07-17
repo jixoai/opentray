@@ -155,7 +155,7 @@
   const showWindowControls = $derived(frameless);
 </script>
 
-<div class="flex h-screen flex-col overflow-hidden bg-background/80 backdrop-blur-xl">
+<div class="flex h-screen flex-col overflow-hidden bg-background/10">
   {#if bridge}
     <Titlebar {bridge} {overlayActive} {showWindowControls} />
   {/if}

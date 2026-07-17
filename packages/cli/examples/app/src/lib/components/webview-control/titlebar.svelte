@@ -41,7 +41,7 @@
 </script>
 
 <div
-  class="sticky top-0 z-20 grid grid-cols-[minmax(0,1fr)_auto] items-center border-b border-border bg-[var(--titlebar-bg)] backdrop-blur-md select-none"
+  class="sticky top-0 z-20 grid grid-cols-[minmax(0,1fr)_auto] items-center border-b border-border bg-[var(--titlebar-bg)] select-none"
   style={style}
   role="button"
   tabindex="0"
