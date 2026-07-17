@@ -149,3 +149,9 @@ After merge to `main`, `.github/workflows/release.yml` creates a version PR or p
 - Keep OpenSpec artifacts, implementation, and archive work conceptually separable.
 - In the empty-repository bootstrap case, a single initial commit may contain workflow, spec, and workspace skeleton because no usable baseline exists yet.
 - Future changes should follow the normal OpenSpec phase split.
+
+## Windows WebView2 Profile Law
+
+- WebView2 user data must not inherit the broker executable path. Temporary package runners such as 'pnpx' can place 'opentray.exe' deeply enough to make the default WebView2 profile fail during environment creation.
+- The Windows host owns an explicit 'WebContext' profile under '<home>/.opentray/webview/<package-version>/<caller-label>'; 'OPENTRAY_WEBVIEW_DATA_DIR' is the deployment and diagnostic override.
+- 'WebContext' is a retained native resource and must be stored beside 'WebView' so it outlives the child. A WebView2 creation error must include the resolved profile path.
