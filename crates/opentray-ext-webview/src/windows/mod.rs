@@ -1,18 +1,20 @@
 // Orthogonal intents (2026-07-17; original user requests: repair Windows frameless chrome,
-// restore the frameless WebView top edge, add application-level soft resizing, expose operational
-// visibility/default auto-hide, enforce switcher exclusion, and fix native HWND residue):
-// 1. Host the Windows WebView2 window and bridge.
+// profile executable-path independence, and preserve the accepted native-host composition):
+// 1. Host the Windows WebView2 window, bridge, and explicit user-data profile.
 // 2. Project switcher, overlay, background, full-client native style, and host-surface ownership.
 // 3. Keep public window geometry in DWM visible-frame logical pixels, including frameless soft resize.
 // 4. Route native window/screen/tray commands and events.
 // 5. Preserve download, permission, metadata, and lifecycle behavior.
+// Original user report (2026-07-17): local pnpm-pub startup works, but pnpx pnpm-pub@latest start
+// briefly shows the tray icon and then exits during WebView creation. The WebView2 profile
+// must be independent from the broker executable path.
 // Compromise: this legacy platform module already exceeds the five-intent/300-line limits. The
-// HWND-thread state, WebView2 pointers, and message procedure remain physically coupled in this
-// fix; splitting them while concurrent uncommitted work exists would expand the verification scope.
+// HWND-thread state, WebView2 pointers, message procedure, and profile lifetime remain physically
+// coupled in this fix; splitting them while concurrent uncommitted work exists would expand the
+// verification scope.
 // Rendering invariant (2026-07-16; user evidence): material residue belongs to the top-level
 // HWND/DWM redirection surface, not page pixels. Material hosts paint a complete black native base
 // before WebView2 background/bounds commit; opaque/plain-transparent hosts retain Softbuffer.
-
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
@@ -20,7 +22,7 @@ use std::io::Cursor;
 use std::num::NonZeroIsize;
 use std::num::NonZeroU32;
 use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut, NonNull};
 use std::rc::Rc;
 
@@ -82,7 +84,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
-    PageLoadEvent, Rect as WryRect, WebView, WebViewBuilder, WebViewExtWindows, RGBA,
+    PageLoadEvent, Rect as WryRect, WebContext, WebView, WebViewBuilder, WebViewExtWindows, RGBA,
 };
 
 mod appwindow;
@@ -127,6 +129,8 @@ const WINDOWS_BACKGROUND_STATES: &[&str] = &["followsWindowActiveState", "active
 const WINDOWS_CORNER_PREFERENCES: &[&str] = &["default", "doNotRound", "round", "roundSmall"];
 const WINDOWS_NATIVE_MATERIAL_COMPARATOR_ENV: &str = "OPENTRAY_WINDOWS_NATIVE_MATERIAL_COMPARATOR";
 const WINDOWS_NATIVE_MATERIAL_PROBE_ENV: &str = "OPENTRAY_WINDOWS_NATIVE_MATERIAL_PROBE";
+const WINDOWS_WEBVIEW_DATA_DIR_ENV: &str = "OPENTRAY_WEBVIEW_DATA_DIR";
+const WINDOWS_WEBVIEW_PROFILE_COMPONENT_MAX_LENGTH: usize = 48;
 thread_local! {
     static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
 }
@@ -138,6 +142,8 @@ pub(crate) struct WindowsWebviewRuntime {
 
 struct WindowsWebviewSlot {
     tray_id: String,
+    // WebContext must be declared before WebView so it outlives the WebView on drop.
+    _webview_context: WebContext,
     webview: Box<WebView>,
     window: Box<Win32HostWindow>,
     bridge: Rc<RefCell<NavigatorWindowBridge>>,
@@ -1127,8 +1133,18 @@ impl WindowsWebviewRuntime {
             )
             .into(),
         });
+        let webview_data_directory = resolve_webview_data_directory()?;
+        std::fs::create_dir_all(&webview_data_directory).map_err(|error| {
+            WebviewRuntimeError::Internal(format!(
+                "failed to prepare WebView2 profile '{}': {}",
+                webview_data_directory.display(),
+                error
+            ))
+        })?;
+        let mut webview_context = WebContext::new(Some(webview_data_directory));
         let webview = build_webview(
             window.as_ref(),
+            &mut webview_context,
             &bridge,
             show_settings.navigator_window,
             show_settings.navigator_screen,
@@ -1144,6 +1160,7 @@ impl WindowsWebviewRuntime {
         )?;
         let mut slot = WindowsWebviewSlot {
             tray_id,
+            _webview_context: webview_context,
             webview,
             window,
             bridge,
@@ -1933,6 +1950,7 @@ fn page_source_state_for_content(content: &WebviewContentDescriptor) -> PageSour
 
 fn build_webview(
     window: &impl HasWindowHandle,
+    webview_context: &mut WebContext,
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     navigator_window: NavigatorWindowSettings,
     navigator_screen: NavigatorScreenSettings,
@@ -1953,7 +1971,11 @@ fn build_webview(
         let state = bridge.borrow();
         state.style.frameless && state.style.resizable
     };
-    let builder = WebViewBuilder::new()
+    let profile_path = webview_context
+        .data_directory()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<wry-default>".to_string());
+    let builder = WebViewBuilder::new_with_web_context(webview_context)
         .with_initialization_script(navigator_window_bootstrap_script(
             navigator_window,
             soft_resize_enabled,
@@ -1990,12 +2012,69 @@ fn build_webview(
     } else {
         builder.with_html(html.unwrap_or_else(default_webview_html))
     };
-    let webview = builder
-        .build_as_child(window)
-        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    let webview = builder.build_as_child(window).map_err(|error| {
+        WebviewRuntimeError::Internal(format!(
+            "WebView2 creation failed using profile '{}': {}",
+            profile_path, error
+        ))
+    })?;
     let webview = Box::new(webview);
     install_download_handlers(webview.as_ref(), bridge)?;
     Ok(webview)
+}
+
+fn resolve_webview_data_directory() -> Result<PathBuf, WebviewRuntimeError> {
+    if let Some(path) = std::env::var_os(WINDOWS_WEBVIEW_DATA_DIR_ENV) {
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path));
+        }
+    }
+
+    let home = std::env::var_os("OPENTRAY_DAEMON_HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .or_else(|| {
+            let drive = std::env::var_os("HOMEDRIVE")?;
+            let path = std::env::var_os("HOMEPATH")?;
+            let mut home = PathBuf::from(drive);
+            home.push(path);
+            Some(home.into_os_string())
+        })
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            WebviewRuntimeError::Internal(
+                "WebView2 profile path cannot be resolved: set OPENTRAY_WEBVIEW_DATA_DIR".into(),
+            )
+        })?;
+
+    let version = sanitized_profile_component("OPENTRAY_DAEMON_PACKAGE_VERSION", "current");
+    let caller = sanitized_profile_component("OPENTRAY_DAEMON_CALLER_LABEL", "opentray");
+
+    Ok(home
+        .join(".opentray")
+        .join("webview")
+        .join(version)
+        .join(caller))
+}
+
+fn sanitized_profile_component(name: &str, fallback: &str) -> String {
+    let value = std::env::var(name).unwrap_or_default();
+    let sanitized: String = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .take(WINDOWS_WEBVIEW_PROFILE_COMPONENT_MAX_LENGTH)
+        .collect();
+    let trimmed = sanitized.trim_matches(|character| character == '.' || character == ' ');
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn client_webview_bounds(hwnd: HWND) -> Option<WryRect> {

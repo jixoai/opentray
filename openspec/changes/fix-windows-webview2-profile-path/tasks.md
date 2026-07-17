@@ -5,17 +5,17 @@
 
 ## 2. Windows Host
 
-- [ ] 2.1 Add a stable profile-path resolver with explicit override and sanitized identity components.
-- [ ] 2.2 Retain 'WebContext' beside 'WebView' and construct through 'new_with_web_context'.
-- [ ] 2.3 Include the resolved profile path in WebView2 construction errors.
+- [x] 2.1 Add a stable profile-path resolver with explicit override and sanitized identity components.
+- [x] 2.2 Retain 'WebContext' beside 'WebView' and construct through 'new_with_web_context'.
+- [x] 2.3 Include the resolved profile path in WebView2 construction errors.
 
 ## 3. Domain Records
 
-- [ ] 3.1 Update 'AGENTS.md' with the executable-path-independent WebView2 profile law.
-- [ ] 3.2 Update 'i18n.zh.md' with profile, temporary package path, and WebView2 startup vocabulary.
+- [x] 3.1 Update 'AGENTS.md' with the executable-path-independent WebView2 profile law.
+- [x] 3.2 Update 'i18n.zh.md' with profile, temporary package path, and WebView2 startup vocabulary.
 
 ## 4. Verification and Release
 
-- [ ] 4.1 Run formatting only; do not run the test suite.
+- [x] 4.1 Run formatting only; do not run the test suite.
 - [ ] 4.2 Build matching Windows runtime and WebView artifacts.
 - [ ] 4.3 Version and publish OpenTray, then update and publish pnpm-pub.
