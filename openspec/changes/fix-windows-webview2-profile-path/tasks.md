@@ -17,5 +17,5 @@
 ## 4. Verification and Release
 
 - [x] 4.1 Run formatting only; do not run the test suite.
-- [ ] 4.2 Build matching Windows runtime and WebView artifacts.
+- [x] 4.2 Build matching Windows runtime and WebView artifacts.
 - [ ] 4.3 Version and publish OpenTray, then update and publish pnpm-pub.
