@@ -44,13 +44,13 @@
 
 ## 5. Consumer Release Follow-up
 
-- [ ] 5.1 After OpenTray is released, update pnpm-pub to use `isVisible()` for Show/Hide menu state, `toVisible()` for Show, and `close()` for Hide.
-- [ ] 5.2 Verify pnpm-pub against the published package, publish its compatible release, and record the consumer runtime proof.
+- [x] 5.1 After OpenTray is released, update pnpm-pub to use `isVisible()` for Show/Hide menu state, `toVisible()` for Show, and `close()` for Hide.
+- [x] 5.2 Verify pnpm-pub against the published package, publish its compatible release, and record the consumer runtime proof.
 
 ## 6. Self-Review Loop
 
-- [ ] 6.1 Generate `review/self-review.md` against `plans/plan.md` after verification and visual acceptance.
-- [ ] 6.2 Commit any self-review artifact updates before another implementation loop.
+- [x] 6.1 Generate `review/self-review.md` against `plans/plan.md` after verification and visual acceptance.
+- [x] 6.2 Commit any self-review artifact updates before another implementation loop.
 - [ ] 6.3 After user acceptance and release decisions, archive the OpenSpec change in a dedicated archive commit and run `bun run openspec:vision -- check fix-windows-frameless-visible-state`.
 
 ## 7. Native Completion Repair
@@ -75,7 +75,7 @@
 - [x] 9.3 Preserve comparator `WS_THICKFRAME` / native resize ownership while projecting only the top client edge to `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS`.
 - [x] 9.4 Update the Windows material-host spec, README, agent law, and Chinese terminology with the top-only projection rule.
 - [x] 9.5 Build the source broker and extension, then run `example:webview-control -- --frameless --resizable --no-overlay` geometry smoke; the bridge reported `gap=2x2`.
-- [ ] 9.6 Require renewed Windows visual acceptance that top/side gaps are 0-4 logical pixels and native edge/corner resize remains continuous.
+- [x] 9.6 Require renewed Windows visual acceptance that top/side gaps are 0-4 logical pixels and native edge/corner resize remains continuous.
 
 ## 10. Operational Tray Lifecycle
 
@@ -85,5 +85,5 @@
 - [x] 10.4 Implement Windows native blur auto-hide and make comparator extended styles obey `showInSwitchers`.
 - [x] 10.5 Implement macOS native blur auto-hide with the same `autoHide && !keepOnTop` predicate.
 - [x] 10.6 Add focused Rust and TypeScript tests, and opt diagnostic examples out with `autoHide: false`.
-- [ ] 10.7 Release the OpenTray package family, update pnpm-pub, and make its tray projection use `isVisible`, `visibleChange`, `toVisible`, and `close`.
-- [ ] 10.8 Verify the published consumer build and start pnpm-pub for renewed Windows visual acceptance.
+- [x] 10.7 Release the OpenTray package family, update pnpm-pub, and make its tray projection use `isVisible`, `visibleChange`, `toVisible`, and `close`.
+- [x] 10.8 Verify the published consumer build and start pnpm-pub for renewed Windows visual acceptance.

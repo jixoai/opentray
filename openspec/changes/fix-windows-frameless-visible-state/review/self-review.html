@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+Orthogonal intents:
+1. Original user input (2026-07-17): close the accepted work and publish pnpm-pub.
+2. Present implementation, release, visual, and deviation evidence in one scan.
+3. Keep superseded experiments visible as incomplete evidence.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenTray Frameless Visibility Self Review</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; background: Canvas; color: CanvasText; }
+    main { width: min(1120px, calc(100% - 32px)); margin: 32px auto 64px; }
+    header { border-bottom: 1px solid color-mix(in srgb, CanvasText 20%, transparent); padding-bottom: 20px; }
+    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
+    h2 { margin: 32px 0 12px; font-size: 20px; letter-spacing: 0; }
+    p { line-height: 1.6; }
+    .status { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+    .metric { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 6px; padding: 14px; }
+    .metric strong { display: block; margin-top: 6px; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent); padding: 10px; text-align: left; vertical-align: top; }
+    th { background: color-mix(in srgb, CanvasText 7%, transparent); }
+    code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+    pre { overflow: auto; padding: 16px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); border-radius: 6px; }
+    .pass { color: #16803c; font-weight: 700; }
+    .deviation { border-left: 3px solid #b7791f; padding-left: 14px; }
+    a { color: LinkText; }
+    @media (max-width: 720px) { .status { grid-template-columns: 1fr; } main { width: min(100% - 20px, 1120px); margin-top: 20px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Frameless Visibility Lifecycle</h1>
+    <p>Self-review for <code>fix-windows-frameless-visible-state</code>, 2026-07-17.</p>
+    <div class="status">
+      <div class="metric">Review iteration<strong>1</strong></div>
+      <div class="metric">Exit judgment<strong class="pass">Normal exit</strong></div>
+      <div class="metric">User acceptance<strong class="pass">Confirmed</strong></div>
+    </div>
+  </header>
+
+  <h2>Lifecycle Projection</h2>
+  <pre>native state completion
+        |
+        v
+isVisible / visibleChange
+        |
+        +--&gt; OpenTray tray label
+        |
+        +--&gt; pnpm-pub retained window lifecycle
+        |
+        v
+close &lt;-&gt; toVisible</pre>
+
+  <h2>Intent Alignment</h2>
+  <table>
+    <thead><tr><th>Intent</th><th>Evidence</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Operational visibility is native truth.</td><td>OpenTray commits <code>980da15</code>, <code>1ada9fe</code>; published in <code>0.14.3</code>.</td><td class="pass">Aligned</td></tr>
+      <tr><td>Frameless geometry removes native residue and preserves resize.</td><td>Commits <code>c429504</code>, <code>b2736fc</code>, <code>2453667</code>; Windows visual acceptance.</td><td class="pass">Aligned</td></tr>
+      <tr><td>Recovery is terminal rather than continuous.</td><td>Commits <code>d7f614b</code>, <code>ae167ad</code>; accepted interaction behavior.</td><td class="pass">Aligned</td></tr>
+      <tr><td>Default switcher exclusion and native auto-hide.</td><td>Commit <code>9d1a950</code>; OpenTray release workflow succeeded.</td><td class="pass">Aligned</td></tr>
+      <tr><td>pnpm-pub uses the public retained lifecycle.</td><td>Commits <code>d70ffc4</code>, <code>7a5bb7a</code>; npm latest is <code>1.4.1</code>.</td><td class="pass">Aligned</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Release Evidence</h2>
+  <table>
+    <thead><tr><th>Artifact</th><th>Version</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>OpenTray</td><td><code>0.14.3</code></td><td><a href="https://github.com/jixoai/opentray/actions/runs/29569611638">successful release workflow</a></td></tr>
+      <tr><td>@opentray/ext-webview</td><td><code>0.14.3</code></td><td>npm registry version confirmed</td></tr>
+      <tr><td>pnpm-pub</td><td><code>1.4.1</code></td><td><a href="https://github.com/Gaubee/pnpm-pub/releases/tag/v1.4.1">GitHub release</a> and <a href="https://github.com/Gaubee/pnpm-pub/actions/runs/29590201247">successful workflow</a></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Deviations</h2>
+  <div class="deviation">
+    <p><code>4.4</code>, <code>4.6</code>, and <code>4.7</code> retain no exact current-context command evidence, so they remain unchecked.</p>
+    <p><code>8.2</code>, <code>8.3</code>, and <code>8.6</code> describe an instrumentation/A-B branch superseded by the accepted terminal recovery and host-topology path. They remain explicitly incomplete.</p>
+    <p>Visual acceptance is Windows-only; no macOS visual claim is made.</p>
+  </div>
+
+  <h2>Exit</h2>
+  <p><strong class="pass">Exit condition satisfied.</strong> The user accepted the visible behavior and authorized pnpm-pub release closure. No new user question or implementation loop remains. The next action is a dedicated OpenSpec archive commit.</p>
+</main>
+</body>
+</html>
