@@ -1,5 +1,11 @@
 # @opentray/ext-webview
 
+## 0.14.1
+
+### Patch Changes
+
+- ec23573: Stabilize Windows material WebView hosting by completing the native parent before WebView2, initializing AppWindow overlay after WebView attachment, stopping window-event polling after transport failure, and aligning the Windows control and residue examples with the accepted native comparator topology and retained tray lifecycle.
+
 ## 0.14.0
 
 ### Minor Changes

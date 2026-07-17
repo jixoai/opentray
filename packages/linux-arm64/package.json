@@ -1,6 +1,6 @@
 {
   "name": "@opentray/linux-arm64",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "OpenTray runtime artifact package for Linux ARM64.",
   "license": "MIT",
   "repository": {
