@@ -9,9 +9,13 @@ import type {
   ServerFrame,
 } from "./index";
 
+interface TestOpenTrayConnection extends OpenTrayConnection {
+  close(): Promise<void>;
+}
+
 const mockState = vi.hoisted(
   (): {
-    connection: OpenTrayConnection | null;
+    connection: TestOpenTrayConnection | null;
     runtimeOptions: OpenTrayRuntimeOptions[];
   } => ({
     connection: null,
@@ -22,7 +26,7 @@ const mockState = vi.hoisted(
 vi.mock("./local-broker", () => ({
   connectLocalBroker: async (
     options: OpenTrayRuntimeOptions = {}
-  ): Promise<OpenTrayConnection> => {
+  ): Promise<TestOpenTrayConnection> => {
     mockState.runtimeOptions.push(options);
     if (mockState.connection === null) {
       throw new Error("missing mocked OpenTray connection");
@@ -54,6 +58,28 @@ describe("opentray ergonomic createTray", () => {
       "opentray-1",
       "opentray-2",
     ]);
+  });
+
+  it("closes the caller-owned broker session when the tray is destroyed", async () => {
+    const tray = await createTray({ id: "status" });
+
+    await tray.destroy();
+    await tray.destroy();
+
+    expect(
+      transport.frames.filter((frame) => frame.type === "destroy-tray")
+    ).toHaveLength(1);
+    expect(transport.closeCount).toBe(1);
+  });
+
+  it("closes the caller-owned broker session when tray creation fails", async () => {
+    transport.failNextCreateTray = true;
+
+    await expect(createTray({ id: "status" })).rejects.toThrow(
+      "failed_create_tray"
+    );
+
+    expect(transport.closeCount).toBe(1);
   });
 
   it("normalizes shorthand menu items before sending protocol frames", async () => {
@@ -197,8 +223,10 @@ describe("opentray ergonomic createTray", () => {
   });
 });
 
-class EventfulRecordingTransport implements OpenTrayConnection {
+class EventfulRecordingTransport implements TestOpenTrayConnection {
   readonly frames: ClientRequestFrame[] = [];
+  closeCount = 0;
+  failNextCreateTray = false;
   failNextSetMenu = false;
   private readonly listeners = new Set<(frame: OpenTrayEventFrame) => void>();
 
@@ -212,6 +240,15 @@ class EventfulRecordingTransport implements OpenTrayConnection {
           app: { appId: "app-default" },
         };
       case "create-tray":
+        if (this.failNextCreateTray) {
+          this.failNextCreateTray = false;
+          return {
+            type: "error",
+            requestId: frame.requestId,
+            code: "failed_create_tray",
+            message: "failed_create_tray",
+          };
+        }
         return {
           type: "tray-created",
           requestId: frame.requestId,
@@ -278,6 +315,10 @@ class EventfulRecordingTransport implements OpenTrayConnection {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  async close(): Promise<void> {
+    this.closeCount += 1;
   }
 
   emit(frame: OpenTrayEventFrame): void {

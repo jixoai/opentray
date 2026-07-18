@@ -112,7 +112,7 @@ without making a menu item the primary route.
 
 ## Runtime Ownership
 
-OpenTray does not ask developers to create a public broker object. The application process or an application-owned background service imports `opentray`, calls `createTray()`, owns event handlers, and releases the tray when that process exits.
+OpenTray does not ask developers to create a public broker object. The application process or an application-owned background service imports `opentray`, calls `createTray()`, and owns its event handlers. Calling the returned handle's `destroy()` removes the tray and closes the caller-owned broker session; repeated calls share the same teardown. Process exit remains the final fallback rather than a required cleanup mechanism.
 
 Platform runtime packages carry the packaged runtime executable at `bin/opentray` or `bin/opentray.exe`.
 

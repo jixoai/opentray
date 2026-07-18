@@ -73,6 +73,8 @@
 - [x] 8.4 Generate `review/self-review.md` comparing every intent/spec/phase/verification requirement against current evidence.
 - [x] 8.5 Generate separate `review/self-review.html` presenting the three artifact identity flows, verification commands, and final evidence without embedding it in Markdown.
 - [x] 8.6 If review enters another loop, run `bun run openspec:vision -- review-state make-native-artifact-resolution-authoritative` and persist recurrence evidence.
+- [x] 8.7 Close final re-review findings: use release target names for Windows packed consumers, close the top-level SDK session after tray teardown or creation failure, and classify loader incompatibility from structured categories rather than message text.
+- [x] 8.8 Re-run focused red/green tests, packed pnpm/npm consumers, `pnpm run build`, and the full `pnpm run verify` gate after the final fixes.
 
 ## 9. Archive / Completion Audit
 

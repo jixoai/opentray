@@ -43,6 +43,9 @@ type ExtDeinitFn = unsafe extern "C" fn(instance: *mut c_void);
 type ExtFreeStringFn = unsafe extern "C" fn(ptr: *mut std::ffi::c_char, len: usize);
 type ExtTakeErrorFn = unsafe extern "C" fn(out_error_json: *mut ExtOwnedBytes) -> ExtResultCode;
 
+const ABI_INCOMPATIBLE_CATEGORY: &str = "abi_incompatible";
+const ARTIFACT_IDENTITY_MISMATCH_CATEGORY: &str = "artifact_identity_mismatch";
+
 #[derive(Debug, Clone)]
 pub struct DynamicExtensionLoader {
     discovery: ExtensionDiscovery,
@@ -217,12 +220,12 @@ where
 
 fn candidate_error_category(error: &ExtensionError) -> &'static str {
     match error {
-        ExtensionError::Detailed { category, .. } if category == "artifact_identity_mismatch" => {
+        ExtensionError::Detailed { category, .. }
+            if category == ARTIFACT_IDENTITY_MISMATCH_CATEGORY =>
+        {
             "identity-incompatible"
         }
-        ExtensionError::Unsupported(message)
-            if message.contains("missing symbol") || message.contains("ABI version") =>
-        {
+        ExtensionError::Detailed { category, .. } if category == ABI_INCOMPATIBLE_CATEGORY => {
             "abi-incompatible"
         }
         ExtensionError::NotFound(_) => "missing",
@@ -302,10 +305,13 @@ impl DynamicExtensionInstance {
             unsafe { get_symbol::<ExtAbiVersionFn>(&library, EXT_SYMBOL_ABI_VERSION)? };
         let actual_abi = unsafe { abi_version() };
         if actual_abi != EXT_ABI_VERSION {
-            return Err(ExtensionError::Unsupported(format!(
-                "extension {} uses ABI version {actual_abi}; expected {EXT_ABI_VERSION}",
-                request.name
-            )));
+            return Err(ExtensionError::Detailed {
+                category: ABI_INCOMPATIBLE_CATEGORY.to_string(),
+                message: format!(
+                    "extension {} uses ABI version {actual_abi}; expected {EXT_ABI_VERSION}",
+                    request.name
+                ),
+            });
         }
 
         let init = unsafe { get_symbol::<ExtInitFn>(&library, EXT_SYMBOL_INIT)? };
@@ -467,8 +473,9 @@ unsafe fn get_symbol<T: Copy>(library: &Library, name: &str) -> Result<T, Extens
     let symbol_name = format!("{name}\0");
     unsafe { library.get::<T>(symbol_name.as_bytes()) }
         .map(|symbol| *symbol)
-        .map_err(|error| {
-            ExtensionError::Unsupported(format!("extension missing symbol {name}: {error}"))
+        .map_err(|error| ExtensionError::Detailed {
+            category: ABI_INCOMPATIBLE_CATEGORY.to_string(),
+            message: format!("extension missing symbol {name}: {error}"),
         })
 }
 
@@ -550,7 +557,7 @@ fn validate_extension_manifest(
         return Ok(());
     }
     Err(ExtensionError::Detailed {
-        category: "artifact_identity_mismatch".to_string(),
+        category: ARTIFACT_IDENTITY_MISMATCH_CATEGORY.to_string(),
         message: format!(
             "expected={}; actual={}",
             serde_json::to_string(expected).unwrap_or_else(|_| "<unserializable>".to_string()),
@@ -899,13 +906,17 @@ mod tests {
         let categories = [
             candidate_error_category(&ExtensionError::NotFound("missing".to_string())),
             candidate_error_category(&ExtensionError::Rejected("invalid manifest".to_string())),
-            candidate_error_category(&ExtensionError::Unsupported(
-                "extension missing symbol init".to_string(),
-            )),
+            candidate_error_category(&ExtensionError::Detailed {
+                category: "abi_incompatible".to_string(),
+                message: "extension missing symbol init".to_string(),
+            }),
             candidate_error_category(&ExtensionError::Detailed {
                 category: "artifact_identity_mismatch".to_string(),
                 message: "old".to_string(),
             }),
+            candidate_error_category(&ExtensionError::Unsupported(
+                "extension missing symbol is only text".to_string(),
+            )),
         ];
 
         assert_eq!(
@@ -915,6 +926,7 @@ mod tests {
                 "unreadable",
                 "abi-incompatible",
                 "identity-incompatible",
+                "unreadable",
             ]
         );
     }

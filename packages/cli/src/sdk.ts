@@ -1,3 +1,8 @@
+// Orthogonal intents (2026-07-19; original user request: pnpm install must be sufficient):
+// 1. Expose one direct, ergonomic createTray entrypoint.
+// 2. Normalize app-facing menu shorthand into the protocol model.
+// 3. Make the returned handle own and deterministically close its broker session.
+
 import type { Icon, Tooltip, TrayOptions } from "@opentray/spec";
 
 import {
@@ -31,7 +36,7 @@ export interface CreateTrayOptions {
   menu?: CreateTrayMenu;
 }
 
-/** Tray handle returned by top-level createTray with ergonomic setMenu input. */
+/** Tray handle returned by top-level createTray with ergonomic menu and session ownership. */
 export interface CreateTrayHandle
   extends Omit<EventfulTrayHandle, "setMenu" | "extend" | "destroy"> {
   setMenu(menu: CreateTrayMenu): Promise<void>;
@@ -46,12 +51,19 @@ export const createTray = async (
   options: CreateTrayOptions,
   runtimeOptions: OpenTrayRuntimeOptions = {}
 ): Promise<CreateTrayHandle> => {
-  const connection = await connectLocalBroker(runtimeOptions);
   const normalized = normalizeCreateTrayOptions(options);
-  const tray = await createClient(connection).createTray(normalized.options);
-  return wrapCreateTrayHandle(tray, {
-    menuUnsubscribe: bindMenuClickHandlers(tray, normalized.menuHandlers),
-  });
+  const connection = await connectLocalBroker(runtimeOptions);
+  try {
+    const tray = await createClient(connection).createTray(normalized.options);
+    return wrapCreateTrayHandle(tray, {
+      closeConnection: () => connection.close(),
+      destroyPromise: undefined,
+      menuUnsubscribe: bindMenuClickHandlers(tray, normalized.menuHandlers),
+    });
+  } catch (error) {
+    await connection.close().catch(noop);
+    throw error;
+  }
 };
 
 const normalizeCreateTrayOptions = (
@@ -96,9 +108,16 @@ const wrapCreateTrayHandle = (
         TCapability;
     },
     async destroy(): Promise<void> {
-      state.menuUnsubscribe();
-      state.menuUnsubscribe = noop;
-      await tray.destroy();
+      state.destroyPromise ??= (async () => {
+        state.menuUnsubscribe();
+        state.menuUnsubscribe = noop;
+        try {
+          await tray.destroy();
+        } finally {
+          await state.closeConnection();
+        }
+      })();
+      await state.destroyPromise;
     },
   };
   return handle;
@@ -126,5 +145,7 @@ interface NormalizedCreateTrayOptions {
 }
 
 interface CreateTrayHandleState {
+  closeConnection: () => Promise<void>;
+  destroyPromise: Promise<void> | undefined;
   menuUnsubscribe: () => void;
 }
