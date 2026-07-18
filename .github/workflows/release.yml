@@ -22,6 +22,7 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  OPENTRAY_BUILD_IDENTITY: "github:${{ github.sha }}"
   LYNX_REF: "3a936299ec1669cfd1f3da71e41240296bc226b3"
   LYNX_XCODE_VERSION: "16.4"
 
@@ -79,9 +80,93 @@ jobs:
               handle.write(f"validate-package-dirs={validate_package_dirs}\n")
           PY
 
+  prepare-release:
+    name: Prepare versioned release source
+    needs: plan-native
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.channel.outputs.channel }}
+      has-changesets: ${{ steps.pending.outputs.has-changesets }}
+      source-ref: ${{ steps.source.outputs.source-ref }}
+      apply-patch: ${{ steps.source.outputs.apply-patch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve release channel
+        id: channel
+        shell: bash
+        run: |
+          channel=stable
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.channel }}" == "alpha" ]]; then
+            channel=alpha
+          fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect pending changesets
+        id: pending
+        shell: bash
+        run: |
+          if find .changeset -maxdepth 1 -type f -name "*.md" ! -name "README.md" | grep -q .; then
+            echo "has-changesets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changesets=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Materialize release source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_ref="${{ github.sha }}"
+          apply_patch=false
+
+          if [[ "${{ steps.pending.outputs.has-changesets }}" == "true" ]]; then
+            if [[ "${{ steps.channel.outputs.channel }}" == "alpha" ]]; then
+              pnpm run version-packages:alpha
+              git diff --binary -- . > release-source.patch
+              apply_patch=true
+            else
+              pnpm run version-packages
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add .changeset packages package.json pnpm-lock.yaml
+              git commit -m "chore: version packages"
+              git push
+              source_ref="$(git rev-parse HEAD)"
+            fi
+          fi
+
+          echo "source-ref=${source_ref}" >> "$GITHUB_OUTPUT"
+          echo "apply-patch=${apply_patch}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload alpha release source patch
+        if: steps.source.outputs.apply-patch == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-source-${{ github.run_id }}
+          path: release-source.patch
+          if-no-files-found: error
+
   native-artifacts:
     name: Native artifacts (${{ matrix.target }} / ${{ matrix.componentsCsv }})
-    needs: plan-native
+    needs:
+      - plan-native
+      - prepare-release
     if: needs.plan-native.outputs.enabled == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.jobTimeoutMinutes }}
@@ -91,6 +176,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare-release.outputs.source-ref }}
+
+      - name: Download alpha release source patch
+        if: needs.prepare-release.outputs.apply-patch == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-source-${{ github.run_id }}
+          path: release-source
+
+      - name: Apply alpha release source patch
+        if: needs.prepare-release.outputs.apply-patch == 'true'
+        shell: bash
+        run: git apply release-source/release-source.patch
 
       - name: Setup Node.js
         if: startsWith(matrix.target, 'darwin-')
@@ -180,8 +279,9 @@ jobs:
     name: Release packages
     needs:
       - plan-native
+      - prepare-release
       - native-artifacts
-    if: ${{ always() && needs.plan-native.result == 'success' && needs.native-artifacts.result != 'failure' && needs.native-artifacts.result != 'cancelled' }}
+    if: ${{ always() && needs.plan-native.result == 'success' && needs.prepare-release.result == 'success' && needs.native-artifacts.result != 'failure' && needs.native-artifacts.result != 'cancelled' }}
     runs-on: ubuntu-latest
     environment: npm-release
     steps:
@@ -189,6 +289,19 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.prepare-release.outputs.source-ref }}
+
+      - name: Download alpha release source patch
+        if: needs.prepare-release.outputs.apply-patch == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-source-${{ github.run_id }}
+          path: release-source
+
+      - name: Apply alpha release source patch
+        if: needs.prepare-release.outputs.apply-patch == 'true'
+        shell: bash
+        run: git apply release-source/release-source.patch
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -217,49 +330,6 @@ jobs:
       - name: Build publish artifacts
         run: pnpm run build
 
-      - name: Detect pending changesets
-        id: pending-changesets
-        shell: bash
-        run: |
-          if find .changeset -maxdepth 1 -type f -name "*.md" ! -name "README.md" | grep -q .; then
-            echo "has_changesets=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changesets=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Resolve release channel
-        id: release-channel
-        shell: bash
-        run: |
-          channel=stable
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.channel }}" == "alpha" ]]; then
-            channel=alpha
-          fi
-          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
-
-      - name: Version packages
-        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'
-        run: pnpm run version-packages
-
-      - name: Snapshot packages for alpha
-        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'alpha'
-        run: pnpm run version-packages:alpha
-
-      - name: Commit version packages
-        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'stable'
-        shell: bash
-        run: |
-          if git diff --quiet; then
-            echo "No version changes generated."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .changeset packages package.json pnpm-lock.yaml
-          git commit -m "chore: version packages"
-          git push
-
       - name: Download native artifacts
         if: needs.plan-native.outputs.enabled == 'true'
         uses: actions/download-artifact@v4
@@ -286,17 +356,17 @@ jobs:
             --package-dirs-json '${{ needs.plan-native.outputs.validate-package-dirs }}'
 
       - name: Publish packages
-        if: needs.plan-native.outputs.publish-enabled == 'true' && steps.release-channel.outputs.channel == 'stable'
+        if: needs.plan-native.outputs.publish-enabled == 'true' && needs.prepare-release.outputs.channel == 'stable'
         run: pnpm run release
 
       - name: Publish alpha packages
-        if: steps.pending-changesets.outputs.has_changesets == 'true' && steps.release-channel.outputs.channel == 'alpha'
+        if: needs.prepare-release.outputs.has-changesets == 'true' && needs.prepare-release.outputs.channel == 'alpha'
         run: pnpm run release:alpha
 
       - name: Backfill release tags
-        if: needs.plan-native.outputs.publish-enabled == 'true' && steps.release-channel.outputs.channel == 'stable'
+        if: needs.plan-native.outputs.publish-enabled == 'true' && needs.prepare-release.outputs.channel == 'stable'
         run: pnpm exec changeset tag
 
       - name: Push release tags
-        if: needs.plan-native.outputs.publish-enabled == 'true' && steps.release-channel.outputs.channel == 'stable'
+        if: needs.plan-native.outputs.publish-enabled == 'true' && needs.prepare-release.outputs.channel == 'stable'
         run: git push origin --tags

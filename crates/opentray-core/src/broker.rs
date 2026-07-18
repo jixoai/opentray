@@ -5,8 +5,8 @@ use opentray_spec::{
 };
 
 use crate::{
-    AppBackend, ExtensionHostContext, ExtensionLoadRequest, ExtensionLoader, Kernel, KernelError,
-    RoutedEvent, UnsupportedExtensionHostContext, UnsupportedExtensionLoader,
+    AppBackend, ExtensionError, ExtensionHostContext, ExtensionLoadRequest, ExtensionLoader,
+    Kernel, KernelError, RoutedEvent, UnsupportedExtensionHostContext, UnsupportedExtensionLoader,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -344,12 +344,14 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 app_id,
                 name,
                 path,
+                expected_identity,
                 mount_id,
             } => {
                 let request = ExtensionLoadRequest {
                     app_id: app_id.clone(),
                     name,
                     path,
+                    expected_identity,
                     mount_id,
                 };
                 match self
@@ -433,6 +435,9 @@ fn extension_events(events: Vec<ExtensionEnvelope>) -> Vec<ServerFrame> {
 }
 
 fn kernel_error(request_id: Option<RequestId>, error: KernelError) -> ServerFrame {
+    if let KernelError::Extension(ExtensionError::Detailed { category, message }) = error {
+        return protocol_error(request_id, category, message);
+    }
     protocol_error(request_id, "kernel-error", error.to_string())
 }
 

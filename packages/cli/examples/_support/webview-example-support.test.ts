@@ -1,13 +1,17 @@
-// Orthogonal intents (2026-07-14; original user request: `example:webview-control` cannot start):
+// Orthogonal intents (maintained 2026-07-19; original user request: `example:webview-control` cannot start):
 // 1. Verify example window defaults remain explicit.
 // 2. Verify source examples receive a caller-scoped broker identity.
 // 3. Verify runtime shutdown releases WebView connections before Vite closes.
+// 4. Keep source-example Unix endpoints within the native socket path limit.
 
 import { describe, expect, it } from "vitest";
+
+import { resolveDaemonPaths } from "../../src/daemon/paths";
 
 import {
   createExamplePrimaryMenu,
   createExampleCallerLabel,
+  createShortExampleHome,
   hasConfiguredBrokerBinaryPath,
   hasConfiguredWebviewExtensionPath,
   requireWindowsExample,
@@ -49,9 +53,23 @@ describe("Feature: WebView example support", () => {
   });
 
   it("Scenario: Given a source WebView example When its broker identity is derived Then it cannot attach to the neutral default endpoint", () => {
-    expect(createExampleCallerLabel("opentray-webview-control", 12_345)).toBe(
-      "example-12345-opentray-webview-control",
-    );
+    const callerLabel = createExampleCallerLabel("opentray-webview-control", 12_345);
+
+    expect(callerLabel).toMatch(/^example-12345-[a-f0-9]{8}$/u);
+    expect(callerLabel).toBe(createExampleCallerLabel("opentray-webview-control", 12_345));
+    expect(callerLabel).not.toBe("opentray");
+  });
+
+  it("Scenario: Given a source WebView example on macOS When its endpoint is derived Then it fits the native Unix socket path", () => {
+    const homePrefix = "opentray-debug-runtime-tray";
+    const endpoint = resolveDaemonPaths({
+      homeDir: createShortExampleHome(homePrefix),
+      packageVersion: "0.14.4",
+      callerLabel: createExampleCallerLabel(homePrefix),
+      platform: "darwin",
+    }).endpoint;
+
+    expect(Buffer.byteLength(endpoint, "utf8")).toBeLessThan(104);
   });
 
   it("Scenario: Given an explicit extension loader path When a source example prepares its runtime Then the explicit path remains authoritative", () => {
@@ -60,16 +78,12 @@ describe("Feature: WebView example support", () => {
         OPENTRAY_EXT_PATH: "E:\\artifacts\\opentray_ext_webview.dll",
       }),
     ).toBe(true);
-    expect(hasConfiguredWebviewExtensionPath({ OPENTRAY_EXT_PATH: "   " })).toBe(
-      false,
-    );
+    expect(hasConfiguredWebviewExtensionPath({ OPENTRAY_EXT_PATH: "   " })).toBe(false);
   });
 
   it("Scenario: Given an explicit extension DLL When no broker override is supplied Then the source broker remains selectable", () => {
     expect(hasConfiguredBrokerBinaryPath({})).toBe(false);
-    expect(hasConfiguredBrokerBinaryPath({ OPENTRAY_BROKER_BIN: "   " })).toBe(
-      false,
-    );
+    expect(hasConfiguredBrokerBinaryPath({ OPENTRAY_BROKER_BIN: "   " })).toBe(false);
     expect(
       hasConfiguredBrokerBinaryPath({
         OPENTRAY_BROKER_BIN: "E:\\artifacts\\opentray.exe",

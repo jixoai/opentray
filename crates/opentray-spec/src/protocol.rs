@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ext::ExtensionEnvelope;
+use crate::ext::{ExpectedExtensionIdentity, ExtensionEnvelope};
 use crate::model::{
     AppId, AppIdentity, AppOptions, AppRef, Icon, Menu, Rect, SessionId, Tooltip, TrayEvent,
     TrayId, TrayOptions,
@@ -251,6 +251,8 @@ pub enum ClientFrame {
         app_id: AppId,
         name: String,
         path: String,
+        #[serde(rename = "expectedIdentity")]
+        expected_identity: ExpectedExtensionIdentity,
         #[serde(default, rename = "mountId", skip_serializing_if = "Option::is_none")]
         mount_id: Option<String>,
     },

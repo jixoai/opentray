@@ -407,6 +407,18 @@ export interface ExtensionEnvelope<TData = unknown> {
   data: TData;
 }
 
+export interface ExtensionArtifactTarget {
+  os: string;
+  arch: string;
+}
+
+export interface ExpectedExtensionIdentity {
+  extensionName: string;
+  artifactSetVersion: string;
+  contractFingerprint: string;
+  target: ExtensionArtifactTarget;
+}
+
 export interface RuntimeHostSessionHealth {
   sessionId: number;
   internalSessionId?: SessionId;
@@ -473,6 +485,7 @@ export type ClientRequestFrame =
       appId: AppId;
       name: string;
       path: string;
+      expectedIdentity: ExpectedExtensionIdentity;
       mountId?: string;
     }
   | {

@@ -14,13 +14,15 @@ use opentray_core::{
 #[cfg(test)]
 use opentray_spec::REQUIRED_EXTENSION_SYMBOLS;
 use opentray_spec::{
-    ExtBytes, ExtContext, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
-    ExtensionScope, Rect, EXT_ABI_VERSION, EXT_API_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED,
-    EXT_ERR_UNSUPPORTED, EXT_OK, EXT_SYMBOL_ABI_VERSION, EXT_SYMBOL_COMMAND, EXT_SYMBOL_DEINIT,
-    EXT_SYMBOL_FREE_STRING, EXT_SYMBOL_INIT, EXT_SYMBOL_SESSION_CLOSED,
+    EmbeddedExtensionManifest, ExpectedExtensionIdentity, ExtBytes, ExtContext, ExtHostContext,
+    ExtOwnedBytes, ExtResultCode, ExtensionEnvelope, ExtensionErrorDetail, ExtensionScope, Rect,
+    EXT_ABI_VERSION, EXT_API_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED,
+    EXT_OK, EXT_SYMBOL_ABI_VERSION, EXT_SYMBOL_COMMAND, EXT_SYMBOL_DEINIT, EXT_SYMBOL_FREE_STRING,
+    EXT_SYMBOL_INIT, EXT_SYMBOL_MANIFEST, EXT_SYMBOL_SESSION_CLOSED, EXT_SYMBOL_TAKE_ERROR,
 };
 
 type ExtAbiVersionFn = unsafe extern "C" fn() -> u32;
+type ExtManifestFn = unsafe extern "C" fn(out_manifest_json: *mut ExtOwnedBytes) -> ExtResultCode;
 type ExtInitFn = unsafe extern "C" fn(
     context: *const ExtContext,
     out_instance: *mut *mut c_void,
@@ -38,7 +40,8 @@ type ExtSessionClosedFn = unsafe extern "C" fn(
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode;
 type ExtDeinitFn = unsafe extern "C" fn(instance: *mut c_void);
-type ExtFreeStringFn = unsafe extern "C" fn(bytes: ExtOwnedBytes);
+type ExtFreeStringFn = unsafe extern "C" fn(ptr: *mut std::ffi::c_char, len: usize);
+type ExtTakeErrorFn = unsafe extern "C" fn(out_error_json: *mut ExtOwnedBytes) -> ExtResultCode;
 
 #[derive(Debug, Clone)]
 pub struct DynamicExtensionLoader {
@@ -194,6 +197,7 @@ struct DynamicExtensionInstance {
     session_closed: ExtSessionClosedFn,
     deinit: ExtDeinitFn,
     free_string: ExtFreeStringFn,
+    take_error: ExtTakeErrorFn,
     _library: Library,
 }
 
@@ -211,6 +215,30 @@ impl DynamicExtensionInstance {
             ))
         })?;
 
+        let free_string =
+            unsafe { get_symbol::<ExtFreeStringFn>(&library, EXT_SYMBOL_FREE_STRING)? };
+        let take_error = unsafe { get_symbol::<ExtTakeErrorFn>(&library, EXT_SYMBOL_TAKE_ERROR)? };
+        let manifest = unsafe { get_symbol::<ExtManifestFn>(&library, EXT_SYMBOL_MANIFEST)? };
+        let mut manifest_output = empty_owned_bytes();
+        let manifest_result = unsafe { manifest(&mut manifest_output) };
+        if manifest_result != EXT_OK {
+            return Err(result_error(
+                &request.name,
+                manifest_result,
+                take_error,
+                free_string,
+            ));
+        }
+        let actual_manifest = unsafe {
+            read_owned_json::<EmbeddedExtensionManifest>(
+                manifest_output,
+                free_string,
+                "extension manifest",
+            )?
+        };
+        // Identity validation is deliberately complete before init creates native state.
+        validate_extension_manifest(&request.expected_identity, &actual_manifest)?;
+
         let abi_version =
             unsafe { get_symbol::<ExtAbiVersionFn>(&library, EXT_SYMBOL_ABI_VERSION)? };
         let actual_abi = unsafe { abi_version() };
@@ -226,8 +254,6 @@ impl DynamicExtensionInstance {
         let session_closed =
             unsafe { get_symbol::<ExtSessionClosedFn>(&library, EXT_SYMBOL_SESSION_CLOSED)? };
         let deinit = unsafe { get_symbol::<ExtDeinitFn>(&library, EXT_SYMBOL_DEINIT)? };
-        let free_string =
-            unsafe { get_symbol::<ExtFreeStringFn>(&library, EXT_SYMBOL_FREE_STRING)? };
 
         let app_id = CString::new(request.app_id.as_str()).map_err(|error| {
             ExtensionError::Unsupported(format!("extension app id contains nul byte: {error}"))
@@ -241,10 +267,7 @@ impl DynamicExtensionInstance {
         let mut instance = ptr::null_mut();
         let result = unsafe { init(&context, &mut instance) };
         if result != EXT_OK || instance.is_null() {
-            return Err(ExtensionError::Unsupported(format!(
-                "extension {} init failed with code {result}",
-                request.name
-            )));
+            return Err(result_error(&request.name, result, take_error, free_string));
         }
 
         Ok(Self {
@@ -254,6 +277,7 @@ impl DynamicExtensionInstance {
             session_closed,
             deinit,
             free_string,
+            take_error,
             _library: library,
         })
     }
@@ -267,15 +291,16 @@ impl DynamicExtensionInstance {
             return Ok(Vec::new());
         }
 
-        let bytes = unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) };
+        let bytes =
+            unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) }.to_vec();
+        unsafe { (self.free_string)(output.ptr, output.len) };
         let mut parsed =
-            serde_json::from_slice::<Vec<ExtensionEnvelope>>(bytes).map_err(|error| {
+            serde_json::from_slice::<Vec<ExtensionEnvelope>>(&bytes).map_err(|error| {
                 ExtensionError::Rejected(format!(
                     "extension {} returned invalid events JSON: {error}",
                     self.name
                 ))
             })?;
-        unsafe { (self.free_string)(output) };
         if let Some(scope) = scope {
             for event in &mut parsed {
                 event.scope = scope.clone();
@@ -323,7 +348,12 @@ impl ExtensionInstance for DynamicExtensionInstance {
             )
         };
         if result != EXT_OK {
-            return Err(result_error(&self.name, result));
+            return Err(result_error(
+                &self.name,
+                result,
+                self.take_error,
+                self.free_string,
+            ));
         }
         self.read_events(output, Some(scope))
     }
@@ -354,7 +384,12 @@ impl ExtensionInstance for DynamicExtensionInstance {
             )
         };
         if result != EXT_OK {
-            return Err(result_error(&self.name, result));
+            return Err(result_error(
+                &self.name,
+                result,
+                self.take_error,
+                self.free_string,
+            ));
         }
         self.read_events(output, None)
     }
@@ -378,7 +413,18 @@ unsafe fn get_symbol<T: Copy>(library: &Library, name: &str) -> Result<T, Extens
         })
 }
 
-fn result_error(name: &str, result: ExtResultCode) -> ExtensionError {
+fn result_error(
+    name: &str,
+    result: ExtResultCode,
+    take_error: ExtTakeErrorFn,
+    free_string: ExtFreeStringFn,
+) -> ExtensionError {
+    if let Some(detail) = take_extension_error(take_error, free_string) {
+        return ExtensionError::Detailed {
+            category: detail.category,
+            message: detail.message,
+        };
+    }
     match result {
         EXT_ERR_UNSUPPORTED => {
             ExtensionError::Unsupported(format!("extension {name} returned unsupported"))
@@ -388,6 +434,70 @@ fn result_error(name: &str, result: ExtResultCode) -> ExtensionError {
         }
         other => ExtensionError::Rejected(format!("extension {name} returned code {other}")),
     }
+}
+
+fn take_extension_error(
+    take_error: ExtTakeErrorFn,
+    free_string: ExtFreeStringFn,
+) -> Option<ExtensionErrorDetail> {
+    let mut output = empty_owned_bytes();
+    if unsafe { take_error(&mut output) } != EXT_OK {
+        return None;
+    }
+    unsafe {
+        read_owned_json(output, free_string, "extension error")
+            .ok()
+            .filter(|detail: &ExtensionErrorDetail| {
+                !detail.category.is_empty() && !detail.message.is_empty()
+            })
+    }
+}
+
+unsafe fn read_owned_json<T: serde::de::DeserializeOwned>(
+    output: ExtOwnedBytes,
+    free_string: ExtFreeStringFn,
+    label: &str,
+) -> Result<T, ExtensionError> {
+    if output.ptr.is_null() || output.len == 0 {
+        return Err(ExtensionError::Rejected(format!(
+            "{label} returned no JSON"
+        )));
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) }.to_vec();
+    unsafe { free_string(output.ptr, output.len) };
+    serde_json::from_slice(&bytes).map_err(|error| {
+        ExtensionError::Rejected(format!("{label} returned invalid JSON: {error}"))
+    })
+}
+
+fn empty_owned_bytes() -> ExtOwnedBytes {
+    ExtOwnedBytes {
+        ptr: ptr::null_mut(),
+        len: 0,
+    }
+}
+
+fn validate_extension_manifest(
+    expected: &ExpectedExtensionIdentity,
+    actual: &EmbeddedExtensionManifest,
+) -> Result<(), ExtensionError> {
+    let identity_matches = actual.abi_version == EXT_ABI_VERSION
+        && actual.extension_name == expected.extension_name
+        && actual.artifact_set_version == expected.artifact_set_version
+        && actual.contract_fingerprint == expected.contract_fingerprint
+        && actual.target == expected.target
+        && !actual.build_identity.is_empty();
+    if identity_matches {
+        return Ok(());
+    }
+    Err(ExtensionError::Detailed {
+        category: "artifact_identity_mismatch".to_string(),
+        message: format!(
+            "expected={}; actual={}",
+            serde_json::to_string(expected).unwrap_or_else(|_| "<unserializable>".to_string()),
+            serde_json::to_string(actual).unwrap_or_else(|_| "<unserializable>".to_string())
+        ),
+    })
 }
 
 fn borrowed_bytes(value: &CString) -> ExtBytes {
@@ -520,7 +630,9 @@ fn write_host_response(out: *mut ExtOwnedBytes, response: &[u8]) -> ExtResultCod
 fn extension_error_code(error: ExtensionError) -> ExtResultCode {
     match error {
         ExtensionError::Unsupported(_) => EXT_ERR_UNSUPPORTED,
-        ExtensionError::NotFound(_) | ExtensionError::Rejected(_) => EXT_ERR_REJECTED,
+        ExtensionError::NotFound(_)
+        | ExtensionError::Rejected(_)
+        | ExtensionError::Detailed { .. } => EXT_ERR_REJECTED,
     }
 }
 
@@ -582,6 +694,20 @@ fn current_arch() -> &'static str {
 mod tests {
     use super::*;
 
+    fn expected_extension_identity(
+        extension_name: &str,
+    ) -> opentray_spec::ExpectedExtensionIdentity {
+        opentray_spec::ExpectedExtensionIdentity {
+            extension_name: extension_name.to_string(),
+            artifact_set_version: "current".to_string(),
+            contract_fingerprint: "current-contract".to_string(),
+            target: opentray_spec::ExtensionArtifactTarget {
+                os: "darwin".to_string(),
+                arch: "arm64".to_string(),
+            },
+        }
+    }
+
     #[test]
     fn validates_required_symbols_as_a_single_abi_gate() {
         assert!(
@@ -597,6 +723,28 @@ mod tests {
 
         assert!(missing.contains(&EXT_SYMBOL_SESSION_CLOSED));
         assert!(missing.contains(&EXT_SYMBOL_DEINIT));
+        assert!(missing.contains(&"opentray_ext_manifest"));
+        assert!(missing.contains(&"opentray_ext_take_error"));
+    }
+
+    #[test]
+    fn rejects_a_mismatched_manifest_with_expected_and_actual_evidence() {
+        let expected = expected_extension_identity("webview");
+        let actual = opentray_spec::EmbeddedExtensionManifest {
+            extension_name: "webview".to_string(),
+            abi_version: EXT_ABI_VERSION,
+            artifact_set_version: "old".to_string(),
+            contract_fingerprint: "old-contract".to_string(),
+            target: expected.target.clone(),
+            build_identity: "old-build".to_string(),
+        };
+
+        let error = validate_extension_manifest(&expected, &actual).unwrap_err();
+
+        let message = error.to_string();
+        assert!(message.contains("current"));
+        assert!(message.contains("old"));
+        assert!(message.contains("old-build"));
     }
 
     #[test]
@@ -609,6 +757,7 @@ mod tests {
             app_id: "app-1".to_string(),
             name: "webview".to_string(),
             path: "/facade/current/libopentray_ext_webview.dylib".to_string(),
+            expected_identity: expected_extension_identity("webview"),
             mount_id: None,
         };
 
@@ -630,6 +779,7 @@ mod tests {
             app_id: "app-1".to_string(),
             name: "webview".to_string(),
             path: "diagnostic".to_string(),
+            expected_identity: expected_extension_identity("webview"),
             mount_id: None,
         };
 

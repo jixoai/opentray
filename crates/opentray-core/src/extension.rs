@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use opentray_spec::{AppId, ExtensionEnvelope, ExtensionScope, Rect, TrayId};
+use opentray_spec::{
+    AppId, ExpectedExtensionIdentity, ExtensionEnvelope, ExtensionScope, Rect, TrayId,
+};
 use serde_json::Value;
 
 pub const RECORDING_EXTENSION_PATH: &str = "opentray://recording-extension";
@@ -59,6 +61,8 @@ pub enum ExtensionError {
     NotFound(String),
     #[error("extension rejected command: {0}")]
     Rejected(String),
+    #[error("extension {category}: {message}")]
+    Detailed { category: String, message: String },
     #[error("extension loading is unsupported: {0}")]
     Unsupported(String),
 }
@@ -68,6 +72,7 @@ pub struct ExtensionLoadRequest {
     pub app_id: AppId,
     pub name: String,
     pub path: String,
+    pub expected_identity: ExpectedExtensionIdentity,
     pub mount_id: Option<String>,
 }
 

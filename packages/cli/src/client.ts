@@ -17,7 +17,6 @@ import {
 import {
   resolveNativeExtensionArtifact,
   type NativeExtensionArtifact,
-  type NativeExtensionFileArtifact,
 } from "./native-extension-artifact";
 
 export interface OpenTrayTransport {
@@ -94,7 +93,7 @@ export interface EventfulTrayHandle extends TrayHandle {
 
 export interface ExtensionLoadOptions {
   name: string;
-  artifact: NativeExtensionFileArtifact;
+  artifact: NativeExtensionArtifact;
   mountId?: string;
 }
 
@@ -249,12 +248,14 @@ export function createTrayHandle(
     },
     async loadExtension(options): Promise<void> {
       const requestId = nextRequestId();
+      const resolved = await resolveNativeExtensionArtifact(options.artifact);
       const response = await transport.request({
         type: "load-ext",
         requestId,
         appId,
         name: options.name,
-        path: options.artifact.path,
+        path: resolved.path,
+        expectedIdentity: resolved.expectedIdentity,
         ...(options.mountId === undefined ? {} : { mountId: options.mountId }),
       });
       expectResponse(response, requestId, "ack");
@@ -416,14 +417,8 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
   const ensureLoaded = async (): Promise<void> => {
     if (loadPromise === undefined) {
       // Package-manager resolution stays in Node; the broker receives one exact file.
-      loadPromise = resolveNativeExtensionArtifact(artifact)
-        .then((resolved) =>
-          tray.loadExtension({
-            name,
-            artifact: { kind: "file", path: resolved.path },
-            mountId,
-          })
-        )
+      loadPromise = tray
+        .loadExtension({ name, artifact, mountId })
         .catch((error: unknown) => {
           loadPromise = undefined;
           throw error;

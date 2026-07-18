@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 1
-- Status: Phase One exact artifact resolution verified; Phase Two active
+- Status: Phase Two extension manifest and structured rejection verified; Phase Three active
 - Previous plan backup: none; this is the first current plan
 
 ## Workflow Command Surface
@@ -210,7 +210,7 @@ Artifact-set identity proves a coordinated npm closure. Contract fingerprint pro
 - [x] 2. Write specs from the intent.
 - [x] 3. Write BDD tasks from specs.
 - [x] 4. Implement Phase 1: exact artifact resolution.
-- [ ] 5. Implement Phase 2: embedded extension manifest and structured rejection.
+- [x] 5. Implement Phase 2: embedded extension manifest and structured rejection.
 - [ ] 6. Implement Phase 3: broker artifact identity and automatic replacement.
 - [ ] 7. Prove package-manager install closures, native behavior, release artifacts, and full repo gates.
 - [ ] 8. Self-review against intent, resolve every finding, archive, and validate the archived state.

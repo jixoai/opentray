@@ -1,13 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
-import { createTrayHandle, type OpenTrayTransport } from "opentray";
+import {
+  createTrayHandle,
+  type NativeExtensionExpectedIdentity,
+  type OpenTrayTransport,
+} from "opentray";
 import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 
 import { attachBadge, BadgeExt, isBadgeEvent } from "./index";
 
+const TEST_EXPECTED_IDENTITY = {
+  extensionName: "badge",
+  artifactSetVersion: "test",
+  contractFingerprint: "badge-test-contract",
+  target: { os: process.platform, arch: process.arch },
+} satisfies NativeExtensionExpectedIdentity;
 const TEST_NATIVE_ARTIFACT = {
   kind: "file",
   path: fileURLToPath(import.meta.url),
+  expectedIdentity: TEST_EXPECTED_IDENTITY,
 } as const;
 
 describe("@opentray/ext-badge", () => {
@@ -45,6 +56,7 @@ describe("@opentray/ext-badge", () => {
         appId: "app-1",
         name: "badge",
         path: TEST_NATIVE_ARTIFACT.path,
+        expectedIdentity: TEST_EXPECTED_IDENTITY,
         mountId: "badge.tray-1",
       },
       {

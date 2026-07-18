@@ -2269,6 +2269,7 @@ dependencies = [
  "opentray-backend-tray-icon",
  "opentray-core",
  "opentray-spec",
+ "serde",
  "serde_json",
  "tray-icon",
  "windows-sys 0.61.2",

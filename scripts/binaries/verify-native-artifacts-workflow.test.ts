@@ -4,10 +4,7 @@ import { resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
 const verifyWorkflow = (): string =>
-  readFileSync(
-    resolve(repoRoot, ".github/workflows/verify-native-artifacts.yml"),
-    "utf8"
-  );
+  readFileSync(resolve(repoRoot, ".github/workflows/verify-native-artifacts.yml"), "utf8");
 
 describe("Feature: native artifact verification workflow", () => {
   test("Scenario: Given feature work changes native packaging When maintainers inspect the verification workflow Then native atoms are planned independently without publishing npm packages", () => {
@@ -17,6 +14,7 @@ describe("Feature: native artifact verification workflow", () => {
 
     expect(workflow).toContain("name: Verify Native Artifacts");
     expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain('OPENTRAY_BUILD_IDENTITY: "github:${{ github.sha }}"');
     expect(workflow).toContain("Plan native verification build");
     expect(workflow).toContain("bun run scripts/binaries/verify-native-plan.ts");
     expect(workflow).toContain("matrix: ${{ fromJson(needs.plan-native.outputs.matrix) }}");

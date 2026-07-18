@@ -6,6 +6,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import type { ExpectedExtensionIdentity } from "@opentray/spec";
 
 export type NativeExtensionArch = "arm64" | "x64";
 export type NativeExtensionTarget = `${NodeJS.Platform}-${NativeExtensionArch}`;
@@ -15,34 +16,45 @@ export interface NativeExtensionPackageTarget {
   libraryPath: string;
 }
 
-export interface NativeExtensionPackageArtifact {
-  kind: "package";
+export interface NativeExtensionIdentitySource {
   packageJsonUrl: string;
   contractManifestUrl: string;
+}
+
+export interface NativeExtensionPackageArtifact
+  extends NativeExtensionIdentitySource {
+  kind: "package";
   targets: Partial<Record<NativeExtensionTarget, NativeExtensionPackageTarget>>;
 }
 
-export interface NativeExtensionFileArtifact {
+interface NativeExtensionFileArtifactBase {
   kind: "file";
   path: string;
 }
+
+export type NativeExtensionFileArtifact = NativeExtensionFileArtifactBase &
+  (
+    | {
+        expectedIdentity: NativeExtensionExpectedIdentity;
+        identitySource?: never;
+      }
+    | {
+        expectedIdentity?: never;
+        identitySource: NativeExtensionIdentitySource;
+      }
+  );
 
 export type NativeExtensionArtifact =
   | NativeExtensionPackageArtifact
   | NativeExtensionFileArtifact;
 
-export interface NativeExtensionExpectedIdentity {
-  extensionName: string;
-  artifactSetVersion: string;
-  contractFingerprint: string;
-  target: NativeExtensionTarget;
-}
+export type NativeExtensionExpectedIdentity = ExpectedExtensionIdentity;
 
 export interface ResolvedNativeExtensionArtifact {
   path: string;
   packageName?: string;
   packageVersion?: string;
-  expectedIdentity?: NativeExtensionExpectedIdentity;
+  expectedIdentity: NativeExtensionExpectedIdentity;
   target: NativeExtensionTarget;
 }
 
@@ -80,6 +92,9 @@ export const resolveNativeExtensionArtifact = async (
   if (artifact.kind === "file") {
     return {
       path: await resolveAccessibleLibrary(artifact.path, target),
+      expectedIdentity:
+        artifact.expectedIdentity ??
+        (await resolveExpectedIdentity(artifact.identitySource, target)),
       target,
     };
   }
@@ -92,10 +107,7 @@ export const resolveNativeExtensionArtifact = async (
     );
   }
 
-  const [facadeManifest, contractManifest] = await Promise.all([
-    readFacadePackageManifest(artifact.packageJsonUrl, target),
-    readExtensionContractManifest(artifact.contractManifestUrl, target),
-  ]);
+  const expectedIdentity = await resolveExpectedIdentity(artifact, target);
 
   const resolveFromFacade = createRequire(artifact.packageJsonUrl);
   let platformPackageJsonPath: string;
@@ -125,13 +137,25 @@ export const resolveNativeExtensionArtifact = async (
     path: await resolveAccessibleLibrary(libraryPath, target, packageTarget.packageName),
     packageName: packageTarget.packageName,
     packageVersion: manifest.version,
-    expectedIdentity: {
-      extensionName: contractManifest.extensionName,
-      artifactSetVersion: facadeManifest.version,
-      contractFingerprint: contractManifest.contractFingerprint,
-      target,
-    },
+    expectedIdentity,
     target,
+  };
+};
+
+const resolveExpectedIdentity = async (
+  source: NativeExtensionIdentitySource,
+  target: NativeExtensionTarget
+): Promise<NativeExtensionExpectedIdentity> => {
+  const [facadeManifest, contractManifest] = await Promise.all([
+    readFacadePackageManifest(source.packageJsonUrl, target),
+    readExtensionContractManifest(source.contractManifestUrl, target),
+  ]);
+  const [os, arch] = splitTarget(target);
+  return {
+    extensionName: contractManifest.extensionName,
+    artifactSetVersion: facadeManifest.version,
+    contractFingerprint: contractManifest.contractFingerprint,
+    target: { os, arch },
   };
 };
 

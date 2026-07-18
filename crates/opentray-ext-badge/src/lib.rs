@@ -1,3 +1,5 @@
+mod abi_support;
+
 use std::ffi::{c_char, c_void, CString};
 use std::fmt;
 
@@ -6,6 +8,8 @@ use opentray_spec::{
     EXT_ABI_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED, EXT_OK,
 };
 use serde::{Deserialize, Serialize};
+
+use abi_support::{clear_error, record_error};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -92,6 +96,13 @@ impl BadgeRuntimeError {
             Self::Internal(_) => EXT_ERR_INTERNAL,
         }
     }
+
+    fn category(&self) -> &'static str {
+        match self {
+            Self::Unsupported(_) => "unsupported",
+            Self::Internal(_) => "internal",
+        }
+    }
 }
 
 impl fmt::Display for BadgeRuntimeError {
@@ -112,8 +123,13 @@ pub unsafe extern "C" fn opentray_ext_init(
     context: *const ExtContext,
     out_instance: *mut *mut c_void,
 ) -> ExtResultCode {
+    clear_error();
     if context.is_null() || out_instance.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_init_context",
+            "init requires context and output instance pointers",
+        );
     }
     let instance = Box::new(BadgeExtension {
         state: default_capabilities(platform_from_env()),
@@ -131,27 +147,54 @@ pub unsafe extern "C" fn opentray_ext_command(
     envelope_json: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
+    clear_error();
     if instance.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_instance",
+            "badge command requires an initialized instance",
+        );
     }
     let Some(bytes) = ext_bytes_as_slice(envelope_json) else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_command_envelope",
+            "badge command envelope bytes are missing",
+        );
     };
-    let Ok(envelope) = serde_json::from_slice::<ExtensionEnvelope>(bytes) else {
-        return EXT_ERR_REJECTED;
+    let envelope = match serde_json::from_slice::<ExtensionEnvelope>(bytes) {
+        Ok(envelope) => envelope,
+        Err(error) => {
+            return record_error(
+                EXT_ERR_REJECTED,
+                "invalid_command_envelope",
+                format!("badge command envelope is invalid: {error}"),
+            )
+        }
     };
     let Some(tray_id) = envelope.scope.tray_id.as_deref() else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "missing_tray_scope",
+            "badge command requires a tray id",
+        );
     };
-    let Ok(command) = serde_json::from_value::<BadgeCommand>(envelope.data) else {
-        return EXT_ERR_REJECTED;
+    let command = match serde_json::from_value::<BadgeCommand>(envelope.data) {
+        Ok(command) => command,
+        Err(error) => {
+            return record_error(
+                EXT_ERR_REJECTED,
+                "invalid_command",
+                format!("badge command is invalid: {error}"),
+            )
+        }
     };
     let extension = unsafe { &mut *instance.cast::<BadgeExtension>() };
     match extension.handle(tray_id, command) {
         Ok(events) => write_owned_events(out_events_json, &events),
         Err(error) => {
             eprintln!("opentray-ext-badge command failed: {error}");
-            error.code()
+            record_error(error.code(), error.category(), error.to_string())
         }
     }
 }
@@ -163,6 +206,7 @@ pub unsafe extern "C" fn opentray_ext_session_closed(
     _session_id: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
+    clear_error();
     write_owned_json(out_events_json, "[]")
 }
 
@@ -174,9 +218,9 @@ pub unsafe extern "C" fn opentray_ext_deinit(instance: *mut c_void) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn opentray_ext_free_string(bytes: ExtOwnedBytes) {
-    if !bytes.ptr.is_null() {
-        drop(unsafe { CString::from_raw(bytes.ptr) });
+pub unsafe extern "C" fn opentray_ext_free_string(ptr: *mut c_char, _len: usize) {
+    if !ptr.is_null() {
+        drop(unsafe { CString::from_raw(ptr) });
     }
 }
 
@@ -293,10 +337,18 @@ unsafe fn ext_bytes_as_slice<'a>(bytes: ExtBytes) -> Option<&'a [u8]> {
 
 fn write_owned_json(out: *mut ExtOwnedBytes, json: &str) -> ExtResultCode {
     if out.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_output_buffer",
+            "badge output buffer pointer is null",
+        );
     }
     let Ok(value) = CString::new(json) else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_INTERNAL,
+            "serialization_failed",
+            "badge output JSON contains a nul byte",
+        );
     };
     let len = value.as_bytes().len();
     unsafe {
@@ -309,8 +361,15 @@ fn write_owned_json(out: *mut ExtOwnedBytes, json: &str) -> ExtResultCode {
 }
 
 fn write_owned_events(out: *mut ExtOwnedBytes, events: &[ExtensionEnvelope]) -> ExtResultCode {
-    let Ok(json) = serde_json::to_string(events) else {
-        return EXT_ERR_REJECTED;
+    let json = match serde_json::to_string(events) {
+        Ok(json) => json,
+        Err(error) => {
+            return record_error(
+                EXT_ERR_INTERNAL,
+                "serialization_failed",
+                format!("badge events could not be serialized: {error}"),
+            )
+        }
     };
     write_owned_json(out, &json)
 }
@@ -318,6 +377,90 @@ fn write_owned_events(out: *mut ExtOwnedBytes, events: &[ExtensionEnvelope]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ptr;
+
+    #[test]
+    fn exports_embedded_artifact_identity() {
+        let mut output = ExtOwnedBytes {
+            ptr: ptr::null_mut(),
+            len: 0,
+        };
+
+        let result = unsafe { abi_support::opentray_ext_manifest(&mut output) };
+
+        assert_eq!(result, EXT_OK);
+        let bytes = unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) };
+        let manifest = serde_json::from_slice::<opentray_spec::EmbeddedExtensionManifest>(bytes)
+            .expect("manifest JSON");
+        assert_eq!(manifest.extension_name, "badge");
+        assert_eq!(manifest.artifact_set_version, "0.14.4");
+        assert_eq!(
+            manifest.contract_fingerprint,
+            "opentray-ext-badge-contract-1"
+        );
+        assert!(!manifest.build_identity.is_empty());
+        unsafe { opentray_ext_free_string(output.ptr, output.len) };
+    }
+
+    #[test]
+    fn command_rejection_exposes_structured_native_detail() {
+        let context = ExtContext {
+            api_version: 1,
+            app_id: ExtBytes {
+                ptr: c"app-1".as_ptr(),
+                len: "app-1".len(),
+            },
+        };
+        let mut instance = ptr::null_mut();
+        assert_eq!(
+            unsafe { opentray_ext_init(&context, &mut instance) },
+            EXT_OK
+        );
+        let envelope = CString::new(
+            serde_json::json!({
+                "scope": { "appId": "app-1", "trayId": "tray-1", "ext": "badge" },
+                "data": { "type": "setProgress", "value": 50, "max": 100 }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut events = ExtOwnedBytes {
+            ptr: ptr::null_mut(),
+            len: 0,
+        };
+
+        let result = unsafe {
+            opentray_ext_command(
+                instance,
+                ptr::null(),
+                ExtBytes {
+                    ptr: envelope.as_ptr(),
+                    len: envelope.as_bytes().len(),
+                },
+                &mut events,
+            )
+        };
+        assert_eq!(result, EXT_ERR_UNSUPPORTED);
+
+        let mut error_output = ExtOwnedBytes {
+            ptr: ptr::null_mut(),
+            len: 0,
+        };
+        assert_eq!(
+            unsafe { abi_support::opentray_ext_take_error(&mut error_output) },
+            EXT_OK
+        );
+        let bytes =
+            unsafe { std::slice::from_raw_parts(error_output.ptr.cast::<u8>(), error_output.len) };
+        let detail = serde_json::from_slice::<opentray_spec::ExtensionErrorDetail>(bytes)
+            .expect("error JSON");
+        assert_eq!(detail.category, "unsupported");
+        assert!(detail.message.contains("progress is unsupported"));
+        unsafe {
+            opentray_ext_free_string(error_output.ptr, error_output.len);
+            opentray_ext_deinit(instance);
+        }
+    }
 
     #[test]
     fn default_capabilities_are_reduced_and_truthful_for_windows() {

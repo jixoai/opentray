@@ -9,12 +9,12 @@
 
 - [x] 2.1 Scenario: Given a current platform package in a facade-relative pnpm closure and an older unmanaged top-level package When the extension first loads Then the SDK resolves and sends only the facade-relative exact artifact.
 - [x] 2.2 Scenario: Given a supported descriptor whose platform package is missing When the extension first loads Then the SDK reports a typed target/package resolution error before broker dispatch.
-- [ ] 2.3 Scenario: Given an exact dylib with a mismatched embedded manifest When `load-ext` validates it Then init is never called and expected/actual identity is returned.
-- [ ] 2.4 Scenario: Given an extension rejects a command with native detail When the broker reports the failure Then category/message survive instead of collapsing to numeric code.
+- [x] 2.3 Scenario: Given an exact dylib with a mismatched embedded manifest When `load-ext` validates it Then init is never called and expected/actual identity is returned.
+- [x] 2.4 Scenario: Given an extension rejects a command with native detail When the broker reports the failure Then category/message survive instead of collapsing to numeric code.
 - [ ] 2.5 Scenario: Given a live same-endpoint broker with missing or different artifact identity When the SDK auto-starts Then it stops and replaces that PID under the daemon lock.
 - [ ] 2.6 Scenario: Given a live same-endpoint broker with matching identity When the SDK auto-starts Then it returns `already-running` without spawning.
 - [ ] 2.7 Scenario: Given packed facade/platform tarballs installed in a temporary pnpm consumer with an orphan top-level platform package When artifact resolution runs Then the current nested artifact wins without environment overrides.
-- [ ] 2.8 Scenario: Given a correctly versioned platform package containing a stale native binary When release verification inspects embedded identity Then the release gate fails.
+- [x] 2.8 Scenario: Given a correctly versioned platform package containing a stale native binary When release verification inspects embedded identity Then the release gate fails.
 
 ## 3. Git Evidence Before Apply
 
@@ -34,15 +34,15 @@
 
 ## 5. Phase Two - Extension Manifest And Structured Errors
 
-- [ ] 5.1 Add red `opentray-spec` / `opentray-bin` tests requiring manifest and structured-error ABI symbols and proving manifest validation occurs before init.
-- [ ] 5.2 Add one canonical extension contract manifest per official facade and include it in packed package files.
-- [ ] 5.3 Replace the dynamic extension ABI with required manifest and structured-error buffer symbols; update C-compatible types and required-symbol law.
-- [ ] 5.4 Export embedded manifests from WebView, Badge, and Lynx using facade package version, contract fingerprint, target, and build identity supplied from one source of truth.
-- [ ] 5.5 Validate exact expected/actual identities generically in `opentray-bin`; never parse extension product commands.
-- [ ] 5.6 Preserve structured init/command/session-cleanup error category and message through `ExtensionError` and client-visible kernel errors.
-- [ ] 5.7 Update native staging/release verification to compare packed facade expectation, platform metadata, and embedded manifest; add stale-binary failure fixture.
-- [ ] 5.8 Add concise intent comments at pre-init validation and structured error extraction.
-- [ ] 5.9 Run focused Rust/facade/release tests plus linkage/size inspection, mark verified Phase Two BDD/tasks, and commit code/tests/task evidence together.
+- [x] 5.1 Add red `opentray-spec` / `opentray-bin` tests requiring manifest and structured-error ABI symbols and proving manifest validation occurs before init.
+- [x] 5.2 Add one canonical extension contract manifest per official facade and include it in packed package files.
+- [x] 5.3 Replace the dynamic extension ABI with required manifest and structured-error buffer symbols; update C-compatible types and required-symbol law.
+- [x] 5.4 Export embedded manifests from WebView, Badge, and Lynx using facade package version, contract fingerprint, target, and build identity supplied from one source of truth.
+- [x] 5.5 Validate exact expected/actual identities generically in `opentray-bin`; never parse extension product commands.
+- [x] 5.6 Preserve structured init/command/session-cleanup error category and message through `ExtensionError` and client-visible kernel errors.
+- [x] 5.7 Update native staging/release verification to compare packed facade expectation, platform metadata, and embedded manifest; add stale-binary failure fixture.
+- [x] 5.8 Add concise intent comments at pre-init validation and structured error extraction.
+- [x] 5.9 Run focused Rust/facade/release tests plus linkage/size inspection, mark verified Phase Two BDD/tasks, and commit code/tests/task evidence together.
 
 ## 6. Phase Three - Broker Artifact Identity
 

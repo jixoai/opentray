@@ -1,3 +1,4 @@
+mod abi_support;
 #[cfg(target_os = "macos")]
 mod macos;
 mod protocol;
@@ -5,6 +6,7 @@ mod protocol;
 use std::ffi::{c_char, c_void, CString};
 use std::fmt;
 
+use abi_support::{clear_error, record_error};
 use opentray_spec::{
     ExtBytes, ExtContext, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
     EXT_ABI_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED, EXT_OK,
@@ -59,6 +61,14 @@ impl LynxRuntimeError {
             Self::Internal(_) => EXT_ERR_INTERNAL,
         }
     }
+
+    fn category(&self) -> &'static str {
+        match self {
+            Self::Rejected(_) => "rejected",
+            Self::Unsupported(_) => "unsupported",
+            Self::Internal(_) => "internal",
+        }
+    }
 }
 
 impl fmt::Display for LynxRuntimeError {
@@ -81,13 +91,24 @@ pub unsafe extern "C" fn opentray_ext_init(
     context: *const ExtContext,
     out_instance: *mut *mut c_void,
 ) -> ExtResultCode {
+    clear_error();
     if context.is_null() || out_instance.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_init_context",
+            "init requires context and output instance pointers",
+        );
     }
 
     let app_id = match unsafe { read_ext_string((*context).app_id) } {
         Some(value) => value,
-        None => return EXT_ERR_REJECTED,
+        None => {
+            return record_error(
+                EXT_ERR_REJECTED,
+                "invalid_app_id",
+                "init app id is missing or invalid UTF-8",
+            )
+        }
     };
     let instance = Box::new(LynxExtension {
         app_id,
@@ -106,31 +127,56 @@ pub unsafe extern "C" fn opentray_ext_command(
     envelope_json: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
+    clear_error();
     if instance.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_instance",
+            "Lynx command requires an initialized instance",
+        );
     }
     let Some(bytes) = (unsafe { ext_bytes_as_slice(envelope_json) }) else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_command_envelope",
+            "Lynx command envelope bytes are missing",
+        );
     };
-    let Ok(envelope) = serde_json::from_slice::<ExtensionEnvelope>(bytes) else {
-        return EXT_ERR_REJECTED;
+    let envelope = match serde_json::from_slice::<ExtensionEnvelope>(bytes) {
+        Ok(envelope) => envelope,
+        Err(error) => {
+            return record_error(
+                EXT_ERR_REJECTED,
+                "invalid_command_envelope",
+                format!("Lynx command envelope is invalid: {error}"),
+            )
+        }
     };
 
     let extension = unsafe { &mut *instance.cast::<LynxExtension>() };
     if envelope.scope.app_id != extension.app_id {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "app_scope_mismatch",
+            "Lynx command app id does not own this instance",
+        );
     }
     let Some(tray_id) = envelope.scope.tray_id.as_deref() else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "missing_tray_scope",
+            "Lynx command requires a tray id",
+        );
     };
-    let Ok(command) = parse_lynx_command(&envelope.data) else {
-        return EXT_ERR_REJECTED;
+    let command = match parse_lynx_command(&envelope.data) {
+        Ok(command) => command,
+        Err(error) => return record_error(error.code(), error.category(), error.to_string()),
     };
     let event = match extension.runtime.handle(tray_id, command) {
         Ok(event) => event,
         Err(error) => {
             eprintln!("opentray-ext-lynx command failed: {error}");
-            return error.code();
+            return record_error(error.code(), error.category(), error.to_string());
         }
     };
 
@@ -148,11 +194,20 @@ pub unsafe extern "C" fn opentray_ext_session_closed(
     session_id: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
+    clear_error();
     if instance.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_instance",
+            "Lynx session cleanup requires an initialized instance",
+        );
     }
     let Some(session_id) = (unsafe { read_ext_string(session_id) }) else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_session_id",
+            "Lynx session id is missing or invalid UTF-8",
+        );
     };
     let extension = unsafe { &mut *instance.cast::<LynxExtension>() };
     extension.runtime.session_closed(&session_id);
@@ -167,9 +222,9 @@ pub unsafe extern "C" fn opentray_ext_deinit(instance: *mut c_void) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn opentray_ext_free_string(bytes: ExtOwnedBytes) {
-    if !bytes.ptr.is_null() {
-        drop(unsafe { CString::from_raw(bytes.ptr) });
+pub unsafe extern "C" fn opentray_ext_free_string(ptr: *mut c_char, _len: usize) {
+    if !ptr.is_null() {
+        drop(unsafe { CString::from_raw(ptr) });
     }
 }
 
@@ -187,10 +242,18 @@ unsafe fn ext_bytes_as_slice<'a>(bytes: ExtBytes) -> Option<&'a [u8]> {
 
 fn write_owned_json(out: *mut ExtOwnedBytes, json: &str) -> ExtResultCode {
     if out.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_output_buffer",
+            "Lynx output buffer pointer is null",
+        );
     }
     let Ok(value) = CString::new(json) else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_INTERNAL,
+            "serialization_failed",
+            "Lynx output JSON contains a nul byte",
+        );
     };
     let len = value.as_bytes().len();
     unsafe {
@@ -203,8 +266,15 @@ fn write_owned_json(out: *mut ExtOwnedBytes, json: &str) -> ExtResultCode {
 }
 
 fn write_owned_events(out: *mut ExtOwnedBytes, events: &[ExtensionEnvelope]) -> ExtResultCode {
-    let Ok(json) = serde_json::to_string(events) else {
-        return EXT_ERR_REJECTED;
+    let json = match serde_json::to_string(events) {
+        Ok(json) => json,
+        Err(error) => {
+            return record_error(
+                EXT_ERR_INTERNAL,
+                "serialization_failed",
+                format!("Lynx events could not be serialized: {error}"),
+            )
+        }
     };
     write_owned_json(out, &json)
 }
@@ -217,6 +287,29 @@ mod tests {
     #[test]
     fn abi_version_matches_public_contract() {
         assert_eq!(opentray_ext_abi_version(), EXT_ABI_VERSION);
+    }
+
+    #[test]
+    fn exports_embedded_artifact_identity() {
+        let mut output = ExtOwnedBytes {
+            ptr: ptr::null_mut(),
+            len: 0,
+        };
+
+        let result = unsafe { abi_support::opentray_ext_manifest(&mut output) };
+
+        assert_eq!(result, EXT_OK);
+        let bytes = unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) };
+        let manifest = serde_json::from_slice::<opentray_spec::EmbeddedExtensionManifest>(bytes)
+            .expect("manifest JSON");
+        assert_eq!(manifest.extension_name, "lynx");
+        assert_eq!(manifest.artifact_set_version, "0.11.1");
+        assert_eq!(
+            manifest.contract_fingerprint,
+            "opentray-ext-lynx-contract-1"
+        );
+        assert!(!manifest.build_identity.is_empty());
+        unsafe { opentray_ext_free_string(output.ptr, output.len) };
     }
 
     #[test]
@@ -264,7 +357,7 @@ mod tests {
             json,
             r#"[{"scope":{"appId":"app-1","trayId":"tray-1","ext":"lynx"},"data":{"type":"hidden"}}]"#
         );
-        unsafe { opentray_ext_free_string(out) };
+        unsafe { opentray_ext_free_string(out.ptr, out.len) };
         unsafe { opentray_ext_deinit(instance) };
     }
 }

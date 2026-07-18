@@ -20,6 +20,7 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  OPENTRAY_BUILD_IDENTITY: "github:${{ github.sha }}"
   LYNX_REF: "3a936299ec1669cfd1f3da71e41240296bc226b3"
   LYNX_XCODE_VERSION: "16.4"
 

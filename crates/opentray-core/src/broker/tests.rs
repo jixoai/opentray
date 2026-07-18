@@ -1,6 +1,6 @@
 use opentray_spec::{
-    AppOptions, ClientFrame, Icon, Menu, MenuItem, ServerFrame, TrayEvent, TrayOptions,
-    PROTOCOL_VERSION,
+    AppOptions, ClientFrame, ExpectedExtensionIdentity, ExtensionArtifactTarget, Icon, Menu,
+    MenuItem, ServerFrame, TrayEvent, TrayOptions, PROTOCOL_VERSION,
 };
 
 use super::*;
@@ -12,6 +12,18 @@ use crate::{
 
 fn icon() -> Option<Icon> {
     Some(Icon::rgba(vec![0, 0, 0, 0], 1, 1))
+}
+
+fn expected_extension_identity(extension_name: &str) -> ExpectedExtensionIdentity {
+    ExpectedExtensionIdentity {
+        extension_name: extension_name.to_string(),
+        artifact_set_version: "test".to_string(),
+        contract_fingerprint: "test-contract".to_string(),
+        target: ExtensionArtifactTarget {
+            os: "test".to_string(),
+            arch: "test".to_string(),
+        },
+    }
 }
 
 fn tray_options(tray_id: &str) -> TrayOptions {
@@ -347,6 +359,7 @@ fn load_ext_rejects_dynamic_paths_without_a_loader() {
             app_id: surface.app_id,
             name: "webview".to_string(),
             path: "@opentray/ext-webview".to_string(),
+            expected_identity: expected_extension_identity("webview"),
             mount_id: None,
         },
         "0.1.0",
@@ -386,6 +399,7 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
             app_id: surface.app_id.clone(),
             name: "webview".to_string(),
             path: RECORDING_EXTENSION_PATH.to_string(),
+            expected_identity: expected_extension_identity("webview"),
             mount_id: None,
         },
         "0.1.0",
@@ -452,6 +466,7 @@ fn load_ext_mount_id_isolates_instances_with_the_same_extension_name() {
                 app_id: surface.app_id.clone(),
                 name: "webview".to_string(),
                 path: RECORDING_EXTENSION_PATH.to_string(),
+                expected_identity: expected_extension_identity("webview"),
                 mount_id: Some(mount_id.to_string()),
             },
             "0.1.0",
@@ -516,6 +531,7 @@ fn explicit_exit_uses_extension_host_for_session_cleanup() {
             app_id: surface.app_id,
             name: "webview".to_string(),
             path: "opentray://host-probe".to_string(),
+            expected_identity: expected_extension_identity("webview"),
             mount_id: None,
         },
         "0.1.0",

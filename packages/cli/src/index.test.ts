@@ -15,8 +15,16 @@ import {
   type OpenTrayTransport,
   type OpenTrayConnection,
   type OpenTrayEventFrame,
+  type NativeExtensionExpectedIdentity,
   type ServerFrame,
 } from "./index";
+
+const TEST_EXPECTED_IDENTITY = {
+  extensionName: "identity",
+  artifactSetVersion: "test",
+  contractFingerprint: "identity-test-contract",
+  target: { os: process.platform, arch: process.arch },
+} satisfies NativeExtensionExpectedIdentity;
 
 describe("opentray client", () => {
   it("routes extension commands through public protocol", async () => {
@@ -57,7 +65,11 @@ describe("opentray client", () => {
 
     const extended = tray.extend({
       name: "identity",
-      artifact: { kind: "file", path: "/tmp/example-identity" },
+      artifact: {
+        kind: "file",
+        path: "/tmp/example-identity",
+        expectedIdentity: TEST_EXPECTED_IDENTITY,
+      },
       extend(_tray, context) {
         return {
           appId: context.appId,
@@ -137,6 +149,15 @@ describe("opentray client", () => {
     expect(transport.frames[0]).toMatchObject({
       type: "load-ext",
       path: await realpath(nestedLibrary),
+      expectedIdentity: {
+        extensionName: "fixture",
+        artifactSetVersion: "2.0.0",
+        contractFingerprint: "fixture-contract-2",
+        target: {
+          os: process.platform,
+          arch: process.arch,
+        },
+      },
     });
   });
 

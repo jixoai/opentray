@@ -23,6 +23,7 @@ export {
   type NativeExtensionArch,
   type NativeExtensionArtifact,
   type NativeExtensionFileArtifact,
+  type NativeExtensionIdentitySource,
   type NativeExtensionExpectedIdentity,
   type NativeExtensionPackageArtifact,
   type NativeExtensionPackageTarget,

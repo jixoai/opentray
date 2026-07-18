@@ -4,6 +4,7 @@
 // 3. Define common retained-window lifecycle defaults and native blur policy.
 // 4. Export the stable dynamic extension ABI.
 
+mod abi_support;
 mod bootstrap;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -19,6 +20,8 @@ use opentray_spec::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+
+use abi_support::{clear_error, record_error};
 use url::Url;
 
 #[cfg(target_os = "macos")]
@@ -638,6 +641,14 @@ impl WebviewRuntimeError {
             Self::Internal(_) => EXT_ERR_INTERNAL,
         }
     }
+
+    fn category(&self) -> &'static str {
+        match self {
+            Self::Rejected(_) => "rejected",
+            Self::Unsupported(_) => "unsupported",
+            Self::Internal(_) => "internal",
+        }
+    }
 }
 
 impl fmt::Display for WebviewRuntimeError {
@@ -660,13 +671,24 @@ pub unsafe extern "C" fn opentray_ext_init(
     context: *const ExtContext,
     out_instance: *mut *mut c_void,
 ) -> ExtResultCode {
+    clear_error();
     if context.is_null() || out_instance.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_init_context",
+            "init requires context and output instance pointers",
+        );
     }
 
     let app_id = match unsafe { read_ext_string((*context).app_id) } {
         Some(value) => value,
-        None => return EXT_ERR_REJECTED,
+        None => {
+            return record_error(
+                EXT_ERR_REJECTED,
+                "invalid_app_id",
+                "init app id is missing or invalid UTF-8",
+            )
+        }
     };
     let instance = Box::new(WebviewExtension {
         app_id,
@@ -685,25 +707,50 @@ pub unsafe extern "C" fn opentray_ext_command(
     envelope_json: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
+    clear_error();
     if instance.is_null() || context.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_command_context",
+            "WebView command requires initialized instance and host context pointers",
+        );
     }
     let Some(bytes) = (unsafe { ext_bytes_as_slice(envelope_json) }) else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_command_envelope",
+            "WebView command envelope bytes are missing",
+        );
     };
-    let Ok(envelope) = serde_json::from_slice::<ExtensionEnvelope>(bytes) else {
-        return EXT_ERR_REJECTED;
+    let envelope = match serde_json::from_slice::<ExtensionEnvelope>(bytes) {
+        Ok(envelope) => envelope,
+        Err(error) => {
+            return record_error(
+                EXT_ERR_REJECTED,
+                "invalid_command_envelope",
+                format!("WebView command envelope is invalid: {error}"),
+            )
+        }
     };
 
     let extension = unsafe { &mut *instance.cast::<WebviewExtension>() };
     if envelope.scope.app_id != extension.app_id {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "app_scope_mismatch",
+            "WebView command app id does not own this instance",
+        );
     }
     let Some(tray_id) = envelope.scope.tray_id.as_deref() else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "missing_tray_scope",
+            "WebView command requires a tray id",
+        );
     };
-    let Ok(command) = parse_webview_command(&envelope.data) else {
-        return EXT_ERR_REJECTED;
+    let command = match parse_webview_command(&envelope.data) {
+        Ok(command) => command,
+        Err(error) => return record_error(error.code(), error.category(), error.to_string()),
     };
     let tray_bounds = unsafe { read_tray_bounds(context) };
     let command = inject_tray_bounds(command, tray_bounds);
@@ -711,7 +758,7 @@ pub unsafe extern "C" fn opentray_ext_command(
         Ok(event) => event,
         Err(error) => {
             eprintln!("opentray-ext-webview command failed: {error}");
-            return error.code();
+            return record_error(error.code(), error.category(), error.to_string());
         }
     };
 
@@ -729,11 +776,20 @@ pub unsafe extern "C" fn opentray_ext_session_closed(
     session_id: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode {
+    clear_error();
     if instance.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_instance",
+            "WebView session cleanup requires an initialized instance",
+        );
     }
     let Some(session_id) = (unsafe { read_ext_string(session_id) }) else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_session_id",
+            "WebView session id is missing or invalid UTF-8",
+        );
     };
     let extension = unsafe { &mut *instance.cast::<WebviewExtension>() };
     extension.runtime.session_closed(&session_id);
@@ -748,9 +804,9 @@ pub unsafe extern "C" fn opentray_ext_deinit(instance: *mut c_void) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn opentray_ext_free_string(bytes: ExtOwnedBytes) {
-    if !bytes.ptr.is_null() {
-        drop(unsafe { CString::from_raw(bytes.ptr) });
+pub unsafe extern "C" fn opentray_ext_free_string(ptr: *mut c_char, _len: usize) {
+    if !ptr.is_null() {
+        drop(unsafe { CString::from_raw(ptr) });
     }
 }
 
@@ -1543,10 +1599,18 @@ unsafe fn ext_bytes_as_slice<'a>(bytes: ExtBytes) -> Option<&'a [u8]> {
 
 fn write_owned_json(out: *mut ExtOwnedBytes, json: &str) -> ExtResultCode {
     if out.is_null() {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_REJECTED,
+            "invalid_output_buffer",
+            "WebView output buffer pointer is null",
+        );
     }
     let Ok(value) = CString::new(json) else {
-        return EXT_ERR_REJECTED;
+        return record_error(
+            EXT_ERR_INTERNAL,
+            "serialization_failed",
+            "WebView output JSON contains a nul byte",
+        );
     };
     let len = value.as_bytes().len();
     unsafe {
@@ -1559,8 +1623,15 @@ fn write_owned_json(out: *mut ExtOwnedBytes, json: &str) -> ExtResultCode {
 }
 
 fn write_owned_events(out: *mut ExtOwnedBytes, events: &[ExtensionEnvelope]) -> ExtResultCode {
-    let Ok(json) = serde_json::to_string(events) else {
-        return EXT_ERR_REJECTED;
+    let json = match serde_json::to_string(events) {
+        Ok(json) => json,
+        Err(error) => {
+            return record_error(
+                EXT_ERR_INTERNAL,
+                "serialization_failed",
+                format!("WebView events could not be serialized: {error}"),
+            )
+        }
     };
     write_owned_json(out, &json)
 }
@@ -1573,6 +1644,29 @@ mod tests {
     #[test]
     fn abi_version_matches_public_contract() {
         assert_eq!(opentray_ext_abi_version(), EXT_ABI_VERSION);
+    }
+
+    #[test]
+    fn exports_embedded_artifact_identity() {
+        let mut output = ExtOwnedBytes {
+            ptr: ptr::null_mut(),
+            len: 0,
+        };
+
+        let result = unsafe { abi_support::opentray_ext_manifest(&mut output) };
+
+        assert_eq!(result, EXT_OK);
+        let bytes = unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) };
+        let manifest = serde_json::from_slice::<opentray_spec::EmbeddedExtensionManifest>(bytes)
+            .expect("manifest JSON");
+        assert_eq!(manifest.extension_name, "webview");
+        assert_eq!(manifest.artifact_set_version, "0.14.4");
+        assert_eq!(
+            manifest.contract_fingerprint,
+            "opentray-ext-webview-contract-1"
+        );
+        assert!(!manifest.build_identity.is_empty());
+        unsafe { opentray_ext_free_string(output.ptr, output.len) };
     }
 
     #[test]
@@ -2206,7 +2300,7 @@ mod tests {
         let value = unsafe { CStr::from_ptr(output.ptr) };
         assert_eq!(value.to_str().unwrap(), "[]");
         unsafe {
-            opentray_ext_free_string(output);
+            opentray_ext_free_string(output.ptr, output.len);
             opentray_ext_deinit(instance);
         }
     }
@@ -2249,7 +2343,7 @@ mod tests {
             assert_eq!(result, EXT_OK);
             let json = unsafe { CStr::from_ptr(output.ptr) }.to_str().unwrap();
             assert!(json.contains("\"type\":\"hidden\""));
-            unsafe { opentray_ext_free_string(output) };
+            unsafe { opentray_ext_free_string(output.ptr, output.len) };
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]

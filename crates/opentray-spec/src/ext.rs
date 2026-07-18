@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::model::{AppId, Rect, TrayId};
 
 pub const EXT_API_VERSION: u32 = 1;
-pub const EXT_ABI_VERSION: u32 = 2;
+pub const EXT_ABI_VERSION: u32 = 3;
 
 pub type ExtResultCode = i32;
 pub const EXT_OK: ExtResultCode = 0;
@@ -15,20 +15,58 @@ pub const EXT_ERR_UNSUPPORTED: ExtResultCode = 2;
 pub const EXT_ERR_INTERNAL: ExtResultCode = 3;
 
 pub const EXT_SYMBOL_ABI_VERSION: &str = "opentray_ext_abi_version";
+pub const EXT_SYMBOL_MANIFEST: &str = "opentray_ext_manifest";
 pub const EXT_SYMBOL_INIT: &str = "opentray_ext_init";
 pub const EXT_SYMBOL_COMMAND: &str = "opentray_ext_command";
 pub const EXT_SYMBOL_SESSION_CLOSED: &str = "opentray_ext_session_closed";
 pub const EXT_SYMBOL_DEINIT: &str = "opentray_ext_deinit";
 pub const EXT_SYMBOL_FREE_STRING: &str = "opentray_ext_free_string";
+pub const EXT_SYMBOL_TAKE_ERROR: &str = "opentray_ext_take_error";
 
 pub const REQUIRED_EXTENSION_SYMBOLS: &[&str] = &[
     EXT_SYMBOL_ABI_VERSION,
+    EXT_SYMBOL_MANIFEST,
     EXT_SYMBOL_INIT,
     EXT_SYMBOL_COMMAND,
     EXT_SYMBOL_SESSION_CLOSED,
     EXT_SYMBOL_DEINIT,
     EXT_SYMBOL_FREE_STRING,
+    EXT_SYMBOL_TAKE_ERROR,
 ];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionArtifactTarget {
+    pub os: String,
+    pub arch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedExtensionIdentity {
+    pub extension_name: String,
+    pub artifact_set_version: String,
+    pub contract_fingerprint: String,
+    pub target: ExtensionArtifactTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedExtensionManifest {
+    pub extension_name: String,
+    pub abi_version: u32,
+    pub artifact_set_version: String,
+    pub contract_fingerprint: String,
+    pub target: ExtensionArtifactTarget,
+    pub build_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionErrorDetail {
+    pub category: String,
+    pub message: String,
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

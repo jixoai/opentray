@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 import {
   createTrayHandle,
+  type NativeExtensionExpectedIdentity,
   type OpenTrayTransport,
   type TrayHandle,
 } from "opentray";
@@ -22,9 +23,16 @@ import {
   windowGeometryKit,
 } from "./index";
 
+const TEST_EXPECTED_IDENTITY = {
+  extensionName: "webview",
+  artifactSetVersion: "test",
+  contractFingerprint: "webview-test-contract",
+  target: { os: process.platform, arch: process.arch },
+} satisfies NativeExtensionExpectedIdentity;
 const TEST_NATIVE_ARTIFACT = {
   kind: "file",
   path: fileURLToPath(import.meta.url),
+  expectedIdentity: TEST_EXPECTED_IDENTITY,
 } as const;
 const WebviewExt = {
   ...OfficialWebviewExt,
@@ -84,6 +92,7 @@ describe("@opentray/ext-webview", () => {
         appId: "app-1",
         name: "webview",
         path: TEST_NATIVE_ARTIFACT.path,
+        expectedIdentity: TEST_EXPECTED_IDENTITY,
         mountId: "webview.tray-1",
       },
       {
@@ -316,6 +325,7 @@ describe("@opentray/ext-webview", () => {
         appId: "app-1",
         name: "webview",
         path: TEST_NATIVE_ARTIFACT.path,
+        expectedIdentity: TEST_EXPECTED_IDENTITY,
         mountId: "webview",
       },
       {
@@ -590,6 +600,7 @@ describe("@opentray/ext-webview", () => {
         appId: "app-1",
         name: "webview",
         path: TEST_NATIVE_ARTIFACT.path,
+        expectedIdentity: TEST_EXPECTED_IDENTITY,
         mountId: "webview",
       },
       {
@@ -648,6 +659,7 @@ describe("@opentray/ext-webview", () => {
         appId: "app-1",
         name: "webview",
         path: TEST_NATIVE_ARTIFACT.path,
+        expectedIdentity: TEST_EXPECTED_IDENTITY,
         mountId: "webview.tray-1",
       },
       {

@@ -1,5 +1,5 @@
 <!--
-Orthogonal intents (maintained 2026-07-18; original user requests: investigate a macOS
+Orthogonal intents (maintained 2026-07-19; original user requests: investigate a macOS
 pnpm-pub window that stopped responding to hide operations until daemon restart; determine why
 skill-creator-v2's Hide Window and primaryEvent fail against the latest OpenTray packages; ensure
 ordinary consumers need only a normal package-manager install for a coherent native runtime):
@@ -30,6 +30,7 @@ OpenTray uses the current tray-first model. Application code calls `createTray()
 - Extensions add native capabilities, but they must attach through tray/session contracts (e.g. `tray.extend(...)` or `attachWebview(tray)`), not by reaching into broker internals.
 - Do not make one CLI directly own another CLI's menu, events, popup, or lifecycle.
 - Windows named-pipe endpoints do not include `homeDir`. Source examples must pass an explicit per-invocation caller label so they cannot attach to a same-version neutral-label broker through the neutral `opentray` endpoint.
+- Source examples must derive one short per-invocation token for both temporary home and caller label. It must retain PID-level isolation and Windows pipe uniqueness while keeping the complete macOS/Linux Unix socket path below the native `sun_path` byte limit; do not repeat descriptive example names through both path segments.
 - Source WebView examples own a Vite server instance through Vite's Node API. `server.listen()`, `resolvedUrls.local`, and `server.close()` are the lifecycle authority; never parse formatted CLI output. Bind example servers to `127.0.0.1` so Windows `localhost` DNS order cannot split the selected listener from the WebView request. On shutdown, close the runtime session before `server.close()` because Vite can wait for the live WebView HTTP connection.
 - In a source WebView example, `OPENTRAY_EXT_PATH` selects only the extension DLL. Unless `OPENTRAY_BROKER_BIN` is explicitly supplied too, the launcher must still build and select the matching source-tree broker; never validate a current extension DLL against a stale packaged broker because tray events and native ABI behavior are a single host contract.
 - On Windows, an initialized caller's `ClientFrame::Exit` has already completed core session cleanup. Its dedicated GUI broker must exit directly from that frame instead of waiting for a named-pipe `Disconnected` event, because a client half-close can defer that event indefinitely.
@@ -53,6 +54,8 @@ The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `sk
 - For native command-surface diagnosis, record the library actually loaded by the broker (`lsof -p <pid>` on macOS), then read the `package.json` beside that exact library and compare its hash with the intended virtual-store artifact. `require.resolve()` from the consumer root may identify the same stale top-level package; neither it nor `pnpm why` is sufficient alone.
 - Package-manager resolution belongs to the Node SDK, which can resolve an official extension's platform package relative to the facade package that declared it. The facade may declare a platform-neutral artifact descriptor, but it must not import native packages into its public interface. The broker must receive an exact resolved library path instead of reconstructing npm/pnpm/Yarn/Bun topology in Rust.
 - Dynamic loading is compatible-artifact selection, not first-file discovery. A native extension must expose generic embedded identity (extension name, ABI, artifact-set identity, contract fingerprint, target, and build identity); `load-ext` must carry the facade's expected identity. The generic loader must reject or skip mismatched candidates before init and report every rejection reason without parsing extension-specific commands.
+- The extension ABI manifest and structured error symbols are required host contracts. The broker must read and free the manifest before `init`, and init/command/session-cleanup rejection must preserve the extension category and message instead of collapsing to a numeric result code.
+- Native build jobs must inspect each extension library on its native runner and record its embedded manifest plus SHA-256 in build evidence. Cross-platform staging may trust that recorded manifest only after the downloaded bytes match the recorded SHA and the current facade contract and platform package target match the evidence.
 - Existing-broker reuse must validate the resolved broker artifact identity, not only caller package version, endpoint, or PID liveness. A mismatch must trigger bounded automatic replacement so a dependency update cannot keep an older broker alive behind the same consumer endpoint.
 - Diagnose retained-window failures as a command chain: `menuClick -> facade command -> broker extension dispatch -> native window state`. If `close()/hide()` returns successfully but native visibility stays true, inspect AppKit/Win32 projection. If a newly added command such as `isVisible` is rejected while older event commands still work, inspect broker/dylib command-surface skew before changing window code.
 - The dynamic extension ABI must preserve actionable rejection detail. A bare `returned code 1` only identifies `EXT_ERR_REJECTED`; run an isolated broker with `OPENTRAY_DAEMON_STDIO=inherit` or add bounded diagnostic transport before attributing the failure to a specific native branch.
@@ -175,7 +178,7 @@ pnpm run changeset
 git push
 ```
 
-After merge to `main`, `.github/workflows/release.yml` creates a version PR or publishes via OIDC. Do not add long-lived `NPM_TOKEN` secrets for normal release publishing.
+After merge to `main`, `.github/workflows/release.yml` materializes the versioned release source before native compilation. Stable releases commit that source directly to `main`; alpha releases transport one generated patch. Native matrix jobs and the publish job must consume that same source view so embedded native identities equal the package versions being published. Publishing then uses OIDC; do not add long-lived `NPM_TOKEN` secrets for normal release publishing.
 
 ## Commit Discipline
 

@@ -1,13 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
-import { createTrayHandle, type OpenTrayTransport } from "opentray";
+import {
+  createTrayHandle,
+  type NativeExtensionExpectedIdentity,
+  type OpenTrayTransport,
+} from "opentray";
 
 import { attachLynx, LynxExt } from "./index";
 
+const TEST_EXPECTED_IDENTITY = {
+  extensionName: "lynx",
+  artifactSetVersion: "test",
+  contractFingerprint: "lynx-test-contract",
+  target: { os: process.platform, arch: process.arch },
+} satisfies NativeExtensionExpectedIdentity;
 const TEST_NATIVE_ARTIFACT = {
   kind: "file",
   path: fileURLToPath(import.meta.url),
+  expectedIdentity: TEST_EXPECTED_IDENTITY,
 } as const;
 
 describe("@opentray/ext-lynx", () => {
@@ -55,6 +66,7 @@ describe("@opentray/ext-lynx", () => {
         appId: "app-1",
         name: "lynx",
         path: TEST_NATIVE_ARTIFACT.path,
+        expectedIdentity: TEST_EXPECTED_IDENTITY,
         mountId: "lynx",
       },
       {

@@ -1,10 +1,12 @@
-// Orthogonal intents (2026-07-14; original user request: `example:webview-control` cannot start):
+// Orthogonal intents (maintained 2026-07-19; original user request: `example:webview-control` cannot start):
 // 1. Build and connect a source-tree WebView example runtime.
 // 2. Mount the typed WebView capability on the example tray.
 // 3. Isolate each example invocation from other same-version CLI brokers.
 // 4. Close the native runtime before Vite so automatic example exit cannot retain WebView clients.
+// 5. Keep descriptive example identities inside native endpoint length limits.
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -17,15 +19,8 @@ import type {
   WebviewWindowOptions,
 } from "../../../ext-webview/src/index";
 import { WebviewExt } from "../../../ext-webview/src/index";
-import {
-  createClient,
-  type EventfulTrayHandle,
-  type Menu,
-} from "../../src/index";
-import {
-  connectLocalBroker,
-  type LocalBrokerClient,
-} from "../../src/local-broker";
+import { createClient, type EventfulTrayHandle, type Menu } from "../../src/index";
+import { connectLocalBroker, type LocalBrokerClient } from "../../src/local-broker";
 import {
   type ExampleRuntimeMode,
   prepareExampleBrokerBinary,
@@ -119,24 +114,20 @@ export interface WebviewPageMessageWatch {
 }
 
 export async function createWebviewExampleRuntime(
-  options: WebviewExampleRuntimeOptions
+  options: WebviewExampleRuntimeOptions,
 ): Promise<WebviewExampleRuntime> {
   const runtimeMode = options.runtimeMode ?? resolveExampleRuntimeMode();
-  const localWebviewExtension = await prepareLocalWebviewExtensionPath(
-    options.importMetaUrl,
-    { mode: runtimeMode },
-  );
-  const homeDir =
-    process.env.OPENTRAY_HOME ?? createShortExampleHome(options.homePrefix);
+  const localWebviewExtension = await prepareLocalWebviewExtensionPath(options.importMetaUrl, {
+    mode: runtimeMode,
+  });
+  const homeDir = process.env.OPENTRAY_HOME ?? createShortExampleHome(options.homePrefix);
   const callerLabel = createExampleCallerLabel(options.homePrefix);
   const connection = await connectLocalBroker({ homeDir, callerLabel });
   const client = createClient(connection, {
     requestIdPrefix: options.requestIdPrefix,
   });
 
-  console.log(
-    `connected: endpoint=${connection.endpoint} session=${connection.sessionId}`
-  );
+  console.log(`connected: endpoint=${connection.endpoint} session=${connection.sessionId}`);
   console.log(`runtime home: ${homeDir}`);
   console.log(`runtime caller: ${connection.callerLabel}`);
   console.log(`runtime mode: ${runtimeMode}`);
@@ -149,9 +140,7 @@ export async function createWebviewExampleRuntime(
 
   const tray = await client.createTray({
     id: options.tray.id,
-    ...(options.tray.tooltip === undefined
-      ? {}
-      : { tooltip: options.tray.tooltip }),
+    ...(options.tray.tooltip === undefined ? {} : { tooltip: options.tray.tooltip }),
     icon: createVisibleTrayIcon(),
     menu: options.tray.menu,
   });
@@ -175,7 +164,7 @@ export async function createWebviewExampleRuntime(
 
 export function mountExampleWebview(
   runtime: Pick<WebviewExampleRuntime, "localWebviewExtension" | "tray">,
-  mountId: string
+  mountId: string,
 ): WebviewTrayCapability {
   const capability = runtime.tray.extend(WebviewExt, {
     mountId,
@@ -185,15 +174,14 @@ export function mountExampleWebview(
           artifact: {
             kind: "file" as const,
             path: runtime.localWebviewExtension,
+            identitySource: WebviewExt.artifact,
           },
         }),
   });
   return {
     ...capability,
     createWebviewWindow(options: WebviewWindowOptions): WebviewWindowHandle {
-      return capability.createWebviewWindow(
-        withExampleWebviewWindowDefaults(options),
-      );
+      return capability.createWebviewWindow(withExampleWebviewWindowDefaults(options));
     },
   };
 }
@@ -207,14 +195,15 @@ export function withExampleWebviewWindowDefaults(
   };
 }
 
-export function createShortExampleHome(homePrefix: string): string {
+export function createShortExampleHome(homePrefix: string, pid: number = process.pid): string {
+  const invocation = createShortExampleInvocation(homePrefix, pid);
   const candidateRoots = ["/tmp", join(homedir(), ".opentray"), tmpdir()];
   for (const root of candidateRoots) {
     if (root.length <= 16) {
-      return join(root, `${homePrefix}-${process.pid}`);
+      return join(root, `ot-${invocation}`);
     }
   }
-  return join("/tmp", `${homePrefix}-${process.pid}`);
+  return join("/tmp", `ot-${invocation}`);
 }
 
 /**
@@ -222,17 +211,19 @@ export function createShortExampleHome(homePrefix: string): string {
  * Windows pipe names do not include the home directory, so the process id must
  * remain in the label to avoid attaching to a concurrently running neutral-label runtime.
  */
-export function createExampleCallerLabel(
-  homePrefix: string,
-  pid: number = process.pid,
-): string {
-  return `example-${pid}-${homePrefix}`;
+export function createExampleCallerLabel(homePrefix: string, pid: number = process.pid): string {
+  return `example-${createShortExampleInvocation(homePrefix, pid)}`;
+}
+
+function createShortExampleInvocation(homePrefix: string, pid: number): string {
+  const fingerprint = createHash("sha256").update(homePrefix).digest("hex").slice(0, 8);
+  return `${pid}-${fingerprint}`;
 }
 
 export function listenWebviewIpcMessages(
   window: Pick<WebviewWindowHandle, "drainIpcMessages">,
   handler: (message: WebviewIpcMessage) => void | Promise<void>,
-  options: { intervalMs?: number } = {}
+  options: { intervalMs?: number } = {},
 ): WebviewPageMessageWatch {
   let active = true;
   let draining = false;
@@ -279,29 +270,19 @@ export async function prepareLocalWebviewExtensionPath(
     }
     return process.env.OPENTRAY_EXT_PATH?.trim();
   }
-  const localWebviewExtension = await resolveLocalWebviewExtension(
-    importMetaUrl,
-    mode,
-  );
-  if (
-    process.env.OPENTRAY_EXT_PATH === undefined &&
-    localWebviewExtension !== undefined
-  ) {
+  const localWebviewExtension = await resolveLocalWebviewExtension(importMetaUrl, mode);
+  if (process.env.OPENTRAY_EXT_PATH === undefined && localWebviewExtension !== undefined) {
     process.env.OPENTRAY_EXT_PATH = localWebviewExtension;
   }
   return localWebviewExtension;
 }
 
-export function hasConfiguredWebviewExtensionPath(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function hasConfiguredWebviewExtensionPath(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.OPENTRAY_EXT_PATH?.trim().length ?? 0) > 0;
 }
 
 /** An explicitly selected broker remains authoritative over source-example defaults. */
-export function hasConfiguredBrokerBinaryPath(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function hasConfiguredBrokerBinaryPath(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.OPENTRAY_BROKER_BIN?.trim().length ?? 0) > 0;
 }
 
@@ -313,10 +294,7 @@ export async function prepareLocalBadgeExtensionPath(
     importMetaUrl,
     options.mode ?? resolveExampleRuntimeMode(),
   );
-  if (
-    process.env.OPENTRAY_BADGE_EXT_PATH === undefined &&
-    localBadgeExtension !== undefined
-  ) {
+  if (process.env.OPENTRAY_BADGE_EXT_PATH === undefined && localBadgeExtension !== undefined) {
     process.env.OPENTRAY_BADGE_EXT_PATH = localBadgeExtension;
   }
   return localBadgeExtension;
@@ -336,23 +314,13 @@ async function resolveLocalWebviewExtension(
     // Not running from the workspace root layout, so skip the source-build path.
     return undefined;
   }
-  await runSourceTreeCargoBuild(
-    workspaceRoot,
-    ["opentray-bin", "opentray-ext-webview"],
-    mode,
-  );
-  const brokerBinary = sourceTreeArtifactPath(
-    workspaceRoot,
-    mode,
-    localRuntimeArtifactName(),
-  );
+  await runSourceTreeCargoBuild(workspaceRoot, ["opentray-bin", "opentray-ext-webview"], mode);
+  const brokerBinary = sourceTreeArtifactPath(workspaceRoot, mode, localRuntimeArtifactName());
   if (process.env.OPENTRAY_BROKER_BIN === undefined) {
     process.env.OPENTRAY_BROKER_BIN = brokerBinary;
   }
 
-  const candidates = [
-    sourceTreeArtifactPath(workspaceRoot, mode, artifactName),
-  ];
+  const candidates = [sourceTreeArtifactPath(workspaceRoot, mode, artifactName)];
 
   for (const candidate of candidates) {
     try {
@@ -379,15 +347,9 @@ async function resolveLocalBadgeExtension(
   if (workspaceRoot === undefined) {
     return undefined;
   }
-  await runSourceTreeCargoBuild(
-    workspaceRoot,
-    ["opentray-bin", "opentray-ext-badge"],
-    mode,
-  );
+  await runSourceTreeCargoBuild(workspaceRoot, ["opentray-bin", "opentray-ext-badge"], mode);
 
-  const candidates = [
-    sourceTreeArtifactPath(workspaceRoot, mode, artifactName),
-  ];
+  const candidates = [sourceTreeArtifactPath(workspaceRoot, mode, artifactName)];
   for (const candidate of candidates) {
     try {
       await access(candidate, constants.R_OK);
@@ -476,15 +438,8 @@ function firstExistingPath(candidates: readonly string[]): string | undefined {
 function runPowerShell(script: string): string | undefined {
   const result = spawnSync(
     "powershell.exe",
-    [
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-      script,
-    ],
-    { encoding: "utf8" }
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { encoding: "utf8" },
   );
   if (result.error !== undefined || result.status !== 0) {
     return undefined;

@@ -126,6 +126,7 @@ export const runDebugRuntimeLynxSmoke = async (
           artifact: {
             kind: "file" as const,
             path: localLynxExtension,
+            identitySource: LynxExt.artifact,
           },
         }),
   });
