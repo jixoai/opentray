@@ -14,6 +14,12 @@ import {
   type TrayOptions,
 } from "@opentray/spec";
 
+import {
+  resolveNativeExtensionArtifact,
+  type NativeExtensionArtifact,
+  type NativeExtensionFileArtifact,
+} from "./native-extension-artifact";
+
 export interface OpenTrayTransport {
   request(frame: ClientRequestFrame): Promise<ServerFrame>;
 }
@@ -88,13 +94,13 @@ export interface EventfulTrayHandle extends TrayHandle {
 
 export interface ExtensionLoadOptions {
   name: string;
-  path: string;
+  artifact: NativeExtensionFileArtifact;
   mountId?: string;
 }
 
 export interface TrayExtensionMountSpec {
   name?: string;
-  path?: string;
+  artifact?: NativeExtensionArtifact;
   mountId?: string;
 }
 
@@ -102,7 +108,7 @@ export interface TrayExtensionContext {
   readonly appId: string;
   readonly trayId: TrayId;
   readonly name: string;
-  readonly path: string;
+  readonly artifact: NativeExtensionArtifact;
   readonly mountId: string;
   ensureLoaded(): Promise<void>;
   command(data: unknown): Promise<void>;
@@ -114,7 +120,7 @@ export interface TrayExtension<
   TOptions = undefined
 > {
   readonly name: string;
-  readonly path: string;
+  readonly artifact: NativeExtensionArtifact;
   resolveMount?(options: TOptions | undefined): TrayExtensionMountSpec;
   extend(
     tray: TrayHandle,
@@ -248,7 +254,7 @@ export function createTrayHandle(
         requestId,
         appId,
         name: options.name,
-        path: options.path,
+        path: options.artifact.path,
         ...(options.mountId === undefined ? {} : { mountId: options.mountId }),
       });
       expectResponse(response, requestId, "ack");
@@ -403,14 +409,21 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
 ): TrayExtensionContext => {
   const mount = extension.resolveMount?.(options) ?? {};
   const name = mount.name ?? extension.name;
-  const path = mount.path ?? extension.path;
+  const artifact = mount.artifact ?? extension.artifact;
   const mountId = mount.mountId ?? nextMountId(name);
   let loadPromise: Promise<void> | undefined;
 
   const ensureLoaded = async (): Promise<void> => {
     if (loadPromise === undefined) {
-      loadPromise = tray
-        .loadExtension({ name, path, mountId })
+      // Package-manager resolution stays in Node; the broker receives one exact file.
+      loadPromise = resolveNativeExtensionArtifact(artifact)
+        .then((resolved) =>
+          tray.loadExtension({
+            name,
+            artifact: { kind: "file", path: resolved.path },
+            mountId,
+          })
+        )
         .catch((error: unknown) => {
           loadPromise = undefined;
           throw error;
@@ -423,7 +436,7 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
     appId,
     trayId: tray.trayId,
     name,
-    path,
+    artifact,
     mountId,
     ensureLoaded,
     async command(data: unknown): Promise<void> {

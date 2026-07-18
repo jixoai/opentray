@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -53,7 +57,7 @@ describe("opentray client", () => {
 
     const extended = tray.extend({
       name: "identity",
-      path: "@example/identity",
+      artifact: { kind: "file", path: "/tmp/example-identity" },
       extend(_tray, context) {
         return {
           appId: context.appId,
@@ -66,6 +70,117 @@ describe("opentray client", () => {
     expect(extended.appId).toBe("app-1");
     expect(extended.trayId).toBe("tray-1");
     expect(extended.mountId).toBe("identity.tray-1.1");
+  });
+
+  it("resolves a native artifact from the facade dependency closure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-artifact-resolution-"));
+    const facadePackageJson = join(
+      root,
+      "node_modules/.pnpm/facade/node_modules/@fixture/ext/package.json"
+    );
+    const contractManifest = join(dirname(facadePackageJson), "contract.json");
+    const nestedPlatformPackageJson = join(
+      root,
+      "node_modules/.pnpm/facade/node_modules/@fixture/ext-platform/package.json"
+    );
+    const nestedLibrary = join(dirname(nestedPlatformPackageJson), "lib/native.dylib");
+    const orphanPlatformPackageJson = join(
+      root,
+      "node_modules/@fixture/ext-platform/package.json"
+    );
+    await writeJson(facadePackageJson, {
+      name: "@fixture/ext",
+      version: "2.0.0",
+    });
+    await writeJson(contractManifest, {
+      extensionName: "fixture",
+      contractFingerprint: "fixture-contract-2",
+    });
+    await writeJson(nestedPlatformPackageJson, {
+      name: "@fixture/ext-platform",
+      version: "2.0.0",
+      os: [process.platform],
+      cpu: [process.arch],
+    });
+    await writeFileAt(nestedLibrary, "current");
+    await writeJson(orphanPlatformPackageJson, {
+      name: "@fixture/ext-platform",
+      version: "1.0.0",
+      os: [process.platform],
+      cpu: [process.arch],
+    });
+    await writeFileAt(join(dirname(orphanPlatformPackageJson), "lib/native.dylib"), "orphan");
+
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(transport, "app-1", "tray-1", createTestRequestId);
+    const target = `${process.platform}-${process.arch}`;
+    const extension = tray.extend({
+      name: "fixture",
+      artifact: {
+        kind: "package",
+        packageJsonUrl: pathToFileURL(facadePackageJson).href,
+        contractManifestUrl: pathToFileURL(contractManifest).href,
+        targets: {
+          [target]: {
+            packageName: "@fixture/ext-platform",
+            libraryPath: "lib/native.dylib",
+          },
+        },
+      },
+      extend(_tray, context) {
+        return { load: () => context.ensureLoaded() };
+      },
+    });
+
+    await extension.load();
+
+    expect(transport.frames[0]).toMatchObject({
+      type: "load-ext",
+      path: await realpath(nestedLibrary),
+    });
+  });
+
+  it("rejects a missing target package before broker dispatch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-artifact-missing-"));
+    const facadePackageJson = join(root, "node_modules/@fixture/ext/package.json");
+    const contractManifest = join(dirname(facadePackageJson), "contract.json");
+    await writeJson(facadePackageJson, {
+      name: "@fixture/ext",
+      version: "2.0.0",
+    });
+    await writeJson(contractManifest, {
+      extensionName: "fixture",
+      contractFingerprint: "fixture-contract-2",
+    });
+    const packageJsonUrl = pathToFileURL(facadePackageJson).href;
+    const target = `${process.platform}-${process.arch}`;
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(transport, "app-1", "tray-1", createTestRequestId);
+    const extension = tray.extend({
+      name: "fixture",
+      artifact: {
+        kind: "package",
+        packageJsonUrl,
+        contractManifestUrl: pathToFileURL(contractManifest).href,
+        targets: {
+          [target]: {
+            packageName: "@fixture/missing-platform",
+            libraryPath: "lib/native.dylib",
+          },
+        },
+      },
+      extend(_tray, context) {
+        return { load: () => context.ensureLoaded() };
+      },
+    });
+
+    await expect(extension.load()).rejects.toMatchObject({
+      code: "OPENTRAY_NATIVE_EXTENSION_ARTIFACT_RESOLUTION_FAILED",
+      target,
+      packageName: "@fixture/missing-platform",
+      facadePackageJsonUrl: packageJsonUrl,
+    });
+    expect(transport.frames).toEqual([]);
   });
 
   it("queries tray bounds through the runtime-bound tray handle", async () => {
@@ -332,3 +447,12 @@ class EventfulRecordingTransport
 }
 
 const createTestRequestId = (): string => "req-test";
+
+const writeJson = async (path: string, value: unknown): Promise<void> => {
+  await writeFileAt(path, `${JSON.stringify(value)}\n`);
+};
+
+const writeFileAt = async (path: string, content: string): Promise<void> => {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content, "utf8");
+};

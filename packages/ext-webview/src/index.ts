@@ -13,7 +13,13 @@ import type {
   Rect,
   TrayBoundsResult,
 } from "@opentray/spec";
-import type { TrayExtension, TrayExtensionContext, TrayHandle } from "opentray";
+import type {
+  NativeExtensionArtifact,
+  TrayExtension,
+  TrayExtensionContext,
+  TrayHandle,
+} from "opentray";
+import { WEBVIEW_NATIVE_ARTIFACT } from "./native-artifact";
 import type {
   WebviewBrowserPermissionFamily,
   WebviewBrowserPermissionPolicy,
@@ -657,7 +663,7 @@ export interface WebviewTrayCapability {
 
 export interface WebviewExtensionOptions {
   mountId?: string;
-  path?: string;
+  artifact?: NativeExtensionArtifact;
   permissions?: WebviewPermissionRuntimeOptions;
 }
 
@@ -669,7 +675,7 @@ export class WebviewExtensionLoadError extends Error {
 
   constructor(context: TrayExtensionContext, cause: unknown) {
     super(
-      `WebView extension "${context.name}" could not be loaded for mount "${context.mountId}". Official @opentray/ext-webview native packages are published for macOS and Windows; Linux is unsupported for this extension. Provide a resolvable extension path only when testing a custom native runtime.`
+      `WebView extension "${context.name}" could not be loaded for mount "${context.mountId}". Official @opentray/ext-webview native packages are published for macOS and Windows; Linux is unsupported for this extension. Provide an exact file artifact only when testing a custom native runtime.`
     );
     this.name = "WebviewExtensionLoadError";
     this.extensionName = context.name;
@@ -679,7 +685,6 @@ export class WebviewExtensionLoadError extends Error {
 }
 
 const WEBVIEW_EXTENSION_NAME = "webview";
-const WEBVIEW_EXTENSION_PACKAGE = "@opentray/ext-webview";
 const WINDOW_EVENT_POLL_INTERVAL_MS = 16;
 const POLLED_WINDOW_EVENTS = new Set([
   "focus",
@@ -695,11 +700,11 @@ const POLLED_WINDOW_EVENTS = new Set([
 
 export const WebviewExt = {
   name: WEBVIEW_EXTENSION_NAME,
-  path: WEBVIEW_EXTENSION_PACKAGE,
+  artifact: WEBVIEW_NATIVE_ARTIFACT,
   resolveMount(options) {
     return {
       ...(options?.mountId === undefined ? {} : { mountId: options.mountId }),
-      ...(options?.path === undefined ? {} : { path: options.path }),
+      ...(options?.artifact === undefined ? {} : { artifact: options.artifact }),
     };
   },
   extend(tray, context, options) {

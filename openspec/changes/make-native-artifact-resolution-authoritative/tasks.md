@@ -7,8 +7,8 @@
 
 ## 2. BDD Contract / Spec Evidence
 
-- [ ] 2.1 Scenario: Given a current platform package in a facade-relative pnpm closure and an older unmanaged top-level package When the extension first loads Then the SDK resolves and sends only the facade-relative exact artifact.
-- [ ] 2.2 Scenario: Given a supported descriptor whose platform package is missing When the extension first loads Then the SDK reports a typed target/package resolution error before broker dispatch.
+- [x] 2.1 Scenario: Given a current platform package in a facade-relative pnpm closure and an older unmanaged top-level package When the extension first loads Then the SDK resolves and sends only the facade-relative exact artifact.
+- [x] 2.2 Scenario: Given a supported descriptor whose platform package is missing When the extension first loads Then the SDK reports a typed target/package resolution error before broker dispatch.
 - [ ] 2.3 Scenario: Given an exact dylib with a mismatched embedded manifest When `load-ext` validates it Then init is never called and expected/actual identity is returned.
 - [ ] 2.4 Scenario: Given an extension rejects a command with native detail When the broker reports the failure Then category/message survive instead of collapsing to numeric code.
 - [ ] 2.5 Scenario: Given a live same-endpoint broker with missing or different artifact identity When the SDK auto-starts Then it stops and replaces that PID under the daemon lock.
@@ -24,13 +24,13 @@
 
 ## 4. Phase One - Exact Artifact Resolution
 
-- [ ] 4.1 Add red client-SDK behavior tests for facade-relative resolution, orphan top-level shadowing, target selection, and missing packages through the public extension-load seam.
-- [ ] 4.2 Replace `TrayExtension.path` and path overrides with a documented platform-neutral native artifact descriptor and exact-file custom descriptor.
-- [ ] 4.3 Implement a deep Node resolver that reads facade package/contract manifests, uses package resolution from the facade origin, validates package target metadata, and returns exact path plus expected identity.
-- [ ] 4.4 Update WebView and Badge official facades to declare descriptors; introduce the same mounted `LynxExt` shape instead of manual identity-free loading.
-- [ ] 4.5 Remove normal package-root reconstruction from the broker request contract and preserve only explicit exact-file / diagnostic override inputs.
-- [ ] 4.6 Add concise intent comments at descriptor resolution and exact-path dispatch explaining package-manager authority and the zero-repair consumer contract.
-- [ ] 4.7 Run focused TypeScript tests/typechecks, mark verified Phase One BDD/tasks, and commit code/tests/task evidence together.
+- [x] 4.1 Add red client-SDK behavior tests for facade-relative resolution, orphan top-level shadowing, target selection, and missing packages through the public extension-load seam.
+- [x] 4.2 Replace `TrayExtension.path` and path overrides with a documented platform-neutral native artifact descriptor and exact-file custom descriptor.
+- [x] 4.3 Implement a deep Node resolver that reads facade package/contract manifests, uses package resolution from the facade origin, validates package target metadata, and returns exact path plus expected identity.
+- [x] 4.4 Update WebView and Badge official facades to declare descriptors; introduce the same mounted `LynxExt` shape instead of manual identity-free loading.
+- [x] 4.5 Remove normal package-root reconstruction from the broker request contract and preserve only explicit exact-file / diagnostic override inputs.
+- [x] 4.6 Add concise intent comments at descriptor resolution and exact-path dispatch explaining package-manager authority and the zero-repair consumer contract.
+- [x] 4.7 Run focused TypeScript tests/typechecks, mark verified Phase One BDD/tasks, and commit code/tests/task evidence together.
 
 ## 5. Phase Two - Extension Manifest And Structured Errors
 

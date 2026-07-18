@@ -1,5 +1,7 @@
 import type { ExtensionEnvelope } from "@opentray/spec";
-import type { TrayHandle } from "opentray";
+import type { NativeExtensionArtifact, TrayHandle } from "opentray";
+
+import { BADGE_NATIVE_ARTIFACT } from "./native-artifact";
 
 import {
   badgePanelEnvelopeFromCapabilities,
@@ -19,11 +21,9 @@ export type * from "./shared";
 export { badgePanelEnvelopeFromCapabilities } from "./shared";
 
 const BADGE_EXTENSION_NAME = "badge";
-const BADGE_EXTENSION_PACKAGE = "@opentray/ext-badge";
-
 export interface BadgeExtensionOptions {
   mountId?: string;
-  path?: string;
+  artifact?: NativeExtensionArtifact;
   platform?: BadgePlatform;
 }
 
@@ -44,11 +44,11 @@ export const attachBadge = (tray: TrayHandle, options: BadgeExtensionOptions = {
 
 export const BadgeExt = {
   name: BADGE_EXTENSION_NAME,
-  path: BADGE_EXTENSION_PACKAGE,
+  artifact: BADGE_NATIVE_ARTIFACT,
   resolveMount(options: BadgeExtensionOptions | undefined) {
     return {
       ...(options?.mountId === undefined ? {} : { mountId: options.mountId }),
-      ...(options?.path === undefined ? {} : { path: options.path }),
+      ...(options?.artifact === undefined ? {} : { artifact: options.artifact }),
     };
   },
   extend(tray: TrayHandle, context, options: BadgeExtensionOptions | undefined): BadgeHandle {

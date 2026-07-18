@@ -181,7 +181,12 @@ export function mountExampleWebview(
     mountId,
     ...(runtime.localWebviewExtension === undefined
       ? {}
-      : { path: runtime.localWebviewExtension }),
+      : {
+          artifact: {
+            kind: "file" as const,
+            path: runtime.localWebviewExtension,
+          },
+        }),
   });
   return {
     ...capability,
@@ -266,16 +271,13 @@ export async function prepareLocalWebviewExtensionPath(
 ): Promise<string | undefined> {
   await prepareLocalWindowsAppRuntimeEnvironment();
   const mode = options.mode ?? resolveExampleRuntimeMode();
-  // An explicit loader override must remain authoritative. Returning no mount
-  // path lets the spawned broker resolve OPENTRAY_EXT_PATH itself instead of
-  // having the source-example default override it in tray.extend(...). It must
-  // still prepare the current source broker: otherwise a source DLL can be
-  // paired with an older packaged broker and its native tray event loop.
+  // An explicit diagnostic file remains authoritative, but the facade still
+  // sends it as one exact artifact so the broker never reconstructs package roots.
   if (hasConfiguredWebviewExtensionPath()) {
     if (!hasConfiguredBrokerBinaryPath()) {
       await prepareExampleBrokerBinary(importMetaUrl, mode);
     }
-    return undefined;
+    return process.env.OPENTRAY_EXT_PATH?.trim();
   }
   const localWebviewExtension = await resolveLocalWebviewExtension(
     importMetaUrl,

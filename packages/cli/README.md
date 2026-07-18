@@ -25,6 +25,12 @@ Use `alpha-A-B` for alpha packages on the same protocol line. Replace `A-B` with
 
 `packages/cli` is the only unscoped npm package in this monorepo.
 
+## Native Artifact Authority
+
+Official `TrayExtension` implementations declare a platform-neutral `artifact` descriptor. On first use, the Node SDK resolves the platform package relative to the facade package that declared it, validates the facade, contract, and platform package manifests, and sends one real native-library path to the broker. The broker does not scan consumer `node_modules` directories or reconstruct npm, pnpm, Yarn, or Bun layouts.
+
+Low-level custom extensions use an exact-file artifact. `OPENTRAY_EXT_PATH` and source-tree paths are diagnostic inputs; a normal package-manager install must be sufficient for official extensions.
+
 ## Tray-First API
 
 For the first app, call `createTray()` directly. The quickstart stays in one file and does not ask the user to wire a worker or a host loop first:

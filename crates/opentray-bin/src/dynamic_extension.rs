@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     env,
-    ffi::{c_void, CString, OsString},
+    ffi::{c_void, CString},
     path::{Path, PathBuf},
     ptr,
 };
@@ -86,33 +86,18 @@ impl ExtensionLoader for DynamicExtensionLoader {
 
 #[derive(Debug, Clone)]
 pub struct ExtensionDiscovery {
-    current_exe: PathBuf,
     home_dir: Option<PathBuf>,
     ext_paths: Vec<PathBuf>,
-    node_module_roots: Vec<PathBuf>,
     package_os: String,
     arch: String,
 }
 
 impl ExtensionDiscovery {
     pub fn from_env() -> Result<Self, ExtensionError> {
-        let current_exe = env::current_exe().map_err(|error| {
-            ExtensionError::Unsupported(format!("cannot resolve current executable: {error}"))
-        })?;
         let current_dir = env::current_dir().map_err(|error| {
             ExtensionError::Unsupported(format!("cannot resolve current directory: {error}"))
         })?;
-        let cli_entrypoint = env::var_os("OPENTRAY_DAEMON_CLI_ENTRYPOINT")
-            .map(PathBuf::from)
-            .map(|path| absolutize_path(&current_dir, path));
-        let node_module_roots = collect_node_module_roots(
-            &current_dir,
-            &current_exe,
-            cli_entrypoint.as_deref(),
-            env::var_os("NODE_PATH"),
-        );
         Ok(Self {
-            current_exe,
             home_dir: env::var_os("OPENTRAY_DAEMON_HOME").map(PathBuf::from),
             ext_paths: env::var_os("OPENTRAY_EXT_PATH")
                 .map(|value| {
@@ -121,29 +106,16 @@ impl ExtensionDiscovery {
                         .collect()
                 })
                 .unwrap_or_default(),
-            node_module_roots,
             package_os: current_package_os().to_string(),
             arch: current_arch().to_string(),
         })
     }
 
     #[cfg(test)]
-    fn for_test(current_exe: PathBuf, home_dir: Option<PathBuf>, ext_paths: Vec<PathBuf>) -> Self {
-        Self::for_test_with_node_module_roots(current_exe, home_dir, ext_paths, Vec::new())
-    }
-
-    #[cfg(test)]
-    fn for_test_with_node_module_roots(
-        current_exe: PathBuf,
-        home_dir: Option<PathBuf>,
-        ext_paths: Vec<PathBuf>,
-        node_module_roots: Vec<PathBuf>,
-    ) -> Self {
+    fn for_test(home_dir: Option<PathBuf>, ext_paths: Vec<PathBuf>) -> Self {
         Self {
-            current_exe,
             home_dir,
             ext_paths,
-            node_module_roots,
             package_os: current_package_os().to_string(),
             arch: current_arch().to_string(),
         }
@@ -160,15 +132,14 @@ impl ExtensionDiscovery {
     }
 
     pub fn candidates(&self, request: &ExtensionLoadRequest) -> Vec<PathBuf> {
-        let mut candidates = Vec::new();
         let requested = PathBuf::from(&request.path);
-        if is_filesystem_path(&request.path) {
-            candidates.push(absolutize_path(
-                self.current_exe.parent().unwrap_or_else(|| Path::new(".")),
-                requested,
-            ));
+        if requested.is_absolute() {
+            // A package facade already resolved this file from its own dependency closure.
+            // Falling back here would let stale diagnostic or package paths shadow it again.
+            return vec![requested];
         }
 
+        let mut candidates = Vec::new();
         let library_file_name = dynamic_library_file_name(&request.name);
         for path in &self.ext_paths {
             candidates.push(if path.extension().is_some() {
@@ -177,9 +148,6 @@ impl ExtensionDiscovery {
                 path.join(&library_file_name)
             });
         }
-
-        candidates.extend(self.request_package_candidates(request));
-        candidates.extend(self.daemon_adjacent_candidates(request));
 
         if let Some(home_dir) = &self.home_dir {
             candidates.push(
@@ -199,46 +167,6 @@ impl ExtensionDiscovery {
         }
 
         dedupe_paths(candidates)
-    }
-
-    fn request_package_candidates(&self, request: &ExtensionLoadRequest) -> Vec<PathBuf> {
-        let Some(package_ref) = PackageRef::parse(&request.path) else {
-            return Vec::new();
-        };
-        let platform_package = package_ref.platform_package(&self.package_os, &self.arch);
-        let mut candidates = Vec::new();
-        for root in &self.node_module_roots {
-            candidates.push(
-                platform_package
-                    .path_in(root)
-                    .join(dynamic_library_relative_path(&request.name)),
-            );
-            candidates.push(
-                package_ref
-                    .path_in(root)
-                    .join("node_modules")
-                    .join(platform_package.path())
-                    .join(dynamic_library_relative_path(&request.name)),
-            );
-        }
-        candidates
-    }
-
-    fn daemon_adjacent_candidates(&self, request: &ExtensionLoadRequest) -> Vec<PathBuf> {
-        let Some(scope_dir) = package_family_dir(&self.current_exe) else {
-            return Vec::new();
-        };
-        let platform_package = PackageRef::parse(&request.path)
-            .map(|package_ref| package_ref.platform_package(&self.package_os, &self.arch))
-            .unwrap_or_else(|| {
-                PackageRef::scoped(
-                    "@opentray".to_string(),
-                    format!("ext-{}-{}-{}", request.name, self.package_os, self.arch),
-                )
-            });
-        vec![scope_dir
-            .join(platform_package.name)
-            .join(dynamic_library_relative_path(&request.name))]
     }
 }
 
@@ -596,133 +524,6 @@ fn extension_error_code(error: ExtensionError) -> ExtResultCode {
     }
 }
 
-fn package_family_dir(current_exe: &Path) -> Option<PathBuf> {
-    let package_dir = current_exe.parent()?.parent()?;
-    package_dir.parent().map(Path::to_path_buf)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PackageRef {
-    scope: Option<String>,
-    name: String,
-}
-
-impl PackageRef {
-    fn parse(value: &str) -> Option<Self> {
-        if is_filesystem_path(value) {
-            return None;
-        }
-        if value.starts_with('@') {
-            let mut parts = value.split('/');
-            let scope = parts.next()?;
-            let name = parts.next()?;
-            if scope.len() <= 1 || name.is_empty() {
-                return None;
-            }
-            return Some(Self::scoped(scope.to_string(), name.to_string()));
-        }
-        let name = value.split('/').next()?;
-        if name.is_empty() {
-            None
-        } else {
-            Some(Self {
-                scope: None,
-                name: name.to_string(),
-            })
-        }
-    }
-
-    fn scoped(scope: String, name: String) -> Self {
-        Self {
-            scope: Some(scope),
-            name,
-        }
-    }
-
-    fn platform_package(&self, package_os: &str, arch: &str) -> Self {
-        Self {
-            scope: self.scope.clone(),
-            name: format!("{}-{package_os}-{arch}", self.name),
-        }
-    }
-
-    fn path(&self) -> PathBuf {
-        match &self.scope {
-            Some(scope) => PathBuf::from(scope).join(&self.name),
-            None => PathBuf::from(&self.name),
-        }
-    }
-
-    fn path_in(&self, node_modules_root: &Path) -> PathBuf {
-        node_modules_root.join(self.path())
-    }
-}
-
-fn collect_node_module_roots(
-    current_dir: &Path,
-    current_exe: &Path,
-    cli_entrypoint: Option<&Path>,
-    node_path: Option<OsString>,
-) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    roots.push(current_dir.join("node_modules"));
-    roots.extend(ancestor_node_modules(current_dir));
-    if let Some(cli_entrypoint) = cli_entrypoint {
-        roots.extend(ancestor_node_modules(cli_entrypoint));
-    }
-    roots.extend(ancestor_node_modules(current_exe));
-    if let Some(node_path) = node_path {
-        roots.extend(env::split_paths(&node_path).map(|path| absolutize_path(current_dir, path)));
-    }
-    dedupe_paths(roots)
-}
-
-fn ancestor_node_modules(path: &Path) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    let mut current = if path.is_dir() {
-        path
-    } else {
-        path.parent().unwrap_or(path)
-    };
-
-    loop {
-        if current.file_name().and_then(|name| name.to_str()) == Some("node_modules") {
-            roots.push(current.to_path_buf());
-        }
-        let candidate = current.join("node_modules");
-        if candidate.is_dir() {
-            roots.push(candidate);
-        }
-
-        let Some(parent) = current.parent() else {
-            break;
-        };
-        if parent == current {
-            break;
-        }
-        current = parent;
-    }
-
-    roots
-}
-
-fn is_filesystem_path(path: &str) -> bool {
-    path.starts_with('/')
-        || path.starts_with("./")
-        || path.starts_with("../")
-        || path.contains('\\')
-        || Path::new(path).extension().is_some()
-}
-
-fn dynamic_library_relative_path(extension_name: &str) -> PathBuf {
-    let file = dynamic_library_file_name(extension_name);
-    if cfg!(target_os = "windows") {
-        PathBuf::from("bin").join(file)
-    } else {
-        PathBuf::from("lib").join(file)
-    }
-}
-
 fn dynamic_library_file_name(extension_name: &str) -> String {
     let stem = format!("opentray_ext_{}", normalize_extension_name(extension_name));
     if cfg!(target_os = "windows") {
@@ -799,197 +600,36 @@ mod tests {
     }
 
     #[test]
-    fn discovery_prefers_package_adjacent_platform_library() {
+    fn exact_request_never_falls_back_to_diagnostic_candidates() {
         let discovery = ExtensionDiscovery::for_test(
-            PathBuf::from("/app/node_modules/@opentray/darwin-arm64/bin/opentray"),
-            None,
-            Vec::new(),
+            Some(PathBuf::from("/home/me")),
+            vec![PathBuf::from("/diagnostic/libopentray_ext_webview.dylib")],
         );
         let request = ExtensionLoadRequest {
             app_id: "app-1".to_string(),
             name: "webview".to_string(),
-            path: "@opentray/ext-webview".to_string(),
+            path: "/facade/current/libopentray_ext_webview.dylib".to_string(),
             mount_id: None,
         };
 
-        let candidates = discovery.candidates(&request);
-
         assert_eq!(
-            candidates[0],
-            PathBuf::from("/app/node_modules/@opentray").join(format!(
-                "ext-webview-{}-{}/{}",
-                current_package_os(),
-                current_arch(),
-                dynamic_library_relative_path("webview").display()
-            ))
+            discovery.candidates(&request),
+            vec![PathBuf::from(
+                "/facade/current/libopentray_ext_webview.dylib"
+            )]
         );
     }
 
     #[test]
-    fn discovery_resolves_badge_platform_library_from_package_candidates() {
+    fn diagnostic_request_includes_only_explicit_and_user_candidates() {
         let discovery = ExtensionDiscovery::for_test(
-            PathBuf::from("/app/node_modules/@opentray/darwin-arm64/bin/opentray"),
-            None,
-            Vec::new(),
-        );
-        let request = ExtensionLoadRequest {
-            app_id: "app-1".to_string(),
-            name: "badge".to_string(),
-            path: "@opentray/ext-badge".to_string(),
-            mount_id: None,
-        };
-
-        let candidates = discovery.candidates(&request);
-
-        assert_eq!(
-            candidates[0],
-            PathBuf::from("/app/node_modules/@opentray").join(format!(
-                "ext-badge-{}-{}/{}",
-                current_package_os(),
-                current_arch(),
-                dynamic_library_relative_path("badge").display()
-            ))
-        );
-    }
-
-    #[test]
-    fn discovery_prefers_explicit_extension_path_over_package_candidates() {
-        let discovery = ExtensionDiscovery::for_test_with_node_module_roots(
-            PathBuf::from("/app/node_modules/.pnpm/opentray@0.2.0/node_modules/@opentray/darwin-arm64/bin/opentray"),
-            None,
-            vec![PathBuf::from("/local/libopentray_ext_webview.dylib")],
-            vec![PathBuf::from("/app/node_modules/.pnpm/opentray@0.2.0/node_modules")],
-        );
-        let request = ExtensionLoadRequest {
-            app_id: "app-1".to_string(),
-            name: "webview".to_string(),
-            path: "@opentray/ext-webview".to_string(),
-            mount_id: None,
-        };
-
-        let candidates = discovery.candidates(&request);
-
-        assert_eq!(
-            candidates[0],
-            PathBuf::from("/local/libopentray_ext_webview.dylib")
-        );
-    }
-
-    #[test]
-    fn discovery_resolves_platform_library_from_request_package_roots() {
-        let discovery = ExtensionDiscovery::for_test_with_node_module_roots(
-            PathBuf::from("/app/node_modules/@opentray/darwin-arm64/bin/opentray"),
-            None,
-            Vec::new(),
-            vec![
-                PathBuf::from("/app/node_modules/.pnpm/opentray@0.2.0/node_modules"),
-                PathBuf::from("/app/node_modules"),
-            ],
-        );
-        let request = ExtensionLoadRequest {
-            app_id: "app-1".to_string(),
-            name: "webview".to_string(),
-            path: "@opentray/ext-webview".to_string(),
-            mount_id: None,
-        };
-
-        let candidates = discovery.candidates(&request);
-
-        assert_eq!(
-            candidates[0],
-            PathBuf::from(format!(
-                "/app/node_modules/.pnpm/opentray@0.2.0/node_modules/@opentray/ext-webview-{}-{}/{}",
-                current_package_os(),
-                current_arch(),
-                dynamic_library_relative_path("webview").display()
-            ))
-        );
-        assert!(candidates.iter().any(|path| {
-            path.starts_with(format!(
-                "/app/node_modules/.pnpm/opentray@0.2.0/node_modules/@opentray/ext-webview/node_modules/@opentray/ext-webview-{}-{}",
-                current_package_os(),
-                current_arch()
-            ))
-        }));
-    }
-
-    #[test]
-    fn discovery_prefers_top_level_platform_package_over_facade_nested_dependency() {
-        let discovery = ExtensionDiscovery::for_test_with_node_module_roots(
-            PathBuf::from("/workspace/app/node_modules/.pnpm/opentray@0.2.0/node_modules/@opentray/darwin-arm64/bin/opentray"),
-            None,
-            Vec::new(),
-            vec![PathBuf::from("/workspace/app/node_modules")],
-        );
-        let request = ExtensionLoadRequest {
-            app_id: "app-1".to_string(),
-            name: "webview".to_string(),
-            path: "@opentray/ext-webview".to_string(),
-            mount_id: None,
-        };
-
-        let candidates = discovery.candidates(&request);
-
-        assert_eq!(
-            candidates[0],
-            PathBuf::from(format!(
-                "/workspace/app/node_modules/@opentray/ext-webview-{}-{}/{}",
-                current_package_os(),
-                current_arch(),
-                dynamic_library_relative_path("webview").display()
-            ))
-        );
-        assert_eq!(
-            candidates[1],
-            PathBuf::from("/workspace/app/node_modules/@opentray/ext-webview")
-                .join("node_modules")
-                .join(format!(
-                    "@opentray/ext-webview-{}-{}/{}",
-                    current_package_os(),
-                    current_arch(),
-                    dynamic_library_relative_path("webview").display()
-                ))
-        );
-    }
-
-    #[test]
-    fn collect_node_module_roots_prefers_current_project_over_cli_virtual_store() {
-        let roots = collect_node_module_roots(
-            Path::new("/workspace/app"),
-            Path::new("/workspace/app/node_modules/.pnpm/opentray@0.2.0/node_modules/@opentray/darwin-arm64/bin/opentray"),
-            None,
-            None,
-        );
-
-        assert_eq!(roots[0], PathBuf::from("/workspace/app/node_modules"));
-        assert!(roots.iter().any(|root| root
-            == &PathBuf::from("/workspace/app/node_modules/.pnpm/opentray@0.2.0/node_modules")));
-    }
-
-    #[test]
-    fn package_ref_parses_scoped_and_plain_packages() {
-        assert_eq!(
-            PackageRef::parse("@opentray/ext-webview").unwrap().path(),
-            PathBuf::from("@opentray").join("ext-webview")
-        );
-        assert_eq!(
-            PackageRef::parse("plain-package").unwrap().path(),
-            PathBuf::from("plain-package")
-        );
-        assert_eq!(PackageRef::parse("./libext.dylib"), None);
-    }
-
-    #[test]
-    fn discovery_includes_env_and_user_config_candidates() {
-        let discovery = ExtensionDiscovery::for_test(
-            PathBuf::from("/repo/target/debug/opentray"),
             Some(PathBuf::from("/home/me")),
             vec![PathBuf::from("/extensions"), PathBuf::from("/repo/exts")],
         );
         let request = ExtensionLoadRequest {
             app_id: "app-1".to_string(),
             name: "webview".to_string(),
-            path: "@opentray/ext-webview".to_string(),
+            path: "diagnostic".to_string(),
             mount_id: None,
         };
 
@@ -1002,6 +642,9 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|path| path.starts_with("/home/me/.opentray/extensions/webview")));
+        assert!(candidates
+            .iter()
+            .all(|path| !path.to_string_lossy().contains("node_modules")));
     }
 
     #[test]

@@ -38,6 +38,8 @@ pnpm add opentray@stable-A-B @opentray/ext-webview@stable-A-B
 
 Use `alpha-A-B` for alpha packages on the same protocol line. Do not install platform WebView packages directly; `@opentray/ext-webview` resolves the supported native package through optional dependencies.
 
+`WebviewExt.artifact` records the facade package, canonical contract manifest, and target package mappings. OpenTray resolves that descriptor from the facade's own dependency closure, so an unmanaged platform package in the consumer root cannot shadow the installed WebView runtime.
+
 ## First Panel
 
 Call `createTray()` directly and mount WebView through `tray.extend(WebviewExt)`. The first `show()` loads the native extension. A primary tray item should always state its next action, use `toVisible()` for a retained session, and use `close()` to hide without destroying page state:
@@ -450,13 +452,13 @@ Current native support:
 - Windows: visible WebView2-backed windows, lifecycle verbs, content replacement/navigation, `evaluate`, `postMessage`, common window bridge commands, title/icon sync, current-monitor screen snapshot, tray bounds projection, and global override binding through `bindWindowGlobals` / `bindScreenGlobals`
 - Windows: `frameless`, `background`, `keepOnTop`, `autoHide`, `opacity`, and `style.platform.windows.cornerPreference`
 - Windows: instance-scoped devtools open through `devtools: true`; close/state remain typed unsupported because current Wry/WebView2 does not expose honest runtime state there
-- Linux: no official native WebView runtime package is published. A custom `path` may still be used for private experiments, but the official package treats Linux WebView as unsupported.
+- Linux: no official native WebView runtime package is published. An exact-file `artifact` may still be used for private experiments, but the official package treats Linux WebView as unsupported.
 
 Release builds include the native inspector API by default so downstream developers can debug release-mode examples and apps through the explicit host/page API. This does not make every WebView inspectable: the per-window `devtools: true` gate is still required, so ordinary release windows keep devtools unavailable by default.
 
 Keep the unsupported taxonomy explicit:
 
-- runtime absent: no official WebView native package exists for the host platform, or a custom `path` could not be resolved
+- runtime absent: no official WebView native package exists for the host platform, or a custom exact-file `artifact` could not be resolved
 - platform-family mismatch: a Windows/Linux style family is requested on the macOS runtime, macOS material/corner style is requested on Windows, or a platform-specific family is otherwise requested on the wrong substrate
 - declarative gate: the runtime could provide a capability, but the current WebView session did not enable it, such as overlay geometry without `windowControlsOverlay`
 - context unavailable: the capability exists, but the current session has no authoritative data, such as tray bounds when no tray anchor was injected

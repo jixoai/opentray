@@ -11,7 +11,7 @@ Official macOS-first Lynx window extension for OpenTray.
 
 This package is an extension atom. It must not become the owner of core tray lifecycle or app background-service policy.
 
-The facade stays platform-neutral. Native libraries are optional platform packages named `@opentray/ext-lynx-<os>-<arch>`, and the runtime host resolves them through the dynamic extension discovery law when `load-ext` requests `@opentray/ext-lynx`.
+The facade stays platform-neutral. `LynxExt.artifact` maps supported targets to optional platform packages named `@opentray/ext-lynx-<os>-<arch>` and names the canonical Lynx contract manifest. The Node SDK resolves one exact dylib relative to this facade before the broker receives `load-ext`.
 
 The macOS native dylib owns the Lynx command protocol and the runtime sidecar contract. `opentray` forwards scoped extension traffic to it, but does not keep a core-side Lynx parser or a core-owned Lynx runtime.
 

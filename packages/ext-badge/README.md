@@ -11,6 +11,8 @@ Official status extension for OpenTray.
 Windows and Linux support is intentionally reduced until a real native projection exists. Unsupported families reject explicitly.
 On the current macOS Dock proof surface, progress and progress state are explicitly unsupported and should not be treated as a working Dock projection.
 
+`BadgeExt.artifact` maps supported targets to platform packages relative to this facade and names the canonical Badge contract manifest. Consumers do not install or locate the native library manually.
+
 ## Debug Panel
 
 The repository ships a macOS-facing proof surface at `pnpm --filter opentray example:badge`.

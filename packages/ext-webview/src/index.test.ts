@@ -2,20 +2,36 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
-import { createTrayHandle, type OpenTrayTransport } from "opentray";
+import {
+  createTrayHandle,
+  type OpenTrayTransport,
+  type TrayHandle,
+} from "opentray";
 
 import {
-  attachWebview,
+  attachWebview as attachOfficialWebview,
   createAppScopedWebviewPermissionStore,
   mediaQueryKit,
   styleKit,
-  WebviewExt,
+  WebviewExt as OfficialWebviewExt,
   WebviewExtensionLoadError,
   webviewBrowserPermissionFamilies,
   WebviewPlacementKit,
   windowGeometryKit,
 } from "./index";
+
+const TEST_NATIVE_ARTIFACT = {
+  kind: "file",
+  path: fileURLToPath(import.meta.url),
+} as const;
+const WebviewExt = {
+  ...OfficialWebviewExt,
+  artifact: TEST_NATIVE_ARTIFACT,
+};
+const attachWebview = (tray: TrayHandle) =>
+  attachOfficialWebview(tray, { artifact: TEST_NATIVE_ARTIFACT });
 import type {
   WebviewCommand,
   WebviewWindowDevtools,
@@ -33,6 +49,22 @@ import type {
 } from "./index";
 
 describe("@opentray/ext-webview", () => {
+  it("declares platform packages relative to the official facade", () => {
+    expect(OfficialWebviewExt.artifact).toMatchObject({
+      kind: "package",
+      targets: {
+        "darwin-arm64": {
+          packageName: "@opentray/ext-webview-darwin-arm64",
+          libraryPath: "lib/libopentray_ext_webview.dylib",
+        },
+        "win32-x64": {
+          packageName: "@opentray/ext-webview-windows-x64",
+          libraryPath: "bin/opentray_ext_webview.dll",
+        },
+      },
+    });
+  });
+
   it("extends a tray with an isolated WebView window mount", async () => {
     const transport = new RecordingTransport();
     const tray = createTrayHandle(transport, "app-1", "tray-1");
@@ -51,7 +83,7 @@ describe("@opentray/ext-webview", () => {
         requestId: "opentray-1",
         appId: "app-1",
         name: "webview",
-        path: "@opentray/ext-webview",
+        path: TEST_NATIVE_ARTIFACT.path,
         mountId: "webview.tray-1",
       },
       {
@@ -283,7 +315,7 @@ describe("@opentray/ext-webview", () => {
         requestId: "opentray-1",
         appId: "app-1",
         name: "webview",
-        path: "@opentray/ext-webview",
+        path: TEST_NATIVE_ARTIFACT.path,
         mountId: "webview",
       },
       {
@@ -557,7 +589,7 @@ describe("@opentray/ext-webview", () => {
         requestId: "opentray-1",
         appId: "app-1",
         name: "webview",
-        path: "@opentray/ext-webview",
+        path: TEST_NATIVE_ARTIFACT.path,
         mountId: "webview",
       },
       {
@@ -615,7 +647,7 @@ describe("@opentray/ext-webview", () => {
         requestId: "opentray-1",
         appId: "app-1",
         name: "webview",
-        path: "@opentray/ext-webview",
+        path: TEST_NATIVE_ARTIFACT.path,
         mountId: "webview.tray-1",
       },
       {
@@ -724,6 +756,7 @@ describe("@opentray/ext-webview", () => {
           width: 300,
           height: 200,
         });
+      await webviewWindow.isVisible();
 
       const unlisten = webviewWindow.listen(
         "windowinteractionchange",
@@ -777,6 +810,7 @@ describe("@opentray/ext-webview", () => {
           width: 300,
           height: 200,
         });
+      await webviewWindow.isVisible();
 
       const unlistenFocus = webviewWindow.listen("focus", (event) => {
         events.push(event);

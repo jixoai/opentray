@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 1
-- Status: research complete; intent locked for spec authoring
+- Status: Phase One exact artifact resolution verified; Phase Two active
 - Previous plan backup: none; this is the first current plan
 
 ## Workflow Command Surface
@@ -207,9 +207,9 @@ Artifact-set identity proves a coordinated npm closure. Contract fingerprint pro
 ## Intent-Driven Plan
 
 - [x] 1. Research and align intent.
-- [ ] 2. Write specs from the intent.
-- [ ] 3. Write BDD tasks from specs.
-- [ ] 4. Implement Phase 1: exact artifact resolution.
+- [x] 2. Write specs from the intent.
+- [x] 3. Write BDD tasks from specs.
+- [x] 4. Implement Phase 1: exact artifact resolution.
 - [ ] 5. Implement Phase 2: embedded extension manifest and structured rejection.
 - [ ] 6. Implement Phase 3: broker artifact identity and automatic replacement.
 - [ ] 7. Prove package-manager install closures, native behavior, release artifacts, and full repo gates.

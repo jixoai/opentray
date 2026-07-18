@@ -18,6 +18,18 @@ export {
   type TrayHandle,
 } from "./client";
 export {
+  NativeExtensionArtifactResolutionError,
+  resolveNativeExtensionArtifact,
+  type NativeExtensionArch,
+  type NativeExtensionArtifact,
+  type NativeExtensionFileArtifact,
+  type NativeExtensionExpectedIdentity,
+  type NativeExtensionPackageArtifact,
+  type NativeExtensionPackageTarget,
+  type NativeExtensionTarget,
+  type ResolvedNativeExtensionArtifact,
+} from "./native-extension-artifact";
+export {
   createTray,
   type CreateTrayHandle,
   type CreateTrayOptions,

@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { LynxExt } from "../../../ext-lynx/src/index";
 import { createClient } from "../../src/client";
 import { connectLocalBroker } from "../../src/local-broker";
 import {
@@ -117,11 +118,18 @@ export const runDebugRuntimeLynxSmoke = async (
   });
   console.log(`tray: ${tray.trayId}`);
 
-  await tray.loadExtension({
-    name: "lynx",
-    path: "@opentray/ext-lynx",
+  const lynx = tray.extend(LynxExt, {
+    mountId: "lynx",
+    ...(localLynxExtension === undefined
+      ? {}
+      : {
+          artifact: {
+            kind: "file" as const,
+            path: localLynxExtension,
+          },
+        }),
   });
-  console.log("lynx extension requested through the generic load-ext path");
+  console.log("lynx extension mounted through tray.extend(LynxExt)");
 
   let closed = false;
   let exitTimer: NodeJS.Timeout | undefined;
@@ -132,7 +140,7 @@ export const runDebugRuntimeLynxSmoke = async (
       bundlePath,
       hostFeatures,
     });
-    await tray.commandExtension("lynx", command);
+    await lynx.show(command);
     console.log(
       `lynx command: show features=${describeLynxHostFeatures(
         hostFeatures
@@ -141,7 +149,7 @@ export const runDebugRuntimeLynxSmoke = async (
   };
 
   const hide = async (): Promise<void> => {
-    await tray.commandExtension("lynx", { type: "hide" });
+    await lynx.hide();
     console.log("lynx command: hide");
   };
 
@@ -236,6 +244,10 @@ export const prepareLocalLynxExtensionPath = (
   moduleUrl = import.meta.url,
   options: PrepareLocalLynxExtensionPathOptions = {}
 ): string | undefined => {
+  const configuredPath = process.env.OPENTRAY_EXT_PATH?.trim();
+  if (configuredPath !== undefined && configuredPath.length > 0) {
+    return configuredPath;
+  }
   const localLynxExtension = resolveLocalLynxExtensionPath(
     moduleUrl,
     options.platform ?? process.platform,
