@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 1
-- Status: All three artifact phases and consumer/repository verification pass; archive audit active
+- Status: Archived; all three artifact phases, consumer gates, review loops, and archived audits pass
 - Previous plan backup: none; this is the first current plan
 
 ## Workflow Command Surface
@@ -213,7 +213,7 @@ Artifact-set identity proves a coordinated npm closure. Contract fingerprint pro
 - [x] 5. Implement Phase 2: embedded extension manifest and structured rejection.
 - [x] 6. Implement Phase 3: broker artifact identity and automatic replacement.
 - [x] 7. Prove package-manager install closures, native behavior, release artifacts, and full repo gates.
-- [ ] 8. Self-review against intent, resolve every finding, archive, and validate the archived state.
+- [x] 8. Self-review against intent, resolve every finding, archive, and validate the archived state.
 
 ## Open Questions
 

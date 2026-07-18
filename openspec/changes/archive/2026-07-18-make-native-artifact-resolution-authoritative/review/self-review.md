@@ -5,8 +5,8 @@
 - Change: `make-native-artifact-resolution-authoritative`
 - Iteration: 5
 - Recurring issue counts: `packed-consumer-release-gate: 1`, `archive-delta-integrity: 2`
-- Exit-condition judgment: product behavior remains aligned; all modified and removed delta identities now match current main specs
-- Next loop action: validate delta integrity, rerun archive commit-check, archive the change, then run the final archived audit
+- Exit-condition judgment: product behavior, archive synchronization, archived vision check, strict validation, and requirement audit all pass
+- Next loop action: none; publish the repaired package closure before expecting external consumers to receive the behavior
 
 ## Intent Alignment
 
@@ -33,7 +33,7 @@
 | Standards | OpenSpec tests used numeric fds/pipes that silently lost nested Bun output. | Direct Bun spawn uses file-backed sinks/sources and keeps `/bin/sh` out of the path. | 37 OpenSpec workflow tests pass under Bun 1.3.14. |
 | Standards | Diagnostic ABI classification depended on matching human-readable error text. | Missing symbols and ABI version mismatch now carry the stable `abi_incompatible` category; diagnostic classification consumes categories only. | Focused Rust red/green plus full `cargo test` pass. |
 | Spec | The packed consumer destroyed the tray but left the top-level SDK's broker socket open. | Top-level `createTray()` now closes its owned session after tray teardown, closes on creation failure, and shares one idempotent destroy promise across extended handles. | SDK red/green tests, packed pnpm/npm consumers, and the full repository gate pass. |
-| Spec | Archive preflight found renamed scenarios and REMOVED requirements that never existed in the current main specs. | Restored existing scenario identifiers, removed phantom removals, and modeled broker-side package-root removal as an explicit replacement of the requirement that actually owned that behavior. | Both archive attempts aborted before writes; delta identity audit, strict validation, and a third archive attempt gate the correction. |
+| Spec | Archive preflight found renamed scenarios and REMOVED requirements that never existed in the current main specs. | Restored existing scenario identifiers, removed phantom removals, and modeled broker-side package-root removal as an explicit replacement of the requirement that actually owned that behavior. | Both failed archive attempts aborted before writes; the third attempt synchronized 7 added, 5 modified, and 1 removed requirement, and the archived requirement audit passes. |
 
 ## Deviations From Intent
 
@@ -52,8 +52,10 @@
 - Source WebView smoke: `example:webview-control --no-overlay`, exit 0
 - Native inspection: `otool -L` on staged broker and WebView dylib; sizes 7.4 MiB and 7.5 MiB
 - Git commits reviewed: `a1c665d..0236b2d`
-- Uncommitted paths, if any: archive-readiness spec and review correction only
-- Task checkboxes updated by this working context: 9.1
+- Archive synchronization: 7 added, 5 modified, and 1 removed requirement across four main specs
+- Archived checks: vision-driven check, 21-item strict validation, requirement content audit, and diff check pass
+- Uncommitted paths, if any: archive move and synchronized main specs pending the dedicated archive commit
+- Task checkboxes updated by this working context: 9.1-9.5
 
 ## HTML Review Report
 
@@ -61,4 +63,4 @@ See `review/self-review.html` for the compact evidence matrix and final archive 
 
 ## Exit Handling
 
-- Normal exit: run the repository-supported archive command only after review and the final check pass.
+- Normal exit: archived change and synchronized main specs are ready for the dedicated archive commit.

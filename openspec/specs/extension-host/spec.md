@@ -27,14 +27,32 @@ Dynamic extension cleanup SHALL use session vocabulary at the host contract and 
 
 The extension ABI SHALL use `extern "C"` functions and C-compatible structures for dynamic libraries. Rust-specific types SHALL NOT cross the dynamic library boundary. JSON command payloads MAY be used inside ABI functions to keep the binary ABI stable while TypeScript/Rust schemas evolve.
 
+Every dynamic extension SHALL export a required manifest symbol before init. The symbol SHALL return extension-owned JSON describing `extensionName`, `abiVersion`, `artifactSetVersion`, `contractFingerprint`, target operating system/architecture, and `buildIdentity`. The broker SHALL validate and free this manifest through generic ABI operations before calling init.
+
+The ABI SHALL provide structured extension-owned error JSON when init, command, or session cleanup returns a non-success result. The error SHALL preserve a stable category and actionable message; a numeric result code alone is insufficient.
+
 The ABI SHALL be strong enough for an official extension to own its entire native runtime internally. The daemon SHALL NOT pass Rust event-loop, window, backend, WebView, or official-extension-specific parser objects across the ABI boundary in order to make a released extension function.
 
 #### Scenario: Dynamic library exports required symbols
 
 - **GIVEN** an extension shared library is loaded
 - **WHEN** the extension host validates it
-- **THEN** it requires init, command, and deinit symbols
+- **THEN** it requires manifest, init, command, session cleanup, deinit, and free symbols
 - **AND** it rejects the library with a structured error if any required symbol is missing.
+
+#### Scenario: Manifest is read before init
+
+- **GIVEN** a dynamic library exists at the exact requested path
+- **WHEN** its embedded identity does not equal the expected extension identity
+- **THEN** the broker rejects it before init
+- **AND** no native extension state is created.
+
+#### Scenario: Extension rejection preserves native detail
+
+- **GIVEN** an extension rejects a validly transported command with a native reason
+- **WHEN** the broker returns the failure to the SDK
+- **THEN** the error includes the extension category and message
+- **AND** it does not collapse the failure to `returned code 1`.
 
 ### Requirement: Internal extension adapter MAY bootstrap P0 only if it uses the same host contract
 
@@ -49,14 +67,23 @@ The implementation MAY start with an internal Rust extension adapter for local d
 
 ### Requirement: Extension discovery SHALL be explicit and auditable
 
-The system SHALL support extension discovery from package-adjacent platform artifacts, user config directories, and `OPENTRAY_EXT_PATH`. Discovery SHALL produce an auditable candidate path list and SHALL not silently load arbitrary libraries outside configured locations.
+The normal package-facade path SHALL arrive at the daemon as one exact native library path resolved by the TypeScript SDK plus an expected embedded identity. The daemon SHALL validate that path and SHALL NOT scan package-manager directories for a replacement.
+
+Explicit diagnostic candidates from `OPENTRAY_EXT_PATH`, source-development configuration, or user extension directories MAY be evaluated in documented order. Each candidate SHALL be classified as missing, unreadable, ABI-incompatible, identity-incompatible, or loadable. Identity-incompatible candidates SHALL never be initialized. When a diagnostic candidate set permits fallback, the loader SHALL continue after a mismatch and select only a compatible artifact.
 
 #### Scenario: Extension path resolution is deterministic
 
-- **GIVEN** multiple extension search paths are configured
-- **WHEN** the broker resolves `webview`
-- **THEN** it evaluates paths in documented priority order
-- **AND** logs or returns the selected path without leaking unrelated filesystem details.
+- **GIVEN** the SDK resolved an official platform package from the facade dependency closure
+- **WHEN** the broker receives `load-ext`
+- **THEN** it evaluates only the exact library path for the normal package path
+- **AND** reports that selected path and verified identity.
+
+#### Scenario: Diagnostic candidates retain rejection evidence
+
+- **GIVEN** an explicit diagnostic candidate list contains an old artifact followed by a compatible artifact
+- **WHEN** the broker resolves the extension
+- **THEN** it records the old artifact's identity mismatch without initializing it
+- **AND** loads the later compatible artifact.
 
 ### Requirement: Official extension runtime ownership SHALL stay inside the extension artifact
 
@@ -82,27 +109,6 @@ When an official extension needs a platform-native runtime such as WebKit or `wr
 - **THEN** the `opentray` binary does not link `WebKit.framework`
 - **AND** `libopentray_ext_webview.dylib` does link `WebKit.framework`.
 
-### Requirement: Daemon SHALL load dynamic extensions through a generic host boundary
-
-The daemon composition layer SHALL provide a generic dynamic extension loader that implements the existing extension host law. The loader SHALL resolve candidate libraries from package-adjacent platform artifacts, request-package-adjacent platform artifacts, user config directories, and `OPENTRAY_EXT_PATH`. It SHALL validate required ABI symbols before registering the extension instance.
-
-The loader SHALL be generic. It SHALL NOT branch on WebView product behavior in `opentray-core`, and it SHALL NOT grant native extensions direct access to kernel registries.
-
-#### Scenario: Dynamic extension library is validated before registration
-
-- **GIVEN** a client requests `load-ext` for an extension
-- **WHEN** the daemon resolves a candidate dynamic library
-- **THEN** it validates ABI version and required init, command, lease cleanup, deinit, and host-free symbols
-- **AND** it returns a structured error if validation fails
-- **AND** it registers the extension only after validation succeeds.
-
-#### Scenario: Request package roots are searched for platform atoms
-
-- **GIVEN** an extension is requested by npm facade package name such as `@opentray/ext-webview`
-- **WHEN** the daemon builds dynamic library candidates
-- **THEN** it searches platform packages adjacent to that requested package's dependency roots
-- **AND** it can resolve layouts where package managers do not place extension platform packages next to the daemon binary package.
-
 ### Requirement: Dynamic extensions SHALL use host capabilities for daemon-owned UI authority
 
 Dynamic extension libraries SHALL NOT receive Rust event-loop, window, backend, or kernel registry objects across the ABI. When an extension needs daemon-owned authority, such as creating a native UI window on the main event loop, it SHALL call a host capability through C-compatible callbacks and JSON payloads. The daemon composition layer SHALL implement the capability; the extension SHALL own command semantics and event payload shape.
@@ -126,30 +132,30 @@ The host capability boundary SHALL be generic. `opentray-core` SHALL only pass a
 
 ### Requirement: Dynamic extension ABI SHALL use JSON payloads across C-compatible calls
 
-The dynamic extension ABI SHALL keep Rust-specific types inside process boundaries. Commands sent to a dynamic extension SHALL cross the ABI as JSON bytes plus C-compatible metadata for scope and request context. Events returned by an extension SHALL cross back as JSON bytes and SHALL be re-scoped by the host before being emitted to clients.
+The dynamic extension ABI SHALL keep Rust-specific types inside process boundaries. Commands sent to a dynamic extension SHALL cross the ABI as JSON bytes plus C-compatible metadata for scope and request context. Events, manifest identity, and structured errors returned by an extension SHALL cross back as extension-owned JSON byte buffers.
 
-Returned event buffers SHALL have explicit ownership. A dynamic extension that allocates a response buffer SHALL export a host-callable free function so the daemon can release extension-owned memory after parsing the JSON payload. Lease cleanup SHALL also cross the same C-compatible boundary so extension state does not survive client disconnects.
+Returned buffers SHALL have explicit ownership. The dynamic extension SHALL export a host-callable free function used for event, manifest, and error buffers. Session cleanup SHALL cross the same C-compatible boundary so extension state does not survive client disconnects.
 
 #### Scenario: Rust types do not cross ABI
 
 - **GIVEN** a dynamic extension command is dispatched
 - **WHEN** the daemon calls the extension ABI
 - **THEN** the call uses C-compatible structures and byte buffers
-- **AND** `Surface`, `Tray`, `Lease`, or kernel Rust structs are not passed across the library boundary.
+- **AND** kernel Rust structs are not passed across the library boundary.
 
 #### Scenario: Dynamic extension owns and releases response buffers
 
-- **GIVEN** a dynamic extension command returns event JSON
-- **WHEN** the daemon parses the returned bytes
+- **GIVEN** an extension returns manifest, event, or error JSON
+- **WHEN** the daemon consumes the bytes
 - **THEN** the daemon calls the extension-provided free function
 - **AND** buffer ownership is not inferred from Rust allocator internals.
 
 #### Scenario: Lease cleanup crosses the extension ABI
 
-- **GIVEN** a lease owning extension state is closed
-- **WHEN** the kernel dispatches lease cleanup
-- **THEN** the daemon calls the extension lease cleanup symbol with C-compatible bytes
-- **AND** any returned cleanup events use the same JSON event buffer contract.
+- **GIVEN** session cleanup fails inside an extension
+- **WHEN** the host receives the non-success result
+- **THEN** it reads and frees the structured extension error
+- **AND** reports its category and message through the generic kernel error path.
 
 ### Requirement: Extension discovery SHALL be auditable
 
@@ -192,3 +198,24 @@ The extension host contract SHALL assume a runtime-host-bound app context. It SH
 - **WHEN** the extension is mounted on a tray
 - **THEN** the extension sees the tray/app runtime boundary
 - **AND** it does not require a public daemon object to describe the host.
+
+### Requirement: Daemon SHALL validate exact dynamic extensions through a generic host boundary
+
+The daemon composition layer SHALL provide a generic dynamic extension loader that implements the existing extension host law. For normal facade loading, the loader SHALL accept an exact library path and expected generic identity from `load-ext`. For explicit diagnostic/custom discovery, it MAY evaluate configured candidate paths. It SHALL validate the embedded manifest, ABI version, required symbols, target, and expected contract before registering the extension instance.
+
+The loader SHALL be generic. It SHALL NOT branch on WebView, Badge, Lynx, or other product command behavior in `opentray-core` or the broker, and it SHALL NOT grant native extensions direct access to kernel registries.
+
+#### Scenario: Dynamic extension library is validated before registration
+
+- **GIVEN** a client requests `load-ext` with an exact artifact and expected identity
+- **WHEN** the daemon opens the dynamic library
+- **THEN** it validates required symbols and the full embedded identity before init
+- **AND** it returns a structured error if validation fails
+- **AND** it registers the extension only after validation and init succeed.
+
+#### Scenario: Broker remains extension agnostic
+
+- **GIVEN** WebView, Badge, and Lynx publish different contract fingerprints
+- **WHEN** the broker validates their manifests
+- **THEN** it compares the same generic identity fields for each
+- **AND** it never parses their product command schemas.

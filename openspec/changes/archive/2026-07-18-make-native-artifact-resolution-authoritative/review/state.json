@@ -6,6 +6,6 @@
     "packed-consumer-release-gate": 1,
     "archive-delta-integrity": 2
   },
-  "updatedAt": "2026-07-18T21:43:18.000Z",
-  "exitCondition": "No unresolved product findings; archive delta identities match main specs"
+  "updatedAt": "2026-07-18T21:49:04.000Z",
+  "exitCondition": "Archived checks pass; publish is the remaining external delivery step"
 }
