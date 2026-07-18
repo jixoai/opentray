@@ -184,7 +184,12 @@ where
                 continue;
             }
             Err(error) => {
-                rejected.push(format!("{}: missing ({error})", candidate.display()));
+                let category = if error.kind() == std::io::ErrorKind::NotFound {
+                    "missing"
+                } else {
+                    "unreadable"
+                };
+                rejected.push(format!("{}: {category} ({error})", candidate.display()));
                 continue;
             }
         }
@@ -192,7 +197,11 @@ where
         match load(&candidate) {
             Ok(instance) => return Ok(Some(instance)),
             Err(error) if exact_path => return Err(error),
-            Err(error) => rejected.push(format!("{}: rejected ({error})", candidate.display())),
+            Err(error) => rejected.push(format!(
+                "{}: {} ({error})",
+                candidate.display(),
+                candidate_error_category(&error),
+            )),
         }
     }
 
@@ -204,6 +213,22 @@ where
         request.name,
         rejected.join("; "),
     )))
+}
+
+fn candidate_error_category(error: &ExtensionError) -> &'static str {
+    match error {
+        ExtensionError::Detailed { category, .. } if category == "artifact_identity_mismatch" => {
+            "identity-incompatible"
+        }
+        ExtensionError::Unsupported(message)
+            if message.contains("missing symbol") || message.contains("ABI version") =>
+        {
+            "abi-incompatible"
+        }
+        ExtensionError::NotFound(_) => "missing",
+        ExtensionError::Rejected(_) | ExtensionError::Detailed { .. } => "rejected",
+        ExtensionError::Unsupported(_) => "unreadable",
+    }
 }
 
 #[cfg(test)]

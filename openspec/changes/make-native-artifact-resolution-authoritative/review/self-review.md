@@ -54,7 +54,7 @@
 
 ## HTML Review Report
 
-See `review/self-review.html` for the compact evidence matrix and the blocked-gate callout.
+See `review/self-review.html` for the compact evidence matrix and final archive conditions.
 
 ## Exit Handling
 
