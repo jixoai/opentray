@@ -6,6 +6,8 @@ const repoRoot = resolve(import.meta.dir, "../..");
 const releaseWorkflow = (): string =>
   readFileSync(resolve(repoRoot, ".github/workflows/release.yml"), "utf8");
 const packageJson = (): string => readFileSync(resolve(repoRoot, "package.json"), "utf8");
+const packedConsumerScript = (): string =>
+  readFileSync(resolve(repoRoot, "scripts/binaries/verify-packed-consumer.ts"), "utf8");
 
 describe("Feature: release native binary CI law", () => {
   test("Scenario: Given release native artifacts When workflow is inspected Then Rust setup cache and artifact transport use maintained Actions", () => {
@@ -68,6 +70,8 @@ describe("Feature: release native binary CI law", () => {
     expect(packedJob).toContain(
       "pnpm run verify:packed-consumer -- --package-manager npm --target",
     );
+    expect(packedConsumerScript()).toContain('value === "windows-arm64"');
+    expect(packedConsumerScript()).toContain('value === "windows-x64"');
     expect(releaseJob).toContain("- packed-consumer");
     expect(prepareJob).toContain("pnpm run version-packages");
     expect(prepareJob).toContain('git commit -m "chore: version packages"');

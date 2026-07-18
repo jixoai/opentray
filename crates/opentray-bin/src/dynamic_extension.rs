@@ -226,8 +226,9 @@ fn candidate_error_category(error: &ExtensionError) -> &'static str {
             "abi-incompatible"
         }
         ExtensionError::NotFound(_) => "missing",
-        ExtensionError::Rejected(_) | ExtensionError::Detailed { .. } => "rejected",
-        ExtensionError::Unsupported(_) => "unreadable",
+        ExtensionError::Rejected(_)
+        | ExtensionError::Detailed { .. }
+        | ExtensionError::Unsupported(_) => "unreadable",
     }
 }
 
@@ -891,6 +892,31 @@ mod tests {
         assert!(result.is_some());
         assert_eq!(attempts, vec![first.clone(), second.clone()]);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn candidate_error_categories_use_only_spec_statuses() {
+        let categories = [
+            candidate_error_category(&ExtensionError::NotFound("missing".to_string())),
+            candidate_error_category(&ExtensionError::Rejected("invalid manifest".to_string())),
+            candidate_error_category(&ExtensionError::Unsupported(
+                "extension missing symbol init".to_string(),
+            )),
+            candidate_error_category(&ExtensionError::Detailed {
+                category: "artifact_identity_mismatch".to_string(),
+                message: "old".to_string(),
+            }),
+        ];
+
+        assert_eq!(
+            categories,
+            [
+                "missing",
+                "unreadable",
+                "abi-incompatible",
+                "identity-incompatible",
+            ]
+        );
     }
 
     #[test]

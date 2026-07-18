@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 
 type PackageManager = "pnpm" | "npm";
-type PackedTarget = "darwin-arm64" | "darwin-x64" | "win32-arm64" | "win32-x64";
+type PackedTarget = "darwin-arm64" | "darwin-x64" | "windows-arm64" | "windows-x64";
 
 interface PackageManifest {
   name: string;
@@ -32,14 +32,14 @@ const { values } = parseArgs({
   options: {
     root: { type: "string", default: process.cwd() },
     "package-manager": { type: "string", default: "pnpm" },
-    target: { type: "string", default: `${process.platform}-${process.arch}` },
+    target: { type: "string", default: defaultPackedTarget() },
     keep: { type: "boolean", default: false },
   },
 });
 
 const root = values.root ?? process.cwd();
 const packageManager = parsePackageManager(values["package-manager"] ?? "pnpm");
-const target = parseTarget(values.target ?? `${process.platform}-${process.arch}`);
+const target = parseTarget(values.target ?? defaultPackedTarget());
 const targetPackages = packagesForTarget(target);
 const workspacePackageManager = await readWorkspacePackageManager(join(root, "package.json"));
 const fixtureRoot = await mkdtemp(join(tmpdir(), `opentray-${packageManager}-consumer-`));
@@ -179,8 +179,8 @@ console.log(JSON.stringify({ resolved, actualPath, runtimeManifest, loaded: true
 }
 
 function packagesForTarget(target: PackedTarget): TargetPackages {
-  const [platform, arch] = target.split("-") as ["darwin" | "win32", "arm64" | "x64"];
-  const packagePlatform = platform === "win32" ? "windows" : "darwin";
+  const [packagePlatform, arch] = target.split("-") as ["darwin" | "windows", "arm64" | "x64"];
+  const platform = packagePlatform === "windows" ? "win32" : "darwin";
   return {
     platform,
     arch,
@@ -200,12 +200,17 @@ function parseTarget(value: string): PackedTarget {
   if (
     value === "darwin-arm64" ||
     value === "darwin-x64" ||
-    value === "win32-arm64" ||
-    value === "win32-x64"
+    value === "windows-arm64" ||
+    value === "windows-x64"
   ) {
     return value;
   }
   throw new Error(`packed WebView consumer target is unsupported: ${value}`);
+}
+
+function defaultPackedTarget(): string {
+  const packagePlatform = process.platform === "win32" ? "windows" : process.platform;
+  return `${packagePlatform}-${process.arch}`;
 }
 
 async function readManifest(path: string): Promise<PackageManifest> {
