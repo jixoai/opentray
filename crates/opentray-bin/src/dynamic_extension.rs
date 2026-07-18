@@ -59,11 +59,14 @@ impl DynamicExtensionLoader {
         &self,
         request: &ExtensionLoadRequest,
     ) -> Result<Option<Box<dyn ExtensionInstance>>, ExtensionError> {
-        let Some(library_path) = self.discovery.resolve_optional(request) else {
-            return Ok(None);
-        };
-        let instance = unsafe { DynamicExtensionInstance::load(request, &library_path)? };
-        Ok(Some(Box::new(instance)))
+        load_candidate_paths(
+            request,
+            self.discovery.candidates(request),
+            |library_path| {
+                let instance = unsafe { DynamicExtensionInstance::load(request, library_path)? };
+                Ok(Box::new(instance) as Box<dyn ExtensionInstance>)
+            },
+        )
     }
 }
 
@@ -124,16 +127,6 @@ impl ExtensionDiscovery {
         }
     }
 
-    fn resolve_optional(&self, request: &ExtensionLoadRequest) -> Option<PathBuf> {
-        let candidates = self.candidates(request);
-        for candidate in &candidates {
-            if candidate.is_file() {
-                return Some(candidate.clone());
-            }
-        }
-        None
-    }
-
     pub fn candidates(&self, request: &ExtensionLoadRequest) -> Vec<PathBuf> {
         let requested = PathBuf::from(&request.path);
         if requested.is_absolute() {
@@ -171,6 +164,46 @@ impl ExtensionDiscovery {
 
         dedupe_paths(candidates)
     }
+}
+
+fn load_candidate_paths<F>(
+    request: &ExtensionLoadRequest,
+    candidates: Vec<PathBuf>,
+    mut load: F,
+) -> Result<Option<Box<dyn ExtensionInstance>>, ExtensionError>
+where
+    F: FnMut(&Path) -> Result<Box<dyn ExtensionInstance>, ExtensionError>,
+{
+    let exact_path = PathBuf::from(&request.path).is_absolute();
+    let mut rejected = Vec::new();
+    for candidate in candidates {
+        match std::fs::metadata(&candidate) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => {
+                rejected.push(format!("{}: unreadable (not a file)", candidate.display()));
+                continue;
+            }
+            Err(error) => {
+                rejected.push(format!("{}: missing ({error})", candidate.display()));
+                continue;
+            }
+        }
+
+        match load(&candidate) {
+            Ok(instance) => return Ok(Some(instance)),
+            Err(error) if exact_path => return Err(error),
+            Err(error) => rejected.push(format!("{}: rejected ({error})", candidate.display())),
+        }
+    }
+
+    if rejected.is_empty() {
+        return Ok(None);
+    }
+    Err(ExtensionError::Unsupported(format!(
+        "extension {} diagnostic candidates were rejected: {}",
+        request.name,
+        rejected.join("; "),
+    )))
 }
 
 #[cfg(test)]
@@ -693,6 +726,7 @@ fn current_arch() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentray_core::RecordingExtension;
 
     fn expected_extension_identity(
         extension_name: &str,
@@ -795,6 +829,78 @@ mod tests {
         assert!(candidates
             .iter()
             .all(|path| !path.to_string_lossy().contains("node_modules")));
+    }
+
+    #[test]
+    fn diagnostic_candidates_continue_after_a_rejected_artifact() {
+        let root = std::env::temp_dir().join(format!(
+            "opentray-extension-candidates-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let first = root.join("old.dylib");
+        let second = root.join("current.dylib");
+        std::fs::write(&first, b"old").unwrap();
+        std::fs::write(&second, b"current").unwrap();
+        let request = ExtensionLoadRequest {
+            app_id: "app-1".to_string(),
+            name: "webview".to_string(),
+            path: "diagnostic".to_string(),
+            expected_identity: expected_extension_identity("webview"),
+            mount_id: None,
+        };
+        let mut attempts = Vec::new();
+
+        let result = load_candidate_paths(&request, vec![first.clone(), second.clone()], |path| {
+            attempts.push(path.to_path_buf());
+            if path == first {
+                return Err(ExtensionError::Detailed {
+                    category: "artifact_identity_mismatch".to_string(),
+                    message: "old candidate".to_string(),
+                });
+            }
+            Ok(Box::new(RecordingExtension::new("webview")) as Box<dyn ExtensionInstance>)
+        })
+        .unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(attempts, vec![first.clone(), second.clone()]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exact_candidate_rejection_does_not_fall_back() {
+        let root =
+            std::env::temp_dir().join(format!("opentray-exact-candidate-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let exact = root.join("current.dylib");
+        let fallback = root.join("fallback.dylib");
+        std::fs::write(&exact, b"exact").unwrap();
+        std::fs::write(&fallback, b"fallback").unwrap();
+        let request = ExtensionLoadRequest {
+            app_id: "app-1".to_string(),
+            name: "webview".to_string(),
+            path: exact.to_string_lossy().to_string(),
+            expected_identity: expected_extension_identity("webview"),
+            mount_id: None,
+        };
+        let mut attempts = Vec::new();
+
+        let result = load_candidate_paths(&request, vec![exact.clone(), fallback], |path| {
+            attempts.push(path.to_path_buf());
+            Err(ExtensionError::Detailed {
+                category: "artifact_identity_mismatch".to_string(),
+                message: "exact candidate".to_string(),
+            })
+        });
+        let error = match result {
+            Ok(_) => panic!("exact candidate unexpectedly loaded"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("exact candidate"));
+        assert_eq!(attempts, vec![exact]);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -38,6 +38,12 @@ describe("Feature: release native binary CI law", () => {
     expect(workflow).toContain('bun run scripts/binaries/release-plan.ts --root "$PWD"');
     expect(workflow).toContain("publish-enabled: ${{ steps.plan.outputs.publish-enabled }}");
     expect(workflow).toContain(
+      "packed-consumer-enabled: ${{ steps.plan.outputs.packed-consumer-enabled }}",
+    );
+    expect(workflow).toContain(
+      "packed-consumer-matrix: ${{ steps.plan.outputs.packed-consumer-matrix }}",
+    );
+    expect(workflow).toContain(
       'publish_enabled = "true" if plan.get("publishEnabled") else "false"',
     );
     expect(nativeJob).toContain("if: needs.plan-native.outputs.enabled == 'true'");
@@ -48,6 +54,21 @@ describe("Feature: release native binary CI law", () => {
     expect(nativeJob).toContain("ref: ${{ needs.prepare-release.outputs.source-ref }}");
     expect(nativeJob).toContain("Apply alpha release source patch");
     expect(nativeJob).not.toContain("packages+=(-p opentray-ext-lynx)");
+    const packedJob = workflow.slice(
+      workflow.indexOf("  packed-consumer:"),
+      workflow.indexOf("  release:"),
+    );
+    expect(packedJob).toContain("runs-on: ${{ matrix.runner }}");
+    expect(packedJob).toContain(
+      "matrix: ${{ fromJson(needs.plan-native.outputs.packed-consumer-matrix) }}",
+    );
+    expect(packedJob).toContain(
+      "pnpm run verify:packed-consumer -- --package-manager pnpm --target",
+    );
+    expect(packedJob).toContain(
+      "pnpm run verify:packed-consumer -- --package-manager npm --target",
+    );
+    expect(releaseJob).toContain("- packed-consumer");
     expect(prepareJob).toContain("pnpm run version-packages");
     expect(prepareJob).toContain('git commit -m "chore: version packages"');
     expect(prepareJob).toContain('source_ref="$(git rev-parse HEAD)"');

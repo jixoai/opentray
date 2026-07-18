@@ -1,21 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
-const readRepoFile = (relativePath: string): string => readFileSync(join(repoRoot, relativePath), "utf8");
+const readRepoFile = (relativePath: string): string =>
+  readFileSync(join(repoRoot, relativePath), "utf8");
 const validReviewMarkdown = `# Self Review
 
 ## Review State
@@ -64,7 +55,17 @@ const runBun = async (
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
   const pathEnvKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   const spawnEnv: Record<string, string> = {};
-  for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "USER", "SHELL", "SYSTEMROOT", "SystemRoot", "ComSpec"]) {
+  for (const key of [
+    "HOME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "USER",
+    "SHELL",
+    "SYSTEMROOT",
+    "SystemRoot",
+    "ComSpec",
+  ]) {
     const value = env[key];
     if (value !== undefined) {
       spawnEnv[key] = value;
@@ -74,7 +75,7 @@ const runBun = async (
   if (env.VISION_TEST_LOG !== undefined) {
     spawnEnv.VISION_TEST_LOG = env.VISION_TEST_LOG;
   }
-  // Nested Bun processes can lose piped stdio under `bun test`; file capture keeps command evidence deterministic.
+  // Bun 1.3 can silently drop nested child streams when numeric fds or pipes are used.
   const captureDir = mkdtempSync(join(tmpdir(), "vision-driven-stdio-"));
   const stdoutPath = join(captureDir, "stdout.log");
   const stderrPath = join(captureDir, "stderr.log");
@@ -82,31 +83,28 @@ const runBun = async (
   if (stdin !== undefined) {
     writeFileSync(stdinPath, stdin);
   }
-  const stdinFd = stdin === undefined ? undefined : openSync(stdinPath, "r");
-  const stdoutFd = openSync(stdoutPath, "w");
-  const stderrFd = openSync(stderrPath, "w");
   try {
-    const result = spawnSync(process.execPath, args, {
+    const child = Bun.spawn({
+      cmd: [process.execPath, ...args],
       cwd,
-      encoding: "utf8",
       env: spawnEnv,
-      stdio: [stdinFd ?? "ignore", stdoutFd, stderrFd],
+      stdin: stdin === undefined ? "ignore" : Bun.file(stdinPath),
+      stdout: Bun.file(stdoutPath),
+      stderr: Bun.file(stderrPath),
     });
+    const exitCode = await child.exited;
     const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
     const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
-    const exitCode = result.status ?? 1;
     return { exitCode, stdout, stderr };
   } finally {
-    if (stdinFd !== undefined) {
-      closeSync(stdinFd);
-    }
-    closeSync(stdoutFd);
-    closeSync(stderrFd);
     rmSync(captureDir, { recursive: true, force: true });
   }
 };
 
-const runCommand = async (cmd: string[], cwd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
+const runCommand = async (
+  cmd: string[],
+  cwd: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
   const proc = Bun.spawn({
     cmd,
     cwd,
@@ -151,7 +149,10 @@ const createFakeOpenspec = async (
       "",
     ].join("\n"),
   );
-  writeFileSync(join(binDir, "openspec.cmd"), ['@echo off', 'node "%~dp0openspec-fake.cjs" %*', ""].join("\r\n"));
+  writeFileSync(
+    join(binDir, "openspec.cmd"),
+    ["@echo off", 'node "%~dp0openspec-fake.cjs" %*', ""].join("\r\n"),
+  );
   chmodSync(scriptPath, 0o755);
   const pathEnvKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   return {
@@ -174,8 +175,12 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
   test("Scenario: Given the project schema is loaded When inspecting the schema Then intent, specs, tasks, and self-review form the enforced workflow", () => {
     const schema = readRepoFile("openspec/schemas/vision-driven/schema.yaml");
     const config = readRepoFile("openspec/config.yaml");
-    const researchPlanTemplate = readRepoFile("openspec/schemas/vision-driven/templates/research-plan.md");
-    const selfReviewTemplate = readRepoFile("openspec/schemas/vision-driven/templates/self-review.md");
+    const researchPlanTemplate = readRepoFile(
+      "openspec/schemas/vision-driven/templates/research-plan.md",
+    );
+    const selfReviewTemplate = readRepoFile(
+      "openspec/schemas/vision-driven/templates/self-review.md",
+    );
     const tasksTemplate = readRepoFile("openspec/schemas/vision-driven/templates/tasks.md");
 
     expect(config).toMatch(/^schema: vision2$/m);
@@ -199,13 +204,19 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
     expect(schema).toContain("bun run openspec:vision -- rename <old-change> <new-change>");
     expect(schema).toContain("tracks: tasks.md");
     expect(schema).toContain("Investigate the relevant code before locking the plan.");
-    expect(schema).toContain("Investigate the relevant existing OpenSpec changes/specs before locking the plan.");
+    expect(schema).toContain(
+      "Investigate the relevant existing OpenSpec changes/specs before locking the plan.",
+    );
     expect(schema).toContain("Make architecture design and data-structure design explicit");
-    expect(schema).toContain("only task checkboxes completed and verified in the current working context");
+    expect(schema).toContain(
+      "only task checkboxes completed and verified in the current working context",
+    );
     expect(schema).toContain("intent comments at critical effect points");
     expect(researchPlanTemplate).toContain("## Workflow Command Surface");
     expect(researchPlanTemplate).toContain("bun run openspec:vision -- new <change>");
-    expect(researchPlanTemplate).toContain("bun run openspec:vision -- commit-check <change> --phase <phase>");
+    expect(researchPlanTemplate).toContain(
+      "bun run openspec:vision -- commit-check <change> --phase <phase>",
+    );
     expect(researchPlanTemplate).toContain("bun run openspec:vision -- check <change>");
     expect(researchPlanTemplate).not.toContain("openspec validate <change> --type change --strict");
     expect(researchPlanTemplate).toContain("### Git Evidence");
@@ -252,7 +263,12 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
         env,
       );
       const instructionsResult = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision-driven.ts"), "instructions", "research-plan", "demo-change"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision-driven.ts"),
+          "instructions",
+          "research-plan",
+          "demo-change",
+        ],
         tmpRoot,
         env,
       );
@@ -281,7 +297,10 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       await runCommand(["git", "init"], tmpRoot);
       const changeDir = join(tmpRoot, "openspec", "changes", "demo-change");
       await mkdir(join(changeDir, "plans"), { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-29\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-29\n",
+      );
       writeFileSync(join(changeDir, "plans", "plan.md"), "# Intent\n");
 
       const result = await runBun(
@@ -303,7 +322,9 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       expect(result.exitCode).toBe(0);
       expect(parsed.phase).toBe("research-plan");
       expect(parsed.changePaths.join("\n")).toContain("openspec/changes/demo-change/");
-      expect(parsed.suggestedCommands.join("\n")).toContain('git commit -m "docs(spec): prepare demo-change for apply"');
+      expect(parsed.suggestedCommands.join("\n")).toContain(
+        'git commit -m "docs(spec): prepare demo-change for apply"',
+      );
       expect(existsSync(join(tmpRoot, ".git"))).toBe(true);
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
@@ -338,12 +359,23 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       const { env } = await createFakeOpenspec(tmpRoot);
       const changeDir = join(tmpRoot, "openspec", "changes", "demo-change");
       await mkdir(join(changeDir, "plans"), { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-29\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-29\n",
+      );
       writeFileSync(join(changeDir, "plans", "plan.md"), "# Intent\n\nBuild the thing.\n");
       writeFileSync(join(changeDir, "tasks.md"), "- [ ] 1.1 Continue the thing\n");
 
-      const first = await runBun([join(repoRoot, "scripts", "openspec", "vision-driven.ts"), "handoff", "demo-change"], tmpRoot, env);
-      const second = await runBun([join(repoRoot, "scripts", "openspec", "vision-driven.ts"), "handoff", "demo-change"], tmpRoot, env);
+      const first = await runBun(
+        [join(repoRoot, "scripts", "openspec", "vision-driven.ts"), "handoff", "demo-change"],
+        tmpRoot,
+        env,
+      );
+      const second = await runBun(
+        [join(repoRoot, "scripts", "openspec", "vision-driven.ts"), "handoff", "demo-change"],
+        tmpRoot,
+        env,
+      );
       const handoff = readFileSync(join(changeDir, "HANDOFF.md"), "utf8");
 
       expect(first.exitCode).toBe(0);
@@ -364,7 +396,10 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
     try {
       const changeDir = join(tmpRoot, "openspec", "changes", "demo-change");
       await mkdir(changeDir, { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-29\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-29\n",
+      );
       writeFileSync(join(changeDir, "HANDOFF.md"), "previous handoff\n");
 
       const scriptPath = join(repoRoot, "scripts", "openspec", "vision-driven.ts");
@@ -386,8 +421,14 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
   }, 10_000);
 
   test("Scenario: Given handoff files are workflow evidence When Git ignore rules are checked Then change-local handoffs stay commit-ready", async () => {
-    const currentHandoff = await runCommand(["git", "check-ignore", "openspec/changes/demo-change/HANDOFF.md"], repoRoot);
-    const versionedHandoff = await runCommand(["git", "check-ignore", "openspec/changes/demo-change/v1.HANDOFF.md"], repoRoot);
+    const currentHandoff = await runCommand(
+      ["git", "check-ignore", "openspec/changes/demo-change/HANDOFF.md"],
+      repoRoot,
+    );
+    const versionedHandoff = await runCommand(
+      ["git", "check-ignore", "openspec/changes/demo-change/v1.HANDOFF.md"],
+      repoRoot,
+    );
 
     expect(currentHandoff.exitCode).toBe(1);
     expect(versionedHandoff.exitCode).toBe(1);
@@ -415,10 +456,20 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       );
 
       const result = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision-driven.ts"), "rename", "old-change", "new-change"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision-driven.ts"),
+          "rename",
+          "old-change",
+          "new-change",
+        ],
         tmpRoot,
       );
-      const state = JSON.parse(readFileSync(join(tmpRoot, "openspec", "changes", "new-change", "review", "state.json"), "utf8")) as {
+      const state = JSON.parse(
+        readFileSync(
+          join(tmpRoot, "openspec", "changes", "new-change", "review", "state.json"),
+          "utf8",
+        ),
+      ) as {
         change: string;
       };
 
@@ -473,7 +524,10 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       await copyVisionSchema(tmpRoot);
       const changeDir = join(tmpRoot, "openspec", "changes", "demo-change");
       await mkdir(join(changeDir, "plans"), { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-28\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-28\n",
+      );
       writeFileSync(join(changeDir, "plans", "plan.md"), "# Intent\n");
       writeFileSync(join(changeDir, "tasks.md"), "- [ ] 1.1 Do the thing\n");
 
@@ -497,7 +551,10 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       const changeDir = join(tmpRoot, "openspec", "changes", "demo-change");
       await mkdir(join(changeDir, "plans"), { recursive: true });
       await mkdir(join(changeDir, "review"), { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-28\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-28\n",
+      );
       writeFileSync(join(changeDir, "plans", "plan.md"), "# Intent\n");
       writeFileSync(join(changeDir, "tasks.md"), "- [x] 1.1 Do the thing\n");
       writeFileSync(join(changeDir, "review", "self-review.md"), validReviewMarkdown);
@@ -521,7 +578,10 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       const changeDir = join(tmpRoot, "openspec", "changes", "demo-change");
       await mkdir(join(changeDir, "plans"), { recursive: true });
       await mkdir(join(changeDir, "review"), { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-28\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-28\n",
+      );
       writeFileSync(join(changeDir, "plans", "plan.md"), "# Intent\n");
       writeFileSync(join(changeDir, "tasks.md"), "- [x] 1.1 Do the thing\n");
       writeFileSync(join(changeDir, "review", "self-review.md"), validReviewMarkdown);
@@ -546,7 +606,10 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       const changeDir = join(tmpRoot, "openspec", "changes", "demo-change");
       await mkdir(join(changeDir, "plans"), { recursive: true });
       await mkdir(join(changeDir, "review"), { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-28\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-28\n",
+      );
       writeFileSync(join(changeDir, "plans", "plan.md"), "# Intent\n");
       writeFileSync(join(changeDir, "tasks.md"), "- [x] 1.1 Do the thing\n");
       writeFileSync(join(changeDir, "review", "self-review.md"), validReviewMarkdown);
@@ -572,7 +635,10 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       const changeDir = join(tmpRoot, "openspec", "changes", "demo-change");
       await mkdir(join(changeDir, "plans"), { recursive: true });
       await mkdir(join(changeDir, "review"), { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-28\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-28\n",
+      );
       writeFileSync(join(changeDir, "plans", "plan.md"), "# Intent\n");
       writeFileSync(join(changeDir, "tasks.md"), "- [x] 1.1 Do the thing\n");
       writeFileSync(join(changeDir, "review", "self-review.md"), validReviewMarkdown);
@@ -598,7 +664,10 @@ describe("Feature: vision-driven OpenSpec workflow contract", () => {
       const changeDir = join(tmpRoot, "openspec", "changes", "archive", "2026-06-03-demo-change");
       await mkdir(join(changeDir, "plans"), { recursive: true });
       await mkdir(join(changeDir, "review"), { recursive: true });
-      writeFileSync(join(changeDir, ".openspec.yaml"), "schema: vision-driven\ncreated: 2026-05-28\n");
+      writeFileSync(
+        join(changeDir, ".openspec.yaml"),
+        "schema: vision-driven\ncreated: 2026-05-28\n",
+      );
       writeFileSync(join(changeDir, "plans", "plan.md"), "# Plan\n");
       writeFileSync(join(changeDir, "tasks.md"), "- [x] archive complete\n");
       writeFileSync(join(changeDir, "review", "self-review.md"), validReviewMarkdown);

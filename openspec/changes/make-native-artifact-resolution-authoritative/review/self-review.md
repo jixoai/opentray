@@ -3,10 +3,10 @@
 ## Review State
 
 - Change: `make-native-artifact-resolution-authoritative`
-- Iteration: 1
-- Recurring issue counts: none recorded
-- Exit-condition judgment: implementation and independent review fixes are aligned; archive remains blocked only by the existing OpenSpec fixture gate and final commit checks
-- Next loop action: repair the repository OpenSpec subprocess fixtures, run the full gate, then archive
+- Iteration: 2
+- Recurring issue counts: `packed-consumer-release-gate: 1`
+- Exit-condition judgment: implementation and independent review fixes are aligned; all product and repository gates pass, with archive pending final commit checks
+- Next loop action: run final vision-driven check, archive commit-check, archive the change, then re-run strict validation and clean-worktree audit
 
 ## Intent Alignment
 
@@ -17,7 +17,9 @@
 | A live same-endpoint broker must be replaced when its artifact is stale | `packages/cli/src/daemon/lifecycle.test.ts` covers matching reuse, missing/different identity replacement, bounded stop, and concurrent starts | pass |
 | The ready contract must carry selected broker evidence | Rust Unix/Windows metadata and protocol ready frame include canonical path and broker identity; local-broker mismatch test passes | pass |
 | User-visible WebView runtime still works after self-validation | `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500 pnpm --filter opentray example:webview-control -- --no-overlay` exited 0 after ready/load/show setup | pass |
-| Fresh packed consumers must preserve package-manager authority | `pnpm run verify:packed-consumer -- --package-manager pnpm` and `--package-manager npm` both passed; pnpm ignored the injected orphan top-level dylib | pass |
+| Fresh packed consumers must preserve package-manager authority | `pnpm run verify:packed-consumer -- --package-manager pnpm` and `--package-manager npm` both passed; each fixture created a tray, loaded the official WebView extension through `loadExtension`, and destroyed the tray; pnpm ignored the injected orphan top-level dylib | pass |
+| Diagnostic candidates must continue after a rejected artifact | `cargo test -p opentray-bin dynamic_extension::tests` covers mismatch evidence followed by a compatible candidate and exact-path no-fallback | pass |
+| Release must enforce packed consumers on native runners | `release.yml` derives a WebView-only matrix from the native plan, runs pnpm/npm packed consumers on matching target runners, and makes release depend on that job | pass |
 
 ## Independent Review Findings
 
@@ -26,11 +28,14 @@
 | Standards | `opentray-core` synthesized a platform-specific all-zero broker identity when composition omitted one. | Broker identity is now a required constructor input; the native binary and in-process runtime compute their real executable identity. | Full `cargo test`; core ready-frame tests require explicit identity. |
 | Standards | Public broker identity APIs lacked API comments/README coverage, and Unix/Windows transports duplicated ready metadata construction. | Added Rust/TypeScript public comments and `@opentray/spec` README guidance; both transports use `BrokerOptions::ready_metadata()`. | Spec typecheck/tests and full Rust tests pass. |
 | Spec | Windows source builds killed every broker sharing the workspace executable, lock timeout was shorter than readiness, and packed-consumer evidence was manual only. | Use caller-scoped Windows Cargo target directories, wait up to five seconds for the daemon lock, add a 1.1-second concurrent-start regression, and add the permanent packed pnpm/npm gate. | CLI 95 tests pass; both packed-consumer modes pass. |
+| Spec | Packed gate was not wired into release, and its fixture did not exercise the public SDK/native loader. | Added the native-runner release matrix and changed the fixture to `createTray -> loadExtension -> destroy`; output is emitted only after broker/native manifest validation and init. | `release-workflow.test.ts`; both packed modes print `loaded: true`. |
+| Spec | Diagnostic fallback stopped at the first existing mismatched library. | Diagnostic candidates now retain rejection evidence and continue to later compatible candidates; exact absolute paths remain single-candidate. | `cargo test -p opentray-bin dynamic_extension::tests`. |
+| Standards | OpenSpec tests used numeric fds/pipes that silently lost nested Bun output. | Direct Bun spawn uses file-backed sinks/sources and keeps `/bin/sh` out of the path. | 37 OpenSpec workflow tests pass under Bun 1.3.14. |
 
 ## Deviations From Intent
 
-1. `pnpm run verify` remains red in the repository's existing OpenSpec subprocess fixtures: 25 vision-driven/vision2 assertions receive empty child output because the fixture subprocess loses the schema/runtime context in temporary cwd. The focused product, Rust, extension, packed-consumer, build, and typecheck lanes pass; this is kept as an explicit archive blocker rather than hidden.
-2. Packed local-tarball fixtures must provide the matching `@opentray/spec` tarball directly (npm) or through a local override (pnpm), otherwise the package manager legitimately resolves the already-published same-version spec and exposes an old export surface. This does not add a runtime fallback.
+1. Local review ran the packed native consumer on macOS arm64; Windows native execution is configured in the release matrix but is not available in this checkout. The matrix uses the target runner and explicit target, so macOS evidence is not promoted to Windows truth.
+2. Packed local-tarball fixtures provide the matching `@opentray/spec` tarball directly (npm) or through a local override (pnpm), otherwise the package manager legitimately resolves the already-published same-version spec and exposes an old export surface. This does not add a runtime fallback.
 
 ## New Questions For User
 
@@ -39,13 +44,13 @@
 ## Evidence
 
 - HTML report: `review/self-review.html`
-- Permanent packed consumer gate: `scripts/binaries/verify-packed-consumer.ts`
+- Permanent packed consumer gate: `scripts/binaries/verify-packed-consumer.ts`, wired into the release matrix
 - Packed pnpm and npm fixtures: fresh temporary directories created and removed by the gate
 - Source WebView smoke: `example:webview-control --no-overlay`, exit 0
 - Native inspection: `otool -L` on staged broker and WebView dylib; sizes 7.4 MiB and 7.5 MiB
-- Git commits reviewed: `a1c665d..9f26e3f` plus the review-fix worktree
-- Uncommitted paths, if any: review fixes, permanent packed-consumer gate, and current review evidence
-- Task checkboxes updated by this working context: 2.7, 8.2-8.5
+- Git commits reviewed: `a1c665d..2266767` plus the iteration-2 review-fix worktree
+- Uncommitted paths, if any: iteration-2 review fixes and current evidence
+- Task checkboxes updated by this working context: 2.7, 7.6, 8.2-8.6
 
 ## HTML Review Report
 

@@ -61,13 +61,13 @@
 - [x] 7.3 Run the equivalent clean flat npm-compatible resolution fixture or deterministic packed-tarball test.
 - [x] 7.4 Run `cargo test -p opentray-spec -p opentray-core -p opentray-bin -p opentray-ext-webview -p opentray-ext-badge -p opentray-ext-lynx`.
 - [x] 7.5 Run `pnpm --filter @opentray/spec test`, `pnpm --filter opentray test`, and all official extension facade tests/typechecks.
-- [ ] 7.6 Run `pnpm run build`, `pnpm run verify`, `openspec validate --all --strict`, and `git diff --check`.
+- [x] 7.6 Run `pnpm run build`, `pnpm run verify`, `openspec validate --all --strict`, and `git diff --check`.
 - [x] 7.7 Build release broker/native extensions, inspect sizes and `otool -L`, and run the source-tree visible WebView smoke without diagnostic overrides.
 - [x] 7.8 Run `bun run openspec:vision -- validate make-native-artifact-resolution-authoritative` after final implementation/task evidence.
 
 ## 8. Independent Review / Self-Review Loop
 
-- [ ] 8.1 Run `bun run openspec:vision -- commit-check make-native-artifact-resolution-authoritative --phase self-review`.
+- [x] 8.1 Run `bun run openspec:vision -- commit-check make-native-artifact-resolution-authoritative --phase self-review`.
 - [x] 8.2 Run the two-axis code review from the pre-change fixed point: Standards against `AGENTS.md` and repo skills, Spec against this change's `plans/plan.md` and delta specs.
 - [x] 8.3 Resolve every review finding, reopen affected tasks, rerun relevant red/green and full gates, and commit any OpenSpec corrections before more implementation.
 - [x] 8.4 Generate `review/self-review.md` comparing every intent/spec/phase/verification requirement against current evidence.

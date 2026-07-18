@@ -59,7 +59,7 @@
   <body>
     <main>
       <h1>Authoritative Native Artifact Resolution</h1>
-      <p>Review iteration 1 for <code>make-native-artifact-resolution-authoritative</code>.</p>
+      <p>Review iteration 2 for <code>make-native-artifact-resolution-authoritative</code>.</p>
       <table>
         <thead>
           <tr>
@@ -80,6 +80,14 @@
           <tr>
             <td>Flat package authority</td>
             <td>The same packed closure installed and resolved through a clean npm consumer.</td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Public SDK native load</td>
+            <td>
+              Both packed consumers create a tray, call public <code>loadExtension</code>, and
+              report <code>loaded: true</code> only after broker/native validation.
+            </td>
             <td class="pass">PASS</td>
           </tr>
           <tr>
@@ -107,6 +115,19 @@
             <td class="pass">PASS</td>
           </tr>
           <tr>
+            <td>Diagnostic candidate fallback</td>
+            <td>
+              Rejected old diagnostic artifacts are recorded and followed by compatible candidates;
+              exact facade paths remain single-candidate.
+            </td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Release gate wiring</td>
+            <td>Native WebView matrix runners execute both packed package-manager consumers before release.</td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
             <td>Visible runtime</td>
             <td>
               Source <code>example:webview-control --no-overlay</code> reached session ready and
@@ -114,19 +135,11 @@
             </td>
             <td class="pass">PASS</td>
           </tr>
-          <tr>
-            <td>Repository verify</td>
-            <td>
-              Existing OpenSpec subprocess fixtures fail in temporary cwd with empty child output;
-              product lanes remain green.
-            </td>
-            <td class="blocked">BLOCKED</td>
-          </tr>
         </tbody>
       </table>
       <p>
-        <strong>Archive rule:</strong> resolve the blocked repository gate and pass final commit
-        checks before archiving.
+        <strong>Archive rule:</strong> final vision-driven check, archive commit-check, and strict
+        clean-worktree audit remain.
       </p>
     </main>
   </body>

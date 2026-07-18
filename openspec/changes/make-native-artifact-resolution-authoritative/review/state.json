@@ -1,7 +1,10 @@
 {
   "change": "make-native-artifact-resolution-authoritative",
-  "iteration": 1,
+  "iteration": 2,
   "maxIterations": 5,
-  "recurringIssues": {},
-  "updatedAt": "2026-07-18T20:04:35.415Z"
+  "recurringIssues": {
+    "packed-consumer-release-gate": 1
+  },
+  "updatedAt": "2026-07-18T20:36:23.002Z",
+  "exitCondition": "No unresolved review findings; archive after final gate"
 }

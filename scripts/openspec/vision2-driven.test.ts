@@ -1,26 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
-const readRepoFile = (relativePath: string): string => readFileSync(join(repoRoot, relativePath), "utf8");
+const readRepoFile = (relativePath: string): string =>
+  readFileSync(join(repoRoot, relativePath), "utf8");
 
 const issueFixture = (title: string, state: "open" | "resolved" | "closed"): string => {
   const githubIssueStatus = state === "open" ? "open" : "closed";
   const closingSection = state === "open" ? "## Recommendation" : "## Resolution";
-  const closingText = state === "open" ? "Add the spec or remove the footnote." : "Archived as requested.";
+  const closingText =
+    state === "open" ? "Add the spec or remove the footnote." : "Archived as requested.";
   return `---
 title: ${title}
 state: ${state}
@@ -91,7 +83,17 @@ const runBun = async (
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
   const pathEnvKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   const spawnEnv: Record<string, string> = {};
-  for (const key of ["HOME", "TMPDIR", "TEMP", "TMP", "USER", "SHELL", "SYSTEMROOT", "SystemRoot", "ComSpec"]) {
+  for (const key of [
+    "HOME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "USER",
+    "SHELL",
+    "SYSTEMROOT",
+    "SystemRoot",
+    "ComSpec",
+  ]) {
     const value = env[key];
     if (value !== undefined) {
       spawnEnv[key] = value;
@@ -109,25 +111,21 @@ const runBun = async (
   if (stdin !== undefined) {
     writeFileSync(stdinPath, stdin);
   }
-  const stdinFd = stdin === undefined ? undefined : openSync(stdinPath, "r");
-  const stdoutFd = openSync(stdoutPath, "w");
-  const stderrFd = openSync(stderrPath, "w");
   try {
-    const result = spawnSync(process.execPath, args, {
+    // Bun 1.3 can silently drop nested child streams when numeric fds or pipes are used.
+    const child = Bun.spawn({
+      cmd: [process.execPath, ...args],
       cwd,
-      encoding: "utf8",
       env: spawnEnv,
-      stdio: [stdinFd ?? "ignore", stdoutFd, stderrFd],
+      stdin: stdin === undefined ? "ignore" : Bun.file(stdinPath),
+      stdout: Bun.file(stdoutPath),
+      stderr: Bun.file(stderrPath),
     });
+    const exitCode = await child.exited;
     const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, "utf8") : "";
     const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
-    return { exitCode: result.status ?? 1, stdout, stderr };
+    return { exitCode, stdout, stderr };
   } finally {
-    if (stdinFd !== undefined) {
-      closeSync(stdinFd);
-    }
-    closeSync(stdoutFd);
-    closeSync(stderrFd);
     rmSync(captureDir, { recursive: true, force: true });
   }
 };
@@ -152,9 +150,13 @@ const runCommand = async (
 
 const copyVision2Schema = async (projectRoot: string): Promise<void> => {
   await mkdir(join(projectRoot, "openspec", "schemas"), { recursive: true });
-  await cp(join(repoRoot, "openspec", "schemas", "vision2"), join(projectRoot, "openspec", "schemas", "vision2"), {
-    recursive: true,
-  });
+  await cp(
+    join(repoRoot, "openspec", "schemas", "vision2"),
+    join(projectRoot, "openspec", "schemas", "vision2"),
+    {
+      recursive: true,
+    },
+  );
 };
 
 const createFakeOpenspec = async (
@@ -187,7 +189,10 @@ const createFakeOpenspec = async (
       "",
     ].join("\n"),
   );
-  writeFileSync(join(binDir, "openspec.cmd"), ['@echo off', 'node "%~dp0openspec-fake.cjs" %*', ""].join("\r\n"));
+  writeFileSync(
+    join(binDir, "openspec.cmd"),
+    ["@echo off", 'node "%~dp0openspec-fake.cjs" %*', ""].join("\r\n"),
+  );
   chmodSync(scriptPath, 0o755);
   const pathEnvKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   return {
@@ -226,9 +231,14 @@ const seedChange = async (tmpRoot: string, change = "demo-change"): Promise<stri
   await writeFile(join(changeDir, "specs", "core", "spec.md"), "## ADDED Requirements\n");
   await writeFile(
     join(changeDir, "toc.md"),
-    ["# TOC", "", "[^interview]: interview_plan.md", "[^tasks]: tasks.md", "[^core]: specs/core/spec.md", ""].join(
-      "\n",
-    ),
+    [
+      "# TOC",
+      "",
+      "[^interview]: interview_plan.md",
+      "[^tasks]: tasks.md",
+      "[^core]: specs/core/spec.md",
+      "",
+    ].join("\n"),
   );
   return changeDir;
 };
@@ -278,10 +288,18 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
     expect(schema).toContain("--new <bug|task|decision|risk|question>");
     expect(schema).toContain("depends_on");
     expect(readRepoFile("openspec/schemas/vision2/templates/issues/bug.md")).toContain("type: bug");
-    expect(readRepoFile("openspec/schemas/vision2/templates/issues/decision.md")).toContain("type: decision");
-    expect(readRepoFile("openspec/schemas/vision2/templates/issues/question.md")).toContain("type: question");
-    expect(readRepoFile("openspec/schemas/vision2/templates/issues/risk.md")).toContain("type: risk");
-    expect(readRepoFile("openspec/schemas/vision2/templates/issues/task.md")).toContain("type: task");
+    expect(readRepoFile("openspec/schemas/vision2/templates/issues/decision.md")).toContain(
+      "type: decision",
+    );
+    expect(readRepoFile("openspec/schemas/vision2/templates/issues/question.md")).toContain(
+      "type: question",
+    );
+    expect(readRepoFile("openspec/schemas/vision2/templates/issues/risk.md")).toContain(
+      "type: risk",
+    );
+    expect(readRepoFile("openspec/schemas/vision2/templates/issues/task.md")).toContain(
+      "type: task",
+    );
     // Offline self-interview mode (added after dogfooding).
     expect(schema).toContain("Interactive vs. offline mode");
     expect(schema).toContain("ASSUMPTION");
@@ -362,7 +380,9 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(readFileSync(join(changeDir, "interview_plan.md"), "utf8")).toBe("# My Interview\n\nhand-written\n");
+      expect(readFileSync(join(changeDir, "interview_plan.md"), "utf8")).toBe(
+        "# My Interview\n\nhand-written\n",
+      );
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }
@@ -379,7 +399,12 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
         env,
       );
       const instructionsResult = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "instructions", "interview", "demo-change"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "instructions",
+          "interview",
+          "demo-change",
+        ],
         tmpRoot,
         env,
       );
@@ -412,14 +437,22 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       writeFileSync(join(changeDir, "interview_plan.md"), "# Intent\n");
 
       const result = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "commit-check", "demo-change", "--phase", "close"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "commit-check",
+          "demo-change",
+          "--phase",
+          "close",
+        ],
         tmpRoot,
       );
       const parsed = JSON.parse(result.stdout) as { phase: string; suggestedCommands: string[] };
 
       expect(result.exitCode).toBe(0);
       expect(parsed.phase).toBe("close");
-      expect(parsed.suggestedCommands.join("\n")).toContain('git commit -m "docs(spec): close demo-change with toc"');
+      expect(parsed.suggestedCommands.join("\n")).toContain(
+        'git commit -m "docs(spec): close demo-change with toc"',
+      );
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }
@@ -501,7 +534,9 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       // toc cites specs/core/spec.md AND a dangling specs/ghost/spec.md
       await writeFile(
         join(changeDir, "toc.md"),
-        ["# TOC", "", "[^core]: specs/core/spec.md", "[^ghost]: specs/ghost/spec.md", ""].join("\n"),
+        ["# TOC", "", "[^core]: specs/core/spec.md", "[^ghost]: specs/ghost/spec.md", ""].join(
+          "\n",
+        ),
       );
 
       const result = await runBun(
@@ -548,7 +583,12 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       );
 
       const result = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "issues", "demo-change", "--validate"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "issues",
+          "demo-change",
+          "--validate",
+        ],
         tmpRoot,
       );
 
@@ -609,7 +649,12 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       expect(issue).toContain('owner: "platform"');
 
       const validateResult = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "issues", "demo-change", "--validate"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "issues",
+          "demo-change",
+          "--validate",
+        ],
         tmpRoot,
       );
       expect(validateResult.exitCode).toBe(0);
@@ -632,7 +677,13 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       );
 
       const result = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "issues", "demo-change", "--group-by", "label"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "issues",
+          "demo-change",
+          "--group-by",
+          "label",
+        ],
         tmpRoot,
       );
       const parsed = JSON.parse(result.stdout) as {
@@ -664,7 +715,12 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       );
 
       const result = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "issues", "demo-change", "--validate"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "issues",
+          "demo-change",
+          "--validate",
+        ],
         tmpRoot,
       );
 
@@ -689,7 +745,12 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       );
 
       const result = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "issues", "demo-change", "--validate"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "issues",
+          "demo-change",
+          "--validate",
+        ],
         tmpRoot,
       );
 
@@ -710,7 +771,12 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       writeIssueFile(changeDir, "003-open.md", "Open issue", "open");
 
       const result = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "issues", "demo-change", "--archive"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "issues",
+          "demo-change",
+          "--archive",
+        ],
         tmpRoot,
       );
       const parsed = JSON.parse(result.stdout) as {
@@ -747,15 +813,33 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
       writeIssueFile(changeDir, "001-open.md", "Open issue", "open");
 
       const first = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "issues", "demo-change", "--archive"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "issues",
+          "demo-change",
+          "--archive",
+        ],
         tmpRoot,
       );
       const second = await runBun(
-        [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "issues", "demo-change", "--archive"],
+        [
+          join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+          "issues",
+          "demo-change",
+          "--archive",
+        ],
         tmpRoot,
       );
-      const firstParsed = JSON.parse(first.stdout) as { ok: boolean; archived: unknown[]; note?: string };
-      const secondParsed = JSON.parse(second.stdout) as { ok: boolean; archived: unknown[]; note?: string };
+      const firstParsed = JSON.parse(first.stdout) as {
+        ok: boolean;
+        archived: unknown[];
+        note?: string;
+      };
+      const secondParsed = JSON.parse(second.stdout) as {
+        ok: boolean;
+        archived: unknown[];
+        note?: string;
+      };
 
       expect(first.exitCode).toBe(0);
       expect(second.exitCode).toBe(0);
@@ -782,7 +866,13 @@ describe("Feature: vision2 OpenSpec workflow contract", () => {
 
       for (const phase of ["interview", "apply", "close", "archive"]) {
         const result = await runBun(
-          [join(repoRoot, "scripts", "openspec", "vision2-driven.ts"), "commit-check", "demo-change", "--phase", phase],
+          [
+            join(repoRoot, "scripts", "openspec", "vision2-driven.ts"),
+            "commit-check",
+            "demo-change",
+            "--phase",
+            phase,
+          ],
           tmpRoot,
         );
         expect(result.exitCode).toBe(0);

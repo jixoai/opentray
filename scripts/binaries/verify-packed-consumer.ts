@@ -142,6 +142,7 @@ function createVerificationScript(target: TargetPackages, orphanPath: string | u
   return `
 import { createRequire } from "node:module";
 import { realpath } from "node:fs/promises";
+import { createTray } from "opentray";
 import { WebviewExt } from "@opentray/ext-webview";
 import { resolveNativeExtensionArtifact } from "opentray";
 
@@ -158,7 +159,22 @@ if (orphanPath !== undefined && actualPath === await realpath(orphanPath)) {
 const requireFromConsumer = createRequire(import.meta.url);
 const requireFromRuntime = createRequire(requireFromConsumer.resolve("opentray/package.json"));
 const runtimeManifest = requireFromRuntime.resolve(${JSON.stringify(`${target.runtimeName}/package.json`)});
-console.log(JSON.stringify({ resolved, actualPath, runtimeManifest }, null, 2));
+const tray = await createTray(
+  {
+    id: "com.opentray.verify-packed-consumer",
+    icon: { "text-only": "OT" },
+  },
+  {
+    appId: "com.opentray.verify-packed-consumer",
+    appName: "OpenTray packed consumer verification",
+  },
+);
+try {
+  await tray.loadExtension({ name: WebviewExt.name, artifact: WebviewExt.artifact });
+} finally {
+  await tray.destroy();
+}
+console.log(JSON.stringify({ resolved, actualPath, runtimeManifest, loaded: true }, null, 2));
 `;
 }
 

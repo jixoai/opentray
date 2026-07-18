@@ -39,6 +39,8 @@ jobs:
       enabled: ${{ steps.plan.outputs.enabled }}
       publish-enabled: ${{ steps.plan.outputs.publish-enabled }}
       matrix: ${{ steps.plan.outputs.matrix }}
+      packed-consumer-enabled: ${{ steps.plan.outputs.packed-consumer-enabled }}
+      packed-consumer-matrix: ${{ steps.plan.outputs.packed-consumer-matrix }}
       stage-plan: ${{ steps.plan.outputs.stage-plan }}
       validate-package-dirs: ${{ steps.plan.outputs.validate-package-dirs }}
     steps:
@@ -69,6 +71,12 @@ jobs:
           enabled = "true" if plan.get("enabled") else "false"
           publish_enabled = "true" if plan.get("publishEnabled") else "false"
           matrix = json.dumps({"include": plan.get("jobs", [])})
+          packed_consumer_jobs = [
+              job for job in plan.get("jobs", [])
+              if "webview" in str(job.get("componentsCsv", "")).split(",")
+          ]
+          packed_consumer_enabled = "true" if packed_consumer_jobs else "false"
+          packed_consumer_matrix = json.dumps({"include": packed_consumer_jobs})
           stage_plan = json.dumps(plan.get("stageEntries", []))
           validate_package_dirs = json.dumps(plan.get("validatePackageDirs", []))
 
@@ -76,6 +84,8 @@ jobs:
               handle.write(f"enabled={enabled}\n")
               handle.write(f"publish-enabled={publish_enabled}\n")
               handle.write(f"matrix={matrix}\n")
+              handle.write(f"packed-consumer-enabled={packed_consumer_enabled}\n")
+              handle.write(f"packed-consumer-matrix={packed_consumer_matrix}\n")
               handle.write(f"stage-plan={stage_plan}\n")
               handle.write(f"validate-package-dirs={validate_package_dirs}\n")
           PY
@@ -275,13 +285,89 @@ jobs:
           path: native-artifacts/*
           if-no-files-found: error
 
+  packed-consumer:
+    name: Packed consumer (${{ matrix.target }})
+    needs:
+      - plan-native
+      - prepare-release
+      - native-artifacts
+    if: ${{ needs.plan-native.outputs.packed-consumer-enabled == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan-native.outputs.packed-consumer-matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare-release.outputs.source-ref }}
+
+      - name: Download alpha release source patch
+        if: needs.prepare-release.outputs.apply-patch == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-source-${{ github.run_id }}
+          path: release-source
+
+      - name: Apply alpha release source patch
+        if: needs.prepare-release.outputs.apply-patch == 'true'
+        shell: bash
+        run: git apply release-source/release-source.patch
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: native-artifacts
+
+      - name: Stage native artifacts into npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run scripts/binaries/stage-release-artifacts.ts \
+            --root "$PWD" \
+            --artifact-root native-artifacts \
+            --stage-plan-json '${{ needs.plan-native.outputs.stage-plan }}'
+
+      - name: Validate native package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run scripts/binaries/validate-package-dirs.ts \
+            --package-dirs-json '${{ needs.plan-native.outputs.validate-package-dirs }}'
+
+      - name: Verify packed pnpm consumer
+        run: pnpm run verify:packed-consumer -- --package-manager pnpm --target "${{ matrix.target }}"
+
+      - name: Verify packed npm consumer
+        run: pnpm run verify:packed-consumer -- --package-manager npm --target "${{ matrix.target }}"
+
   release:
     name: Release packages
     needs:
       - plan-native
       - prepare-release
       - native-artifacts
-    if: ${{ always() && needs.plan-native.result == 'success' && needs.prepare-release.result == 'success' && needs.native-artifacts.result != 'failure' && needs.native-artifacts.result != 'cancelled' }}
+      - packed-consumer
+    if: ${{ always() && needs.plan-native.result == 'success' && needs.prepare-release.result == 'success' && needs.native-artifacts.result != 'failure' && needs.native-artifacts.result != 'cancelled' && (needs.packed-consumer.result == 'success' || needs.packed-consumer.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: npm-release
     steps:
