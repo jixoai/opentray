@@ -62,7 +62,7 @@ The daemon lifecycle implementation SHALL use current caller runtime metadata an
 - **THEN** at most one broker process is started
 - **AND** the losing process reuses the matching healthy broker.
 
-#### Scenario: Stale metadata is cleaned only inside current version and caller
+#### Scenario: Stale metadata is cleaned only inside current version
 
 - **GIVEN** the current caller runtime directory contains stale PID or ready metadata
 - **WHEN** start verifies no compatible process is alive
@@ -81,14 +81,14 @@ The daemon lifecycle implementation SHALL use current caller runtime metadata an
 
 The running broker SHALL bind the endpoint derived from the current caller package version, protocol version, and caller label. It SHALL write readiness metadata under the current caller runtime directory and SHALL NOT scan or reuse another package version's or another caller's daemon state. The endpoint identity SHALL incorporate a normalized caller label so concurrent callers cannot collide. Reuse inside that endpoint SHALL additionally require exact broker artifact identity.
 
-#### Scenario: Ready metadata matches endpoint and artifact identity
+#### Scenario: Ready metadata matches endpoint identity
 
 - **GIVEN** the SDK resolved a caller/version endpoint and broker executable
 - **WHEN** the daemon reports ready
 - **THEN** the ready metadata uses that caller runtime directory and endpoint
 - **AND** includes the resolved broker artifact identity.
 
-#### Scenario: Same version different callers remain separate brokers
+#### Scenario: Same version, different callers remain separate brokers
 
 - **GIVEN** two host applications use the same OpenTray caller package version
 - **WHEN** each starts its daemon with a different caller label

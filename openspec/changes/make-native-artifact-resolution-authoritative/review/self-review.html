@@ -59,7 +59,7 @@
   <body>
     <main>
       <h1>Authoritative Native Artifact Resolution</h1>
-      <p>Review iteration 3 for <code>make-native-artifact-resolution-authoritative</code>.</p>
+      <p>Review iteration 4 for <code>make-native-artifact-resolution-authoritative</code>.</p>
       <table>
         <thead>
           <tr>
@@ -127,6 +127,14 @@
           <tr>
             <td>Release gate wiring</td>
             <td>Native WebView matrix runners execute both packed package-manager consumers before release.</td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Archive scenario identity</td>
+            <td>
+              Modified requirements preserve existing scenario identifiers; removal of broker-side
+              package-root reconstruction is an explicit requirement replacement.
+            </td>
             <td class="pass">PASS</td>
           </tr>
           <tr>

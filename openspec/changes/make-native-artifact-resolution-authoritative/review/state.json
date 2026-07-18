@@ -1,10 +1,11 @@
 {
   "change": "make-native-artifact-resolution-authoritative",
-  "iteration": 3,
+  "iteration": 4,
   "maxIterations": 5,
   "recurringIssues": {
-    "packed-consumer-release-gate": 1
+    "packed-consumer-release-gate": 1,
+    "archive-scenario-identity": 1
   },
-  "updatedAt": "2026-07-18T21:16:11.528Z",
-  "exitCondition": "No unresolved review findings; archive after final gate"
+  "updatedAt": "2026-07-18T21:37:40.000Z",
+  "exitCondition": "No unresolved product findings; validate archive scenario identity correction"
 }

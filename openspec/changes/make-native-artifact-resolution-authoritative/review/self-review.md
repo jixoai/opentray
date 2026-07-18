@@ -3,10 +3,10 @@
 ## Review State
 
 - Change: `make-native-artifact-resolution-authoritative`
-- Iteration: 3
-- Recurring issue counts: `packed-consumer-release-gate: 1`
-- Exit-condition judgment: implementation and independent review fixes are aligned; all product and repository gates pass, with archive pending final commit checks
-- Next loop action: run final vision-driven check, archive commit-check, archive the change, then re-run strict validation and clean-worktree audit
+- Iteration: 4
+- Recurring issue counts: `packed-consumer-release-gate: 1`, `archive-scenario-identity: 1`
+- Exit-condition judgment: implementation and independent review fixes are aligned; archive scenario identity correction awaits validation and commit
+- Next loop action: validate and commit the archive correction, rerun archive commit-check, archive the change, then run the final archived audit
 
 ## Intent Alignment
 
@@ -33,6 +33,7 @@
 | Standards | OpenSpec tests used numeric fds/pipes that silently lost nested Bun output. | Direct Bun spawn uses file-backed sinks/sources and keeps `/bin/sh` out of the path. | 37 OpenSpec workflow tests pass under Bun 1.3.14. |
 | Standards | Diagnostic ABI classification depended on matching human-readable error text. | Missing symbols and ABI version mismatch now carry the stable `abi_incompatible` category; diagnostic classification consumes categories only. | Focused Rust red/green plus full `cargo test` pass. |
 | Spec | The packed consumer destroyed the tray but left the top-level SDK's broker socket open. | Top-level `createTray()` now closes its owned session after tray teardown, closes on creation failure, and shares one idempotent destroy promise across extended handles. | SDK red/green tests, packed pnpm/npm consumers, and the full repository gate pass. |
+| Spec | Archive detected renamed scenario identities inside modified requirements and would have dropped existing scenario history. | Restored existing scenario identifiers; modeled removal of broker-side package-root reconstruction as an explicit old-requirement removal plus exact-artifact replacement. | Archive command aborted before writes; vision validation and a second archive attempt gate the correction. |
 
 ## Deviations From Intent
 
@@ -51,8 +52,8 @@
 - Source WebView smoke: `example:webview-control --no-overlay`, exit 0
 - Native inspection: `otool -L` on staged broker and WebView dylib; sizes 7.4 MiB and 7.5 MiB
 - Git commits reviewed: `a1c665d..0236b2d`
-- Uncommitted paths, if any: current review evidence only
-- Task checkboxes updated by this working context: 7, 8.7, and 8.8
+- Uncommitted paths, if any: archive-readiness spec and review correction only
+- Task checkboxes updated by this working context: 9.1
 
 ## HTML Review Report
 

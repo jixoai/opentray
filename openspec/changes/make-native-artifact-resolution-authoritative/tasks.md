@@ -78,7 +78,7 @@
 
 ## 9. Archive / Completion Audit
 
-- [ ] 9.1 Confirm all task checkboxes are backed by current-context command or artifact evidence and no requirement is inferred from a narrower test.
+- [x] 9.1 Confirm all task checkboxes are backed by current-context command or artifact evidence and no requirement is inferred from a narrower test.
 - [ ] 9.2 Run `bun run openspec:vision -- commit-check make-native-artifact-resolution-authoritative --phase archive`.
 - [ ] 9.3 Archive with the repository-supported OpenSpec archive command and keep archive/spec sync separate from product-code commits.
 - [ ] 9.4 Commit the archive result as a dedicated `docs(spec):` commit.
