@@ -10,8 +10,7 @@ export const OPENTRAY_PROTOCOL_LINE_MAJOR = 1;
 export const OPENTRAY_PROTOCOL_LINE_MINOR = 1;
 
 export const protocolLineReleaseChannels = ["stable", "alpha"] as const;
-export type ProtocolLineReleaseChannel =
-  (typeof protocolLineReleaseChannels)[number];
+export type ProtocolLineReleaseChannel = (typeof protocolLineReleaseChannels)[number];
 
 export interface OpenTrayProtocolLine {
   family: typeof OPENTRAY_PROTOCOL_FAMILY;
@@ -40,7 +39,7 @@ export const OPENTRAY_PROTOCOL_LINE: OpenTrayProtocolLine = {
 // Install-time protocol lines can advance by minor version while runtime authority stays numeric.
 export const compareOpenTrayProtocolLine = (
   left: OpenTrayProtocolLine,
-  right: OpenTrayProtocolLine
+  right: OpenTrayProtocolLine,
 ): number => {
   assertOpenTrayProtocolLine(left, "left");
   assertOpenTrayProtocolLine(right, "right");
@@ -52,13 +51,11 @@ export const compareOpenTrayProtocolLine = (
 
 export const isOpenTrayProtocolLineCompatible = (
   supported: OpenTrayProtocolLine,
-  required: OpenTrayProtocolLine
+  required: OpenTrayProtocolLine,
 ): boolean => {
   assertOpenTrayProtocolLine(supported, "supported");
   assertOpenTrayProtocolLine(required, "required");
-  return (
-    supported.major === required.major && supported.minor >= required.minor
-  );
+  return supported.major === required.major && supported.minor >= required.minor;
 };
 
 export const formatOpenTrayProtocolLine = ({
@@ -71,9 +68,7 @@ export const formatOpenTrayProtocolLine = ({
   return `${family}/${major}.${minor}`;
 };
 
-export const isProtocolLineReleaseChannel = (
-  value: string
-): value is ProtocolLineReleaseChannel =>
+export const isProtocolLineReleaseChannel = (value: string): value is ProtocolLineReleaseChannel =>
   protocolLineReleaseChannels.includes(value as ProtocolLineReleaseChannel);
 
 export const formatProtocolDistTag = ({
@@ -95,9 +90,7 @@ export const parseProtocolDistTag = (tag: string): ProtocolDistTag => {
   }
   const channel = groups.channel;
   if (channel === undefined || !isProtocolLineReleaseChannel(channel)) {
-    throw new Error(
-      `unsupported OpenTray protocol dist-tag channel: ${channel ?? ""}`
-    );
+    throw new Error(`unsupported OpenTray protocol dist-tag channel: ${channel ?? ""}`);
   }
   const major = Number(groups.major);
   const minor = Number(groups.minor);
@@ -157,9 +150,7 @@ export const createBrokerEndpointIdentity = ({
 }: BrokerEndpointIdentityOptions): BrokerEndpointIdentity => {
   assertEndpointComponent(packageVersion, "packageVersion");
   if (!Number.isInteger(protocolVersion) || protocolVersion <= 0) {
-    throw new Error(
-      `protocolVersion must be a positive integer: ${protocolVersion}`
-    );
+    throw new Error(`protocolVersion must be a positive integer: ${protocolVersion}`);
   }
 
   return {
@@ -172,16 +163,14 @@ export const createBrokerEndpointIdentity = ({
 export const isSupportedProtocolVersion = (protocolVersion: number): boolean =>
   protocolVersion === PROTOCOL_VERSION;
 
-export const formatBrokerEndpointName = (
-  identity: BrokerEndpointIdentity
-): string => {
+export const formatBrokerEndpointName = (identity: BrokerEndpointIdentity): string => {
   assertEndpointIdentity(identity);
   return `opentray-${identity.packageVersion}-p${identity.protocolVersion}-${identity.callerLabel}`;
 };
 
 export const formatBrokerStateRoot = (
   homeDir: string,
-  identity: BrokerEndpointIdentity
+  identity: BrokerEndpointIdentity,
 ): string => {
   assertEndpointIdentity(identity);
   if (homeDir.length === 0) {
@@ -192,64 +181,44 @@ export const formatBrokerStateRoot = (
   return `${normalizedHome}/.opentray/${identity.packageVersion}/${identity.callerLabel}`;
 };
 
-export const formatUnixSocketPath = (
-  homeDir: string,
-  identity: BrokerEndpointIdentity
-): string =>
-  `${formatBrokerStateRoot(homeDir, identity)}/opentray-p${
-    identity.protocolVersion
-  }.sock`;
+export const formatUnixSocketPath = (homeDir: string, identity: BrokerEndpointIdentity): string =>
+  `${formatBrokerStateRoot(homeDir, identity)}/opentray-p${identity.protocolVersion}.sock`;
 
-export const formatWindowsPipeName = (
-  identity: BrokerEndpointIdentity
-): string => `\\\\.\\pipe\\${formatBrokerEndpointName(identity)}`;
+export const formatWindowsPipeName = (identity: BrokerEndpointIdentity): string =>
+  `\\\\.\\pipe\\${formatBrokerEndpointName(identity)}`;
 
 /**
  * Human-readable process title for a broker pinned to a caller. Used by the SDK
  * spawn path so task managers show the owning application, not a generic name.
  */
-export const formatBrokerProcessTitle = (
-  identity: BrokerEndpointIdentity
-): string => {
+export const formatBrokerProcessTitle = (identity: BrokerEndpointIdentity): string => {
   assertEndpointIdentity(identity);
   return `opentray · ${identity.callerLabel}`;
 };
 
 const endpointComponentPattern = /^[0-9A-Za-z._+-]+$/u;
 
-const assertOpenTrayProtocolLine = (
-  line: OpenTrayProtocolLine,
-  name: string
-): void => {
+const assertOpenTrayProtocolLine = (line: OpenTrayProtocolLine, name: string): void => {
   assertProtocolLineVersion(line.major, `${name}.major`);
   assertProtocolLineVersion(line.minor, `${name}.minor`);
 };
 
 const assertProtocolLineReleaseChannel = (channel: string): void => {
   if (!isProtocolLineReleaseChannel(channel)) {
-    throw new Error(
-      `unsupported OpenTray protocol release channel: ${channel}`
-    );
+    throw new Error(`unsupported OpenTray protocol release channel: ${channel}`);
   }
 };
 
 const assertProtocolLineVersion = (value: number, name: string): void => {
   if (!Number.isInteger(value) || value < 0) {
-    throw new Error(
-      `protocol line ${name} must be a non-negative integer: ${value}`
-    );
+    throw new Error(`protocol line ${name} must be a non-negative integer: ${value}`);
   }
 };
 
 const assertEndpointIdentity = (identity: BrokerEndpointIdentity): void => {
   assertEndpointComponent(identity.packageVersion, "packageVersion");
-  if (
-    !Number.isInteger(identity.protocolVersion) ||
-    identity.protocolVersion <= 0
-  ) {
-    throw new Error(
-      `protocolVersion must be a positive integer: ${identity.protocolVersion}`
-    );
+  if (!Number.isInteger(identity.protocolVersion) || identity.protocolVersion <= 0) {
+    throw new Error(`protocolVersion must be a positive integer: ${identity.protocolVersion}`);
   }
 };
 
@@ -419,11 +388,13 @@ export interface ExpectedExtensionIdentity {
   target: ExtensionArtifactTarget;
 }
 
+/** Operating-system and architecture identity for one broker executable. */
 export interface BrokerArtifactTarget {
   os: "darwin" | "linux" | "win32";
   arch: "arm64" | "x64";
 }
 
+/** Content-derived identity used to decide whether a live broker may be reused. */
 export interface BrokerArtifactIdentity {
   packageVersion: string;
   target: BrokerArtifactTarget;
@@ -431,6 +402,7 @@ export interface BrokerArtifactIdentity {
   buildIdentity: string;
 }
 
+/** Caller-scoped readiness evidence written by a successfully initialized broker. */
 export interface BrokerReadyMetadata {
   pid: number;
   endpoint: string;
@@ -586,21 +558,19 @@ export const parseServerFrame = (line: string): ParseResult<ServerFrame> => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const isBrokerArtifactIdentity = (
-  value: unknown,
-): value is BrokerArtifactIdentity =>
+/** Returns true when an unknown value is a complete broker artifact identity. */
+export const isBrokerArtifactIdentity = (value: unknown): value is BrokerArtifactIdentity =>
   isRecord(value) &&
   typeof value.packageVersion === "string" &&
   isRecord(value.target) &&
-  (value.target.os === "darwin" ||
-    value.target.os === "linux" ||
-    value.target.os === "win32") &&
+  (value.target.os === "darwin" || value.target.os === "linux" || value.target.os === "win32") &&
   (value.target.arch === "arm64" || value.target.arch === "x64") &&
   typeof value.executableHash === "string" &&
   /^[a-f0-9]{64}$/u.test(value.executableHash) &&
   typeof value.buildIdentity === "string" &&
   value.buildIdentity.length > 0;
 
+/** Compares every compatibility-bearing broker artifact identity field. */
 export const brokerArtifactIdentityEquals = (
   left: BrokerArtifactIdentity,
   right: BrokerArtifactIdentity,
@@ -650,9 +620,7 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
         value.events.every(isExtensionEnvelope)
       );
     case "runtime-host-health":
-      return (
-        typeof value.requestId === "string" && isRuntimeHostHealth(value.health)
-      );
+      return typeof value.requestId === "string" && isRuntimeHostHealth(value.health);
     case "event":
       return isTrayEvent(value.event);
     case "ext-event":
@@ -663,8 +631,7 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       );
     case "error":
       return (
-        (value.requestId === undefined ||
-          typeof value.requestId === "string") &&
+        (value.requestId === undefined || typeof value.requestId === "string") &&
         typeof value.code === "string" &&
         typeof value.message === "string"
       );
@@ -705,13 +672,10 @@ const isRuntimeHostHealth = (value: unknown): value is RuntimeHostHealth => {
   );
 };
 
-const isRuntimeHostSessionHealth = (
-  value: unknown
-): value is RuntimeHostSessionHealth =>
+const isRuntimeHostSessionHealth = (value: unknown): value is RuntimeHostSessionHealth =>
   isRecord(value) &&
   typeof value.sessionId === "number" &&
-  (value.internalSessionId === undefined ||
-    typeof value.internalSessionId === "string") &&
+  (value.internalSessionId === undefined || typeof value.internalSessionId === "string") &&
   typeof value.initialized === "boolean";
 
 const isRect = (value: unknown): value is Rect =>
@@ -723,9 +687,7 @@ const isRect = (value: unknown): value is Rect =>
 
 const isTrayBoundsResult = (value: unknown): value is TrayBoundsResult =>
   isRecord(value) &&
-  (value.kind === "native" ||
-    value.kind === "inferred" ||
-    value.kind === "unavailable") &&
+  (value.kind === "native" || value.kind === "inferred" || value.kind === "unavailable") &&
   typeof value.source === "string" &&
   (value.rect === null || isRect(value.rect));
 

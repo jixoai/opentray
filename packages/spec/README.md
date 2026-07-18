@@ -11,6 +11,12 @@ Shared TypeScript protocol and contract package for OpenTray.
 
 This package is platform-neutral and must not import native implementation packages.
 
+## Broker Artifact Identity
+
+`BrokerArtifactIdentity` identifies the exact broker executable selected by the SDK. It combines the caller package version, native target, executable SHA-256, and build identity. `BrokerReadyMetadata` persists that identity beside the caller-scoped endpoint, while the protocol `ready` frame carries the same identity to the connected SDK.
+
+Use `isBrokerArtifactIdentity()` at untyped storage or transport boundaries and `brokerArtifactIdentityEquals()` when deciding whether a live broker can be reused. PID liveness, endpoint name, and package version alone are not compatibility evidence.
+
 ## Tray Contract
 
 `TrayOptions` uses `id` as the tray atom identity. Visible tray text belongs to the unified `icon` field:

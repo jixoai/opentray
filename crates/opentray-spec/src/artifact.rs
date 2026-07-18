@@ -10,6 +10,7 @@ use crate::AppId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Operating-system and architecture identity for one broker executable.
 pub struct BrokerArtifactTarget {
     pub os: String,
     pub arch: String,
@@ -17,6 +18,7 @@ pub struct BrokerArtifactTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Content-derived broker identity shared by readiness metadata and protocol frames.
 pub struct BrokerArtifactIdentity {
     pub package_version: String,
     pub target: BrokerArtifactTarget,
@@ -26,6 +28,7 @@ pub struct BrokerArtifactIdentity {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Complete caller-scoped readiness evidence written by the native broker.
 pub struct BrokerReadyMetadata {
     pub pid: u32,
     pub endpoint: String,

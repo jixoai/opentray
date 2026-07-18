@@ -8,13 +8,11 @@ import {
   type BrokerReadyMetadata,
 } from "@opentray/spec";
 
-import {
-  resolveBrokerArtifact,
-  type ResolvedBrokerArtifact,
-} from "./broker-command";
+import { resolveBrokerArtifact, type ResolvedBrokerArtifact } from "./broker-command";
 import type { DaemonPaths } from "./paths";
 
 const DAEMON_STDIO_ENV = "OPENTRAY_DAEMON_STDIO";
+const DEFAULT_DAEMON_LOCK_TIMEOUT_MS = 5_000;
 
 export type DaemonStartResult =
   | {
@@ -41,10 +39,7 @@ export type DaemonInspectResult =
 export interface DaemonDriver {
   resolveBroker(paths: DaemonPaths): Promise<ResolvedBrokerArtifact>;
   isAlive(pid: number): Promise<boolean>;
-  spawnBroker(
-    paths: DaemonPaths,
-    broker: ResolvedBrokerArtifact,
-  ): Promise<number>;
+  spawnBroker(paths: DaemonPaths, broker: ResolvedBrokerArtifact): Promise<number>;
   stop(pid: number): Promise<void>;
 }
 
@@ -64,9 +59,7 @@ export interface InspectDaemonOptions {
   driver: DaemonDriver;
 }
 
-export const createNodeDaemonDriver = (
-  cliEntrypoint: string,
-): DaemonDriver => ({
+export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => ({
   async resolveBroker(paths) {
     return resolveBrokerArtifact(paths);
   },
@@ -100,16 +93,14 @@ export const createNodeDaemonDriver = (
   },
 });
 
-export const resolveBrokerStdio = (
-  value: string | undefined,
-): "ignore" | "inherit" => {
+export const resolveBrokerStdio = (value: string | undefined): "ignore" | "inherit" => {
   return value === "inherit" ? "inherit" : "ignore";
 };
 
 export const startDaemon = async ({
   paths,
   driver,
-  lockTimeoutMs = 1_000,
+  lockTimeoutMs = DEFAULT_DAEMON_LOCK_TIMEOUT_MS,
 }: StartDaemonOptions): Promise<DaemonStartResult> => {
   const broker = await driver.resolveBroker(paths);
   await mkdir(paths.runtimeDir, { recursive: true });
@@ -176,9 +167,7 @@ export const stopDaemon = async ({
   return { status: "stopped", pid, paths };
 };
 
-export const restartDaemon = async (
-  options: StartDaemonOptions
-): Promise<DaemonStartResult> => {
+export const restartDaemon = async (options: StartDaemonOptions): Promise<DaemonStartResult> => {
   await stopDaemon({ paths: options.paths, driver: options.driver });
   return startDaemon(options);
 };
@@ -219,10 +208,7 @@ const cleanupRuntimeFiles = async (paths: DaemonPaths): Promise<void> => {
   }
 };
 
-const waitUntilStopped = async (
-  driver: DaemonDriver,
-  pid: number,
-): Promise<boolean> => {
+const waitUntilStopped = async (driver: DaemonDriver, pid: number): Promise<boolean> => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (!(await driver.isAlive(pid))) {
       return true;
@@ -259,9 +245,7 @@ const waitForReadyFile = async (
   throw new Error(`timed out waiting for daemon readiness: ${paths.readyFile}`);
 };
 
-const readReadyMetadata = async (
-  readyFile: string,
-): Promise<BrokerReadyMetadata | undefined> => {
+const readReadyMetadata = async (readyFile: string): Promise<BrokerReadyMetadata | undefined> => {
   let value: unknown;
   try {
     value = JSON.parse(await readFile(readyFile, "utf8"));
@@ -317,14 +301,11 @@ const readyMatchesBroker = (
   ready.appName === paths.appName &&
   ready.callerLabel === paths.callerLabel &&
   ready.executablePath === broker.executablePath &&
-  brokerArtifactIdentityEquals(
-    ready.brokerArtifactIdentity,
-    broker.artifactIdentity,
-  );
+  brokerArtifactIdentityEquals(ready.brokerArtifactIdentity, broker.artifactIdentity);
 
 const acquireLock = async (
   lockFile: string,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<{
   release(): Promise<void>;
 }> => {
@@ -333,7 +314,7 @@ const acquireLock = async (
     try {
       const handle = await open(
         lockFile,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
       );
       await handle.writeFile(`${process.pid}\n`, "utf8");
       return {
@@ -367,8 +348,7 @@ const isProcessAlive = (pid: number): boolean => {
   }
 };
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
   error instanceof Error && "code" in error;

@@ -118,6 +118,21 @@ describe("daemon lifecycle", () => {
     expect(driver.spawned).toHaveLength(1);
   });
 
+  it("waits longer than readiness polling before a concurrent start reuses the winner", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver(1_100);
+
+    const [first, second] = await Promise.all([
+      startDaemon({ paths, driver }),
+      startDaemon({ paths, driver }),
+    ]);
+
+    expect(new Set([first.pid, second.pid]).size).toBe(1);
+    expect(driver.spawned).toHaveLength(1);
+    expect([first.status, second.status].sort()).toEqual(["already-running", "started"]);
+  });
+
   it("reports broker exit before readiness instead of masking it as a timeout", async () => {
     const homeDir = await makeTempHome();
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });

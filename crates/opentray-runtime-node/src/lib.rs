@@ -6,9 +6,10 @@ use opentray_core::{
     BackendCapabilities, BrokerKernel, BrokerSession, FakeBackend, UnsupportedExtensionLoader,
 };
 use opentray_spec::{
-    AppIdentity, AppOptions, ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame,
-    PROTOCOL_VERSION,
+    AppIdentity, AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame,
+    RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame, PROTOCOL_VERSION,
 };
+use sha2::{Digest, Sha256};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod visible;
@@ -117,9 +118,11 @@ pub fn create_headless_runtime(
     package_version: Option<String>,
     app_id: Option<String>,
     app_name: Option<String>,
-) -> HeadlessRuntime {
+) -> napi::Result<HeadlessRuntime> {
+    let package_version = package_version.unwrap_or_else(|| "0.0.0".to_string());
+    let broker_artifact_identity = runtime_broker_artifact_identity(&package_version)?;
     let app = runtime_app_identity(app_id, app_name);
-    HeadlessRuntime {
+    Ok(HeadlessRuntime {
         broker: Mutex::new(BrokerKernel::with_default_app_options(
             FakeBackend::new(BackendCapabilities::full()),
             UnsupportedExtensionLoader,
@@ -129,11 +132,52 @@ pub fn create_headless_runtime(
                 icon: None,
                 default: true,
             },
+            broker_artifact_identity,
         )),
         session: Mutex::new(BrokerSession::new()),
-        package_version: package_version.unwrap_or_else(|| "0.0.0".to_string()),
+        package_version,
         app,
-    }
+    })
+}
+
+pub(crate) fn runtime_broker_artifact_identity(
+    package_version: &str,
+) -> napi::Result<BrokerArtifactIdentity> {
+    let executable_path = std::env::current_exe()
+        .and_then(|path| path.canonicalize())
+        .map_err(runtime_identity_error)?;
+    let executable_hash = format!(
+        "{:x}",
+        Sha256::digest(std::fs::read(&executable_path).map_err(runtime_identity_error)?)
+    );
+    Ok(BrokerArtifactIdentity {
+        package_version: package_version.to_string(),
+        target: BrokerArtifactTarget {
+            os: if cfg!(target_os = "windows") {
+                "win32"
+            } else if cfg!(target_os = "macos") {
+                "darwin"
+            } else {
+                "linux"
+            }
+            .to_string(),
+            arch: if cfg!(target_arch = "aarch64") {
+                "arm64"
+            } else {
+                "x64"
+            }
+            .to_string(),
+        },
+        build_identity: format!("sha256:{}", &executable_hash[..16]),
+        executable_hash,
+    })
+}
+
+fn runtime_identity_error(error: std::io::Error) -> Error {
+    Error::new(
+        Status::GenericFailure,
+        format!("unable to identify the in-process runtime host: {error}"),
+    )
 }
 
 fn runtime_app_identity(app_id: Option<String>, app_name: Option<String>) -> AppIdentity {
@@ -174,7 +218,8 @@ mod tests {
             Some("0.9.0".to_string()),
             Some("com.example.build".to_string()),
             Some("Build".to_string()),
-        );
+        )
+        .expect("headless runtime");
 
         let ready = request_one(
             &runtime,

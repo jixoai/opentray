@@ -5,16 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpenTray Artifact Identity Review</title>
     <style>
-      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      body { margin: 0; padding: 32px; color: #17202a; background: #f5f7fa; }
-      main { max-width: 1100px; margin: auto; background: #fff; padding: 28px; border: 1px solid #dfe5ec; }
-      h1 { margin-top: 0; font-size: 26px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 18px; }
-      th, td { padding: 11px 12px; border-bottom: 1px solid #e5e9ef; text-align: left; vertical-align: top; }
-      th { background: #f0f3f7; font-size: 13px; }
-      .pass { color: #137333; font-weight: 600; }
-      .blocked { color: #9a6700; font-weight: 600; }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+      :root {
+        color-scheme: light;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 32px;
+        color: #17202a;
+        background: #f5f7fa;
+      }
+      main {
+        max-width: 1100px;
+        margin: auto;
+        background: #fff;
+        padding: 28px;
+        border: 1px solid #dfe5ec;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 26px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 18px;
+      }
+      th,
+      td {
+        padding: 11px 12px;
+        border-bottom: 1px solid #e5e9ef;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f0f3f7;
+        font-size: 13px;
+      }
+      .pass {
+        color: #137333;
+        font-weight: 600;
+      }
+      .blocked {
+        color: #9a6700;
+        font-weight: 600;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.92em;
+      }
     </style>
   </head>
   <body>
@@ -22,16 +61,73 @@
       <h1>Authoritative Native Artifact Resolution</h1>
       <p>Review iteration 1 for <code>make-native-artifact-resolution-authoritative</code>.</p>
       <table>
-        <thead><tr><th>Contract</th><th>Evidence</th><th>Result</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Contract</th>
+            <th>Evidence</th>
+            <th>Result</th>
+          </tr>
+        </thead>
         <tbody>
-          <tr><td>Facade-relative package authority</td><td>pnpm packed consumer selected the nested current WebView dylib even with an orphan top-level package.</td><td class="pass">PASS</td></tr>
-          <tr><td>Broker identity reuse gate</td><td>Lifecycle tests cover exact reuse, mismatch/missing replacement, bounded stop, and concurrent single-writer startup.</td><td class="pass">PASS</td></tr>
-          <tr><td>Native self-validation</td><td>Rust broker recomputes <code>current_exe()</code>; ready metadata and ready frame carry the same identity.</td><td class="pass">PASS</td></tr>
-          <tr><td>Visible runtime</td><td>Source <code>example:webview-control --no-overlay</code> reached session ready and exited cleanly.</td><td class="pass">PASS</td></tr>
-          <tr><td>Repository verify</td><td>Existing OpenSpec subprocess fixtures fail in temporary cwd with empty child output; product lanes remain green.</td><td class="blocked">BLOCKED</td></tr>
+          <tr>
+            <td>Facade-relative package authority</td>
+            <td>
+              pnpm packed consumer selected the nested current WebView dylib even with an orphan
+              top-level package.
+            </td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Flat package authority</td>
+            <td>The same packed closure installed and resolved through a clean npm consumer.</td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Broker identity reuse gate</td>
+            <td>
+              Lifecycle tests cover exact reuse, mismatch/missing replacement, bounded stop, and
+              concurrent single-writer startup.
+            </td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Native self-validation</td>
+            <td>
+              Rust broker recomputes <code>current_exe()</code>; ready metadata and ready frame
+              carry the same identity.
+            </td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Independent review fixes</td>
+            <td>
+              Core requires real identity, ready metadata is shared, public APIs are documented, and
+              Windows source builds use caller-scoped targets.
+            </td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Visible runtime</td>
+            <td>
+              Source <code>example:webview-control --no-overlay</code> reached session ready and
+              exited cleanly.
+            </td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>Repository verify</td>
+            <td>
+              Existing OpenSpec subprocess fixtures fail in temporary cwd with empty child output;
+              product lanes remain green.
+            </td>
+            <td class="blocked">BLOCKED</td>
+          </tr>
         </tbody>
       </table>
-      <p><strong>Archive rule:</strong> resolve the blocked repository gate and complete the independent standards/spec review before archiving.</p>
+      <p>
+        <strong>Archive rule:</strong> resolve the blocked repository gate and pass final commit
+        checks before archiving.
+      </p>
     </main>
   </body>
 </html>

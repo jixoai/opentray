@@ -4,8 +4,6 @@ import { access } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { terminateWorkspaceDevBrokerProcess } from "../../src/daemon/broker-command";
-
 export type ExampleRuntimeMode = "debug" | "release";
 
 const runtimeModeFlags = new Set(["-r", "--release", "--debug"]);
@@ -26,9 +24,7 @@ export function resolveExampleRuntimeMode(
   return mode;
 }
 
-export function stripExampleRuntimeModeArgs(
-  args: readonly string[],
-): string[] {
+export function stripExampleRuntimeModeArgs(args: readonly string[]): string[] {
   return args.filter((arg) => !runtimeModeFlags.has(arg));
 }
 
@@ -41,11 +37,7 @@ export async function prepareExampleBrokerBinary(
     return undefined;
   }
   await runSourceTreeCargoBuild(workspaceRoot, ["opentray-bin"], mode);
-  const binary = sourceTreeArtifactPath(
-    workspaceRoot,
-    mode,
-    localRuntimeArtifactName(),
-  );
+  const binary = sourceTreeArtifactPath(workspaceRoot, mode, localRuntimeArtifactName());
   await access(binary, constants.X_OK);
   if (process.env.OPENTRAY_BROKER_BIN === undefined) {
     process.env.OPENTRAY_BROKER_BIN = binary;
@@ -58,13 +50,12 @@ export async function runSourceTreeCargoBuild(
   cargoPackages: readonly string[],
   mode: ExampleRuntimeMode,
 ): Promise<void> {
-  if (cargoPackages.includes("opentray-bin")) {
-    await terminateWorkspaceDevBrokerProcess(workspaceRoot);
-  }
+  const targetDir = sourceTreeTargetDir(workspaceRoot);
   const args = [
     "build",
     ...(mode === "release" ? ["--release"] : []),
     ...cargoPackages.flatMap((pkg) => ["-p", pkg]),
+    ...(process.platform === "win32" ? ["--target-dir", targetDir] : []),
   ];
   await new Promise<void>((resolve, reject) => {
     const child = spawn("cargo", args, {
@@ -81,18 +72,12 @@ export async function runSourceTreeCargoBuild(
         resolve();
         return;
       }
-      reject(
-        new Error(
-          `cargo ${args.join(" ")} failed with code ${code ?? "unknown"}`,
-        ),
-      );
+      reject(new Error(`cargo ${args.join(" ")} failed with code ${code ?? "unknown"}`));
     });
   });
 }
 
-export function resolveSourceWorkspaceRoot(
-  moduleUrl: string,
-): string | undefined {
+export function resolveSourceWorkspaceRoot(moduleUrl: string): string | undefined {
   let currentDir = dirname(fileURLToPath(moduleUrl));
   while (true) {
     if (
@@ -115,18 +100,20 @@ export function sourceTreeArtifactPath(
   mode: ExampleRuntimeMode,
   artifactName: string,
 ): string {
-  return join(workspaceRoot, "target", mode, artifactName);
+  return join(sourceTreeTargetDir(workspaceRoot), mode, artifactName);
 }
 
-export function localRuntimeArtifactName(
-  platform: NodeJS.Platform = process.platform,
-): string {
+function sourceTreeTargetDir(workspaceRoot: string): string {
+  return process.platform === "win32"
+    ? join(workspaceRoot, "target", "opentray-source", `example-${process.pid}`)
+    : join(workspaceRoot, "target");
+}
+
+export function localRuntimeArtifactName(platform: NodeJS.Platform = process.platform): string {
   return platform === "win32" ? "opentray.exe" : "opentray";
 }
 
-function normalizeRuntimeMode(
-  value: string | undefined,
-): ExampleRuntimeMode | undefined {
+function normalizeRuntimeMode(value: string | undefined): ExampleRuntimeMode | undefined {
   if (value === undefined) {
     return undefined;
   }

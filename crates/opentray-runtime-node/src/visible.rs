@@ -17,7 +17,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
 use winit::window::WindowId;
 
-use crate::{runtime_app_identity, serialize_frames};
+use crate::{runtime_app_identity, runtime_broker_artifact_identity, serialize_frames};
 
 #[napi(object)]
 pub struct VisibleRuntimeHostOptions {
@@ -108,6 +108,7 @@ pub fn run_visible_runtime_host(options: Option<VisibleRuntimeHostOptions>) -> n
     let package_version = options
         .package_version
         .unwrap_or_else(|| "0.0.0".to_string());
+    let broker_artifact_identity = runtime_broker_artifact_identity(&package_version)?;
     let app = runtime_app_identity(options.app_id, options.app_name);
     let event_loop = build_event_loop()?;
     event_loop.set_control_flow(ControlFlow::Wait);
@@ -149,6 +150,7 @@ pub fn run_visible_runtime_host(options: Option<VisibleRuntimeHostOptions>) -> n
                 icon: None,
                 default: true,
             },
+            broker_artifact_identity,
         ),
         session: None,
         event_queue: Vec::new(),

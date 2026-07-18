@@ -1,6 +1,7 @@
 use opentray_spec::{
-    AppOptions, ClientFrame, ExpectedExtensionIdentity, ExtensionArtifactTarget, Icon, Menu,
-    MenuItem, ServerFrame, TrayEvent, TrayOptions, PROTOCOL_VERSION,
+    AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame,
+    ExpectedExtensionIdentity, ExtensionArtifactTarget, Icon, Menu, MenuItem, ServerFrame,
+    TrayEvent, TrayOptions, PROTOCOL_VERSION,
 };
 
 use super::*;
@@ -23,6 +24,18 @@ fn expected_extension_identity(extension_name: &str) -> ExpectedExtensionIdentit
             os: "test".to_string(),
             arch: "test".to_string(),
         },
+    }
+}
+
+fn test_broker_artifact_identity() -> BrokerArtifactIdentity {
+    BrokerArtifactIdentity {
+        package_version: "0.1.0".to_string(),
+        target: BrokerArtifactTarget {
+            os: "darwin".to_string(),
+            arch: "arm64".to_string(),
+        },
+        executable_hash: "0".repeat(64),
+        build_identity: "test-broker".to_string(),
     }
 }
 
@@ -53,7 +66,7 @@ fn init() -> ClientFrame {
 #[test]
 fn compatible_init_accepts_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend);
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
     let mut session = BrokerSession::new();
 
     let frames = broker.handle_frame(&mut session, init(), "0.1.0");
@@ -75,7 +88,7 @@ fn compatible_init_accepts_session() {
 #[test]
 fn incompatible_init_does_not_create_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend);
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
     let mut session = BrokerSession::new();
 
     let frames = broker.handle_frame(
@@ -97,7 +110,7 @@ fn incompatible_init_does_not_create_session() {
 #[test]
 fn command_before_init_is_rejected_without_backend_mutation() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend.clone());
+    let mut broker = BrokerKernel::new(backend.clone(), test_broker_artifact_identity());
     let mut session = BrokerSession::new();
 
     let frames = broker.handle_frame(
@@ -128,7 +141,7 @@ fn command_before_init_is_rejected_without_backend_mutation() {
 #[test]
 fn create_app_returns_correlated_broker_identity() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend);
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
 
@@ -158,7 +171,7 @@ fn create_app_returns_correlated_broker_identity() {
 #[test]
 fn create_tray_syncs_backend_projection() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend.clone());
+    let mut broker = BrokerKernel::new(backend.clone(), test_broker_artifact_identity());
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
     let surface = create_app(&mut broker, &mut session);
@@ -193,7 +206,7 @@ fn create_tray_syncs_backend_projection() {
 #[test]
 fn get_tray_bounds_returns_correlated_bounds_for_owner() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend.clone());
+    let mut broker = BrokerKernel::new(backend.clone(), test_broker_artifact_identity());
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
     let surface = create_app(&mut broker, &mut session);
@@ -240,7 +253,7 @@ fn get_tray_bounds_returns_correlated_bounds_for_owner() {
 #[test]
 fn get_tray_bounds_rejects_non_owner_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend);
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
     let mut owner = BrokerSession::new();
     let mut other = BrokerSession::new();
     broker.handle_frame(&mut owner, init(), "0.1.0");
@@ -279,7 +292,7 @@ fn get_tray_bounds_rejects_non_owner_session() {
 #[test]
 fn disconnect_cleans_only_current_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend.clone());
+    let mut broker = BrokerKernel::new(backend.clone(), test_broker_artifact_identity());
     let mut first = BrokerSession::new();
     let mut second = BrokerSession::new();
     broker.handle_frame(&mut first, init(), "0.1.0");
@@ -322,7 +335,7 @@ fn disconnect_cleans_only_current_session() {
 #[test]
 fn backend_event_routes_to_owning_session() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend);
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
     let surface = create_app(&mut broker, &mut session);
@@ -350,7 +363,7 @@ fn backend_event_routes_to_owning_session() {
 #[test]
 fn load_ext_rejects_dynamic_paths_without_a_loader() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::new(backend);
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
     let surface = create_app(&mut broker, &mut session);
@@ -381,7 +394,11 @@ fn load_ext_rejects_dynamic_paths_without_a_loader() {
 #[test]
 fn explicit_recording_loader_registers_preview_extension_for_command_path() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::with_extension_loader(backend, RecordingExtensionLoader);
+    let mut broker = BrokerKernel::with_extension_loader(
+        backend,
+        RecordingExtensionLoader,
+        test_broker_artifact_identity(),
+    );
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
     let surface = create_app(&mut broker, &mut session);
@@ -445,7 +462,11 @@ fn explicit_recording_loader_registers_preview_extension_for_command_path() {
 #[test]
 fn load_ext_mount_id_isolates_instances_with_the_same_extension_name() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::with_extension_loader(backend, RecordingExtensionLoader);
+    let mut broker = BrokerKernel::with_extension_loader(
+        backend,
+        RecordingExtensionLoader,
+        test_broker_artifact_identity(),
+    );
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
     let surface = create_app(&mut broker, &mut session);
@@ -523,7 +544,11 @@ fn load_ext_mount_id_isolates_instances_with_the_same_extension_name() {
 #[test]
 fn explicit_exit_uses_extension_host_for_session_cleanup() {
     let backend = FakeBackend::new(BackendCapabilities::full());
-    let mut broker = BrokerKernel::with_extension_loader(backend, HostProbeLoader);
+    let mut broker = BrokerKernel::with_extension_loader(
+        backend,
+        HostProbeLoader,
+        test_broker_artifact_identity(),
+    );
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
     let surface = create_app(&mut broker, &mut session);

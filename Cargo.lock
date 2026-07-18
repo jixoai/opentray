@@ -2345,6 +2345,7 @@ dependencies = [
  "opentray-core",
  "opentray-spec",
  "serde_json",
+ "sha2",
  "tray-icon",
  "winit",
 ]

@@ -15,6 +15,7 @@ napi-derive = "2"
 opentray-core.workspace = true
 opentray-spec.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 opentray-backend-tray-icon.workspace = true

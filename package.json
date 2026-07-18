@@ -2,7 +2,6 @@
   "name": "opentray-workspace",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.22.0",
   "scripts": {
     "changeset": "changeset",
     "openspec:vision": "bun run scripts/openspec/vision-driven.ts",
@@ -28,6 +27,7 @@
     "trusted-publish:dry-run": "bun run scripts/npm/configure-trusted-publish.ts --dry-run",
     "smoke:lynx": "bun run scripts/binaries/launch-lynx-smoke.ts",
     "verify": "bun test scripts/openspec/vision-driven.test.ts scripts/openspec/vision2-driven.test.ts scripts/npm && bun test scripts/binaries && openspec schema validate vision-driven && openspec schema validate vision2 && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
+    "verify:packed-consumer": "bun run scripts/binaries/verify-packed-consumer.ts",
     "version-packages": "changeset version",
     "version-packages:alpha": "changeset version --snapshot alpha"
   },
@@ -40,8 +40,9 @@
     "vitest": "^4.1.7"
   },
   "engines": {
+    "bun": ">=1.3.0",
     "node": ">=20.19.0",
-    "pnpm": ">=10.22.0",
-    "bun": ">=1.3.0"
-  }
+    "pnpm": ">=10.22.0"
+  },
+  "packageManager": "pnpm@10.22.0"
 }

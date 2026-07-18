@@ -8,8 +8,8 @@ mod windows_transport;
 use std::{env, error::Error, path::PathBuf, time::Duration};
 
 use opentray_spec::{
-    sanitize_caller_label, AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame,
-    DEFAULT_CALLER_LABEL, PROTOCOL_VERSION,
+    sanitize_caller_label, AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget,
+    BrokerReadyMetadata, ClientFrame, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -56,12 +56,23 @@ impl BrokerOptions {
         &self.app_name
     }
 
-    pub fn executable_path(&self) -> &std::path::Path {
-        &self.executable_path
-    }
-
     pub fn broker_artifact_identity(&self) -> &BrokerArtifactIdentity {
         &self.broker_artifact_identity
+    }
+
+    /// Builds the single readiness record shared by Unix and Windows transports.
+    pub fn ready_metadata(&self) -> BrokerReadyMetadata {
+        BrokerReadyMetadata {
+            pid: std::process::id(),
+            endpoint: self.endpoint.to_string_lossy().to_string(),
+            package_version: self.package_version.clone(),
+            protocol_version: self.protocol_version,
+            app_id: self.app_id().to_string(),
+            app_name: self.app_name().to_string(),
+            caller_label: self.caller_label().to_string(),
+            executable_path: self.executable_path.to_string_lossy().to_string(),
+            broker_artifact_identity: self.broker_artifact_identity.clone(),
+        }
     }
 
     pub fn default_app_options(&self) -> AppOptions {
@@ -342,8 +353,8 @@ mod native_broker {
                 TrayIconBackend::with_runtime(NativeTrayIconRuntime::new()),
                 DynamicExtensionLoader::from_env()?,
                 options.default_app_options(),
-            )
-            .with_broker_artifact_identity(options.broker_artifact_identity().clone()),
+                options.broker_artifact_identity().clone(),
+            ),
             sessions: HashMap::new(),
             broker_version: options.package_version.clone(),
             idle_timeout: options.idle_timeout,

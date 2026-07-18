@@ -15,9 +15,7 @@ use crate::frame_error::extract_request_id;
 use std::time::Duration;
 
 use opentray_core::BrokerSession;
-use opentray_spec::{
-    BrokerReadyMetadata, ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame,
-};
+use opentray_spec::{ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame};
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
     INVALID_HANDLE_VALUE,
@@ -353,17 +351,7 @@ fn write_ready_file(options: &BrokerOptions) -> std::io::Result<()> {
         create_dir_all(parent)?;
     }
 
-    let ready = BrokerReadyMetadata {
-        pid: std::process::id(),
-        endpoint: options.endpoint.to_string_lossy().to_string(),
-        package_version: options.package_version.clone(),
-        protocol_version: options.protocol_version,
-        app_id: options.app_id().to_string(),
-        app_name: options.app_name().to_string(),
-        caller_label: options.caller_label().to_string(),
-        executable_path: options.executable_path().to_string_lossy().to_string(),
-        broker_artifact_identity: options.broker_artifact_identity().clone(),
-    };
+    let ready = options.ready_metadata();
     let mut file = File::create(&options.ready_file)?;
     serde_json::to_writer_pretty(&mut file, &ready)?;
     file.write_all(b"\n")?;

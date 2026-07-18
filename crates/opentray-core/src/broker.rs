@@ -1,7 +1,7 @@
 use opentray_spec::{
     is_supported_protocol_version, AppIdentity, AppOptions, AppRef, BrokerArtifactIdentity,
-    BrokerArtifactTarget, ClientFrame, ExtensionEnvelope, Rect, RequestId, ServerFrame, SessionId,
-    TrayBoundsKind, TrayBoundsResult, TrayEvent, PROTOCOL_VERSION,
+    ClientFrame, ExtensionEnvelope, Rect, RequestId, ServerFrame, SessionId, TrayBoundsKind,
+    TrayBoundsResult, TrayEvent, PROTOCOL_VERSION,
 };
 
 use crate::{
@@ -50,7 +50,7 @@ pub struct BrokerKernel<B: AppBackend, L: ExtensionLoader = UnsupportedExtension
     next_session: u64,
     default_app: Option<AppRef>,
     default_app_options: AppOptions,
-    broker_artifact_identity: Option<BrokerArtifactIdentity>,
+    broker_artifact_identity: BrokerArtifactIdentity,
 }
 
 struct ScopedExtensionHost<'a> {
@@ -77,20 +77,37 @@ impl ExtensionHostContext for ScopedExtensionHost<'_> {
 }
 
 impl<B: AppBackend> BrokerKernel<B, UnsupportedExtensionLoader> {
-    pub fn new(backend: B) -> Self {
-        Self::with_extension_loader(backend, UnsupportedExtensionLoader)
+    /// Creates a broker kernel whose ready frames carry the composition-owned artifact identity.
+    pub fn new(backend: B, broker_artifact_identity: BrokerArtifactIdentity) -> Self {
+        Self::with_extension_loader(
+            backend,
+            UnsupportedExtensionLoader,
+            broker_artifact_identity,
+        )
     }
 }
 
 impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
-    pub fn with_extension_loader(backend: B, extension_loader: L) -> Self {
-        Self::with_default_app_options(backend, extension_loader, default_app_options())
+    /// Creates a broker kernel with an explicit extension loader and artifact identity.
+    pub fn with_extension_loader(
+        backend: B,
+        extension_loader: L,
+        broker_artifact_identity: BrokerArtifactIdentity,
+    ) -> Self {
+        Self::with_default_app_options(
+            backend,
+            extension_loader,
+            default_app_options(),
+            broker_artifact_identity,
+        )
     }
 
+    /// Creates a broker kernel with explicit default-app and broker artifact authority.
     pub fn with_default_app_options(
         backend: B,
         extension_loader: L,
         default_app_options: AppOptions,
+        broker_artifact_identity: BrokerArtifactIdentity,
     ) -> Self {
         Self {
             kernel: Kernel::new(backend),
@@ -98,13 +115,8 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
             next_session: 1,
             default_app: None,
             default_app_options,
-            broker_artifact_identity: None,
+            broker_artifact_identity,
         }
-    }
-
-    pub fn with_broker_artifact_identity(mut self, identity: BrokerArtifactIdentity) -> Self {
-        self.broker_artifact_identity = Some(identity);
-        self
     }
 
     pub fn backend(&self) -> &B {
@@ -150,10 +162,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 vec![ServerFrame::Ready {
                     protocol_version: PROTOCOL_VERSION,
                     broker_version: broker_version.to_string(),
-                    broker_artifact_identity: self
-                        .broker_artifact_identity
-                        .clone()
-                        .unwrap_or_else(|| in_process_broker_identity(broker_version)),
+                    broker_artifact_identity: self.broker_artifact_identity.clone(),
                     session_id: session_id,
                 }]
             }
@@ -394,30 +403,6 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         self.next_session += 1;
         session.accept(session_id.clone());
         session_id
-    }
-}
-
-fn in_process_broker_identity(broker_version: &str) -> BrokerArtifactIdentity {
-    BrokerArtifactIdentity {
-        package_version: broker_version.to_string(),
-        target: BrokerArtifactTarget {
-            os: if cfg!(target_os = "windows") {
-                "win32"
-            } else if cfg!(target_os = "macos") {
-                "darwin"
-            } else {
-                "linux"
-            }
-            .to_string(),
-            arch: if cfg!(target_arch = "aarch64") {
-                "arm64"
-            } else {
-                "x64"
-            }
-            .to_string(),
-        },
-        executable_hash: "0".repeat(64),
-        build_identity: "in-process".to_string(),
     }
 }
 

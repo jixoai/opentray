@@ -13,7 +13,7 @@
 - [x] 2.4 Scenario: Given an extension rejects a command with native detail When the broker reports the failure Then category/message survive instead of collapsing to numeric code.
 - [x] 2.5 Scenario: Given a live same-endpoint broker with missing or different artifact identity When the SDK auto-starts Then it stops and replaces that PID under the daemon lock.
 - [x] 2.6 Scenario: Given a live same-endpoint broker with matching identity When the SDK auto-starts Then it returns `already-running` without spawning.
-- [ ] 2.7 Scenario: Given packed facade/platform tarballs installed in a temporary pnpm consumer with an orphan top-level platform package When artifact resolution runs Then the current nested artifact wins without environment overrides.
+- [x] 2.7 Scenario: Given packed facade/platform tarballs installed in a temporary pnpm consumer with an orphan top-level platform package When artifact resolution runs Then the current nested artifact wins without environment overrides.
 - [x] 2.8 Scenario: Given a correctly versioned platform package containing a stale native binary When release verification inspects embedded identity Then the release gate fails.
 
 ## 3. Git Evidence Before Apply
@@ -68,11 +68,11 @@
 ## 8. Independent Review / Self-Review Loop
 
 - [ ] 8.1 Run `bun run openspec:vision -- commit-check make-native-artifact-resolution-authoritative --phase self-review`.
-- [ ] 8.2 Run the two-axis code review from the pre-change fixed point: Standards against `AGENTS.md` and repo skills, Spec against this change's `plans/plan.md` and delta specs.
-- [ ] 8.3 Resolve every review finding, reopen affected tasks, rerun relevant red/green and full gates, and commit any OpenSpec corrections before more implementation.
-- [ ] 8.4 Generate `review/self-review.md` comparing every intent/spec/phase/verification requirement against current evidence.
-- [ ] 8.5 Generate separate `review/self-review.html` presenting the three artifact identity flows, verification commands, and final evidence without embedding it in Markdown.
-- [ ] 8.6 If review enters another loop, run `bun run openspec:vision -- review-state make-native-artifact-resolution-authoritative` and persist recurrence evidence.
+- [x] 8.2 Run the two-axis code review from the pre-change fixed point: Standards against `AGENTS.md` and repo skills, Spec against this change's `plans/plan.md` and delta specs.
+- [x] 8.3 Resolve every review finding, reopen affected tasks, rerun relevant red/green and full gates, and commit any OpenSpec corrections before more implementation.
+- [x] 8.4 Generate `review/self-review.md` comparing every intent/spec/phase/verification requirement against current evidence.
+- [x] 8.5 Generate separate `review/self-review.html` presenting the three artifact identity flows, verification commands, and final evidence without embedding it in Markdown.
+- [x] 8.6 If review enters another loop, run `bun run openspec:vision -- review-state make-native-artifact-resolution-authoritative` and persist recurrence evidence.
 
 ## 9. Archive / Completion Audit
 
