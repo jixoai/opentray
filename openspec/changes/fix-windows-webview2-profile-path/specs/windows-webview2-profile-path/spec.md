@@ -1,4 +1,4 @@
-# Windows WebView2 Profile Path
+## ADDED Requirements
 
 ### Requirement: WebView2 profile storage SHALL be executable-path independent
 
@@ -40,6 +40,10 @@ The native slot SHALL retain the 'WebContext' for at least as long as the 'WebVi
 - **THEN** the context backing the WebView remains alive and valid
 
 ### Requirement: Diagnostics SHALL identify the profile
+
+The native error SHALL include the resolved profile path when WebView2 creation fails.
+
+#### Scenario: WebView2 creation failure
 
 - **WHEN** WebView2 creation fails
 - **THEN** the returned native error SHALL include the resolved profile path
