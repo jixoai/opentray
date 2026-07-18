@@ -3,10 +3,10 @@
 ## Review State
 
 - Change: `make-native-artifact-resolution-authoritative`
-- Iteration: 4
-- Recurring issue counts: `packed-consumer-release-gate: 1`, `archive-scenario-identity: 1`
-- Exit-condition judgment: implementation, independent review fixes, archive scenario identity, and archive commit-check are aligned
-- Next loop action: archive the change, commit the synchronized specs, then run the final archived audit
+- Iteration: 5
+- Recurring issue counts: `packed-consumer-release-gate: 1`, `archive-delta-integrity: 2`
+- Exit-condition judgment: product behavior remains aligned; all modified and removed delta identities now match current main specs
+- Next loop action: validate delta integrity, rerun archive commit-check, archive the change, then run the final archived audit
 
 ## Intent Alignment
 
@@ -33,7 +33,7 @@
 | Standards | OpenSpec tests used numeric fds/pipes that silently lost nested Bun output. | Direct Bun spawn uses file-backed sinks/sources and keeps `/bin/sh` out of the path. | 37 OpenSpec workflow tests pass under Bun 1.3.14. |
 | Standards | Diagnostic ABI classification depended on matching human-readable error text. | Missing symbols and ABI version mismatch now carry the stable `abi_incompatible` category; diagnostic classification consumes categories only. | Focused Rust red/green plus full `cargo test` pass. |
 | Spec | The packed consumer destroyed the tray but left the top-level SDK's broker socket open. | Top-level `createTray()` now closes its owned session after tray teardown, closes on creation failure, and shares one idempotent destroy promise across extended handles. | SDK red/green tests, packed pnpm/npm consumers, and the full repository gate pass. |
-| Spec | Archive detected renamed scenario identities inside modified requirements and would have dropped existing scenario history. | Restored existing scenario identifiers; modeled removal of broker-side package-root reconstruction as an explicit old-requirement removal plus exact-artifact replacement. | Archive command aborted before writes; vision validation and a second archive attempt gate the correction. |
+| Spec | Archive preflight found renamed scenarios and REMOVED requirements that never existed in the current main specs. | Restored existing scenario identifiers, removed phantom removals, and modeled broker-side package-root removal as an explicit replacement of the requirement that actually owned that behavior. | Both archive attempts aborted before writes; delta identity audit, strict validation, and a third archive attempt gate the correction. |
 
 ## Deviations From Intent
 

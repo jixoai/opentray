@@ -108,9 +108,3 @@ Returned buffers SHALL have explicit ownership. The dynamic extension SHALL expo
 **Reason**: The old requirement made the broker reconstruct package-manager topology from request package roots, which allowed unmanaged artifacts to shadow the facade dependency closure.
 
 **Migration**: The replacement exact-artifact requirement keeps the generic host boundary but makes the SDK-resolved path and embedded identity authoritative. Diagnostic paths remain explicit candidates only.
-
-### Requirement: Broker SHALL discover official extension platform packages from package roots
-
-**Reason**: Rust package-root scanning reconstructs JavaScript package-manager topology and allowed an unmanaged old platform package to shadow the installed facade closure.
-
-**Migration**: Official facades provide artifact descriptors; the Node SDK resolves their exact platform package and sends the exact native library path plus expected identity.

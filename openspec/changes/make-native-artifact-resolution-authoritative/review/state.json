@@ -1,11 +1,11 @@
 {
   "change": "make-native-artifact-resolution-authoritative",
-  "iteration": 4,
+  "iteration": 5,
   "maxIterations": 5,
   "recurringIssues": {
     "packed-consumer-release-gate": 1,
-    "archive-scenario-identity": 1
+    "archive-delta-integrity": 2
   },
-  "updatedAt": "2026-07-18T21:41:43.000Z",
-  "exitCondition": "No unresolved findings; archive commit-check passes"
+  "updatedAt": "2026-07-18T21:43:18.000Z",
+  "exitCondition": "No unresolved product findings; archive delta identities match main specs"
 }
