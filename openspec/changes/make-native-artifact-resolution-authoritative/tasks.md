@@ -56,14 +56,14 @@
 
 ## 7. Consumer And Repository Verification
 
-- [ ] 7.1 Pack current packages and build a clean temporary pnpm consumer that loads an official extension without artifact overrides.
-- [ ] 7.2 Add an orphan older top-level platform package to the temporary consumer and prove facade-relative exact resolution still selects the current packed artifact.
-- [ ] 7.3 Run the equivalent clean flat npm-compatible resolution fixture or deterministic packed-tarball test.
-- [ ] 7.4 Run `cargo test -p opentray-spec -p opentray-core -p opentray-bin -p opentray-ext-webview -p opentray-ext-badge -p opentray-ext-lynx`.
-- [ ] 7.5 Run `pnpm --filter @opentray/spec test`, `pnpm --filter opentray test`, and all official extension facade tests/typechecks.
+- [x] 7.1 Pack current packages and build a clean temporary pnpm consumer that loads an official extension without artifact overrides.
+- [x] 7.2 Add an orphan older top-level platform package to the temporary consumer and prove facade-relative exact resolution still selects the current packed artifact.
+- [x] 7.3 Run the equivalent clean flat npm-compatible resolution fixture or deterministic packed-tarball test.
+- [x] 7.4 Run `cargo test -p opentray-spec -p opentray-core -p opentray-bin -p opentray-ext-webview -p opentray-ext-badge -p opentray-ext-lynx`.
+- [x] 7.5 Run `pnpm --filter @opentray/spec test`, `pnpm --filter opentray test`, and all official extension facade tests/typechecks.
 - [ ] 7.6 Run `pnpm run build`, `pnpm run verify`, `openspec validate --all --strict`, and `git diff --check`.
-- [ ] 7.7 Build release broker/native extensions, inspect sizes and `otool -L`, and run the source-tree visible WebView smoke without diagnostic overrides.
-- [ ] 7.8 Run `bun run openspec:vision -- validate make-native-artifact-resolution-authoritative` after final implementation/task evidence.
+- [x] 7.7 Build release broker/native extensions, inspect sizes and `otool -L`, and run the source-tree visible WebView smoke without diagnostic overrides.
+- [x] 7.8 Run `bun run openspec:vision -- validate make-native-artifact-resolution-authoritative` after final implementation/task evidence.
 
 ## 8. Independent Review / Self-Review Loop
 
