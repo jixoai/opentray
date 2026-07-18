@@ -3,7 +3,7 @@
 ## Review State
 
 - Change: `make-native-artifact-resolution-authoritative`
-- Iteration: 2
+- Iteration: 3
 - Recurring issue counts: `packed-consumer-release-gate: 1`
 - Exit-condition judgment: implementation and independent review fixes are aligned; all product and repository gates pass, with archive pending final commit checks
 - Next loop action: run final vision-driven check, archive commit-check, archive the change, then re-run strict validation and clean-worktree audit
@@ -31,6 +31,8 @@
 | Spec | Packed gate was not wired into release, and its fixture did not exercise the public SDK/native loader. | Added the native-runner release matrix and changed the fixture to `createTray -> loadExtension -> destroy`; output is emitted only after broker/native manifest validation and init. | `release-workflow.test.ts`; both packed modes print `loaded: true`. |
 | Spec | Diagnostic fallback stopped at the first existing mismatched library. | Diagnostic candidates now retain missing/unreadable/ABI/identity classification and continue to later compatible candidates; exact absolute paths remain single-candidate. | `cargo test -p opentray-bin dynamic_extension::tests`. |
 | Standards | OpenSpec tests used numeric fds/pipes that silently lost nested Bun output. | Direct Bun spawn uses file-backed sinks/sources and keeps `/bin/sh` out of the path. | 37 OpenSpec workflow tests pass under Bun 1.3.14. |
+| Standards | Diagnostic ABI classification depended on matching human-readable error text. | Missing symbols and ABI version mismatch now carry the stable `abi_incompatible` category; diagnostic classification consumes categories only. | Focused Rust red/green plus full `cargo test` pass. |
+| Spec | The packed consumer destroyed the tray but left the top-level SDK's broker socket open. | Top-level `createTray()` now closes its owned session after tray teardown, closes on creation failure, and shares one idempotent destroy promise across extended handles. | SDK red/green tests, packed pnpm/npm consumers, and the full repository gate pass. |
 
 ## Deviations From Intent
 
@@ -48,9 +50,9 @@
 - Packed pnpm and npm fixtures: fresh temporary directories created and removed by the gate
 - Source WebView smoke: `example:webview-control --no-overlay`, exit 0
 - Native inspection: `otool -L` on staged broker and WebView dylib; sizes 7.4 MiB and 7.5 MiB
-- Git commits reviewed: `a1c665d..2266767` plus the iteration-2 review-fix worktree
-- Uncommitted paths, if any: iteration-2 review fixes and current evidence
-- Task checkboxes updated by this working context: 2.7, 7.6, 8.2-8.6
+- Git commits reviewed: `a1c665d..0236b2d`
+- Uncommitted paths, if any: current review evidence only
+- Task checkboxes updated by this working context: 7, 8.7, and 8.8
 
 ## HTML Review Report
 

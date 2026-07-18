@@ -59,7 +59,7 @@
   <body>
     <main>
       <h1>Authoritative Native Artifact Resolution</h1>
-      <p>Review iteration 2 for <code>make-native-artifact-resolution-authoritative</code>.</p>
+      <p>Review iteration 3 for <code>make-native-artifact-resolution-authoritative</code>.</p>
       <table>
         <thead>
           <tr>
@@ -86,7 +86,8 @@
             <td>Public SDK native load</td>
             <td>
               Both packed consumers create a tray, call public <code>loadExtension</code>, and
-              report <code>loaded: true</code> only after broker/native validation.
+              report <code>loaded: true</code> only after broker/native validation. Their
+              <code>destroy()</code> calls close the caller session so both processes exit naturally.
             </td>
             <td class="pass">PASS</td>
           </tr>
@@ -118,7 +119,8 @@
             <td>Diagnostic candidate fallback</td>
             <td>
               Rejected old diagnostic artifacts are recorded and followed by compatible candidates;
-              exact facade paths remain single-candidate.
+              exact facade paths remain single-candidate, and ABI status comes from structured
+              categories rather than error text.
             </td>
             <td class="pass">PASS</td>
           </tr>
