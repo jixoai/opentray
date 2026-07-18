@@ -1,7 +1,7 @@
 use opentray_spec::{
-    is_supported_protocol_version, AppIdentity, AppOptions, AppRef, ClientFrame, ExtensionEnvelope,
-    Rect, RequestId, ServerFrame, SessionId, TrayBoundsKind, TrayBoundsResult, TrayEvent,
-    PROTOCOL_VERSION,
+    is_supported_protocol_version, AppIdentity, AppOptions, AppRef, BrokerArtifactIdentity,
+    BrokerArtifactTarget, ClientFrame, ExtensionEnvelope, Rect, RequestId, ServerFrame, SessionId,
+    TrayBoundsKind, TrayBoundsResult, TrayEvent, PROTOCOL_VERSION,
 };
 
 use crate::{
@@ -50,6 +50,7 @@ pub struct BrokerKernel<B: AppBackend, L: ExtensionLoader = UnsupportedExtension
     next_session: u64,
     default_app: Option<AppRef>,
     default_app_options: AppOptions,
+    broker_artifact_identity: Option<BrokerArtifactIdentity>,
 }
 
 struct ScopedExtensionHost<'a> {
@@ -97,7 +98,13 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
             next_session: 1,
             default_app: None,
             default_app_options,
+            broker_artifact_identity: None,
         }
+    }
+
+    pub fn with_broker_artifact_identity(mut self, identity: BrokerArtifactIdentity) -> Self {
+        self.broker_artifact_identity = Some(identity);
+        self
     }
 
     pub fn backend(&self) -> &B {
@@ -143,6 +150,10 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 vec![ServerFrame::Ready {
                     protocol_version: PROTOCOL_VERSION,
                     broker_version: broker_version.to_string(),
+                    broker_artifact_identity: self
+                        .broker_artifact_identity
+                        .clone()
+                        .unwrap_or_else(|| in_process_broker_identity(broker_version)),
                     session_id: session_id,
                 }]
             }
@@ -383,6 +394,30 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         self.next_session += 1;
         session.accept(session_id.clone());
         session_id
+    }
+}
+
+fn in_process_broker_identity(broker_version: &str) -> BrokerArtifactIdentity {
+    BrokerArtifactIdentity {
+        package_version: broker_version.to_string(),
+        target: BrokerArtifactTarget {
+            os: if cfg!(target_os = "windows") {
+                "win32"
+            } else if cfg!(target_os = "macos") {
+                "darwin"
+            } else {
+                "linux"
+            }
+            .to_string(),
+            arch: if cfg!(target_arch = "aarch64") {
+                "arm64"
+            } else {
+                "x64"
+            }
+            .to_string(),
+        },
+        executable_hash: "0".repeat(64),
+        build_identity: "in-process".to_string(),
     }
 }
 

@@ -64,8 +64,11 @@ fn compatible_init_accepts_session() {
         ServerFrame::Ready {
             session_id,
             protocol_version: PROTOCOL_VERSION,
+            broker_artifact_identity,
             ..
         } if session_id == "session-1"
+            && matches!(broker_artifact_identity.target.os.as_str(), "darwin" | "linux" | "win32")
+            && matches!(broker_artifact_identity.target.arch.as_str(), "arm64" | "x64")
     ));
 }
 

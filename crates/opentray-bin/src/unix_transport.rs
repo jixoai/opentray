@@ -18,8 +18,9 @@ use std::time::Instant;
 use opentray_core::BrokerSession;
 #[cfg(not(target_os = "macos"))]
 use opentray_core::{AppBackend, BrokerKernel};
-use opentray_spec::{ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame};
-use serde_json::json;
+use opentray_spec::{
+    BrokerReadyMetadata, ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame,
+};
 
 #[cfg(not(target_os = "macos"))]
 use crate::dynamic_extension::DynamicExtensionLoader;
@@ -139,7 +140,8 @@ where
         backend,
         DynamicExtensionLoader::from_env()?,
         options.default_app_options(),
-    );
+    )
+    .with_broker_artifact_identity(options.broker_artifact_identity().clone());
     let mut sessions = HashMap::<u64, TransportSession>::new();
     let mut idle_since = Some(Instant::now());
 
@@ -319,15 +321,17 @@ fn write_ready_file(options: &BrokerOptions) -> std::io::Result<()> {
         create_dir_all(parent)?;
     }
 
-    let ready = json!({
-        "pid": std::process::id(),
-        "endpoint": options.endpoint.to_string_lossy(),
-        "packageVersion": options.package_version,
-        "protocolVersion": options.protocol_version,
-        "appId": options.app_id(),
-        "appName": options.app_name(),
-        "callerLabel": options.caller_label(),
-    });
+    let ready = BrokerReadyMetadata {
+        pid: std::process::id(),
+        endpoint: options.endpoint.to_string_lossy().to_string(),
+        package_version: options.package_version.clone(),
+        protocol_version: options.protocol_version,
+        app_id: options.app_id().to_string(),
+        app_name: options.app_name().to_string(),
+        caller_label: options.caller_label().to_string(),
+        executable_path: options.executable_path().to_string_lossy().to_string(),
+        broker_artifact_identity: options.broker_artifact_identity().clone(),
+    };
     let mut file = File::create(&options.ready_file)?;
     serde_json::to_writer_pretty(&mut file, &ready)?;
     file.write_all(b"\n")?;

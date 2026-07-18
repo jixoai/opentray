@@ -419,6 +419,30 @@ export interface ExpectedExtensionIdentity {
   target: ExtensionArtifactTarget;
 }
 
+export interface BrokerArtifactTarget {
+  os: "darwin" | "linux" | "win32";
+  arch: "arm64" | "x64";
+}
+
+export interface BrokerArtifactIdentity {
+  packageVersion: string;
+  target: BrokerArtifactTarget;
+  executableHash: string;
+  buildIdentity: string;
+}
+
+export interface BrokerReadyMetadata {
+  pid: number;
+  endpoint: string;
+  packageVersion: string;
+  protocolVersion: number;
+  appId: AppId;
+  appName: string;
+  callerLabel: string;
+  executablePath: string;
+  brokerArtifactIdentity: BrokerArtifactIdentity;
+}
+
 export interface RuntimeHostSessionHealth {
   sessionId: number;
   internalSessionId?: SessionId;
@@ -504,6 +528,7 @@ export type ServerFrame =
       type: "ready";
       protocolVersion: number;
       brokerVersion: string;
+      brokerArtifactIdentity: BrokerArtifactIdentity;
       sessionId: SessionId;
     }
   | { type: "app-created"; requestId: RequestId; app: AppRef }
@@ -561,6 +586,31 @@ export const parseServerFrame = (line: string): ParseResult<ServerFrame> => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+export const isBrokerArtifactIdentity = (
+  value: unknown,
+): value is BrokerArtifactIdentity =>
+  isRecord(value) &&
+  typeof value.packageVersion === "string" &&
+  isRecord(value.target) &&
+  (value.target.os === "darwin" ||
+    value.target.os === "linux" ||
+    value.target.os === "win32") &&
+  (value.target.arch === "arm64" || value.target.arch === "x64") &&
+  typeof value.executableHash === "string" &&
+  /^[a-f0-9]{64}$/u.test(value.executableHash) &&
+  typeof value.buildIdentity === "string" &&
+  value.buildIdentity.length > 0;
+
+export const brokerArtifactIdentityEquals = (
+  left: BrokerArtifactIdentity,
+  right: BrokerArtifactIdentity,
+): boolean =>
+  left.packageVersion === right.packageVersion &&
+  left.target.os === right.target.os &&
+  left.target.arch === right.target.arch &&
+  left.executableHash === right.executableHash &&
+  left.buildIdentity === right.buildIdentity;
+
 export const isServerFrame = (value: unknown): value is ServerFrame => {
   if (!isRecord(value) || typeof value.type !== "string") {
     return false;
@@ -571,6 +621,7 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return (
         typeof value.protocolVersion === "number" &&
         typeof value.brokerVersion === "string" &&
+        isBrokerArtifactIdentity(value.brokerArtifactIdentity) &&
         typeof value.sessionId === "string"
       );
     case "app-created":

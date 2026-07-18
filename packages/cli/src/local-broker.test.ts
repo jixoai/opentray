@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   PROTOCOL_VERSION,
+  type BrokerArtifactIdentity,
   type ClientFrame,
   type ServerFrame,
 } from "@opentray/spec";
@@ -19,9 +20,7 @@ const cleanup: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((close) => close()));
-  await Promise.all(
-    tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true }))
-  );
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
 describe("local broker client", () => {
@@ -77,10 +76,24 @@ describe("local broker client", () => {
         endpoint: paths.endpoint,
         autoStart: false,
         daemonDriver: driver,
-      })
+      }),
     ).rejects.toThrow();
 
     expect(driver.spawned).toBe(0);
+  });
+
+  it("rejects a ready frame from a broker with another artifact identity", async () => {
+    const homeDir = await makeTempHome();
+    const driver = createSocketBrokerDriver(undefined, brokerIdentity("b"));
+    cleanup.push(driver.close);
+
+    await expect(
+      connectLocalBroker({
+        homeDir,
+        packageVersion: "0.1.0",
+        daemonDriver: driver,
+      }),
+    ).rejects.toThrow(/broker artifact identity mismatch/);
   });
 
   it("routes tray-bounds responses back to the pending request", async () => {
@@ -98,7 +111,7 @@ describe("local broker client", () => {
               source: "backend.nativeTrayBounds",
               rect: { x: 10, y: 20, width: 24, height: 24 },
             },
-          })}\n`
+          })}\n`,
         );
       }
     });
@@ -133,7 +146,8 @@ const makeTempHome = async (): Promise<string> => {
 };
 
 const createSocketBrokerDriver = (
-  onFrame?: (frame: ClientFrame, socket: Socket) => void
+  onFrame?: (frame: ClientFrame, socket: Socket) => void,
+  readyFrameIdentity?: BrokerArtifactIdentity,
 ): DaemonDriver & {
   readonly spawned: number;
   readonly spawnedPaths: DaemonPaths[];
@@ -149,15 +163,18 @@ const createSocketBrokerDriver = (
       return spawned;
     },
     spawnedPaths,
+    async resolveBroker(paths) {
+      return resolvedBroker(paths);
+    },
     async isAlive(checkPid) {
       return checkPid === pid && server !== undefined;
     },
-    async spawnBroker(paths) {
+    async spawnBroker(paths, broker) {
       spawned += 1;
       spawnedPaths.push(paths);
-      server = createReadyServer(paths, onFrame);
+      server = createReadyServer(paths, readyFrameIdentity ?? broker.artifactIdentity, onFrame);
       await listen(server, paths.endpoint);
-      await writeFile(paths.readyFile, `${JSON.stringify({ pid })}\n`, "utf8");
+      await writeReadyMetadata(paths, pid, broker.artifactIdentity);
       return pid;
     },
     async stop() {
@@ -180,16 +197,15 @@ const createCountingDriver = (): DaemonDriver & {
     get spawned() {
       return spawned;
     },
+    async resolveBroker(paths) {
+      return resolvedBroker(paths);
+    },
     async isAlive() {
       return false;
     },
-    async spawnBroker(paths) {
+    async spawnBroker(paths, broker) {
       spawned += 1;
-      await writeFile(
-        paths.readyFile,
-        `${JSON.stringify({ pid: 30_000 })}\n`,
-        "utf8"
-      );
+      await writeReadyMetadata(paths, 30_000, broker.artifactIdentity);
       return 30_000;
     },
     async stop() {},
@@ -198,7 +214,8 @@ const createCountingDriver = (): DaemonDriver & {
 
 const createReadyServer = (
   paths: DaemonPaths,
-  onFrame?: (frame: ClientFrame, socket: Socket) => void
+  brokerArtifactIdentity: BrokerArtifactIdentity,
+  onFrame?: (frame: ClientFrame, socket: Socket) => void,
 ): Server =>
   createServer((socket) => {
     socket.setEncoding("utf8");
@@ -219,7 +236,7 @@ const createReadyServer = (
         const frame = JSON.parse(line) as ClientFrame;
         if (!initialized) {
           initialized = true;
-          writeReadyFrame(socket, paths);
+          writeReadyFrame(socket, paths, brokerArtifactIdentity);
           continue;
         }
         onFrame?.(frame, socket);
@@ -227,14 +244,58 @@ const createReadyServer = (
     });
   });
 
-const writeReadyFrame = (socket: Socket, paths: DaemonPaths): void => {
+const writeReadyFrame = (
+  socket: Socket,
+  paths: DaemonPaths,
+  brokerArtifactIdentity: BrokerArtifactIdentity,
+): void => {
   socket.write(
     `${JSON.stringify({
       type: "ready",
       protocolVersion: PROTOCOL_VERSION,
       brokerVersion: paths.packageVersion,
+      brokerArtifactIdentity,
       sessionId: "session-test",
-    })}\n`
+    })}\n`,
+  );
+};
+
+const brokerIdentity = (seed: string): BrokerArtifactIdentity => ({
+  packageVersion: "0.1.0",
+  target: { os: "darwin", arch: "arm64" },
+  executableHash: seed.repeat(64),
+  buildIdentity: `sha256:${seed.repeat(16)}`,
+});
+
+const resolvedBroker = (paths: DaemonPaths) => ({
+  command: "/fake/opentray",
+  args: [],
+  executablePath: "/fake/opentray",
+  artifactIdentity: {
+    ...brokerIdentity("a"),
+    packageVersion: paths.packageVersion,
+  },
+});
+
+const writeReadyMetadata = async (
+  paths: DaemonPaths,
+  pid: number,
+  brokerArtifactIdentity: BrokerArtifactIdentity,
+): Promise<void> => {
+  await writeFile(
+    paths.readyFile,
+    `${JSON.stringify({
+      pid,
+      endpoint: paths.endpoint,
+      packageVersion: paths.packageVersion,
+      protocolVersion: paths.protocolVersion,
+      appId: paths.appId,
+      appName: paths.appName,
+      callerLabel: paths.callerLabel,
+      executablePath: "/fake/opentray",
+      brokerArtifactIdentity,
+    })}\n`,
+    "utf8",
   );
 };
 

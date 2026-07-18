@@ -4,6 +4,12 @@ const readyFrame = JSON.stringify({
   type: "ready",
   protocolVersion: PROTOCOL_VERSION,
   brokerVersion: "0.1.0",
+  brokerArtifactIdentity: {
+    packageVersion: "0.1.0",
+    target: { os: "darwin", arch: "arm64" },
+    executableHash: "0".repeat(64),
+    buildIdentity: "sha256:0000000000000000",
+  },
   sessionId: "session-1",
 } satisfies ServerFrame);
 

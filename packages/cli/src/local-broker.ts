@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   PROTOCOL_VERSION,
+  brokerArtifactIdentityEquals,
   parseServerFrame,
+  type BrokerArtifactIdentity,
   type BrokerEndpointIdentityOptions,
   type ClientRequestFrame,
   type RequestId,
@@ -47,6 +49,7 @@ export interface ConnectLocalBrokerOptions
   daemonDriver?: DaemonDriver;
   cliEntrypoint?: string;
   callerLabel?: string;
+  expectedBrokerArtifactIdentity?: BrokerArtifactIdentity;
 }
 
 interface PendingRequest {
@@ -90,19 +93,25 @@ export const connectLocalBroker = async (
       "local broker autoStart requires the derived same-version endpoint"
     );
   }
-  if (autoStart) {
-    const cliEntrypoint = options.cliEntrypoint ?? resolveCliEntrypoint();
-    const driver =
-      options.daemonDriver ?? createNodeDaemonDriver(cliEntrypoint);
-    await startDaemon({ paths, driver });
-  }
+  const cliEntrypoint = options.cliEntrypoint ?? resolveCliEntrypoint();
+  const driver = options.daemonDriver ?? createNodeDaemonDriver(cliEntrypoint);
+  const expectedBrokerArtifactIdentity = autoStart
+    ? (await startDaemon({ paths, driver })).broker.artifactIdentity
+    : options.expectedBrokerArtifactIdentity ??
+      (await driver.resolveBroker(paths)).artifactIdentity;
   const socket = await connectSocket(endpoint);
   const connection = new LocalBrokerConnection(socket, endpoint, callerLabel);
 
-  await connection.init(
-    clientVersion,
-    options.protocolVersion ?? PROTOCOL_VERSION
-  );
+  try {
+    await connection.init(
+      clientVersion,
+      options.protocolVersion ?? PROTOCOL_VERSION,
+      expectedBrokerArtifactIdentity,
+    );
+  } catch (error) {
+    await connection.close();
+    throw error;
+  }
   return connection;
 };
 
@@ -149,7 +158,11 @@ class LocalBrokerConnection implements LocalBrokerClient {
     });
   }
 
-  async init(clientVersion: string, protocolVersion: number): Promise<void> {
+  async init(
+    clientVersion: string,
+    protocolVersion: number,
+    expectedBrokerArtifactIdentity: BrokerArtifactIdentity,
+  ): Promise<void> {
     const ready = new Promise<Extract<ServerFrame, { type: "ready" }>>(
       (resolve, reject) => {
         this.ready = { resolve, reject };
@@ -161,6 +174,16 @@ class LocalBrokerConnection implements LocalBrokerClient {
       clientVersion,
     });
     const frame = await ready;
+    if (
+      !brokerArtifactIdentityEquals(
+        frame.brokerArtifactIdentity,
+        expectedBrokerArtifactIdentity,
+      )
+    ) {
+      throw new Error(
+        `broker artifact identity mismatch: expected=${JSON.stringify(expectedBrokerArtifactIdentity)} actual=${JSON.stringify(frame.brokerArtifactIdentity)}`,
+      );
+    }
     this.sessionId = frame.sessionId;
   }
 

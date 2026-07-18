@@ -11,8 +11,8 @@
 - [x] 2.2 Scenario: Given a supported descriptor whose platform package is missing When the extension first loads Then the SDK reports a typed target/package resolution error before broker dispatch.
 - [x] 2.3 Scenario: Given an exact dylib with a mismatched embedded manifest When `load-ext` validates it Then init is never called and expected/actual identity is returned.
 - [x] 2.4 Scenario: Given an extension rejects a command with native detail When the broker reports the failure Then category/message survive instead of collapsing to numeric code.
-- [ ] 2.5 Scenario: Given a live same-endpoint broker with missing or different artifact identity When the SDK auto-starts Then it stops and replaces that PID under the daemon lock.
-- [ ] 2.6 Scenario: Given a live same-endpoint broker with matching identity When the SDK auto-starts Then it returns `already-running` without spawning.
+- [x] 2.5 Scenario: Given a live same-endpoint broker with missing or different artifact identity When the SDK auto-starts Then it stops and replaces that PID under the daemon lock.
+- [x] 2.6 Scenario: Given a live same-endpoint broker with matching identity When the SDK auto-starts Then it returns `already-running` without spawning.
 - [ ] 2.7 Scenario: Given packed facade/platform tarballs installed in a temporary pnpm consumer with an orphan top-level platform package When artifact resolution runs Then the current nested artifact wins without environment overrides.
 - [x] 2.8 Scenario: Given a correctly versioned platform package containing a stale native binary When release verification inspects embedded identity Then the release gate fails.
 
@@ -46,13 +46,13 @@
 
 ## 6. Phase Three - Broker Artifact Identity
 
-- [ ] 6.1 Add red daemon lifecycle tests for matching reuse, mismatched replacement, missing-identity replacement, bounded stop, and concurrent starts.
-- [ ] 6.2 Resolve the broker command once per start attempt and compute a SHA-256 artifact identity from executable bytes plus target.
-- [ ] 6.3 Pass broker artifact identity/path to the spawned broker and write them into caller-scoped `ready.json` on macOS/Linux and Windows.
-- [ ] 6.4 Add broker artifact identity to protocol ready frames and validate expected/actual identity before client init succeeds.
-- [ ] 6.5 Under the daemon lock, replace live brokers whose ready identity is missing/mismatched; reuse only exact matches and preserve caller/version isolation.
-- [ ] 6.6 Add concise intent comments at the liveness-versus-identity decision and bounded replacement path.
-- [ ] 6.7 Run focused lifecycle/protocol/Rust transport tests, mark verified Phase Three BDD/tasks, and commit code/tests/task evidence together.
+- [x] 6.1 Add red daemon lifecycle tests for matching reuse, mismatched replacement, missing-identity replacement, bounded stop, and concurrent starts.
+- [x] 6.2 Resolve the broker command once per start attempt and compute a SHA-256 artifact identity from executable bytes plus target.
+- [x] 6.3 Pass broker artifact identity/path to the spawned broker and write them into caller-scoped `ready.json` on macOS/Linux and Windows.
+- [x] 6.4 Add broker artifact identity to protocol ready frames and validate expected/actual identity before client init succeeds.
+- [x] 6.5 Under the daemon lock, replace live brokers whose ready identity is missing/mismatched; reuse only exact matches and preserve caller/version isolation.
+- [x] 6.6 Add concise intent comments at the liveness-versus-identity decision and bounded replacement path.
+- [x] 6.7 Run focused lifecycle/protocol/Rust transport tests, mark verified Phase Three BDD/tasks, and commit code/tests/task evidence together.
 
 ## 7. Consumer And Repository Verification
 

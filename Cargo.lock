@@ -2271,6 +2271,7 @@ dependencies = [
  "opentray-spec",
  "serde",
  "serde_json",
+ "sha2",
  "tray-icon",
  "windows-sys 0.61.2",
  "winit",

@@ -1,3 +1,5 @@
+import type { BrokerArtifactTarget } from "@opentray/spec";
+
 export type BrokerPackageOs = "darwin" | "linux" | "windows";
 export type BrokerArch = "arm64" | "x64";
 
@@ -15,6 +17,17 @@ export const resolveBrokerNativeTarget = (
   return {
     packageName: `@opentray/${packageOs}-${nativeArch}`,
     binaryRelativePath: `bin/${packageOs === "windows" ? "opentray.exe" : "opentray"}`,
+  };
+};
+
+export const resolveBrokerArtifactTarget = (
+  platform: string = process.platform,
+  arch: string = process.arch,
+): BrokerArtifactTarget => {
+  const packageOs = platformToPackageOs(platform);
+  return {
+    os: packageOs === "windows" ? "win32" : packageOs,
+    arch: normalizeArch(arch),
   };
 };
 

@@ -316,6 +316,35 @@ describe("@opentray/spec", () => {
     expect(parsed.ok).toBe(false);
   });
 
+  it("requires exact broker artifact identity in ready frames", () => {
+    const identity = {
+      packageVersion: "0.1.0",
+      target: { os: "darwin", arch: "arm64" },
+      executableHash: "a".repeat(64),
+      buildIdentity: "sha256:aaaaaaaaaaaaaaaa",
+    } as const;
+    const missing = parseServerFrame(
+      JSON.stringify({
+        type: "ready",
+        protocolVersion: PROTOCOL_VERSION,
+        brokerVersion: "0.1.0",
+        sessionId: "session-1",
+      }),
+    );
+    const current = parseServerFrame(
+      JSON.stringify({
+        type: "ready",
+        protocolVersion: PROTOCOL_VERSION,
+        brokerVersion: "0.1.0",
+        brokerArtifactIdentity: identity,
+        sessionId: "session-1",
+      }),
+    );
+
+    expect(missing.ok).toBe(false);
+    expect(current.ok).toBe(true);
+  });
+
   it("checks protocol compatibility before session authority exists", () => {
     const init: ClientFrame = {
       type: "init",

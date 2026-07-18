@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import type { BrokerArtifactIdentity } from "@opentray/spec";
 
 import type { DaemonDriver } from "./lifecycle";
 import {
@@ -46,6 +49,46 @@ describe("daemon lifecycle", () => {
     expect(driver.spawned).toEqual([first.pid]);
   });
 
+  it("replaces a live broker whose ready metadata has no artifact identity", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver();
+    const first = await startDaemon({ paths, driver });
+    await writeFile(paths.readyFile, `${JSON.stringify({ pid: first.pid })}\n`, "utf8");
+
+    const replacement = await startDaemon({ paths, driver });
+
+    expect(replacement.status).toBe("started");
+    expect(replacement.pid).not.toBe(first.pid);
+    expect(driver.spawned).toEqual([first.pid, replacement.pid]);
+  });
+
+  it("replaces a live broker whose ready artifact identity is different", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver();
+    const first = await startDaemon({ paths, driver });
+    await writeReadyFile(paths, first.pid, brokerIdentity("old"));
+
+    const replacement = await startDaemon({ paths, driver });
+
+    expect(replacement.status).toBe("started");
+    expect(replacement.pid).not.toBe(first.pid);
+  });
+
+  it("does not start a competing broker when incompatible PID shutdown is not bounded", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver(0, false);
+    const first = await startDaemon({ paths, driver });
+    await writeReadyFile(paths, first.pid, brokerIdentity("old"));
+
+    await expect(startDaemon({ paths, driver })).rejects.toThrow(
+      /incompatible daemon broker did not stop/,
+    );
+    expect(driver.spawned).toEqual([first.pid]);
+  });
+
   it("stops only the current version runtime", async () => {
     const homeDir = await makeTempHome();
     const current = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
@@ -80,7 +123,9 @@ describe("daemon lifecycle", () => {
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
     const driver = createExitedDriver();
 
-    await expect(startDaemon({ paths, driver })).rejects.toThrow("daemon broker exited before readiness");
+    await expect(startDaemon({ paths, driver })).rejects.toThrow(
+      "daemon broker exited before readiness",
+    );
   });
 
   it("restarts by stopping and starting the same version endpoint", async () => {
@@ -122,17 +167,23 @@ describe("daemon lifecycle", () => {
   });
 });
 
-const createFakeDriver = (spawnDelayMs = 0): DaemonDriver & { readonly spawned: number[] } => {
+const createFakeDriver = (
+  spawnDelayMs = 0,
+  stopSucceeds = true,
+): DaemonDriver & { readonly spawned: number[] } => {
   const alive = new Set<number>();
   const spawned: number[] = [];
   let nextPid = 10_000;
 
   return {
     spawned,
+    async resolveBroker(paths) {
+      return resolvedBroker(paths);
+    },
     async isAlive(pid) {
       return alive.has(pid);
     },
-    async spawnBroker(paths) {
+    async spawnBroker(paths, broker) {
       if (spawnDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, spawnDelayMs));
       }
@@ -140,16 +191,60 @@ const createFakeDriver = (spawnDelayMs = 0): DaemonDriver & { readonly spawned: 
       nextPid += 1;
       alive.add(pid);
       spawned.push(pid);
-      await writeFile(paths.readyFile, `${JSON.stringify({ pid })}\n`, "utf8");
+      await writeReadyFile(paths, pid, broker.artifactIdentity);
       return pid;
     },
     async stop(pid) {
-      alive.delete(pid);
+      if (stopSucceeds) {
+        alive.delete(pid);
+      }
     },
   };
 };
 
+const brokerIdentity = (seed: string, packageVersion = "0.1.0"): BrokerArtifactIdentity => {
+  const executableHash = createHash("sha256").update(seed).digest("hex");
+  return {
+    packageVersion,
+    target: { os: "darwin", arch: "arm64" },
+    executableHash,
+    buildIdentity: `sha256:${executableHash.slice(0, 16)}`,
+  };
+};
+
+const resolvedBroker = (paths: ReturnType<typeof resolveDaemonPaths>) => ({
+  command: "/fake/opentray",
+  args: [],
+  executablePath: "/fake/opentray",
+  artifactIdentity: brokerIdentity("current", paths.packageVersion),
+});
+
+const writeReadyFile = async (
+  paths: ReturnType<typeof resolveDaemonPaths>,
+  pid: number,
+  brokerArtifactIdentity: BrokerArtifactIdentity,
+): Promise<void> => {
+  await writeFile(
+    paths.readyFile,
+    `${JSON.stringify({
+      pid,
+      endpoint: paths.endpoint,
+      packageVersion: paths.packageVersion,
+      protocolVersion: paths.protocolVersion,
+      appId: paths.appId,
+      appName: paths.appName,
+      callerLabel: paths.callerLabel,
+      executablePath: "/fake/opentray",
+      brokerArtifactIdentity,
+    })}\n`,
+    "utf8",
+  );
+};
+
 const createExitedDriver = (): DaemonDriver => ({
+  async resolveBroker(paths) {
+    return resolvedBroker(paths);
+  },
   async isAlive() {
     return false;
   },

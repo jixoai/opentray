@@ -1,14 +1,28 @@
+import { createHash } from "node:crypto";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  resolveBrokerArtifact,
   resolveBrokerCommand,
   resolveDevBrokerBinaryPath,
   resolveInstalledBrokerBinary,
 } from "./broker-command";
 import { resolveBrokerNativeTarget } from "./native-target";
 import { resolveDaemonPaths } from "./paths";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    tempDirs.splice(0).map((directory) =>
+      rm(directory, { force: true, recursive: true }),
+    ),
+  );
+});
 
 describe("broker command resolver", () => {
   it("uses OPENTRAY_BROKER_BIN before package and workspace resolution", async () => {
@@ -32,6 +46,33 @@ describe("broker command resolver", () => {
     expect(command.args).toContain(paths.appId);
     expect(command.args).toContain("--app-name");
     expect(command.args).toContain(paths.appName);
+  });
+
+  it("hashes one exact resolved broker executable into its launch identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-broker-artifact-"));
+    tempDirs.push(root);
+    const executablePath = join(root, "opentray");
+    await writeFile(executablePath, "current-broker", "utf8");
+    const paths = resolveDaemonPaths({
+      homeDir: "/tmp/opentray-test",
+      packageVersion: "0.1.0",
+    });
+
+    const broker = await resolveBrokerArtifact(paths, {
+      env: { OPENTRAY_BROKER_BIN: executablePath },
+      platform: "darwin",
+      arch: "arm64",
+    });
+
+    const hash = createHash("sha256").update("current-broker").digest("hex");
+    expect(broker.executablePath).toBe(await realpath(executablePath));
+    expect(broker.artifactIdentity).toEqual({
+      packageVersion: "0.1.0",
+      target: { os: "darwin", arch: "arm64" },
+      executableHash: hash,
+      buildIdentity: `sha256:${hash.slice(0, 16)}`,
+    });
+    expect(broker.args).toContain("--broker-artifact-identity");
   });
 
   it("prefers the installed platform package before workspace fallback", async () => {

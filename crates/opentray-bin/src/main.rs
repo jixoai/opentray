@@ -8,8 +8,10 @@ mod windows_transport;
 use std::{env, error::Error, path::PathBuf, time::Duration};
 
 use opentray_spec::{
-    sanitize_caller_label, AppOptions, ClientFrame, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION,
+    sanitize_caller_label, AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame,
+    DEFAULT_CALLER_LABEL, PROTOCOL_VERSION,
 };
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
 pub struct BrokerOptions {
@@ -20,6 +22,8 @@ pub struct BrokerOptions {
     app_id: String,
     app_name: String,
     caller_label: String,
+    executable_path: PathBuf,
+    broker_artifact_identity: BrokerArtifactIdentity,
     idle_timeout: Option<Duration>,
 }
 
@@ -52,6 +56,14 @@ impl BrokerOptions {
         &self.app_name
     }
 
+    pub fn executable_path(&self) -> &std::path::Path {
+        &self.executable_path
+    }
+
+    pub fn broker_artifact_identity(&self) -> &BrokerArtifactIdentity {
+        &self.broker_artifact_identity
+    }
+
     pub fn default_app_options(&self) -> AppOptions {
         AppOptions {
             id: Some(self.app_id.clone()),
@@ -70,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     match args.next().as_deref() {
         Some("broker") => run_broker(parse_broker_options(args)?),
         _ => {
-            eprintln!("Usage: opentray broker --endpoint <path> --ready-file <path> --package-version <version> --protocol-version <version>");
+            eprintln!("Usage: opentray broker --endpoint <path> --ready-file <path> --package-version <version> --protocol-version <version> --broker-executable-path <path> --broker-artifact-identity <json>");
             Ok(())
         }
     }
@@ -101,6 +113,8 @@ fn parse_broker_options(
     let mut app_id = None;
     let mut app_name = None;
     let mut caller_label = None;
+    let mut broker_executable_path = None;
+    let mut broker_artifact_identity = None;
     let mut args = args.peekable();
 
     while let Some(flag) = args.next() {
@@ -117,6 +131,11 @@ fn parse_broker_options(
             "--app-id" => app_id = Some(value),
             "--app-name" => app_name = Some(value),
             "--caller-label" => caller_label = Some(value),
+            "--broker-executable-path" => broker_executable_path = Some(PathBuf::from(value)),
+            "--broker-artifact-identity" => {
+                broker_artifact_identity =
+                    Some(serde_json::from_str::<BrokerArtifactIdentity>(&value)?);
+            }
             _ => return Err(format!("unknown broker option: {flag}").into()),
         }
     }
@@ -125,6 +144,28 @@ fn parse_broker_options(
     if protocol_version != PROTOCOL_VERSION {
         return Err(format!(
             "unsupported broker protocolVersion {protocol_version}; expected {PROTOCOL_VERSION}"
+        )
+        .into());
+    }
+
+    let package_version = package_version.ok_or("missing --package-version")?;
+    let expected_executable_path = broker_executable_path
+        .ok_or("missing --broker-executable-path")?
+        .canonicalize()?;
+    let expected_artifact_identity =
+        broker_artifact_identity.ok_or("missing --broker-artifact-identity")?;
+    let (executable_path, actual_artifact_identity) =
+        resolve_current_broker_artifact(&package_version)?;
+    // Recompute from current_exe so a path replacement between SDK hashing and exec cannot pass.
+    if executable_path != expected_executable_path
+        || actual_artifact_identity != expected_artifact_identity
+    {
+        return Err(format!(
+            "broker artifact identity mismatch: expectedPath={}; actualPath={}; expected={}; actual={}",
+            expected_executable_path.display(),
+            executable_path.display(),
+            serde_json::to_string(&expected_artifact_identity)?,
+            serde_json::to_string(&actual_artifact_identity)?,
         )
         .into());
     }
@@ -153,13 +194,44 @@ fn parse_broker_options(
     Ok(BrokerOptions {
         endpoint: endpoint.ok_or("missing --endpoint")?,
         ready_file: ready_file.ok_or("missing --ready-file")?,
-        package_version: package_version.ok_or("missing --package-version")?,
+        package_version,
         protocol_version,
         app_id,
         app_name,
         caller_label,
+        executable_path,
+        broker_artifact_identity: actual_artifact_identity,
         idle_timeout: daemon_idle_timeout()?,
     })
+}
+
+fn resolve_current_broker_artifact(
+    package_version: &str,
+) -> Result<(PathBuf, BrokerArtifactIdentity), Box<dyn Error>> {
+    let executable_path = env::current_exe()?.canonicalize()?;
+    let executable_hash = format!("{:x}", Sha256::digest(std::fs::read(&executable_path)?));
+    let identity = BrokerArtifactIdentity {
+        package_version: package_version.to_string(),
+        target: BrokerArtifactTarget {
+            os: if cfg!(target_os = "windows") {
+                "win32"
+            } else if cfg!(target_os = "macos") {
+                "darwin"
+            } else {
+                "linux"
+            }
+            .to_string(),
+            arch: if cfg!(target_arch = "aarch64") {
+                "arm64"
+            } else {
+                "x64"
+            }
+            .to_string(),
+        },
+        build_identity: format!("sha256:{}", &executable_hash[..16]),
+        executable_hash,
+    };
+    Ok((executable_path, identity))
 }
 
 fn resolve_non_empty(value: Option<String>, fallback: &str) -> String {
@@ -270,7 +342,8 @@ mod native_broker {
                 TrayIconBackend::with_runtime(NativeTrayIconRuntime::new()),
                 DynamicExtensionLoader::from_env()?,
                 options.default_app_options(),
-            ),
+            )
+            .with_broker_artifact_identity(options.broker_artifact_identity().clone()),
             sessions: HashMap::new(),
             broker_version: options.package_version.clone(),
             idle_timeout: options.idle_timeout,
@@ -545,7 +618,8 @@ mod tests {
 
     use super::{
         broker_disconnect_action, broker_frame_action, parse_broker_options,
-        parse_daemon_idle_timeout, BrokerDisconnectAction, DEFAULT_DAEMON_IDLE_TIMEOUT_MS,
+        parse_daemon_idle_timeout, resolve_current_broker_artifact, BrokerDisconnectAction,
+        DEFAULT_DAEMON_IDLE_TIMEOUT_MS,
     };
     use opentray_spec::ClientFrame;
 
@@ -599,7 +673,11 @@ mod tests {
     }
 
     fn broker_args() -> Vec<String> {
-        [
+        let (executable_path, artifact_identity) =
+            resolve_current_broker_artifact("0.1.0").expect("current broker artifact");
+        let artifact_identity_json =
+            serde_json::to_string(&artifact_identity).expect("artifact identity");
+        vec![
             "--endpoint",
             "/tmp/opentray.sock",
             "--ready-file",
@@ -608,9 +686,13 @@ mod tests {
             "0.1.0",
             "--protocol-version",
             "1",
+            "--broker-executable-path",
+            executable_path.to_str().expect("executable path"),
+            "--broker-artifact-identity",
+            artifact_identity_json.as_str(),
         ]
-        .iter()
-        .map(|value| value.to_string())
+        .into_iter()
+        .map(ToOwned::to_owned)
         .collect()
     }
 

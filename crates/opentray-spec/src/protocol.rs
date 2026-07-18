@@ -288,6 +288,8 @@ pub enum ServerFrame {
         protocol_version: u32,
         #[serde(rename = "brokerVersion")]
         broker_version: String,
+        #[serde(rename = "brokerArtifactIdentity")]
+        broker_artifact_identity: crate::BrokerArtifactIdentity,
         #[serde(rename = "sessionId")]
         session_id: SessionId,
     },
@@ -419,6 +421,15 @@ mod tests {
         let ready = ServerFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
             broker_version: "0.1.0".to_string(),
+            broker_artifact_identity: crate::BrokerArtifactIdentity {
+                package_version: "0.1.0".to_string(),
+                target: crate::BrokerArtifactTarget {
+                    os: "darwin".to_string(),
+                    arch: "arm64".to_string(),
+                },
+                executable_hash: "a".repeat(64),
+                build_identity: "sha256:aaaaaaaaaaaaaaaa".to_string(),
+            },
             session_id: "session-1".to_string(),
         };
 
@@ -436,6 +447,12 @@ mod tests {
                 "type": "ready",
                 "protocolVersion": 1,
                 "brokerVersion": "0.1.0",
+                "brokerArtifactIdentity": {
+                    "packageVersion": "0.1.0",
+                    "target": { "os": "darwin", "arch": "arm64" },
+                    "executableHash": "a".repeat(64),
+                    "buildIdentity": "sha256:aaaaaaaaaaaaaaaa"
+                },
                 "sessionId": "session-1"
             })
         );

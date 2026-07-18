@@ -1,14 +1,18 @@
-import { access } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, readFile, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
+import type { BrokerArtifactIdentity } from "@opentray/spec";
+
 import type { DaemonPaths } from "./paths";
 import {
   type BrokerNativeTarget,
   MissingPlatformBrokerBinaryError,
+  resolveBrokerArtifactTarget,
   resolveBrokerNativeTarget,
 } from "./native-target";
 
@@ -16,6 +20,11 @@ export interface BrokerCommand {
   command: string;
   args: string[];
   cwd?: string;
+}
+
+export interface ResolvedBrokerArtifact extends BrokerCommand {
+  executablePath: string;
+  artifactIdentity: BrokerArtifactIdentity;
 }
 
 const sourceUrl = import.meta.url;
@@ -47,6 +56,45 @@ export interface ResolveBrokerCommandOptions {
   findWorkspaceRoot?: (start: string) => Promise<string | undefined>;
   ensureDevBrokerBinary?: (workspaceRoot: string) => Promise<string>;
 }
+
+export interface ResolveBrokerArtifactOptions extends ResolveBrokerCommandOptions {
+  resolveExecutablePath?: (path: string) => Promise<string>;
+  readExecutable?: (path: string) => Promise<Uint8Array>;
+}
+
+export const resolveBrokerArtifact = async (
+  paths: DaemonPaths,
+  options: ResolveBrokerArtifactOptions = {},
+): Promise<ResolvedBrokerArtifact> => {
+  const command = await resolveBrokerCommand(paths, options);
+  const executablePath = await (options.resolveExecutablePath ?? realpath)(
+    command.command,
+  );
+  const bytes = await (options.readExecutable ?? readFile)(executablePath);
+  const executableHash = createHash("sha256").update(bytes).digest("hex");
+  const artifactIdentity: BrokerArtifactIdentity = {
+    packageVersion: paths.packageVersion,
+    target: resolveBrokerArtifactTarget(
+      options.platform ?? process.platform,
+      options.arch ?? process.arch,
+    ),
+    executableHash,
+    buildIdentity: `sha256:${executableHash.slice(0, 16)}`,
+  };
+  return {
+    ...command,
+    command: executablePath,
+    args: [
+      ...command.args,
+      "--broker-executable-path",
+      executablePath,
+      "--broker-artifact-identity",
+      JSON.stringify(artifactIdentity),
+    ],
+    executablePath,
+    artifactIdentity,
+  };
+};
 
 export const resolveBrokerCommand = async (
   paths: DaemonPaths,
