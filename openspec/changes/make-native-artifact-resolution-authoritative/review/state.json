@@ -6,6 +6,6 @@
     "packed-consumer-release-gate": 1,
     "archive-scenario-identity": 1
   },
-  "updatedAt": "2026-07-18T21:37:40.000Z",
-  "exitCondition": "No unresolved product findings; validate archive scenario identity correction"
+  "updatedAt": "2026-07-18T21:41:43.000Z",
+  "exitCondition": "No unresolved findings; archive commit-check passes"
 }

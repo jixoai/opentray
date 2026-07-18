@@ -5,8 +5,8 @@
 - Change: `make-native-artifact-resolution-authoritative`
 - Iteration: 4
 - Recurring issue counts: `packed-consumer-release-gate: 1`, `archive-scenario-identity: 1`
-- Exit-condition judgment: implementation and independent review fixes are aligned; archive scenario identity correction awaits validation and commit
-- Next loop action: validate and commit the archive correction, rerun archive commit-check, archive the change, then run the final archived audit
+- Exit-condition judgment: implementation, independent review fixes, archive scenario identity, and archive commit-check are aligned
+- Next loop action: archive the change, commit the synchronized specs, then run the final archived audit
 
 ## Intent Alignment
 
