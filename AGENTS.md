@@ -1,3 +1,17 @@
+<!--
+Orthogonal intents (maintained 2026-07-18; original user requests: investigate a macOS
+pnpm-pub window that stopped responding to hide operations until daemon restart; determine why
+skill-creator-v2's Hide Window and primaryEvent fail against the latest OpenTray packages; ensure
+ordinary consumers need only a normal package-manager install for a coherent native runtime):
+1. Preserve the tray-first App/Tray/Session platform laws.
+2. Preserve native runtime and extension package boundaries across macOS and Windows.
+3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
+4. Preserve monorepo, OpenSpec, release, and verification laws.
+5. Preserve platform-specific acceptance evidence without promoting it to cross-platform truth.
+Compromise: AGENTS.md is the required project-wide agent SSOT, so these law families cannot be
+physically split without losing the single discovery entrypoint required by repository tooling.
+-->
+
 # OpenTray Agent Guide
 
 ## Vision
@@ -25,6 +39,25 @@ OpenTray uses the current tray-first model. Application code calls `createTray()
 - Do not add platform special cases into shared layers; expose capability contracts instead.
 
 OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Older docs that still mention them describe an earlier surface model.
+
+## Runtime Compatibility And Diagnosis Laws
+
+The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `skill-creator-v2` retained-window investigations:
+
+- A broker endpoint is currently derived from the caller package version and caller label. That identity does not fingerprint the actual OpenTray broker binary, WebView facade, or native extension library. `already-running` therefore proves process liveness only; it does not prove runtime artifact compatibility.
+- A temporary package runner can install a new OpenTray dependency graph while a same-endpoint broker from an earlier local or cached graph is still alive. Until runtime identity includes an artifact manifest or compatibility fingerprint, restart is the only operation that guarantees broker and extension replacement.
+- Core `opentray` declarations cover generic tray/runtime contracts. Typed WebView window methods, events, and style fields belong to `@opentray/ext-webview`; absence from the core declaration file is package-boundary evidence, not a missing extension capability.
+- A manifest and lockfile describe the requested dependency graph, not the installed graph. Consumer diagnosis must record `pnpm why`, resolved package versions, and `require.resolve()` or equivalent real paths before attributing strict type failures to a published SDK.
+- A normal package-manager install is the consumer contract. Deleting `node_modules`, clearing caches, restarting a broker manually, or setting `OPENTRAY_EXT_PATH` are diagnostic operations only; OpenTray must not require them to obtain a coherent broker/facade/native-extension graph.
+- Dynamic extension discovery currently checks the broker working directory's top-level `node_modules` platform package before facade-nested and pnpm virtual-store candidates. That precedence proves only that a file exists. It does not validate the platform package manifest, version, or artifact hash. An orphaned top-level native package can therefore shadow the installed graph even when `pnpm why` and the lockfile both report the current version.
+- For native command-surface diagnosis, record the library actually loaded by the broker (`lsof -p <pid>` on macOS), then read the `package.json` beside that exact library and compare its hash with the intended virtual-store artifact. `require.resolve()` from the consumer root may identify the same stale top-level package; neither it nor `pnpm why` is sufficient alone.
+- Package-manager resolution belongs to the Node SDK, which can resolve an official extension's platform package relative to the facade package that declared it. The facade may declare a platform-neutral artifact descriptor, but it must not import native packages into its public interface. The broker must receive an exact resolved library path instead of reconstructing npm/pnpm/Yarn/Bun topology in Rust.
+- Dynamic loading is compatible-artifact selection, not first-file discovery. A native extension must expose generic embedded identity (extension name, ABI, artifact-set identity, contract fingerprint, target, and build identity); `load-ext` must carry the facade's expected identity. The generic loader must reject or skip mismatched candidates before init and report every rejection reason without parsing extension-specific commands.
+- Existing-broker reuse must validate the resolved broker artifact identity, not only caller package version, endpoint, or PID liveness. A mismatch must trigger bounded automatic replacement so a dependency update cannot keep an older broker alive behind the same consumer endpoint.
+- Diagnose retained-window failures as a command chain: `menuClick -> facade command -> broker extension dispatch -> native window state`. If `close()/hide()` returns successfully but native visibility stays true, inspect AppKit/Win32 projection. If a newly added command such as `isVisible` is rejected while older event commands still work, inspect broker/dylib command-surface skew before changing window code.
+- The dynamic extension ABI must preserve actionable rejection detail. A bare `returned code 1` only identifies `EXT_ERR_REJECTED`; run an isolated broker with `OPENTRAY_DAEMON_STDIO=inherit` or add bounded diagnostic transport before attributing the failure to a specific native branch.
+- Native acceptance must use one coherent artifact graph. Record the broker executable path, loaded extension library path, hashes or versions, endpoint identity, and PID before a restart destroys the evidence. A successful restart is runtime-replacement evidence, not proof of the original root cause.
+- Extension cleanup remains session-authoritative. Extension state must be scoped to its owning `(appId, trayId, sessionId)` and a session-close callback must not clear another live session's retained window.
 
 ## Windows Tray WebView Laws
 

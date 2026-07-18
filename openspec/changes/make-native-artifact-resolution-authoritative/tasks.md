@@ -1,0 +1,83 @@
+## 1. Alignment / Investigation
+
+- [x] 1.1 Confirm the latest `plans/plan.md` records the live `skill-creator-v2` failure, relevant loader/lifecycle code, existing OpenSpec laws, and the zero-repair install contract.
+- [x] 1.2 Confirm the breaking-update stance: replace bare `TrayExtension.path` and the old extension ABI directly; no compatibility aliases, symbol fallback, cleanup instructions, or identity bypass.
+- [x] 1.3 Confirm the three public TDD seams are `tray.extend(...).ensureLoaded()`, generic `load-ext`, and `connectLocalBroker/startDaemon`.
+- [x] 1.4 Confirm an agent may check off only tasks it completed and verified in the current working context.
+
+## 2. BDD Contract / Spec Evidence
+
+- [ ] 2.1 Scenario: Given a current platform package in a facade-relative pnpm closure and an older unmanaged top-level package When the extension first loads Then the SDK resolves and sends only the facade-relative exact artifact.
+- [ ] 2.2 Scenario: Given a supported descriptor whose platform package is missing When the extension first loads Then the SDK reports a typed target/package resolution error before broker dispatch.
+- [ ] 2.3 Scenario: Given an exact dylib with a mismatched embedded manifest When `load-ext` validates it Then init is never called and expected/actual identity is returned.
+- [ ] 2.4 Scenario: Given an extension rejects a command with native detail When the broker reports the failure Then category/message survive instead of collapsing to numeric code.
+- [ ] 2.5 Scenario: Given a live same-endpoint broker with missing or different artifact identity When the SDK auto-starts Then it stops and replaces that PID under the daemon lock.
+- [ ] 2.6 Scenario: Given a live same-endpoint broker with matching identity When the SDK auto-starts Then it returns `already-running` without spawning.
+- [ ] 2.7 Scenario: Given packed facade/platform tarballs installed in a temporary pnpm consumer with an orphan top-level platform package When artifact resolution runs Then the current nested artifact wins without environment overrides.
+- [ ] 2.8 Scenario: Given a correctly versioned platform package containing a stale native binary When release verification inspects embedded identity Then the release gate fails.
+
+## 3. Git Evidence Before Apply
+
+- [x] 3.1 Run `bun run openspec:vision -- validate make-native-artifact-resolution-authoritative` after plan/spec/task authoring.
+- [x] 3.2 Run `bun run openspec:vision -- commit-check make-native-artifact-resolution-authoritative --phase research-plan`.
+- [x] 3.3 Commit plan, specs, tasks, and directly related platform-language law before product-code work.
+
+## 4. Phase One - Exact Artifact Resolution
+
+- [ ] 4.1 Add red client-SDK behavior tests for facade-relative resolution, orphan top-level shadowing, target selection, and missing packages through the public extension-load seam.
+- [ ] 4.2 Replace `TrayExtension.path` and path overrides with a documented platform-neutral native artifact descriptor and exact-file custom descriptor.
+- [ ] 4.3 Implement a deep Node resolver that reads facade package/contract manifests, uses package resolution from the facade origin, validates package target metadata, and returns exact path plus expected identity.
+- [ ] 4.4 Update WebView and Badge official facades to declare descriptors; introduce the same mounted `LynxExt` shape instead of manual identity-free loading.
+- [ ] 4.5 Remove normal package-root reconstruction from the broker request contract and preserve only explicit exact-file / diagnostic override inputs.
+- [ ] 4.6 Add concise intent comments at descriptor resolution and exact-path dispatch explaining package-manager authority and the zero-repair consumer contract.
+- [ ] 4.7 Run focused TypeScript tests/typechecks, mark verified Phase One BDD/tasks, and commit code/tests/task evidence together.
+
+## 5. Phase Two - Extension Manifest And Structured Errors
+
+- [ ] 5.1 Add red `opentray-spec` / `opentray-bin` tests requiring manifest and structured-error ABI symbols and proving manifest validation occurs before init.
+- [ ] 5.2 Add one canonical extension contract manifest per official facade and include it in packed package files.
+- [ ] 5.3 Replace the dynamic extension ABI with required manifest and structured-error buffer symbols; update C-compatible types and required-symbol law.
+- [ ] 5.4 Export embedded manifests from WebView, Badge, and Lynx using facade package version, contract fingerprint, target, and build identity supplied from one source of truth.
+- [ ] 5.5 Validate exact expected/actual identities generically in `opentray-bin`; never parse extension product commands.
+- [ ] 5.6 Preserve structured init/command/session-cleanup error category and message through `ExtensionError` and client-visible kernel errors.
+- [ ] 5.7 Update native staging/release verification to compare packed facade expectation, platform metadata, and embedded manifest; add stale-binary failure fixture.
+- [ ] 5.8 Add concise intent comments at pre-init validation and structured error extraction.
+- [ ] 5.9 Run focused Rust/facade/release tests plus linkage/size inspection, mark verified Phase Two BDD/tasks, and commit code/tests/task evidence together.
+
+## 6. Phase Three - Broker Artifact Identity
+
+- [ ] 6.1 Add red daemon lifecycle tests for matching reuse, mismatched replacement, missing-identity replacement, bounded stop, and concurrent starts.
+- [ ] 6.2 Resolve the broker command once per start attempt and compute a SHA-256 artifact identity from executable bytes plus target.
+- [ ] 6.3 Pass broker artifact identity/path to the spawned broker and write them into caller-scoped `ready.json` on macOS/Linux and Windows.
+- [ ] 6.4 Add broker artifact identity to protocol ready frames and validate expected/actual identity before client init succeeds.
+- [ ] 6.5 Under the daemon lock, replace live brokers whose ready identity is missing/mismatched; reuse only exact matches and preserve caller/version isolation.
+- [ ] 6.6 Add concise intent comments at the liveness-versus-identity decision and bounded replacement path.
+- [ ] 6.7 Run focused lifecycle/protocol/Rust transport tests, mark verified Phase Three BDD/tasks, and commit code/tests/task evidence together.
+
+## 7. Consumer And Repository Verification
+
+- [ ] 7.1 Pack current packages and build a clean temporary pnpm consumer that loads an official extension without artifact overrides.
+- [ ] 7.2 Add an orphan older top-level platform package to the temporary consumer and prove facade-relative exact resolution still selects the current packed artifact.
+- [ ] 7.3 Run the equivalent clean flat npm-compatible resolution fixture or deterministic packed-tarball test.
+- [ ] 7.4 Run `cargo test -p opentray-spec -p opentray-core -p opentray-bin -p opentray-ext-webview -p opentray-ext-badge -p opentray-ext-lynx`.
+- [ ] 7.5 Run `pnpm --filter @opentray/spec test`, `pnpm --filter opentray test`, and all official extension facade tests/typechecks.
+- [ ] 7.6 Run `pnpm run build`, `pnpm run verify`, `openspec validate --all --strict`, and `git diff --check`.
+- [ ] 7.7 Build release broker/native extensions, inspect sizes and `otool -L`, and run the source-tree visible WebView smoke without diagnostic overrides.
+- [ ] 7.8 Run `bun run openspec:vision -- validate make-native-artifact-resolution-authoritative` after final implementation/task evidence.
+
+## 8. Independent Review / Self-Review Loop
+
+- [ ] 8.1 Run `bun run openspec:vision -- commit-check make-native-artifact-resolution-authoritative --phase self-review`.
+- [ ] 8.2 Run the two-axis code review from the pre-change fixed point: Standards against `AGENTS.md` and repo skills, Spec against this change's `plans/plan.md` and delta specs.
+- [ ] 8.3 Resolve every review finding, reopen affected tasks, rerun relevant red/green and full gates, and commit any OpenSpec corrections before more implementation.
+- [ ] 8.4 Generate `review/self-review.md` comparing every intent/spec/phase/verification requirement against current evidence.
+- [ ] 8.5 Generate separate `review/self-review.html` presenting the three artifact identity flows, verification commands, and final evidence without embedding it in Markdown.
+- [ ] 8.6 If review enters another loop, run `bun run openspec:vision -- review-state make-native-artifact-resolution-authoritative` and persist recurrence evidence.
+
+## 9. Archive / Completion Audit
+
+- [ ] 9.1 Confirm all task checkboxes are backed by current-context command or artifact evidence and no requirement is inferred from a narrower test.
+- [ ] 9.2 Run `bun run openspec:vision -- commit-check make-native-artifact-resolution-authoritative --phase archive`.
+- [ ] 9.3 Archive with the repository-supported OpenSpec archive command and keep archive/spec sync separate from product-code commits.
+- [ ] 9.4 Commit the archive result as a dedicated `docs(spec):` commit.
+- [ ] 9.5 Run the final vision-driven check against the archived change, strict all-spec validation, clean-worktree audit, and requirement-by-requirement completion audit.
