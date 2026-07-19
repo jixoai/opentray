@@ -1,9 +1,13 @@
 #!/usr/bin/env bun
-import { mkdtemp, rm } from "node:fs/promises";
+// Orthogonal intents (maintained 2026-07-19; original user request: publish OpenTray and verify skill-creator-v2):
+// 1. Validate required native payloads after npm packing.
+// 2. Read tarball metadata consistently across POSIX and Windows hosts.
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { parseArgs } from "node:util";
+import { gunzipSync } from "node:zlib";
 
 import { nativeTargets } from "./artifacts";
 
@@ -119,6 +123,34 @@ export function parsePackedTarEntries(listing: string): readonly PackedTarEntry[
     });
 }
 
+export function parsePackedTarArchive(archive: Uint8Array): readonly PackedTarEntry[] {
+  const entries: PackedTarEntry[] = [];
+  let offset = 0;
+
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) {
+      break;
+    }
+
+    const name = readTarField(header, 0, 100);
+    const prefix = readTarField(header, 345, 155);
+    const path = prefix.length === 0 ? name : `${prefix}/${name}`;
+    const mode = parseTarOctal(header, 100, 8);
+    const size = parseTarOctal(header, 124, 12);
+    const type = header[156] === 100 ? "d" : "-";
+
+    entries.push({
+      mode: formatTarMode(type, mode),
+      path: path.replace(/^package\//u, ""),
+    });
+
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+
+  return entries;
+}
+
 function parsePackageDirs(value: string): string[] {
   let parsed: unknown;
   try {
@@ -204,8 +236,36 @@ async function packPackageDir(
 }
 
 async function listPackedTarEntries(tarballPath: string): Promise<readonly PackedTarEntry[]> {
-  const listing = await runCommand("tar", ["-tvzf", tarballPath], process.cwd());
-  return parsePackedTarEntries(listing);
+  const compressed = await readFile(tarballPath);
+  return parsePackedTarArchive(gunzipSync(compressed));
+}
+
+function readTarField(header: Uint8Array, offset: number, length: number): string {
+  const field = header.subarray(offset, offset + length);
+  const end = field.findIndex((byte) => byte === 0);
+  return new TextDecoder().decode(end === -1 ? field : field.subarray(0, end)).trim();
+}
+
+function parseTarOctal(header: Uint8Array, offset: number, length: number): number {
+  const value = readTarField(header, offset, length).trim();
+  return value.length === 0 ? 0 : Number.parseInt(value, 8);
+}
+
+function formatTarMode(type: string, mode: number): string {
+  const permissions = [
+    [0o400, "r"],
+    [0o200, "w"],
+    [0o100, "x"],
+    [0o040, "r"],
+    [0o020, "w"],
+    [0o010, "x"],
+    [0o004, "r"],
+    [0o002, "w"],
+    [0o001, "x"],
+  ] as const;
+  return `${type}${permissions
+    .map(([bit, character]) => ((mode & bit) === 0 ? "-" : character))
+    .join("")}`;
 }
 
 function isExecutableMode(mode: string): boolean {
