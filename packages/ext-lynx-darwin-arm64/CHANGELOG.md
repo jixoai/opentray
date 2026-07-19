@@ -1,5 +1,11 @@
 # @opentray/ext-lynx-darwin-arm64
 
+## 0.12.0
+
+### Minor Changes
+
+- fc72702: Resolve native extensions from the facade dependency closure, validate embedded artifact identity before init, preserve structured native errors, and reject stale broker or extension artifacts without consumer cleanup steps.
+
 ## 0.11.1
 
 ## 0.11.0

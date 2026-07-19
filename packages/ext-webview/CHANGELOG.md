@@ -1,5 +1,11 @@
 # @opentray/ext-webview
 
+## 0.15.0
+
+### Minor Changes
+
+- fc72702: Resolve native extensions from the facade dependency closure, validate embedded artifact identity before init, preserve structured native errors, and reject stale broker or extension artifacts without consumer cleanup steps.
+
 ## 0.14.4
 
 ### Patch Changes
