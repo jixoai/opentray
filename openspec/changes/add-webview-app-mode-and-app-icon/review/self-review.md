@@ -46,3 +46,11 @@ These are acceptance and architecture follow-ups, not hidden compatibility shims
 ## Decision
 
 The implementation slice is internally consistent and passes all available automated gates. Keep this OpenSpec change active until the platform GUI and multi-runtime Darwin aggregation evidence is available; do not archive it as fully complete yet.
+
+## Review Reopened: Darwin Carrier Launch Identity
+
+The 2026-07-19 consumer acceptance invalidated the earlier carrier conclusion. `skill-creator-v2`
+did enter Dock, but macOS displayed `opentray` and the generic executable icon. Repository evidence
+shows why: the runtime package staged an independent idle Swift `.app`, while the SDK continued to
+spawn raw `bin/opentray`. Tasks 6.8-6.10 and 7.6 are reopened/new apply work. Visual acceptance is
+delegated to the user after the linked local preparation path is ready.

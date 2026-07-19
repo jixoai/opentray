@@ -40,12 +40,29 @@ The published `@opentray/darwin-arm64` and `@opentray/darwin-x64` runtime packag
 
 `opentray-core` SHALL remain platform-neutral: it may define App identity state, protocol frames, and `AppProjection`, but it SHALL NOT contain AppKit code, `.app` bundle files, or carrier launch logic. `@opentray/ext-badge` SHALL own only badge/overlay semantics and its native library; it SHALL consume the shared carrier contract when needed and SHALL NOT be the distribution owner of the runtime carrier.
 
+The carrier SHALL contain the matching broker executable. The Node runtime SHALL materialize the carrier atomically in the caller-scoped runtime directory, project the caller `appId` and bootstrap `appName` into its bundle metadata, and launch the broker from `Contents/MacOS`. Shipping an idle helper bundle beside a separately launched raw broker SHALL NOT satisfy this requirement.
+
 #### Scenario: Darwin package installs a complete runtime
 
 - **GIVEN** a consumer installs a supported `@opentray/darwin-*` package through the normal package manager flow
 - **WHEN** the runtime host starts an app-mode WebView
 - **THEN** the package can discover both the matching broker executable and shared `.app` carrier from its own artifact graph
 - **AND** no consumer-side copy, manual helper install, or `ext-badge` dependency is required.
+
+#### Scenario: Broker executes inside the caller carrier
+
+- **GIVEN** a supported Darwin runtime package contains a broker-bearing carrier template
+- **WHEN** a caller starts OpenTray with `appId: "com.skill-creator"` and `appName: "Skill Creator"`
+- **THEN** the SDK materializes a caller-scoped `.app`
+- **AND** the broker `current_exe()` is that bundle's `Contents/MacOS` executable
+- **AND** the Dock identity is `Skill Creator`, not the raw executable name `opentray`.
+
+#### Scenario: Carrier reuse remains artifact-coherent
+
+- **GIVEN** a caller-scoped carrier was materialized from one broker artifact
+- **WHEN** the resolved carrier or broker artifact identity changes
+- **THEN** the SDK replaces the materialized carrier under the existing lifecycle lock
+- **AND** an already-running broker is reused only when its executable path and artifact identity match the current materialized bundle.
 
 #### Scenario: Core crate remains free of bundle ownership
 

@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 4
-- Status: macOS acceptance proved that packaging a carrier zip is insufficient: the raw broker still enters Dock as `opentray` with the generic `exec` icon. The runtime must execute the broker from a caller-materialized `.app` and project the Core App icon before app-mode promotion.
-- Previous plan backup: `plans/plan-v3.md`
+- Round: 3
+- Status: User confirmed that the platform-neutral Core owns App identity contracts, while the published Darwin runtime must include the shared `.app` carrier. The carrier is being moved out of extension-private packaging.
+- Previous plan backup: `plans/plan-v2.md`
 
 ## Workflow Command Surface
 
@@ -33,10 +33,6 @@
 > 建议用 style.appMode:bool ，然后顶层加一个 appIcon 字段，默认继承 icon。你看这个设计行不行，怎么改进
 >
 > 开始使用 openspe 进行推进
->
-> 我现在 pnpm dev 启动后，dock确实出现了一个图标。但是这个新图标有问题，title是opentray，然后图标是一个 exec图标
->
-> 因为要快速迭代，skill-creator-v2建议先直接link本地的 opentray。你只需要确保每次我做 pnpm dev 之前的所有准备工作就行
 
 ## Objective Record
 
@@ -54,8 +50,6 @@
 | 8 | User | Requested that `appIcon` inheritance follow Windows system icon matching rules. | The resolver must separate AppUserModelID/group identity from icon artwork and prefer native App identity sources before convenience tray inheritance. |
 | 9 | User | Asked for interfaces to change App icon and title, and whether they belong in `ext-badge` or Core. | App identity mutation is a Core/runtime contract; ext-badge remains status overlay capability; window title/icon remain ext-webview metadata. |
 | 10 | User | Clarified that although the platform-neutral Core must not package `.app`, the OpenTray core runtime distribution should contain the App bundle. | Separate kernel source ownership from Darwin runtime distribution: the shared carrier ships with `@opentray/darwin-*`, while `ext-badge` no longer owns a private carrier. |
-| 11 | User | macOS visual acceptance found a Dock item titled `opentray` with the generic `exec` icon. | A carrier artifact that is merely staged but never launches the broker is not a carrier implementation. The broker must run from a caller-specific materialized bundle and App artwork must reach `NSApplication`. |
-| 12 | User | During rapid iteration, `skill-creator-v2` should directly link the local OpenTray checkout; every `pnpm dev` must prepare all required local artifacts first. | Add a reproducible linked-consumer preparation command and wire it into `skill-creator-v2` `predev`; do not require a publish cycle for native acceptance. |
 
 ### Evidence Read
 
@@ -82,8 +76,6 @@
 | `crates/opentray-core/src/kernel.rs:94-106,267-288` | Core stores `AppOptions` and reprojects app title/icon together with trays. | Add app-level mutation methods and protocol frames rather than routing identity through an extension. |
 | `packages/ext-badge/src/shared.ts` | Badge owns badge text/count, progress, overlay icon, and attention. | Base app title/icon are orthogonal to badge status and must not be added to the badge extension. |
 | `crates/opentray-ext-webview/src/macos/metadata.rs:54-125` | WebView `setTitle` and `setIcon` intentionally mutate only `NSWindow` metadata. | Window metadata APIs must remain separate from App identity APIs. |
-| `packages/darwin-app-carrier/main.swift` and `packages/cli/src/daemon/broker-command.ts` | The staged carrier is a separate idle Swift application, while the SDK still launches the raw `bin/opentray` executable. | This directly explains the accepted Dock defect: AppKit sees the raw executable, so bundle display name and icon never become broker identity. |
-| macOS acceptance, 2026-07-19 | App mode produced a Dock item, but its title was `opentray` and its artwork was the generic executable icon. | Activation policy works, but carrier launch identity and App icon projection are incomplete. |
 | Microsoft Learn `shell/appids` | Windows taskbar associates processes/windows with explicit AppUserModelID; shortcut/relaunch metadata supplies application identity, and window-level identity can override process identity. | `appId` controls Shell grouping; `appIcon` is the artwork source. Do not treat tray icon selection as the Windows identity mechanism. |
 | Microsoft Learn `shell/taskbar-extensions` | Taskbar overlays are status notifications on an existing application button, not the base application icon. | Confirms ext-badge belongs to overlay/status effects, not base App icon/title. |
 
@@ -150,7 +142,7 @@
 
 ### Final Visible Effect
 
-在 `skill-creator-v2` 中，用户从托盘点一次，应用窗口显示并获得焦点；Windows 任务栏/Alt+Tab 和 macOS Dock/应用切换器都把它当普通应用处理。macOS Dock 显示 `Skill Creator` 和调用方提供的 App 图标，而不是 `opentray`/`exec`。点击窗口关闭按钮只隐藏保留的窗口 session，系统 Shell 图标随之消失；再次点击托盘会恢复同一个窗口和页面状态。应用不需要置顶，也不会因为失去焦点而意外消失。托盘仍是生命周期入口，关闭 runtime/session 后所有 native 状态清理。
+在 `skill-creator-v2` 中，用户从托盘点一次，应用窗口显示并获得焦点；Windows 任务栏/Alt+Tab 和 macOS Dock/应用切换器都把它当普通应用处理。点击窗口关闭按钮只隐藏保留的窗口 session，系统 Shell 图标随之消失；再次点击托盘会恢复同一个窗口和页面状态。应用不需要置顶，也不会因为失去焦点而意外消失。托盘仍是生命周期入口，关闭 runtime/session 后所有 native 状态清理。
 
 ## Platform Diagnosis
 
@@ -217,12 +209,6 @@ The operator sees one application, not a new panel on every click. Tray and wind
 ```text
 createTray(options, runtimeOptions)
         |
-        +--> Darwin runtime materializer
-        |       { carrier template, appId, appName }
-        |              |
-        |              v
-        |       <runtime>/OpenTray.app/Contents/MacOS/opentray
-        |
         +--> App identity { appId, appName, resolvedAppIcon }
         |       |
         |       +--> AppHandle.setName / setIcon
@@ -241,7 +227,7 @@ createTray(options, runtimeOptions)
 
 The kernel remains backend-neutral. The extension owns WebView commands and session state. Core owns App identity state and mutation frames; adapters consume the resulting projection. `ext-badge` owns only status overlays and attention. No layer infers app mode or App identity from a window title/icon.
 
-The shared Darwin carrier is composed and published by the Darwin runtime package. The SDK materializes that template inside the caller-scoped runtime directory and launches the broker from the bundle executable path; staging an unrelated idle `.app` beside a raw broker is not sufficient. `ext-badge` may consume that carrier contract, but it does not own an `OpenTrayBadgeHelper.app` lifecycle or make its package the source of the runtime App bundle.
+The shared Darwin carrier is composed and published by the Darwin runtime package. `ext-badge` may consume that carrier contract, but it does not own an `OpenTrayBadgeHelper.app` lifecycle or make its package the source of the runtime App bundle.
 
 ### User Confirmation Gates
 
@@ -268,7 +254,7 @@ The shared Darwin carrier is composed and published by the Darwin runtime packag
 
 | Question | Why it matters | Default assumption until user answers |
 | -------- | -------------- | ------------------------------------- |
-| What is the exact carrier launch/discovery mechanism for each Darwin runtime package? | The package must ship one coherent broker-plus-carrier artifact graph without making consumers hand-install a helper. | Decided: package a broker-bearing carrier template, materialize it atomically under the caller runtime directory, set `CFBundleIdentifier`/`CFBundleName`/`CFBundleDisplayName`, then launch that bundle's broker executable. |
+| What is the exact carrier launch/discovery mechanism for each Darwin runtime package? | The package must ship one coherent broker-plus-carrier artifact graph without making consumers hand-install a helper. | The `@opentray/darwin-*` package owns the shared carrier and runtime host discovery; consumer setup remains a normal package-manager install. |
 | What should Linux report for `appMode` before a Shell projection is implemented? | A false success would break the capability law. | Keep `appMode` accepted only where the adapter can report truthful Shell behavior; otherwise expose capability absence or a typed unsupported result. |
 | Should App identity icon resolution reject an incompatible explicit icon or fall back? | Silent fallback can make a signed app appear with the wrong identity. | Reject an explicit non-native-capable `appIcon`; only implicit inheritance may use the documented fallback chain. |
 | Should App title mutation rename the OS bundle/process? | macOS bundle display name and Windows shortcut identity are packaging/Shell metadata, not freely mutable runtime projection. | No. Mutate logical App name and supported current projections; keep window title and packaged bundle identity separate. |

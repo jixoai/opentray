@@ -20,6 +20,7 @@
 - [x] 2.10 Boundary: Verify that no public TypeScript declaration, README, changelog, or example teaches `showInSwitchers` after migration.
 - [x] 2.11 Boundary: Verify that app-mode capability DTO fields are serialized symmetrically in TypeScript, protocol, Windows, macOS, and any adapter that claims support.
 - [x] 2.12 Confirm each checkbox in this file is checked only by the agent that completed and verified the task in the current working context.
+- [x] 2.13 Regression: Given the published Darwin carrier zip is staged but the SDK launches raw `bin/opentray` When `appMode` promotes the process Then the Dock exposes `opentray` plus the generic `exec` icon; require a broker-bearing caller carrier and Core App artwork projection instead.
 
 ## 3. OpenSpec Evidence Gate
 
@@ -57,6 +58,9 @@
 - [ ] 6.5 Project App identity artwork/name through the carrier only where the platform supports runtime mutation; do not rewrite packaged shortcut/bundle metadata.
 - [ ] 6.6 Add Darwin native tests for first-window promotion, multi-window retention, last-window demotion, explicit App icon, App mutation, native close, tray reveal, and cleanup.
 - [ ] 6.7 Add a macOS human-visible smoke command or update an existing WebView example so the Dock/application-switching effect can be inspected.
+- [ ] 6.8 Replace the idle Swift runtime carrier with a broker-bearing carrier template and make native build/staging prove that the bundled executable bytes equal the paired broker artifact.
+- [ ] 6.9 Materialize the Darwin carrier atomically per caller, project `appId`/bootstrap `appName` into `Info.plist`, launch `Contents/MacOS/opentray`, and include the materialized executable path in broker reuse authority.
+- [ ] 6.10 Project native-capable Core App artwork to `NSApplication` before app-mode promotion and reject template-only tray artwork as App identity fallback.
 
 ## 7. Consumer Migration
 
@@ -65,6 +69,7 @@
 - [x] 7.3 Keep `primaryEvent` labels and handlers derived from `isVisible()` / `visibleChange`, using `show()` only for first bootstrap, `toVisible()` for reveal, and `close()` for hide.
 - [ ] 7.4 Add or update consumer acceptance coverage for tray open, native close, taskbar/Dock icon removal, second tray open, retained page state, and final session cleanup.
 - [ ] 7.5 Update consumer skill and WebView README examples to teach `appMode` as the product decision and `appIcon` as App identity input.
+- [ ] 7.6 Link `skill-creator-v2` directly to the local `opentray` and `@opentray/ext-webview` packages, pass an explicit non-template `appIcon`, and wire `predev` to one OpenTray preparation command that builds/stages facade, broker, carrier, and WebView artifacts.
 
 ## 8. Verification And Task Progress
 
@@ -73,6 +78,7 @@
 - [ ] 8.3 Run the exact `skill-creator-v2` `pnpm dev` flow against the local OpenTray artifacts and record the visible tray/window result.
 - [x] 8.4 Run `bun run openspec:vision -- validate add-webview-app-mode-and-app-icon`, `git diff --check`, and the narrowest repo verification gate that covers changed packages.
 - [x] 8.5 Update only task checkboxes completed and verified in the current context, then commit the task-progress update with matching code/BDD evidence.
+- [ ] 8.6 Verify the linked-consumer preparation from a clean staged-artifact state, start the exact `skill-creator-v2` `pnpm dev` path without publishing, and hand macOS visual acceptance to the user.
 
 ## 9. Self-Review Loop
 

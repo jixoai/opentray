@@ -24,6 +24,21 @@ explicit appIcon
 - **THEN** the explicit app icon is selected
 - **AND** the tray icon remains only the tray projection.
 
+#### Scenario: Darwin projects App artwork before Dock participation
+
+- **GIVEN** a Darwin caller provides a native-capable explicit `appIcon`
+- **WHEN** the Core App projection is synchronized before the first app-mode window is shown
+- **THEN** the carrier process applies that image to `NSApplication`
+- **AND** Dock never falls back to the generic executable icon for that app-mode reveal.
+
+#### Scenario: Tray template image is not an App icon
+
+- **GIVEN** runtime options omit `appIcon`
+- **AND** the first tray icon selects a Darwin template image intended for the menu bar
+- **WHEN** App identity fallback is resolved
+- **THEN** the template image is not promoted as application artwork
+- **AND** the runtime continues to the packaged carrier or operating-system fallback.
+
 #### Scenario: App icon follows native identity precedence before tray convenience
 
 - **GIVEN** runtime options omit `appIcon`
