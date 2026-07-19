@@ -1,5 +1,11 @@
 # @opentray/darwin-x64
 
+## 0.16.0
+
+### Minor Changes
+
+- f543322: Add the common `style.appMode` shell intent, Core App identity mutation APIs, and Darwin runtime carrier ownership for application-mode WebViews. Consumers can provide `appIcon` at runtime and no longer need the removed Windows-specific switcher field or a keep-on-top workaround for application discoverability.
+
 ## 0.15.0
 
 ## 0.14.4
