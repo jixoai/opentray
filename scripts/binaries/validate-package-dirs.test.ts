@@ -18,17 +18,13 @@ describe("Feature: native package publish validator", () => {
   });
 
   test("Scenario: Given a WebView native package When required entries are resolved Then only the staged dylib or DLL is required", () => {
-    expect(
-      resolveRequiredPackageEntries("packages/ext-webview-darwin-arm64")
-    ).toEqual([
+    expect(resolveRequiredPackageEntries("packages/ext-webview-darwin-arm64")).toEqual([
       {
         path: "lib/libopentray_ext_webview.dylib",
         executable: false,
       },
     ]);
-    expect(
-      resolveRequiredPackageEntries("packages/ext-webview-windows-x64")
-    ).toEqual([
+    expect(resolveRequiredPackageEntries("packages/ext-webview-windows-x64")).toEqual([
       {
         path: "bin/opentray_ext_webview.dll",
         executable: false,
@@ -61,8 +57,8 @@ describe("Feature: native package publish validator", () => {
         [
           "-rwxr-xr-x  0 0      0     123 Oct 26  1985 package/bin/opentray",
           "-rw-r--r--  0 0      0      45 Oct 26  1985 package/README.md",
-        ].join("\n")
-      )
+        ].join("\n"),
+      ),
     ).toEqual([
       {
         mode: "-rwxr-xr-x",

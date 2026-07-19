@@ -42,6 +42,8 @@ const packageManager = parsePackageManager(values["package-manager"] ?? "pnpm");
 const target = parseTarget(values.target ?? defaultPackedTarget());
 const targetPackages = packagesForTarget(target);
 const workspacePackageManager = await readWorkspacePackageManager(join(root, "package.json"));
+const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const packageManagerCommand = resolvePackageManagerCommand(packageManager);
 const fixtureRoot = await mkdtemp(join(tmpdir(), `opentray-${packageManager}-consumer-`));
 
 try {
@@ -60,7 +62,11 @@ try {
   for (const packageDir of packageDirs) {
     const absolutePackageDir = join(root, packageDir);
     const manifest = await readManifest(join(absolutePackageDir, "package.json"));
-    await run("pnpm", ["--dir", absolutePackageDir, "pack", "--pack-destination", packDir], root);
+    await run(
+      pnpmCommand,
+      ["--dir", absolutePackageDir, "pack", "--pack-destination", packDir],
+      root,
+    );
     tarballs.set(manifest.name, join(packDir, tarballName(manifest)));
   }
 
@@ -94,7 +100,7 @@ try {
   await writeFile(join(consumerDir, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);
 
   await run(
-    packageManager,
+    packageManagerCommand,
     packageManager === "pnpm"
       ? ["install", "--ignore-scripts"]
       : ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
@@ -194,6 +200,10 @@ function packagesForTarget(target: PackedTarget): TargetPackages {
 function parsePackageManager(value: string): PackageManager {
   if (value === "pnpm" || value === "npm") return value;
   throw new Error(`unsupported package manager: ${value}`);
+}
+
+function resolvePackageManagerCommand(packageManager: PackageManager): string {
+  return process.platform === "win32" ? `${packageManager}.cmd` : packageManager;
 }
 
 function parseTarget(value: string): PackedTarget {

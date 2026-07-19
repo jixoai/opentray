@@ -46,14 +46,9 @@ if (import.meta.main) {
   }
 }
 
-export async function validatePackageDir(
-  workspaceRoot: string,
-  packageDir: string
-): Promise<void> {
+export async function validatePackageDir(workspaceRoot: string, packageDir: string): Promise<void> {
   const requiredEntries = resolveRequiredPackageEntries(packageDir);
-  const packDirectory = await mkdtemp(
-    join(tmpdir(), "opentray-validate-package-dirs-")
-  );
+  const packDirectory = await mkdtemp(join(tmpdir(), "opentray-validate-package-dirs-"));
   try {
     const tarballPath = await packPackageDir(workspaceRoot, packageDir, packDirectory);
     const entries = await listPackedTarEntries(tarballPath);
@@ -67,7 +62,7 @@ export async function validatePackageDir(
           ...missing.map((entry) => `- ${entry.path}`),
           "packed entries:",
           ...entries.map((entry) => `- ${entry.path}`),
-        ].join("\n")
+        ].join("\n"),
       );
     }
 
@@ -86,7 +81,7 @@ export async function validatePackageDir(
             const packedEntry = byPath.get(entry.path);
             return `- ${entry.path} (${packedEntry?.mode ?? "missing"})`;
           }),
-        ].join("\n")
+        ].join("\n"),
       );
     }
   } finally {
@@ -94,9 +89,7 @@ export async function validatePackageDir(
   }
 }
 
-export function resolveRequiredPackageEntries(
-  packageDir: string
-): readonly RequiredPackageEntry[] {
+export function resolveRequiredPackageEntries(packageDir: string): readonly RequiredPackageEntry[] {
   const expected = packageEntryExpectations.get(packageDir);
   if (expected === undefined) {
     throw new Error(`unsupported native package directory: ${packageDir}`);
@@ -192,10 +185,7 @@ function createPackageEntryExpectations(): ReadonlyMap<string, readonly Required
           ? []
           : [
               {
-                path: relativeArtifactPath(
-                  target.badgePackageDir,
-                  target.badgeHelperArtifact
-                ),
+                path: relativeArtifactPath(target.badgePackageDir, target.badgeHelperArtifact),
                 executable: false,
               } satisfies RequiredPackageEntry,
             ]),
@@ -216,12 +206,12 @@ function relativeArtifactPath(packageDir: string, artifactPath: string): string 
 async function packPackageDir(
   workspaceRoot: string,
   packageDir: string,
-  packDirectory: string
+  packDirectory: string,
 ): Promise<string> {
   const output = await runCommand(
     "pnpm",
     ["pack", "--json", "--pack-destination", packDirectory],
-    join(workspaceRoot, packageDir)
+    join(workspaceRoot, packageDir),
   );
   const parsed: unknown = JSON.parse(output);
   if (
@@ -272,11 +262,7 @@ function isExecutableMode(mode: string): boolean {
   return mode.slice(1).includes("x");
 }
 
-function runCommand(
-  command: string,
-  args: readonly string[],
-  cwd: string
-): Promise<string> {
+function runCommand(command: string, args: readonly string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
       cwd,
@@ -300,8 +286,8 @@ function runCommand(
       }
       reject(
         new Error(
-          `${command} ${args.join(" ")} failed with code ${code ?? "unknown"}\n${stderr || stdout}`
-        )
+          `${command} ${args.join(" ")} failed with code ${code ?? "unknown"}\n${stderr || stdout}`,
+        ),
       );
     });
   });
