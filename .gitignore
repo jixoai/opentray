@@ -11,6 +11,7 @@ dist/
 coverage/
 .turbo/
 .vite/
+.svelte-kit/
 .worktree/
 research/
 
@@ -19,6 +20,7 @@ target/
 
 # CI/local staging places generated native artifacts into package directories.
 packages/*/bin/opentray*
+packages/darwin-*/app/*.zip
 packages/ext-webview-*/bin/*.dll
 packages/ext-webview-*/lib/*.dylib
 packages/ext-webview-*/lib/*.so
