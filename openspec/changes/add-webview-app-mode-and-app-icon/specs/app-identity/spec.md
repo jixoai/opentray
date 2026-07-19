@@ -4,15 +4,17 @@
 
 The app-facing runtime configuration SHALL accept optional `appIcon?: Icon` alongside `appId` and `appName`. `appIcon` SHALL describe process-level Dock/taskbar identity and SHALL NOT be a WebView window metadata field. A WebView title, favicon, or `window.setIcon()` call SHALL NOT mutate the App identity icon.
 
-The runtime SHALL resolve one immutable App identity snapshot at initialization. Resolution order SHALL be:
+The runtime SHALL resolve one App identity snapshot at initialization. Resolution order SHALL follow the Windows distinction between Shell grouping identity and artwork source:
 
 ```text
 explicit appIcon
-  > first tray icon at app initialization
-  > packaged Darwin carrier or platform runtime icon
+  > packaged/carrier App identity artwork
+  > explicit protocol AppOptions.icon
+  > first native-capable tray icon at app initialization
+  > operating-system executable/default icon
 ```
 
-The resolved value SHALL be reused by all app-mode windows in that runtime. Later tray icon updates and later WebView icon updates SHALL not change the App identity snapshot. An explicit `appIcon` that is not native-capable SHALL reject with a typed validation error; the runtime SHALL not silently substitute a page URL or a tray-only text template.
+`appId` SHALL remain the stable Windows AppUserModelID/grouping identity; it SHALL not be inferred from icon content. The resolved artwork SHALL be reused by all app-mode windows in that runtime. Later tray icon updates and later WebView icon updates SHALL not change the App identity snapshot unless an explicit App identity mutation is requested. An explicit `appIcon` that is not native-capable SHALL reject with a typed validation error; the runtime SHALL not silently substitute a page URL or a tray-only text template.
 
 #### Scenario: Explicit app icon wins
 
@@ -22,9 +24,19 @@ The resolved value SHALL be reused by all app-mode windows in that runtime. Late
 - **THEN** the explicit app icon is selected
 - **AND** the tray icon remains only the tray projection.
 
-#### Scenario: App icon inherits the first tray icon once
+#### Scenario: App icon follows native identity precedence before tray convenience
 
 - **GIVEN** runtime options omit `appIcon`
+- **AND** the packaged/carrier identity has a native app icon
+- **AND** the first tray created during initialization provides a native-capable icon
+- **WHEN** the App identity is initialized
+- **THEN** the packaged/carrier app icon wins
+- **AND** the first tray icon remains only the tray projection.
+
+#### Scenario: App icon inherits the first tray icon only as a convenience fallback
+
+- **GIVEN** runtime options omit `appIcon`
+- **AND** no packaged/carrier or explicit AppOptions icon is available
 - **AND** the first tray created during initialization provides a native-capable icon
 - **WHEN** the App identity is initialized
 - **THEN** the first tray icon becomes the immutable App identity snapshot
@@ -61,3 +73,33 @@ The App identity snapshot SHALL be created from the caller-owned runtime seam us
 - **WHEN** the owning caller disconnects or destroys its session
 - **THEN** all app-mode windows and their Shell projections are removed
 - **AND** no retained App identity remains visible without a live owning session.
+
+### Requirement: App identity mutation SHALL be a Core/runtime capability
+
+The generic Core protocol and kernel SHALL expose app-scoped mutation operations for the logical App name and App icon. The public TypeScript facade SHALL expose these operations through an App-scoped handle reachable from the caller-owned tray runtime, without introducing a second `createApp` lifecycle. The mutation path SHALL update the stored `AppOptions`, re-run the generic `AppProjection`, and let each backend/carrier project only the portions it truthfully supports.
+
+The public App handle SHALL use `getName`, `setName`, `getIcon`, and `setIcon` (or an equivalent explicitly App-scoped namespace). It SHALL NOT reuse WebView window `setTitle`/`setIcon` names at the same object level. App name mutation SHALL not claim to rename a packaged executable, Windows shortcut, or macOS bundle at runtime. WebView window metadata SHALL remain owned by `@opentray/ext-webview`.
+
+`@opentray/ext-badge` SHALL remain responsible for badge text/count, progress, overlay icon, and attention state. It SHALL not become the owner of base App title or App icon mutation.
+
+#### Scenario: Caller updates App identity through the Core path
+
+- **GIVEN** a live caller owns an App identity
+- **WHEN** it calls `tray.app.setName("Skill Creator")` or `tray.app.setIcon(nativeIcon)`
+- **THEN** the request is routed through the generic App protocol/kernel path
+- **AND** the resulting App projection is synchronized to the backend/carrier
+- **AND** no badge extension mount is required.
+
+#### Scenario: Window metadata remains separate from App identity
+
+- **GIVEN** a WebView calls `navigator.window.setTitle(...)` or `navigator.window.setIcon(...)`
+- **WHEN** the extension applies the metadata change
+- **THEN** only that native WebView window changes
+- **AND** the App identity icon/name remains unchanged.
+
+#### Scenario: Badge extension remains status-only
+
+- **GIVEN** a caller wants to set a badge, overlay, or attention state
+- **WHEN** it mounts `@opentray/ext-badge`
+- **THEN** the extension changes only its status projection
+- **AND** it does not become the authority for base App name or icon.

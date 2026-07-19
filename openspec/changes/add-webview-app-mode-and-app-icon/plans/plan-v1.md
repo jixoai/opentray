@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 2
-- Status: User confirmed the breaking rename, App runtime placement, and Darwin policy; icon inheritance and App identity mutation boundaries are now being specified.
-- Previous plan backup: `plans/plan-v1.md`
+- Round: 1
+- Status: Intent aligned from repository evidence; ready to derive specs.
+- Previous plan backup: None. This is a new change.
 
 ## Workflow Command Surface
 
@@ -46,9 +46,6 @@
 | 4 | User | `showInSwitchers` is behavior-shaped naming and should be replaced by a dedicated standard name. | Public API uses `style.appMode`; the old public Windows field is removed rather than aliased. |
 | 5 | User | Proposed `style.appMode: bool` plus a top-level `appIcon` that defaults to `icon`, with a request for design improvement. | App identity is configured at the App-facing runtime seam; inheritance is a one-time initialization rule, not a live alias. |
 | 6 | User | The work must now proceed through OpenSpec. | This change must complete the vision-driven artifact chain before product-code implementation. |
-| 7 | User | Confirmed removal of public `showInSwitchers`, App runtime placement of `appIcon`, and Darwin Regular/Accessory aggregation. | These are approved breaking/platform decisions; implementation may proceed after the artifact update. |
-| 8 | User | Requested that `appIcon` inheritance follow Windows system icon matching rules. | The resolver must separate AppUserModelID/group identity from icon artwork and prefer native App identity sources before convenience tray inheritance. |
-| 9 | User | Asked for interfaces to change App icon and title, and whether they belong in `ext-badge` or Core. | App identity mutation is a Core/runtime contract; ext-badge remains status overlay capability; window title/icon remain ext-webview metadata. |
 
 ### Evidence Read
 
@@ -69,12 +66,6 @@
 | `packages/ext-webview/README.md:304-315` | `hide` retains a session, `toVisible` restores it, and `destroy` is explicit teardown. | App-mode Shell membership must not alter retained-session semantics. |
 | `openspec/changes/darwin-runtime-carrier-and-webview-permissions/.openspec.yaml` | An existing, independent Darwin carrier change declares `vision2`. | This change must not silently modify that incomplete change; it owns only app-mode/app-icon contracts and references carrier work as a dependency boundary. |
 | `openspec/specs/webview-extension/spec.md` | WebView window operations are extension-owned and capability-gated; unsupported native behavior must be explicit. | `appMode` must be represented in ext-webview capability/state contracts and never faked on unsupported platforms. |
-| `crates/opentray-core/src/backend.rs:27-47` | `AppProjection` already carries app-level `title` and `icon`, and `AppBackend::sync_app` is the generic projection boundary. | App identity updates fit Core without importing native GUI or badge dependencies. |
-| `crates/opentray-core/src/kernel.rs:94-106,267-288` | Core stores `AppOptions` and reprojects app title/icon together with trays. | Add app-level mutation methods and protocol frames rather than routing identity through an extension. |
-| `packages/ext-badge/src/shared.ts` | Badge owns badge text/count, progress, overlay icon, and attention. | Base app title/icon are orthogonal to badge status and must not be added to the badge extension. |
-| `crates/opentray-ext-webview/src/macos/metadata.rs:54-125` | WebView `setTitle` and `setIcon` intentionally mutate only `NSWindow` metadata. | Window metadata APIs must remain separate from App identity APIs. |
-| Microsoft Learn `shell/appids` | Windows taskbar associates processes/windows with explicit AppUserModelID; shortcut/relaunch metadata supplies application identity, and window-level identity can override process identity. | `appId` controls Shell grouping; `appIcon` is the artwork source. Do not treat tray icon selection as the Windows identity mechanism. |
-| Microsoft Learn `shell/taskbar-extensions` | Taskbar overlays are status notifications on an existing application button, not the base application icon. | Confirms ext-badge belongs to overlay/status effects, not base App icon/title. |
 
 ### Git Evidence
 
@@ -107,9 +98,7 @@
 | 关闭窗口，这个图标也会被关闭 | Close/hide removes Shell visibility while retaining the session for later reveal. | Operational visibility becomes false; session is not destroyed. |
 | 不用 keepOnTop | Normal app discoverability must come from Shell membership, not forced z-order. | Independent z-order is not an app-mode prerequisite. |
 | 行为命名 | A field name describes an implementation effect rather than product intent. | Name the product mode, then let each platform project it. |
-| 顶层加一个 appIcon，默认继承 icon | App identity needs a dedicated icon source with ergonomic fallback. | Explicit App identity icon, resolved with native identity precedence and only then convenience tray inheritance. |
-| Windows系统的图标匹配规则 | Windows Shell first associates a process/window with AppUserModelID, then resolves launcher/window/executable artwork. | Keep grouping identity (`appId`) separate from artwork (`appIcon`) and avoid claiming tray metadata is a Shell identity. |
-| 图标和标题的修改接口 | Runtime mutation of App identity, not badge status and not WebView window metadata. | Core protocol + public `AppHandle`; `ext-badge` remains overlay/status-only. |
+| 顶层加一个 appIcon，默认继承 icon | App identity needs a dedicated icon source with ergonomic fallback. | Explicit app identity icon, resolved once from a tray icon snapshot when omitted. |
 
 ### Demo / Spike Code
 
@@ -121,11 +110,9 @@
 
 | Question | Why this is the real question | Current inference before user answers |
 | -------- | ----------------------------- | ----------------------------- |
-| Should `appIcon` be configured in `createTray(..., runtimeOptions)` rather than in `createWebviewWindow(...)`? | A WebView window must not mutate process-wide Dock/taskbar identity; this is the ownership boundary that affects API shape. | Confirmed: runtime/App identity owns it. |
-| Is removing public `style.platform.windows.showInSwitchers` acceptable as a breaking change? | Keeping an alias would preserve the behavior-shaped ontology the user asked to replace. | Confirmed: remove it without a public alias. |
-| Should a process with mixed app-mode and tray-only WebViews use regular activation policy while any app-mode session is alive? | macOS activation policy is process-level, unlike Windows window extended styles. | Confirmed: Regular while any app-mode projection is live; Accessory after the last one closes/destroys. |
-| What should the App icon inheritance order be? | Windows Shell uses AppUserModelID for grouping and native app/window/shortcut sources for artwork; blindly inheriting a tray icon can override the actual application identity. | Explicit `appIcon` -> packaged/carrier App icon -> explicit App-level `AppOptions.icon` -> first native-capable tray icon snapshot -> OS default. |
-| Where should runtime App title/icon mutation live? | Badge status and WebView window metadata are separate ownership domains. | Core protocol/kernel projection with a public `AppHandle`; ext-badge remains badge/overlay/attention only. |
+| Should `appIcon` be configured in `createTray(..., runtimeOptions)` rather than in `createWebviewWindow(...)`? | A WebView window must not mutate process-wide Dock/taskbar identity; this is the ownership boundary that affects API shape. | Yes. Runtime/App identity owns it, with inheritance from the first tray icon at initialization. |
+| Is removing public `style.platform.windows.showInSwitchers` acceptable as a breaking change? | Keeping an alias would preserve the behavior-shaped ontology the user asked to replace. | Yes, because the repository defaults to breaking updates and the user requested a dedicated standard name. |
+| Should a process with mixed app-mode and tray-only WebViews use regular activation policy while any app-mode session is alive? | macOS activation policy is process-level, unlike Windows window extended styles. | Yes. Aggregate `Regular` while at least one app-mode window is live; return to `Accessory` only after the last one is gone. |
 
 ## Intent
 
@@ -144,10 +131,10 @@
 ## Platform Diagnosis
 
 - Current platform laws: App is caller-owned; Tray is a status atom; Session owns live authority; WebView owns its extension protocol; platform adapters project already-derived state; unsupported capabilities must be explicit.
-- Does this fit as a regular atom: Yes. `appMode` is a common WebView shell intent; `appIcon` and App identity mutation are Core/runtime identity contracts. They do not require a new public `createApp` entrypoint or a new tray event family.
+- Does this fit as a regular atom: Yes. `appMode` is a common WebView shell intent and `appIcon` is App identity input. They do not require a new public App object or a new tray event family.
 - Does this require law upgrade: Yes, in two narrow places: macOS activation policy must aggregate live app-mode windows, and app-mode close/reveal must project operational visibility consistently on every supported platform.
 - Breaking update stance: Remove public `showInSwitchers` and migrate callers to `style.appMode`; do not publish a compatibility alias. Internal native variable names may remain temporarily while the adapter migration is completed.
-- User confirmations still required: none for the approved `appMode`/`appIcon` direction. Remaining Linux support and exact packaged-carrier implementation are engineering gates, not unresolved product decisions.
+- User confirmations still required: API placement of `appIcon`, acceptance of the breaking field rename, and mixed-window Darwin activation aggregation. Current inferences are recorded above and are safe defaults for spec drafting.
 
 ## Reverse-Inferred Design
 
@@ -183,17 +170,13 @@ The operator sees one application, not a new panel on every click. Tray and wind
 - `appMode` is independent from `frameless`, `resizable`, `keepOnTop`, `autoHide`, background, opacity, and titlebar controls.
 - Public platform style no longer exposes `showInSwitchers`; Windows and macOS adapters derive Shell membership from `appMode`.
 - App-facing runtime options gain optional `appIcon?: Icon` next to `appId` and `appName`.
-- App icon inheritance follows the Windows identity/artwork split: `appId` is the stable Shell grouping identity, while `appIcon` is artwork. The resolver order is explicit `appIcon` -> packaged/carrier App icon -> explicit App-level `AppOptions.icon` -> first native-capable tray icon snapshot -> OS default.
-- The inheritance result is frozen when App identity is initialized. Later tray or WebView icon changes do not mutate App identity unless the caller explicitly invokes the App identity setter.
+- When `appIcon` is absent, the runtime resolves it once from the first tray icon supplied during app initialization, then falls back to the packaged Darwin carrier or platform runtime icon. A later tray or WebView icon change does not mutate App identity.
 - The app icon must be a native-capable icon source. Remote WebView URLs and tray-only text templates are not silently promoted to a high-quality application icon.
-- The public SDK exposes an App-scoped handle without introducing `createApp`: `tray.app.getName()`, `tray.app.setName(name)`, `tray.app.getIcon()`, and `tray.app.setIcon(icon)`.
-- `AppHandle.setName` mutates logical App identity and supported runtime/tray projections; it does not rename a packaged executable or a macOS bundle at runtime. `WebviewWindowHandle.setTitle` remains window-scoped.
 - Existing `primaryEvent`, `show`, `toVisible`, `close`, `destroy`, `isVisible`, and `visibleChange` remain the lifecycle verbs.
 
 ### Data Shape
 
-- Durable App identity: `(appId, appName, resolvedAppIcon)` plus explicit runtime mutations stored in Core.
-- Windows grouping identity: stable `appId` / AppUserModelID. Windows icon artwork: native App/shortcut/window/executable source selected by the resolver. These facts must not be collapsed into one tray icon field.
+- Durable App identity: `(appId, appName, resolvedAppIcon)`.
 - Window declaration: `(trayId, window session, appMode, other WebView style)`, owned by the extension session.
 - Platform projection: Windows extended styles; macOS process activation policy plus window ordering; Linux capability absence or a truthful adapter projection.
 - Operational visibility: `!closed && !minimized`, emitted only when the projection changes.
@@ -204,9 +187,7 @@ The operator sees one application, not a new panel on every click. Tray and wind
 ```text
 createTray(options, runtimeOptions)
         |
-        +--> App identity { appId, appName, resolvedAppIcon }
-        |       |
-        |       +--> AppHandle.setName / setIcon
+        +--> App identity { appId, appName, appIcon }
         |
         +--> Tray projection { icon, menu, primaryEvent }
                          |
@@ -220,23 +201,22 @@ createTray(options, runtimeOptions)
    APPWINDOW/TOOLWINDOW            Regular/Accessory aggregate
 ```
 
-The kernel remains backend-neutral. The extension owns WebView commands and session state. Core owns App identity state and mutation frames; adapters consume the resulting projection. `ext-badge` owns only status overlays and attention. No layer infers app mode or App identity from a window title/icon.
+The kernel remains backend-neutral. The extension owns WebView commands and session state. Adapters consume capabilities and derived intent; they do not reach into broker internals or infer app mode from title/icon.
 
 ### User Confirmation Gates
 
 | Gate | Why confirmation is required | Default until user answers |
 | ---- | ---------------------------- | -------------------------- |
-| `appIcon` placement | Determines whether a window can mutate process identity. | Confirmed: Runtime/App-facing options. |
-| Rename compatibility | Determines whether downstream consumers get an alias. | Confirmed: breaking removal of public `showInSwitchers`. |
-| Darwin mixed-mode policy | Process activation policy is global, while window mode is local. | Confirmed: Regular while any live app-mode projection exists; Accessory otherwise. |
-| App title/icon mutation ownership | Determines whether status extension or platform-neutral identity owns the API. | Core protocol/kernel + public `AppHandle`; ext-badge remains status-only. |
+| `appIcon` placement | Determines whether a window can mutate process identity. | Runtime/App-facing options. |
+| Rename compatibility | Determines whether downstream consumers get an alias. | Breaking removal of public `showInSwitchers`. |
+| Darwin mixed-mode policy | Process activation policy is global, while window mode is local. | Regular while any live app-mode window exists; Accessory otherwise. |
 
 ## Intent-Driven Plan
 
 - [x] 1. Research and align intent.
-- [x] 2. Write specs from the intent.
-- [x] 3. Write BDD tasks from specs.
-- [ ] 4. Commit the revised OpenSpec artifacts before product-code work.
+- [ ] 2. Write specs from the intent.
+- [ ] 3. Write BDD tasks from specs.
+- [ ] 4. Commit OpenSpec artifacts before product-code work.
 - [ ] 5. Implement public TypeScript/Rust contracts and Windows projection.
 - [ ] 6. Implement Darwin activation aggregation, app identity icon resolution, and lifecycle projection.
 - [ ] 7. Migrate `skill-creator-v2` and remove its `keepOnTop` workaround.
@@ -249,8 +229,7 @@ The kernel remains backend-neutral. The extension owns WebView commands and sess
 | -------- | -------------- | ------------------------------------- |
 | Does macOS Dock participation require a packaged `.app` for every app-mode consumer, or can the existing runtime carrier own one shared process identity? | This affects release packaging and whether a consumer can remain a CLI-launched runtime. | Reuse the shared Darwin carrier boundary; do not make ext-webview own a private `.app` package. |
 | What should Linux report for `appMode` before a Shell projection is implemented? | A false success would break the capability law. | Keep `appMode` accepted only where the adapter can report truthful Shell behavior; otherwise expose capability absence or a typed unsupported result. |
-| Should App identity icon resolution reject an incompatible explicit icon or fall back? | Silent fallback can make a signed app appear with the wrong identity. | Reject an explicit non-native-capable `appIcon`; only implicit inheritance may use the documented fallback chain. |
-| Should App title mutation rename the OS bundle/process? | macOS bundle display name and Windows shortcut identity are packaging/Shell metadata, not freely mutable runtime projection. | No. Mutate logical App name and supported current projections; keep window title and packaged bundle identity separate. |
+| Should App identity icon resolution reject an incompatible explicit icon or fall back? | Silent fallback can make a signed app appear with the wrong identity. | Reject an explicit non-native-capable `appIcon`; only implicit inheritance may use a documented fallback chain. |
 
 ## Rejected Paths
 
@@ -263,8 +242,6 @@ The kernel remains backend-neutral. The extension owns WebView commands and sess
 | Toggle macOS activation policy from one WebView window without aggregation | Mixed tray-only and app-mode sessions would leak or steal process identity. |
 | Add a public `appIcon` field to the wire `AppOptions` immediately | The protocol already has `AppOptions.icon`; duplicating the field would create two competing identity sources. |
 | Treat title, favicon, or `window.setIcon()` as App identity | These are window/page metadata and must not mutate Dock/taskbar identity. |
-| Put App title/icon setters in `ext-badge` | Badge is an orthogonal status extension; making it the owner would force every app identity consumer to mount a status extension and would conflate base artwork with overlays. |
-| Use the first tray icon as the unconditional App icon | Windows Shell separates AppUserModelID/grouping from launcher/window/executable artwork; a tray icon is only a convenience fallback. |
 
 ## Exit Conditions
 

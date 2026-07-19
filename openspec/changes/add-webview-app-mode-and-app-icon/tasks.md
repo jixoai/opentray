@@ -2,9 +2,9 @@
 
 - [x] 1.1 Confirm the latest `plans/plan.md` records the user requirement, code evidence, independent Darwin change boundary, and the `appMode` / `appIcon` vocabulary.
 - [x] 1.2 Confirm existing OpenSpec requirements for Windows switcher projection, operational visibility, auto-hide, retained sessions, App identity, and consumer examples before writing deltas.
-- [ ] 1.3 Confirm with the user that removing public `style.platform.windows.showInSwitchers` is an approved breaking cleanup and that `appIcon` belongs on the App-facing runtime seam.
-- [ ] 1.4 Confirm the Darwin mixed-window policy: process activation is `.regular` while any app-mode window is live and `.accessory` otherwise.
-- [ ] 1.5 If user confirmation changes the intent, run `bun run openspec:vision -- backup-plan add-webview-app-mode-and-app-icon`, update the current plan, and re-derive specs/tasks before implementation.
+- [x] 1.3 Confirm with the user that removing public `style.platform.windows.showInSwitchers` is an approved breaking cleanup and that `appIcon` belongs on the App-facing runtime seam.
+- [x] 1.4 Confirm the Darwin mixed-window policy: process activation is `.regular` while any app-mode projection is live and `.accessory` otherwise.
+- [x] 1.5 Run `bun run openspec:vision -- backup-plan add-webview-app-mode-and-app-icon` before materially revising the plan, then record the Windows identity/artwork rule and Core App mutation boundary.
 
 ## 2. BDD Contract
 
@@ -35,8 +35,9 @@
 - [ ] 4.3 Update Rust WebView style DTOs, defaults, patch handling, and command serialization to carry `app_mode` across the extension boundary.
 - [ ] 4.4 Add app-mode capability reporting to every platform DTO and reject unsupported requests with typed errors.
 - [ ] 4.5 Add `appIcon?: Icon` to the App-facing runtime seam used by `createTray`, preserving the existing wire `AppOptions.icon` as the protocol identity field.
-- [ ] 4.6 Implement one-time App icon resolution: explicit app icon, first tray icon snapshot, then packaged/platform carrier fallback; reject explicit non-native-capable sources.
-- [ ] 4.7 Add focused TypeScript and Rust tests for defaulting, patching, breaking-field removal, capability serialization, and immutable App icon resolution.
+- [ ] 4.6 Implement Windows-aligned App artwork resolution: explicit app icon, packaged/carrier identity artwork, protocol App icon, first native-capable tray icon snapshot, then OS default; keep stable `appId`/AppUserModelID separate.
+- [ ] 4.7 Add Core protocol/kernel App identity mutation frames and public `AppHandle` methods for `getName`, `setName`, `getIcon`, and `setIcon` without adding `createApp`.
+- [ ] 4.8 Add focused TypeScript and Rust tests for defaulting, patching, breaking-field removal, capability serialization, immutable resolution, App mutation, and badge/window metadata separation.
 
 ## 5. Windows Projection And Lifecycle
 
@@ -52,8 +53,9 @@
 - [ ] 6.2 Track live app-mode windows by `(appId, sessionId, windowId)` and aggregate activation policy transitions on show, close, hide, destroy, and session disconnect.
 - [ ] 6.3 Promote the Darwin process to regular policy before an app-mode window reports successful show; demote only after the last live app-mode projection is gone.
 - [ ] 6.4 Reuse the carrier contract from `ext-badge` packaging/build paths without creating a second extension-private `.app` lifecycle.
-- [ ] 6.5 Add Darwin native tests for first-window promotion, multi-window retention, last-window demotion, explicit App icon, native close, tray reveal, and cleanup.
-- [ ] 6.6 Add a macOS human-visible smoke command or update an existing WebView example so the Dock/application-switching effect can be inspected.
+- [ ] 6.5 Project App identity artwork/name through the carrier only where the platform supports runtime mutation; do not rewrite packaged shortcut/bundle metadata.
+- [ ] 6.6 Add Darwin native tests for first-window promotion, multi-window retention, last-window demotion, explicit App icon, App mutation, native close, tray reveal, and cleanup.
+- [ ] 6.7 Add a macOS human-visible smoke command or update an existing WebView example so the Dock/application-switching effect can be inspected.
 
 ## 7. Consumer Migration
 

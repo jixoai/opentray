@@ -52,6 +52,24 @@ The WebView capabilities DTO SHALL report common `appMode` support separately fr
 - **THEN** app-mode support is reported as unavailable
 - **AND** an app-mode request cannot resolve as a successful native operation.
 
+### Requirement: Platform App identity projection SHALL distinguish grouping from artwork
+
+Windows Shell grouping SHALL use the stable App identity (`appId` / AppUserModelID) independently from the selected App icon artwork. A change to App artwork SHALL not silently create a new grouping identity. Native adapters MAY project the updated artwork to currently visible windows and runtime surfaces, but SHALL report or reject any platform operation that would require updating a packaged shortcut, installed bundle metadata, or another immutable deployment artifact.
+
+#### Scenario: App icon changes without taskbar regrouping
+
+- **GIVEN** an app-mode Windows window is grouped by a stable `appId`
+- **WHEN** the caller explicitly updates the App icon through the Core App handle
+- **THEN** the current supported native artwork projection is updated
+- **AND** the window remains in the same AppUserModelID group.
+
+#### Scenario: Runtime title mutation does not rewrite deployment metadata
+
+- **GIVEN** the caller updates the logical App name at runtime
+- **WHEN** the platform adapter applies the projection
+- **THEN** supported runtime/tray labels update
+- **AND** the adapter does not claim to rewrite the Windows shortcut or macOS bundle display name.
+
 ### Requirement: Native close and reveal SHALL use one lifecycle transaction
 
 Every supported platform SHALL route native close, host `close()`, tray `toVisible()`, and `visibleChange` through one extension-owned lifecycle projection. Native close SHALL not wait for a second unrelated event before updating visibility. Reveal SHALL activate the existing native session and apply the current App identity/Shell projection before reporting success.
