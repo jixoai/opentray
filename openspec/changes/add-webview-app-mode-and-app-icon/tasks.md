@@ -38,6 +38,7 @@
 - [ ] 4.6 Implement Windows-aligned App artwork resolution: explicit app icon, packaged/carrier identity artwork, protocol App icon, first native-capable tray icon snapshot, then OS default; keep stable `appId`/AppUserModelID separate.
 - [ ] 4.7 Add Core protocol/kernel App identity mutation frames and public `AppHandle` methods for `getName`, `setName`, `getIcon`, and `setIcon` without adding `createApp`.
 - [ ] 4.8 Add focused TypeScript and Rust tests for defaulting, patching, breaking-field removal, capability serialization, immutable resolution, App mutation, and badge/window metadata separation.
+- [ ] 4.9 Move the shared Darwin `.app` carrier artifact contract into the core runtime distribution model; keep `opentray-core` bundle-free and add package-manifest/staging assertions for executable plus carrier completeness.
 
 ## 5. Windows Projection And Lifecycle
 
@@ -52,7 +53,7 @@
 - [ ] 6.1 Define the shared Darwin carrier adapter boundary for process identity, app icon, `.app` activation, and regular/accessory policy without importing carrier details into `opentray-core`.
 - [ ] 6.2 Track live app-mode windows by `(appId, sessionId, windowId)` and aggregate activation policy transitions on show, close, hide, destroy, and session disconnect.
 - [ ] 6.3 Promote the Darwin process to regular policy before an app-mode window reports successful show; demote only after the last live app-mode projection is gone.
-- [ ] 6.4 Reuse the carrier contract from `ext-badge` packaging/build paths without creating a second extension-private `.app` lifecycle.
+- [ ] 6.4 Extract the carrier source/build path from `ext-badge`, stage the shared `.app` into each matching `@opentray/darwin-*` package, and keep badge packages limited to badge artifacts.
 - [ ] 6.5 Project App identity artwork/name through the carrier only where the platform supports runtime mutation; do not rewrite packaged shortcut/bundle metadata.
 - [ ] 6.6 Add Darwin native tests for first-window promotion, multi-window retention, last-window demotion, explicit App icon, App mutation, native close, tray reveal, and cleanup.
 - [ ] 6.7 Add a macOS human-visible smoke command or update an existing WebView example so the Dock/application-switching effect can be inspected.

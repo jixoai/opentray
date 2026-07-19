@@ -34,6 +34,33 @@ The Darwin carrier SHALL own the process identity and activation-policy transiti
 - **THEN** it uses the shared carrier contract
 - **AND** it does not introduce a second extension-specific `.app` lifecycle law.
 
+### Requirement: Darwin runtime distribution SHALL include the shared App carrier
+
+The published `@opentray/darwin-arm64` and `@opentray/darwin-x64` runtime packages SHALL contain one coherent Darwin runtime artifact set: the OpenTray broker executable and the shared `.app` carrier used to establish process identity, AppKit activation policy, and Dock participation. The carrier SHALL be built and discovered by the OpenTray runtime/release layer, not by `opentray-core` and not by an extension-private package.
+
+`opentray-core` SHALL remain platform-neutral: it may define App identity state, protocol frames, and `AppProjection`, but it SHALL NOT contain AppKit code, `.app` bundle files, or carrier launch logic. `@opentray/ext-badge` SHALL own only badge/overlay semantics and its native library; it SHALL consume the shared carrier contract when needed and SHALL NOT be the distribution owner of the runtime carrier.
+
+#### Scenario: Darwin package installs a complete runtime
+
+- **GIVEN** a consumer installs a supported `@opentray/darwin-*` package through the normal package manager flow
+- **WHEN** the runtime host starts an app-mode WebView
+- **THEN** the package can discover both the matching broker executable and shared `.app` carrier from its own artifact graph
+- **AND** no consumer-side copy, manual helper install, or `ext-badge` dependency is required.
+
+#### Scenario: Core crate remains free of bundle ownership
+
+- **GIVEN** the platform-neutral kernel is built or tested
+- **WHEN** it handles App identity projection
+- **THEN** it carries only protocol/domain state and backend contracts
+- **AND** it does not compile, launch, or package a Darwin `.app` bundle.
+
+#### Scenario: Badge package does not own the runtime carrier
+
+- **GIVEN** a caller mounts `@opentray/ext-badge`
+- **WHEN** the badge native artifact is staged or loaded
+- **THEN** the package contributes badge capability artifacts only
+- **AND** the shared Darwin carrier remains owned and versioned by the matching `@opentray/darwin-*` runtime package.
+
 ### Requirement: Platform capability reporting SHALL distinguish app-mode support
 
 The WebView capabilities DTO SHALL report common `appMode` support separately from platform-specific appearance and geometry capabilities. A platform SHALL report `appMode: true` only when its native adapter can project the requested Shell membership and lifecycle transitions. Capability serialization SHALL be symmetric across TypeScript, protocol DTOs, Windows, macOS, and any platform adapter that claims support.

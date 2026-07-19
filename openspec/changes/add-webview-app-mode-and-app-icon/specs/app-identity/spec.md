@@ -82,6 +82,8 @@ The public App handle SHALL use `getName`, `setName`, `getIcon`, and `setIcon` (
 
 `@opentray/ext-badge` SHALL remain responsible for badge text/count, progress, overlay icon, and attention state. It SHALL not become the owner of base App title or App icon mutation.
 
+The App identity contract SHALL be split from its Darwin packaging carrier: Core owns the logical identity and projection protocol, while the matching Darwin runtime distribution owns the shared `.app` bundle that supplies the native process carrier. The `.app` bundle SHALL not be treated as a WebView or badge extension artifact.
+
 #### Scenario: Caller updates App identity through the Core path
 
 - **GIVEN** a live caller owns an App identity
@@ -89,6 +91,13 @@ The public App handle SHALL use `getName`, `setName`, `getIcon`, and `setIcon` (
 - **THEN** the request is routed through the generic App protocol/kernel path
 - **AND** the resulting App projection is synchronized to the backend/carrier
 - **AND** no badge extension mount is required.
+
+#### Scenario: App identity uses the runtime carrier without moving carrier code into Core
+
+- **GIVEN** a Darwin runtime is installed from the matching `@opentray/darwin-*` package
+- **WHEN** Core synchronizes an App identity projection
+- **THEN** the runtime carrier applies the supported native App name/icon projection
+- **AND** Core remains free of AppKit and `.app` bundle ownership.
 
 #### Scenario: Window metadata remains separate from App identity
 
