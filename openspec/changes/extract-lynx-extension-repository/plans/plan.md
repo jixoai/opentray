@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 1
-- Status: implementation complete; awaiting independent repository first commit, submodule wiring, and final verification.
+- Status: implementation and local verification complete; external release-order and Darwin carrier gates remain. Archive is deferred until those gates are independently accepted.
 - Previous plan backup: none; this is a new change.
 
 ## Workflow Command Surface
@@ -54,8 +54,8 @@
 | Checkpoint | Expected commit evidence | Current status |
 | ---------- | ------------------------ | -------------- |
 | OpenSpec artifacts before apply | Commit containing this `plans/plan.md` before product-code work starts | Baseline `ca450d4 docs(spec): define Lynx repository boundary` |
-| Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | Pending independent repository first commit and core submodule wiring |
-| Self-review updates | Commit containing review output and any reopened or added OpenSpec tasks before the next apply loop | Current round is being verified; archive is intentionally deferred |
+| Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | Independent `52dc270`; core `47d3afd` |
+| Self-review updates | Commit containing review output and any reopened or added OpenSpec tasks before the next apply loop | `53be910`; archive remains deferred behind external gates |
 | Normal archive | Commit containing `openspec archive extract-lynx-extension-repository` result | Not started |
 | Abnormal handoff | Commit containing handoff evidence before returning to user discussion | Not expected |
 
@@ -166,7 +166,8 @@ The new repository must not import private core packages. The core repository mu
 - [x] 2. Write specs from the intent.
 - [x] 3. Write BDD tasks from specs.
 - [x] 4. Implement tasks in the new repository and clean the core repository.
-- [ ] 5. Self-review against intent, verify both repositories, and archive the change.
+- [x] 5. Self-review against intent and verify both repositories; record external gates.
+- [ ] 6. Archive after core `0.15.x` publication and full Darwin carrier acceptance.
 
 ## Open Questions
 
