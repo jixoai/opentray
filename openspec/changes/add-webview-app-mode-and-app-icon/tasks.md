@@ -35,11 +35,16 @@
 - [x] 4.2 Replace the public Windows `showInSwitchers` type/capability field with the common `appMode` contract and update parser/serializer fixtures without adding an alias.
 - [x] 4.3 Update Rust WebView style DTOs, defaults, patch handling, and command serialization to carry `app_mode` across the extension boundary.
 - [x] 4.4 Add app-mode capability reporting to every platform DTO and reject unsupported requests with typed errors.
-- [x] 4.5 Add `appIcon?: Icon` to the App-facing runtime seam used by `createTray`, preserving the existing wire `AppOptions.icon` as the protocol identity field.
-- [x] 4.6 Implement Windows-aligned App artwork resolution: explicit app icon, packaged/carrier identity artwork, protocol App icon, first native-capable tray icon snapshot, then OS default; keep stable `appId`/AppUserModelID separate.
+- [x] 4.5 Initial pass: add generic `appIcon?: Icon` to the App-facing runtime seam (superseded by strict task 4.11).
+- [x] 4.6 Initial pass: implement Windows-aligned artwork precedence including tray fallback (superseded by strict task 4.13).
 - [x] 4.7 Add Core protocol/kernel App identity mutation frames and public `AppHandle` methods for `getName`, `setName`, `getIcon`, and `setIcon` without adding `createApp`.
 - [x] 4.8 Add focused TypeScript and Rust tests for defaulting, patching, breaking-field removal, capability serialization, immutable resolution, App mutation, and badge/window metadata separation.
 - [x] 4.9 Move the shared Darwin `.app` carrier artifact contract into the core runtime distribution model; keep `opentray-core` bundle-free and add package-manifest/staging assertions for executable plus carrier completeness.
+- [x] 4.10 Move consumer app-icon normalization and ICNS generation into `@opentray/vite-plugin`; include source, built implementation, recipe, encoder versions, and output existence in the cache gate.
+- [ ] 4.11 Replace generic `Icon` app identity input with a strict `AppIcon` platform asset array in TypeScript and Rust; keep tray `Icon` unchanged.
+- [ ] 4.12 Validate native formats and platform coverage (`darwin/icns`, `windows/ico`, `linux/png|svg`) and reject invalid explicit arrays before broker connection.
+- [ ] 4.13 Remove runtime tray-icon inheritance for App identity and update App mutation/identity frames to carry `AppIcon`.
+- [ ] 4.14 Add protocol, facade, and native projection tests for platform selection, duplicate rejection, missing-current-platform rejection, and standards-only sources.
 
 ## 5. Windows Projection And Lifecycle
 
@@ -55,12 +60,12 @@
 - [ ] 6.2 Track live app-mode windows by `(appId, sessionId, windowId)` and aggregate activation policy transitions on show, close, hide, destroy, and session disconnect.
 - [ ] 6.3 Promote the Darwin process to regular policy before an app-mode window reports successful show; demote only after the last live app-mode projection is gone.
 - [x] 6.4 Extract the carrier source/build path from `ext-badge`, stage the shared `.app` into each matching `@opentray/darwin-*` package, and keep badge packages limited to badge artifacts.
-- [ ] 6.5 Project App identity artwork/name through the carrier only where the platform supports runtime mutation; do not rewrite packaged shortcut/bundle metadata.
+- [x] 6.5 Project App identity artwork/name through the carrier only where the platform supports runtime mutation; do not rewrite packaged shortcut/bundle metadata.
 - [ ] 6.6 Add Darwin native tests for first-window promotion, multi-window retention, last-window demotion, explicit App icon, App mutation, native close, tray reveal, and cleanup.
 - [ ] 6.7 Add a macOS human-visible smoke command or update an existing WebView example so the Dock/application-switching effect can be inspected.
 - [x] 6.8 Replace the idle Swift runtime carrier with a broker-bearing carrier template and make native build/staging prove that the bundled executable bytes equal the paired broker artifact.
 - [x] 6.9 Materialize the Darwin carrier atomically per caller, project `appId`/bootstrap `appName` into `Info.plist`, launch `Contents/MacOS/opentray`, and include the materialized executable path in broker reuse authority.
-- [x] 6.10 Project native-capable Core App artwork to `NSApplication` before app-mode promotion and reject template-only tray artwork as App identity fallback.
+- [x] 6.10 Initial pass: project generic native-capable Core App artwork to `NSApplication` before app-mode promotion (superseded by strict native-format projection task 4.14).
 
 ## 7. Consumer Migration
 
@@ -70,6 +75,8 @@
 - [ ] 7.4 Add or update consumer acceptance coverage for tray open, native close, taskbar/Dock icon removal, second tray open, retained page state, and final session cleanup.
 - [ ] 7.5 Update consumer skill and WebView README examples to teach `appMode` as the product decision and `appIcon` as App identity input.
 - [x] 7.6 Link `skill-creator-v2` directly to the local `opentray` and `@opentray/ext-webview` packages, pass an explicit non-template `appIcon`, and wire `predev` to one OpenTray preparation command that builds/stages facade, broker, carrier, and WebView artifacts.
+- [x] 7.7 Replace the consumer-local icon generator with `@opentray/vite-plugin`, use `flat-symbol.png` explicitly, and resolve source-dev tray assets from `webui/static` before stale build output.
+- [ ] 7.8 Make `@opentray/vite-plugin` emit a standards-compliant `AppIcon` manifest with ICNS, ICO, and Linux theme-size outputs; keep the generator optional for consumers.
 
 ## 8. Verification And Task Progress
 
@@ -79,6 +86,8 @@
 - [x] 8.4 Run `bun run openspec:vision -- validate add-webview-app-mode-and-app-icon`, `git diff --check`, and the narrowest repo verification gate that covers changed packages.
 - [x] 8.5 Update only task checkboxes completed and verified in the current context, then commit the task-progress update with matching code/BDD evidence.
 - [x] 8.6 Verify the linked-consumer preparation from a clean staged-artifact state, start the exact `skill-creator-v2` `pnpm dev` path without publishing, and hand macOS visual acceptance to the user.
+- [x] 8.7 Run the plugin's generation/cache tests, consumer typecheck, Svelte check, and production WebUI build; record the pre-existing daemon/socket blocker separately from the new artifact chain.
+- [ ] 8.8 Re-run strict AppIcon contract tests and linked `skill-creator-v2` preparation after the platform asset migration.
 
 ## 9. Self-Review Loop
 

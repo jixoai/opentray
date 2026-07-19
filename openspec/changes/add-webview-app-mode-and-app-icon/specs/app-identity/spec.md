@@ -2,31 +2,42 @@
 
 ### Requirement: App identity SHALL own the application icon
 
-The app-facing runtime configuration SHALL accept optional `appIcon?: Icon` alongside `appId` and `appName`. `appIcon` SHALL describe process-level Dock/taskbar identity and SHALL NOT be a WebView window metadata field. A WebView title, favicon, or `window.setIcon()` call SHALL NOT mutate the App identity icon.
+The app-facing runtime configuration SHALL accept optional `appIcon?: AppIcon` alongside `appId` and `appName`. `AppIcon` SHALL be a platform-oriented array of native application assets and SHALL be distinct from the tray `Icon` contract. `appIcon` SHALL describe process-level Dock/taskbar identity and SHALL NOT be a WebView window metadata field. A WebView title, favicon, or `window.setIcon()` call SHALL NOT mutate the App identity icon.
 
-The runtime SHALL resolve one App identity snapshot at initialization. Resolution order SHALL follow the Windows distinction between Shell grouping identity and artwork source:
+The public shape SHALL be equivalent to:
 
 ```text
-explicit appIcon
-  > packaged/carrier App identity artwork
-  > explicit protocol AppOptions.icon
-  > first native-capable tray icon at app initialization
+AppIcon = AppIconAsset[]
+
+darwin asset  = { platform: "darwin", format: "icns", source: FileOrEncoded }
+windows asset = { platform: "windows", format: "ico", source: FileOrEncoded }
+linux asset   = { platform: "linux", format: "png", size, source: FileOrEncoded }
+              | { platform: "linux", format: "svg", source: FileOrEncoded }
+```
+
+`FileOrEncoded` SHALL contain a path or encoded bytes for the declared native format. Raw RGBA buffers, text-only icons, template tray icons, page URLs, and remote favicons SHALL NOT be valid `appIcon` sources. Darwin and Windows accept one asset per platform; Linux may provide multiple fixed-size theme entries.
+
+The runtime SHALL resolve one App identity snapshot at initialization. Resolution SHALL follow the Windows distinction between Shell grouping identity and artwork source:
+
+```text
+explicit appIcon (current platform)
+  > packaged/carrier App identity artwork when appIcon is omitted
   > operating-system executable/default icon
 ```
 
-`appId` SHALL remain the stable Windows AppUserModelID/grouping identity; it SHALL not be inferred from icon content. The resolved artwork SHALL be reused by all app-mode windows in that runtime. Later tray icon updates and later WebView icon updates SHALL not change the App identity snapshot unless an explicit App identity mutation is requested. An explicit `appIcon` that is not native-capable SHALL reject with a typed validation error; the runtime SHALL not silently substitute a page URL or a tray-only text template.
+`appId` SHALL remain the stable Windows AppUserModelID/grouping identity; it SHALL not be inferred from icon content. The resolved artwork SHALL be reused by all app-mode windows in that runtime. Later tray icon updates and later WebView icon updates SHALL not change the App identity snapshot. An explicit `appIcon` with malformed sources, duplicate Darwin/Windows entries, or no valid current-platform entry SHALL reject with a typed validation error; the runtime SHALL not silently substitute a tray icon, page URL, or text template.
 
-#### Scenario: Explicit app icon wins
+#### Scenario: Explicit platform app icon wins
 
 - **GIVEN** runtime options provide `appIcon`
-- **AND** the first tray also provides an icon
+- **AND** the first tray also provides a generic tray icon
 - **WHEN** the App identity is initialized
 - **THEN** the explicit app icon is selected
 - **AND** the tray icon remains only the tray projection.
 
 #### Scenario: Darwin projects App artwork before Dock participation
 
-- **GIVEN** a Darwin caller provides a native-capable explicit `appIcon`
+- **GIVEN** a Darwin caller provides a standards-compliant ICNS `appIcon` asset
 - **WHEN** the Core App projection is synchronized before the first app-mode window is shown
 - **THEN** the carrier process applies that image to `NSApplication`
 - **AND** Dock never falls back to the generic executable icon for that app-mode reveal.
@@ -39,23 +50,21 @@ explicit appIcon
 - **THEN** the template image is not promoted as application artwork
 - **AND** the runtime continues to the packaged carrier or operating-system fallback.
 
-#### Scenario: App icon follows native identity precedence before tray convenience
+#### Scenario: Omitted app icon uses packaged identity before OS default
 
 - **GIVEN** runtime options omit `appIcon`
 - **AND** the packaged/carrier identity has a native app icon
-- **AND** the first tray created during initialization provides a native-capable icon
+- **AND** the first tray created during initialization provides a generic tray icon
 - **WHEN** the App identity is initialized
 - **THEN** the packaged/carrier app icon wins
 - **AND** the first tray icon remains only the tray projection.
 
-#### Scenario: App icon inherits the first tray icon only as a convenience fallback
+#### Scenario: Missing current platform is rejected
 
-- **GIVEN** runtime options omit `appIcon`
-- **AND** no packaged/carrier or explicit AppOptions icon is available
-- **AND** the first tray created during initialization provides a native-capable icon
-- **WHEN** the App identity is initialized
-- **THEN** the first tray icon becomes the immutable App identity snapshot
-- **AND** a later tray icon update does not change it.
+- **GIVEN** runtime options provide only a Windows `ico` asset on a Darwin host
+- **WHEN** App identity initialization validates the explicit array
+- **THEN** initialization rejects with a typed platform-missing validation error
+- **AND** the tray icon is not consulted as a fallback.
 
 #### Scenario: Window icon changes do not change App identity
 
@@ -66,7 +75,7 @@ explicit appIcon
 
 #### Scenario: Invalid explicit app icon is rejected
 
-- **GIVEN** runtime options provide an `appIcon` that is remote, tray-only text, or otherwise not native-capable
+- **GIVEN** runtime options provide an `appIcon` that is remote, tray-only, malformed, duplicate, or missing the current platform
 - **WHEN** App identity initialization validates it
 - **THEN** initialization rejects with a typed validation error
 - **AND** it does not silently fall back to a page or tray representation.
