@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenTray App Mode Self Review</title>
+    <style>
+      :root { color-scheme: light; font: 15px/1.5 system-ui, sans-serif; }
+      body { margin: 0; padding: 32px; color: #1f2937; background: #f8fafc; }
+      main { max-width: 960px; margin: auto; }
+      h1, h2 { color: #111827; }
+      section { margin: 24px 0; }
+      table { width: 100%; border-collapse: collapse; background: #fff; }
+      th, td { padding: 10px 12px; border: 1px solid #dbe3ee; text-align: left; vertical-align: top; }
+      th { background: #eef2f7; }
+      code { padding: 1px 4px; background: #e5e7eb; border-radius: 3px; }
+      .risk { border-left: 4px solid #d97706; padding-left: 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WebView App Mode And App Icon</h1>
+      <p>Self-review recorded 2026-07-19.</p>
+      <section>
+        <h2>Intent</h2>
+        <p><code>style.appMode</code> is the common application Shell intent; <code>appIcon</code> is App identity input; Core owns identity mutation; Darwin runtime packages own the shared carrier; skill-creator-v2 uses a retained app-mode window without keep-on-top.</p>
+      </section>
+      <section>
+        <h2>Automated Evidence</h2>
+        <table>
+          <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>Core Rust tests</td><td>27/27 passed</td></tr>
+            <tr><td>WebView Rust tests</td><td>71/71 passed</td></tr>
+            <tr><td>Runtime, broker, and tray backend Rust tests</td><td>Passed</td></tr>
+            <tr><td>OpenTray SDK tests</td><td>90/90 passed</td></tr>
+            <tr><td>WebView facade tests</td><td>40/40 passed</td></tr>
+            <tr><td>Native packaging tests</td><td>52/52 passed</td></tr>
+            <tr><td>skill-creator-v2 tests</td><td>77/77 passed</td></tr>
+            <tr><td>TypeScript, format, OpenSpec validate, diff check</td><td>Passed</td></tr>
+          </tbody>
+        </table>
+      </section>
+      <section class="risk">
+        <h2>Residual Risk</h2>
+        <ol>
+          <li>Windows taskbar/Alt+Tab close-and-reveal smoke needs a Windows runner.</li>
+          <li>macOS Dock/Application Switcher smoke needs a human-visible run.</li>
+          <li>The macOS extension runtime currently has one native WebView slot; process-wide aggregation across multiple extension runtimes keyed by <code>(appId, sessionId, windowId)</code> remains open.</li>
+          <li>Cross-platform packed-consumer execution and Windows native tests remain unverified here.</li>
+        </ol>
+      </section>
+      <section>
+        <h2>Decision</h2>
+        <p>The available implementation slice is internally consistent and automated gates are green. Keep the OpenSpec change active until the platform GUI and multi-runtime Darwin evidence is complete; do not archive it as fully complete yet.</p>
+      </section>
+    </main>
+  </body>
+</html>
