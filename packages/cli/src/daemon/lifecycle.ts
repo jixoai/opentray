@@ -300,8 +300,25 @@ const readyMatchesBroker = (
   ready.appId === paths.appId &&
   ready.appName === paths.appName &&
   ready.callerLabel === paths.callerLabel &&
-  ready.executablePath === broker.executablePath &&
+  executablePathsEqual(ready.executablePath, broker.executablePath) &&
   brokerArtifactIdentityEquals(ready.brokerArtifactIdentity, broker.artifactIdentity);
+
+export const executablePathsEqual = (
+  left: string,
+  right: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean => {
+  if (platform !== "win32") {
+    return left === right;
+  }
+
+  const normalize = (value: string): string =>
+    value
+      .replaceAll("\\", "/")
+      .replace(/^\/\/?\?\//u, "")
+      .toLowerCase();
+  return normalize(left) === normalize(right);
+};
 
 const acquireLock = async (
   lockFile: string,

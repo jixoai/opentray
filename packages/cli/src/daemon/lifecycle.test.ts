@@ -8,6 +8,7 @@ import type { BrokerArtifactIdentity } from "@opentray/spec";
 
 import type { DaemonDriver } from "./lifecycle";
 import {
+  executablePathsEqual,
   inspectDaemon,
   resolveBrokerStdio,
   restartDaemon,
@@ -29,6 +30,16 @@ afterEach(async () => {
 });
 
 describe("daemon lifecycle", () => {
+  it("treats Windows verbatim and regular executable paths as the same file", () => {
+    expect(
+      executablePathsEqual(
+        "\\\\?\\C:\\Users\\runner\\opentray.exe",
+        "c:/Users/runner/opentray.exe",
+        "win32",
+      ),
+    ).toBe(true);
+  });
+
   it("keeps broker stdio quiet by default and allows explicit inherit for debugging", () => {
     expect(resolveBrokerStdio(undefined)).toBe("ignore");
     expect(resolveBrokerStdio("quiet")).toBe("ignore");
