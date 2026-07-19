@@ -76,11 +76,11 @@
 
 ## 9. Self-Review Loop
 
-- [ ] 9.1 Run `bun run openspec:vision -- commit-check add-webview-app-mode-and-app-icon --phase self-review` before recording review evidence.
-- [ ] 9.2 Write `review/self-review.md` comparing implementation and acceptance evidence against every intent section and open question.
+- [x] 9.1 Run `bun run openspec:vision -- commit-check add-webview-app-mode-and-app-icon --phase self-review` before recording review evidence.
+- [x] 9.2 Write `review/self-review.md` comparing implementation and acceptance evidence against every intent section and open question.
 - [ ] 9.3 Write `review/self-review.html` with structured screenshots/evidence for Windows and macOS visible behavior when those platforms are available.
 - [ ] 9.4 If review changes specs, tasks, or plan, run `bun run openspec:vision -- backup-plan add-webview-app-mode-and-app-icon` when the plan changes, commit the artifact update, and reopen only the affected tasks.
 - [ ] 9.5 If the same issue recurs in two independent acceptance paths, persist review loop state with `bun run openspec:vision -- review-state add-webview-app-mode-and-app-icon` and run another apply loop.
 - [ ] 9.6 If review cannot exit normally, run `bun run openspec:vision -- handoff add-webview-app-mode-and-app-icon` and commit the handoff evidence before returning to user discussion.
 - [ ] 9.7 If review exits normally, archive with `openspec archive add-webview-app-mode-and-app-icon` and commit the archive result.
-- [ ] 9.8 Run `bun run openspec:vision -- check add-webview-app-mode-and-app-icon` and record the final workflow gate.
+- [x] 9.8 Run `bun run openspec:vision -- check add-webview-app-mode-and-app-icon` and record the final workflow gate.
