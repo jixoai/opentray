@@ -77,6 +77,45 @@ describe("opentray ergonomic createTray", () => {
     ]);
   });
 
+  it("rejects a template-only explicit appIcon before opening a broker connection", async () => {
+    await expect(
+      createTray(
+        { id: "status" },
+        {
+          appIcon: {
+            "darwin-icon-only": {
+              type: "rgba",
+              data: [1, 2, 3, 4],
+              width: 1,
+              height: 1,
+              isTemplate: true,
+            },
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "OPENTRAY_INVALID_APP_ICON" });
+    expect(mockState.runtimeOptions).toEqual([]);
+  });
+
+  it("does not promote a template-only tray icon into App identity", async () => {
+    await createTray({
+      id: "status",
+      icon: {
+        "darwin-icon-only": {
+          type: "rgba",
+          data: [1, 2, 3, 4],
+          width: 1,
+          height: 1,
+          isTemplate: true,
+        },
+      },
+    });
+
+    expect(
+      transport.frames.filter((frame) => frame.type === "set-app-icon"),
+    ).toEqual([]);
+  });
+
   it("snapshots the first tray icon as app identity and never replaces it from a later tray", async () => {
     const firstIcon: Icon = { type: "rgba", data: [1, 2, 3, 4], width: 1, height: 1 };
     const laterIcon: Icon = { type: "rgba", data: [5, 6, 7, 8], width: 1, height: 1 };

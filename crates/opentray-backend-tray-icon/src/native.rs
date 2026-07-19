@@ -1,11 +1,14 @@
 use std::{cell::RefCell, collections::HashMap};
 
 #[cfg(target_os = "macos")]
-use objc2::MainThreadMarker;
+use std::io::Cursor;
+
 #[cfg(target_os = "macos")]
-use objc2_app_kit::NSEvent;
+use objc2::{AnyThread, MainThreadMarker};
 #[cfg(target_os = "macos")]
-use objc2_foundation::NSRect;
+use objc2_app_kit::{NSApplication, NSEvent, NSImage};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSData, NSRect};
 use opentray_core::BackendError;
 #[cfg(target_os = "windows")]
 use opentray_spec::geometry::DpiScale;
@@ -58,6 +61,8 @@ impl NativeTrayIconRuntime {
 
 impl TrayIconRuntime for NativeTrayIconRuntime {
     fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
+        #[cfg(target_os = "macos")]
+        apply_native_application_icon(projection.icon.as_ref())?;
         let TrayIconProjection {
             app_id,
             trays,
@@ -193,6 +198,44 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
                 .insert(tray_icon_id.to_string(), bounds);
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_native_application_icon(asset: Option<&TrayIconAsset>) -> Result<(), BackendError> {
+    let mtm = MainThreadMarker::new().ok_or_else(|| {
+        BackendError::Failure("application icon projection requires the AppKit main thread".into())
+    })?;
+    let image = asset.map(ns_application_icon).transpose()?;
+    let app = NSApplication::sharedApplication(mtm);
+    unsafe { app.setApplicationIconImage(image.as_deref()) };
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn ns_application_icon(
+    asset: &TrayIconAsset,
+) -> Result<objc2::rc::Retained<NSImage>, BackendError> {
+    let TrayIconAsset::Rgba {
+        data,
+        width,
+        height,
+        ..
+    } = asset;
+    let mut encoded = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(Cursor::new(&mut encoded), *width, *height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| BackendError::Failure(error.to_string()))?;
+        writer
+            .write_image_data(data)
+            .map_err(|error| BackendError::Failure(error.to_string()))?;
+    }
+    let bytes = NSData::from_vec(encoded);
+    NSImage::initWithData(NSImage::alloc(), &bytes)
+        .ok_or_else(|| BackendError::Failure("AppKit rejected application icon image".into()))
 }
 
 fn create_native_tray(

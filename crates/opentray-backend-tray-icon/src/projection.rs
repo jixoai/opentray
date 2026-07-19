@@ -46,7 +46,7 @@ impl TrayIconProjection {
             icon: projection
                 .icon
                 .as_ref()
-                .and_then(TrayIconSelection::from_icon)
+                .and_then(TrayIconSelection::from_app_icon)
                 .map(TrayIconAsset::from_selection)
                 .transpose()?,
             trays,
@@ -131,6 +131,76 @@ impl<'a> TrayIconSelection<'a> {
             text: fallback.text.as_ref(),
             is_template: false,
         })
+    }
+
+    fn from_app_icon(icon: &'a Icon) -> Option<Self> {
+        let os = current_icon_os();
+        let platform_icon = match os {
+            IconOs::Darwin => icon
+                .darwin_icon_only
+                .as_ref()
+                .filter(|candidate| !candidate.is_template)
+                .map(|candidate| Self {
+                    image: &candidate.image,
+                    text: None,
+                    is_template: false,
+                }),
+            IconOs::Win32 => icon.win32_icon_only.as_ref().map(|image| Self {
+                image,
+                text: None,
+                is_template: false,
+            }),
+            IconOs::Linux => icon.linux_icon_only.as_ref().map(|image| Self {
+                image,
+                text: None,
+                is_template: false,
+            }),
+            IconOs::Other => None,
+        };
+        platform_icon
+            .or_else(|| {
+                icon.icon_only.as_ref().map(|image| Self {
+                    image,
+                    text: None,
+                    is_template: false,
+                })
+            })
+            .or_else(|| match os {
+                IconOs::Darwin => icon
+                    .darwin_icon_text
+                    .as_ref()
+                    .filter(|candidate| !candidate.is_template)
+                    .map(|candidate| Self {
+                        image: &candidate.image,
+                        text: Some(&candidate.text),
+                        is_template: false,
+                    }),
+                IconOs::Win32 => icon.win32_icon_text.as_ref().map(|candidate| Self {
+                    image: &candidate.image,
+                    text: Some(&candidate.text),
+                    is_template: false,
+                }),
+                IconOs::Linux => icon.linux_icon_text.as_ref().map(|candidate| Self {
+                    image: &candidate.image,
+                    text: Some(&candidate.text),
+                    is_template: false,
+                }),
+                IconOs::Other => None,
+            })
+            .or_else(|| {
+                icon.icon_text.as_ref().map(|candidate| Self {
+                    image: &candidate.image,
+                    text: Some(&candidate.text),
+                    is_template: false,
+                })
+            })
+            .or_else(|| {
+                icon.fallback.as_ref().map(|fallback| Self {
+                    image: &fallback.image,
+                    text: fallback.text.as_ref(),
+                    is_template: false,
+                })
+            })
     }
 }
 
@@ -1024,6 +1094,58 @@ mod tests {
     }
 
     #[test]
+    fn template_only_darwin_icon_is_not_projected_as_application_artwork() {
+        let projection = TrayIconProjection::from_app_projection(&projection_with_app_icon(Icon {
+            icon_only: None,
+            darwin_icon_only: Some(DarwinIcon {
+                image: rgba_image([1, 2, 3, 4]),
+                is_template: true,
+            }),
+            win32_icon_only: None,
+            linux_icon_only: None,
+            text_only: None,
+            icon_text: None,
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
+            fallback: None,
+        }))
+        .expect("projection");
+
+        assert_eq!(projection.icon, None);
+    }
+
+    #[test]
+    fn generic_app_artwork_survives_a_template_only_darwin_candidate() {
+        let projection = TrayIconProjection::from_app_projection(&projection_with_app_icon(Icon {
+            icon_only: Some(rgba_image([9, 10, 11, 12])),
+            darwin_icon_only: Some(DarwinIcon {
+                image: rgba_image([1, 2, 3, 4]),
+                is_template: true,
+            }),
+            win32_icon_only: None,
+            linux_icon_only: None,
+            text_only: None,
+            icon_text: None,
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
+            fallback: None,
+        }))
+        .expect("projection");
+
+        assert_eq!(
+            projection.icon,
+            Some(TrayIconAsset::Rgba {
+                data: vec![9, 10, 11, 12],
+                width: 1,
+                height: 1,
+                is_template: false,
+            })
+        );
+    }
+
+    #[test]
     fn transparent_icon_projects_app_name_as_visible_tray_text() {
         let projection = TrayIconProjection::from_app_projection(&projection_with_optional_icon(
             Some(Icon::rgba(vec![0, 0, 0, 0], 1, 1)),
@@ -1321,6 +1443,18 @@ mod tests {
 
     fn projection_with_icon(icon: Icon) -> AppProjection {
         projection_with_optional_icon(Some(icon))
+    }
+
+    fn projection_with_app_icon(icon: Icon) -> AppProjection {
+        AppProjection {
+            app: AppRef {
+                app_id: "surface-1".to_string(),
+            },
+            title: Some("Status App".to_string()),
+            tooltip: None,
+            icon: Some(icon),
+            trays: vec![],
+        }
     }
 
     fn projection_with_optional_icon(icon: Option<Icon>) -> AppProjection {

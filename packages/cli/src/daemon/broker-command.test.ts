@@ -86,13 +86,20 @@ describe("broker command resolver", () => {
       resolveInstalledBrokerBinary: async (target) => ({
         binary: `/node_modules/${target.packageName}/bin/opentray`,
         binaryPath: `/node_modules/${target.packageName}/bin/opentray`,
+        carrierArchive: `/node_modules/${target.packageName}/app/OpenTray.app.zip`,
+        carrierArchivePath: `/node_modules/${target.packageName}/app/OpenTray.app.zip`,
       }),
+      materializeDarwinCarrier: async ({ archivePath, brokerPath }) => {
+        expect(archivePath).toContain("OpenTray.app.zip");
+        expect(brokerPath).toContain("bin/opentray");
+        return "/runtime/OpenTray.app/Contents/MacOS/opentray";
+      },
       findWorkspaceRoot: async () => {
         throw new Error("workspace resolution should not run");
       },
     });
 
-    expect(command.command).toBe("/node_modules/@opentray/darwin-arm64/bin/opentray");
+    expect(command.command).toBe("/runtime/OpenTray.app/Contents/MacOS/opentray");
     expect(command.cwd).toBeUndefined();
   });
 
@@ -130,9 +137,12 @@ describe("broker command resolver", () => {
       }),
       findWorkspaceRoot: async () => "/repo",
       ensureDevBrokerBinary: async (workspaceRoot) => `${workspaceRoot}/target/debug/opentray`,
+      ensureDevDarwinCarrierArchive: async () => "/repo/target/OpenTray.app.zip",
+      materializeDarwinCarrier: async () =>
+        "/runtime/OpenTray.app/Contents/MacOS/opentray",
     });
 
-    expect(command.command).toBe("/repo/target/debug/opentray");
+    expect(command.command).toBe("/runtime/OpenTray.app/Contents/MacOS/opentray");
     expect(command.cwd).toBeUndefined();
   });
 
@@ -153,6 +163,33 @@ describe("broker command resolver", () => {
     ).rejects.toMatchObject({
       code: "OPENTRAY_MISSING_PLATFORM_BROKER_BINARY",
       packageName: "@opentray/linux-x64",
+    });
+  });
+
+  it("rejects an installed Darwin broker whose carrier archive is missing", async () => {
+    const paths = resolveDaemonPaths({
+      homeDir: "/tmp/opentray-test",
+      packageVersion: "0.1.0",
+    });
+
+    await expect(
+      resolveBrokerCommand(paths, {
+        env: {},
+        platform: "darwin",
+        arch: "x64",
+        resolveInstalledBrokerBinary: async () => ({
+          binary: "/node_modules/@opentray/darwin-x64/bin/opentray",
+          binaryPath: "/node_modules/@opentray/darwin-x64/bin/opentray",
+          carrierArchivePath:
+            "/node_modules/@opentray/darwin-x64/app/OpenTray.app.zip",
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: "OPENTRAY_MISSING_PLATFORM_BROKER_BINARY",
+      platform: "darwin",
+      arch: "x64",
+      packageName: "@opentray/darwin-x64",
+      binaryPath: "/node_modules/@opentray/darwin-x64/app/OpenTray.app.zip",
     });
   });
 
@@ -194,17 +231,21 @@ describe("installed broker package resolution", () => {
       {
         packageName: "@opentray/darwin-arm64",
         binaryRelativePath: "bin/opentray",
+        carrierArchiveRelativePath: "app/OpenTray.app.zip",
       },
       {
         platform: "darwin",
         resolvePackageJson: () => packageJsonPath,
         assertBinaryAccessible: async () => {},
+        assertCarrierAccessible: async () => {},
       },
     );
 
     expect(result).toEqual({
       binary: binaryPath,
       binaryPath,
+      carrierArchive: join(dirname(packageJsonPath), "app/OpenTray.app.zip"),
+      carrierArchivePath: join(dirname(packageJsonPath), "app/OpenTray.app.zip"),
     });
   });
 
@@ -215,6 +256,7 @@ describe("installed broker package resolution", () => {
       {
         packageName: "@opentray/darwin-arm64",
         binaryRelativePath: "bin/opentray",
+        carrierArchiveRelativePath: "app/OpenTray.app.zip",
       },
       {
         platform: "darwin",
@@ -222,11 +264,14 @@ describe("installed broker package resolution", () => {
         assertBinaryAccessible: async () => {
           throw errno("ENOENT");
         },
+        assertCarrierAccessible: async () => {},
       },
     );
 
     expect(result).toEqual({
       binaryPath,
+      carrierArchive: join(dirname(packageJsonPath), "app/OpenTray.app.zip"),
+      carrierArchivePath: join(dirname(packageJsonPath), "app/OpenTray.app.zip"),
     });
   });
 
@@ -235,6 +280,7 @@ describe("installed broker package resolution", () => {
       {
         packageName: "@opentray/darwin-arm64",
         binaryRelativePath: "bin/opentray",
+        carrierArchiveRelativePath: "app/OpenTray.app.zip",
       },
       {
         platform: "darwin",
@@ -253,6 +299,11 @@ describe("broker native target", () => {
     expect(resolveBrokerNativeTarget("win32", "arm64")).toEqual({
       packageName: "@opentray/windows-arm64",
       binaryRelativePath: "bin/opentray.exe",
+    });
+    expect(resolveBrokerNativeTarget("darwin", "arm64")).toEqual({
+      packageName: "@opentray/darwin-arm64",
+      binaryRelativePath: "bin/opentray",
+      carrierArchiveRelativePath: "app/OpenTray.app.zip",
     });
   });
 });

@@ -16,6 +16,7 @@ import {
   type CreateTrayMenu,
   type CreateTrayMenuClickHandler,
 } from "./menu-input";
+import { InvalidAppIconError, isNativeCapableAppIcon } from "./app-icon";
 
 export interface OpenTrayRuntimeOptions {
   endpoint?: string;
@@ -52,6 +53,12 @@ export const createTray = async (
   options: CreateTrayOptions,
   runtimeOptions: OpenTrayRuntimeOptions = {}
 ): Promise<CreateTrayHandle> => {
+  if (
+    runtimeOptions.appIcon !== undefined &&
+    !isNativeCapableAppIcon(runtimeOptions.appIcon)
+  ) {
+    throw new InvalidAppIconError(process.platform);
+  }
   const normalized = normalizeCreateTrayOptions(options);
   const connection = await connectLocalBroker(runtimeOptions);
   try {

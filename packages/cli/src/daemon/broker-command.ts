@@ -8,6 +8,10 @@ import { spawn } from "node:child_process";
 
 import type { BrokerArtifactIdentity } from "@opentray/spec";
 
+import {
+  materializeDarwinBrokerCarrier,
+  type MaterializeDarwinCarrierOptions,
+} from "./darwin-carrier";
 import type { DaemonPaths } from "./paths";
 import {
   type BrokerNativeTarget,
@@ -33,12 +37,15 @@ const requireFromSource = createRequire(sourceUrl);
 export interface InstalledBrokerBinaryResolution {
   binary?: string;
   binaryPath?: string;
+  carrierArchive?: string;
+  carrierArchivePath?: string;
 }
 
 export interface ResolveInstalledBrokerBinaryOptions {
   platform?: NodeJS.Platform;
   resolvePackageJson?: (specifier: string) => string;
   assertBinaryAccessible?: (binaryPath: string, platform: NodeJS.Platform) => Promise<void>;
+  assertCarrierAccessible?: (carrierPath: string) => Promise<void>;
 }
 
 export interface ResolveBrokerCommandOptions {
@@ -56,6 +63,12 @@ export interface ResolveBrokerCommandOptions {
     paths: DaemonPaths,
     platform: NodeJS.Platform,
   ) => Promise<string>;
+  ensureDevDarwinCarrierArchive?: (
+    workspaceRoot: string,
+    paths: DaemonPaths,
+    brokerPath: string,
+  ) => Promise<string>;
+  materializeDarwinCarrier?: (options: MaterializeDarwinCarrierOptions) => Promise<string>;
 }
 
 export interface ResolveBrokerArtifactOptions extends ResolveBrokerCommandOptions {
@@ -113,7 +126,16 @@ export const resolveBrokerCommand = async (
     { platform },
   );
   if (installed.binary !== undefined) {
-    return commandForBinary(installed.binary, paths);
+    if (platform !== "darwin") return commandForBinary(installed.binary, paths);
+    if (installed.carrierArchive === undefined) {
+      throw missingDarwinCarrierError(target, installed, arch);
+    }
+    const binary = await (options.materializeDarwinCarrier ?? materializeDarwinBrokerCarrier)({
+      archivePath: installed.carrierArchive,
+      brokerPath: installed.binary,
+      paths,
+    });
+    return commandForBinary(binary, paths);
   }
 
   const sourceDir = options.sourceDir ?? dirname(fileURLToPath(sourceUrl));
@@ -124,7 +146,14 @@ export const resolveBrokerCommand = async (
       paths,
       platform,
     );
-    return commandForBinary(binary, paths);
+    if (platform !== "darwin") return commandForBinary(binary, paths);
+    const archivePath = await (
+      options.ensureDevDarwinCarrierArchive ?? ensureDevDarwinCarrierArchive
+    )(workspaceRoot, paths, binary);
+    const carrierBinary = await (
+      options.materializeDarwinCarrier ?? materializeDarwinBrokerCarrier
+    )({ archivePath, brokerPath: binary, paths });
+    return commandForBinary(carrierBinary, paths);
   }
 
   throw new MissingPlatformBrokerBinaryError(
@@ -158,18 +187,47 @@ export const resolveInstalledBrokerBinary = async (
   }
 
   const binaryPath = join(dirname(packageJsonPath), target.binaryRelativePath);
+  const carrierArchivePath =
+    target.carrierArchiveRelativePath === undefined
+      ? undefined
+      : join(dirname(packageJsonPath), target.carrierArchiveRelativePath);
+  let carrierArchive: string | undefined;
+  if (carrierArchivePath !== undefined) {
+    try {
+      await (options.assertCarrierAccessible ?? assertInstalledCarrierAccessible)(
+        carrierArchivePath,
+      );
+      carrierArchive = carrierArchivePath;
+    } catch (error) {
+      if (
+        !isNodeError(error) ||
+        (error.code !== "ENOENT" && error.code !== "EACCES" && error.code !== "EPERM")
+      ) {
+        throw error;
+      }
+    }
+  }
   try {
     await (options.assertBinaryAccessible ?? assertInstalledBrokerBinaryAccessible)(
       binaryPath,
       platform,
     );
-    return { binary: binaryPath, binaryPath };
+    return {
+      binary: binaryPath,
+      binaryPath,
+      ...(carrierArchivePath === undefined ? {} : { carrierArchivePath }),
+      ...(carrierArchive === undefined ? {} : { carrierArchive }),
+    };
   } catch (error) {
     if (
       isNodeError(error) &&
       (error.code === "ENOENT" || error.code === "EACCES" || error.code === "EPERM")
     ) {
-      return { binaryPath };
+      return {
+        binaryPath,
+        ...(carrierArchivePath === undefined ? {} : { carrierArchivePath }),
+        ...(carrierArchive === undefined ? {} : { carrierArchive }),
+      };
     }
     throw error;
   }
@@ -250,28 +308,54 @@ const ensureDevBrokerBinary = async (
   return binary;
 };
 
+const ensureDevDarwinCarrierArchive = async (
+  workspaceRoot: string,
+  paths: DaemonPaths,
+  brokerPath: string,
+): Promise<string> => {
+  const archivePath = join(
+    workspaceRoot,
+    "target",
+    "darwin-app-carrier",
+    `source-${paths.callerLabel}`,
+    "OpenTray.app.zip",
+  );
+  await runProcess(
+    "bash",
+    ["scripts/release/build-darwin-runtime-carrier.sh", archivePath, brokerPath],
+    workspaceRoot,
+  );
+  return archivePath;
+};
+
 const runCargoBuild = (workspaceRoot: string, targetDir?: string): Promise<void> =>
+  runProcess(
+    "cargo",
+    [
+      "build",
+      "-p",
+      "opentray-bin",
+      ...(targetDir === undefined ? [] : ["--target-dir", targetDir]),
+    ],
+    workspaceRoot,
+    process.env.OPENTRAY_BROKER_BUILD_LOGS === "1" ? "inherit" : "ignore",
+  );
+
+const runProcess = (
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  stdio: "ignore" | "inherit" = "ignore",
+): Promise<void> =>
   new Promise((resolve, reject) => {
-    const child = spawn(
-      "cargo",
-      [
-        "build",
-        "-p",
-        "opentray-bin",
-        ...(targetDir === undefined ? [] : ["--target-dir", targetDir]),
-      ],
-      {
-        cwd: workspaceRoot,
-        stdio: process.env.OPENTRAY_BROKER_BUILD_LOGS === "1" ? "inherit" : "ignore",
-      },
-    );
+    const child = spawn(command, [...args], { cwd, stdio });
     child.once("error", reject);
     child.once("exit", (code) => {
       if (code === 0) {
         resolve();
         return;
       }
-      reject(new Error(`cargo build -p opentray-bin failed with code ${code ?? "unknown"}`));
+      reject(new Error(`${command} ${args.join(" ")} failed with code ${code ?? "unknown"}`));
     });
   });
 
@@ -293,6 +377,27 @@ const assertInstalledBrokerBinaryAccessible = async (
 ): Promise<void> => {
   await access(binaryPath, binaryAccessMode(platform));
 };
+
+const assertInstalledCarrierAccessible = async (carrierPath: string): Promise<void> => {
+  await access(carrierPath, constants.F_OK);
+};
+
+const missingDarwinCarrierError = (
+  target: BrokerNativeTarget,
+  resolution: InstalledBrokerBinaryResolution,
+  arch: string,
+): MissingPlatformBrokerBinaryError =>
+  new MissingPlatformBrokerBinaryError(
+    `unable to resolve OpenTray Darwin carrier for ${target.packageName}; expected ${resolution.carrierArchivePath ?? target.carrierArchiveRelativePath ?? "app/OpenTray.app.zip"}`,
+    "darwin",
+    arch,
+    {
+      packageName: target.packageName,
+      ...(resolution.carrierArchivePath === undefined
+        ? {}
+        : { binaryPath: resolution.carrierArchivePath }),
+    },
+  );
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;

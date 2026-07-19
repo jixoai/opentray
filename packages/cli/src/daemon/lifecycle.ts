@@ -102,11 +102,13 @@ export const startDaemon = async ({
   driver,
   lockTimeoutMs = DEFAULT_DAEMON_LOCK_TIMEOUT_MS,
 }: StartDaemonOptions): Promise<DaemonStartResult> => {
-  const broker = await driver.resolveBroker(paths);
   await mkdir(paths.runtimeDir, { recursive: true });
 
   const lock = await acquireLock(paths.lockFile, lockTimeoutMs);
   try {
+    // Darwin carrier materialization is part of broker resolution. Keep it under the same
+    // caller lifecycle lock that decides reuse/replacement so bundle bytes cannot race readiness.
+    const broker = await driver.resolveBroker(paths);
     const existingPid = await readPid(paths.pidFile);
     if (existingPid !== undefined && (await driver.isAlive(existingPid))) {
       const ready = await readReadyMetadata(paths.readyFile);

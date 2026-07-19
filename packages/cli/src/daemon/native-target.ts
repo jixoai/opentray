@@ -6,6 +6,7 @@ export type BrokerArch = "arm64" | "x64";
 export interface BrokerNativeTarget {
   packageName: string;
   binaryRelativePath: string;
+  carrierArchiveRelativePath?: string;
 }
 
 export const resolveBrokerNativeTarget = (
@@ -17,6 +18,9 @@ export const resolveBrokerNativeTarget = (
   return {
     packageName: `@opentray/${packageOs}-${nativeArch}`,
     binaryRelativePath: `bin/${packageOs === "windows" ? "opentray.exe" : "opentray"}`,
+    ...(packageOs === "darwin"
+      ? { carrierArchiveRelativePath: "app/OpenTray.app.zip" }
+      : {}),
   };
 };
 

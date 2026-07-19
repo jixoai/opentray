@@ -37,6 +37,7 @@ export {
   type CreateTrayOptions,
   type OpenTrayRuntimeOptions,
 } from "./sdk";
+export { InvalidAppIconError, isNativeCapableAppIcon } from "./app-icon";
 export {
   type CreateTrayCheckItem,
   type CreateTrayItem,

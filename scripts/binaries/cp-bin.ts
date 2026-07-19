@@ -66,6 +66,14 @@ for (const kind of kinds) {
   const destination = resolveStageDestination(nativeTarget, kind);
   await stageArtifact(root, source, destination);
   console.log(`copied ${target} ${kind} artifact: ${source} -> ${destination}`);
+  if (kind === "runtime" && nativeTarget.runtimeCarrierArtifact !== undefined) {
+    const carrierDestination = join(root, nativeTarget.runtimeCarrierArtifact);
+    await runCommand(
+      "bash",
+      ["scripts/release/build-darwin-runtime-carrier.sh", carrierDestination, source],
+      root,
+    );
+  }
 }
 
 function normalizeKinds(values: readonly string[]): LocalBuildKind[] {

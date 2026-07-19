@@ -14,6 +14,7 @@ import {
   type TrayId,
   type TrayOptions,
 } from "@opentray/spec";
+import { isNativeCapableAppIcon } from "./app-icon";
 
 import {
   resolveNativeExtensionArtifact,
@@ -183,6 +184,7 @@ export function createClient(
         await handle.setIcon(configured.icon);
       } else if (
         trayOptions.icon !== undefined &&
+        isNativeCapableAppIcon(trayOptions.icon) &&
         (await handle.getIcon()) === null
       ) {
         await handle.setIcon(trayOptions.icon);

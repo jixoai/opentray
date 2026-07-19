@@ -400,7 +400,7 @@ export const executeNativeBuildExecution = async (
       const carrierOutput = join(outputDir, darwinRuntimeCarrierArtifactName);
       await runCommand(
         "bash",
-        ["scripts/release/build-darwin-runtime-carrier.sh", carrierOutput],
+        ["scripts/release/build-darwin-runtime-carrier.sh", carrierOutput, source],
         workspaceRoot,
       );
       copiedFiles.push(basename(carrierOutput));
