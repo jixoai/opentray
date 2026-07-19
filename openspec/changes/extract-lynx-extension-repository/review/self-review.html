@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lynx repository extraction self-review</title>
+    <style>
+      body { font: 16px/1.5 -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem auto; max-width: 58rem; padding: 0 1rem; color: #202124; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #c8c8c8; padding: .5rem; text-align: left; vertical-align: top; }
+      code { background: #f1f3f4; padding: .1rem .25rem; }
+      pre { background: #f1f3f4; padding: 1rem; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Lynx repository extraction self-review</h1>
+    <p><strong>Decision:</strong> the core graph is Lynx-free and the root submodule points to the independently pushed <code>52dc270</code> release closure.</p>
+    <table>
+      <thead><tr><th>Boundary</th><th>Evidence</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Independent source</td><td><code>jixoai/opentray-ext-lynx@52dc270</code></td><td>Pass</td></tr>
+        <tr><td>Core graph</td><td>Workspace, native planners, validators, and workflows no longer select Lynx.</td><td>Pass</td></tr>
+        <tr><td>Verification</td><td><code>pnpm run verify</code> and <code>openspec validate --all --strict</code></td><td>Pass</td></tr>
+        <tr><td>Trusted publishing</td><td><code>release.yml</code> retains OIDC, <code>npm-release</code>, and provenance for the new repository.</td><td>Pass</td></tr>
+      </tbody>
+    </table>
+    <h2>Release-order gate</h2>
+    <pre>core 0.15.x publish
+        |
+        v
+independent pnpm install -> real lockfile -> Lynx first publish</pre>
+    <p>The registry has only <code>opentray@0.14.4</code>; the independent repository does not commit a fabricated lockfile. Its bootstrap workflows use <code>--no-frozen-lockfile</code> until core <code>0.15.x</code> is published.</p>
+    <p>The full Xcode carrier build and visual Darwin smoke remain platform/registry gates. Static carrier tests and the executable consumer smoke path are included and verified.</p>
+  </body>
+</html>
