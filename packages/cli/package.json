@@ -29,7 +29,6 @@
     "example:matrix": "bun run examples/example-matrix.ts",
     "example:basic": "bun run examples/basic-tray.ts",
     "example:first-app": "bun run examples/first-app.ts",
-    "example:debug-runtime-lynx": "bun run examples/debug-runtime-lynx.ts",
     "example:debug-runtime-tray": "bun run examples/debug-runtime-tray.ts",
     "example:download": "bun run examples/download-panel.ts",
     "example:mediaQuery": "bun run examples/media-query-panel.ts",

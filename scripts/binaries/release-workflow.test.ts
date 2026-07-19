@@ -16,8 +16,6 @@ describe("Feature: release native binary CI law", () => {
     expect(workflow).toContain("uses: actions/setup-node@v6");
     expect(workflow).toContain("uses: oven-sh/setup-bun@v2");
     expect(workflow).toContain("uses: dtolnay/rust-toolchain@stable");
-    expect(workflow).toContain("uses: actions/cache/restore@v4");
-    expect(workflow).toContain("uses: actions/cache/save@v4");
     expect(workflow).toContain("uses: Swatinem/rust-cache@v2");
     expect(workflow).toContain("uses: actions/upload-artifact@v4");
     expect(workflow).toContain("uses: actions/download-artifact@v4");
@@ -50,12 +48,10 @@ describe("Feature: release native binary CI law", () => {
     );
     expect(nativeJob).toContain("if: needs.plan-native.outputs.enabled == 'true'");
     expect(nativeJob).toContain("matrix: ${{ fromJson(needs.plan-native.outputs.matrix) }}");
-    expect(nativeJob).toContain("if: matrix.buildsLynxRuntime == true");
     expect(nativeJob).toContain("bun run scripts/binaries/build-native-job.ts");
     expect(nativeJob).toContain("name: ${{ matrix.artifactName }}");
     expect(nativeJob).toContain("ref: ${{ needs.prepare-release.outputs.source-ref }}");
     expect(nativeJob).toContain("Apply alpha release source patch");
-    expect(nativeJob).not.toContain("packages+=(-p opentray-ext-lynx)");
     const packedJob = workflow.slice(
       workflow.indexOf("  packed-consumer:"),
       workflow.indexOf("  release:"),
@@ -80,13 +76,6 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("Stage native artifacts into npm packages");
     expect(releaseJob).toContain("bun run scripts/binaries/stage-release-artifacts.ts");
     expect(releaseJob).toContain("bun run scripts/binaries/validate-package-dirs.ts");
-    expect(workflow).toContain("Seed Googlesource hosts");
-    expect(workflow).toContain("sudo python3 scripts/ci/seed_hosts_from_doh.py");
-    expect(workflow).toContain("flutter.googlesource.com");
-    expect(workflow).toContain("'native/lynx-runtime-macos/**'");
-    expect(workflow).toContain("'native/lynx-patches/**'");
-    expect(workflow).toContain("Upload Lynx build logs");
-    expect(workflow).toContain("research/lynx/logs/**");
     expect(releaseJob).toContain("git push origin --tags");
     expect(releaseJob).toContain("Backfill release tags");
     expect(releaseJob).toContain("pnpm exec changeset tag");

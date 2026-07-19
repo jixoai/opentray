@@ -24,15 +24,6 @@ describe("Feature: native verification planner", () => {
     const plan = await resolveVerifyNativePlan(root);
 
     expect(plan.jobs.every((job) => job.components.length === 1)).toBe(true);
-    expect(
-      plan.jobs.some(
-        (job) =>
-          job.components.includes("webview") && job.components.includes("lynx")
-      )
-    ).toBe(false);
-    expect(plan.jobs.map((job) => job.artifactName)).toContain(
-      "native-darwin-arm64-lynx-runtime"
-    );
     expect(new Set(plan.jobs.map((job) => job.artifactName)).size).toBe(
       plan.jobs.length
     );
@@ -41,7 +32,7 @@ describe("Feature: native verification planner", () => {
     ).toBe(true);
   });
 
-  test("Scenario: Given pending runtime and extension changesets When the plan is resolved Then paused Lynx atoms stay out of the PR verification closure", async () => {
+  test("Scenario: Given pending runtime and extension changesets When the plan is resolved Then requested native atoms remain independent", async () => {
     const root = await createTempWorkspace();
     await writeFile(
       join(root, ".changeset", "release.md"),
@@ -57,13 +48,6 @@ describe("Feature: native verification planner", () => {
 
     expect(plan.components).toEqual(["runtime", "webview", "badge"]);
     expect(plan.jobs.every((job) => job.components.length === 1)).toBe(true);
-    expect(
-      plan.jobs.some((job) => job.components.includes("lynx"))
-    ).toBe(false);
-    expect(
-      plan.jobs.some((job) => job.components.includes("lynx-runtime"))
-    ).toBe(false);
-    expect(plan.validatePackageDirs).not.toContain("packages/ext-lynx-darwin-arm64");
     expect(plan.validatePackageDirs).toContain("packages/ext-webview-darwin-arm64");
     expect(plan.validatePackageDirs).toContain("packages/ext-badge-darwin-arm64");
   });

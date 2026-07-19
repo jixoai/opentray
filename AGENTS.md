@@ -43,6 +43,13 @@ OpenTray uses the current tray-first model. Application code calls `createTray()
 
 OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Older docs that still mention them describe an earlier surface model.
 
+## External Extension Ownership
+
+Lynx is an independently releasable official extension owned by
+[`jixoai/opentray-ext-lynx`](https://github.com/jixoai/opentray-ext-lynx). This repository
+keeps only generic extension ABI/loader, `@opentray/spec`, and `TrayHandle.extend` contracts;
+it must not build, stage, or publish Lynx packages, native libraries, runtime carriers, or smoke assets.
+
 ## Runtime Compatibility And Diagnosis Laws
 
 The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `skill-creator-v2` retained-window investigations:

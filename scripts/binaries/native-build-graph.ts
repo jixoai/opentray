@@ -24,9 +24,8 @@ export type NativeBuildTargetName =
   | "windows-arm64"
   | "windows-x64";
 
-export type NativeBuildComponent = "runtime" | "webview" | "badge" | "lynx" | "lynx-runtime";
+export type NativeBuildComponent = "runtime" | "webview" | "badge";
 export type NativeArtifactKind = NativeStageKind;
-export const lynxRuntimeArtifactName = "OpenTrayLynxRuntime.app.zip";
 export const badgeDynamicLibraryArtifactName = "libopentray_ext_badge.dylib";
 export const extensionInspectorCargoPackage = "opentray-extension-inspector";
 
@@ -36,10 +35,7 @@ export interface NativeBuildTargetConfig {
   readonly arch: NativeArch;
   readonly runner: string;
   readonly previewJobTimeoutMinutes: number;
-  readonly previewLynxRuntimeJobTimeoutMinutes: number;
   readonly releaseJobTimeoutMinutes: number;
-  readonly releaseLynxRuntimeJobTimeoutMinutes: number;
-  readonly lynxRuntimeTimeoutSeconds: number;
 }
 
 export interface NativeBuildComponentConfig {
@@ -61,8 +57,6 @@ export interface NativeBuildExecution {
   readonly runner: string;
   readonly previewJobTimeoutMinutes: number;
   readonly releaseJobTimeoutMinutes: number;
-  readonly lynxRuntimeTimeoutSeconds: number;
-  readonly buildsLynxRuntime: boolean;
 }
 
 export interface NativeBuildManifest {
@@ -87,10 +81,7 @@ const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig>
     arch: "arm64",
     runner: "macos-15",
     previewJobTimeoutMinutes: 60,
-    previewLynxRuntimeJobTimeoutMinutes: 90,
     releaseJobTimeoutMinutes: 90,
-    releaseLynxRuntimeJobTimeoutMinutes: 90,
-    lynxRuntimeTimeoutSeconds: 4_500,
   },
   "darwin-x64": {
     id: "darwin-x64",
@@ -98,10 +89,7 @@ const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig>
     arch: "x64",
     runner: "macos-15-intel",
     previewJobTimeoutMinutes: 75,
-    previewLynxRuntimeJobTimeoutMinutes: 120,
     releaseJobTimeoutMinutes: 120,
-    releaseLynxRuntimeJobTimeoutMinutes: 120,
-    lynxRuntimeTimeoutSeconds: 5_700,
   },
   "linux-arm64": {
     id: "linux-arm64",
@@ -109,10 +97,7 @@ const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig>
     arch: "arm64",
     runner: "ubuntu-24.04-arm",
     previewJobTimeoutMinutes: 45,
-    previewLynxRuntimeJobTimeoutMinutes: 45,
     releaseJobTimeoutMinutes: 90,
-    releaseLynxRuntimeJobTimeoutMinutes: 90,
-    lynxRuntimeTimeoutSeconds: 0,
   },
   "linux-x64": {
     id: "linux-x64",
@@ -120,10 +105,7 @@ const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig>
     arch: "x64",
     runner: "ubuntu-24.04",
     previewJobTimeoutMinutes: 45,
-    previewLynxRuntimeJobTimeoutMinutes: 45,
     releaseJobTimeoutMinutes: 90,
-    releaseLynxRuntimeJobTimeoutMinutes: 90,
-    lynxRuntimeTimeoutSeconds: 0,
   },
   "windows-arm64": {
     id: "windows-arm64",
@@ -131,10 +113,7 @@ const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig>
     arch: "arm64",
     runner: "windows-11-arm",
     previewJobTimeoutMinutes: 45,
-    previewLynxRuntimeJobTimeoutMinutes: 45,
     releaseJobTimeoutMinutes: 90,
-    releaseLynxRuntimeJobTimeoutMinutes: 90,
-    lynxRuntimeTimeoutSeconds: 0,
   },
   "windows-x64": {
     id: "windows-x64",
@@ -142,10 +121,7 @@ const nativeBuildTargets: Record<NativeBuildTargetName, NativeBuildTargetConfig>
     arch: "x64",
     runner: "windows-2025",
     previewJobTimeoutMinutes: 45,
-    previewLynxRuntimeJobTimeoutMinutes: 45,
     releaseJobTimeoutMinutes: 90,
-    releaseLynxRuntimeJobTimeoutMinutes: 90,
-    lynxRuntimeTimeoutSeconds: 0,
   },
 };
 
@@ -166,8 +142,6 @@ const nativeBuildComponentOrder: readonly NativeBuildComponent[] = [
   "runtime",
   "webview",
   "badge",
-  "lynx",
-  "lynx-runtime",
 ];
 
 const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentConfig> = {
@@ -197,24 +171,6 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
     artifactKinds: ["badge"],
     inferredPackages: ["@opentray/ext-badge"],
     inferredPackagePrefixes: ["@opentray/ext-badge-"],
-  },
-  lynx: {
-    component: "lynx",
-    allowedTargets: ["darwin-arm64", "darwin-x64"],
-    defaultReleaseTargets: ["darwin-arm64", "darwin-x64"],
-    cargoPackages: ["opentray-ext-lynx", extensionInspectorCargoPackage],
-    artifactKinds: ["lynx"],
-    inferredPackages: ["@opentray/ext-lynx"],
-    inferredPackagePrefixes: ["@opentray/ext-lynx-"],
-  },
-  "lynx-runtime": {
-    component: "lynx-runtime",
-    allowedTargets: ["darwin-arm64", "darwin-x64"],
-    defaultReleaseTargets: ["darwin-arm64", "darwin-x64"],
-    cargoPackages: [],
-    artifactKinds: ["lynx-runtime"],
-    inferredPackages: [],
-    inferredPackagePrefixes: [],
   },
 };
 
@@ -257,11 +213,6 @@ export const inferNativeBuildComponentsFromReleasePackages = (
       inferred.add("badge");
       continue;
     }
-    if (matchesReleasePackage("lynx", releasePackage)) {
-      inferred.add("lynx");
-      inferred.add("lynx-runtime");
-      continue;
-    }
     if (matchesReleasePackage("runtime", releasePackage)) {
       inferred.add("runtime");
     }
@@ -297,13 +248,11 @@ export const materializeNativeBuildExecutions = (
 
     const cargoPackages = new Set<string>();
     const artifactKinds = new Set<NativeArtifactKind>();
-    let buildsLynxRuntime = false;
 
     for (const component of selectedComponents) {
       const config = resolveNativeBuildComponent(component);
       config.cargoPackages.forEach((pkg) => cargoPackages.add(pkg));
       config.artifactKinds.forEach((kind) => artifactKinds.add(kind));
-      buildsLynxRuntime ||= config.artifactKinds.includes("lynx-runtime");
     }
 
     return {
@@ -313,14 +262,8 @@ export const materializeNativeBuildExecutions = (
       artifactKinds: [...artifactKinds],
       artifactName: nativeBuildExecutionArtifactName(target, selectedComponents),
       runner: targetConfig.runner,
-      previewJobTimeoutMinutes: buildsLynxRuntime
-        ? targetConfig.previewLynxRuntimeJobTimeoutMinutes
-        : targetConfig.previewJobTimeoutMinutes,
-      releaseJobTimeoutMinutes: buildsLynxRuntime
-        ? targetConfig.releaseLynxRuntimeJobTimeoutMinutes
-        : targetConfig.releaseJobTimeoutMinutes,
-      lynxRuntimeTimeoutSeconds: targetConfig.lynxRuntimeTimeoutSeconds,
-      buildsLynxRuntime,
+      previewJobTimeoutMinutes: targetConfig.previewJobTimeoutMinutes,
+      releaseJobTimeoutMinutes: targetConfig.releaseJobTimeoutMinutes,
     };
   });
 };
@@ -401,17 +344,6 @@ export const executeNativeBuildExecution = async (
   const extensionArtifacts: ExtensionArtifactEvidence[] = [];
 
   for (const kind of execution.artifactKinds) {
-    if (kind === "lynx-runtime") {
-      const runtimeOutput = join(outputDir, lynxRuntimeArtifactName);
-      await runCommand(
-        "bash",
-        ["scripts/release/build-lynx-runtime.sh", runtimeOutput],
-        workspaceRoot,
-      );
-      copiedFiles.push(basename(runtimeOutput));
-      continue;
-    }
-
     if (kind === "badge") {
       const source = join(
         workspaceRoot,
@@ -503,7 +435,7 @@ export const parseNativeBuildTargetName = (value: string): NativeBuildTargetName
 };
 
 export const releaseArtifactName = (
-  kind: Exclude<NativeArtifactKind, "lynx-runtime">,
+  kind: NativeArtifactKind,
   packageOs: PackageOs,
 ): string => {
   switch (kind) {
@@ -525,8 +457,6 @@ export const releaseArtifactName = (
         return badgeDynamicLibraryArtifactName;
       }
       throw new Error("badge native artifacts are not published for linux targets");
-    case "lynx":
-      return "libopentray_ext_lynx.dylib";
   }
 };
 
@@ -560,12 +490,6 @@ const resolvePackageDirForComponent = (
         throw new Error(`target ${packageOs}-${arch} does not publish badge package directories`);
       }
       return target.badgePackageDir;
-    case "lynx":
-    case "lynx-runtime":
-      if (target.lynxPackageDir === undefined) {
-        throw new Error(`target ${packageOs}-${arch} does not publish lynx package directories`);
-      }
-      return target.lynxPackageDir;
   }
 };
 

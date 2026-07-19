@@ -7,8 +7,6 @@ export type NativeArch = "arm64" | "x64";
 export type NativeStageKind =
   | "runtime"
   | "webview"
-  | "lynx"
-  | "lynx-runtime"
   | "badge";
 export const badgeDockHelperArtifactName = "OpenTrayBadgeHelper.app.zip";
 export const runtimeExecutableArtifactName = "opentray";
@@ -27,10 +25,6 @@ export interface NativeTarget {
   badgePackageDir?: string;
   badgeArtifact?: string;
   badgeHelperArtifact?: string;
-  lynxPackageName?: string;
-  lynxPackageDir?: string;
-  lynxArtifact?: string;
-  lynxRuntimeArtifact?: string;
 }
 
 const packageTargets = [
@@ -70,11 +64,6 @@ export function createNativeTarget(
     badgePackageDir === undefined
       ? undefined
       : `@opentray/ext-badge-${packageOs}-${arch}`;
-  const lynxPackageDir =
-    packageOs === "darwin"
-      ? `packages/ext-lynx-${packageOs}-${arch}`
-      : undefined;
-
   return {
     packageOs,
     npmOs,
@@ -99,19 +88,6 @@ export function createNativeTarget(
     badgePackageDir,
     badgeArtifact,
     badgeHelperArtifact,
-    lynxPackageName:
-      lynxPackageDir === undefined
-        ? undefined
-        : `@opentray/ext-lynx-${packageOs}-${arch}`,
-    lynxPackageDir,
-    lynxArtifact:
-      lynxPackageDir === undefined
-        ? undefined
-        : `${lynxPackageDir}/lib/libopentray_ext_lynx.dylib`,
-    lynxRuntimeArtifact:
-      lynxPackageDir === undefined
-        ? undefined
-        : `${lynxPackageDir}/runtime/OpenTrayLynxRuntime.app.zip`,
   };
 }
 
@@ -188,20 +164,6 @@ export const resolveStageDestination = (
         );
       }
       return target.badgeArtifact;
-    case "lynx":
-      if (target.lynxArtifact === undefined) {
-        throw new Error(
-          `target ${target.packageOs}-${target.arch} does not publish a lynx dylib`
-        );
-      }
-      return target.lynxArtifact;
-    case "lynx-runtime":
-      if (target.lynxRuntimeArtifact === undefined) {
-        throw new Error(
-          `target ${target.packageOs}-${target.arch} does not publish a lynx runtime`
-        );
-      }
-      return target.lynxRuntimeArtifact;
   }
 };
 
@@ -228,8 +190,6 @@ export const resolveStageDestinationForArtifactFile = (
     target.webviewArtifact,
     target.badgeArtifact,
     target.badgeHelperArtifact,
-    target.lynxArtifact,
-    target.lynxRuntimeArtifact,
   ].filter((candidate): candidate is string => candidate !== undefined);
 
   const destination = candidates.find(

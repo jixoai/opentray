@@ -58,25 +58,6 @@ OpenTray SHALL centralize branch preview build planning in a planner that reads 
 - **WHEN** the planner resolves the request
 - **THEN** planning fails explicitly instead of silently merging them
 
-### Requirement: ext-webview preview builds SHALL not require Lynx builds
-
-The preview build law SHALL treat `ext-webview-native` as its own artifact family. Its build closure may include the broker binary required to exercise the extension, but it SHALL NOT compile `opentray-ext-lynx` or build the Lynx runtime sidecar unless a Lynx family was explicitly requested.
-
-#### Scenario: ext-webview preview matrix excludes Lynx
-
-- **GIVEN** the planner resolved an `ext-webview-native` preview build for `darwin-arm64`
-- **WHEN** the preview build workflow executes the matrix job
-- **THEN** the Rust build command includes `opentray-bin` and `opentray-ext-webview`
-- **AND** it does not include `opentray-ext-lynx`
-- **AND** it does not invoke the Lynx runtime sidecar build script
-
-#### Scenario: ext-webview preview artifacts stay within its family closure
-
-- **GIVEN** the preview build workflow completed an `ext-webview-native` job
-- **WHEN** it uploads artifacts
-- **THEN** the uploaded native outputs are limited to the broker binary and WebView native library for that target
-- **AND** no Lynx dylib or Lynx runtime zip is uploaded
-
 ### Requirement: Manual preview overrides SHALL exist without weakening changeset-gated automatic triggers
 
 OpenTray SHALL keep `workflow_dispatch` as an escape hatch for manual preview builds, but that manual path SHALL use the same planner and family metadata as changeset-triggered builds.
@@ -90,23 +71,14 @@ OpenTray SHALL keep `workflow_dispatch` as an escape hatch for manual preview bu
 
 ### Requirement: Native build graph SHALL model daemon and extension artifacts as independent atoms
 
-OpenTray SHALL treat the daemon binary, WebView native library, Lynx native library, and Lynx runtime sidecar as distinct native build atoms. Preview families and release package selection MAY combine these atoms, but they SHALL NOT collapse them back into one platform-owned monolith.
+OpenTray SHALL treat the daemon binary, WebView native library, and Badge native library as distinct native build atoms. Preview families and release package selection MAY combine these atoms, but they SHALL NOT collapse them back into one platform-owned monolith.
 
-#### Scenario: WebView preview family keeps Lynx atoms out of the closure
+#### Scenario: WebView preview family keeps its atom explicit
 
 - **GIVEN** a preview build request resolves to the `ext-webview-native` family
 - **WHEN** the planner materializes the native job
 - **THEN** the job includes the WebView native library atom for the selected target
-- **AND** it excludes the Lynx native library atom
-- **AND** it excludes the Lynx runtime sidecar atom
-
-#### Scenario: Lynx release selection still keeps runtime as an explicit atom
-
-- **GIVEN** a release plan resolves a publish that includes `@opentray/ext-lynx`
-- **WHEN** the planner materializes the native jobs
-- **THEN** the plan includes the Lynx native library atom
-- **AND** it separately includes the Lynx runtime sidecar atom
-- **AND** the two atoms remain absent from WebView-only release plans
+- **AND** unrelated native package atoms remain outside that job
 
 ### Requirement: Preview and release planners SHALL share the same native build graph truth
 

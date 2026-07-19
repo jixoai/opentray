@@ -49,11 +49,8 @@ Notes on what each proves:
 - `example:mediaQuery` — responsive native-window behavior through `styleKit.apply(...)`, `mediaQueryKit.match(...)`, and size constraints.
 - `example:badge` — `@opentray/ext-badge` WebView IPC debug panel.
 
-For Lynx contributor acceptance:
-
-```bash
-pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
-```
+Lynx contributor acceptance is maintained in the independent
+[`jixoai/opentray-ext-lynx`](https://github.com/jixoai/opentray-ext-lynx) repository.
 
 Use `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=<ms>` only for examples that support timed exit.
 

@@ -9,7 +9,6 @@ Follow the existing atom pattern:
 - Facade package: `@opentray/ext-<name>`
 - Platform packages are capability-specific. Do not assume every extension supports every OpenTray daemon target.
   - `@opentray/ext-webview` currently publishes `darwin-arm64`, `darwin-x64`, `windows-arm64`, and `windows-x64` native packages only.
-  - `@opentray/ext-lynx` currently publishes macOS native packages only.
   - The core `opentray` daemon still publishes macOS, Linux, and Windows packages.
 - Native artifact path:
   - macOS: `lib/libopentray_ext_<name>.dylib`

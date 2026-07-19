@@ -1,22 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   createExampleMatrix,
-  lynxExtensionSourcePath,
   type PlannedExampleMatrixRow,
 } from "./example-matrix";
-
-const tempDirs: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })),
-  );
-});
 
 describe("Feature: opentray example matrix planning", () => {
   it("Scenario: Given the package example matrix When rows are resolved Then finite rows replace shell wildcard expansion", () => {
@@ -36,7 +25,6 @@ describe("Feature: opentray example matrix planning", () => {
       "placement",
       "media-query",
       "badge",
-      "lynx",
     ]);
     for (const row of rows) {
       const commands = [row.command, ...(row.preflight ?? [])];
@@ -109,90 +97,6 @@ describe("Feature: opentray example matrix planning", () => {
     expect(row.skipReason).toBe("unsupported platform: linux");
   });
 
-  it("Scenario: Given a CI-owned Lynx carrier artifact is missing When planned Then the row skips instead of pretending success", async () => {
-    const workspaceRoot = await makeTempDir();
-    await writeWorkspaceFile(
-      workspaceRoot,
-      "packages/cli/assets/lynx-review/main.lynx.bundle",
-    );
-
-    const row = rowById(
-      createExampleMatrix({
-        platform: "darwin",
-        arch: "arm64",
-        workspaceRoot,
-      }),
-      "lynx",
-    );
-
-    expect(row.skipped).toBe(true);
-    expect(row.skipReason).toBe(
-      "missing artifact: packages/ext-lynx-darwin-arm64/runtime/OpenTrayLynxRuntime.app.zip",
-    );
-  });
-
-  it("Scenario: Given the Lynx row is planned on macOS When preflight runs Then it builds and stages the extension dylib from source", () => {
-    const workspaceRoot = "/repo";
-    const row = rowById(
-      createExampleMatrix({
-        platform: "darwin",
-        arch: "arm64",
-        workspaceRoot,
-      }),
-      "lynx",
-    );
-
-    expect(row.preflight).toEqual([
-      { command: "cargo", args: ["build", "-p", "opentray-ext-lynx"] },
-      {
-        command: "bun",
-        args: [
-          "run",
-          "scripts/binaries/stage-local.ts",
-          "--kind",
-          "lynx",
-          "--source",
-          lynxExtensionSourcePath("darwin", workspaceRoot),
-        ],
-      },
-    ]);
-    expect(row.command.env).toEqual({
-      OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "1200",
-    });
-  });
-
-  it("Scenario: Given the Lynx row is planned for release When preflight runs Then release artifacts are staged", () => {
-    const workspaceRoot = "/repo";
-    const row = rowById(
-      createExampleMatrix({
-        platform: "darwin",
-        arch: "arm64",
-        workspaceRoot,
-        runtimeMode: "release",
-      }),
-      "lynx",
-    );
-
-    expect(row.preflight).toEqual([
-      {
-        command: "cargo",
-        args: ["build", "--release", "-p", "opentray-ext-lynx"],
-      },
-      {
-        command: "bun",
-        args: [
-          "run",
-          "scripts/binaries/stage-local.ts",
-          "--kind",
-          "lynx",
-          "--source",
-          lynxExtensionSourcePath("darwin", workspaceRoot, "release"),
-        ],
-      },
-    ]);
-    expect(row.command.args).toContain("-r");
-  });
-
   it("Scenario: Given native extension rows are planned When output is reviewed Then source-tree runtime coverage is explicit", () => {
     const rows = createExampleMatrix({
       platform: "darwin",
@@ -207,7 +111,6 @@ describe("Feature: opentray example matrix planning", () => {
       "placement",
       "media-query",
       "badge",
-      "lynx",
     ].map((id) => rowById(rows, id));
 
     expect(
@@ -227,19 +130,4 @@ const rowById = (
     throw new Error(`missing example matrix row: ${id}`);
   }
   return row;
-};
-
-const makeTempDir = async (): Promise<string> => {
-  const dir = await mkdtemp(join(tmpdir(), "opentray-example-matrix-"));
-  tempDirs.push(dir);
-  return dir;
-};
-
-const writeWorkspaceFile = async (
-  workspaceRoot: string,
-  relativePath: string,
-): Promise<void> => {
-  const file = join(workspaceRoot, relativePath);
-  await mkdir(join(file, ".."), { recursive: true });
-  await writeFile(file, "", "utf8");
 };

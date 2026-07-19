@@ -299,23 +299,6 @@ Release-time native artifact planning SHALL derive its build closure from the pa
 - **THEN** daemon binaries go only to daemon platform packages
 - **AND** WebView dynamic libraries go only to WebView platform packages.
 
-#### Scenario: WebView-only release plan excludes Lynx work
-
-- **GIVEN** the pending changesets release `@opentray/ext-webview`
-- **AND** they do not release `@opentray/ext-lynx`
-- **WHEN** the release planner resolves the native build jobs
-- **THEN** it schedules WebView native atoms for the WebView first-stage targets
-- **AND** it does not compile `opentray-ext-lynx`
-- **AND** it does not invoke the Lynx runtime sidecar build
-
-#### Scenario: Lynx release plan stays darwin-scoped and includes runtime
-
-- **GIVEN** the pending changesets release `@opentray/ext-lynx`
-- **WHEN** the release planner resolves the native build jobs
-- **THEN** it schedules Lynx native atoms only for the supported darwin targets
-- **AND** it includes the Lynx runtime sidecar atom for those targets
-- **AND** it does not schedule Windows or Linux Lynx jobs
-
 ### Requirement: Release workflow SHALL stage native artifacts before npm publish
 
 The release workflow SHALL build daemon binaries and WebView dynamic libraries on platform-appropriate CI runners before running `changeset publish`. The publish job SHALL download those artifacts and place them into the package directories listed by each package manifest `files` field.
@@ -339,13 +322,12 @@ The release workflow SHALL skip native artifact compilation and native package s
 - **THEN** it returns no native jobs
 - **AND** the native artifact matrix does not start
 
-#### Scenario: WebView-only release validates only WebView package atoms
+#### Scenario: WebView-only release validates only selected package atoms
 
 - **GIVEN** the release planner selected only WebView native atoms for the current publish
 - **WHEN** the release job stages and validates package contents
 - **THEN** it stages only the selected WebView platform package directories
-- **AND** it does not require Lynx package directories to contain artifacts
-- **AND** it does not fail because an unrelated Lynx runtime zip was never built
+- **AND** it does not require unrelated package directories to contain artifacts
 
 ### Requirement: Native artifact build matrix SHALL cover first-stage platform packages
 
@@ -379,7 +361,7 @@ The release configuration SHALL keep `opentray` and daemon platform packages ver
 
 ### Requirement: Post-publish npm registry visual acceptance SHALL be the final release gate
 
-After npm publish, maintainers SHALL verify the release from a fresh project that installs packages from the npm registry rather than workspace links. The visual acceptance recipe SHALL prove daemon binary resolution, daemon health, WebView dynamic library resolution, human-visible WebView behavior, Lynx runtime-host resolution when Lynx is part of the release, and the human-visible Lynx carrier audit path.
+After npm publish, maintainers SHALL verify the release from a fresh project that installs packages from the npm registry rather than workspace links. The visual acceptance recipe SHALL prove daemon binary resolution, daemon health, WebView dynamic library resolution, and human-visible WebView behavior.
 
 For alpha publishes, the fresh install SHALL use the alpha channel entrypoint such as `npm i opentray@alpha`. The acceptance report SHALL keep stable and alpha evidence separate so prerelease acceptance does not get mistaken for stable release acceptance.
 
@@ -400,14 +382,6 @@ For alpha publishes, the fresh install SHALL use the alpha channel entrypoint su
 - **AND** the acceptance proof records the same runtime/unsupported truth promised by the alpha docs
 - **AND** the result is archived separately from stable release evidence.
 
-#### Scenario: Fresh npm install proves Lynx carrier through a skill recipe
-
-- **GIVEN** `opentray` and `@opentray/ext-lynx` have been published to npm
-- **WHEN** a fresh project installs the published versions and the maintainer runs the documented OpenTray skill recipe
-- **THEN** the recipe resolves the installed daemon binary and Lynx platform package
-- **AND** it launches an explicit review bundle or source-tree acceptance bundle without requiring a public `opentray smoke` subcommand
-- **AND** maintainers can use that recipe as the final human-visible audit for the published Lynx carrier path.
-
 ### Requirement: Package bootstrap SHALL cover WebView platform atoms
 
 The npm bootstrap/trusted-publish tooling SHALL support the `extension-platform` package kind for `@opentray/ext-webview-<os>-<arch>` packages. The script SHALL initialize missing local package manifests, publish initial packages only when explicitly requested, and configure or verify trusted publishing claims without product-specific branches.
@@ -418,30 +392,6 @@ The npm bootstrap/trusted-publish tooling SHALL support the `extension-platform`
 - **WHEN** the package bootstrap script runs with kind `extension-platform`
 - **THEN** it uses generic extension-platform manifest defaults
 - **AND** it does not contain hardcoded WebView-specific npm logic.
-
-### Requirement: Release workflow SHALL stage Lynx dylib and runtime sidecar from GitHub CI
-
-When Lynx platform packages are part of the release set, the release workflow SHALL build the official Lynx extension dylib and the OpenTray-owned Lynx runtime host app zip in GitHub Actions before npm publish. The darwin platform packages SHALL receive both artifacts through workflow artifact transport, not from locally committed files.
-
-#### Scenario: Darwin release stages both Lynx artifacts
-
-- **GIVEN** the release workflow is preparing `@opentray/ext-lynx-darwin-arm64` or `@opentray/ext-lynx-darwin-x64`
-- **WHEN** the native darwin build job succeeds
-- **THEN** it uploads the Lynx extension dynamic library and the OpenTray Lynx runtime host app zip as GitHub Actions artifacts
-- **AND** the release job stages the dylib into the package `lib/` directory
-- **AND** the release job stages the runtime host zip into the package `runtime/` directory before npm publish.
-
-### Requirement: Darwin Lynx runtime build SHALL use Xcode selection and the proven research build path
-
-The release workflow SHALL select a full Xcode toolchain on darwin runners before building the official Lynx runtime sidecar. The workflow MAY reuse the researched Lynx build steps and upstream Lynx library build graph, but the mainline release path SHALL build an OpenTray-owned host app rather than zipping a long-term patched `LynxExplorer.app`.
-
-#### Scenario: Darwin release uses an explicit Xcode setup step
-
-- **GIVEN** the release workflow builds Lynx runtime artifacts on macOS
-- **WHEN** the workflow is inspected
-- **THEN** it selects Xcode explicitly before the Lynx runtime build step
-- **AND** the runtime zip is produced by a version-controlled build script in this repository
-- **AND** that build script targets the OpenTray-owned Lynx host app carrier.
 
 ### Requirement: Release workflow SHALL support alpha-channel publish without consuming stable version numbers
 
@@ -476,17 +426,6 @@ The release pipeline SHALL treat this guidance alignment as part of publish read
 - **WHEN** a developer reads the published README and repo skills
 - **THEN** the guidance uses the same maturity matrix and unsupported taxonomy as the release channel
 - **AND** it does not present the alpha channel as a fully stable cross-platform release.
-
-### Requirement: Published Lynx audit SHALL be skill-driven
-
-After npm publish, maintainers SHALL be able to run a documented skill/workflow recipe from a fresh install to visually verify the Lynx carrier path. The recipe MAY accept an explicit bundle path. The public `opentray` CLI SHALL remain limited to daemon lifecycle and health.
-
-#### Scenario: Fresh install runs the final Lynx audit recipe
-
-- **GIVEN** `opentray` and `@opentray/ext-lynx` have been installed from npm
-- **WHEN** a maintainer runs the documented OpenTray skill recipe
-- **THEN** the recipe resolves the installed daemon and Lynx package path
-- **AND** it exercises the installed Lynx runtime host path without adding a public smoke subcommand to `opentray`.
 
 ### Requirement: OpenTray protocol-line tags SHALL evolve as a same-major compatibility line
 

@@ -5,7 +5,6 @@ import { resolve } from "node:path";
 import {
   describeReleaseStagePlan,
   inferNativeBuildComponentsFromReleasePackages,
-  lynxRuntimeArtifactName,
   materializeIndependentNativeBuildExecutions,
   materializeNativeBuildExecutions,
   resolveReleaseTargetsForComponents,
@@ -54,7 +53,6 @@ describe("Feature: shared native build graph", () => {
     expect(darwinArm64.artifactName).toBe(
       "native-darwin-arm64-runtime-webview"
     );
-    expect(darwinArm64.buildsLynxRuntime).toBe(false);
     expect(linuxX64?.components).toEqual(["runtime"]);
     expect(linuxX64?.cargoPackages).toEqual(["opentray-bin"]);
   });
@@ -64,11 +62,9 @@ describe("Feature: shared native build graph", () => {
       "runtime",
       "webview",
       "badge",
-      "lynx",
-      "lynx-runtime",
     ]);
     const executions = materializeIndependentNativeBuildExecutions(
-      ["runtime", "webview", "badge", "lynx", "lynx-runtime"],
+      ["runtime", "webview", "badge"],
       targets
     );
 
@@ -82,24 +78,10 @@ describe("Feature: shared native build graph", () => {
       )?.artifactName
     ).toBe("native-darwin-arm64-webview");
     expect(
-      executions.find(
-        (execution) =>
-          execution.target === "darwin-arm64" &&
-          execution.components.includes("lynx")
-      )?.buildsLynxRuntime
-    ).toBe(false);
-    expect(
-      executions.find(
-        (execution) =>
-          execution.target === "darwin-arm64" &&
-          execution.components.includes("lynx-runtime")
-      )?.buildsLynxRuntime
-    ).toBe(true);
-    expect(
       executions
         .filter((execution) =>
           execution.components.some((component) =>
-            component === "webview" || component === "badge" || component === "lynx"
+            component === "webview" || component === "badge"
           )
         )
         .every((execution) =>
@@ -108,7 +90,7 @@ describe("Feature: shared native build graph", () => {
     ).toBe(true);
   });
 
-  test("Scenario: Given WebView-only executions When stage plan is derived Then unrelated Lynx package dirs stay absent", () => {
+  test("Scenario: Given WebView-only executions When stage plan is derived Then only WebView package dirs are present", () => {
     const executions = materializeNativeBuildExecutions(
       ["webview"],
       ["darwin-arm64"]
@@ -150,10 +132,6 @@ describe("Feature: shared native build graph", () => {
       "packages/ext-badge-darwin-arm64",
       "packages/ext-badge-windows-x64",
     ]);
-  });
-
-  test("Scenario: Given Lynx runtime build and staging When artifact names are resolved Then the OpenTray host carrier name is shared", () => {
-    expect(lynxRuntimeArtifactName).toBe("OpenTrayLynxRuntime.app.zip");
   });
 
   test("Scenario: Given badge Darwin helper builds When script is inspected Then it delegates to the shared Darwin carrier", () => {

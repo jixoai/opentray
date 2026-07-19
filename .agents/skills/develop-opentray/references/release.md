@@ -101,7 +101,7 @@ Planner law:
 - use the family default targets when `targets` is omitted
 - fail explicitly if one push changes multiple changesets that all request preview builds
 
-The first branch-preview priority is `ext-webview-native` isolation: WebView preview builds may compile the broker binary they need for testing, but they must not compile `opentray-ext-lynx` or build the Lynx runtime sidecar unless the preview request explicitly asks for a Lynx family.
+The first branch-preview priority is `ext-webview-native` isolation: WebView preview builds may compile the broker binary they need for testing, but they do not reach into independently released extension repositories.
 
 ## Publish Artifact Rule
 
@@ -121,11 +121,10 @@ Do not make Tauri app build Actions, GitHub Release binary upload Actions, or de
 Release planning is now package-truth-driven rather than platform-matrix-first:
 
 - preview and release share the same native build graph
-- the lowest-level native atoms are `daemon`, `webview`, `lynx`, and `lynx-runtime`
+- the core native atoms are `daemon` and `webview`; independently released extensions own their own native atoms
 - release reads pending changesets, infers which native atoms are actually part of this publish, and only builds those atoms on their supported targets
-- release and native verification emit independent jobs per native atom and target; a Darwin WebView or badge build must not share a job with Lynx native or the Lynx runtime sidecar
-- a WebView-only alpha or stable publish must not compile `opentray-ext-lynx` or build `LynxExplorer.app.zip`
-- a Lynx publish still includes both the darwin dylib and the darwin runtime zip, because those are separate atoms in the Lynx family rather than an accidental side effect of all macOS releases
+- release and native verification emit independent jobs per core native atom and target
+- an OpenTray core release never compiles or stages artifacts from an independent extension repository
 
 ## Provenance Metadata Rule
 

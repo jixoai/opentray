@@ -34,7 +34,7 @@ describe("Feature: selective native release planner", () => {
     expect(plan.jobs).toEqual([]);
   });
 
-  test("Scenario: Given WebView pending changesets on the shared release line When the planner runs Then runtime and badge siblings are staged but Lynx remains excluded", async () => {
+  test("Scenario: Given WebView pending changesets on the shared release line When the planner runs Then runtime and badge siblings are staged", async () => {
     const root = await createTempChangeset(
       "webview.md",
       `---
@@ -58,8 +58,6 @@ describe("Feature: selective native release planner", () => {
     const artifactKinds = plan.stageEntries.flatMap(
       (entry) => entry.artifactKinds
     );
-    expect(artifactKinds).not.toContain("lynx");
-    expect(artifactKinds).not.toContain("lynx-runtime");
     expect(plan.validatePackageDirs).toEqual([
       "packages/darwin-arm64",
       "packages/darwin-x64",
@@ -120,7 +118,7 @@ describe("Feature: selective native release planner", () => {
     ]);
   });
 
-  test("Scenario: Given core runtime pending changesets on the shared release line When the planner runs Then runtime, WebView, and badge native families are staged together while Lynx stays paused", async () => {
+  test("Scenario: Given core runtime pending changesets on the shared release line When the planner runs Then runtime, WebView, and badge native families are staged together", async () => {
     const root = await createTempChangeset(
       "runtime.md",
       `---
@@ -161,41 +159,6 @@ describe("Feature: selective native release planner", () => {
       "packages/linux-x64",
       "packages/windows-arm64",
       "packages/windows-x64",
-    ]);
-  });
-
-  test("Scenario: Given Lynx pending changesets When the planner runs Then only darwin native and runtime jobs remain", async () => {
-    const root = await createTempChangeset(
-      "lynx.md",
-      `---
-"@opentray/ext-lynx": patch
----
-`
-    );
-
-    const plan = await resolveReleaseNativePlan(root);
-
-    expect(plan.enabled).toBe(true);
-    expect(plan.components).toEqual(["lynx", "lynx-runtime"]);
-    expect(plan.jobs.map((job) => job.artifactName)).toEqual([
-      "native-darwin-arm64-lynx",
-      "native-darwin-x64-lynx",
-      "native-darwin-arm64-lynx-runtime",
-      "native-darwin-x64-lynx-runtime",
-    ]);
-    expect(
-      plan.jobs
-        .filter((job) => job.componentsCsv === "lynx")
-        .every((job) => job.buildsLynxRuntime)
-    ).toBe(false);
-    expect(
-      plan.jobs
-        .filter((job) => job.componentsCsv === "lynx-runtime")
-        .every((job) => job.buildsLynxRuntime)
-    ).toBe(true);
-    expect(plan.validatePackageDirs).toEqual([
-      "packages/ext-lynx-darwin-arm64",
-      "packages/ext-lynx-darwin-x64",
     ]);
   });
 
@@ -256,7 +219,6 @@ describe("Feature: selective native release planner", () => {
 "opentray": minor
 "@opentray/ext-webview": minor
 "@opentray/ext-badge": minor
-"@opentray/ext-lynx": minor
 ---
 `
     );
@@ -264,20 +226,8 @@ describe("Feature: selective native release planner", () => {
     const plan = await resolveReleaseNativePlan(root);
 
     expect(plan.enabled).toBe(true);
-    expect(plan.components).toEqual([
-      "runtime",
-      "webview",
-      "badge",
-      "lynx",
-      "lynx-runtime",
-    ]);
+    expect(plan.components).toEqual(["runtime", "webview", "badge"]);
     expect(plan.jobs.every((job) => job.components.length === 1)).toBe(true);
-    expect(
-      plan.jobs.some(
-        (job) =>
-          job.components.includes("webview") && job.components.includes("lynx")
-      )
-    ).toBe(false);
     expect(new Set(plan.jobs.map((job) => job.artifactName)).size).toBe(
       plan.jobs.length
     );

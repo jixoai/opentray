@@ -33,8 +33,6 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  LYNX_REF: "3a936299ec1669cfd1f3da71e41240296bc226b3"
-  LYNX_XCODE_VERSION: "16.4"
 
 jobs:
   plan:
@@ -160,35 +158,6 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Xcode
-        if: startsWith(matrix.target, 'darwin-')
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.LYNX_XCODE_VERSION }}
-
-      - name: Restore Lynx caches
-        if: matrix.buildLynxRuntime == true
-        id: lynx-cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.habitat_cache
-            research/lynx/cache
-          key: lynx-preview-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-${{ hashFiles('scripts/release/build-lynx-runtime.sh', 'scripts/release/lynx-macos.args.gn', 'scripts/release/lynx-mirrored-urls.txt', 'native/lynx-runtime-macos/**', 'native/lynx-patches/**') }}
-          restore-keys: |
-            lynx-preview-${{ matrix.target }}-xcode-${{ env.LYNX_XCODE_VERSION }}-ref-${{ env.LYNX_REF }}-
-
-      - name: Seed Googlesource hosts
-        if: matrix.buildLynxRuntime == true
-        shell: bash
-        run: |
-          sudo python3 scripts/ci/seed_hosts_from_doh.py \
-            flutter.googlesource.com \
-            chromium.googlesource.com \
-            fuchsia.googlesource.com \
-            skia.googlesource.com \
-            swiftshader.googlesource.com
-
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
 
@@ -202,27 +171,6 @@ jobs:
             --family "${{ matrix.family }}" \
             --target "${{ matrix.target }}" \
             --output-dir preview-native-artifacts
-
-      - name: Save Lynx caches
-        if: matrix.buildLynxRuntime == true && always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.habitat_cache
-            research/lynx/cache
-          key: ${{ steps.lynx-cache-restore.outputs.cache-primary-key }}
-
-      - name: Upload Lynx build logs
-        if: matrix.buildLynxRuntime == true && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: preview-lynx-build-logs-${{ matrix.alias }}-${{ matrix.target }}-${{ github.run_id }}
-          if-no-files-found: warn
-          retention-days: 7
-          path: |
-            research/lynx/logs/**
-            research/lynx/upstream/lynx/out/Default/args.gn
-            research/lynx/upstream/lynx/out/Default/all.xcodeproj/project.pbxproj
 
       - name: Upload preview artifacts
         uses: actions/upload-artifact@v4

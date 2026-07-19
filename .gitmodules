@@ -1,0 +1,3 @@
+[submodule "opentray-ext-lynx"]
+	path = opentray-ext-lynx
+	url = https://github.com/jixoai/opentray-ext-lynx.git

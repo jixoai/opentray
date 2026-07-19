@@ -40,7 +40,7 @@ The OpenTray core repository SHALL NOT include Lynx facade packages, Lynx platfo
 - **GIVEN** a Lynx changeset is present in the new repository
 - **WHEN** its release workflow plans native work
 - **THEN** it builds the Darwin extension libraries and runtime carrier, stages them into the platform package atoms, validates packed consumer artifacts, and publishes only through the repository's own release workflow
-- **AND** the workflow leaves trusted-publisher configuration as an operator-controlled external step.
+- **AND** the configured trusted publisher is exercised only by that repository's OIDC release workflow.
 
 ### Requirement: Shared protocol contracts SHALL not be copied into the Lynx repository
 

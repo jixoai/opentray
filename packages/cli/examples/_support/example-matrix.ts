@@ -37,33 +37,21 @@ export interface CreateExampleMatrixOptions {
 }
 
 const WEBVIEW_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "win32"];
-const LYNX_PLATFORMS: readonly NodeJS.Platform[] = ["darwin"];
 
 export const createExampleMatrix = ({
   platform = process.platform,
-  arch = process.arch,
   workspaceRoot,
   runtimeMode = "debug",
 }: CreateExampleMatrixOptions): PlannedExampleMatrixRow[] => {
-  const lynxSource = lynxExtensionSourcePath(platform, workspaceRoot, runtimeMode);
   const rows = createRows({
-    platform,
-    arch,
-    lynxSource,
     runtimeMode,
   });
   return rows.map((row) => planRow(row, platform, workspaceRoot));
 };
 
 const createRows = ({
-  platform,
-  arch,
-  lynxSource,
   runtimeMode,
 }: {
-  readonly platform: NodeJS.Platform;
-  readonly arch: string;
-  readonly lynxSource: string | undefined;
   readonly runtimeMode: ExampleRuntimeMode;
 }): ExampleMatrixRow[] => [
   {
@@ -153,47 +141,6 @@ const createRows = ({
       OPENTRAY_EXAMPLE_WEBVIEW_SMOKE: "1",
     }),
   },
-  {
-    id: "lynx",
-    coverage: "extension-runtime",
-    description: "ext-lynx runtime smoke with packaged review bundle",
-    platforms: LYNX_PLATFORMS,
-    ...preflight(
-      lynxSource === undefined
-        ? undefined
-        : [
-            command("cargo", [
-              "build",
-              ...(runtimeMode === "release" ? ["--release"] : []),
-              "-p",
-              "opentray-ext-lynx",
-            ]),
-            command("bun", [
-              "run",
-              "scripts/binaries/stage-local.ts",
-              "--kind",
-              "lynx",
-              "--source",
-              lynxSource,
-            ]),
-          ],
-    ),
-    ...requiredPaths(lynxRequiredCarrierPaths(platform, arch)),
-    command: {
-      ...pnpmExample("example:debug-runtime-lynx", runtimeMode, {
-        OPENTRAY_EXAMPLE_EXIT_AFTER_MS: "1200",
-      }),
-      args: [
-        "--filter",
-        "opentray",
-        "example:debug-runtime-lynx",
-        ...runtimeModeArgs(runtimeMode),
-        "--",
-        "--bundle",
-        "packages/cli/assets/lynx-review/main.lynx.bundle",
-      ],
-    },
-  },
 ];
 
 const planRow = (
@@ -260,31 +207,3 @@ const requiredPaths = (
   paths: readonly string[] | undefined,
 ): Pick<ExampleMatrixRow, "requiredPaths"> =>
   paths === undefined ? {} : { requiredPaths: paths };
-
-export const lynxExtensionSourcePath = (
-  platform: NodeJS.Platform,
-  workspaceRoot: string,
-  runtimeMode: ExampleRuntimeMode = "debug",
-): string | undefined => {
-  if (platform === "darwin") {
-    return join(
-      workspaceRoot,
-      `target/${runtimeMode}/libopentray_ext_lynx.dylib`,
-    );
-  }
-  return undefined;
-};
-
-const lynxRequiredCarrierPaths = (
-  platform: NodeJS.Platform,
-  arch: string,
-): readonly string[] | undefined => {
-  if (platform !== "darwin") {
-    return undefined;
-  }
-  const packageArch = arch === "x64" ? "x64" : "arm64";
-  return [
-    `packages/ext-lynx-darwin-${packageArch}/runtime/OpenTrayLynxRuntime.app.zip`,
-    "packages/cli/assets/lynx-review/main.lynx.bundle",
-  ];
-};

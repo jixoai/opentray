@@ -46,17 +46,10 @@ pnpm --filter opentray example:tray-panel
 
 Use `OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` or an equivalent extension-specific smoke path when the example supports it.
 
-For Lynx host-window work, the human-visible path is:
-
-```bash
-pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
-```
-
-When local Xcode is unavailable, split verification cleanly:
-
-- local: protocol tests, facade tests, bundle build, static carrier metadata tests, and smoke-path code review
-- CI: full `OpenTrayLynxRuntime.app.zip` rebuild
-- human after CI: smoke the CI-built artifact and confirm Dock icon, title/icon mutation, screen API, fit-content, and fixed-size opt-out visually
+Lynx host-window verification belongs to the independent
+[`jixoai/opentray-ext-lynx`](https://github.com/jixoai/opentray-ext-lynx) repository. Do
+not run Lynx paths through the core workspace; use that repository's smoke and CI
+carrier gates.
 
 ## Failure Interpretation
 

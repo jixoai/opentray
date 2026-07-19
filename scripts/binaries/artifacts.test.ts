@@ -40,12 +40,6 @@ describe("Feature: native runtime artifact topology", () => {
       "@opentray/ext-badge-windows-arm64",
       "@opentray/ext-badge-windows-x64",
     ]);
-    expect(
-      nativeTargets.map((target) => target.lynxPackageName).filter(Boolean)
-    ).toEqual([
-      "@opentray/ext-lynx-darwin-arm64",
-      "@opentray/ext-lynx-darwin-x64",
-    ]);
   });
 
   test("Scenario: Given platform packages When artifact paths are generated Then generated binaries land in package-owned directories", () => {
@@ -65,14 +59,7 @@ describe("Feature: native runtime artifact topology", () => {
     expect(darwin.badgeHelperArtifact).toBe(
       "packages/ext-badge-darwin-arm64/app/OpenTrayBadgeHelper.app.zip"
     );
-    expect(darwin.lynxArtifact).toBe(
-      "packages/ext-lynx-darwin-arm64/lib/libopentray_ext_lynx.dylib"
-    );
-    expect(darwin.lynxRuntimeArtifact).toBe(
-      "packages/ext-lynx-darwin-arm64/runtime/OpenTrayLynxRuntime.app.zip"
-    );
     expect(linux.webviewArtifact).toBeUndefined();
-    expect(linux.lynxArtifact).toBeUndefined();
     expect(windows.runtimeArtifact).toBe(
       "packages/windows-x64/bin/opentray.exe"
     );
@@ -105,7 +92,6 @@ describe("Feature: native runtime artifact topology", () => {
     expect(target.badgeArtifact).toBe(
       "packages/ext-badge-windows-arm64/bin/opentray_ext_badge.dll"
     );
-    expect(target.lynxArtifact).toBeUndefined();
   });
 
   test("Scenario: Given a Linux target When WebView staging is requested Then the unsupported package boundary is explicit", () => {
@@ -132,9 +118,6 @@ describe("Feature: native runtime artifact topology", () => {
       resolveStageDestinationForArtifactFile(target, badgeDockHelperArtifactName)
     ).toBe(
       `packages/ext-badge-darwin-arm64/app/${badgeDockHelperArtifactName}`
-    );
-    expect(resolveStageDestination(target, "lynx-runtime")).toBe(
-      "packages/ext-lynx-darwin-arm64/runtime/OpenTrayLynxRuntime.app.zip"
     );
   });
 

@@ -16,7 +16,6 @@ describe("Feature: protocol-line npm dist-tag planner", () => {
     const root = await createWorkspace({
       opentray: { name: "opentray", version: "0.5.1" },
       "ext-webview": { name: "@opentray/ext-webview", version: "0.4.0" },
-      "ext-lynx": { name: "@opentray/ext-lynx", version: "0.1.2" },
     });
 
     const plan = await resolveProtocolDistTagPlan({
@@ -30,13 +29,11 @@ describe("Feature: protocol-line npm dist-tag planner", () => {
     expect(plan.protocolLine).toBe("opentray-protocol/1.1");
     expect(plan.tag).toBe("stable-1-1");
     expect(plan.entries.map((entry) => entry.packageName)).toEqual([
-      "@opentray/ext-lynx",
       "@opentray/ext-webview",
       "opentray",
     ]);
     expect(plan.entries.every((entry) => entry.tag === "stable-1-1")).toBe(true);
     expect(plan.entries.map((entry) => entry.command.join(" "))).toEqual([
-      "npm dist-tag add @opentray/ext-lynx@0.1.2 stable-1-1",
       "npm dist-tag add @opentray/ext-webview@0.4.0 stable-1-1",
       "npm dist-tag add opentray@0.5.1 stable-1-1",
     ]);

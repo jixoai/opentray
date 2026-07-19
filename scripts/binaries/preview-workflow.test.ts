@@ -19,11 +19,9 @@ describe("Feature: changeset-gated preview build workflow", () => {
     expect(workflow).toContain("needs.plan.outputs.enabled == 'true'");
   });
 
-  test("Scenario: Given preview jobs When the workflow is inspected Then build execution is delegated to family scripts instead of hard-coded Lynx branches", () => {
+  test("Scenario: Given preview jobs When the workflow is inspected Then build execution is delegated to family scripts", () => {
     const workflow = previewWorkflow();
 
     expect(workflow).toContain("bun run scripts/binaries/build-preview-job.ts");
-    expect(workflow).not.toContain("cargo build --release -p opentray-ext-lynx");
-    expect(workflow).not.toContain("bash scripts/release/build-lynx-runtime.sh");
   });
 });

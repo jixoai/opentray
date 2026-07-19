@@ -27,7 +27,7 @@ The matrix SHALL report each row with a stable id, the command it ran, and a res
 
 The matrix SHALL include rows that prove official extension examples still mount through the v0.9 tray/app/session extension host boundary. Extension rows MAY use the contributor debug local broker while native extension loading remains implemented there, but the row label and documentation SHALL identify that transport as debug-runtime extension coverage rather than default app runtime coverage.
 
-The matrix SHALL NOT introduce extension-specific parsing, branching, or runtime ownership into `opentray-core` or the public SDK. WebView, badge, and Lynx semantics SHALL remain owned by their `packages/ext-*` facade packages and `crates/opentray-ext-*` native crates.
+The matrix SHALL NOT introduce extension-specific parsing, branching, or runtime ownership into `opentray-core` or the public SDK. WebView and Badge semantics SHALL remain owned by their `packages/ext-*` facade packages and `crates/opentray-ext-*` native crates.
 
 #### Scenario: WebView row stays tray-scoped
 
@@ -42,13 +42,6 @@ The matrix SHALL NOT introduce extension-specific parsing, branching, or runtime
 - **WHEN** the example commands `@opentray/ext-badge`
 - **THEN** unsupported badge features remain explicit capability results or typed failures
 - **AND** the WebView panel remains a projection over badge extension state, not badge ontology.
-
-#### Scenario: Lynx row is not faked when carrier proof is unavailable
-
-- **GIVEN** the local machine cannot rebuild or smoke the full Lynx runtime carrier
-- **WHEN** the matrix evaluates Lynx coverage
-- **THEN** it runs only the locally provable source-side row or skips the row with a clear reason
-- **AND** it does not claim CI-only carrier acceptance as local proof.
 
 ### Requirement: Example documentation SHALL distinguish default runtime and debug extension runtime
 

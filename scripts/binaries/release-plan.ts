@@ -47,7 +47,7 @@ export interface PackageVersionRegistry {
 export interface ReleaseNativeJob
   extends Pick<
     NativeBuildExecution,
-    "target" | "runner" | "lynxRuntimeTimeoutSeconds" | "buildsLynxRuntime"
+    "target" | "runner"
   > {
   readonly jobTimeoutMinutes: number;
   readonly components: readonly NativeBuildComponent[];
@@ -120,8 +120,6 @@ export async function resolveReleaseNativePlan(
       target: execution.target,
       runner: execution.runner,
       jobTimeoutMinutes: execution.releaseJobTimeoutMinutes,
-      lynxRuntimeTimeoutSeconds: execution.lynxRuntimeTimeoutSeconds,
-      buildsLynxRuntime: execution.buildsLynxRuntime,
       components: execution.components,
       componentsCsv: execution.components.join(","),
       artifactKinds: execution.artifactKinds,

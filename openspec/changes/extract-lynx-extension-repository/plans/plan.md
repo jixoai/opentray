@@ -3,7 +3,7 @@
 ## Current Round
 
 - Round: 1
-- Status: research-plan ready; implementation is blocked until this artifact is committed.
+- Status: implementation complete; awaiting independent repository first commit, submodule wiring, and final verification.
 - Previous plan backup: none; this is a new change.
 
 ## Workflow Command Surface
@@ -34,6 +34,8 @@
 | 1 | User | Lynx construction must leave the main repository and operate in `jixoai/opentray-ext-lynx`. | Treat the split as an ownership boundary, not a conditional build toggle. |
 | 2 | User | A Terra subagent must perform the migration, and work starts from a committed baseline. | Commit this plan before deleting or moving product code; delegate the migration as one bounded execution. |
 | 3 | User | Trusted Publishing will be configured later by the user. | Prepare normalized package metadata, changesets, workflow permissions, and release dry-run surfaces without mutating npm publisher configuration. |
+| 4 | User/maintainer | The independent repository is the release owner; the core repository receives it as a git submodule after the first independent commit. | Keep Lynx outside the core workspace and record the submodule as a source pointer only. |
+| 5 | User/maintainer | Trusted Publishing is now configured for `jixoai/opentray-ext-lynx` with workflow `release.yml` and environment `npm-release`. | Record the external publisher state as complete; do not publish from this migration. |
 
 ### Evidence Read
 
@@ -44,15 +46,16 @@
 | `scripts/binaries/*`, `.github/workflows/{release,preview-native,verify-native-artifacts}.yml` | Release planning, native staging, and CI explicitly enumerate Lynx atoms. | Main-repository planner and workflow must become Lynx-free. |
 | `openspec/specs/lynx-extension/spec.md`, archived Lynx changes | Existing behavior and ABI contracts are documented already. | Reuse the behavior contract in the new repo while replacing workspace ownership. |
 | `Cargo.toml`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `.changeset/config.json` | Workspace membership, path aliases, dependency graph, and fixed release groups include or imply Lynx. | The split is incomplete unless all graph projections are cleaned. |
-| `git ls-remote https://github.com/jixoai/opentray-ext-lynx.git` | Target GitHub repository does not exist yet. | The migration must create and initialize the repository before pushing its history. |
+| `git ls-remote https://github.com/jixoai/opentray-ext-lynx.git` | Target repository is the independent release boundary. | The migration prepares its first commit; the core receives the resulting commit as a submodule pointer. |
+| npm registry resolution | The registry currently exposes `opentray@0.14.4`, not the required artifact-resolver `0.15.x` line. | Do not commit a copied or unverifiable 0.15 lock; bootstrap with `--no-frozen-lockfile` until the core line is published, then generate the real lock before Lynx first publish. |
 
 ### Git Evidence
 
 | Checkpoint | Expected commit evidence | Current status |
 | ---------- | ------------------------ | -------------- |
-| OpenSpec artifacts before apply | Commit containing this `plans/plan.md` before product-code work starts | Pending this commit |
-| Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | Not started |
-| Self-review updates | Commit containing review output and any reopened or added OpenSpec tasks before the next apply loop | Not started |
+| OpenSpec artifacts before apply | Commit containing this `plans/plan.md` before product-code work starts | Baseline `ca450d4 docs(spec): define Lynx repository boundary` |
+| Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | Pending independent repository first commit and core submodule wiring |
+| Self-review updates | Commit containing review output and any reopened or added OpenSpec tasks before the next apply loop | Current round is being verified; archive is intentionally deferred |
 | Normal archive | Commit containing `openspec archive extract-lynx-extension-repository` result | Not started |
 | Abnormal handoff | Commit containing handoff evidence before returning to user discussion | Not expected |
 
@@ -154,23 +157,24 @@ The new repository must not import private core packages. The core repository mu
 
 | Gate | Why confirmation is required | Default until user answers |
 | ---- | ---------------------------- | -------------------------- |
-| Trusted Publishing setup | It changes external npm/GitHub publisher state. | Prepare workflow and dry-run checks only; user configures it later. |
+| Trusted Publishing setup | It changes external npm/GitHub publisher state. | Completed by the maintainer for repository `jixoai/opentray-ext-lynx`, workflow `release.yml`, environment `npm-release`; this migration does not publish or mutate it. |
 | First npm publish | It creates public registry state. | Do not publish from this migration. |
 
 ## Intent-Driven Plan
 
 - [x] 1. Research and align intent.
-- [ ] 2. Write specs from the intent.
-- [ ] 3. Write BDD tasks from specs.
-- [ ] 4. Implement tasks in the new repository and clean the core repository.
+- [x] 2. Write specs from the intent.
+- [x] 3. Write BDD tasks from specs.
+- [x] 4. Implement tasks in the new repository and clean the core repository.
 - [ ] 5. Self-review against intent, verify both repositories, and archive the change.
 
 ## Open Questions
 
 | Question | Why it matters | Default assumption until user answers |
 | -------- | -------------- | ------------------------------------- |
-| How should `opentray-spec` be consumed from the independent Rust workspace? | It controls protocol drift and publishability. | Pin the source Git revision and document the upgrade procedure. |
-| Which Lynx smoke fixture is the canonical consumer path after extraction? | The old CLI example cannot remain in core. | Keep an extension-repo smoke command and a minimal consumer recipe in its README. |
+| How should `opentray-spec` be consumed from the independent Rust workspace? | It controls protocol drift and publishability. | Resolved: pin the source Git revision and document the upgrade procedure. |
+| Which Lynx smoke fixture is the canonical consumer path after extraction? | The old CLI example cannot remain in core. | Resolved: `fixtures/lynx-review` plus the real `pnpm run smoke` consumer path. |
+| When should the independent pnpm lockfile be generated? | The required core artifact-resolver version is not yet on npm, so a frozen lock would encode stale or fake integrity. | Resolved: generate and commit it once core `0.15.x` is published; until then CI/release use `--no-frozen-lockfile`. |
 
 ## Rejected Paths
 

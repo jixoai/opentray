@@ -6,7 +6,6 @@ members = [
   "crates/opentray-core",
   "crates/opentray-ext-badge",
   "crates/opentray-extension-inspector",
-  "crates/opentray-ext-lynx",
   "crates/opentray-ext-webview",
   "crates/opentray-runtime-node",
   "crates/opentray-spec",
@@ -25,7 +24,6 @@ opentray-backend-ksni = { path = "crates/opentray-backend-ksni", version = "0.0.
 opentray-backend-tray-icon = { path = "crates/opentray-backend-tray-icon", version = "0.0.0" }
 opentray-core = { path = "crates/opentray-core", version = "0.0.0" }
 opentray-ext-badge = { path = "crates/opentray-ext-badge", version = "0.0.0" }
-opentray-ext-lynx = { path = "crates/opentray-ext-lynx", version = "0.0.0" }
 opentray-ext-webview = { path = "crates/opentray-ext-webview", version = "0.0.0" }
 opentray-runtime-node = { path = "crates/opentray-runtime-node", version = "0.0.0" }
 opentray-spec = { path = "crates/opentray-spec", version = "0.0.0" }

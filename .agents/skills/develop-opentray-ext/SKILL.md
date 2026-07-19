@@ -24,7 +24,8 @@ Use this skill when the work is extension-centric rather than repo-wide. The cor
 - Verification and acceptance checklist: read `references/verification.md`.
 - Current canonical case study: read `references/webview-runtime-case-study.md`.
 - WebView window style, event, and screen-aware recipes: read `references/webview-window-patterns.md`.
-- For Lynx host-window work, sizing defaults, and bridge law: read `references/lynx-window-host.md`.
+- Lynx host-window work is maintained in the independent
+  [`jixoai/opentray-ext-lynx`](https://github.com/jixoai/opentray-ext-lynx) repository.
 
 ## Non-Negotiable Boundaries
 
@@ -33,7 +34,7 @@ Use this skill when the work is extension-centric rather than repo-wide. The cor
 - Do not commit generated binaries to git. Stage them locally or in CI only.
 - Do not fake unsupported native behavior. Return typed unsupported/capability errors.
 - Do not call an extension “split out” unless binary size/linkage evidence matches the ownership story.
-- Do not treat DOM/body size as the native-window law for Lynx or WebView extensions; window fit policy belongs to the host capability layer.
+- Do not treat DOM/body size as the native-window law for WebView extensions; window fit policy belongs to the host capability layer.
 
 ## Minimum Proof
 

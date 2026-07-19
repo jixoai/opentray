@@ -11,8 +11,6 @@
       "@opentray/tsdown-plugin": ["packages/tsdown-plugin/src/index.ts"],
       "@opentray/esbuild-plugin": ["packages/esbuild-plugin/src/index.ts"],
       "@opentray/webpack-plugin": ["packages/webpack-plugin/src/index.ts"],
-      "@opentray/ext-lynx": ["packages/ext-lynx/src/index.ts"],
-      "@opentray/ext-lynx/runtime": ["packages/ext-lynx/src/runtime.ts"],
       "opentray": ["packages/cli/src/index.ts"],
       "@opentray/ext-webview": ["packages/ext-webview/src/index.ts"]
     },

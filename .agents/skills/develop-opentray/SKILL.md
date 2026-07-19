@@ -23,7 +23,6 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 - Extension host and dynamic loader laws: read `references/extension-host.md`.
 - Tray primary action patterns: read `references/tray-primary-event-patterns.md`.
 - Official extension package boundaries: read `references/official-extensions.md`.
-- For Lynx-side window/controller work, also read `../develop-opentray-ext/references/lynx-window-host.md`.
 - Badge roadmap atom: read `references/ext-badge.md`.
 - Island/live-activity roadmap atom: read `references/ext-island.md`.
 - Release and trusted publishing flow: read `references/release.md`.
@@ -58,7 +57,6 @@ git diff --check
 
 For visual changes, also run the relevant smoke command from `references/visual-acceptance.md`.
 
-For Lynx window-controller work, the visual proof must cover both:
-
-- the tray-launched fit-content default window
-- the explicit fixed-size opt-out path plus in-window `navigator.window` controls
+Lynx host-window work is owned by the independent
+[`jixoai/opentray-ext-lynx`](https://github.com/jixoai/opentray-ext-lynx) repository;
+the core repository only verifies the generic extension boundary.

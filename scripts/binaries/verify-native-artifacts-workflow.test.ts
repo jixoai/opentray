@@ -18,13 +18,8 @@ describe("Feature: native artifact verification workflow", () => {
     expect(workflow).toContain("Plan native verification build");
     expect(workflow).toContain("bun run scripts/binaries/verify-native-plan.ts");
     expect(workflow).toContain("matrix: ${{ fromJson(needs.plan-native.outputs.matrix) }}");
-    expect(workflow).toContain("uses: maxim-lobanov/setup-xcode@v1");
     expect(nativeJob).toContain("bun run scripts/binaries/build-native-job.ts");
-    expect(nativeJob).toContain("if: matrix.buildsLynxRuntime == true");
     expect(nativeJob).toContain("name: ${{ matrix.artifactName }}");
-    expect(nativeJob).not.toContain("packages+=(-p opentray-ext-lynx)");
-    expect(workflow).toContain("native/lynx-patches/**");
-    expect(workflow).toContain("native/lynx-runtime-macos/**");
     expect(workflow).toContain("name: Stage and pack native npm packages");
     expect(stageJob).toContain("bun run scripts/binaries/stage-release-artifacts.ts");
     expect(stageJob).toContain("bun run scripts/binaries/validate-package-dirs.ts");

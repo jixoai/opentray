@@ -171,7 +171,8 @@ pnpm --filter opentray example:win32-bug
 pnpm --filter opentray example:tray-panel
 pnpm --filter opentray example:placement
 pnpm --filter opentray example:mediaQuery
-pnpm --filter opentray example:debug-runtime-lynx -- --bundle packages/cli/assets/lynx-review/main.lynx.bundle
+See the independent Lynx repository for its native carrier smoke path:
+https://github.com/jixoai/opentray-ext-lynx
 ```
 
 The example matrix stages the packaged runtime executable before `first-app`, skips unsupported or missing native extension carrier artifacts with an explicit reason, and labels contributor-only extension rows as `extension-debug-runtime` coverage. The first-app example exercises the default package runtime. The debug-runtime examples exercise the contributor-only source-tree transport for extension and panel iteration. `example:win32-bug` is intentionally outside the finite matrix: it is Windows-only human evidence tooling for WebView2/DWM residue, not an accepted rendering repair. It disables automatic white-block recovery so its one-pixel pulse remains a geometry-only control. The public API demonstrated by the other examples is tray-first: application code creates trays directly and treats background/service lifecycle as application-owned.

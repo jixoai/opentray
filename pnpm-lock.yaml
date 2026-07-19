@@ -194,43 +194,6 @@ importers:
         specifier: workspace:*
         version: link:../cli
 
-  packages/ext-lynx:
-    devDependencies:
-      '@opentray/spec':
-        specifier: workspace:*
-        version: link:../spec
-      opentray:
-        specifier: workspace:*
-        version: link:../cli
-      tsdown:
-        specifier: ^0.22.1
-        version: 0.22.1(typescript@6.0.3)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.7
-        version: 4.1.7(@types/node@25.9.1)(vite@8.1.4(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
-    optionalDependencies:
-      '@opentray/ext-lynx-darwin-arm64':
-        specifier: workspace:*
-        version: link:../ext-lynx-darwin-arm64
-      '@opentray/ext-lynx-darwin-x64':
-        specifier: workspace:*
-        version: link:../ext-lynx-darwin-x64
-
-  packages/ext-lynx-darwin-arm64:
-    dependencies:
-      opentray:
-        specifier: '>=0.0.0'
-        version: 0.1.0
-
-  packages/ext-lynx-darwin-x64:
-    dependencies:
-      opentray:
-        specifier: '>=0.0.0'
-        version: 0.1.0
-
   packages/ext-webview:
     devDependencies:
       '@opentray/spec':

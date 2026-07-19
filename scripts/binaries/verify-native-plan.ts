@@ -13,8 +13,6 @@ const verifyNativeComponents: readonly NativeBuildComponent[] = [
   "runtime",
   "webview",
   "badge",
-  "lynx",
-  "lynx-runtime",
 ];
 
 export interface VerifyNativePlan {
@@ -33,8 +31,6 @@ export interface VerifyNativeJob
     NativeBuildExecution,
     | "target"
     | "runner"
-    | "lynxRuntimeTimeoutSeconds"
-    | "buildsLynxRuntime"
     | "artifactName"
   > {
   readonly jobTimeoutMinutes: number;
@@ -65,8 +61,6 @@ export async function resolveVerifyNativePlan(
       target: execution.target,
       runner: execution.runner,
       jobTimeoutMinutes: execution.releaseJobTimeoutMinutes,
-      lynxRuntimeTimeoutSeconds: execution.lynxRuntimeTimeoutSeconds,
-      buildsLynxRuntime: execution.buildsLynxRuntime,
       artifactName: execution.artifactName,
       components: execution.components,
       componentsCsv: execution.components.join(","),

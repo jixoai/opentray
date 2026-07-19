@@ -51,13 +51,15 @@ tray = await createTray(options, {
 | `packages/spec`          | `@opentray/spec`          | TypeScript protocol and shared contract package.         |
 | `packages/packaging`     | `@opentray/packaging`     | Bundler-neutral runtime artifact staging contract.       |
 | `packages/vite-plugin`   | `@opentray/vite-plugin`   | First Vite adapter over the packaging contract.          |
-| `packages/ext-lynx`      | `@opentray/ext-lynx`      | Lynx window extension facade.                            |
-| `packages/ext-lynx-*`    | `@opentray/ext-lynx-*`    | macOS Lynx dynamic library and runtime sidecar packages. |
 | `packages/ext-webview`   | `@opentray/ext-webview`   | Rich popup extension facade.                             |
 | `packages/ext-webview-*` | `@opentray/ext-webview-*` | Platform WebView dynamic library packages.               |
 | `packages/ext-badge`     | `@opentray/ext-badge`     | Platform badge/progress/overlay API extension.           |
 | `packages/ext-island`    | `@opentray/ext-island`    | Roadmap dynamic island / live activity extension.        |
 | `packages/<os>-<arch>`   | `@opentray/<os>-<arch>`   | Platform runtime artifact packages.                      |
+
+The Lynx extension is maintained in the independent
+[`jixoai/opentray-ext-lynx`](https://github.com/jixoai/opentray-ext-lynx) repository.
+OpenTray core does not build, stage, or publish Lynx artifacts.
 
 ## API
 

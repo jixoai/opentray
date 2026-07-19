@@ -58,7 +58,7 @@ First-time setup (one-off, shared by all WebView examples):
 cd packages/cli/examples/app && bun install
 ```
 
-The three non-WebView examples (`basic-tray`, `first-app`, `debug-runtime-lynx`) remain standalone scripts with no page.
+The two non-WebView examples (`basic-tray`, `first-app`) remain standalone scripts with no page.
 
 ## Preflight
 
@@ -320,7 +320,7 @@ pnpm --filter opentray example:matrix
 pnpm --filter opentray example:matrix -- --row webview-control
 ```
 
-The matrix does not depend on shell wildcard expansion. It stages the packaged runtime executable before `first-app`, labels WebView/Badge/Lynx rows as contributor-only `extension-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts. Pass `-r` to make the whole matrix use release-mode native artifacts.
+The matrix does not depend on shell wildcard expansion. It stages the packaged runtime executable before `first-app`, labels WebView/Badge rows as contributor-only `extension-runtime` coverage, and prints explicit skip reasons for unsupported platforms or missing carrier artifacts. Pass `-r` to make the whole matrix use release-mode native artifacts. Lynx acceptance is owned by its independent repository.
 
 These are useful for quick regression passes:
 

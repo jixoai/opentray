@@ -13,9 +13,7 @@ import {
 
 export type PreviewBuildFamily =
   | "core-runtime"
-  | "ext-webview-native"
-  | "ext-lynx-native"
-  | "ext-lynx-runtime";
+  | "ext-webview-native";
 
 export type PreviewTargetName = NativeBuildTargetName;
 export type PreviewArtifactKind = NativeArtifactKind;
@@ -35,8 +33,6 @@ export interface PreviewBuildJob {
   readonly target: PreviewTargetName;
   readonly runner: string;
   readonly jobTimeoutMinutes: number;
-  readonly lynxRuntimeTimeoutSeconds: number;
-  readonly buildLynxRuntime: boolean;
 }
 
 export interface PreviewBuildManifest extends NativeBuildManifest {
@@ -64,22 +60,6 @@ const previewFamilies: Record<PreviewBuildFamily, PreviewFamilyConfig> = {
     allowedTargets: resolveNativeBuildComponent("webview").allowedTargets,
     inferredPackagePrefixes: ["@opentray/ext-webview-"],
     inferredPackages: ["@opentray/ext-webview"],
-  },
-  "ext-lynx-native": {
-    family: "ext-lynx-native",
-    components: ["runtime", "lynx"],
-    defaultTargets: ["darwin-arm64"],
-    allowedTargets: ["darwin-arm64", "darwin-x64"],
-    inferredPackagePrefixes: ["@opentray/ext-lynx-"],
-    inferredPackages: ["@opentray/ext-lynx"],
-  },
-  "ext-lynx-runtime": {
-    family: "ext-lynx-runtime",
-    components: ["lynx-runtime"],
-    defaultTargets: ["darwin-arm64"],
-    allowedTargets: ["darwin-arm64", "darwin-x64"],
-    inferredPackagePrefixes: [],
-    inferredPackages: [],
   },
 };
 
@@ -118,16 +98,11 @@ export const inferPreviewFamiliesFromReleasePackages = (
       inferred.add("ext-webview-native");
       continue;
     }
-    if (matchesFamilyReleasePackage("ext-lynx-native", releasePackage)) {
-      inferred.add("ext-lynx-native");
-      inferred.add("ext-lynx-runtime");
-      continue;
-    }
     if (matchesFamilyReleasePackage("core-runtime", releasePackage)) {
       inferred.add("core-runtime");
     }
   }
-  if (inferred.has("ext-webview-native") || inferred.has("ext-lynx-native")) {
+  if (inferred.has("ext-webview-native")) {
     inferred.delete("core-runtime");
   }
   return [...inferred];
@@ -184,8 +159,6 @@ export const materializePreviewBuildJobs = (
         target,
         runner: execution.runner,
         jobTimeoutMinutes: execution.previewJobTimeoutMinutes,
-        lynxRuntimeTimeoutSeconds: execution.lynxRuntimeTimeoutSeconds,
-        buildLynxRuntime: execution.buildsLynxRuntime,
       });
     }
   }

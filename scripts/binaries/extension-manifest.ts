@@ -10,7 +10,7 @@ import { basename, join } from "node:path";
 
 export const EXTENSION_ABI_VERSION = 3;
 
-export type ExtensionArtifactKind = "webview" | "badge" | "lynx";
+export type ExtensionArtifactKind = "webview" | "badge";
 
 export interface ExtensionArtifactTarget {
   readonly os: string;
@@ -166,7 +166,7 @@ export const sha256File = async (path: string): Promise<string> =>
     .digest("hex");
 
 export const isExtensionArtifactKind = (value: string): value is ExtensionArtifactKind =>
-  value === "webview" || value === "badge" || value === "lynx";
+  value === "webview" || value === "badge";
 
 const parseEmbeddedExtensionManifest = (value: unknown): EmbeddedExtensionManifest => {
   if (

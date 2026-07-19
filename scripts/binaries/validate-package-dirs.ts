@@ -169,25 +169,6 @@ function createPackageEntryExpectations(): ReadonlyMap<string, readonly Required
             ]),
       ]);
     }
-    if (
-      target.lynxPackageDir !== undefined &&
-      target.lynxArtifact !== undefined &&
-      target.lynxRuntimeArtifact !== undefined
-    ) {
-      expectations.set(target.lynxPackageDir, [
-        {
-          path: relativeArtifactPath(target.lynxPackageDir, target.lynxArtifact),
-          executable: false,
-        },
-        {
-          path: relativeArtifactPath(
-            target.lynxPackageDir,
-            target.lynxRuntimeArtifact
-          ),
-          executable: false,
-        },
-      ]);
-    }
   }
   return expectations;
 }

@@ -181,9 +181,7 @@ function resolveExtensionPlatformPackageDir(
   const directory =
     kind === "webview"
       ? target.webviewPackageDir
-      : kind === "badge"
-        ? target.badgePackageDir
-        : target.lynxPackageDir;
+      : target.badgePackageDir;
   if (directory === undefined) {
     throw new Error(`target ${target.packageOs}-${target.arch} does not publish ${kind}`);
   }
