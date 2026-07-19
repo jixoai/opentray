@@ -23,10 +23,10 @@
 
 ## 3. OpenSpec Evidence Gate
 
-- [ ] 3.1 Run `bun run openspec:vision -- validate add-webview-app-mode-and-app-icon` after tasks are authored and record a clean result.
-- [ ] 3.2 Run `bun run openspec:vision -- commit-check add-webview-app-mode-and-app-icon --phase research-plan` and verify the requested phase evidence.
-- [ ] 3.3 Commit `plans/plan.md`, all change-local specs, and `tasks.md` as the OpenSpec artifact commit before touching product code.
-- [ ] 3.4 Run `bun run openspec:vision -- commit-check add-webview-app-mode-and-app-icon --phase apply` immediately before product-code work begins.
+- [x] 3.1 Run `bun run openspec:vision -- validate add-webview-app-mode-and-app-icon` after tasks are authored and record a clean result.
+- [x] 3.2 Run `bun run openspec:vision -- commit-check add-webview-app-mode-and-app-icon --phase research-plan` and verify the requested phase evidence.
+- [x] 3.3 Commit `plans/plan.md`, all change-local specs, and `tasks.md` as the OpenSpec artifact commit before touching product code.
+- [x] 3.4 Run `bun run openspec:vision -- commit-check add-webview-app-mode-and-app-icon --phase apply` immediately before product-code work begins.
 
 ## 4. Public Contract Implementation
 
