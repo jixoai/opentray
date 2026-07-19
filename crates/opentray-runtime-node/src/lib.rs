@@ -183,7 +183,11 @@ fn runtime_identity_error(error: std::io::Error) -> Error {
 fn runtime_app_identity(app_id: Option<String>, app_name: Option<String>) -> AppIdentity {
     let app_id = non_empty(app_id).unwrap_or_else(|| "opentray".to_string());
     let app_name = non_empty(app_name).unwrap_or_else(|| app_id.clone());
-    AppIdentity { app_id, app_name }
+    AppIdentity {
+        app_id,
+        app_name,
+        icon: None,
+    }
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {

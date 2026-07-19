@@ -1,5 +1,5 @@
 // Orthogonal intents (2026-07-14; original user request: Chrome-PWA-like Windows overlay controls):
-// 1. Expose typed WebView extension contracts, including Windows overlay-control colors and showInSwitchers.
+// 1. Expose typed WebView extension contracts, including Windows overlay-control colors and appMode.
 // 2. Provide tray-scoped window handles and capability facades.
 // 3. Re-export placement, responsive, style, and permission helpers.
 // 4. Declare common chrome-derived resize and native blur auto-hide intent.
@@ -160,8 +160,6 @@ export type WebviewWindowsCornerPreference =
 
 export interface WebviewWindowsWindowStyle {
   cornerPreference: WebviewWindowsCornerPreference | null;
-  /** Whether the native window participates in the Windows taskbar and Alt+Tab switcher. */
-  showInSwitchers: boolean;
 }
 
 export interface WebviewWindowPlatformStyle {
@@ -171,6 +169,8 @@ export interface WebviewWindowPlatformStyle {
 }
 
 export interface WebviewWindowStyle {
+  /** Whether the window behaves as a normal application surface in the platform Shell. */
+  appMode: boolean;
   frameless: boolean;
   /** Whether the operator can resize the native window with pointer input. */
   resizable: boolean;
@@ -183,6 +183,7 @@ export interface WebviewWindowStyle {
 }
 
 export interface WebviewWindowStylePatch {
+  appMode?: boolean;
   frameless?: boolean;
   /** Explicitly overrides the chrome-derived user-resize default. */
   resizable?: boolean;
@@ -210,7 +211,6 @@ export interface WebviewWindowsWindowCapabilities {
   semanticBackgrounds: string[];
   backgroundStates: WebviewBackgroundEffectState[];
   cornerPreference: boolean;
-  showInSwitchers: boolean;
 }
 
 export interface WebviewLinuxWindowCapabilities {
@@ -235,6 +235,7 @@ export interface WebviewWindowCapabilities {
   overlay: boolean;
   appRegionDrag: boolean;
   frameless: boolean;
+  appMode: boolean;
   keepOnTop: boolean;
   autoHide: boolean;
   opacity: boolean;

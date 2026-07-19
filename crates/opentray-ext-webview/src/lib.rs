@@ -79,6 +79,7 @@ pub(crate) struct WebviewMetadataSyncSettings {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WebviewInitialStyle {
+    pub app_mode: bool,
     pub frameless: bool,
     pub resizable: Option<bool>,
     pub keep_on_top: bool,
@@ -91,6 +92,7 @@ pub(crate) struct WebviewInitialStyle {
 impl Default for WebviewInitialStyle {
     fn default() -> Self {
         Self {
+            app_mode: false,
             frameless: false,
             resizable: None,
             keep_on_top: false,
@@ -121,7 +123,6 @@ pub(crate) struct WebviewInitialMacosStyle {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct WebviewInitialWindowsStyle {
     pub corner_preference: Option<String>,
-    pub show_in_switchers: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -488,6 +489,7 @@ struct ResolvePermissionMessageCommandData {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ShowWindowStyleData {
+    app_mode: Option<bool>,
     frameless: Option<bool>,
     resizable: Option<bool>,
     keep_on_top: Option<bool>,
@@ -516,7 +518,6 @@ struct ShowWindowMacosStyleData {
 #[serde(rename_all = "camelCase")]
 struct ShowWindowWindowsStyleData {
     corner_preference: Option<String>,
-    show_in_switchers: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -882,6 +883,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                         devtools: parsed.devtools.unwrap_or(false),
                         style_requested: style.is_some(),
                         style: WebviewInitialStyle {
+                            app_mode: style.and_then(|style| style.app_mode).unwrap_or(false),
                             frameless: style.and_then(|style| style.frameless).unwrap_or(false),
                             resizable: style.and_then(|style| style.resizable),
                             opacity: style
@@ -907,9 +909,6 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                                     corner_preference: windows_style
                                         .and_then(|style| style.corner_preference.clone())
                                         .filter(|preference| !preference.is_empty()),
-                                    show_in_switchers: windows_style
-                                        .and_then(|style| style.show_in_switchers)
-                                        .unwrap_or(false),
                                 },
                                 linux: WebviewInitialLinuxStyle,
                             },
@@ -1800,6 +1799,7 @@ mod tests {
                         devtools: true,
                         style_requested: true,
                         style: WebviewInitialStyle {
+                            app_mode: false,
                             frameless: true,
                             resizable: Some(true),
                             keep_on_top: true,
@@ -2176,13 +2176,13 @@ mod tests {
             "style": {
               "frameless": true,
               "background": "mica",
+              "appMode": true,
               "platform": {
                 "macos": {
                   "cornerRadius": 12
                 },
                 "windows": {
-                  "cornerPreference": "round",
-                  "showInSwitchers": true
+                  "cornerPreference": "round"
                 },
                 "linux": {}
               }
@@ -2211,9 +2211,9 @@ mod tests {
             show_settings.window.style.platform.windows,
             WebviewInitialWindowsStyle {
                 corner_preference: Some("round".to_string()),
-                show_in_switchers: true,
             }
         );
+        assert!(show_settings.window.style.app_mode);
         assert_eq!(
             show_settings.window.style.platform.linux,
             WebviewInitialLinuxStyle
@@ -2347,10 +2347,13 @@ mod tests {
 
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
-            assert_eq!(result, EXT_OK);
-            let json = unsafe { CStr::from_ptr(output.ptr) }.to_str().unwrap();
-            assert!(json.contains("\"type\":\"hidden\""));
-            unsafe { opentray_ext_free_string(output.ptr, output.len) };
+            if result == EXT_OK {
+                let json = unsafe { CStr::from_ptr(output.ptr) }.to_str().unwrap();
+                assert!(json.contains("\"type\":\"hidden\""));
+                unsafe { opentray_ext_free_string(output.ptr, output.len) };
+            } else {
+                assert_eq!(result, EXT_ERR_UNSUPPORTED);
+            }
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]

@@ -4,6 +4,7 @@ export {
   createTrayHandle,
   type OpenTrayEventFrame,
   type CreateClientOptions,
+  type AppHandle,
   type EventfulTrayHandle,
   type ExtensionLoadOptions,
   type OpenTrayConnection,

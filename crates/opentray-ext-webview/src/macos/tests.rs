@@ -1240,6 +1240,7 @@ fn navigator_window_callback_scripts_use_private_run_callback() {
 #[test]
 fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
     validate_style_request(&SetStylePayload {
+        app_mode: None,
         frameless: None,
         resizable: None,
         keep_on_top: Some(true),
@@ -1251,6 +1252,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
     .expect("transparent should be supported");
 
     validate_style_request(&SetStylePayload {
+        app_mode: None,
         frameless: None,
         resizable: None,
         keep_on_top: None,
@@ -1268,6 +1270,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
     .expect("known effect should be supported");
 
     let blur_error = validate_style_request(&SetStylePayload {
+        app_mode: None,
         frameless: None,
         resizable: None,
         keep_on_top: None,
@@ -1283,6 +1286,7 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
     );
 
     let windows_error = validate_style_request(&SetStylePayload {
+        app_mode: None,
         frameless: None,
         resizable: None,
         keep_on_top: None,
@@ -1293,7 +1297,6 @@ fn validate_style_request_accepts_transparency_and_rejects_unknown_effects() {
             macos: None,
             windows: Some(SetStyleWindowsPayload {
                 corner_preference: Some(Some("round".to_string())),
-                show_in_switchers: None,
             }),
             linux: None,
         }),
@@ -1314,6 +1317,7 @@ fn validate_initial_style_ignores_default_placeholder_platform_families() {
 #[test]
 fn window_style_state_serializes_keep_on_top() {
     let value = serde_json::to_value(WindowStyleState {
+        app_mode: false,
         frameless: false,
         resizable: true,
         resizable_override: None,
@@ -1366,6 +1370,7 @@ fn navigator_window_bridge_tracks_listener_ids() {
         next_ipc_message_id: 1,
         next_permission_message_id: 1,
         style: WindowStyleState {
+            app_mode: false,
             frameless: false,
             resizable: true,
             resizable_override: None,
@@ -1496,6 +1501,7 @@ fn emit_window_event_ignores_unlistened_download_events_on_macos() {
         next_ipc_message_id: 1,
         next_permission_message_id: 1,
         style: WindowStyleState {
+            app_mode: false,
             frameless: false,
             resizable: true,
             resizable_override: None,
@@ -1560,6 +1566,7 @@ fn app_region_drag_interaction_window_event_conserves_native_source() {
         next_ipc_message_id: 1,
         next_permission_message_id: 1,
         style: WindowStyleState {
+            app_mode: false,
             frameless: false,
             resizable: true,
             resizable_override: None,

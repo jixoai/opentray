@@ -558,6 +558,12 @@ pub(super) fn apply_window_style_patch(
 
     let mut bridge_state = bridge.borrow_mut();
     let mut changed = false;
+    if let Some(app_mode) = payload.app_mode {
+        if bridge_state.style.app_mode != app_mode {
+            bridge_state.style.app_mode = app_mode;
+            changed = true;
+        }
+    }
     if let Some(frameless) = payload.frameless {
         if bridge_state.style.frameless != frameless {
             bridge_state.style.frameless = frameless;

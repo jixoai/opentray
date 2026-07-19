@@ -311,6 +311,7 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
   switch (frame.type) {
     case "app-created":
     case "default-app":
+    case "app-identity":
     case "tray-created":
     case "tray-bounds":
     case "ack":

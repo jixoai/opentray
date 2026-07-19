@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import {
   badgeDockHelperArtifactName,
+  darwinRuntimeCarrierArtifactName,
   nativeTargets,
   resolveNativePackageTarget,
   resolveNativeTarget,
@@ -50,6 +51,9 @@ describe("Feature: native runtime artifact topology", () => {
     expect(darwin.runtimeArtifact).toBe(
       "packages/darwin-arm64/bin/opentray"
     );
+    expect(darwin.runtimeCarrierArtifact).toBe(
+      "packages/darwin-arm64/app/OpenTray.app.zip"
+    );
     expect(darwin.webviewArtifact).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"
     );
@@ -60,9 +64,11 @@ describe("Feature: native runtime artifact topology", () => {
       "packages/ext-badge-darwin-arm64/app/OpenTrayBadgeHelper.app.zip"
     );
     expect(linux.webviewArtifact).toBeUndefined();
+    expect(linux.runtimeCarrierArtifact).toBeUndefined();
     expect(windows.runtimeArtifact).toBe(
       "packages/windows-x64/bin/opentray.exe"
     );
+    expect(windows.runtimeCarrierArtifact).toBeUndefined();
     expect(windows.webviewArtifact).toBe(
       "packages/ext-webview-windows-x64/bin/opentray_ext_webview.dll"
     );
@@ -107,6 +113,14 @@ describe("Feature: native runtime artifact topology", () => {
 
     expect(resolveStageDestination(target, "runtime")).toBe(
       "packages/darwin-arm64/bin/opentray"
+    );
+    expect(
+      resolveStageDestinationForArtifactFile(
+        target,
+        darwinRuntimeCarrierArtifactName
+      )
+    ).toBe(
+      `packages/darwin-arm64/app/${darwinRuntimeCarrierArtifactName}`
     );
     expect(resolveStageDestination(target, "webview")).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"

@@ -14,6 +14,16 @@ describe("Feature: native package publish validator", () => {
         path: "bin/opentray",
         executable: true,
       },
+      {
+        path: "app/OpenTray.app.zip",
+        executable: false,
+      },
+    ]);
+    expect(resolveRequiredPackageEntries("packages/linux-x64")).toEqual([
+      {
+        path: "bin/opentray",
+        executable: true,
+      },
     ]);
   });
 

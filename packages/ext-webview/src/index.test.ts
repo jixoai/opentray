@@ -287,19 +287,18 @@ describe("@opentray/ext-webview", () => {
         frameless: true,
         keepOnTop: true,
         autoHide: false,
-        opacity: 0.72,
-        background: {
+      opacity: 0.72,
+      background: {
           kind: "platformMaterial",
           material: "hudWindow",
           state: "active",
-        },
-        platform: {
+      },
+      appMode: true,
+      platform: {
           macos: {
             cornerRadius: null,
           },
-          windows: {
-            showInSwitchers: true,
-          },
+          windows: {},
         },
       },
       titleSync: {
@@ -356,13 +355,12 @@ describe("@opentray/ext-webview", () => {
               material: "hudWindow",
               state: "active",
             },
+            appMode: true,
             platform: {
               macos: {
                 cornerRadius: null,
               },
-              windows: {
-                showInSwitchers: true,
-              },
+              windows: {},
             },
           },
           titleSync: {
@@ -896,16 +894,14 @@ describe("@opentray/ext-webview", () => {
       if (isWebviewCommand(command) && command.type === "setStyle") {
         return {
           frameless: true,
+          appMode: false,
           resizable: true,
           keepOnTop: true,
           autoHide: command.style.autoHide ?? true,
           opacity: command.style.opacity ?? 1,
           background: { kind: "semantic", token: "blur", state: "active" },
           platform: {
-            windows: {
-              cornerPreference: "round",
-              showInSwitchers: false,
-            },
+            windows: { cornerPreference: "round" },
           },
         };
       }
@@ -1841,16 +1837,14 @@ describe("@opentray/ext-webview", () => {
         calls.push(["setStyle", style]);
         return {
           frameless: true,
+          appMode: false,
           resizable: true,
           keepOnTop: true,
           autoHide: false,
           opacity: 0.88,
           background: { kind: "opaque" },
           platform: {
-            windows: {
-              cornerPreference: "round",
-              showInSwitchers: false,
-            },
+            windows: { cornerPreference: "round" },
           },
         } satisfies WebviewWindowStyle;
       },
@@ -1858,16 +1852,14 @@ describe("@opentray/ext-webview", () => {
         calls.push(["setBackground", background, options]);
         return {
           frameless: true,
+          appMode: false,
           resizable: true,
           keepOnTop: true,
           autoHide: false,
           opacity: 0.88,
           background: { kind: "semantic", token: "blur", state: "active" },
           platform: {
-            windows: {
-              cornerPreference: "round",
-              showInSwitchers: false,
-            },
+            windows: { cornerPreference: "round" },
           },
         } satisfies WebviewWindowStyle;
       },

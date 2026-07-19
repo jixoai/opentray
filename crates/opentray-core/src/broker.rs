@@ -39,6 +39,7 @@ impl BrokerSession {
         self.app_identity = Some(AppIdentity {
             app_id: app.app_id.clone(),
             app_name: app_name(options.name.as_deref(), &app.app_id),
+            icon: options.icon.clone(),
         });
     }
 }
@@ -245,6 +246,66 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     Err(error) => vec![kernel_error(Some(request_id), error)],
                 }
             }
+            ClientFrame::GetAppIdentity { request_id, app_id } => {
+                if !session_owns_app(session, &app_id) {
+                    return vec![protocol_error(
+                        Some(request_id),
+                        "session-mismatch",
+                        format!("session does not own app: {app_id}"),
+                    )];
+                }
+                match self.kernel.app_identity(&app_id) {
+                    Ok(identity) => vec![ServerFrame::AppIdentity {
+                        request_id,
+                        identity,
+                    }],
+                    Err(error) => vec![kernel_error(Some(request_id), error)],
+                }
+            }
+            ClientFrame::SetAppName {
+                request_id,
+                app_id,
+                name,
+            } => {
+                if !session_owns_app(session, &app_id) {
+                    return vec![protocol_error(
+                        Some(request_id),
+                        "session-mismatch",
+                        format!("session does not own app: {app_id}"),
+                    )];
+                }
+                match self.kernel.set_app_name(&app_id, name) {
+                    Ok(()) => {
+                        if let Ok(identity) = self.kernel.app_identity(&app_id) {
+                            session.app_identity = Some(identity);
+                        }
+                        vec![ServerFrame::Ack { request_id }]
+                    }
+                    Err(error) => vec![kernel_error(Some(request_id), error)],
+                }
+            }
+            ClientFrame::SetAppIcon {
+                request_id,
+                app_id,
+                icon,
+            } => {
+                if !session_owns_app(session, &app_id) {
+                    return vec![protocol_error(
+                        Some(request_id),
+                        "session-mismatch",
+                        format!("session does not own app: {app_id}"),
+                    )];
+                }
+                match self.kernel.set_app_icon(&app_id, icon) {
+                    Ok(()) => {
+                        if let Ok(identity) = self.kernel.app_identity(&app_id) {
+                            session.app_identity = Some(identity);
+                        }
+                        vec![ServerFrame::Ack { request_id }]
+                    }
+                    Err(error) => vec![kernel_error(Some(request_id), error)],
+                }
+            }
             ClientFrame::CreateTray {
                 request_id,
                 app,
@@ -426,6 +487,9 @@ fn request_id(frame: &ClientFrame) -> Option<RequestId> {
     match frame {
         ClientFrame::CreateApp { request_id, .. }
         | ClientFrame::ResolveDefaultApp { request_id }
+        | ClientFrame::GetAppIdentity { request_id, .. }
+        | ClientFrame::SetAppName { request_id, .. }
+        | ClientFrame::SetAppIcon { request_id, .. }
         | ClientFrame::CreateTray { request_id, .. }
         | ClientFrame::DestroyTray { request_id, .. }
         | ClientFrame::GetTrayBounds { request_id, .. }
@@ -438,6 +502,13 @@ fn request_id(frame: &ClientFrame) -> Option<RequestId> {
         | ClientFrame::Health { request_id } => Some(request_id.clone()),
         ClientFrame::Init { .. } | ClientFrame::Exit => None,
     }
+}
+
+fn session_owns_app(session: &BrokerSession, app_id: &str) -> bool {
+    session
+        .app_identity()
+        .map(|identity| identity.app_id == app_id)
+        .unwrap_or(false)
 }
 
 fn extension_events(events: Vec<ExtensionEnvelope>) -> Vec<ServerFrame> {

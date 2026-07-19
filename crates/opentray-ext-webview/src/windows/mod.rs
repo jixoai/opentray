@@ -268,6 +268,7 @@ struct NavigatorWindowListener {
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowStyleState {
+    app_mode: bool,
     frameless: bool,
     resizable: bool,
     #[serde(skip)]
@@ -289,7 +290,6 @@ struct WindowPlatformStyleState {
 #[serde(rename_all = "camelCase")]
 struct WindowsWindowStyleState {
     corner_preference: Option<String>,
-    show_in_switchers: bool,
 }
 
 #[derive(Debug)]
@@ -477,6 +477,7 @@ struct PageIconChangedPayload {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetStylePayload {
+    app_mode: Option<bool>,
     frameless: Option<bool>,
     resizable: Option<bool>,
     keep_on_top: Option<bool>,
@@ -505,7 +506,6 @@ struct SetStyleMacosPayload {
 #[serde(rename_all = "camelCase")]
 struct SetStyleWindowsPayload {
     corner_preference: Option<Option<String>>,
-    show_in_switchers: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -515,6 +515,7 @@ struct SetStyleLinuxPayload {}
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowCapabilities {
+    app_mode: bool,
     close: bool,
     r#move: bool,
     resize: bool,
@@ -558,7 +559,6 @@ struct WindowsWindowCapabilities {
     semantic_backgrounds: Vec<String>,
     background_states: Vec<String>,
     corner_preference: bool,
-    show_in_switchers: bool,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
@@ -2571,6 +2571,7 @@ fn window_style_from_initial(
 ) -> Result<WindowStyleState, WebviewRuntimeError> {
     reject_macos_style(&style.platform.macos)?;
     Ok(WindowStyleState {
+        app_mode: style.app_mode,
         frameless: style.frameless,
         resizable: style.resizable.unwrap_or(!style.frameless),
         resizable_override: style.resizable,
@@ -2587,7 +2588,6 @@ fn window_style_from_initial(
                     .as_deref()
                     .map(normalize_windows_corner_preference)
                     .transpose()?,
-                show_in_switchers: style.platform.windows.show_in_switchers,
             },
         },
     })
@@ -2706,6 +2706,12 @@ fn apply_style_patch(
 ) -> Result<bool, WebviewRuntimeError> {
     let mut bridge_state = bridge.borrow_mut();
     let mut changed = false;
+    if let Some(app_mode) = payload.app_mode {
+        if bridge_state.style.app_mode != app_mode {
+            bridge_state.style.app_mode = app_mode;
+            changed = true;
+        }
+    }
     changed |= apply_resizable_style_patch(
         &mut bridge_state.style,
         payload.frameless,
@@ -2745,12 +2751,6 @@ fn apply_style_patch(
                 .transpose()?;
             if bridge_state.style.platform.windows.corner_preference != corner_preference {
                 bridge_state.style.platform.windows.corner_preference = corner_preference;
-                changed = true;
-            }
-        }
-        if let Some(show_in_switchers) = windows_payload.show_in_switchers {
-            if bridge_state.style.platform.windows.show_in_switchers != show_in_switchers {
-                bridge_state.style.platform.windows.show_in_switchers = show_in_switchers;
                 changed = true;
             }
         }
@@ -3527,7 +3527,7 @@ fn window_ex_style_bits(
     let app_window = WS_EX_APPWINDOW as isize;
     // Comparator topology may change non-client geometry, but switcher participation remains an
     // explicit product style and must not be inferred from title, icon, or host construction.
-    if style.platform.windows.show_in_switchers {
+    if style.app_mode {
         (with_opacity & !tool_window) | app_window
     } else {
         (with_opacity | tool_window) & !app_window
@@ -5321,6 +5321,7 @@ impl NavigatorWindowBridge {
     fn capabilities_json(&self) -> Result<Value, WebviewRuntimeError> {
         let devtools = self.devtools_enabled;
         serde_json::to_value(WindowCapabilities {
+            app_mode: true,
             close: true,
             r#move: true,
             resize: true,
@@ -5360,7 +5361,6 @@ impl NavigatorWindowBridge {
                         .map(|state| (*state).to_string())
                         .collect(),
                     corner_preference: true,
-                    show_in_switchers: true,
                 },
             },
         })
@@ -6132,6 +6132,7 @@ mod tests {
     #[test]
     fn validate_style_request_accepts_windows_background_family() {
         validate_style_request(&SetStylePayload {
+            app_mode: Some(true),
             frameless: None,
             resizable: None,
             keep_on_top: None,
@@ -6142,7 +6143,6 @@ mod tests {
                 macos: None,
                 windows: Some(SetStyleWindowsPayload {
                     corner_preference: Some(Some("round".to_string())),
-                    show_in_switchers: Some(true),
                 }),
                 linux: None,
             }),
@@ -6150,6 +6150,7 @@ mod tests {
         .expect("windows DWM style should be supported");
 
         validate_style_request(&SetStylePayload {
+            app_mode: None,
             frameless: None,
             resizable: None,
             keep_on_top: None,
@@ -6161,6 +6162,7 @@ mod tests {
         .expect("generic background material should fall back on Windows");
 
         validate_style_request(&SetStylePayload {
+            app_mode: None,
             frameless: None,
             resizable: None,
             keep_on_top: None,
@@ -6182,6 +6184,7 @@ mod tests {
     #[test]
     fn validate_style_request_rejects_invalid_opacity() {
         let error = validate_style_request(&SetStylePayload {
+            app_mode: None,
             frameless: None,
             resizable: None,
             keep_on_top: None,
@@ -6221,7 +6224,6 @@ mod tests {
             state.platform.windows,
             WindowsWindowStyleState {
                 corner_preference: Some("roundSmall".to_string()),
-                show_in_switchers: false,
             }
         );
         assert!(state.auto_hide);
@@ -6309,7 +6311,6 @@ mod tests {
             platform: WindowPlatformStyleState {
                 windows: WindowsWindowStyleState {
                     corner_preference: None,
-                    show_in_switchers: false,
                 },
             },
         };
@@ -6622,7 +6623,7 @@ mod tests {
     #[test]
     fn explicit_windows_style_participates_in_task_switchers() {
         let mut initial = crate::WebviewInitialStyle::default();
-        initial.platform.windows.show_in_switchers = true;
+        initial.app_mode = true;
         let style = window_style_from_initial(&initial).expect("switcher style");
         let production_bits = window_ex_style_bits(&style, WS_EX_TOOLWINDOW as isize, false);
         let comparator_bits = window_ex_style_bits(&style, WS_EX_TOOLWINDOW as isize, true);

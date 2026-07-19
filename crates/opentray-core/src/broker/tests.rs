@@ -169,6 +169,80 @@ fn create_app_returns_correlated_broker_identity() {
 }
 
 #[test]
+fn app_identity_mutations_are_session_owned_and_projected() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::new(backend.clone(), test_broker_artifact_identity());
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_app(&mut broker, &mut session);
+    let app_icon = icon();
+
+    let set_name = broker.handle_frame(
+        &mut session,
+        ClientFrame::SetAppName {
+            request_id: "req-name".to_string(),
+            app_id: surface.app_id.clone(),
+            name: "Renamed".to_string(),
+        },
+        "0.1.0",
+    );
+    let set_icon = broker.handle_frame(
+        &mut session,
+        ClientFrame::SetAppIcon {
+            request_id: "req-icon".to_string(),
+            app_id: surface.app_id.clone(),
+            icon: app_icon.clone(),
+        },
+        "0.1.0",
+    );
+    assert!(matches!(set_name[0], ServerFrame::Ack { ref request_id } if request_id == "req-name"));
+    assert!(matches!(set_icon[0], ServerFrame::Ack { ref request_id } if request_id == "req-icon"));
+
+    let identity = broker.handle_frame(
+        &mut session,
+        ClientFrame::GetAppIdentity {
+            request_id: "req-identity".to_string(),
+            app_id: surface.app_id.clone(),
+        },
+        "0.1.0",
+    );
+    assert!(matches!(
+        &identity[0],
+        ServerFrame::AppIdentity { identity, .. }
+            if identity.app_name == "Renamed" && identity.icon == app_icon
+    ));
+    assert!(backend.operations().iter().any(|operation| {
+        matches!(operation, BackendOperation::SyncApp(projection)
+            if projection.title.as_deref() == Some("Renamed") && projection.icon == app_icon)
+    }));
+}
+
+#[test]
+fn app_identity_reads_reject_non_owner_sessions() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
+    let mut owner = BrokerSession::new();
+    let mut other = BrokerSession::new();
+    broker.handle_frame(&mut owner, init(), "0.1.0");
+    broker.handle_frame(&mut other, init(), "0.1.0");
+    let surface = create_app(&mut broker, &mut owner);
+
+    let frames = broker.handle_frame(
+        &mut other,
+        ClientFrame::GetAppIdentity {
+            request_id: "req-identity".to_string(),
+            app_id: surface.app_id,
+        },
+        "0.1.0",
+    );
+    assert!(matches!(
+        &frames[0],
+        ServerFrame::Error { request_id: Some(request_id), code, .. }
+            if request_id == "req-identity" && code == "session-mismatch"
+    ));
+}
+
+#[test]
 fn create_tray_syncs_backend_projection() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::new(backend.clone(), test_broker_artifact_identity());

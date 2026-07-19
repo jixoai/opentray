@@ -1,5 +1,5 @@
 // Orthogonal intents (2026-07-17; original user requests: common resizable and tray auto-hide styles):
-// 1. Keep macOS style parsing explicit and reject Windows `showInSwitchers` payloads.
+// 1. Keep macOS style parsing explicit and reject unsupported platform-family payloads.
 // 2. Preserve existing AppKit window/background projection.
 // 3. Project common `resizable` and `autoHide` lifecycle intent.
 
@@ -26,6 +26,7 @@ use super::{AppKitViewHandle, NavigatorWindowBridge, CLEAR_BACKGROUND, OPAQUE_BA
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct WindowStyleState {
+    pub(super) app_mode: bool,
     pub(super) frameless: bool,
     pub(super) resizable: bool,
     #[serde(skip)]
@@ -52,6 +53,7 @@ pub(super) struct MacosWindowStyleState {
 impl Default for WindowStyleState {
     fn default() -> Self {
         Self {
+            app_mode: false,
             frameless: false,
             resizable: true,
             resizable_override: None,
@@ -71,6 +73,7 @@ impl Default for WindowStyleState {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetStylePayload {
+    pub(super) app_mode: Option<bool>,
     pub(super) frameless: Option<bool>,
     pub(super) resizable: Option<bool>,
     pub(super) keep_on_top: Option<bool>,
@@ -99,7 +102,6 @@ pub(super) struct SetStyleMacosPayload {
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetStyleWindowsPayload {
     pub(super) corner_preference: Option<Option<String>>,
-    pub(super) show_in_switchers: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -112,7 +114,7 @@ pub(super) fn validate_style_request(payload: &SetStylePayload) -> Result<(), We
         .as_ref()
         .and_then(|platform| platform.windows.as_ref());
     if windows_payload
-        .map(|payload| payload.corner_preference.is_some() || payload.show_in_switchers.is_some())
+        .map(|payload| payload.corner_preference.is_some())
         .unwrap_or(false)
     {
         // A cross-platform contract may carry multiple family placeholders, but the macOS
@@ -141,21 +143,19 @@ pub(super) fn validate_initial_style(
     show_settings: &WebviewShowSettings,
 ) -> Result<(), WebviewRuntimeError> {
     let initial_windows_style = &show_settings.window.style.platform.windows;
-    let windows_payload = if initial_windows_style.corner_preference.is_some()
-        || initial_windows_style.show_in_switchers
-    {
+    let windows_payload = if initial_windows_style.corner_preference.is_some() {
         Some(SetStyleWindowsPayload {
             corner_preference: initial_windows_style
                 .corner_preference
                 .as_ref()
                 .map(|preference| Some(preference.clone())),
-            show_in_switchers: initial_windows_style.show_in_switchers.then_some(true),
         })
     } else {
         None
     };
 
     validate_style_request(&SetStylePayload {
+        app_mode: Some(show_settings.window.style.app_mode),
         frameless: Some(show_settings.window.style.frameless),
         resizable: show_settings.window.style.resizable,
         keep_on_top: Some(show_settings.window.style.keep_on_top),

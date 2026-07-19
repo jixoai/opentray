@@ -17,11 +17,12 @@ mod overlay;
 mod policy;
 mod screen;
 mod style;
+mod window_delegate;
 mod window_state;
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     ptr::NonNull,
     rc::Rc,
 };
@@ -33,8 +34,8 @@ use objc2::{
     MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSResponder, NSScreen, NSView, NSWindow,
-    NSWindowDidBecomeKeyNotification, NSWindowDidResignKeyNotification,
+    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSResponder, NSScreen,
+    NSView, NSWindow, NSWindowDidBecomeKeyNotification, NSWindowDidResignKeyNotification,
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{AppKitWindowHandle, HasWindowHandle, RawWindowHandle, WindowHandle};
@@ -69,6 +70,7 @@ use self::style::{
     apply_window_style, framed_window_style_mask, supported_background_effects,
     validate_initial_style, WindowStyleState,
 };
+use self::window_delegate::RetainedWindowDelegate;
 use self::window_state::{window_is_closed, window_is_visible};
 use crate::bootstrap::navigator_window_bootstrap_script;
 
@@ -86,6 +88,9 @@ const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
 #[derive(Default)]
 pub(crate) struct MacosWebviewRuntime {
     slot: Option<WebviewSlot>,
+    // AppKit activation policy is process-wide. Keep the live app-mode projections explicit so
+    // hiding one retained window cannot demote a sibling application window.
+    app_mode_windows: HashSet<String>,
 }
 
 struct WebviewSlot {
@@ -95,6 +100,7 @@ struct WebviewSlot {
     bridge: Rc<RefCell<NavigatorWindowBridge>>,
     _download_navigation_delegate: Option<Retained<DownloadNavigationDelegate>>,
     _focus_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
+    _window_delegate: Retained<RetainedWindowDelegate>,
     content_descriptor: WebviewContentDescriptor,
     show_settings: WebviewShowSettings,
 }
@@ -143,6 +149,7 @@ struct WindowSizeConstraints {
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowCapabilities {
+    app_mode: bool,
     close: bool,
     r#move: bool,
     resize: bool,
@@ -245,6 +252,8 @@ impl MacosWebviewRuntime {
                     show_settings,
                 )?;
                 self.focus()?;
+                self.reconcile_app_mode_window(tray_id);
+                self.sync_activation_policy()?;
                 if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
                     emit_visible_change_if_needed(&slot.bridge, &slot.window, was_visible)?;
                 }
@@ -256,15 +265,20 @@ impl MacosWebviewRuntime {
                     slot.window.orderOut(None);
                     emit_visible_change_if_needed(&slot.bridge, &slot.window, was_visible)?;
                 }
+                self.app_mode_windows.remove(tray_id);
+                self.sync_activation_policy()?;
                 Ok(json!({ "type": "hidden" }))
             }
             WebviewCommand::Close => {
                 if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
                     close_window(&slot.bridge, &slot.window)?;
                 }
+                self.app_mode_windows.remove(tray_id);
+                self.sync_activation_policy()?;
                 Ok(json!({ "type": "closed" }))
             }
             WebviewCommand::Destroy => {
+                self.app_mode_windows.remove(tray_id);
                 self.destroy_slot(tray_id);
                 Ok(json!({ "type": "destroyed" }))
             }
@@ -355,18 +369,22 @@ impl MacosWebviewRuntime {
                 Ok(Value::Bool(window_is_visible(&slot.window)))
             }
             WebviewCommand::ToVisible => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "toVisible requires an active WebView window".into(),
-                        )
-                    })?;
-                let was_visible = window_is_visible(&slot.window);
-                to_visible(&slot.window);
-                emit_window_state_change(&slot.bridge, &slot.window, was_visible)?;
+                {
+                    let slot = self
+                        .slot
+                        .as_ref()
+                        .filter(|slot| slot.tray_id == tray_id)
+                        .ok_or_else(|| {
+                            WebviewRuntimeError::Rejected(
+                                "toVisible requires an active WebView window".into(),
+                            )
+                        })?;
+                    let was_visible = window_is_visible(&slot.window);
+                    to_visible(&slot.window);
+                    emit_window_state_change(&slot.bridge, &slot.window, was_visible)?;
+                }
+                self.reconcile_app_mode_window(tray_id);
+                self.focus()?;
                 Ok(Value::Null)
             }
             WebviewCommand::GetBounds => {
@@ -439,6 +457,8 @@ impl MacosWebviewRuntime {
                 Ok(json!({ "type": "permissionMessageResolved", "id": id }))
             }
             WebviewCommand::DrainWindowEvents => {
+                self.reconcile_app_mode_window(tray_id);
+                self.sync_activation_policy()?;
                 let slot = self
                     .slot
                     .as_ref()
@@ -488,22 +508,27 @@ impl MacosWebviewRuntime {
                 devtools_open_state(&slot.bridge)
             }
             WebviewCommand::SetStyle { style } => {
-                let slot = self
-                    .slot
-                    .as_mut()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "setStyle requires an active WebView window".into(),
-                        )
-                    })?;
-                let payload: self::style::SetStylePayload =
-                    serde_json::from_value(style).map_err(|error| {
-                        WebviewRuntimeError::Rejected(format!(
-                            "setStyle payload is invalid: {error}"
-                        ))
-                    })?;
-                apply_window_style_patch(&slot.bridge, &slot.window, payload)
+                let response = {
+                    let slot = self
+                        .slot
+                        .as_mut()
+                        .filter(|slot| slot.tray_id == tray_id)
+                        .ok_or_else(|| {
+                            WebviewRuntimeError::Rejected(
+                                "setStyle requires an active WebView window".into(),
+                            )
+                        })?;
+                    let payload: self::style::SetStylePayload = serde_json::from_value(style)
+                        .map_err(|error| {
+                            WebviewRuntimeError::Rejected(format!(
+                                "setStyle payload is invalid: {error}"
+                            ))
+                        })?;
+                    apply_window_style_patch(&slot.bridge, &slot.window, payload)?
+                };
+                self.reconcile_app_mode_window(tray_id);
+                self.sync_activation_policy()?;
+                Ok(response)
             }
             WebviewCommand::SetMinimumSize { width, height } => {
                 let slot = self
@@ -545,6 +570,7 @@ impl MacosWebviewRuntime {
     }
 
     pub(crate) fn session_closed(&mut self, _session_id: &str) {
+        self.app_mode_windows.clear();
         self.close();
     }
 
@@ -723,6 +749,7 @@ impl MacosWebviewRuntime {
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
             style: WindowStyleState {
+                app_mode: show_settings.window.style.app_mode,
                 frameless: show_settings.window.style.frameless,
                 resizable: show_settings
                     .window
@@ -840,6 +867,7 @@ impl MacosWebviewRuntime {
         apply_initial_window_position(&window, tray_bounds);
 
         let app = NSApplication::sharedApplication(mtm);
+        set_activation_policy(&app, show_settings.window.style.app_mode);
         ensure_standard_edit_menu(&app, mtm);
         #[allow(deprecated)]
         app.activateIgnoringOtherApps(true);
@@ -851,6 +879,7 @@ impl MacosWebviewRuntime {
         window.orderFrontRegardless();
 
         let focus_observers = install_focus_observers(&window, &bridge);
+        let window_delegate = RetainedWindowDelegate::install(&window, Rc::downgrade(&bridge), mtm);
 
         Ok(WebviewSlot {
             tray_id,
@@ -859,6 +888,7 @@ impl MacosWebviewRuntime {
             bridge,
             _download_navigation_delegate: Some(download_navigation_delegate),
             _focus_observers: focus_observers,
+            _window_delegate: window_delegate,
             content_descriptor,
             show_settings,
         })
@@ -870,6 +900,7 @@ impl MacosWebviewRuntime {
         })?;
         if let Some(slot) = &self.slot {
             let app = NSApplication::sharedApplication(mtm);
+            set_activation_policy(&app, !self.app_mode_windows.is_empty());
             #[allow(deprecated)]
             app.activateIgnoringOtherApps(true);
             focus_webview_responder(&slot.window, slot.webview.as_ref());
@@ -883,9 +914,38 @@ impl MacosWebviewRuntime {
     }
 
     fn close(&mut self) {
+        self.app_mode_windows.clear();
         if let Some(slot) = self.slot.take() {
             slot.bridge.borrow_mut().app_region_drag.stop();
+            slot.window.setDelegate(None);
             slot.window.close();
+        }
+        if let Some(mtm) = MainThreadMarker::new() {
+            let app = NSApplication::sharedApplication(mtm);
+            set_activation_policy(&app, false);
+        }
+    }
+
+    fn sync_activation_policy(&self) -> Result<(), WebviewRuntimeError> {
+        let mtm = MainThreadMarker::new().ok_or_else(|| {
+            WebviewRuntimeError::Unsupported("webview runtime requires the main thread".into())
+        })?;
+        let app = NSApplication::sharedApplication(mtm);
+        set_activation_policy(&app, !self.app_mode_windows.is_empty());
+        Ok(())
+    }
+
+    fn reconcile_app_mode_window(&mut self, tray_id: &str) {
+        let is_live_app_mode = self
+            .slot
+            .as_ref()
+            .filter(|slot| slot.tray_id == tray_id)
+            .map(|slot| slot.bridge.borrow().style.app_mode && window_is_visible(&slot.window))
+            .unwrap_or(false);
+        if is_live_app_mode {
+            self.app_mode_windows.insert(tray_id.to_string());
+        } else {
+            self.app_mode_windows.remove(tray_id);
         }
     }
 
@@ -899,6 +959,14 @@ impl MacosWebviewRuntime {
             self.close();
         }
     }
+}
+
+fn set_activation_policy(app: &NSApplication, app_mode: bool) {
+    app.setActivationPolicy(if app_mode {
+        NSApplicationActivationPolicy::Regular
+    } else {
+        NSApplicationActivationPolicy::Accessory
+    });
 }
 
 fn ensure_session_reuse_allowed(
@@ -1018,6 +1086,7 @@ fn apply_reused_show_updates(
 
     if show_settings.window.style_requested {
         let requested_style = WindowStyleState {
+            app_mode: show_settings.window.style.app_mode,
             frameless: show_settings.window.style.frameless,
             resizable: show_settings
                 .window
@@ -1187,6 +1256,7 @@ impl NavigatorWindowBridge {
     fn capabilities_json(&self) -> Result<Value, WebviewRuntimeError> {
         let devtools = self.devtools_enabled;
         serde_json::to_value(WindowCapabilities {
+            app_mode: true,
             close: true,
             r#move: true,
             resize: true,

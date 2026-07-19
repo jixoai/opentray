@@ -7,6 +7,7 @@ import {
   type NativeStageKind,
   type PackageOs,
   badgeDockHelperArtifactName,
+  darwinRuntimeCarrierArtifactName,
   normalizeArch,
   resolveNativePackageTarget,
 } from "./artifacts";
@@ -394,6 +395,15 @@ export const executeNativeBuildExecution = async (
           arch: nativeTarget.arch,
         }),
       );
+    }
+    if (kind === "runtime" && target.packageOs === "darwin") {
+      const carrierOutput = join(outputDir, darwinRuntimeCarrierArtifactName);
+      await runCommand(
+        "bash",
+        ["scripts/release/build-darwin-runtime-carrier.sh", carrierOutput],
+        workspaceRoot,
+      );
+      copiedFiles.push(basename(carrierOutput));
     }
   }
 

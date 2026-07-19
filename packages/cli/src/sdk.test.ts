@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ClientRequestFrame,
   CreateTrayOptions,
+  Icon,
   OpenTrayConnection,
   OpenTrayEventFrame,
   OpenTrayRuntimeOptions,
@@ -58,6 +59,35 @@ describe("opentray ergonomic createTray", () => {
       "opentray-1",
       "opentray-2",
     ]);
+  });
+
+  it("projects explicit appIcon before the tray icon fallback", async () => {
+    const trayIcon: Icon = { type: "rgba", data: [1, 2, 3, 4], width: 1, height: 1 };
+    const appIcon: Icon = { type: "rgba", data: [5, 6, 7, 8], width: 1, height: 1 };
+
+    await createTray(
+      { id: "status", icon: trayIcon },
+      { appIcon }
+    );
+
+    expect(
+      transport.frames.filter((frame) => frame.type === "set-app-icon")
+    ).toEqual([
+      expect.objectContaining({ icon: appIcon }),
+    ]);
+  });
+
+  it("snapshots the first tray icon as app identity and never replaces it from a later tray", async () => {
+    const firstIcon: Icon = { type: "rgba", data: [1, 2, 3, 4], width: 1, height: 1 };
+    const laterIcon: Icon = { type: "rgba", data: [5, 6, 7, 8], width: 1, height: 1 };
+
+    await createTray({ id: "first", icon: firstIcon });
+    await createTray({ id: "second", icon: laterIcon });
+
+    expect(transport.appIcon).toEqual(firstIcon);
+    expect(
+      transport.frames.filter((frame) => frame.type === "set-app-icon")
+    ).toHaveLength(1);
   });
 
   it("closes the caller-owned broker session when the tray is destroyed", async () => {
@@ -228,6 +258,8 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
   closeCount = 0;
   failNextCreateTray = false;
   failNextSetMenu = false;
+  appName = "Test";
+  appIcon: Icon | undefined;
   private readonly listeners = new Set<(frame: OpenTrayEventFrame) => void>();
 
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {
@@ -255,6 +287,22 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
           appId: frame.app.appId,
           trayId: frame.tray.id,
         };
+      case "get-app-identity":
+        return {
+          type: "app-identity",
+          requestId: frame.requestId,
+          identity: {
+            appId: frame.appId,
+            appName: this.appName,
+            ...(this.appIcon === undefined ? {} : { icon: this.appIcon }),
+          },
+        };
+      case "set-app-name":
+        this.appName = frame.name;
+        return { type: "ack", requestId: frame.requestId };
+      case "set-app-icon":
+        this.appIcon = frame.icon ?? undefined;
+        return { type: "ack", requestId: frame.requestId };
       case "set-tray-menu":
         if (this.failNextSetMenu) {
           this.failNextSetMenu = false;

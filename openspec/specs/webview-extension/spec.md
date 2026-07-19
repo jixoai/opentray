@@ -1059,22 +1059,22 @@ leave a loopback listener that changes later example startup behavior.
 - **THEN** its Vite server instance is closed
 - **AND** the listener cannot remain as an orphan for the next example run.
 
-### Requirement: Windows WebView switcher visibility SHALL be explicit
+### Requirement: WebView application mode SHALL be explicit
 
-The WebView extension SHALL expose Windows system-switcher visibility as `style.platform.windows.showInSwitchers`. The durable fact SHALL mean participation in normal Windows task switchers, including the taskbar and Alt+Tab projection. It SHALL default to `false` so tray-owned WebViews behave as utility windows. Setting it to `true` SHALL opt a window into switcher participation without coupling that policy to title, icon metadata, frameless state, material hosting, or internal comparator topology.
+The WebView extension SHALL expose normal application Shell membership as the common `style.appMode` field. The durable fact SHALL mean participation in the platform's normal application switchers, including the Windows taskbar/Alt+Tab and macOS Dock/application switcher. It SHALL default to `false` so tray-owned WebViews behave as utility windows. Setting it to `true` SHALL opt a window into application membership without coupling that policy to title, icon metadata, frameless state, material hosting, or internal comparator topology.
 
 When false, every Windows host topology SHALL project `WS_EX_TOOLWINDOW` and remove `WS_EX_APPWINDOW`. When true, every topology SHALL project `WS_EX_APPWINDOW` and remove `WS_EX_TOOLWINDOW`.
 
 #### Scenario: Comparator tray window stays out of switchers by default
 
-- **GIVEN** a Windows WebView uses comparator topology without `showInSwitchers`
+- **GIVEN** a Windows WebView uses comparator topology without `appMode`
 - **WHEN** its native extended style is projected
 - **THEN** it does not appear in the taskbar or Alt+Tab
 - **AND** comparator geometry and material behavior remain unchanged.
 
 #### Scenario: An application explicitly opts into switchers
 
-- **GIVEN** a Windows WebView sets `showInSwitchers: true`
+- **GIVEN** a WebView sets `style.appMode: true`
 - **WHEN** either production or comparator topology projects the native style
 - **THEN** the window participates in the normal Windows task switchers.
 

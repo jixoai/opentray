@@ -166,6 +166,14 @@ function createPackageEntryExpectations(): ReadonlyMap<string, readonly Required
         path: relativeArtifactPath(target.runtimePackageDir, target.runtimeArtifact),
         executable: target.packageOs !== "windows",
       },
+      ...(target.runtimeCarrierArtifact === undefined
+        ? []
+        : [
+            {
+              path: relativeArtifactPath(target.runtimePackageDir, target.runtimeCarrierArtifact),
+              executable: false,
+            } satisfies RequiredPackageEntry,
+          ]),
     ]);
     if (target.webviewPackageDir !== undefined && target.webviewArtifact !== undefined) {
       expectations.set(target.webviewPackageDir, [

@@ -161,4 +161,25 @@ describe("Feature: shared native build graph", () => {
     expect(script).toContain("NSCameraUsageDescription");
     expect(script).toContain("NSMicrophoneUsageDescription");
   });
+
+  test("Scenario: Given a Darwin runtime build When the graph is inspected Then the shared app carrier is emitted with the broker artifact", () => {
+    const executions = materializeNativeBuildExecutions(
+      ["runtime"],
+      ["darwin-arm64", "linux-x64"]
+    );
+    const darwinCarrierScript = readFileSync(
+      resolve(repoRoot, "scripts/release/build-darwin-runtime-carrier.sh"),
+      "utf8"
+    );
+    const darwinPackage = readFileSync(
+      resolve(repoRoot, "packages/darwin-arm64/package.json"),
+      "utf8"
+    );
+
+    expect(executions[0]?.artifactKinds).toEqual(["runtime"]);
+    expect(executions[1]?.artifactKinds).toEqual(["runtime"]);
+    expect(darwinCarrierScript).toContain("packages/darwin-app-carrier");
+    expect(darwinCarrierScript).toContain("camera,microphone");
+    expect(darwinPackage).toContain('"app/OpenTray.app.zip"');
+  });
 });

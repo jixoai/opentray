@@ -8,6 +8,7 @@ export type NativeStageKind =
   | "runtime"
   | "webview"
   | "badge";
+export const darwinRuntimeCarrierArtifactName = "OpenTray.app.zip";
 export const badgeDockHelperArtifactName = "OpenTrayBadgeHelper.app.zip";
 export const runtimeExecutableArtifactName = "opentray";
 
@@ -18,6 +19,7 @@ export interface NativeTarget {
   runtimePackageName: string;
   runtimePackageDir: string;
   runtimeArtifact: string;
+  runtimeCarrierArtifact?: string;
   webviewPackageName?: string;
   webviewPackageDir?: string;
   webviewArtifact?: string;
@@ -42,6 +44,10 @@ export function createNativeTarget(
   arch: NativeArch
 ): NativeTarget {
   const runtimePackageDir = `packages/${packageOs}-${arch}`;
+  const runtimeCarrierArtifact =
+    packageOs === "darwin"
+      ? `${runtimePackageDir}/app/${darwinRuntimeCarrierArtifactName}`
+      : undefined;
   const webviewPackageDir =
     packageOs === "linux"
       ? undefined
@@ -73,6 +79,7 @@ export function createNativeTarget(
     runtimeArtifact: `${runtimePackageDir}/bin/${
       packageOs === "windows" ? "opentray.exe" : runtimeExecutableArtifactName
     }`,
+    runtimeCarrierArtifact,
     webviewPackageName:
       webviewPackageDir === undefined
         ? undefined
@@ -176,7 +183,7 @@ export const stageArtifact = async (
   await mkdir(dirname(absoluteDestination), { recursive: true });
   // Source control stays binary-free; local and CI staging populate package artifacts just before smoke/publish.
   await copyFile(source, absoluteDestination);
-  if (!destination.endsWith(".dll")) {
+  if (!destination.endsWith(".dll") && !destination.endsWith(".zip")) {
     await chmod(absoluteDestination, 0o755);
   }
 };
@@ -187,6 +194,7 @@ export const resolveStageDestinationForArtifactFile = (
 ): string => {
   const candidates = [
     target.runtimeArtifact,
+    target.runtimeCarrierArtifact,
     target.webviewArtifact,
     target.badgeArtifact,
     target.badgeHelperArtifact,

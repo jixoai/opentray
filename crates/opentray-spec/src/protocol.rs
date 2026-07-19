@@ -195,6 +195,26 @@ pub enum ClientFrame {
         #[serde(rename = "requestId")]
         request_id: RequestId,
     },
+    GetAppIdentity {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
+    },
+    SetAppName {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
+        name: String,
+    },
+    SetAppIcon {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
+        icon: Option<Icon>,
+    },
     CreateTray {
         #[serde(rename = "requestId")]
         request_id: RequestId,
@@ -302,6 +322,11 @@ pub enum ServerFrame {
         #[serde(rename = "requestId")]
         request_id: RequestId,
         app: AppRef,
+    },
+    AppIdentity {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        identity: AppIdentity,
     },
     TrayCreated {
         #[serde(rename = "requestId")]
@@ -561,6 +586,7 @@ mod tests {
                 app: AppIdentity {
                     app_id: "com.example.build".to_string(),
                     app_name: "Build".to_string(),
+                    icon: None,
                 },
                 caller_label: "myapp".to_string(),
                 session_count: 2,

@@ -245,6 +245,7 @@ export interface AppRef {
 export interface AppIdentity {
   appId: AppId;
   appName: string;
+  icon?: Icon;
 }
 
 export interface TrayOptions {
@@ -441,6 +442,19 @@ export type ClientFrame =
 export type ClientRequestFrame =
   | ({ type: "create-app"; requestId: RequestId } & AppOptions)
   | { type: "resolve-default-app"; requestId: RequestId }
+  | { type: "get-app-identity"; requestId: RequestId; appId: AppId }
+  | {
+      type: "set-app-name";
+      requestId: RequestId;
+      appId: AppId;
+      name: string;
+    }
+  | {
+      type: "set-app-icon";
+      requestId: RequestId;
+      appId: AppId;
+      icon: Icon | null;
+    }
   | {
       type: "create-tray";
       requestId: RequestId;
@@ -505,6 +519,11 @@ export type ServerFrame =
     }
   | { type: "app-created"; requestId: RequestId; app: AppRef }
   | { type: "default-app"; requestId: RequestId; app: AppRef }
+  | {
+      type: "app-identity";
+      requestId: RequestId;
+      identity: AppIdentity;
+    }
   | { type: "tray-created"; requestId: RequestId; appId: AppId; trayId: TrayId }
   | {
       type: "tray-bounds";
@@ -598,6 +617,8 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return typeof value.requestId === "string" && isRecord(value.app);
     case "default-app":
       return typeof value.requestId === "string" && isRecord(value.app);
+    case "app-identity":
+      return typeof value.requestId === "string" && isRecord(value.identity);
     case "tray-created":
       return (
         typeof value.requestId === "string" &&

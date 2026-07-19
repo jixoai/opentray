@@ -166,6 +166,24 @@ impl<B: AppBackend> Kernel<B> {
         Ok(())
     }
 
+    pub fn set_app_name(&mut self, app_id: &str, name: String) -> Result<(), KernelError> {
+        let app = self
+            .apps
+            .get_mut(app_id)
+            .ok_or_else(|| KernelError::AppNotFound(app_id.to_string()))?;
+        app.options.name = Some(name);
+        self.sync_app(app_id)
+    }
+
+    pub fn set_app_icon(&mut self, app_id: &str, icon: Option<Icon>) -> Result<(), KernelError> {
+        let app = self
+            .apps
+            .get_mut(app_id)
+            .ok_or_else(|| KernelError::AppNotFound(app_id.to_string()))?;
+        app.options.icon = icon;
+        self.sync_app(app_id)
+    }
+
     pub fn destroy_tray(
         &mut self,
         session_id: &str,
@@ -300,6 +318,7 @@ impl<B: AppBackend> Kernel<B> {
                 .filter(|value| !value.is_empty())
                 .unwrap_or(&app.app.app_id)
                 .to_string(),
+            icon: app.options.icon.clone(),
         })
     }
 

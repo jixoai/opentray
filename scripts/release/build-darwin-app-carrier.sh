@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# Orthogonal intents (maintained 2026-07-19; original user request: make the
+# Darwin runtime and official extensions consume one shared app carrier law):
+# 1. Materialize a macOS app bundle from one carrier source configuration.
+# 2. Merge bundle identity and privacy usage strings deterministically.
+# 3. Produce one release-stable zip without owning extension semantics.
+
 set -euo pipefail
 
 output_zip="${1:-}"
@@ -30,6 +36,15 @@ case "${source_dir}" in
   *) source_dir="${root_dir}/${source_dir}" ;;
 esac
 
+if [[ ! -f "${source_dir}/main.swift" ]]; then
+  echo "missing Darwin carrier source: ${source_dir}/main.swift" >&2
+  exit 1
+fi
+if [[ ! -f "${source_dir}/Info.plist" ]]; then
+  echo "missing Darwin carrier plist: ${source_dir}/Info.plist" >&2
+  exit 1
+fi
+
 build_dir="${root_dir}/target/darwin-app-carrier/${app_name}"
 app_bundle="${build_dir}/${app_name}.app"
 
@@ -44,17 +59,44 @@ swiftc \
 
 mkdir -p "${app_bundle}/Contents/MacOS"
 cp "${source_dir}/Info.plist" "${app_bundle}/Contents/Info.plist"
+
+set_plist_string() {
+  local key="$1"
+  local value="$2"
+  /usr/libexec/PlistBuddy -c "Set :${key} ${value}" "${app_bundle}/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :${key} string ${value}" "${app_bundle}/Contents/Info.plist"
+}
+
+if [[ -n "${OPENTRAY_DARWIN_BUNDLE_IDENTIFIER:-}" ]]; then
+  set_plist_string "CFBundleIdentifier" "${OPENTRAY_DARWIN_BUNDLE_IDENTIFIER}"
+fi
+if [[ -n "${OPENTRAY_DARWIN_BUNDLE_NAME:-}" ]]; then
+  set_plist_string "CFBundleName" "${OPENTRAY_DARWIN_BUNDLE_NAME}"
+fi
+if [[ -n "${OPENTRAY_DARWIN_BUNDLE_DISPLAY_NAME:-}" ]]; then
+  set_plist_string "CFBundleDisplayName" "${OPENTRAY_DARWIN_BUNDLE_DISPLAY_NAME}"
+fi
+
 if [[ -n "${privacy_families}" ]]; then
   IFS=',' read -ra families <<< "${privacy_families}"
   for family in "${families[@]}"; do
+    family="${family//[[:space:]]/}"
     case "${family}" in
       camera)
-        /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription OpenTray needs camera access for this app." "${app_bundle}/Contents/Info.plist" 2>/dev/null \
-          || /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string OpenTray needs camera access for this app." "${app_bundle}/Contents/Info.plist"
+        set_plist_string \
+          "NSCameraUsageDescription" \
+          "${OPENTRAY_DARWIN_CAMERA_USAGE_DESCRIPTION:-OpenTray needs camera access for this app.}"
         ;;
       microphone)
-        /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription OpenTray needs microphone access for this app." "${app_bundle}/Contents/Info.plist" 2>/dev/null \
-          || /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string OpenTray needs microphone access for this app." "${app_bundle}/Contents/Info.plist"
+        set_plist_string \
+          "NSMicrophoneUsageDescription" \
+          "${OPENTRAY_DARWIN_MICROPHONE_USAGE_DESCRIPTION:-OpenTray needs microphone access for this app.}"
+        ;;
+      "")
+        ;;
+      *)
+        echo "unsupported Darwin privacy family: ${family}" >&2
+        exit 1
         ;;
     esac
   done
@@ -62,6 +104,7 @@ fi
 cp "${build_dir}/${binary_name}" "${app_bundle}/Contents/MacOS/${binary_name}"
 chmod 755 "${app_bundle}/Contents/MacOS/${binary_name}"
 
+rm -f "${output_zip}"
 ditto -c -k --sequesterRsrc --keepParent \
   "${app_bundle}" \
   "${output_zip}"

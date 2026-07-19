@@ -30,49 +30,49 @@
 
 ## 4. Public Contract Implementation
 
-- [ ] 4.1 Add `appMode` to the common TypeScript WebView style and patch types with default `false`; keep it independent from all existing shell and appearance fields.
-- [ ] 4.2 Replace the public Windows `showInSwitchers` type/capability field with the common `appMode` contract and update parser/serializer fixtures without adding an alias.
-- [ ] 4.3 Update Rust WebView style DTOs, defaults, patch handling, and command serialization to carry `app_mode` across the extension boundary.
-- [ ] 4.4 Add app-mode capability reporting to every platform DTO and reject unsupported requests with typed errors.
-- [ ] 4.5 Add `appIcon?: Icon` to the App-facing runtime seam used by `createTray`, preserving the existing wire `AppOptions.icon` as the protocol identity field.
-- [ ] 4.6 Implement Windows-aligned App artwork resolution: explicit app icon, packaged/carrier identity artwork, protocol App icon, first native-capable tray icon snapshot, then OS default; keep stable `appId`/AppUserModelID separate.
-- [ ] 4.7 Add Core protocol/kernel App identity mutation frames and public `AppHandle` methods for `getName`, `setName`, `getIcon`, and `setIcon` without adding `createApp`.
-- [ ] 4.8 Add focused TypeScript and Rust tests for defaulting, patching, breaking-field removal, capability serialization, immutable resolution, App mutation, and badge/window metadata separation.
-- [ ] 4.9 Move the shared Darwin `.app` carrier artifact contract into the core runtime distribution model; keep `opentray-core` bundle-free and add package-manifest/staging assertions for executable plus carrier completeness.
+- [x] 4.1 Add `appMode` to the common TypeScript WebView style and patch types with default `false`; keep it independent from all existing shell and appearance fields.
+- [x] 4.2 Replace the public Windows `showInSwitchers` type/capability field with the common `appMode` contract and update parser/serializer fixtures without adding an alias.
+- [x] 4.3 Update Rust WebView style DTOs, defaults, patch handling, and command serialization to carry `app_mode` across the extension boundary.
+- [x] 4.4 Add app-mode capability reporting to every platform DTO and reject unsupported requests with typed errors.
+- [x] 4.5 Add `appIcon?: Icon` to the App-facing runtime seam used by `createTray`, preserving the existing wire `AppOptions.icon` as the protocol identity field.
+- [x] 4.6 Implement Windows-aligned App artwork resolution: explicit app icon, packaged/carrier identity artwork, protocol App icon, first native-capable tray icon snapshot, then OS default; keep stable `appId`/AppUserModelID separate.
+- [x] 4.7 Add Core protocol/kernel App identity mutation frames and public `AppHandle` methods for `getName`, `setName`, `getIcon`, and `setIcon` without adding `createApp`.
+- [x] 4.8 Add focused TypeScript and Rust tests for defaulting, patching, breaking-field removal, capability serialization, immutable resolution, App mutation, and badge/window metadata separation.
+- [x] 4.9 Move the shared Darwin `.app` carrier artifact contract into the core runtime distribution model; keep `opentray-core` bundle-free and add package-manifest/staging assertions for executable plus carrier completeness.
 
 ## 5. Windows Projection And Lifecycle
 
-- [ ] 5.1 Map common `appMode` to `WS_EX_APPWINDOW` / `WS_EX_TOOLWINDOW` for production and comparator topologies.
+- [x] 5.1 Map common `appMode` to `WS_EX_APPWINDOW` / `WS_EX_TOOLWINDOW` for production and comparator topologies.
 - [ ] 5.2 Update Windows native close handling so `WM_CLOSE` hides the retained session and updates the authoritative operational visibility projection in the same lifecycle transaction.
 - [ ] 5.3 Ensure Windows reveal restores the existing session, activates the HWND, reapplies app-mode Shell projection, and resolves only after the projection is observable.
 - [ ] 5.4 Add Windows BDD/unit coverage for taskbar/Alt+Tab styles, close/reveal, minimized restore, no keep-on-top coupling, and session cleanup.
-- [ ] 5.5 Remove Windows README, examples, and changelog guidance that presents `showInSwitchers` as the public field; document `style.appMode` instead.
+- [x] 5.5 Remove Windows README, examples, and changelog guidance that presents `showInSwitchers` as the public field; document `style.appMode` instead.
 
 ## 6. Darwin Carrier And Projection
 
-- [ ] 6.1 Define the shared Darwin carrier adapter boundary for process identity, app icon, `.app` activation, and regular/accessory policy without importing carrier details into `opentray-core`.
+- [x] 6.1 Define the shared Darwin carrier adapter boundary for process identity, app icon, `.app` activation, and regular/accessory policy without importing carrier details into `opentray-core`.
 - [ ] 6.2 Track live app-mode windows by `(appId, sessionId, windowId)` and aggregate activation policy transitions on show, close, hide, destroy, and session disconnect.
 - [ ] 6.3 Promote the Darwin process to regular policy before an app-mode window reports successful show; demote only after the last live app-mode projection is gone.
-- [ ] 6.4 Extract the carrier source/build path from `ext-badge`, stage the shared `.app` into each matching `@opentray/darwin-*` package, and keep badge packages limited to badge artifacts.
+- [x] 6.4 Extract the carrier source/build path from `ext-badge`, stage the shared `.app` into each matching `@opentray/darwin-*` package, and keep badge packages limited to badge artifacts.
 - [ ] 6.5 Project App identity artwork/name through the carrier only where the platform supports runtime mutation; do not rewrite packaged shortcut/bundle metadata.
 - [ ] 6.6 Add Darwin native tests for first-window promotion, multi-window retention, last-window demotion, explicit App icon, App mutation, native close, tray reveal, and cleanup.
 - [ ] 6.7 Add a macOS human-visible smoke command or update an existing WebView example so the Dock/application-switching effect can be inspected.
 
 ## 7. Consumer Migration
 
-- [ ] 7.1 Update `skill-creator-v2` tray-host configuration to `appMode: true`, `frameless: false`, `keepOnTop: false`, and `autoHide: false`.
-- [ ] 7.2 Remove the reveal-time `setStyle({ keepOnTop: true })` workaround from `skill-creator-v2`.
-- [ ] 7.3 Keep `primaryEvent` labels and handlers derived from `isVisible()` / `visibleChange`, using `show()` only for first bootstrap, `toVisible()` for reveal, and `close()` for hide.
+- [x] 7.1 Update `skill-creator-v2` tray-host configuration to `appMode: true`, `frameless: false`, `keepOnTop: false`, and `autoHide: false`.
+- [x] 7.2 Remove the reveal-time `setStyle({ keepOnTop: true })` workaround from `skill-creator-v2`.
+- [x] 7.3 Keep `primaryEvent` labels and handlers derived from `isVisible()` / `visibleChange`, using `show()` only for first bootstrap, `toVisible()` for reveal, and `close()` for hide.
 - [ ] 7.4 Add or update consumer acceptance coverage for tray open, native close, taskbar/Dock icon removal, second tray open, retained page state, and final session cleanup.
 - [ ] 7.5 Update consumer skill and WebView README examples to teach `appMode` as the product decision and `appIcon` as App identity input.
 
 ## 8. Verification And Task Progress
 
-- [ ] 8.1 Run targeted TypeScript tests for `@opentray/ext-webview`, `opentray`, and protocol fixtures.
-- [ ] 8.2 Run targeted Rust tests for `opentray-ext-webview`, `opentray-runtime-node`, `opentray-bin`, and affected backend crates.
+- [x] 8.1 Run targeted TypeScript tests for `@opentray/ext-webview`, `opentray`, and protocol fixtures.
+- [x] 8.2 Run targeted Rust tests for `opentray-ext-webview`, `opentray-runtime-node`, `opentray-bin`, and affected backend crates.
 - [ ] 8.3 Run the exact `skill-creator-v2` `pnpm dev` flow against the local OpenTray artifacts and record the visible tray/window result.
-- [ ] 8.4 Run `bun run openspec:vision -- validate add-webview-app-mode-and-app-icon`, `git diff --check`, and the narrowest repo verification gate that covers changed packages.
-- [ ] 8.5 Update only task checkboxes completed and verified in the current context, then commit the task-progress update with matching code/BDD evidence.
+- [x] 8.4 Run `bun run openspec:vision -- validate add-webview-app-mode-and-app-icon`, `git diff --check`, and the narrowest repo verification gate that covers changed packages.
+- [x] 8.5 Update only task checkboxes completed and verified in the current context, then commit the task-progress update with matching code/BDD evidence.
 
 ## 9. Self-Review Loop
 

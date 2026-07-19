@@ -2,6 +2,7 @@ import {
   PROTOCOL_VERSION,
   type ClientFrame,
   type ClientRequestFrame,
+  type AppIdentity,
   type ExtensionEnvelope,
   type Icon,
   type Menu,
@@ -46,6 +47,7 @@ export interface OpenTrayEventfulClient extends OpenTrayClient {
 
 export interface TrayHandle {
   trayId: TrayId;
+  app: AppHandle;
   getBounds(): Promise<TrayBoundsResult>;
   setMenu(menu: Menu): Promise<void>;
   setTooltip(tooltip: Tooltip): Promise<void>;
@@ -58,6 +60,14 @@ export interface TrayHandle {
     options?: TOptions
   ): TrayHandle & TCapability;
   destroy(): Promise<void>;
+}
+
+export interface AppHandle {
+  readonly appId: string;
+  getName(): Promise<string>;
+  setName(name: string): Promise<string>;
+  getIcon(): Promise<Icon | null>;
+  setIcon(icon: Icon | null): Promise<Icon | null>;
 }
 
 export type TrayScopedEvent = Exclude<TrayEvent, { type: "ready" }>;
@@ -136,6 +146,10 @@ export const createInitFrame = (clientVersion: string): ClientFrame => ({
 
 export interface CreateClientOptions {
   requestIdPrefix?: string;
+  appOptions?: {
+    name?: string;
+    icon?: Icon;
+  };
 }
 
 export function createClient(
@@ -153,10 +167,37 @@ export function createClient(
   const nextRequestId = createRequestIdFactory(
     options.requestIdPrefix ?? "opentray"
   );
+  let appPromise: Promise<{ app: { appId: string }; handle: AppHandle }> | undefined;
+
+  const ensureApp = async (
+    trayOptions: TrayOptions
+  ): Promise<{ app: { appId: string }; handle: AppHandle }> => {
+    appPromise ??= (async () => {
+      const app = await resolveDefaultAppRef(transport, nextRequestId);
+      const handle = createAppHandle(transport, app.appId, nextRequestId);
+      const configured = options.appOptions;
+      if (configured?.name !== undefined) {
+        await handle.setName(configured.name);
+      }
+      if (configured?.icon !== undefined) {
+        await handle.setIcon(configured.icon);
+      } else if (
+        trayOptions.icon !== undefined &&
+        (await handle.getIcon()) === null
+      ) {
+        await handle.setIcon(trayOptions.icon);
+      }
+      return { app, handle };
+    })().catch((error: unknown) => {
+      appPromise = undefined;
+      throw error;
+    });
+    return appPromise;
+  };
 
   return {
     async createTray(options: TrayOptions): Promise<TrayHandle> {
-      const app = await resolveDefaultAppRef(transport, nextRequestId);
+      const { app } = await ensureApp(options);
       const requestId = nextRequestId();
       const response = await transport.request({
         type: "create-tray",
@@ -203,6 +244,7 @@ export function createTrayHandle(
   };
   const handle: TrayHandle = {
     trayId,
+    app: createAppHandle(transport, appId, nextRequestId),
     async getBounds(): Promise<TrayBoundsResult> {
       const requestId = nextRequestId();
       const response = await transport.request({
@@ -401,6 +443,53 @@ const resolveDefaultAppRef = async (
   return expectResponse(response, requestId, "default-app").app;
 };
 
+const createAppHandle = (
+  transport: OpenTrayTransport,
+  appId: string,
+  nextRequestId: () => RequestId,
+): AppHandle => {
+  const requestIdentity = async (): Promise<AppIdentity> => {
+    const requestId = nextRequestId();
+    const response = await transport.request({
+      type: "get-app-identity",
+      requestId,
+      appId,
+    });
+    return expectResponse(response, requestId, "app-identity").identity;
+  };
+  return {
+    appId,
+    async getName(): Promise<string> {
+      return (await requestIdentity()).appName;
+    },
+    async setName(name: string): Promise<string> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "set-app-name",
+        requestId,
+        appId,
+        name,
+      });
+      expectResponse(response, requestId, "ack");
+      return (await requestIdentity()).appName;
+    },
+    async getIcon(): Promise<Icon | null> {
+      return (await requestIdentity()).icon ?? null;
+    },
+    async setIcon(icon: Icon | null): Promise<Icon | null> {
+      const requestId = nextRequestId();
+      const response = await transport.request({
+        type: "set-app-icon",
+        requestId,
+        appId,
+        icon,
+      });
+      expectResponse(response, requestId, "ack");
+      return icon;
+    },
+  };
+};
+
 const createTrayExtensionContext = <TCapability extends object, TOptions>(
   tray: TrayHandle,
   appId: string,
@@ -486,6 +575,7 @@ const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
   switch (frame.type) {
     case "app-created":
     case "default-app":
+    case "app-identity":
     case "tray-created":
     case "tray-bounds":
     case "ack":

@@ -30,6 +30,8 @@ pub struct AppRef {
 pub struct AppIdentity {
     pub app_id: AppId,
     pub app_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Icon>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -25,6 +25,7 @@ export interface OpenTrayRuntimeOptions {
   clientVersion?: string;
   appId?: string;
   appName?: string;
+  appIcon?: Icon;
   autoStart?: boolean;
 }
 
@@ -54,7 +55,16 @@ export const createTray = async (
   const normalized = normalizeCreateTrayOptions(options);
   const connection = await connectLocalBroker(runtimeOptions);
   try {
-    const tray = await createClient(connection).createTray(normalized.options);
+    const tray = await createClient(connection, {
+      appOptions: {
+        ...(runtimeOptions.appName === undefined
+          ? {}
+          : { name: runtimeOptions.appName }),
+        ...(runtimeOptions.appIcon === undefined
+          ? {}
+          : { icon: runtimeOptions.appIcon }),
+      },
+    }).createTray(normalized.options);
     return wrapCreateTrayHandle(tray, {
       closeConnection: () => connection.close(),
       destroyPromise: undefined,
