@@ -8,6 +8,8 @@ ordinary consumers need only a normal package-manager install for a coherent nat
 3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
 4. Preserve monorepo, OpenSpec, release, and verification laws.
 5. Preserve platform-specific acceptance evidence without promoting it to cross-platform truth.
+6. Preserve the cross-platform window-shell role contract and its platform projections.
+7. Preserve the split between platform-neutral Core identity contracts and Darwin runtime carrier packaging.
 Compromise: AGENTS.md is the required project-wide agent SSOT, so these law families cannot be
 physically split without losing the single discovery entrypoint required by repository tooling.
 -->
@@ -75,6 +77,55 @@ The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `sk
 - Release-grade extension manifest inspection must execute a same-target native inspector built beside the extension. Do not depend on `bun:ffi` for this gate because Windows arm64 Bun builds may disable TinyCC and `dlopen()` entirely.
 - Extension cleanup remains session-authoritative. Extension state must be scoped to its owning `(appId, trayId, sessionId)` and a session-close callback must not clear another live session's retained window.
 
+## Window Shell Mode Law
+
+The public WebView window contract uses `style.appMode`, not a platform behavior name such as
+`showInSwitchers`. The old Windows-only field has been removed; native adapters project the common
+mode directly:
+
+- `appMode: true` means the caller wants an ordinary desktop application window.
+- `appMode: false` means the caller wants a tray-owned utility window outside ordinary application
+  switching surfaces; this remains the default.
+- The mode is a durable source fact. Visibility, minimization, and close/reveal lifecycle decide
+  when that fact is projected into the native shell; `keepOnTop` remains an independent explicit
+  z-order capability and must not be used as a substitute for application participation.
+- Windows maps the mode to `WS_EX_APPWINDOW`/`WS_EX_TOOLWINDOW`, taskbar, and Alt+Tab projection.
+- macOS maps the set of active app-mode windows through the Darwin runtime carrier to
+  Regular/Accessory activation and Dock participation. This is an app-level projection and must
+  aggregate by `(appId, trayId, sessionId)` without allowing one session close to clear another.
+- Native adapters must not reintroduce a public switcher-specific alias; Shell membership is always
+  derived from the common application mode.
+- `appMode` does not imply framelessness, auto-hide, material, or titlebar composition. Those
+  remain orthogonal style facts.
+
+## App Icon Law
+
+- `appIcon` is app identity, not WebView window metadata. The public runtime seam may accept an
+  ergonomic `appIcon` field, but the protocol source of truth remains `AppOptions.icon`.
+- If `appIcon` is omitted, the facade may snapshot the first tray `icon` as the app icon. The
+  inheritance is bootstrap-time resolution, not a live alias to tray icon or page favicon changes.
+- Explicit `appIcon` wins over inherited tray icon; if neither is available, the Darwin carrier or
+  packaged runtime identity supplies its own fallback.
+- `appIcon` must use native-capable app assets. A remote WebView `Href` or a tray-only template
+  asset must not be silently claimed as a valid Dock/taskbar identity.
+- App identity and window icon remain separate facts. An app-mode window may project `appIcon` to
+  the taskbar/Dock while `icon` continues to control the window chrome and page metadata sync.
+
+## Darwin Runtime Carrier Law
+
+- `opentray-core` is the platform-neutral kernel/protocol layer. It may own App identity state,
+  mutation frames, and `AppProjection`, but it must not import AppKit, contain `.app` files, or
+  launch a native carrier.
+- The OpenTray Darwin runtime distribution is a core release atom. Each matching
+  `@opentray/darwin-*` package must contain the broker executable and the shared `.app` carrier
+  required for AppKit activation policy, Dock participation, and App identity projection.
+- The shared carrier is built and discovered by the runtime/release layer. `ext-badge` may consume
+  the carrier contract, but it owns only badge/overlay semantics and its native library; it must
+  not remain the source of the runtime `.app` bundle.
+- A normal package-manager install must yield a coherent broker-plus-carrier artifact graph. A
+  consumer must not copy a helper bundle manually or install `ext-badge` merely to obtain normal
+  app-mode behavior.
+
 ## Windows Tray WebView Laws
 
 The following laws were established from the 2026-07-14 pnpm-pub repair and its native evidence:
@@ -91,7 +142,7 @@ matching FrameworkUdk + Windowing.Core
 
 - A CBS directory may supply `Microsoft.WindowsAppRuntime.Bootstrap.dll`; it is not the selected runtime identity. Resolve runtime DLLs by bare name through the package graph unless `OPENTRAY_WINDOWS_APP_RUNTIME_DIR` explicitly supplies a complete runtime.
 - AppWindow objects are HWND-thread-affine for this host path. Initialize WinRT and mutate `AppWindowTitleBar` synchronously on the HWND-owning thread before first show; do not move the call to an MTA worker or send AppWindow interfaces across apartments.
-- `style.platform.windows.showInSwitchers` owns taskbar/Alt+Tab projection. Default `false` means `WS_EX_TOOLWINDOW` and no `WS_EX_APPWINDOW`; title and icon metadata do not decide switcher membership. Comparator/probe topology may change native frame geometry, but it must obey the same switcher projection.
+- `style.appMode` owns taskbar/Alt+Tab projection. Default `false` means `WS_EX_TOOLWINDOW` and no `WS_EX_APPWINDOW`; title and icon metadata do not decide switcher membership. Comparator/probe topology may change native frame geometry, but it must obey the same application-mode projection.
 - Common `style.autoHide` defaults to `true`. Native focus loss hides the retained session only when `autoHide && !keepOnTop`; `keepOnTop: true` and `autoHide: false` are independent suppression paths. The hide must preserve the session and emit operational `visibleChange(false)`. Control/comparator examples explicitly use `autoHide: false` so DevTools and observation windows do not dismiss the specimen.
 - Public Windows window bounds are DWM visible-frame logical pixels. `moveTo` and `resizeTo` must compensate the raw invisible-border delta before `SetWindowPos`.
 - Frameless and overlay windows use full-client `WM_NCCALCSIZE` for every Win32 message form. For Windows overlays, `AppWindowTitleBar.LeftInset`, `RightInset`, and `Height` are the safe-area authority and must be read synchronously on the HWND-owning STA; DWM caption-button bounds are only a lower-level rectangle, not an equivalent width contract.
