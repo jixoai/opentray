@@ -2335,6 +2335,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentray-extension-inspector"
+version = "0.0.0"
+dependencies = [
+ "libloading",
+ "opentray-spec",
+ "serde_json",
+]
+
+[[package]]
 name = "opentray-runtime-node"
 version = "0.0.0"
 dependencies = [

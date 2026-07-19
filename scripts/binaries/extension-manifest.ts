@@ -1,9 +1,10 @@
 // Orthogonal intents (2026-07-19; original user request: pnpm install must be sufficient):
-// 1. Read the manifest exported by an actual native extension artifact through Bun FFI.
+// 1. Read the manifest exported by an actual native extension artifact through a same-target inspector.
 // 2. Derive the expected identity from the facade package and canonical contract files.
 // 3. Reject stale or cross-target artifacts with expected/actual evidence.
 
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
@@ -42,7 +43,7 @@ export const createExtensionArtifactEvidence = async (
   target: ExtensionArtifactTarget,
 ): Promise<ExtensionArtifactEvidence> => {
   const expected = await readExpectedExtensionArtifactIdentity(root, kind, target);
-  const manifest = await inspectExtensionArtifact(file);
+  const manifest = await inspectExtensionArtifact(root, file);
   verifyExtensionArtifactIdentity(expected, manifest);
   return {
     kind,
@@ -91,39 +92,26 @@ export const verifyExtensionPlatformPackageTarget = async (
 };
 
 export const inspectExtensionArtifact = async (
+  root: string,
   path: string,
 ): Promise<EmbeddedExtensionManifest> => {
-  const { dlopen, ptr, toArrayBuffer } = await import("bun:ffi");
-  const library = dlopen(path, {
-    opentray_ext_manifest: { args: ["ptr"], returns: "i32" },
-    opentray_ext_free_string: {
-      args: ["ptr", "usize"],
-      returns: "void",
-    },
-  });
-  const output = new BigUint64Array(2);
-  try {
-    const result = library.symbols.opentray_ext_manifest(ptr(output));
-    if (result !== 0) {
-      throw new Error(`extension manifest returned code ${result}`);
-    }
-    const outputPointer = Number(output[0]);
-    const outputLength = Number(output[1]);
-    if (outputPointer === 0 || outputLength === 0) {
-      throw new Error("extension manifest returned an empty buffer");
-    }
-    try {
-      const json = new TextDecoder().decode(
-        new Uint8Array(toArrayBuffer(outputPointer, 0, outputLength)),
-      );
-      return parseEmbeddedExtensionManifest(JSON.parse(json));
-    } finally {
-      library.symbols.opentray_ext_free_string(outputPointer, outputLength);
-    }
-  } finally {
-    library.close();
-  }
+  const inspector = resolveExtensionInspectorPath(root);
+  const json = await runInspector(inspector, path);
+  return parseEmbeddedExtensionManifest(JSON.parse(json));
 };
+
+export const resolveExtensionInspectorPath = (
+  root: string,
+  platform: string = process.platform,
+): string =>
+  join(
+    root,
+    "target",
+    "release",
+    platform === "win32"
+      ? "opentray-extension-inspector.exe"
+      : "opentray-extension-inspector",
+  );
 
 export const readExpectedExtensionArtifactIdentity = async (
   root: string,
@@ -203,6 +191,28 @@ const parseEmbeddedExtensionManifest = (value: unknown): EmbeddedExtensionManife
     buildIdentity: value.buildIdentity,
   };
 };
+
+const runInspector = (inspector: string, artifact: string): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const child = spawn(inspector, [artifact], { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout).toString("utf8").trim());
+        return;
+      }
+      const detail = Buffer.concat(stderr).toString("utf8").trim();
+      reject(
+        new Error(
+          `native extension inspector failed with code ${code ?? "unknown"}${detail.length > 0 ? `: ${detail}` : ""}`,
+        ),
+      );
+    });
+  });
 
 const readJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 

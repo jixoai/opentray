@@ -28,6 +28,7 @@ export type NativeBuildComponent = "runtime" | "webview" | "badge" | "lynx" | "l
 export type NativeArtifactKind = NativeStageKind;
 export const lynxRuntimeArtifactName = "OpenTrayLynxRuntime.app.zip";
 export const badgeDynamicLibraryArtifactName = "libopentray_ext_badge.dylib";
+export const extensionInspectorCargoPackage = "opentray-extension-inspector";
 
 export interface NativeBuildTargetConfig {
   readonly id: NativeBuildTargetName;
@@ -183,7 +184,7 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
     component: "webview",
     allowedTargets: webviewNativeBuildTargets,
     defaultReleaseTargets: webviewNativeBuildTargets,
-    cargoPackages: ["opentray-ext-webview"],
+    cargoPackages: ["opentray-ext-webview", extensionInspectorCargoPackage],
     artifactKinds: ["webview"],
     inferredPackages: ["@opentray/ext-webview"],
     inferredPackagePrefixes: ["@opentray/ext-webview-"],
@@ -192,7 +193,7 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
     component: "badge",
     allowedTargets: badgeNativeBuildTargets,
     defaultReleaseTargets: badgeNativeBuildTargets,
-    cargoPackages: ["opentray-ext-badge"],
+    cargoPackages: ["opentray-ext-badge", extensionInspectorCargoPackage],
     artifactKinds: ["badge"],
     inferredPackages: ["@opentray/ext-badge"],
     inferredPackagePrefixes: ["@opentray/ext-badge-"],
@@ -201,7 +202,7 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
     component: "lynx",
     allowedTargets: ["darwin-arm64", "darwin-x64"],
     defaultReleaseTargets: ["darwin-arm64", "darwin-x64"],
-    cargoPackages: ["opentray-ext-lynx"],
+    cargoPackages: ["opentray-ext-lynx", extensionInspectorCargoPackage],
     artifactKinds: ["lynx"],
     inferredPackages: ["@opentray/ext-lynx"],
     inferredPackagePrefixes: ["@opentray/ext-lynx-"],

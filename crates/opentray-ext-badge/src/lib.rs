@@ -392,8 +392,15 @@ mod tests {
         let bytes = unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) };
         let manifest = serde_json::from_slice::<opentray_spec::EmbeddedExtensionManifest>(bytes)
             .expect("manifest JSON");
+        let facade = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../../packages/ext-badge/package.json"
+        ))
+        .expect("facade package JSON");
         assert_eq!(manifest.extension_name, "badge");
-        assert_eq!(manifest.artifact_set_version, "0.14.4");
+        assert_eq!(
+            manifest.artifact_set_version,
+            facade["version"].as_str().expect("facade package version")
+        );
         assert_eq!(
             manifest.contract_fingerprint,
             "opentray-ext-badge-contract-1"

@@ -49,6 +49,7 @@ describe("Feature: shared native build graph", () => {
     expect(darwinArm64.cargoPackages).toEqual([
       "opentray-bin",
       "opentray-ext-webview",
+      "opentray-extension-inspector",
     ]);
     expect(darwinArm64.artifactName).toBe(
       "native-darwin-arm64-runtime-webview"
@@ -93,6 +94,17 @@ describe("Feature: shared native build graph", () => {
           execution.target === "darwin-arm64" &&
           execution.components.includes("lynx-runtime")
       )?.buildsLynxRuntime
+    ).toBe(true);
+    expect(
+      executions
+        .filter((execution) =>
+          execution.components.some((component) =>
+            component === "webview" || component === "badge" || component === "lynx"
+          )
+        )
+        .every((execution) =>
+          execution.cargoPackages.includes("opentray-extension-inspector")
+        )
     ).toBe(true);
   });
 

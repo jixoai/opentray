@@ -65,6 +65,7 @@ The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `sk
 - Diagnose retained-window failures as a command chain: `menuClick -> facade command -> broker extension dispatch -> native window state`. If `close()/hide()` returns successfully but native visibility stays true, inspect AppKit/Win32 projection. If a newly added command such as `isVisible` is rejected while older event commands still work, inspect broker/dylib command-surface skew before changing window code.
 - The dynamic extension ABI must preserve actionable rejection detail. A bare `returned code 1` only identifies `EXT_ERR_REJECTED`; run an isolated broker with `OPENTRAY_DAEMON_STDIO=inherit` or add bounded diagnostic transport before attributing the failure to a specific native branch.
 - Native acceptance must use one coherent artifact graph. Record the broker executable path, loaded extension library path, hashes or versions, endpoint identity, and PID before a restart destroys the evidence. A successful restart is runtime-replacement evidence, not proof of the original root cause.
+- Release-grade extension manifest inspection must execute a same-target native inspector built beside the extension. Do not depend on `bun:ffi` for this gate because Windows arm64 Bun builds may disable TinyCC and `dlopen()` entirely.
 - Extension cleanup remains session-authoritative. Extension state must be scoped to its owning `(appId, trayId, sessionId)` and a session-close callback must not clear another live session's retained window.
 
 ## Windows Tray WebView Laws

@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 
 import {
   EXTENSION_ABI_VERSION,
+  resolveExtensionInspectorPath,
   sha256File,
   verifyExtensionArtifactIdentity,
   verifyExtensionPlatformPackageTarget,
@@ -75,6 +76,12 @@ describe("native extension artifact manifest", () => {
         arch: "arm64",
       }),
     ).rejects.toThrow(/platform package target mismatch/);
+  });
+
+  it("resolves the same-target inspector executable on Windows", () => {
+    expect(resolveExtensionInspectorPath("C:\\opentray", "win32")).toBe(
+      join("C:\\opentray", "target", "release", "opentray-extension-inspector.exe"),
+    );
   });
 });
 

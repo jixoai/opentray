@@ -1,0 +1,14 @@
+[package]
+name = "opentray-extension-inspector"
+description = "Build-time inspector for OpenTray native extension manifests."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+libloading.workspace = true
+opentray-spec.workspace = true
+serde_json.workspace = true
