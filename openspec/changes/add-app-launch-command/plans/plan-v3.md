@@ -20,9 +20,8 @@ silently claimed by this change.
 ## Current Round
 
 - Round: 3
-- Status: Round 3 implementation and source-tree cold/warm verification are complete; the
-  remaining Dock visual acceptance belongs to the owner.
-- Previous plan backup: `plans/plan-v3.md`.
+- Status: Owner confirmed the warm Dock reopen, development launch-vector, and consumer-documentation boundaries; implementation pending.
+- Previous plan backup: `plans/plan-v2.md`.
 
 ## Workflow Command Surface
 
@@ -241,11 +240,11 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - [x] 1. Research and align the original launch-command intent.
 - [x] 2. Implement and self-review the round-1 cold-launch path.
 - [x] 3. Capture the owner rejection and reproduce the incoherent installed/bundle graph.
-- [x] 4. Commit the round-2 specs and red BDD surface.
-- [x] 5. Correct package identity, bundle convergence, and durable diagnostics.
-- [x] 6. Verify through the real linked `skill-creator-v2` `pnpm dev` graph.
-- [x] 7. Return the sole remaining Dock visual/click acceptance to the owner.
-- [x] 8. Implement and verify the confirmed warm reopen, explicit focus, and development launch-vector behavior.
+- [ ] 4. Commit the round-2 specs and red BDD surface.
+- [ ] 5. Correct package identity, bundle convergence, and durable diagnostics.
+- [ ] 6. Verify through the real linked `skill-creator-v2` `pnpm dev` graph.
+- [ ] 7. Return the sole remaining Dock visual/click acceptance to the owner.
+- [ ] 8. Implement and verify the confirmed warm reopen, explicit focus, and development launch-vector behavior.
 
 ## Open Questions
 
