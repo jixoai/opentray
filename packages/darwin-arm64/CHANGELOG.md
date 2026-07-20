@@ -1,5 +1,11 @@
 # @opentray/darwin-arm64
 
+## 0.17.0
+
+### Minor Changes
+
+- 9d45ae4: Materialize stable caller-owned Darwin app bundles with package-derived identity, strict native app-icon variants, and shared build-plugin adapters. Consumers can use a normal install or a prebuilt bundle without relying on a compressed carrier or manually copied runtime files.
+
 ## 0.16.0
 
 ### Minor Changes

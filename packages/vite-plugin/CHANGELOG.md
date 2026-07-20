@@ -1,5 +1,17 @@
 # @opentray/vite-plugin
 
+## 0.17.0
+
+### Minor Changes
+
+- 9d45ae4: Materialize stable caller-owned Darwin app bundles with package-derived identity, strict native app-icon variants, and shared build-plugin adapters. Consumers can use a normal install or a prebuilt bundle without relying on a compressed carrier or manually copied runtime files.
+
+### Patch Changes
+
+- Updated dependencies [9d45ae4]
+  - @opentray/spec@0.17.0
+  - @opentray/packaging@0.17.0
+
 ## 0.16.0
 
 ### Patch Changes

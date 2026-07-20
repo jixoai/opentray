@@ -1,6 +1,6 @@
 {
   "name": "@opentray/packaging",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Bundler-neutral OpenTray runtime artifact packaging contract.",
   "type": "module",
   "license": "MIT",
