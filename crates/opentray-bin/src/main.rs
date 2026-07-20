@@ -9,6 +9,8 @@
 // native event-loop ownership cannot be physically separated without adding a
 // second shipped executable and breaking the shared carrier artifact contract.
 
+#[cfg(target_os = "macos")]
+mod darwin_reopen;
 mod dynamic_extension;
 mod frame_error;
 #[cfg(unix)]
@@ -145,7 +147,12 @@ fn run_app_entrypoint() -> Result<(), Box<dyn Error>> {
                 log_path.display()
             )
         })?;
-    append_app_launch_log(&mut log, "carrier-start", &descriptor_path, serde_json::json!({}))?;
+    append_app_launch_log(
+        &mut log,
+        "carrier-start",
+        &descriptor_path,
+        serde_json::json!({}),
+    )?;
     let descriptor = match parse_app_launch_descriptor(&descriptor_path) {
         Ok(descriptor) => descriptor,
         Err(error) => {
@@ -521,7 +528,7 @@ mod native_broker {
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
     use opentray_core::{BrokerKernel, BrokerSession, UnsupportedExtensionHostContext};
-    use opentray_spec::{ClientFrame, ServerFrame};
+    use opentray_spec::{AppEvent, ClientFrame, ServerFrame};
     use winit::application::ApplicationHandler;
     use winit::event::StartCause;
     use winit::event::WindowEvent;
@@ -544,12 +551,22 @@ mod native_broker {
         Transport(broker_transport::TransportEvent),
         Menu(tray_icon::menu::MenuEvent),
         Tray(tray_icon::TrayIconEvent),
+        #[cfg(target_os = "macos")]
+        AppReopenRequested,
         IdleExpired(u64),
     }
 
     pub fn run(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
         let event_loop = build_event_loop()?;
         event_loop.set_control_flow(ControlFlow::Wait);
+
+        #[cfg(target_os = "macos")]
+        {
+            let proxy = event_loop.create_proxy();
+            super::darwin_reopen::install(move || {
+                let _ = proxy.send_event(UserEvent::AppReopenRequested);
+            })?;
+        }
 
         let proxy = event_loop.create_proxy();
         let listener = broker_transport::spawn_listener(options.clone(), move |event| {
@@ -634,6 +651,8 @@ mod native_broker {
                 }
                 UserEvent::Menu(event) => self.handle_menu(event),
                 UserEvent::Tray(event) => self.handle_tray(event),
+                #[cfg(target_os = "macos")]
+                UserEvent::AppReopenRequested => self.dispatch_app_reopen_requested(),
                 UserEvent::IdleExpired(generation) => {
                     if self.sessions.is_empty() && generation == self.idle_generation {
                         event_loop.exit();
@@ -786,6 +805,23 @@ mod native_broker {
                         event: routed.event.clone(),
                     });
                 }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        fn dispatch_app_reopen_requested(&mut self) {
+            for session in self.sessions.values_mut() {
+                let Some(app_id) = session
+                    .broker
+                    .app_identity()
+                    .map(|identity| identity.app_id.clone())
+                else {
+                    continue;
+                };
+                eprintln!("opentray app reopen requested: app_id={app_id}");
+                session.write_frame(ServerFrame::AppEvent {
+                    event: AppEvent::ReopenRequested { app_id },
+                });
             }
         }
 

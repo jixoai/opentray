@@ -392,6 +392,7 @@ enum WebviewCommand {
     IsClosed,
     IsVisible,
     ToVisible,
+    Focus,
     GetBounds,
     GetScreenDetails,
     DrainIpcMessages,
@@ -984,6 +985,7 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
         "isClosed" => Ok(WebviewCommand::IsClosed),
         "isVisible" => Ok(WebviewCommand::IsVisible),
         "toVisible" => Ok(WebviewCommand::ToVisible),
+        "focus" => Ok(WebviewCommand::Focus),
         "getBounds" => Ok(WebviewCommand::GetBounds),
         "getScreenDetails" => Ok(WebviewCommand::GetScreenDetails),
         "drainIpcMessages" | "drainPageMessages" => Ok(WebviewCommand::DrainIpcMessages),
@@ -1937,6 +1939,10 @@ mod tests {
             parse_webview_command(&serde_json::json!({ "type": "toVisible" }))
                 .expect("toVisible command"),
             WebviewCommand::ToVisible
+        );
+        assert_eq!(
+            parse_webview_command(&serde_json::json!({ "type": "focus" })).expect("focus command"),
+            WebviewCommand::Focus
         );
     }
 

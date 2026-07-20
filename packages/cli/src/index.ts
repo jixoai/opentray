@@ -67,6 +67,7 @@ export {
   isSupportedProtocolVersion,
   PROTOCOL_VERSION,
   type AppId,
+  type AppEvent,
   type AppIdentity,
   type AppIcon,
   type AppIconAsset,

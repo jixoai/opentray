@@ -517,6 +517,7 @@ struct SetStyleLinuxPayload {}
 struct WindowCapabilities {
     app_mode: bool,
     close: bool,
+    focus: bool,
     r#move: bool,
     resize: bool,
     resizable: bool,
@@ -765,6 +766,10 @@ impl WindowsWebviewRuntime {
                 show_bridge_window(&slot.bridge, false)?;
                 emit_window_state_change(&slot.bridge, was_visible)?;
                 emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
+                Ok(Value::Null)
+            }
+            WebviewCommand::Focus => {
+                self.focus(tray_id)?;
                 Ok(Value::Null)
             }
             WebviewCommand::GetBounds => {
@@ -1690,6 +1695,10 @@ fn dispatch_navigator_window_command(
             show_bridge_window(bridge, false)?;
             emit_window_state_change(bridge, was_visible)?;
             emit_overlay_geometry_change_if_enabled(bridge)?;
+            Ok(Value::Null)
+        }
+        "focus" => {
+            show_bridge_window(bridge, true)?;
             Ok(Value::Null)
         }
         "isMaximized" => Ok(Value::Bool(unsafe { IsZoomed(bridge.borrow().hwnd) != 0 })),
@@ -5323,6 +5332,7 @@ impl NavigatorWindowBridge {
         serde_json::to_value(WindowCapabilities {
             app_mode: true,
             close: true,
+            focus: true,
             r#move: true,
             resize: true,
             resizable: true,

@@ -7,6 +7,8 @@ import type { ClientRequestFrame, ServerFrame } from "@opentray/spec";
 import {
   createTrayHandle,
   type NativeExtensionExpectedIdentity,
+  type OpenTrayConnection,
+  type OpenTrayEventFrame,
   type OpenTrayTransport,
   type TrayHandle,
 } from "opentray";
@@ -243,6 +245,7 @@ describe("@opentray/ext-webview", () => {
     await expect(webviewWindow.isClosed()).resolves.toBe(true);
     await expect(webviewWindow.isVisible()).resolves.toBe(false);
     await webviewWindow.toVisible();
+    await webviewWindow.focus();
     await webviewWindow.close();
     await eventually(() => Promise.resolve(events[0]));
     unlisten();
@@ -261,10 +264,95 @@ describe("@opentray/ext-webview", () => {
         "isClosed",
         "isVisible",
         "toVisible",
+        "focus",
         "close",
         "drainWindowEvents",
       ])
     );
+  });
+
+  it("reopens a bootstrapped app-mode window from the generic app event", async () => {
+    const transport = new EventfulWebviewTransport((command) => {
+      if (
+        isWebviewCommand(command) &&
+        command.type === "drainWindowEvents"
+      ) {
+        return { type: "windowEvents", events: [] };
+      }
+      return { type: "ok" };
+    });
+    const tray = createTrayHandle(transport, "app-reopen", "tray-1");
+    const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
+      html: "<main />",
+      style: { appMode: true },
+    });
+
+    await webviewWindow.show();
+    await flushMicrotasks();
+    transport.frames.length = 0;
+    transport.emit({
+      type: "app-event",
+      event: { type: "reopenRequested", appId: "app-reopen" },
+    });
+    await eventually(async () => {
+      const commands = transport.frames.flatMap((frame) =>
+        frame.type === "ext-command" && isWebviewCommand(frame.data)
+          ? [frame.data.type]
+          : []
+      );
+      return commands.includes("focus") ? commands : undefined;
+    });
+    await webviewWindow.destroy();
+
+    expect(
+      transport.frames.flatMap((frame) =>
+        frame.type === "ext-command" && isWebviewCommand(frame.data)
+          ? [frame.data.type]
+          : []
+      )
+    ).toEqual(expect.arrayContaining(["toVisible", "focus"]));
+    const reopenCommands = transport.frames
+      .flatMap((frame) =>
+        frame.type === "ext-command" && isWebviewCommand(frame.data)
+          ? [frame.data.type]
+          : []
+      )
+      .filter((command) => command === "toVisible" || command === "focus");
+    expect(reopenCommands).toEqual(["toVisible", "focus"]);
+  });
+
+  it("stops internal app-mode polling before destroying the native session", async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new EventfulWebviewTransport((command) =>
+        isWebviewCommand(command) && command.type === "drainWindowEvents"
+          ? { type: "windowEvents", events: [] }
+          : { type: "ok" }
+      );
+      const tray = createTrayHandle(transport, "app-destroy", "tray-1");
+      const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
+        html: "<main />",
+        style: { appMode: true },
+      });
+
+      await webviewWindow.show();
+      await flushMicrotasks();
+      transport.frames.length = 0;
+
+      await webviewWindow.destroy();
+      await vi.advanceTimersByTimeAsync(64);
+
+      expect(
+        transport.frames.some(
+          (frame) =>
+            frame.type === "ext-command" &&
+            isWebviewCommand(frame.data) &&
+            frame.data.type === "drainWindowEvents"
+        )
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps attachWebview on the legacy webview mount and auto-loads once", async () => {
@@ -2207,6 +2295,9 @@ describe("@opentray/ext-webview", () => {
     expectTypeOf<WebviewNavigatorWindow["toVisible"]>().returns.toEqualTypeOf<
       Promise<void>
     >();
+    expectTypeOf<WebviewNavigatorWindow["focus"]>().returns.toEqualTypeOf<
+      Promise<void>
+    >();
     expectTypeOf<
       Parameters<WebviewNavigatorWindow["listen"]>[0]
     >().toMatchTypeOf<string>();
@@ -2285,6 +2376,24 @@ class WebviewResultTransport extends RecordingTransport {
       };
     }
     return { type: "ack", requestId: frame.requestId };
+  }
+}
+
+class EventfulWebviewTransport
+  extends WebviewResultTransport
+  implements OpenTrayConnection
+{
+  readonly #listeners = new Set<(frame: OpenTrayEventFrame) => void>();
+
+  onEvent(listener: (frame: OpenTrayEventFrame) => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  emit(frame: OpenTrayEventFrame): void {
+    for (const listener of this.#listeners) {
+      listener(frame);
+    }
   }
 }
 

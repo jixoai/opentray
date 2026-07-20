@@ -79,11 +79,11 @@ entry relaunch the consumer with the last or explicitly configured command):
 
 ## 8. Owner Acceptance / Round 3 Warm Reopen And Development Launch
 
-- [ ] 8.1 Back up the round-2 plan and record the confirmed warm-reopen, explicit-focus, development-vector, and consumer-documentation decisions.
-- [ ] 8.2 BDD: when a running Darwin carrier receives Dock reopen, emit one generic `reopenRequested` intent without executing the cold descriptor.
-- [ ] 8.3 BDD: when app-mode windows exist, the default WebView projection selects the most recently active retained window and composes `toVisible()` with `focus()`.
-- [ ] 8.4 Add typed host/page `focus()` commands and native macOS/Windows projections without moving WebView policy into Core.
-- [ ] 8.5 Install an AppKit delegate bridge because winit does not expose `applicationShouldHandleReopen:` directly; preserve the generic broker event boundary.
-- [ ] 8.6 Adapt `skill-creator-v2` development tray initialization to persist the resolved absolute package-manager vector for `pnpm dev` from the repository root.
-- [ ] 8.7 Update only `skill-creator-v2/AGENTS.md` with the agreed incompatible-content reset versus I/O failure boundary; do not change its registry code.
-- [ ] 8.8 Run focused Rust/TypeScript tests, rebuild the linked OpenTray artifacts, and validate the cold and warm Dock paths with durable logs.
+- [x] 8.1 Back up the round-2 plan and record the confirmed warm-reopen, explicit-focus, development-vector, and consumer-documentation decisions.
+- [x] 8.2 BDD: when a running Darwin carrier receives Dock reopen, emit one generic `reopenRequested` intent without executing the cold descriptor.
+- [x] 8.3 BDD: when app-mode windows exist, the default WebView projection selects the most recently active retained window and composes `toVisible()` with `focus()`.
+- [x] 8.4 Add typed host/page `focus()` commands and native macOS/Windows projections without moving WebView policy into Core.
+- [x] 8.5 Install an AppKit delegate bridge because winit does not expose `applicationShouldHandleReopen:` directly; preserve the generic broker event boundary.
+- [x] 8.6 Adapt `skill-creator-v2` development tray initialization to persist the resolved absolute package-manager vector for `pnpm dev` from the repository root.
+- [x] 8.7 Update only `skill-creator-v2/AGENTS.md` with the agreed incompatible-content reset versus I/O failure boundary; do not change its registry code.
+- [x] 8.8 Run focused Rust/TypeScript tests, rebuild the linked OpenTray artifacts, and validate the cold and warm Dock paths with durable logs.

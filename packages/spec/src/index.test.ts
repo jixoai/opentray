@@ -123,6 +123,23 @@ describe("@opentray/spec", () => {
     });
   });
 
+  it("accepts generic app reopen event frames", () => {
+    const parsed = parseServerFrame(
+      JSON.stringify({
+        type: "app-event",
+        event: { type: "reopenRequested", appId: "app-1" },
+      }),
+    );
+
+    expect(parsed).toEqual({
+      ok: true,
+      frame: {
+        type: "app-event",
+        event: { type: "reopenRequested", appId: "app-1" },
+      },
+    });
+  });
+
   it("models responsive icon candidates in one icon field", () => {
     const icon: Icon = {
       type: "file",

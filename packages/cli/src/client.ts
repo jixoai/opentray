@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  type AppEvent,
   type ClientFrame,
   type ClientRequestFrame,
   type AppIdentity,
@@ -32,7 +33,7 @@ export interface OpenTrayTransport {
 
 export type OpenTrayEventFrame = Extract<
   ServerFrame,
-  { type: "event" | "ext-event" }
+  { type: "event" | "app-event" | "ext-event" }
 >;
 
 export interface OpenTrayEventSource {
@@ -105,6 +106,9 @@ export interface EventfulTrayHandle extends TrayHandle {
   ): () => void;
   onTrayDoubleClick(
     handler: (event: TrayEventByType<"trayDoubleClick">) => void
+  ): () => void;
+  onAppReopenRequested(
+    handler: (event: Extract<AppEvent, { type: "reopenRequested" }>) => void
   ): () => void;
 }
 
@@ -403,6 +407,17 @@ const attachEventfulTrayHandle = (
     onTrayDoubleClick(handler) {
       return listen("trayDoubleClick", handler);
     },
+    onAppReopenRequested(handler) {
+      return source.onEvent((frame) => {
+        if (
+          frame.type === "app-event" &&
+          frame.event.type === "reopenRequested" &&
+          frame.event.appId === appId
+        ) {
+          handler(frame.event);
+        }
+      });
+    },
     extend<TCapability extends object, TOptions = undefined>(
       extension: TrayExtension<TCapability, TOptions>,
       options?: TOptions
@@ -610,6 +625,7 @@ const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
       return frame.requestId;
     case "ready":
     case "event":
+    case "app-event":
     case "ext-event":
       return undefined;
   }

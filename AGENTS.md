@@ -9,7 +9,8 @@ tray Icon so consumers may supply independently generated native assets; add sem
 variants whose omitted name is default and whose selection remains Core-owned; let a stable
 app-mode entry relaunch the latest `process.argv` invocation or an explicit launch script
 ; eliminate duplicate same-AppId Dock carriers and make detached broker/carrier failures
-observable in stable logs (2026-07-21)):
+observable in stable logs; make a live Dock click reveal and focus the latest retained app-mode
+WebView without spawning a second consumer (2026-07-21)):
 1. Preserve the tray-first App/Tray/Session platform laws.
 2. Preserve native runtime and extension package boundaries across macOS and Windows.
 3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
@@ -224,6 +225,18 @@ mode directly:
 - Cold launch after process exit is distinct from a live-process Dock reopen. Windows and Linux
   taskbar entries are not persistent launchers merely because a window uses `appMode`; those
   platforms require their own shortcut/launcher atoms before equivalent persistence is claimed.
+- A live Darwin Dock reopen emits one app-scoped `reopenRequested` event through the generic
+  broker protocol. It never executes `appLaunch`; the cold descriptor is process-start-only.
+- `@opentray/ext-webview` owns the default projection: among bootstrapped retained windows whose
+  current style has `appMode: true`, select the most recently active one and run `toVisible()` then
+  `focus()`. Core transports intent but never selects or commands a WebView.
+- `WebviewWindowHandle.focus()` and `navigator.opentrayWindow.focus()` are explicit lower-level
+  capabilities on macOS and Windows. They remain orthogonal to visibility, even where a native
+  substrate must also raise or restore the window to obtain foreground focus.
+- Development launch descriptors must reconstruct the supervisor that owns the complete app tree.
+  A pnpm/Vite consumer should persist `process.execPath` with the absolute `npm_execpath` and
+  `"dev"` arguments plus repository-root `cwd`; never persist only the daemon child, a shell
+  string, or a bare package-manager name.
 
 ## Windows Tray WebView Laws
 

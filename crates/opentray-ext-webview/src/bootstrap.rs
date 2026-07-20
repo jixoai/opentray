@@ -396,6 +396,9 @@ pub(crate) fn navigator_window_bootstrap_script(
         toVisible() {
           return invoke("toVisible");
         },
+        focus() {
+          return invoke("focus");
+        },
         minimize() {
           return invoke("minimize");
         },

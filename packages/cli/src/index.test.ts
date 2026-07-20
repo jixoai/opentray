@@ -289,6 +289,9 @@ describe("opentray client", () => {
     const unsubscribeClick = tray.onTrayClick((event) => {
       seen.push(`click:${event.x},${event.y}`);
     });
+    const unsubscribeReopen = tray.onAppReopenRequested(() => {
+      seen.push("app:reopen");
+    });
 
     transport.emit({
       type: "event",
@@ -316,15 +319,24 @@ describe("opentray client", () => {
       ext: "webview",
       data: {},
     });
+    transport.emit({
+      type: "app-event",
+      event: { type: "reopenRequested", appId: "other-app" },
+    });
+    transport.emit({
+      type: "app-event",
+      event: { type: "reopenRequested", appId: "app-1" },
+    });
 
     unsubscribeMenu();
     unsubscribeClick();
+    unsubscribeReopen();
     transport.emit({
       type: "event",
       event: { type: "menuClick", appId: "app-1", trayId: "tray-1", itemId: 3 },
     });
 
-    expect(seen).toEqual(["menu:2", "click:4,8"]);
+    expect(seen).toEqual(["menu:2", "click:4,8", "app:reopen"]);
   });
 
   it("creates explicit protocol handshake frames", () => {

@@ -3,8 +3,8 @@ use serde_json::Value;
 
 use crate::ext::{ExpectedExtensionIdentity, ExtensionEnvelope};
 use crate::model::{
-    AppIcon, AppId, AppIdentity, AppOptions, AppRef, Icon, Menu, Rect, SessionId, Tooltip,
-    TrayEvent, TrayId, TrayOptions,
+    AppEvent, AppIcon, AppId, AppIdentity, AppOptions, AppRef, Icon, Menu, Rect, SessionId,
+    Tooltip, TrayEvent, TrayId, TrayOptions,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -370,6 +370,9 @@ pub enum ServerFrame {
     Event {
         event: TrayEvent,
     },
+    AppEvent {
+        event: AppEvent,
+    },
     ExtEvent {
         #[serde(rename = "appId")]
         app_id: AppId,
@@ -727,6 +730,26 @@ mod tests {
                     "appId": "app-1",
                     "trayId": "daemon-status",
                     "itemId": 99
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn app_event_frames_expose_generic_reopen_intent() {
+        let frame = ServerFrame::AppEvent {
+            event: AppEvent::ReopenRequested {
+                app_id: "app-1".to_string(),
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(frame).unwrap(),
+            serde_json::json!({
+                "type": "app-event",
+                "event": {
+                    "type": "reopenRequested",
+                    "appId": "app-1"
                 }
             })
         );

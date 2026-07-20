@@ -6,8 +6,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use dispatch2::DispatchQueue;
-use objc2::rc::Retained;
-use objc2_app_kit::NSWindow;
+use objc2::{rc::Retained, MainThreadMarker};
+use objc2_app_kit::{NSApplication, NSWindow};
 use objc2_foundation::{NSPoint, NSSize};
 use opentray_spec::Rect;
 use serde::Deserialize;
@@ -386,6 +386,19 @@ fn dispatch_navigator_window_command(
             to_visible(window);
             emit_window_state_change(bridge, window, was_visible)?;
             emit_overlay_geometry_change_if_enabled(bridge, window)?;
+            Ok(Value::Null)
+        }
+        "focus" => {
+            let mtm = MainThreadMarker::new().ok_or_else(|| {
+                WebviewRuntimeError::Unsupported(
+                    "navigator window focus requires the main thread".into(),
+                )
+            })?;
+            let app = NSApplication::sharedApplication(mtm);
+            #[allow(deprecated)]
+            app.activateIgnoringOtherApps(true);
+            window.makeKeyAndOrderFront(None);
+            window.orderFrontRegardless();
             Ok(Value::Null)
         }
         "isMaximized" => Ok(Value::Bool(window.isZoomed() && !window.isMiniaturized())),

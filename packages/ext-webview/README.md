@@ -139,6 +139,7 @@ macOS support includes:
 - native app-region dragging through `startAppRegionDrag()`
 - minimize, maximize, and restore window-state controls
 - operational visibility through `isClosed()`, `isVisible()`, `toVisible()`, and `visibleChange`
+- explicit foreground activation through `focus()`
 - common native focus-loss dismissal through `style.autoHide`, defaulting to `true` and suppressed by `keepOnTop`
 - adjustable native window-frame corner radius through `style.platform.macos.cornerRadius`
 - native title and icon state
@@ -153,7 +154,7 @@ Windows support includes:
 - visible WebView2-backed windows through Wry
 - `show`, `hide`, `destroy`, `setContent`, `navigate`, `evaluate`, and `postMessage`
 - `navigator.window` / `navigator.opentrayWindow` bridge injection with source-scoped `nativeApiPolicy`
-- `close`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isClosed`, `isVisible`, `toVisible`, `isMaximized`, and `isMinimized`
+- `close`, `focus`, `moveTo`, `resizeTo`, `minimize`, `maximize`, `restore`, `getWindowState`, `isClosed`, `isVisible`, `toVisible`, `isMaximized`, and `isMinimized`
 - `getStyle` / `setStyle` for common `frameless`, `resizable`, `background`, `keepOnTop`, `autoHide`, and `opacity`
 - `windowControlsOverlay` geometry, Windows caption-button `backgroundColor` / `symbolColor`, `startAppRegionDrag()`, and subscription-driven bridge events
 - title sync and native window/taskbar icon projection for RGBA icons, local icon files, and PNG data URLs
@@ -400,12 +401,20 @@ From the host side, keep the lifecycle verbs explicit:
 - `await webview.show()` to restore an already-created session without resetting page, size, style, or native bridge state
 - `await webview.hide()` to hide without destroying the page runtime
 - `await webview.close()` to close/hide the retained session, or `await webview.toVisible()` to reveal or restore it
+- `await webview.focus()` to explicitly foreground the existing native window
 - `await webview.isClosed()` / `await webview.isVisible()` when a tray menu needs one operational Show/Hide predicate
 - `await webview.setContent({ type: "setContent", html })` to replace local HTML content explicitly
 - `await webview.navigate("https://example.com/status")` as the URL-focused content replacement alias
 - `await webview.resizeTo(360, 240)` and `await webview.moveTo(10, 20)` for host-owned geometry changes
 - `await webview.devtools.open()`, `close()`, and `isOpen()` for the instance-owned devtools channel when `devtools: true` was declared before the first show
 - `await webview.destroy()` to destroy the tray-scoped session
+
+With an eventful OpenTray connection, the extension also supplies the default
+live app reopen policy. A Darwin Dock reopen selects the most recently active,
+bootstrapped window whose current style has `appMode: true`, then executes
+`toVisible()` followed by `focus()`. The generic App event remains observable
+through `tray.onAppReopenRequested(...)`; it never invokes the cold
+`appLaunch` descriptor.
 
 `devtools` is a WebView creation setting, not a late-bound toggle. Set `devtools: true` on the first `show({ ... })` / `createWebviewWindow({ ... })` if that session should admit inspector commands. Repeated `show()` does not rebuild the underlying WebView, so changing `devtools` later requires `destroy()` and a fresh show. Read `getCapabilities()` before showing close/state UI: macOS can expose open/close/state, while Windows currently exposes open only. Release builds still compile the native inspector API; windows that omit `devtools: true` keep devtools unavailable by default. Wry does not expose a cross-platform native switch for hiding only the DevTools context-menu item while preserving normal page/input context menus.
 

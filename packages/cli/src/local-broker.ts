@@ -40,7 +40,10 @@ import type { DaemonPaths } from "./daemon/paths";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 
-export type LocalRuntimeEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
+export type LocalRuntimeEventFrame = Extract<
+  ServerFrame,
+  { type: "event" | "app-event" | "ext-event" }
+>;
 
 export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
@@ -357,7 +360,11 @@ class LocalBrokerConnection implements LocalBrokerClient {
       return;
     }
 
-    if (frame.type === "event" || frame.type === "ext-event") {
+    if (
+      frame.type === "event" ||
+      frame.type === "app-event" ||
+      frame.type === "ext-event"
+    ) {
       for (const listener of this.listeners) {
         listener(frame);
       }
@@ -401,6 +408,7 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
       return frame.requestId;
     case "ready":
     case "event":
+    case "app-event":
     case "ext-event":
     case "error":
       return undefined;

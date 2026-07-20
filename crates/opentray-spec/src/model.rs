@@ -1207,6 +1207,17 @@ pub enum MouseButton {
     Middle,
 }
 
+/// Application-scoped lifecycle intent emitted by a native runtime carrier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum AppEvent {
+    ReopenRequested { app_id: AppId },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "type",

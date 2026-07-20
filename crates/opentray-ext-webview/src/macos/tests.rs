@@ -445,6 +445,11 @@ const toVisibleRequest = takeMessage("toVisible");
 window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(toVisibleRequest.callback, null);
 await toVisiblePromise;
 
+const focusPromise = navigator.opentrayWindow.focus();
+const focusRequest = takeMessage("focus");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(focusRequest.callback, null);
+await focusPromise;
+
 let visibleChange = null;
 navigator.opentrayWindow.addEventListener("visibleChange", (event) => {
   visibleChange = event.payload.visible;
@@ -518,6 +523,7 @@ return {
   isVisibleCmd: isVisibleRequest.cmd,
   isVisible,
   toVisibleCmd: toVisibleRequest.cmd,
+  focusCmd: focusRequest.cmd,
   visibleChange,
   minimizeCmd: minimizeRequest.cmd,
   minimizedState: minimized.state,
@@ -563,6 +569,7 @@ return {
         runtime["toVisibleCmd"],
         Value::String("toVisible".to_string())
     );
+    assert_eq!(runtime["focusCmd"], Value::String("focus".to_string()));
     assert_eq!(runtime["visibleChange"], Value::Bool(false));
     assert_eq!(
         runtime["minimizeCmd"],
@@ -1412,6 +1419,7 @@ fn navigator_window_bridge_tracks_listener_ids() {
     let capabilities = bridge
         .capabilities_json()
         .expect("macOS capabilities should serialize");
+    assert_eq!(capabilities["focus"], Value::Bool(true));
     assert_eq!(capabilities["resizable"], Value::Bool(true));
 
     let event_id = bridge.add_listener("resized".to_string(), 42);

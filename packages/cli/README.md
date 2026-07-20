@@ -152,8 +152,17 @@ mode those assets remain read-only, while the runtime-owned
 after a successful handshake.
 
 Cold launch is currently a Darwin carrier capability. A live retained session
-continues to use tray/window reveal, and ordinary Windows/Linux taskbar entries
-are not claimed as persistent post-exit launchers.
+does not execute this descriptor: the broker emits an app-scoped
+`reopenRequested` event instead. `@opentray/ext-webview` consumes that intent by
+revealing and focusing the most recently active retained `appMode` window.
+Ordinary Windows/Linux taskbar entries are not claimed as persistent post-exit
+launchers.
+
+Development callers must describe the command that owns the complete process
+tree. For a pnpm/Vite app, persist `process.execPath` with the absolute
+`npm_execpath` and `"dev"` arguments plus the repository-root `cwd`. Persisting
+only a daemon child, a shell string, or a bare `pnpm` command cannot reliably
+restore Vite, its proxy, and the final WebView URL from a Dock cold launch.
 
 ### Runtime diagnostics
 

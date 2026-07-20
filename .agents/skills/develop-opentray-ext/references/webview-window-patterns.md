@@ -18,6 +18,12 @@ The WebView extension owns window protocol, native projection, page injection, a
 
 Events are subscription-driven. Do not add polling loops or unconditional page pushes for window state. If a native observer becomes necessary, install it only when a relevant listener exists and tear it down when the last listener is removed.
 
+A live Darwin Dock reopen is a generic App intent, not a WebView command in
+Core. `@opentray/ext-webview` selects the most recently active bootstrapped
+window whose current style has `appMode: true`, then runs `toVisible()` and
+`focus()`. Host and page code may also call `focus()` explicitly. Cold
+`appLaunch` remains process-start-only and must never run for this warm path.
+
 Retained WebView tray surfaces use one `primaryEvent` item whose label states the next action: `Show Example` while `isVisible()` is false and `Hide Example` while true. Bootstrap only once with `show()`, reveal a retained hidden/minimized session with `toVisible()`, hide it with `close()`, and update the menu from `visibleChange`. Do not keep a parallel local visibility boolean.
 
 Native APIs exposed to a page are a security boundary. Keep the CSP-like `nativeApiPolicy` model: grant each capability family explicitly, keep local-only defaults for remote content, and avoid hidden broad grants.

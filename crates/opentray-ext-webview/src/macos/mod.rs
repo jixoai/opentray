@@ -151,6 +151,7 @@ struct WindowSizeConstraints {
 struct WindowCapabilities {
     app_mode: bool,
     close: bool,
+    focus: bool,
     r#move: bool,
     resize: bool,
     resizable: bool,
@@ -384,6 +385,20 @@ impl MacosWebviewRuntime {
                     emit_window_state_change(&slot.bridge, &slot.window, was_visible)?;
                 }
                 self.reconcile_app_mode_window(tray_id);
+                self.focus()?;
+                Ok(Value::Null)
+            }
+            WebviewCommand::Focus => {
+                if self
+                    .slot
+                    .as_ref()
+                    .filter(|slot| slot.tray_id == tray_id)
+                    .is_none()
+                {
+                    return Err(WebviewRuntimeError::Rejected(
+                        "focus requires an active WebView window".into(),
+                    ));
+                }
                 self.focus()?;
                 Ok(Value::Null)
             }
@@ -1266,6 +1281,7 @@ impl NavigatorWindowBridge {
         serde_json::to_value(WindowCapabilities {
             app_mode: true,
             close: true,
+            focus: true,
             r#move: true,
             resize: true,
             resizable: true,

@@ -44,6 +44,18 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 - Keep code examples consistent with the actual public exports. Do not reach for removed APIs (`createSpace`, `resolveDefaultSpace`, `tray.setTitle`) even when documenting history; show the real current surface (`createTray`, `setIcon({ text })`).
 - Prefer concrete example script names that exist in `package.json` (e.g. `example:debug-runtime-tray`). Verify a script name before writing it into a doc; never invent an `example:mediaQuery`-style name that does not resolve.
 
+## Development App Launch Rule
+
+- `appLaunch` is a cold process-entry vector. A live Darwin Dock reopen emits
+  `reopenRequested` and must never execute it.
+- In a Vite/package-manager development graph, persist the top-level supervisor
+  that reconstructs the complete server, daemon, and WebView tree. For pnpm,
+  use `process.execPath`, `args: [absolute npm_execpath, "dev"]`, and the
+  repository-root `cwd`.
+- Do not persist only a daemon child, a shell string, or a bare `pnpm` command.
+  Package-manager resolution and Finder's launch environment are not stable
+  enough for those shortcuts.
+
 ## Verification Baseline
 
 Use the smallest relevant gate first, then close with the repo gate:

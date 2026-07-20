@@ -392,6 +392,9 @@ export interface TrayBoundsResult {
 
 export type MouseButton = "left" | "right" | "middle";
 
+/** Application-scoped lifecycle intent emitted by a native runtime carrier. */
+export type AppEvent = { type: "reopenRequested"; appId: AppId };
+
 export type TrayEvent =
   | { type: "ready"; appId: AppId }
   | { type: "menuClick"; appId: AppId; trayId: TrayId; itemId: MenuItemId }
@@ -596,6 +599,7 @@ export type ServerFrame =
       health: RuntimeHostHealth;
     }
   | { type: "event"; event: TrayEvent }
+  | { type: "app-event"; event: AppEvent }
   | {
       type: "ext-event";
       appId: AppId;
@@ -696,6 +700,8 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return typeof value.requestId === "string" && isRuntimeHostHealth(value.health);
     case "event":
       return isTrayEvent(value.event);
+    case "app-event":
+      return isAppEvent(value.event);
     case "ext-event":
       return (
         typeof value.appId === "string" &&
@@ -712,6 +718,11 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return false;
   }
 };
+
+const isAppEvent = (value: unknown): value is AppEvent =>
+  isRecord(value) &&
+  value.type === "reopenRequested" &&
+  typeof value.appId === "string";
 
 const isExtensionEnvelope = (value: unknown): value is ExtensionEnvelope => {
   if (!isRecord(value) || !isRecord(value.scope)) {

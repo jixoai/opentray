@@ -1,4 +1,5 @@
-// Orthogonal intents (2026-07-14; original user request: Chrome-PWA-like Windows overlay controls):
+// Orthogonal intents (2026-07-21; original user request: Chrome-PWA-like Windows overlay controls
+// and a running app-mode Dock click that restores the latest retained window):
 // 1. Expose typed WebView extension contracts, including Windows overlay-control colors and appMode.
 // 2. Provide tray-scoped window handles and capability facades.
 // 3. Re-export placement, responsive, style, and permission helpers.
@@ -19,6 +20,10 @@ import type {
   TrayExtensionContext,
   TrayHandle,
 } from "opentray";
+import {
+  getAppReopenCoordinator,
+  type AppReopenCoordinator,
+} from "./app-reopen";
 import { WEBVIEW_NATIVE_ARTIFACT } from "./native-artifact";
 import type {
   WebviewBrowserPermissionFamily,
@@ -224,6 +229,7 @@ export interface WebviewWindowPlatformCapabilities {
 }
 
 export interface WebviewWindowCapabilities {
+  focus: boolean;
   close: boolean;
   move: boolean;
   resize: boolean;
@@ -395,6 +401,7 @@ export interface WebviewNavigatorWindow {
   isClosed(): Promise<boolean>;
   isVisible(): Promise<boolean>;
   toVisible(): Promise<void>;
+  focus(): Promise<void>;
   minimize(): Promise<WebviewWindowState>;
   maximize(): Promise<WebviewWindowState>;
   restore(): Promise<WebviewWindowState>;
@@ -537,6 +544,7 @@ export type WebviewCommand =
   | { type: "isClosed" }
   | { type: "isVisible" }
   | { type: "toVisible" }
+  | { type: "focus" }
   | { type: "getBounds" }
   | { type: "getScreenDetails" }
   | { type: "drainIpcMessages" }
@@ -617,6 +625,7 @@ export interface WebviewWindowHandle {
   isClosed(): Promise<boolean>;
   isVisible(): Promise<boolean>;
   toVisible(): Promise<void>;
+  focus(): Promise<void>;
   moveTo(x: number, y: number): Promise<void>;
   resizeTo(width: number, height: number): Promise<void>;
   getBounds(): Promise<Rect>;
@@ -691,6 +700,7 @@ const POLLED_WINDOW_EVENTS = new Set([
   "focus",
   "blur",
   "visibleChange",
+  "stylechange",
   "windowinteractionchange",
   "downloadstarted",
   "downloadprogress",
@@ -710,6 +720,19 @@ export const WebviewExt = {
   },
   extend(tray, context, options) {
     const endpoint = createWebviewEndpoint(tray, context);
+    const appReopenEventSource = isAppReopenEventSourceTray(tray)
+      ? tray
+      : undefined;
+    const appReopen = appReopenEventSource
+      ? getAppReopenCoordinator(context.appId)
+      : undefined;
+    if (appReopen !== undefined && appReopenEventSource !== undefined) {
+      appReopenEventSource.onAppReopenRequested(() => {
+        void appReopen.reopen().catch((error: unknown) => {
+          console.error("OpenTray WebView app reopen failed:", error);
+        });
+      });
+    }
     return {
       getScreenDetails() {
         return endpoint.command<WebviewScreenDetails>({
@@ -720,6 +743,7 @@ export const WebviewExt = {
         return createWebviewWindowHandle(endpoint, windowOptions, {
           appId: context.appId,
           permissions: options?.permissions ?? {},
+          ...(appReopen === undefined ? {} : { appReopen }),
         });
       },
       createWebviewHandle() {
@@ -758,6 +782,10 @@ type ExtensionEventSourceTray = TrayHandle & {
     ext: string,
     handler: (event: ExtensionEnvelope<TData>) => void
   ): () => void;
+};
+
+type AppReopenEventSourceTray = TrayHandle & {
+  onAppReopenRequested(handler: () => void): () => void;
 };
 
 const createWebviewEndpoint = (
@@ -876,6 +904,7 @@ const createLegacyWebviewHandle = (endpoint: {
 interface WebviewWindowRuntimeContext {
   appId: string;
   permissions: WebviewPermissionRuntimeOptions;
+  appReopen?: AppReopenCoordinator;
 }
 
 const createWebviewWindowHandle = (
@@ -897,6 +926,15 @@ const createWebviewWindowHandle = (
   let windowEventPollInFlight = false;
   let windowEventPollFailed = false;
   let permissionPoll: ReturnType<typeof setInterval> | undefined;
+  const appReopenRegistration = runtime.appReopen?.register({
+    toVisible() {
+      return endpoint.command<void>({ type: "toVisible" });
+    },
+    focus() {
+      return endpoint.command<void>({ type: "focus" });
+    },
+  });
+  let stopAppReopenActivityTracking: (() => void) | undefined;
 
   const drainWindowEvents = async (): Promise<void> => {
     const response = await endpoint.command<
@@ -1023,6 +1061,30 @@ const createWebviewWindowHandle = (
     };
   };
 
+  const startAppReopenActivityTracking = (): void => {
+    if (
+      appReopenRegistration === undefined ||
+      stopAppReopenActivityTracking !== undefined
+    ) {
+      return;
+    }
+    const stopFocus = trackWindowListener(
+      "focus",
+      endpoint.listen("focus", () => appReopenRegistration.markActive())
+    );
+    const stopStyle = trackWindowListener(
+      "stylechange",
+      endpoint.listen<WebviewWindowStyle>("stylechange", ({ payload }) => {
+        appReopenRegistration.setAppMode(payload.appMode);
+      })
+    );
+    stopAppReopenActivityTracking = () => {
+      stopFocus();
+      stopStyle();
+      stopAppReopenActivityTracking = undefined;
+    };
+  };
+
   return {
     devtools: {
       open() {
@@ -1042,6 +1104,7 @@ const createWebviewWindowHandle = (
       },
     },
     async show(command = {}) {
+      const wasBootstrapped = bootstrapped;
       const showCommand = {
         type: "show",
         ...(bootstrapped ? {} : options),
@@ -1049,6 +1112,15 @@ const createWebviewWindowHandle = (
       } satisfies WebviewCommand;
       await endpoint.command<void>(showCommand);
       bootstrapped = true;
+      appReopenRegistration?.setBootstrapped(true);
+      if (!wasBootstrapped) {
+        const initialStyle = command.style ?? options.style;
+        appReopenRegistration?.setAppMode(initialStyle?.appMode ?? false);
+      } else if (command.style !== undefined) {
+        appReopenRegistration?.setAppMode(command.style.appMode ?? false);
+      }
+      appReopenRegistration?.markActive();
+      startAppReopenActivityTracking();
     },
     hide() {
       return endpoint.command<void>({ type: "hide" } satisfies WebviewCommand);
@@ -1057,10 +1129,14 @@ const createWebviewWindowHandle = (
       return endpoint.command<void>({ type: "close" } satisfies WebviewCommand);
     },
     async destroy() {
+      // Stop the internal MRU listeners before native session cleanup. The
+      // event drain loop must never race a broker-side destroy response.
+      stopAppReopenActivityTracking?.();
       await endpoint.command<void>({
         type: "destroy",
       } satisfies WebviewCommand);
       bootstrapped = false;
+      appReopenRegistration?.setBootstrapped(false);
       if (permissionPoll !== undefined) {
         clearInterval(permissionPoll);
         permissionPoll = undefined;
@@ -1080,6 +1156,15 @@ const createWebviewWindowHandle = (
       return endpoint.command<void>({
         type: "toVisible",
       } satisfies WebviewCommand);
+    },
+    focus() {
+      return endpoint
+        .command<void>({
+          type: "focus",
+        } satisfies WebviewCommand)
+        .then(() => {
+          appReopenRegistration?.markActive();
+        });
     },
     moveTo(x, y) {
       return endpoint.command<void>({
@@ -1135,18 +1220,28 @@ const createWebviewWindowHandle = (
       );
     },
     setStyle(style) {
-      return endpoint.command<WebviewWindowStyle>({
-        type: "setStyle",
-        style,
-      } satisfies WebviewCommand);
+      return endpoint
+        .command<WebviewWindowStyle>({
+          type: "setStyle",
+          style,
+        } satisfies WebviewCommand)
+        .then((result) => {
+          appReopenRegistration?.setAppMode(result.appMode);
+          return result;
+        });
     },
     setBackground(background, backgroundOptions) {
-      return endpoint.command<WebviewWindowStyle>({
-        type: "setStyle",
-        style: {
-          background: backgroundInputWithOptions(background, backgroundOptions),
-        },
-      } satisfies WebviewCommand);
+      return endpoint
+        .command<WebviewWindowStyle>({
+          type: "setStyle",
+          style: {
+            background: backgroundInputWithOptions(background, backgroundOptions),
+          },
+        } satisfies WebviewCommand)
+        .then((result) => {
+          appReopenRegistration?.setAppMode(result.appMode);
+          return result;
+        });
     },
     listen<TPayload = unknown>(
       event: string,
@@ -1192,6 +1287,12 @@ const isExtensionEventSourceTray = (
   tray: TrayHandle
 ): tray is ExtensionEventSourceTray =>
   "listenExtension" in tray && typeof tray.listenExtension === "function";
+
+const isAppReopenEventSourceTray = (
+  tray: TrayHandle
+): tray is AppReopenEventSourceTray =>
+  "onAppReopenRequested" in tray &&
+  typeof tray.onAppReopenRequested === "function";
 
 const resolvePermissionMessage = async (
   permissions: WebviewPermissionRuntimeOptions,

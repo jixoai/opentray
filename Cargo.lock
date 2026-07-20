@@ -2266,6 +2266,8 @@ name = "opentray-bin"
 version = "0.0.0"
 dependencies = [
  "libloading",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "opentray-backend-ksni",
  "opentray-backend-tray-icon",
  "opentray-core",
