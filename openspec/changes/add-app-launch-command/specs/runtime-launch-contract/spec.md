@@ -7,6 +7,7 @@ addressed the stable bundle to the wrong workspace package):
 2. Normalize automatic and explicit invocations deterministically.
 3. Keep launch state out of the platform-neutral Core projection.
 4. Resolve stable Bundle ownership from the running consumer package.
+5. Restore complete development launch graphs when a consumer explicitly configures a package-manager command.
 -->
 
 ## ADDED Requirements
@@ -39,6 +40,15 @@ the launch command to the Core `AppProjection` or tray protocol.
 - **WHEN** the runtime snapshots an automatic or explicit launch command
 - **THEN** the persisted command SHALL contain no environment map and the carrier SHALL inherit
   its launch environment at execution time
+
+#### Scenario: Development mode restores its frontend supervisor
+
+- **GIVEN** a consumer runs under a Vite development supervisor
+- **WHEN** it configures its OpenTray app launch command
+- **THEN** the persisted vector SHALL invoke the package-manager development script from the
+  repository root (for example, an absolute `pnpm` executable with `args: ["dev"]`)
+- **AND** a cold Dock launch SHALL restore the supervisor, daemon, proxy, and WebView URL together
+- **AND** it SHALL not persist only the daemon child entry as a substitute
 
 ### Requirement: Last Successful Invocation
 

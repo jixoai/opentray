@@ -5,7 +5,8 @@ owner could not observe any LaunchServices or consumer failure):
 1. Define the no-argument Darwin carrier entry procedure.
 2. Execute the persisted vector directly and detach the consumer.
 3. Persist cold-carrier and early consumer diagnostics.
-4. Keep the live retained-session path and non-Darwin platforms unchanged.
+4. Keep the live retained-session path coherent and non-Darwin persistence unchanged.
+5. Restore a live app-mode window on Darwin reopen without cold-launching a second consumer.
 -->
 
 ## ADDED Requirements
@@ -63,16 +64,43 @@ an early module/runtime failure remains observable after the carrier exits.
 - **THEN** it SHALL run the existing native broker path and SHALL not spawn the consumer launch
   descriptor
 
+### Requirement: Darwin Live Reopen
+
+When the stable Darwin carrier is already running and macOS delivers an application reopen request, OpenTray MUST emit a platform-neutral `reopenRequested` app lifecycle intent to the owning runtime.
+The WebView extension SHALL, by default, select the most recently active retained `appMode` window,
+make it visible, and focus it. The warm path SHALL NOT execute the persisted cold-launch descriptor.
+The intent SHALL remain observable to the consumer for diagnostics or custom coordination.
+
+#### Scenario: Dock reopens a running app-mode consumer
+
+- **GIVEN** a broker owns a retained WebView window with `style.appMode: true`
+- **WHEN** the user clicks the running application's Dock entry
+- **THEN** OpenTray SHALL restore and focus the most recently active app-mode window
+- **AND** SHALL NOT spawn a second consumer process
+
+### Requirement: Explicit WebView Focus
+
+The WebView window facade and native extension SHALL expose a typed `focus()` operation. It SHALL
+activate the owning application and focus the retained native window without requiring the consumer
+to know the platform API. `toVisible()` SHALL remain the visibility/restoration operation; the
+default reopen projection composes `toVisible()` and `focus()`.
+
+#### Scenario: Consumer focuses a visible retained window
+
+- **GIVEN** a retained WebView window exists and may be obscured by another application
+- **WHEN** the consumer calls `focus()`
+- **THEN** the native window SHALL become the active focused window without recreating its session
+
 ### Requirement: Scope Boundary For Reopen And Other Platforms
 
-This change SHALL guarantee cold launch after the carrier/broker process has exited. It SHALL not
-claim that an already-running macOS process receives a second consumer launch on Dock activation,
-and it SHALL not claim persistent post-exit taskbar launch behavior for Windows or Linux without a
-platform-specific launcher artifact.
+This change SHALL guarantee cold launch after the carrier/broker process has exited and warm reopen
+while the Darwin process remains alive. It SHALL not claim persistent post-exit taskbar launch
+behavior for Windows or Linux without a platform-specific launcher artifact.
 
 #### Scenario: Retained live session is not duplicated
 
 - **GIVEN** the broker and consumer are still alive with a retained WebView session
-- **WHEN** the user uses the existing tray primary action or native reveal path
+- **WHEN** the user uses the existing tray primary action or native reveal path, or the Darwin Dock
+  reopen path
 - **THEN** OpenTray SHALL retain the current session lifecycle and SHALL not invoke the cold-launch
   descriptor as a second consumer

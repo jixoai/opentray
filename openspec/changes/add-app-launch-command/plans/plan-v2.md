@@ -8,8 +8,6 @@ diagnostics):
 3. Make a cold launch from the bundle execute the consumer without a shell.
 4. Converge legacy/wrong-package Darwin bundles onto one live App identity.
 5. Preserve durable broker/carrier diagnostics and platform boundaries.
-6. Reopen a live app-mode runtime from the Dock without spawning a second consumer.
-7. Require development launch descriptors to restore the complete Vite -> daemon -> WebView tree.
 Compromise: Darwin is the only platform with a stable OpenTray app carrier today;
 Windows taskbar persistence needs a separate shortcut/launcher atom and is not
 silently claimed by this change.
@@ -19,9 +17,9 @@ silently claimed by this change.
 
 ## Current Round
 
-- Round: 3
-- Status: Owner confirmed the warm Dock reopen, development launch-vector, and consumer-documentation boundaries; implementation pending.
-- Previous plan backup: `plans/plan-v2.md`.
+- Round: 2
+- Status: Owner acceptance rejected round 1; diagnosis and corrective apply pending.
+- Previous plan backup: `plans/plan-v1.md`.
 
 ## Workflow Command Surface
 
@@ -47,14 +45,6 @@ silently claimed by this change.
 > 只要启动一次，那么下次启动的时候，自然会使用上一次的 process.argv 的信息来进行启动。
 > 当然也可以手动配置，所以开发者可以自己预留启动脚本。
 
-> 我执行 pnpm dev，然后将图标固定到dock。首先可以确定的是，点击确实有反应了，它确实执行了一些动作。但是结果并不符合预期：skill creator没有关闭时点击没有打开窗口；关闭后点击打开了窗口但内容是 404。
-
-> 所以这其实是开发模式的问题。我们直接在开发模式下，配置启动命令成 `pnpm dev`。
-
-> 运行中的应用被点击 Dock 时，appMode: true 应默认自动显示并聚焦最近活跃的 appMode 窗口，这是我们opentray需要默认提供的行为。当然底层也需要暴露接口出来，比如可能是 opentrayWindow.focus，这部分你自己决策。
-
-> 最后是我说的这个 skill-creator-v2 这个项目的新增的最佳实践，你可能需要帮它记录到项目AGENTS.md中，你不用开发，我会直接提醒skill-creator-v2自己做出修复。
-
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -67,10 +57,6 @@ silently claimed by this change.
 | 4 | User | `pnpm dev` shows two Dock icons; hiding the window removes one. | A stable carrier is not sufficient while another OpenTray-owned bundle with the same App identity remains registered. |
 | 5 | User | Pinning one icon, exiting, and clicking the pinned icon does not relaunch Skill Creator. | The sole surviving Dock path must be the current validated stable bundle and must contain the latest launch descriptor. |
 | 6 | User | Manual acceptance needs daemon logs that expose the actual error. | Broker and cold-carrier output must be durable by default and documented at deterministic paths. |
-| 7 | User | Development Dock launch must restore `pnpm dev`, not only the daemon child. | The descriptor must reconstruct Vite, its proxy, the daemon, and the WebView URL as one process tree. |
-| 8 | User | A running app-mode Dock click must show and focus the most recently active app-mode window. | The live carrier needs a platform-neutral reopen intent and an extension-owned default projection. |
-| 9 | User | OpenTray should expose a lower-level focus operation while supplying the default reopen behavior. | Add a typed WebView `focus()` capability without moving WebView policy into Core. |
-| 10 | User | The Skill Creator persistence rule belongs in its `AGENTS.md`, not in this implementation. | Record incompatible-content reset versus I/O failure; do not change the consumer registry code. |
 
 ### Evidence Read
 
@@ -88,9 +74,6 @@ silently claimed by this change.
 | `packages/packaging/src/package-identity.ts` | Ambient `npm_package_json` currently beats the default running script path. | `pnpm --dir webui dev` incorrectly addresses the stable bundle as package `webui` instead of `skill-creator`. |
 | `packages/cli/src/daemon/lifecycle.ts` | Detached broker stdio defaults to `ignore`. | Native broker failures disappear into `/dev/null`, preventing owner-assisted diagnosis. |
 | `crates/opentray-bin/src/main.rs` | Cold carrier and spawned consumer use null stdout/stderr. | LaunchServices failures and early consumer exit are invisible even when the carrier resolves the descriptor. |
-| `winit` macOS platform documentation | Winit intentionally does not expose `applicationShouldHandleReopen:`; applications must install an AppKit delegate. | The native broker must bridge Dock reopen into its generic event loop instead of inferring it from `resumed`. |
-| `packages/ext-webview/src/index.ts` and native runtimes | `toVisible()` reveals retained windows; macOS focuses during reveal while Windows already has an internal focus path. | Expose `focus()` and compose `toVisible()` plus `focus()` for the default reopen projection. |
-| `skill-creator-v2/AGENTS.md` | The consumer already records safeParse terminology but lacks the complete content-failure versus I/O boundary. | Update only the guide with the agreed reset rule; do not alter its registry implementation. |
 
 ### Git Evidence
 
@@ -133,14 +116,14 @@ silently claimed by this change.
 
 | Question | Why this is the real question | Current inference before user answers |
 | -------- | ----------------------------- | ------------------------------------- |
-| Should clicking an entry while the broker is still alive trigger the same command? | A live macOS app process receives activation/reopen events differently from a cold `.app` launch. | Emit a generic `reopenRequested` intent and let WebView auto-reveal/focus the most recent app-mode window; never spawn a second consumer. |
+| Should clicking an entry while the broker is still alive trigger the same command? | A live macOS app process receives activation/reopen events differently from a cold `.app` launch. | This change guarantees cold launch after process exit; retained-window reveal remains the existing tray/session contract. |
 | Should Windows receive a persistent launcher too? | A normal taskbar button disappears with its process; persistence requires a shortcut or pinned shell identity. | Darwin only for this atom; Windows needs a separate launcher/shortcut capability. |
 
 ## Intent
 
 ### Surface Intent
 
-When an ordinary application-mode entry is opened from the Dock, the user should either see the live application window restored and focused or, after the process exits, see the complete consumer development/production process tree start again. The entry must remember the last successful invocation automatically, while a developer can replace it with a deliberate script/command.
+When an ordinary application-mode entry is opened from the Dock after the tray process has exited, the user should see the same consumer application start again. The entry must remember the last successful invocation automatically, while a developer can replace it with a deliberate script/command.
 
 ### Underlying Drive
 
@@ -151,7 +134,7 @@ When an ordinary application-mode entry is opened from the Dock, the user should
 1. A consumer starts normally and creates its OpenTray app-mode runtime.
 2. The runtime records the exact executable, arguments, and cwd that started it.
 3. The consumer exits; the stable app entry remains usable in the Dock.
-4. Opening that entry while live restores and focuses the most recently active app-mode window without a second consumer; opening it after exit launches the recorded consumer once, without a shell or manual repair.
+4. Opening that entry launches the recorded consumer once, without a shell or manual repair.
 5. If the developer configured a command, that command is launched instead; the carrier never guesses or concatenates shell text.
 6. A previous OpenTray-owned bundle with the same App identity is unregistered and removed only after the current bundle is proven live; one Dock identity remains.
 7. Broker and cold-launch failures append to deterministic log files without requiring a debug environment variable.
@@ -162,7 +145,7 @@ When an ordinary application-mode entry is opened from the Dock, the user should
 - Does this fit as a regular atom: yes. It is a runtime/carrier launch atom, not a new Core platform law.
 - Does this require law upgrade: only the carrier contract gains a cold-launch descriptor and a no-argument entry procedure.
 - Breaking update stance: introduce `appLaunch` without a legacy alias; do not persist shell strings or full environment state.
-- User confirmations still required: Windows persistent launcher remains outside this change; the owner confirmed Darwin live reopen for this round.
+- User confirmations still required: live-process Dock reopen and Windows persistent launcher remain explicitly outside this change.
 
 ## Reverse-Inferred Design
 
@@ -190,7 +173,7 @@ Dock/Finder opens .app
 carrier logs -> reads descriptor -> spawns consumer with log stdio -> carrier exits
 ```
 
-Opening a retained live app is a warm reopen, not a second consumer launch. The carrier emits a platform-neutral `reopenRequested` intent; the WebView extension selects the most recently active `appMode` window, calls `toVisible()` and `focus()`, and exposes the intent for observation. The launch descriptor remains cold-start-only.
+Opening a retained live app is not silently converted into a second consumer. The existing broker/session lifecycle remains authoritative while it is alive.
 
 ### Interface Shape
 
@@ -206,7 +189,7 @@ interface OpenTrayRuntimeOptions {
 }
 ```
 
-`undefined` and `null` mean auto snapshot. The normalized persisted vector is `{ command, args, cwd }`. `command` is an executable path/name, never a shell expression. Development consumers must explicitly persist their package-manager entry (for Skill Creator, the resolved absolute `pnpm` executable with `args: ["dev"]` and repository-root `cwd`) so a cold Dock launch restores Vite as well as the daemon.
+`undefined` and `null` mean auto snapshot. The normalized persisted vector is `{ command, args, cwd }`. `command` is an executable path/name, never a shell expression.
 
 ### Data Shape
 
@@ -223,16 +206,14 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - `opentray-core`: unchanged; no Node command or process spawning.
 - `@opentray/packaging`: owns descriptor type, validation, path, atomic persistence, bundle identity inspection, and owner-safe stale-bundle removal.
 - `opentray` SDK: resolves the running consumer script before nested package-manager environment metadata, snapshots the invocation, owns deterministic runtime log paths, and reconciles stale bundle identities only after handshake plus descriptor commit.
-- `opentray-bin` Darwin carrier: with no `broker` subcommand, resolves its own `.app` resources, appends carrier/consumer diagnostics, spawns the vector without a shell, and exits; with `broker`, it also bridges AppKit `applicationShouldHandleReopen:` into the generic broker event loop.
-- `@opentray/ext-webview`: owns app-mode window selection and exposes `focus()`; it must not be reimplemented in `opentray-core`.
-- Native broker/Core event seam: transports a generic app reopen intent; Core never selects or commands a WebView window.
+- `opentray-bin` Darwin carrier: with no `broker` subcommand, resolves its own `.app` resources, appends carrier/consumer diagnostics, spawns the vector without a shell, and exits; with `broker`, behavior is unchanged apart from SDK-owned log redirection.
 - Windows/Linux: retain current no-argument usage behavior until a platform launcher atom is specified.
 
 ### User Confirmation Gates
 
 | Gate | Why confirmation is required | Default until user answers |
 | ---- | ---------------------------- | -------------------------- |
-| Live-process Dock reopen | Requires AppKit delegate bridging and a deterministic retained-window selection rule. | Auto-select the most recently active app-mode window, reveal and focus it, and expose the generic intent. |
+| Live-process Dock reopen | Requires AppKit/winit activation callback and can conflict with retained session authority. | Keep current live-process behavior; guarantee cold launch only. |
 | Windows persistence | Needs a stable shortcut/launcher instead of a taskbar button. | Darwin-only implementation. |
 
 ## Intent-Driven Plan
@@ -244,7 +225,6 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - [ ] 5. Correct package identity, bundle convergence, and durable diagnostics.
 - [ ] 6. Verify through the real linked `skill-creator-v2` `pnpm dev` graph.
 - [ ] 7. Return the sole remaining Dock visual/click acceptance to the owner.
-- [ ] 8. Implement and verify the confirmed warm reopen, explicit focus, and development launch-vector behavior.
 
 ## Open Questions
 
@@ -253,7 +233,6 @@ The descriptor schema is versioned and strict. It stores no environment variable
 | Should a null value disable relaunch? | The user described empty as fallback, not disable. | Null/omitted always auto snapshot; no disable mode in v1. |
 | Should env be persisted? | Full env can leak credentials and differs between Finder and terminal. | Do not persist env; inherit the carrier environment at cold launch. |
 | Should prebuilt bundles be immutable? | The descriptor must follow the latest invocation even when assets are prebuilt. | Assets/manifest are read-only; `opentray-launch.json` is explicitly runtime-mutable. |
-| Should incompatible Skill Creator persistence be migrated in this change? | The consumer owns its registry implementation and defaults to destructive updates. | Document the safeParse reset/I/O boundary in Skill Creator `AGENTS.md`; do not change its code here. |
 
 ## Rejected Paths
 
@@ -269,4 +248,4 @@ The descriptor schema is versioned and strict. It stores no environment variable
 
 - Default max review iterations: 2.
 - Issue recurrence threshold: reopen the plan after one repeated mismatch between descriptor, bundle, or carrier behavior.
-- Custom exit condition from intent: a real Darwin `.app` cold launch must execute the configured/default consumer vector once; a live Dock reopen must restore/focus the most recent app-mode window without a second consumer; the current consumer must converge to one OpenTray-owned same-AppId bundle; failures must be present in documented logs; and a normal published `pnpm install` must remain sufficient for the runtime path.
+- Custom exit condition from intent: a real Darwin `.app` cold launch must execute the configured/default consumer vector once; the current consumer must converge to one OpenTray-owned same-AppId bundle; failures must be present in documented logs; and a normal published `pnpm install` must remain sufficient for the runtime path.
