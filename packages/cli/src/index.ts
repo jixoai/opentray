@@ -37,7 +37,10 @@ export {
   type CreateTrayOptions,
   type OpenTrayRuntimeOptions,
 } from "./sdk";
-export type { OpenTrayAppBundleOptions } from "@opentray/packaging";
+export type {
+  OpenTrayAppBundleOptions,
+  OpenTrayAppLaunchOptions,
+} from "@opentray/packaging";
 export {
   AppIconVariantNotFoundError,
   DEFAULT_APP_ICON_VARIANT,

@@ -17,6 +17,15 @@ export {
   type OpenTrayDarwinAppBundleResult,
 } from "./app-bundle";
 export {
+  DARWIN_APP_LAUNCH_DESCRIPTOR,
+  parseDarwinAppLaunchDescriptor,
+  readDarwinAppLaunchDescriptor,
+  resolveDarwinAppLaunchDescriptorPath,
+  updateDarwinAppLaunchDescriptor,
+  type OpenTrayAppLaunchDescriptor,
+  type OpenTrayAppLaunchOptions,
+} from "./app-launch";
+export {
   encodeOpenTrayPackageName,
   resolveDefaultDarwinAppBundlePath,
   resolveOpenTrayPackageIdentity,

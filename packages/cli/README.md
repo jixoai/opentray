@@ -123,6 +123,11 @@ const tray = await createTray(options, {
   appId: "com.example.first-app",
   appName: "First App",
   appIcon,
+  appLaunch: {
+    command: process.execPath,
+    args: ["./dist/main.mjs", "--desktop"],
+    cwd: process.cwd(),
+  },
   appBundle: {
     // Relative paths resolve from the caller package root.
     path: "dist/First App.app",
@@ -132,9 +137,23 @@ const tray = await createTray(options, {
 });
 ```
 
+`appLaunch` is optional. When omitted or `null`, OpenTray snapshots
+`process.execPath`, `process.argv.slice(1)`, and `process.cwd()` after the local
+runtime handshake succeeds. Opening the stable macOS bundle later launches that
+latest vector directly, without a shell. Explicit commands may name an
+executable or script launcher and may provide `args`/`cwd`; OpenTray never stores
+the full process environment in the bundle.
+
 `appBundle.reinitialize` defaults to `true`. A prebuilt bundle must contain the
 matching broker, `Info.plist`, target, icon, and OpenTray manifest; incompatible
-bundles fail with a typed error instead of being silently rebuilt.
+bundles fail with a typed error instead of being silently rebuilt. In prebuilt
+mode those assets remain read-only, while the runtime-owned
+`Contents/Resources/opentray-launch.json` descriptor is still atomically updated
+after a successful handshake.
+
+Cold launch is currently a Darwin carrier capability. A live retained session
+continues to use tray/window reveal, and ordinary Windows/Linux taskbar entries
+are not claimed as persistent post-exit launchers.
 
 ## Runtime Ownership
 

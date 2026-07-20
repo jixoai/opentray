@@ -1,3 +1,14 @@
+// Orthogonal intents (maintained 2026-07-21; original user requests: run the
+// caller-owned tray broker and let a stable app-mode Dock entry relaunch the
+// latest consumer invocation):
+// 1. Parse and run the private broker command with artifact identity gates.
+// 2. Run the Darwin no-broker carrier entry from a strict launch descriptor.
+// 3. Compose native broker transport, tray backend, and dynamic extension host.
+// 4. Preserve caller/session lifecycle, ready metadata, and idle shutdown.
+// Compromise: this binary is the native composition root, so command entry and
+// native event-loop ownership cannot be physically separated without adding a
+// second shipped executable and breaking the shared carrier artifact contract.
+
 mod dynamic_extension;
 mod frame_error;
 #[cfg(unix)]
@@ -5,12 +16,19 @@ mod unix_transport;
 #[cfg(target_os = "windows")]
 mod windows_transport;
 
-use std::{env, error::Error, path::PathBuf, time::Duration};
+use std::{
+    env,
+    error::Error,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::Duration,
+};
 
 use opentray_spec::{
     sanitize_caller_label, AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget,
     BrokerReadyMetadata, ClientFrame, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION,
 };
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
@@ -89,14 +107,126 @@ const DEFAULT_DAEMON_IDLE_TIMEOUT_MS: u64 = 30_000;
 const DAEMON_IDLE_TIMEOUT_ENV: &str = "OPENTRAY_DAEMON_IDLE_TIMEOUT_MS";
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut args = env::args().skip(1);
-    match args.next().as_deref() {
-        Some("broker") => run_broker(parse_broker_options(args)?),
-        _ => {
-            eprintln!("Usage: opentray broker --endpoint <path> --ready-file <path> --package-version <version> --protocol-version <version> --broker-executable-path <path> --broker-artifact-identity <json>");
-            Ok(())
-        }
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.first().map(String::as_str) == Some("broker") {
+        return run_broker(parse_broker_options(args.into_iter().skip(1))?);
     }
+    if is_app_launch_args(&args) {
+        return run_app_entrypoint();
+    }
+    print_usage();
+    Ok(())
+}
+
+fn is_app_launch_args(args: &[String]) -> bool {
+    args.is_empty() || (args.len() == 1 && args[0].starts_with("-psn_"))
+}
+
+fn print_usage() {
+    eprintln!("Usage: opentray broker --endpoint <path> --ready-file <path> --package-version <version> --protocol-version <version> --broker-executable-path <path> --broker-artifact-identity <json>");
+}
+
+#[cfg(target_os = "macos")]
+fn run_app_entrypoint() -> Result<(), Box<dyn Error>> {
+    // The stable .app is a carrier for the caller process. Its mutable launch
+    // descriptor is intentionally separate from the immutable bundle manifest.
+    let executable = env::current_exe()?.canonicalize()?;
+    let descriptor_path = resolve_app_launch_descriptor_path(&executable)?;
+    let descriptor = parse_app_launch_descriptor(&descriptor_path)?;
+    let child = Command::new(&descriptor.command)
+        .args(&descriptor.args)
+        .current_dir(&descriptor.cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "unable to launch consumer from Darwin app bundle {}: {error}",
+                descriptor_path.display()
+            )
+        })?;
+    eprintln!(
+        "opentray app carrier launched consumer pid={} from {}",
+        child.id(),
+        descriptor_path.display()
+    );
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn run_app_entrypoint() -> Result<(), Box<dyn Error>> {
+    print_usage();
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppLaunchDescriptor {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    command: String,
+    args: Vec<String>,
+    cwd: String,
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_app_launch_descriptor_path(executable: &Path) -> Result<PathBuf, Box<dyn Error>> {
+    let macos_dir = executable
+        .parent()
+        .ok_or("carrier executable has no parent directory")?;
+    if macos_dir.file_name().and_then(|value| value.to_str()) != Some("MacOS") {
+        return Err(format!(
+            "carrier executable is not inside a Darwin .app bundle: {}",
+            executable.display()
+        )
+        .into());
+    }
+    let contents_dir = macos_dir
+        .parent()
+        .ok_or("carrier executable is missing Contents directory")?;
+    if contents_dir.file_name().and_then(|value| value.to_str()) != Some("Contents") {
+        return Err(format!(
+            "carrier executable is not inside a Darwin Contents directory: {}",
+            executable.display()
+        )
+        .into());
+    }
+    let bundle_dir = contents_dir
+        .parent()
+        .ok_or("carrier executable is missing app bundle root")?;
+    Ok(bundle_dir.join("Contents/Resources/opentray-launch.json"))
+}
+
+#[cfg(target_os = "macos")]
+fn parse_app_launch_descriptor(path: &Path) -> Result<AppLaunchDescriptor, Box<dyn Error>> {
+    let raw = std::fs::read_to_string(path).map_err(|error| {
+        format!(
+            "unable to read Darwin app launch descriptor {}: {error}",
+            path.display()
+        )
+    })?;
+    let descriptor = serde_json::from_str::<AppLaunchDescriptor>(&raw).map_err(|error| {
+        format!(
+            "unable to parse Darwin app launch descriptor {}: {error}",
+            path.display()
+        )
+    })?;
+    if descriptor.schema_version != 1
+        || descriptor.command.trim().is_empty()
+        || descriptor.cwd.trim().is_empty()
+        || descriptor.command.contains('\0')
+        || descriptor.cwd.contains('\0')
+        || descriptor.args.iter().any(|arg| arg.contains('\0'))
+    {
+        return Err(format!(
+            "invalid Darwin app launch descriptor fields: {}",
+            path.display()
+        )
+        .into());
+    }
+    Ok(descriptor)
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -625,13 +755,17 @@ mod native_broker {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use std::path::Path;
     use std::time::Duration;
 
     use super::{
-        broker_disconnect_action, broker_frame_action, parse_broker_options,
+        broker_disconnect_action, broker_frame_action, is_app_launch_args, parse_broker_options,
         parse_daemon_idle_timeout, resolve_current_broker_artifact, BrokerDisconnectAction,
         DEFAULT_DAEMON_IDLE_TIMEOUT_MS,
     };
+    #[cfg(target_os = "macos")]
+    use super::{parse_app_launch_descriptor, resolve_app_launch_descriptor_path};
     use opentray_spec::ClientFrame;
 
     #[test]
@@ -681,6 +815,48 @@ mod tests {
             broker_frame_action(&ClientFrame::Exit, false),
             BrokerDisconnectAction::WaitForIdle
         );
+    }
+
+    #[test]
+    fn app_launch_accepts_only_empty_or_launch_services_process_serial_number() {
+        assert!(is_app_launch_args(&[]));
+        assert!(is_app_launch_args(&["-psn_0_12345".to_string()]));
+        assert!(!is_app_launch_args(&["--unexpected".to_string()]));
+        assert!(!is_app_launch_args(&[
+            "-psn_0_12345".to_string(),
+            "extra".to_string()
+        ]));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_launch_descriptor_path_is_relative_to_the_carrier_bundle() {
+        let path = resolve_app_launch_descriptor_path(Path::new(
+            "/tmp/Skill Creator.app/Contents/MacOS/opentray",
+        ))
+        .expect("descriptor path");
+        assert_eq!(
+            path,
+            Path::new("/tmp/Skill Creator.app/Contents/Resources/opentray-launch.json")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_launch_descriptor_parser_rejects_unknown_fields() {
+        let path = std::env::temp_dir().join(format!(
+            "opentray-launch-descriptor-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            r#"{"schemaVersion":1,"command":"/usr/bin/node","args":[],"cwd":"/tmp","env":{}}"#,
+        )
+        .expect("write descriptor");
+        let error = parse_app_launch_descriptor(&path).expect_err("unknown fields must fail");
+        std::fs::remove_file(&path).expect("remove descriptor");
+        assert!(error.to_string().contains(path.to_string_lossy().as_ref()));
+        assert!(error.to_string().contains("unknown field"));
     }
 
     fn broker_args() -> Vec<String> {

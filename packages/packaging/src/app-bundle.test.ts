@@ -2,6 +2,7 @@
 // plugin-generated bundles must share one contract):
 // 1. Prove managed generation writes the expected identity and hashes.
 // 2. Prove prebuilt validation is read-only and rejects drift.
+// 3. Prove mutable launch state does not modify validated prebuilt assets.
 
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -15,6 +16,10 @@ import {
   DarwinAppBundleError,
   writeDarwinAppBundleOwner,
 } from "./app-bundle";
+import {
+  readDarwinAppLaunchDescriptor,
+  updateDarwinAppLaunchDescriptor,
+} from "./app-launch";
 
 const roots: string[] = [];
 
@@ -135,6 +140,62 @@ describe("Darwin app bundle", () => {
         reinitialize: false,
       }),
     ).rejects.toMatchObject({ code: "incompatible_bundle" } satisfies Pick<DarwinAppBundleError, "code">);
+  });
+
+  it("updates only runtime launch state after validating a prebuilt bundle", async () => {
+    const root = await mkdtemp("/tmp/opentray-app-bundle-");
+    roots.push(root);
+    const templatePath = join(root, "Info.plist");
+    const brokerPath = join(root, "broker");
+    const bundlePath = join(root, "Skill Creator.app");
+    await writeFile(templatePath, template());
+    await writeFile(brokerPath, "broker-v1");
+    const bundleOptions = {
+      bundlePath,
+      packageName: "@jixoai/skill-creator",
+      appId: "com.jixoai.skill-creator",
+      appName: "Skill Creator",
+      target: { os: "darwin" as const, arch: "arm64" as const },
+      brokerPath,
+      templatePath,
+    };
+    await ensureDarwinAppBundle(bundleOptions);
+    await updateDarwinAppLaunchDescriptor(bundlePath, {
+      schemaVersion: 1,
+      command: "/usr/bin/node",
+      args: ["first.mjs"],
+      cwd: "/tmp/first",
+    });
+    const manifestPath = join(bundlePath, "Contents/Resources/opentray-app-bundle.json");
+    const plistPath = join(bundlePath, "Contents/Info.plist");
+    const executablePath = join(bundlePath, "Contents/MacOS/opentray");
+    const immutableBefore = await Promise.all([
+      readFile(manifestPath),
+      readFile(plistPath),
+      readFile(executablePath),
+    ]);
+
+    await ensureDarwinAppBundle({ ...bundleOptions, reinitialize: false });
+    await updateDarwinAppLaunchDescriptor(bundlePath, {
+      schemaVersion: 1,
+      command: "/usr/bin/node",
+      args: ["second.mjs"],
+      cwd: "/tmp/second",
+    });
+
+    expect(await readDarwinAppLaunchDescriptor(bundlePath)).toEqual({
+      schemaVersion: 1,
+      command: "/usr/bin/node",
+      args: ["second.mjs"],
+      cwd: "/tmp/second",
+    });
+    expect(
+      await Promise.all([
+        readFile(manifestPath),
+        readFile(plistPath),
+        readFile(executablePath),
+      ]),
+    ).toEqual(immutableBefore);
   });
 
   it("rejects an incompatible managed rewrite while a live owner is marked", async () => {

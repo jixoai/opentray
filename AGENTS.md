@@ -1,12 +1,14 @@
 <!--
-Orthogonal intents (maintained 2026-07-20; original user requests: investigate a macOS
+Orthogonal intents (maintained 2026-07-21; original user requests: investigate a macOS
 pnpm-pub window that stopped responding to hide operations until daemon restart; determine why
 skill-creator-v2's Hide Window and primaryEvent fail against the latest OpenTray packages; ensure
 ordinary consumers need only a normal package-manager install for a coherent native runtime;
 move skill-creator-v2's app-icon generation into a linked @opentray/vite-plugin with source and
 implementation-aware caching; make appIcon a strict platform-standard asset array distinct from
 tray Icon so consumers may supply independently generated native assets; add semantic App icon
-variants whose omitted name is default and whose selection remains Core-owned (2026-07-20)):
+variants whose omitted name is default and whose selection remains Core-owned; let a stable
+app-mode entry relaunch the latest `process.argv` invocation or an explicit launch script
+(2026-07-21)):
 1. Preserve the tray-first App/Tray/Session platform laws.
 2. Preserve native runtime and extension package boundaries across macOS and Windows.
 3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
@@ -15,6 +17,7 @@ variants whose omitted name is default and whose selection remains Core-owned (2
 6. Preserve the cross-platform window-shell role contract and its platform projections.
 7. Preserve the split between platform-neutral Core identity contracts and Darwin runtime carrier packaging.
 8. Preserve App icon catalog/variant state without giving WebView, badge, or tray projections App identity authority.
+9. Preserve stable App launch intent without promoting Node process commands into Core protocol state.
 Compromise: AGENTS.md is the required project-wide agent SSOT, so these law families cannot be
 physically split without losing the single discovery entrypoint required by repository tooling.
 -->
@@ -181,11 +184,34 @@ mode directly:
   `appBundle.path`, and launches the broker from `Contents/MacOS/opentray`.
 - Managed bundle generation defaults to `appBundle.reinitialize: true`, keeps the directory stable,
   replaces OpenTray-owned files through sibling paths, and commits
-  `Contents/Resources/opentray-app-bundle.json` last. `reinitialize: false` is read-only prebuilt
-  validation; it must reject target, identity, template, icon, or broker drift with a typed error.
+  `Contents/Resources/opentray-app-bundle.json` last. `reinitialize: false` performs read-only
+  validation of prebuilt assets; it must reject target, identity, template, icon, or broker drift
+  with a typed error. Runtime-owned launch state remains governed by the separate law below.
 - The stable bundle is a single-writer resource. A live incompatible owner must not be overwritten:
   the runtime may stop its own caller-scoped broker and retry, while a different live owner receives
   a typed `bundle_in_use` failure. Build adapters delegate generation to `@opentray/packaging`.
+
+## App Launch Command Law
+
+- `appLaunch` is runtime/carrier launch intent, not Core `AppProjection`, tray state, WebView
+  metadata, or a shell command string. Its public vector is `command`, optional `args`, and
+  optional `cwd`; it never persists the caller's full environment map.
+- Omitted or `null` `appLaunch` snapshots `process.execPath`, `process.argv.slice(1)`, and
+  `process.cwd()`. An explicit path-like command and relative cwd resolve from the current working
+  directory; a bare executable name remains eligible for normal `PATH` lookup.
+- The mutable last invocation lives at `Contents/Resources/opentray-launch.json`, physically
+  separate from immutable `opentray-app-bundle.json` compatibility identity. It is atomically
+  committed under the stable bundle lock only after the local broker handshake succeeds,
+  including when a compatible broker is reused.
+- `appBundle.reinitialize: false` keeps broker, plist, icon, and compatibility manifest bytes
+  read-only after validation. The launch descriptor remains explicitly runtime-owned and mutable;
+  incompatible prebuilt bundles fail before launch state is updated.
+- The Darwin carrier accepts a cold launch only with no arguments or one LaunchServices
+  `-psn_*` argument, strictly parses the descriptor, spawns the vector once with null stdio, and
+  exits without a shell or child wait. The private `broker` subcommand remains unchanged.
+- Cold launch after process exit is distinct from a live-process Dock reopen. Windows and Linux
+  taskbar entries are not persistent launchers merely because a window uses `appMode`; those
+  platforms require their own shortcut/launcher atoms before equivalent persistence is claimed.
 
 ## Windows Tray WebView Laws
 

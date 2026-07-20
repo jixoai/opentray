@@ -17,7 +17,7 @@ silently claimed by this change.
 ## Current Round
 
 - Round: 1
-- Status: Intent aligned; implementation not started.
+- Status: Implementation and repository verification complete; self-review pending.
 - Previous plan backup: none; this is a new change.
 
 ## Workflow Command Surface
@@ -70,8 +70,8 @@ silently claimed by this change.
 
 | Checkpoint | Expected commit evidence | Current status |
 | ---------- | ------------------------ | -------------- |
-| OpenSpec artifacts before apply | Commit containing `plans/plan.md`, specs, and `tasks.md` before product-code work starts | Pending. |
-| Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | Pending implementation. |
+| OpenSpec artifacts before apply | Commit containing `plans/plan.md`, specs, and `tasks.md` before product-code work starts | Committed as `c1c9a66 docs(spec): prepare add-app-launch-command for apply`. |
+| Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | Implementation commit pending. |
 | Self-review updates | Commit containing review output and any reopened or added OpenSpec tasks before the next apply loop | Pending. |
 | Normal archive | Commit containing `openspec archive <change>` result | Pending. |
 | Abnormal handoff | Commit containing `HANDOFF.md` / `vN.HANDOFF.md` evidence before returning to user discussion | Not expected. |
@@ -204,9 +204,9 @@ The descriptor schema is versioned and strict. It stores no environment variable
 ## Intent-Driven Plan
 
 - [x] 1. Research and align intent.
-- [ ] 2. Write specs from the intent.
-- [ ] 3. Write BDD tasks from specs.
-- [ ] 4. Implement tasks.
+- [x] 2. Write specs from the intent.
+- [x] 3. Write BDD tasks from specs.
+- [x] 4. Implement tasks.
 - [ ] 5. Self-review against intent and decide whether to loop.
 
 ## Open Questions

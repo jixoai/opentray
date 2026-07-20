@@ -1,3 +1,11 @@
+// Orthogonal intents (2026-07-21; original user requests: a normal install
+// yields one coherent local runtime; the last app launch command is committed
+// only after a successful broker handshake):
+// 1. Resolve caller identity, endpoint, package graph, and stable Darwin bundle.
+// 2. Start/reuse one compatible caller-scoped broker and validate its identity.
+// 3. Own request/event transport and deterministic connection teardown.
+// 4. Commit mutable Darwin launch state after runtime initialization succeeds.
+
 import { createConnection, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -13,10 +21,14 @@ import {
   type RequestId,
   type ServerFrame,
 } from "@opentray/spec";
-import type { OpenTrayAppBundleOptions } from "@opentray/packaging";
+import type {
+  OpenTrayAppBundleOptions,
+  OpenTrayAppLaunchDescriptor,
+} from "@opentray/packaging";
 import {
   resolveDefaultDarwinAppBundlePath,
   resolveOpenTrayPackageIdentity,
+  updateDarwinAppLaunchDescriptor,
   type OpenTrayPackageIdentity,
 } from "@opentray/packaging";
 
@@ -60,6 +72,7 @@ export interface ConnectLocalBrokerOptions
   expectedBrokerArtifactIdentity?: BrokerArtifactIdentity;
   appIcon?: import("@opentray/spec").AppIcon;
   appBundle?: OpenTrayAppBundleOptions;
+  appLaunch?: OpenTrayAppLaunchDescriptor;
   packageName?: string;
   packageRoot?: string;
 }
@@ -137,6 +150,9 @@ export const connectLocalBroker = async (
       options.protocolVersion ?? PROTOCOL_VERSION,
       expectedBrokerArtifactIdentity,
     );
+    if (appBundle !== undefined && options.appLaunch !== undefined) {
+      await updateDarwinAppLaunchDescriptor(appBundle.path, options.appLaunch);
+    }
   } catch (error) {
     await connection.close();
     throw error;

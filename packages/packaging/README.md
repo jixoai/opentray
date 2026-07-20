@@ -50,6 +50,14 @@ writes the default ICNS into `Contents/Resources`, and commits
 `opentray-app-bundle.json` last. Runtime managed mode and plugin prebuilds
 therefore produce the same manifest and layout.
 
-`ensureDarwinAppBundle({ reinitialize: false })` validates that contract without
-writing the bundle. It rejects target, identity, broker, template, or icon drift
-with `DarwinAppBundleError`.
+`ensureDarwinAppBundle({ reinitialize: false })` validates the immutable bundle
+assets without writing them. It rejects target, identity, broker, template, or
+icon drift with `DarwinAppBundleError`.
+
+The mutable last invocation is stored separately at
+`Contents/Resources/opentray-launch.json`. `updateDarwinAppLaunchDescriptor()`
+uses the same stable-bundle lock and atomic sibling replacement as managed
+generation. The strict schema contains only `schemaVersion`, `command`, `args`,
+and `cwd`; it never contains a shell string or environment map. The `opentray`
+SDK commits this state after a successful local broker handshake, including for
+validated prebuilt bundles.

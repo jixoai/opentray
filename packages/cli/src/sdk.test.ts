@@ -92,7 +92,9 @@ describe("opentray ergonomic createTray", () => {
       { packageVersion: "0.10.0" }
     );
 
-    expect(mockState.runtimeOptions).toEqual([{ packageVersion: "0.10.0" }]);
+    expect(mockState.runtimeOptions).toEqual([
+      expect.objectContaining({ packageVersion: "0.10.0", appLaunch: expect.any(Object) }),
+    ]);
     expect(tray.trayId).toBe("status");
     expect(transport.frames.map((frame) => frame.requestId)).toEqual([
       "opentray-1",

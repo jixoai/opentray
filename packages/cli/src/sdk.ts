@@ -1,10 +1,16 @@
-// Orthogonal intents (2026-07-19; original user request: pnpm install must be sufficient):
+// Orthogonal intents (maintained 2026-07-21; original user requests: pnpm
+// install must be sufficient; an empty App launch command must remember the
+// current process.argv invocation for the next stable-bundle launch):
 // 1. Expose one direct, ergonomic createTray entrypoint.
 // 2. Normalize app-facing menu shorthand into the protocol model.
 // 3. Make the returned handle own and deterministically close its broker session.
+// 4. Snapshot caller launch intent before initializing the local runtime.
 
 import type { AppIcon, Icon, Tooltip, TrayOptions } from "@opentray/spec";
-import type { OpenTrayAppBundleOptions } from "@opentray/packaging";
+import type {
+  OpenTrayAppBundleOptions,
+  OpenTrayAppLaunchOptions,
+} from "@opentray/packaging";
 
 import {
   createClient,
@@ -18,6 +24,7 @@ import {
   type CreateTrayMenuClickHandler,
 } from "./menu-input";
 import { normalizeAppIcon, validateAppIcon } from "./app-icon";
+import { normalizeAppLaunch } from "./app-launch";
 
 export interface OpenTrayRuntimeOptions {
   endpoint?: string;
@@ -29,6 +36,8 @@ export interface OpenTrayRuntimeOptions {
   appName?: string;
   appIcon?: AppIcon;
   appBundle?: OpenTrayAppBundleOptions;
+  /** Stable app-entry launch vector. Omitted/null snapshots the current invocation. */
+  appLaunch?: OpenTrayAppLaunchOptions | null;
   autoStart?: boolean;
 }
 
@@ -63,9 +72,11 @@ export const createTray = async (
       ? undefined
       : normalizeAppIcon(runtimeOptions.appIcon);
   const normalized = normalizeCreateTrayOptions(options);
+  const appLaunch = normalizeAppLaunch(runtimeOptions.appLaunch);
   const connection = await connectLocalBroker({
     ...runtimeOptions,
     ...(appIcon === undefined ? {} : { appIcon }),
+    appLaunch,
   });
   try {
     const tray = await createClient(connection, {

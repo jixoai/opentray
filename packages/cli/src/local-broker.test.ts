@@ -1,5 +1,6 @@
 import { createServer, type Server, type Socket } from "node:net";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -9,6 +10,7 @@ import {
   type ClientFrame,
   type ServerFrame,
 } from "@opentray/spec";
+import { readDarwinAppLaunchDescriptor } from "@opentray/packaging";
 
 import { connectLocalBroker } from "./local-broker";
 import type { DaemonDriver } from "./daemon/lifecycle";
@@ -64,26 +66,104 @@ describe("local broker client", () => {
     await connection.close();
   });
 
-  it("does not auto-start when explicit endpoint opts out", async () => {
+  it("commits the latest app launch descriptor when a compatible broker is reused", async () => {
+    const homeDir = await makeTempHome();
+    await writeFile(join(homeDir, "package.json"), JSON.stringify({ name: "@example/app" }));
+    const driver = createSocketBrokerDriver();
+    cleanup.push(driver.close);
+    const bundlePath = join(homeDir, ".opentray/apps/@example+app/Example App.app");
+    await prepareBundle(bundlePath);
+
+    const first = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      appName: "Example App",
+      packageName: "@example/app",
+      packageRoot: homeDir,
+      appLaunch: {
+        schemaVersion: 1,
+        command: "/usr/bin/node",
+        args: ["/tmp/first.mjs"],
+        cwd: "/tmp/first",
+      },
+      daemonDriver: driver,
+    });
+    await first.close();
+
+    const second = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      appName: "Example App",
+      packageName: "@example/app",
+      packageRoot: homeDir,
+      appLaunch: {
+        schemaVersion: 1,
+        command: "/usr/bin/node",
+        args: ["/tmp/latest.mjs", "--dev"],
+        cwd: "/tmp/latest",
+      },
+      daemonDriver: driver,
+    });
+
+    expect(driver.spawned).toBe(1);
+    expect(await readDarwinAppLaunchDescriptor(bundlePath)).toEqual({
+      schemaVersion: 1,
+      command: "/usr/bin/node",
+      args: ["/tmp/latest.mjs", "--dev"],
+      cwd: "/tmp/latest",
+    });
+
+    await second.close();
+  });
+
+  it("does not mutate a local app bundle through a successful external connection", async () => {
     const homeDir = await makeTempHome();
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
-    const driver = createCountingDriver();
+    const driver = createSocketBrokerDriver();
+    cleanup.push(driver.close);
+    const broker = await driver.resolveBroker(paths);
+    await Promise.all([
+      mkdir(dirname(paths.endpoint), { recursive: true }),
+      mkdir(dirname(paths.readyFile), { recursive: true }),
+    ]);
+    await driver.spawnBroker(paths, broker);
 
-    await expect(
-      connectLocalBroker({
-        homeDir,
-        packageVersion: "0.1.0",
-        endpoint: paths.endpoint,
-        autoStart: false,
-        daemonDriver: driver,
-      }),
-    ).rejects.toThrow();
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      endpoint: paths.endpoint,
+      autoStart: false,
+      appBundle: { path: join(homeDir, "Ignored.app") },
+      appLaunch: {
+        schemaVersion: 1,
+        command: "/usr/bin/node",
+        args: ["/tmp/app.mjs"],
+        cwd: "/tmp",
+      },
+      daemonDriver: driver,
+    });
 
-    expect(driver.spawned).toBe(0);
+    expect(driver.spawned).toBe(1);
+    await expect(readDarwinAppLaunchDescriptor(join(homeDir, "Ignored.app"))).rejects.toMatchObject(
+      { code: "ENOENT" },
+    );
+    await connection.close();
   });
 
   it("rejects a ready frame from a broker with another artifact identity", async () => {
     const homeDir = await makeTempHome();
+    await writeFile(join(homeDir, "package.json"), JSON.stringify({ name: "@example/app" }));
+    const bundlePath = join(homeDir, ".opentray/apps/@example+app/Example App.app");
+    await prepareBundle(bundlePath);
+    await writeFile(
+      join(bundlePath, "Contents/Resources/opentray-launch.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        command: "/usr/bin/node",
+        args: ["/tmp/previous.mjs"],
+        cwd: "/tmp/previous",
+      })}\n`,
+    );
     const driver = createSocketBrokerDriver(undefined, brokerIdentity("b"));
     cleanup.push(driver.close);
 
@@ -91,9 +171,24 @@ describe("local broker client", () => {
       connectLocalBroker({
         homeDir,
         packageVersion: "0.1.0",
+        appName: "Example App",
+        packageName: "@example/app",
+        packageRoot: homeDir,
+        appLaunch: {
+          schemaVersion: 1,
+          command: "/usr/bin/node",
+          args: ["/tmp/must-not-commit.mjs"],
+          cwd: "/tmp/new",
+        },
         daemonDriver: driver,
       }),
     ).rejects.toThrow(/broker artifact identity mismatch/);
+    expect(await readDarwinAppLaunchDescriptor(bundlePath)).toEqual({
+      schemaVersion: 1,
+      command: "/usr/bin/node",
+      args: ["/tmp/previous.mjs"],
+      cwd: "/tmp/previous",
+    });
   });
 
   it("routes tray-bounds responses back to the pending request", async () => {
@@ -145,6 +240,12 @@ const makeTempHome = async (): Promise<string> => {
   return dir;
 };
 
+const prepareBundle = async (bundlePath: string): Promise<void> => {
+  const resources = join(bundlePath, "Contents/Resources");
+  await mkdir(resources, { recursive: true });
+  await writeFile(join(resources, "opentray-app-bundle.json"), "{}\n");
+};
+
 const createSocketBrokerDriver = (
   onFrame?: (frame: ClientFrame, socket: Socket) => void,
   readyFrameIdentity?: BrokerArtifactIdentity,
@@ -185,30 +286,6 @@ const createSocketBrokerDriver = (
       await closeServer(server);
       server = undefined;
     },
-  };
-};
-
-const createCountingDriver = (): DaemonDriver & {
-  readonly spawned: number;
-} => {
-  let spawned = 0;
-
-  return {
-    get spawned() {
-      return spawned;
-    },
-    async resolveBroker(paths) {
-      return resolvedBroker(paths);
-    },
-    async isAlive() {
-      return false;
-    },
-    async spawnBroker(paths, broker) {
-      spawned += 1;
-      await writeReadyMetadata(paths, 30_000, broker.artifactIdentity);
-      return 30_000;
-    },
-    async stop() {},
   };
 };
 
