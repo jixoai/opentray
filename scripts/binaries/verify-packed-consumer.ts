@@ -3,6 +3,7 @@
 // 1. Pack one coherent official broker/WebView package closure from release-ready directories.
 // 2. Install that closure with pnpm isolated or npm-compatible flat resolution.
 // 3. Prove facade-relative native resolution ignores an orphan pnpm root package.
+// 4. Verify the complete published runtime closure before any package reaches npm.
 
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -53,6 +54,7 @@ try {
 
   const packageDirs = [
     "packages/spec",
+    "packages/packaging",
     "packages/cli",
     "packages/ext-webview",
     targetPackages.runtimeDir,
@@ -71,6 +73,7 @@ try {
   }
 
   const specTarball = requireTarball(tarballs, "@opentray/spec");
+  const packagingTarball = requireTarball(tarballs, "@opentray/packaging");
   const runtimeTarball = requireTarball(tarballs, targetPackages.runtimeName);
   const extensionTarball = requireTarball(tarballs, targetPackages.extensionName);
   const dependencies: Record<string, string> = {
@@ -88,12 +91,14 @@ try {
     packageJson.pnpm = {
       overrides: {
         "@opentray/spec": fileDependency(specTarball),
+        "@opentray/packaging": fileDependency(packagingTarball),
         [targetPackages.runtimeName]: fileDependency(runtimeTarball),
         [targetPackages.extensionName]: fileDependency(extensionTarball),
       },
     };
   } else {
     dependencies["@opentray/spec"] = fileDependency(specTarball);
+    dependencies["@opentray/packaging"] = fileDependency(packagingTarball);
     dependencies[targetPackages.runtimeName] = fileDependency(runtimeTarball);
     dependencies[targetPackages.extensionName] = fileDependency(extensionTarball);
   }

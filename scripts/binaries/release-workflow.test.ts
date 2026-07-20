@@ -70,6 +70,8 @@ describe("Feature: release native binary CI law", () => {
     expect(packedConsumerScript()).toContain('value === "windows-x64"');
     expect(packedConsumerScript()).toContain('process.platform === "win32"');
     expect(packedConsumerScript()).toContain("`${packageManager}.cmd`");
+    expect(packedConsumerScript()).toContain('"packages/packaging"');
+    expect(packedConsumerScript()).toContain('"@opentray/packaging"');
     expect(packedJob).toContain("- name: Build publish artifacts");
     expect(packedJob).toContain("run: pnpm run build");
     expect(releaseJob).toContain("- packed-consumer");
