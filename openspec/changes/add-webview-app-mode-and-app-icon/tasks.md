@@ -120,4 +120,4 @@
 - [x] 10.7 Export appBundle build adapters from Vite, esbuild, webpack, and tsdown plugin packages without duplicating generation logic.
 - [x] 10.8 Add focused tests for package discovery, custom/default paths, managed regeneration, prebuilt rejection, stable-path locking, bundle manifest commit order, and every plugin hook.
 - [x] 10.9 Update public READMEs, changesets, AGENTS laws, Chinese terminology, and linked-consumer configuration.
-- [ ] 10.10 Run focused package/runtime/plugin tests, OpenSpec validation/check, build/typecheck, and the exact linked Skill Creator preparation flow; leave visual acceptance to the user.
+- [x] 10.10 Run focused package/runtime/plugin tests, OpenSpec validation/check, build/typecheck, and the exact linked Skill Creator preparation flow; leave visual acceptance to the user.

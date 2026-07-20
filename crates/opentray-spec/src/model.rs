@@ -6,6 +6,365 @@ pub type AppId = String;
 pub type TrayId = String;
 pub type MenuItemId = u32;
 
+/// Canonical App icon variant used when an asset omits `variant`.
+pub const DEFAULT_APP_ICON_VARIANT: &str = "default";
+
+/// One validated set of native application identity assets.
+///
+/// The transparent representation keeps the wire shape as an array while the
+/// newtype prevents invalid assets from entering Core through Rust callers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct AppIcon(Vec<AppIconAsset>);
+
+impl AppIcon {
+    pub fn assets(&self) -> &[AppIconAsset] {
+        &self.0
+    }
+
+    pub fn darwin(&self) -> Option<&AppIconSource> {
+        self.0.iter().find_map(|asset| match asset {
+            AppIconAsset::Darwin { source, .. } => Some(source),
+            _ => None,
+        })
+    }
+
+    pub fn windows(&self) -> Option<&AppIconSource> {
+        self.0.iter().find_map(|asset| match asset {
+            AppIconAsset::Windows { source, .. } => Some(source),
+            _ => None,
+        })
+    }
+
+    /// Returns whether at least one asset declares the semantic variant.
+    pub fn has_variant(&self, variant: &str) -> bool {
+        self.0.iter().any(|asset| asset.has_variant(variant))
+    }
+
+    /// Produces a platform-neutral projection containing only matching assets.
+    pub fn for_variant(&self, variant: &str) -> Option<Self> {
+        let assets = self
+            .0
+            .iter()
+            .filter(|asset| asset.has_variant(variant))
+            .cloned()
+            .collect::<Vec<_>>();
+        (!assets.is_empty()).then_some(Self(assets))
+    }
+
+    fn validate(assets: &[AppIconAsset]) -> Result<(), String> {
+        if assets.is_empty() {
+            return Err("appIcon asset array must not be empty".to_string());
+        }
+        let mut darwin = std::collections::HashSet::new();
+        let mut windows = std::collections::HashSet::new();
+        let mut linux_svg = std::collections::HashSet::new();
+        let mut linux_png_sizes = std::collections::HashSet::new();
+        for asset in assets {
+            asset.source().validate()?;
+            match asset {
+                AppIconAsset::Darwin { variant, .. } => {
+                    for name in variant.names() {
+                        if !darwin.insert(name.clone()) {
+                            return Err(format!(
+                                "appIcon contains duplicate Darwin asset for variant {name}"
+                            ));
+                        }
+                    }
+                }
+                AppIconAsset::Windows { variant, .. } => {
+                    for name in variant.names() {
+                        if !windows.insert(name.clone()) {
+                            return Err(format!(
+                                "appIcon contains duplicate Windows asset for variant {name}"
+                            ));
+                        }
+                    }
+                }
+                AppIconAsset::LinuxPng { variant, size, .. } => {
+                    if *size == 0 {
+                        return Err("Linux appIcon PNG size must be greater than zero".to_string());
+                    }
+                    for name in variant.names() {
+                        if !linux_png_sizes.insert((name.clone(), *size)) {
+                            return Err(format!(
+                                "appIcon contains duplicate Linux PNG size {size} for variant {name}"
+                            ));
+                        }
+                    }
+                }
+                AppIconAsset::LinuxSvg { variant, .. } => {
+                    for name in variant.names() {
+                        if !linux_svg.insert(name.clone()) {
+                            return Err(format!(
+                                "appIcon contains duplicate Linux SVG asset for variant {name}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        if !assets
+            .iter()
+            .any(|asset| asset.has_variant(DEFAULT_APP_ICON_VARIANT))
+        {
+            return Err("appIcon does not declare a default variant".to_string());
+        }
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for AppIcon {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let assets = Vec::<AppIconAsset>::deserialize(deserializer)?;
+        Self::validate(&assets).map_err(de::Error::custom)?;
+        Ok(Self(assets))
+    }
+}
+
+/// A native application icon source. Raw RGBA and tray-only variants are not
+/// part of this contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum AppIconSource {
+    Encoded { data: Vec<u8> },
+    File { path: String },
+}
+
+impl AppIconSource {
+    fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Encoded { data } if data.is_empty() => {
+                Err("appIcon encoded source must not be empty".to_string())
+            }
+            Self::File { path } if path.trim().is_empty() => {
+                Err("appIcon file source path must not be empty".to_string())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// One or more semantic names which select the same native App icon asset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppIconVariant(Vec<String>);
+
+impl AppIconVariant {
+    /// Returns every semantic name aliased to this native asset.
+    pub fn names(&self) -> &[String] {
+        &self.0
+    }
+
+    /// Returns whether this asset participates in the semantic variant.
+    pub fn contains(&self, variant: &str) -> bool {
+        self.0.iter().any(|name| name == variant)
+    }
+
+    fn validate(names: Vec<String>) -> Result<Self, String> {
+        if names.is_empty() {
+            return Err("appIcon variant array must not be empty".to_string());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for name in &names {
+            if !is_valid_app_icon_variant_name(name) {
+                return Err(format!(
+                    "appIcon variant must match ^[a-z][a-z0-9-]{{0,63}}$: {name}"
+                ));
+            }
+            if !seen.insert(name.clone()) {
+                return Err(format!(
+                    "appIcon asset contains duplicate variant name {name}"
+                ));
+            }
+        }
+        Ok(Self(names))
+    }
+}
+
+impl Default for AppIconVariant {
+    fn default() -> Self {
+        Self(vec![DEFAULT_APP_ICON_VARIANT.to_string()])
+    }
+}
+
+impl Serialize for AppIconVariant {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let [variant] = self.0.as_slice() {
+            variant.serialize(serializer)
+        } else {
+            self.0.serialize(serializer)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AppIconVariant {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum WireVariant {
+            One(String),
+            Many(Vec<String>),
+        }
+
+        let names = match WireVariant::deserialize(deserializer)? {
+            WireVariant::One(name) => vec![name],
+            WireVariant::Many(names) => names,
+        };
+        Self::validate(names).map_err(de::Error::custom)
+    }
+}
+
+fn is_valid_app_icon_variant_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(first) if first.is_ascii_lowercase())
+        && name.len() <= 64
+        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// One platform-standard application icon asset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppIconAsset {
+    Darwin {
+        variant: AppIconVariant,
+        source: AppIconSource,
+    },
+    Windows {
+        variant: AppIconVariant,
+        source: AppIconSource,
+    },
+    LinuxPng {
+        variant: AppIconVariant,
+        size: u32,
+        source: AppIconSource,
+    },
+    LinuxSvg {
+        variant: AppIconVariant,
+        source: AppIconSource,
+    },
+}
+
+impl AppIconAsset {
+    /// Returns the native file or encoded-byte source.
+    pub fn source(&self) -> &AppIconSource {
+        match self {
+            Self::Darwin { source, .. }
+            | Self::Windows { source, .. }
+            | Self::LinuxPng { source, .. }
+            | Self::LinuxSvg { source, .. } => source,
+        }
+    }
+
+    /// Returns the normalized semantic variant declaration.
+    pub fn variant(&self) -> &AppIconVariant {
+        match self {
+            Self::Darwin { variant, .. }
+            | Self::Windows { variant, .. }
+            | Self::LinuxPng { variant, .. }
+            | Self::LinuxSvg { variant, .. } => variant,
+        }
+    }
+
+    /// Returns whether this native asset participates in the semantic variant.
+    pub fn has_variant(&self, variant: &str) -> bool {
+        self.variant().contains(variant)
+    }
+}
+
+impl Serialize for AppIconAsset {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = match self {
+            Self::Darwin { variant, source } => serde_json::json!({
+                "platform": "darwin",
+                "format": "icns",
+                "variant": variant,
+                "source": source,
+            }),
+            Self::Windows { variant, source } => serde_json::json!({
+                "platform": "windows",
+                "format": "ico",
+                "variant": variant,
+                "source": source,
+            }),
+            Self::LinuxPng {
+                variant,
+                size,
+                source,
+            } => serde_json::json!({
+                "platform": "linux",
+                "format": "png",
+                "variant": variant,
+                "size": size,
+                "source": source,
+            }),
+            Self::LinuxSvg { variant, source } => serde_json::json!({
+                "platform": "linux",
+                "format": "svg",
+                "variant": variant,
+                "source": source,
+            }),
+        };
+        value.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AppIconAsset {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct WireAsset {
+            platform: String,
+            format: String,
+            source: AppIconSource,
+            #[serde(default)]
+            variant: AppIconVariant,
+            #[serde(default)]
+            size: Option<u32>,
+        }
+
+        let asset = WireAsset::deserialize(deserializer)?;
+        match (asset.platform.as_str(), asset.format.as_str(), asset.size) {
+            ("darwin", "icns", None) => Ok(Self::Darwin {
+                variant: asset.variant,
+                source: asset.source,
+            }),
+            ("windows", "ico", None) => Ok(Self::Windows {
+                variant: asset.variant,
+                source: asset.source,
+            }),
+            ("linux", "png", Some(size)) if size > 0 => Ok(Self::LinuxPng {
+                variant: asset.variant,
+                size,
+                source: asset.source,
+            }),
+            ("linux", "svg", None) => Ok(Self::LinuxSvg {
+                variant: asset.variant,
+                source: asset.source,
+            }),
+            ("linux", "png", _) => Err(de::Error::custom(
+                "Linux PNG appIcon asset requires a positive integer size",
+            )),
+            (platform, format, _) => Err(de::Error::custom(format!(
+                "unsupported appIcon platform/format pair: {platform}/{format}"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppOptions {
@@ -14,7 +373,7 @@ pub struct AppOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<Icon>,
+    pub app_icon: Option<AppIcon>,
     #[serde(default)]
     pub default: bool,
 }
@@ -31,7 +390,9 @@ pub struct AppIdentity {
     pub app_id: AppId,
     pub app_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<Icon>,
+    pub app_icon: Option<AppIcon>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_icon_variant: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -505,6 +866,153 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn app_icon_platform_assets_roundtrip_as_an_array() {
+        let value = json!([
+            {
+                "platform": "darwin",
+                "format": "icns",
+                "source": { "type": "file", "path": "AppIcon.icns" }
+            },
+            {
+                "platform": "windows",
+                "format": "ico",
+                "source": { "type": "encoded", "data": [0, 0, 1, 0] }
+            },
+            {
+                "platform": "linux",
+                "format": "png",
+                "size": 128,
+                "source": { "type": "file", "path": "128x128/app.png" }
+            },
+            {
+                "platform": "linux",
+                "format": "svg",
+                "source": { "type": "file", "path": "scalable/app.svg" }
+            }
+        ]);
+        let app_icon: AppIcon = serde_json::from_value(value.clone()).expect("app icon");
+        let normalized = serde_json::to_value(app_icon).expect("serialize");
+
+        assert_eq!(normalized[0]["variant"], "default");
+        assert_eq!(normalized[1]["variant"], "default");
+        assert_eq!(normalized[2]["variant"], "default");
+        assert_eq!(normalized[3]["variant"], "default");
+    }
+
+    #[test]
+    fn app_icon_rejects_non_standard_formats_and_duplicate_assets() {
+        let wrong_format = serde_json::from_value::<AppIcon>(json!([{
+            "platform": "darwin",
+            "format": "png",
+            "source": { "type": "file", "path": "app.png" }
+        }]))
+        .expect_err("Darwin requires ICNS");
+        assert!(wrong_format
+            .to_string()
+            .contains("unsupported appIcon platform/format pair"));
+
+        let duplicate = serde_json::from_value::<AppIcon>(json!([
+            {
+                "platform": "windows",
+                "format": "ico",
+                "source": { "type": "file", "path": "one.ico" }
+            },
+            {
+                "platform": "windows",
+                "format": "ico",
+                "source": { "type": "file", "path": "two.ico" }
+            }
+        ]))
+        .expect_err("one Windows asset");
+        assert!(duplicate
+            .to_string()
+            .contains("duplicate Windows asset for variant default"));
+    }
+
+    #[test]
+    fn app_icon_variants_support_aliases_and_semantic_selection() {
+        let app_icon = serde_json::from_value::<AppIcon>(json!([
+            {
+                "platform": "darwin",
+                "format": "icns",
+                "variant": ["default", "empty"],
+                "source": { "type": "file", "path": "empty.icns" }
+            },
+            {
+                "platform": "darwin",
+                "format": "icns",
+                "variant": "files",
+                "source": { "type": "file", "path": "files.icns" }
+            }
+        ]))
+        .expect("variant catalog");
+
+        assert!(app_icon.has_variant("default"));
+        assert!(app_icon.has_variant("empty"));
+        assert!(app_icon.has_variant("files"));
+        let empty = app_icon.for_variant("empty").expect("empty variant");
+        let files = app_icon.for_variant("files").expect("files variant");
+        assert_eq!(empty.darwin(), app_icon.assets()[0].source().into());
+        assert_eq!(files.darwin(), app_icon.assets()[1].source().into());
+        assert!(app_icon.for_variant("missing").is_none());
+    }
+
+    #[test]
+    fn app_icon_variants_reject_invalid_names_duplicates_and_missing_default() {
+        let invalid_name = serde_json::from_value::<AppIcon>(json!([{
+            "platform": "darwin",
+            "format": "icns",
+            "variant": "Dark",
+            "source": { "type": "file", "path": "dark.icns" }
+        }]))
+        .expect_err("lowercase semantic name");
+        assert!(invalid_name.to_string().contains("variant must match"));
+
+        let duplicate_alias = serde_json::from_value::<AppIcon>(json!([{
+            "platform": "darwin",
+            "format": "icns",
+            "variant": ["default", "default"],
+            "source": { "type": "file", "path": "default.icns" }
+        }]))
+        .expect_err("unique aliases");
+        assert!(duplicate_alias
+            .to_string()
+            .contains("duplicate variant name default"));
+
+        let missing_default = serde_json::from_value::<AppIcon>(json!([{
+            "platform": "darwin",
+            "format": "icns",
+            "variant": "files",
+            "source": { "type": "file", "path": "files.icns" }
+        }]))
+        .expect_err("default is required");
+        assert!(missing_default
+            .to_string()
+            .contains("does not declare a default variant"));
+
+        let duplicate_for_variant = serde_json::from_value::<AppIcon>(json!([
+            {
+                "platform": "linux",
+                "format": "png",
+                "variant": ["default", "empty"],
+                "size": 32,
+                "source": { "type": "file", "path": "empty-32.png" }
+            },
+            {
+                "platform": "linux",
+                "format": "png",
+                "variant": "empty",
+                "size": 32,
+                "source": { "type": "file", "path": "other-empty-32.png" }
+            }
+        ]))
+        .expect_err("size uniqueness is per variant");
+        assert!(duplicate_for_variant
+            .to_string()
+            .contains("duplicate Linux PNG size 32 for variant empty"));
+    }
 
     #[test]
     fn responsive_icon_candidates_roundtrip() {

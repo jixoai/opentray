@@ -6,9 +6,35 @@ import { describe, expect, it } from "vitest";
 
 import { formatOpenTrayArtifactStem } from "@opentray/packaging";
 
-import { openTrayEsbuildPlugin, resolveEsbuildEntry } from "./index";
+import {
+  openTrayAppBundlePlugin,
+  openTrayEsbuildPlugin,
+  resolveEsbuildEntry,
+  type EsbuildBuildLike,
+  type EsbuildPlugin,
+  type EsbuildInitialOptionsLike,
+} from "./index";
 
 describe("@opentray/esbuild-plugin", () => {
+  it("delegates app bundle generation to the shared Darwin contract", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-esbuild-app-bundle-"));
+    const brokerPath = join(root, "broker");
+    const templatePath = join(root, "Info.plist");
+    await writeFile(brokerPath, "broker");
+    await writeFile(templatePath, appBundleTemplate());
+    const plugin = openTrayAppBundlePlugin({
+      packageName: "@jixoai/consumer",
+      appId: "com.example.consumer",
+      appName: "Consumer",
+      target: { os: "darwin", arch: "arm64" },
+      brokerPath,
+      templatePath,
+    });
+    await runSetup(plugin, { outdir: "dist", absWorkingDir: root });
+    expect(plugin.getLastResult()?.executablePath).toBe(
+      join(root, "dist/Consumer.app/Contents/MacOS/opentray"),
+    );
+  });
   it("Scenario: Given esbuild initial options When onEnd fires Then the shared manifest shape is emitted", async () => {
     const root = await mkdtemp(join(tmpdir(), "opentray-esbuild-"));
     const runtimeSource = join(root, "runtime-host");
@@ -98,17 +124,21 @@ describe("@opentray/esbuild-plugin", () => {
   });
 });
 
+const appBundleTemplate = (): string =>
+  `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>OpenTray</string></dict></plist>\n`;
+
 const runSetup = async (
-  plugin: ReturnType<typeof openTrayEsbuildPlugin>,
-  initialOptions: Record<string, unknown>,
+  plugin: EsbuildPlugin,
+  initialOptions: EsbuildInitialOptionsLike,
 ): Promise<void> => {
   const callbacks: Array<(result: unknown) => Promise<void> | void> = [];
-  plugin.setup({
+  const build: EsbuildBuildLike = {
     initialOptions,
     onEnd: (cb) => {
       callbacks.push(cb);
     },
-  });
+  };
+  plugin.setup(build);
   for (const cb of callbacks) {
     await cb({});
   }

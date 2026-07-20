@@ -21,6 +21,7 @@ target/
 # CI/local staging places generated native artifacts into package directories.
 packages/*/bin/opentray*
 packages/darwin-*/app/*.zip
+packages/darwin-*/app/Info.plist
 packages/ext-webview-*/bin/*.dll
 packages/ext-webview-*/lib/*.dylib
 packages/ext-webview-*/lib/*.so

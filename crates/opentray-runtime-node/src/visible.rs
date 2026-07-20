@@ -147,7 +147,7 @@ pub fn run_visible_runtime_host(options: Option<VisibleRuntimeHostOptions>) -> n
             AppOptions {
                 id: Some(app.app_id.clone()),
                 name: Some(app.app_name.clone()),
-                icon: None,
+                app_icon: None,
                 default: true,
             },
             broker_artifact_identity,

@@ -1,8 +1,12 @@
 <!--
-Orthogonal intents (maintained 2026-07-19; original user requests: investigate a macOS
+Orthogonal intents (maintained 2026-07-20; original user requests: investigate a macOS
 pnpm-pub window that stopped responding to hide operations until daemon restart; determine why
 skill-creator-v2's Hide Window and primaryEvent fail against the latest OpenTray packages; ensure
-ordinary consumers need only a normal package-manager install for a coherent native runtime):
+ordinary consumers need only a normal package-manager install for a coherent native runtime;
+move skill-creator-v2's app-icon generation into a linked @opentray/vite-plugin with source and
+implementation-aware caching; make appIcon a strict platform-standard asset array distinct from
+tray Icon so consumers may supply independently generated native assets; add semantic App icon
+variants whose omitted name is default and whose selection remains Core-owned (2026-07-20)):
 1. Preserve the tray-first App/Tray/Session platform laws.
 2. Preserve native runtime and extension package boundaries across macOS and Windows.
 3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
@@ -10,6 +14,7 @@ ordinary consumers need only a normal package-manager install for a coherent nat
 5. Preserve platform-specific acceptance evidence without promoting it to cross-platform truth.
 6. Preserve the cross-platform window-shell role contract and its platform projections.
 7. Preserve the split between platform-neutral Core identity contracts and Darwin runtime carrier packaging.
+8. Preserve App icon catalog/variant state without giving WebView, badge, or tray projections App identity authority.
 Compromise: AGENTS.md is the required project-wide agent SSOT, so these law families cannot be
 physically split without losing the single discovery entrypoint required by repository tooling.
 -->
@@ -74,6 +79,16 @@ The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `sk
 - Diagnose retained-window failures as a command chain: `menuClick -> facade command -> broker extension dispatch -> native window state`. If `close()/hide()` returns successfully but native visibility stays true, inspect AppKit/Win32 projection. If a newly added command such as `isVisible` is rejected while older event commands still work, inspect broker/dylib command-surface skew before changing window code.
 - The dynamic extension ABI must preserve actionable rejection detail. A bare `returned code 1` only identifies `EXT_ERR_REJECTED`; run an isolated broker with `OPENTRAY_DAEMON_STDIO=inherit` or add bounded diagnostic transport before attributing the failure to a specific native branch.
 - Native acceptance must use one coherent artifact graph. Record the broker executable path, loaded extension library path, hashes or versions, endpoint identity, and PID before a restart destroys the evidence. A successful restart is runtime-replacement evidence, not proof of the original root cause.
+- `@opentray/vite-plugin` optionally owns consumer app-icon normalization and ICNS/ICO/Linux theme
+  generation. Its cache
+  identity includes the source image, the linked generator source, the built generator
+  implementation, the rendering recipe, encoder versions, and every output path. Linked consumers
+  must rebuild the plugin before `vite dev` or `vite build`; source-dev tray lookup prefers
+  `webui/static` so a stale build directory cannot shadow the current generated asset.
+- Generated preview/Linux PNGs use 72 DPI. ICNS encoding uses explicit macOS @1x/@2x tags with
+  decoded/re-encoded PNG payloads, so AppKit sees 1024 px / 512 pt, 512 px / 512 pt, and
+  512 px / 256 pt representations instead of inheriting a source image's physical density. The
+  encoder and representation recipe are cache identity.
 - Release-grade extension manifest inspection must execute a same-target native inspector built beside the extension. Do not depend on `bun:ffi` for this gate because Windows arm64 Bun builds may disable TinyCC and `dlopen()` entirely.
 - Extension cleanup remains session-authoritative. Extension state must be scoped to its owning `(appId, trayId, sessionId)` and a session-close callback must not clear another live session's retained window.
 
@@ -100,16 +115,51 @@ mode directly:
 
 ## App Icon Law
 
-- `appIcon` is app identity, not WebView window metadata. The public runtime seam may accept an
-  ergonomic `appIcon` field, but the protocol source of truth remains `AppOptions.icon`.
-- If `appIcon` is omitted, the facade may snapshot the first tray `icon` as the app icon. The
-  inheritance is bootstrap-time resolution, not a live alias to tray icon or page favicon changes.
-- Explicit `appIcon` wins over inherited tray icon; if neither is available, the Darwin carrier or
-  packaged runtime identity supplies its own fallback.
-- `appIcon` must use native-capable app assets. A remote WebView `Href` or a tray-only template
-  asset must not be silently claimed as a valid Dock/taskbar identity.
+- App name has two projections. Bootstrap `appName` is written into the caller-specific Darwin
+  carrier's `CFBundleName` and `CFBundleDisplayName` before launch; this is the authoritative
+  Dock/Cmd+Tab name for that process lifetime.
+- `tray.app.setName(name)` mutates logical Core identity and any truthful live backend projection.
+  On macOS, `NSProcessInfo.processName` is not authority for LaunchServices bundle identity and
+  must not be documented as dynamically renaming the running app in Dock or Cmd+Tab. A changed
+  macOS Shell name requires a new process launched from a carrier materialized with that name;
+  OpenTray must not hide that lifecycle reset behind a successful in-session mutation.
+
+- `appIcon` is App identity, not WebView window metadata. Its protocol source of truth is the
+  platform-neutral `AppOptions.appIcon` / Rust `app_icon` field.
+- `AppIcon` is an array of platform-standard assets: one `darwin/icns`, one `windows/ico`, and
+  Linux `png` theme entries with explicit sizes and/or one `svg`. Sources are native encoded bytes
+  or files whose bytes match the declared format; raw RGBA, text, template images, URLs, and page
+  favicons are invalid.
+- Each asset may declare `variant?: string | readonly string[]`. Omission is the canonical `default`
+  variant; one asset may serve aliases such as `["default", "light"]`. Names are arbitrary
+  application states such as `light/dark` or `empty/files`, not a Core-owned theme enum.
+- Darwin and Windows entries are unique per variant. Linux fixed-size PNG entries are unique by
+  variant and size. An explicit array must contain the current platform's `default` projection and
+  is rejected before broker connection when malformed, duplicated, unreadable, incomplete, or
+  format-mismatched.
+- File sources are validated relative to the caller and canonicalized to absolute paths before
+  broker dispatch. A reused broker working directory must never reinterpret an App identity asset.
+- Omitted `appIcon` never inherits tray artwork. Packaged/carrier identity wins when present, then
+  the operating-system executable/default artwork applies. This keeps tray templates and App
+  identity independently reproducible.
+- Creating an already-known explicit `appId` is idempotent. It returns the existing App identity
+  without clearing its name, icon, or trays; callers use the App mutation API for deliberate
+  identity changes.
+- Core retains the declared App icon catalog plus the active variant. `tray.app.setAppIcon(name)`
+  selects a declared name without involving `ext-webview`; direct AppIcon input replaces the
+  catalog and resets selection to `default`. Missing variants reject before state or native
+  projection changes.
+- Public App icon methods are explicitly named `getAppIcon`, `getAppIconVariant`, and `setAppIcon`.
+  The type surface exposes literal variant-name extraction for application-owned IPC contracts;
+  OpenTray does not provide automatic theme observation.
 - App identity and window icon remain separate facts. An app-mode window may project `appIcon` to
   the taskbar/Dock while `icon` continues to control the window chrome and page metadata sync.
+- On macOS, a Darwin ICNS asset is applied through `NSApplication.applicationIconImage` and the
+  mutation must be followed by an explicit
+  `NSDockTile.display()` refresh. A caller-specific `.app` carrier establishes bundle identity, but
+  it does not by itself invalidate a Dock tile that was initialized from the executable artwork.
+  The Accessory-to-Regular activation-policy transition may re-read that bundle artwork; the
+  adapter must preserve and reapply the projected Core App icon after the transition.
 
 ## Darwin Runtime Carrier Law
 
@@ -125,6 +175,17 @@ mode directly:
 - A normal package-manager install must yield a coherent broker-plus-carrier artifact graph. A
   consumer must not copy a helper bundle manually or install `ext-badge` merely to obtain normal
   app-mode behavior.
+- Darwin runtime packages publish one broker executable plus a minimal `app/Info.plist` template;
+  they must not publish a second broker copy embedded in a compressed carrier artifact. The Node runtime owns the
+  caller-specific bundle at `~/.opentray/apps/<encoded-package>/<app-name>.app` or an explicit
+  `appBundle.path`, and launches the broker from `Contents/MacOS/opentray`.
+- Managed bundle generation defaults to `appBundle.reinitialize: true`, keeps the directory stable,
+  replaces OpenTray-owned files through sibling paths, and commits
+  `Contents/Resources/opentray-app-bundle.json` last. `reinitialize: false` is read-only prebuilt
+  validation; it must reject target, identity, template, icon, or broker drift with a typed error.
+- The stable bundle is a single-writer resource. A live incompatible owner must not be overwritten:
+  the runtime may stop its own caller-scoped broker and retry, while a different live owner receives
+  a typed `bundle_in_use` failure. Build adapters delegate generation to `@opentray/packaging`.
 
 ## Windows Tray WebView Laws
 

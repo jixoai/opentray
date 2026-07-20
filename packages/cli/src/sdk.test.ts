@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AppIcon,
   ClientRequestFrame,
   CreateTrayOptions,
   Icon,
@@ -38,6 +39,44 @@ vi.mock("./local-broker", () => ({
 
 import { createTray, PROTOCOL_VERSION } from "./index";
 
+const crossPlatformAppIcon = (): AppIcon => [
+  {
+    platform: "darwin",
+    format: "icns",
+    source: { type: "encoded", data: [0x69, 0x63, 0x6e, 0x73, 0, 0, 0, 8] },
+  },
+  {
+    platform: "windows",
+    format: "ico",
+    source: { type: "encoded", data: [0, 0, 1, 0, 1, 0] },
+  },
+  {
+    platform: "linux",
+    format: "png",
+    size: 32,
+    source: { type: "encoded", data: [137, 80, 78, 71, 13, 10, 26, 10] },
+  },
+];
+
+const appIconMissingCurrentPlatform = (): AppIcon => {
+  if (process.platform === "darwin") {
+    return [
+      {
+        platform: "windows",
+        format: "ico",
+        source: { type: "encoded", data: [0, 0, 1, 0, 1, 0] },
+      },
+    ];
+  }
+  return [
+    {
+      platform: "darwin",
+      format: "icns",
+      source: { type: "encoded", data: [0x69, 0x63, 0x6e, 0x73, 0, 0, 0, 8] },
+    },
+  ];
+};
+
 describe("opentray ergonomic createTray", () => {
   let transport: EventfulRecordingTransport;
 
@@ -61,38 +100,51 @@ describe("opentray ergonomic createTray", () => {
     ]);
   });
 
-  it("projects explicit appIcon before the tray icon fallback", async () => {
-    const trayIcon: Icon = { type: "rgba", data: [1, 2, 3, 4], width: 1, height: 1 };
-    const appIcon: Icon = { type: "rgba", data: [5, 6, 7, 8], width: 1, height: 1 };
+  it("projects explicit platform appIcon without changing the tray icon", async () => {
+    const trayIcon: Icon = {
+      type: "rgba",
+      data: [1, 2, 3, 4],
+      width: 1,
+      height: 1,
+    };
+    const appIcon = crossPlatformAppIcon();
 
-    await createTray(
-      { id: "status", icon: trayIcon },
-      { appIcon }
-    );
+    await createTray({ id: "status", icon: trayIcon }, { appIcon });
 
     expect(
       transport.frames.filter((frame) => frame.type === "set-app-icon")
     ).toEqual([
-      expect.objectContaining({ icon: appIcon }),
+      expect.objectContaining({
+        appIcon: appIcon.map((asset) => ({ ...asset, variant: "default" })),
+      }),
     ]);
   });
 
-  it("rejects a template-only explicit appIcon before opening a broker connection", async () => {
+  it("switches declared semantic variants through the App handle", async () => {
+    const catalog: AppIcon = crossPlatformAppIcon().flatMap((asset) => [
+      { ...asset, variant: ["default", "empty"] },
+      { ...asset, variant: "files" },
+    ]);
+    const tray = await createTray({ id: "status" }, { appIcon: catalog });
+
+    await tray.app.setAppIcon("files");
+
+    expect(await tray.app.getAppIconVariant()).toBe("files");
+    expect(
+      transport.frames.filter(
+        (frame) => frame.type === "set-app-icon-variant"
+      )
+    ).toEqual([expect.objectContaining({ variant: "files" })]);
+  });
+
+  it("rejects an explicit appIcon missing the current platform before opening a broker connection", async () => {
     await expect(
       createTray(
         { id: "status" },
         {
-          appIcon: {
-            "darwin-icon-only": {
-              type: "rgba",
-              data: [1, 2, 3, 4],
-              width: 1,
-              height: 1,
-              isTemplate: true,
-            },
-          },
-        },
-      ),
+          appIcon: appIconMissingCurrentPlatform(),
+        }
+      )
     ).rejects.toMatchObject({ code: "OPENTRAY_INVALID_APP_ICON" });
     expect(mockState.runtimeOptions).toEqual([]);
   });
@@ -112,21 +164,31 @@ describe("opentray ergonomic createTray", () => {
     });
 
     expect(
-      transport.frames.filter((frame) => frame.type === "set-app-icon"),
+      transport.frames.filter((frame) => frame.type === "set-app-icon")
     ).toEqual([]);
   });
 
-  it("snapshots the first tray icon as app identity and never replaces it from a later tray", async () => {
-    const firstIcon: Icon = { type: "rgba", data: [1, 2, 3, 4], width: 1, height: 1 };
-    const laterIcon: Icon = { type: "rgba", data: [5, 6, 7, 8], width: 1, height: 1 };
+  it("never promotes tray icons into App identity", async () => {
+    const firstIcon: Icon = {
+      type: "rgba",
+      data: [1, 2, 3, 4],
+      width: 1,
+      height: 1,
+    };
+    const laterIcon: Icon = {
+      type: "rgba",
+      data: [5, 6, 7, 8],
+      width: 1,
+      height: 1,
+    };
 
     await createTray({ id: "first", icon: firstIcon });
     await createTray({ id: "second", icon: laterIcon });
 
-    expect(transport.appIcon).toEqual(firstIcon);
+    expect(transport.appIcon).toBeUndefined();
     expect(
       transport.frames.filter((frame) => frame.type === "set-app-icon")
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it("closes the caller-owned broker session when the tray is destroyed", async () => {
@@ -298,7 +360,8 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
   failNextCreateTray = false;
   failNextSetMenu = false;
   appName = "Test";
-  appIcon: Icon | undefined;
+  appIcon: AppIcon | undefined;
+  appIconVariant: string | undefined;
   private readonly listeners = new Set<(frame: OpenTrayEventFrame) => void>();
 
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {
@@ -333,14 +396,21 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
           identity: {
             appId: frame.appId,
             appName: this.appName,
-            ...(this.appIcon === undefined ? {} : { icon: this.appIcon }),
+            ...(this.appIcon === undefined ? {} : { appIcon: this.appIcon }),
+            ...(this.appIconVariant === undefined
+              ? {}
+              : { appIconVariant: this.appIconVariant }),
           },
         };
       case "set-app-name":
         this.appName = frame.name;
         return { type: "ack", requestId: frame.requestId };
       case "set-app-icon":
-        this.appIcon = frame.icon ?? undefined;
+        this.appIcon = frame.appIcon ?? undefined;
+        this.appIconVariant = frame.appIcon === null ? undefined : "default";
+        return { type: "ack", requestId: frame.requestId };
+      case "set-app-icon-variant":
+        this.appIconVariant = frame.variant;
         return { type: "ack", requestId: frame.requestId };
       case "set-tray-menu":
         if (this.failNextSetMenu) {

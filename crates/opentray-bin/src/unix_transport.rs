@@ -220,7 +220,8 @@ pub fn build_runtime_host_health(
         .unwrap_or_else(|| opentray_spec::AppIdentity {
             app_id: options.app_id().to_string(),
             app_name: options.app_name().to_string(),
-            icon: None,
+            app_icon: None,
+            app_icon_variant: None,
         });
     let mut sessions = sessions
         .iter()

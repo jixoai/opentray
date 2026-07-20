@@ -234,7 +234,7 @@ const assertEndpointComponent = (value: string, name: string): void => {
 export interface AppOptions {
   id?: AppId;
   name?: string;
-  icon?: Icon;
+  appIcon?: AppIcon;
   default?: boolean;
 }
 
@@ -245,7 +245,8 @@ export interface AppRef {
 export interface AppIdentity {
   appId: AppId;
   appName: string;
-  icon?: Icon;
+  appIcon?: AppIcon;
+  appIconVariant?: string;
 }
 
 export interface TrayOptions {
@@ -302,6 +303,51 @@ export type IconImage =
   | { type: "rgba"; data: Uint8Array | number[]; width: number; height: number }
   | { type: "encoded"; data: Uint8Array | number[] }
   | { type: "file"; path: string };
+
+/** A source carrying one platform-native application icon file. */
+export type AppIconSource =
+  | { type: "encoded"; data: Uint8Array | readonly number[] }
+  | { type: "file"; path: string };
+
+/** One or more application-defined semantic names for a native App icon asset. */
+export type AppIconVariant = string | readonly string[];
+
+interface AppIconVariantField {
+  /** Omission is equivalent to the canonical `default` variant. */
+  variant?: AppIconVariant;
+}
+
+/** One standards-compliant application icon asset for a specific operating system. */
+export type AppIconAsset = AppIconVariantField &
+  (
+    | { platform: "darwin"; format: "icns"; source: AppIconSource }
+    | { platform: "windows"; format: "ico"; source: AppIconSource }
+    | {
+        platform: "linux";
+        format: "png";
+        size: number;
+        source: AppIconSource;
+      }
+    | { platform: "linux"; format: "svg"; source: AppIconSource }
+  );
+
+/** Cross-platform application identity assets; tray `Icon` is a separate contract. */
+export type AppIcon = readonly AppIconAsset[];
+
+type AppIconAssetVariantName<TAsset> = TAsset extends {
+  readonly variant: infer TVariant;
+}
+  ? TVariant extends readonly string[]
+    ? TVariant[number]
+    : TVariant extends string
+      ? TVariant
+      : never
+  : never;
+
+/** Literal variant names declared by an `as const` AppIcon catalog. */
+export type AppIconVariantOf<TCatalog extends AppIcon> =
+  | "default"
+  | AppIconAssetVariantName<TCatalog[number]>;
 
 export type SimpleIcon = IconImage & { text?: string };
 
@@ -453,7 +499,13 @@ export type ClientRequestFrame =
       type: "set-app-icon";
       requestId: RequestId;
       appId: AppId;
-      icon: Icon | null;
+      appIcon: AppIcon | null;
+    }
+  | {
+      type: "set-app-icon-variant";
+      requestId: RequestId;
+      appId: AppId;
+      variant: string;
     }
   | {
       type: "create-tray";

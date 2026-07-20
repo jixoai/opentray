@@ -110,6 +110,32 @@ that need exact wire shapes.
 Use `tray.onTrayClick(...)` when you want to listen to raw tray-icon clicks
 without making a menu item the primary route.
 
+## Darwin App Bundle
+
+On macOS, `createTray()` launches the broker from a stable caller-owned bundle.
+The default is derived from the caller package name:
+`~/.opentray/apps/@scope+name/App Name.app`. The bundle is regenerated in place
+on each managed start, so the Dock identity uses the caller's `appName` and
+`appIcon` before the first window is shown.
+
+```ts
+const tray = await createTray(options, {
+  appId: "com.example.first-app",
+  appName: "First App",
+  appIcon,
+  appBundle: {
+    // Relative paths resolve from the caller package root.
+    path: "dist/First App.app",
+    // A plugin-generated bundle can be validated without mutation.
+    reinitialize: false,
+  },
+});
+```
+
+`appBundle.reinitialize` defaults to `true`. A prebuilt bundle must contain the
+matching broker, `Info.plist`, target, icon, and OpenTray manifest; incompatible
+bundles fail with a typed error instead of being silently rebuilt.
+
 ## Runtime Ownership
 
 OpenTray does not ask developers to create a public broker object. The application process or an application-owned background service imports `opentray`, calls `createTray()`, and owns its event handlers. Calling the returned handle's `destroy()` removes the tray and closes the caller-owned broker session; repeated calls share the same teardown. Process exit remains the final fallback rather than a required cleanup mechanism.
@@ -133,16 +159,52 @@ pnpm run npm:cp-bin:webview -- -t debug
 
 By default, `createTray()` routes through the local runtime host and starts it on first use when needed. It resolves the broker executable from the installed current-platform package first; source-tree contributors can either stage fresh package artifacts with `npm:cp-bin*` or point directly at a debug broker with `OPENTRAY_BROKER_BIN`. The executable host remains the source of truth for tray lifecycle, session cleanup, and native event routing on supported platforms.
 
-Runtime options may also carry app identity facts:
+Runtime options may also carry app identity facts. For a Darwin runtime, the
+identity catalog and App handle look like this:
 
 ```ts
-await createTray(options, {
+import { createTray, type AppIcon, type AppIconVariantOf } from "opentray";
+
+const appIcon = [
+  {
+    platform: "darwin",
+    format: "icns",
+    variant: ["default", "light"],
+    source: { type: "file", path: "./assets/app-light.icns" },
+  },
+  {
+    platform: "darwin",
+    format: "icns",
+    variant: "dark",
+    source: { type: "file", path: "./assets/app-dark.icns" },
+  },
+] as const satisfies AppIcon;
+type AppIconVariant = AppIconVariantOf<typeof appIcon>;
+
+const tray = await createTray(options, {
   appId: "com.example.status",
   appName: "Status",
+  appIcon,
 });
+
+const selectAppIcon = (variant: AppIconVariant) =>
+  tray.app.setAppIcon(variant);
+
+await selectAppIcon("dark");
 ```
 
-The runtime host reports those facts as `appId` and `appName` in `runtime-host-health`; tray icon text, menu labels, and tooltip text remain projection data.
+`appIcon` is a current-platform catalog of native App identity assets: ICNS on
+macOS, ICO on Windows, and sized PNG or SVG assets on Linux. Omitted `variant`
+means `default`; an array aliases one file to several semantic names. Names are
+application states, so `empty/files` is as valid as `light/dark`. Every catalog
+must provide `default` and every selectable variant for the current platform.
+
+`tray.app.getAppIcon()` returns the complete catalog,
+`tray.app.getAppIconVariant()` returns the selected name, and
+`tray.app.setAppIcon(...)` either selects a name, replaces the catalog and resets
+selection to `default`, or clears explicit artwork with `null`. Selection does
+not add WebView IPC or automatic theme behavior. Tray icon text, menu labels,
+tooltip text, and WebView window metadata remain separate projection data.
 
 ## Examples
 

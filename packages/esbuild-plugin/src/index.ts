@@ -1,11 +1,14 @@
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
+  buildDarwinAppBundle,
   stageOpenTrayPackage,
+  type DarwinAppBundleOptions,
   type OpenTrayArtifactInput,
   type OpenTrayPackagingApp,
   type OpenTrayPackageManifest,
   type OpenTrayPackageResult,
+  type OpenTrayDarwinAppBundleResult,
 } from "@opentray/packaging";
 
 export interface OpenTrayEsbuildPluginOptions {
@@ -52,6 +55,37 @@ export interface OpenTrayEsbuildPlugin extends EsbuildPlugin {
   /** Returns the last staging result. Only populated after `onEnd` runs. */
   readonly getLastResult: () => OpenTrayPackageResult | undefined;
 }
+
+export interface OpenTrayEsbuildAppBundlePluginOptions
+  extends Omit<DarwinAppBundleOptions, "bundlePath" | "reinitialize"> {
+  readonly bundlePath?: string;
+}
+
+export interface OpenTrayEsbuildAppBundlePlugin extends EsbuildPlugin {
+  readonly name: "opentray-app-bundle";
+  readonly getLastResult: () => OpenTrayDarwinAppBundleResult | undefined;
+}
+
+/** esbuild lifecycle adapter for the shared Darwin app bundle contract. */
+export const openTrayAppBundlePlugin = (
+  options: OpenTrayEsbuildAppBundlePluginOptions,
+): OpenTrayEsbuildAppBundlePlugin => {
+  let lastResult: OpenTrayDarwinAppBundleResult | undefined;
+  return {
+    name: "opentray-app-bundle",
+    setup(build) {
+      build.onEnd(async () => {
+        const cwd = build.initialOptions.absWorkingDir ?? process.cwd();
+        const bundlePath =
+          options.bundlePath === undefined
+            ? join(resolveEsbuildBundleOutputDir(build.initialOptions, cwd), `${options.appName}.app`)
+            : resolve(cwd, options.bundlePath);
+        lastResult = await buildDarwinAppBundle({ ...options, bundlePath });
+      });
+    },
+    getLastResult: () => lastResult,
+  };
+};
 
 export const openTrayEsbuildPlugin = (
   options: OpenTrayEsbuildPluginOptions,
@@ -103,6 +137,19 @@ const resolveEsbuildOutDir = (
     return resolve(cwd, dirname(initialOptions.outfile));
   }
   return resolve(process.cwd(), "dist");
+};
+
+const resolveEsbuildBundleOutputDir = (
+  initialOptions: EsbuildInitialOptionsLike,
+  cwd: string,
+): string => {
+  if (initialOptions.outdir !== undefined && initialOptions.outdir.length > 0) {
+    return resolve(cwd, initialOptions.outdir);
+  }
+  if (initialOptions.outfile !== undefined && initialOptions.outfile.length > 0) {
+    return resolve(cwd, dirname(initialOptions.outfile));
+  }
+  return resolve(cwd, "dist");
 };
 
 export const resolveEsbuildEntry = (initialOptions: EsbuildInitialOptionsLike): string => {

@@ -32,15 +32,11 @@ impl BrokerSession {
         self.session_id = Some(session_id);
     }
 
-    fn pin_app_identity(&mut self, app: &AppRef, options: &AppOptions) {
+    fn pin_app_identity(&mut self, identity: AppIdentity) {
         if self.app_identity.is_some() {
             return;
         }
-        self.app_identity = Some(AppIdentity {
-            app_id: app.app_id.clone(),
-            app_name: app_name(options.name.as_deref(), &app.app_id),
-            icon: options.icon.clone(),
-        });
+        self.app_identity = Some(identity);
     }
 }
 
@@ -221,7 +217,9 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                 options,
             } => match self.kernel.create_app(options.clone()) {
                 Ok(app) => {
-                    session.pin_app_identity(&app, &options);
+                    if let Ok(identity) = self.kernel.app_identity(&app.app_id) {
+                        session.pin_app_identity(identity);
+                    }
                     if options.default || self.default_app.is_none() {
                         self.default_app = Some(app.clone());
                     }
@@ -287,7 +285,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
             ClientFrame::SetAppIcon {
                 request_id,
                 app_id,
-                icon,
+                app_icon,
             } => {
                 if !session_owns_app(session, &app_id) {
                     return vec![protocol_error(
@@ -296,7 +294,29 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                         format!("session does not own app: {app_id}"),
                     )];
                 }
-                match self.kernel.set_app_icon(&app_id, icon) {
+                match self.kernel.set_app_icon(&app_id, app_icon) {
+                    Ok(()) => {
+                        if let Ok(identity) = self.kernel.app_identity(&app_id) {
+                            session.app_identity = Some(identity);
+                        }
+                        vec![ServerFrame::Ack { request_id }]
+                    }
+                    Err(error) => vec![kernel_error(Some(request_id), error)],
+                }
+            }
+            ClientFrame::SetAppIconVariant {
+                request_id,
+                app_id,
+                variant,
+            } => {
+                if !session_owns_app(session, &app_id) {
+                    return vec![protocol_error(
+                        Some(request_id),
+                        "session-mismatch",
+                        format!("session does not own app: {app_id}"),
+                    )];
+                }
+                match self.kernel.set_app_icon_variant(&app_id, variant) {
                     Ok(()) => {
                         if let Ok(identity) = self.kernel.app_identity(&app_id) {
                             session.app_identity = Some(identity);
@@ -471,16 +491,9 @@ fn default_app_options() -> AppOptions {
     AppOptions {
         id: Some("opentray.default".to_string()),
         name: Some("opentray".to_string()),
-        icon: None,
+        app_icon: None,
         default: true,
     }
-}
-
-fn app_name(name: Option<&str>, fallback: &str) -> String {
-    name.map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(fallback)
-        .to_string()
 }
 
 fn request_id(frame: &ClientFrame) -> Option<RequestId> {
@@ -490,6 +503,7 @@ fn request_id(frame: &ClientFrame) -> Option<RequestId> {
         | ClientFrame::GetAppIdentity { request_id, .. }
         | ClientFrame::SetAppName { request_id, .. }
         | ClientFrame::SetAppIcon { request_id, .. }
+        | ClientFrame::SetAppIconVariant { request_id, .. }
         | ClientFrame::CreateTray { request_id, .. }
         | ClientFrame::DestroyTray { request_id, .. }
         | ClientFrame::GetTrayBounds { request_id, .. }
@@ -526,10 +540,17 @@ fn extension_events(events: Vec<ExtensionEnvelope>) -> Vec<ServerFrame> {
 }
 
 fn kernel_error(request_id: Option<RequestId>, error: KernelError) -> ServerFrame {
-    if let KernelError::Extension(ExtensionError::Detailed { category, message }) = error {
-        return protocol_error(request_id, category, message);
+    match error {
+        KernelError::AppIconVariantNotFound { app_id, variant } => protocol_error(
+            request_id,
+            "app-icon-variant-not-found",
+            format!("app icon variant not found for {app_id}: {variant}"),
+        ),
+        KernelError::Extension(ExtensionError::Detailed { category, message }) => {
+            protocol_error(request_id, category, message)
+        }
+        error => protocol_error(request_id, "kernel-error", error.to_string()),
     }
-    protocol_error(request_id, "kernel-error", error.to_string())
 }
 
 fn protocol_error(

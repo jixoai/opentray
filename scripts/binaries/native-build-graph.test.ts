@@ -162,13 +162,13 @@ describe("Feature: shared native build graph", () => {
     expect(script).toContain("NSMicrophoneUsageDescription");
   });
 
-  test("Scenario: Given a Darwin runtime build When the graph is inspected Then the shared app carrier is emitted with the broker artifact", () => {
+  test("Scenario: Given a Darwin runtime build When the graph is inspected Then the package receives only the shared app bundle template", () => {
     const executions = materializeNativeBuildExecutions(
       ["runtime"],
       ["darwin-arm64", "linux-x64"]
     );
-    const darwinCarrierScript = readFileSync(
-      resolve(repoRoot, "scripts/release/build-darwin-runtime-carrier.sh"),
+    const darwinGraph = readFileSync(
+      resolve(repoRoot, "scripts/binaries/native-build-graph.ts"),
       "utf8"
     );
     const darwinPackage = readFileSync(
@@ -178,8 +178,9 @@ describe("Feature: shared native build graph", () => {
 
     expect(executions[0]?.artifactKinds).toEqual(["runtime"]);
     expect(executions[1]?.artifactKinds).toEqual(["runtime"]);
-    expect(darwinCarrierScript).toContain("packages/darwin-app-carrier");
-    expect(darwinCarrierScript).toContain("camera,microphone");
-    expect(darwinPackage).toContain('"app/OpenTray.app.zip"');
+    expect(darwinGraph).toContain("packages/darwin-app-carrier/Info.plist");
+    expect(darwinGraph).not.toContain("build-darwin-runtime-carrier.sh");
+    expect(darwinPackage).toContain('"app/Info.plist"');
+    expect(darwinPackage).not.toContain('"app/OpenTray.app.zip"');
   });
 });

@@ -1,5 +1,5 @@
 use opentray_spec::{
-    AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame,
+    AppIcon, AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame,
     ExpectedExtensionIdentity, ExtensionArtifactTarget, Icon, Menu, MenuItem, ServerFrame,
     TrayEvent, TrayOptions, PROTOCOL_VERSION,
 };
@@ -13,6 +13,37 @@ use crate::{
 
 fn icon() -> Option<Icon> {
     Some(Icon::rgba(vec![0, 0, 0, 0], 1, 1))
+}
+
+fn app_icon() -> Option<AppIcon> {
+    Some(
+        serde_json::from_value(serde_json::json!([{
+            "platform": "darwin",
+            "format": "icns",
+            "source": { "type": "encoded", "data": [105, 99, 110, 115] }
+        }]))
+        .expect("app icon"),
+    )
+}
+
+fn app_icon_catalog() -> Option<AppIcon> {
+    Some(
+        serde_json::from_value(serde_json::json!([
+            {
+                "platform": "darwin",
+                "format": "icns",
+                "variant": ["default", "empty"],
+                "source": { "type": "file", "path": "empty.icns" }
+            },
+            {
+                "platform": "darwin",
+                "format": "icns",
+                "variant": "files",
+                "source": { "type": "file", "path": "files.icns" }
+            }
+        ]))
+        .expect("app icon catalog"),
+    )
 }
 
 fn expected_extension_identity(extension_name: &str) -> ExpectedExtensionIdentity {
@@ -120,7 +151,7 @@ fn command_before_init_is_rejected_without_backend_mutation() {
             options: AppOptions {
                 id: Some("app".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: true,
             },
         },
@@ -152,7 +183,7 @@ fn create_app_returns_correlated_broker_identity() {
             options: AppOptions {
                 id: Some("app".to_string()),
                 name: Some("App".to_string()),
-                icon: None,
+                app_icon: None,
                 default: true,
             },
         },
@@ -169,13 +200,57 @@ fn create_app_returns_correlated_broker_identity() {
 }
 
 #[test]
+fn repeated_app_id_pins_the_existing_kernel_identity() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
+    let mut first = BrokerSession::new();
+    let mut repeated = BrokerSession::new();
+    broker.handle_frame(&mut first, init(), "0.1.0");
+    broker.handle_frame(&mut repeated, init(), "0.1.0");
+    let app_icon = app_icon();
+
+    broker.handle_frame(
+        &mut first,
+        ClientFrame::CreateApp {
+            request_id: "req-first".to_string(),
+            options: AppOptions {
+                id: Some("shared-app".to_string()),
+                name: Some("Original".to_string()),
+                app_icon: app_icon.clone(),
+                default: true,
+            },
+        },
+        "0.1.0",
+    );
+    broker.handle_frame(
+        &mut repeated,
+        ClientFrame::CreateApp {
+            request_id: "req-repeated".to_string(),
+            options: AppOptions {
+                id: Some("shared-app".to_string()),
+                name: Some("Replacement".to_string()),
+                app_icon: None,
+                default: false,
+            },
+        },
+        "0.1.0",
+    );
+
+    assert!(matches!(
+        repeated.app_identity(),
+        Some(identity)
+            if identity.app_name == "Original" && identity.app_icon == app_icon.as_ref().cloned()
+    ));
+}
+
+#[test]
 fn app_identity_mutations_are_session_owned_and_projected() {
     let backend = FakeBackend::new(BackendCapabilities::full());
     let mut broker = BrokerKernel::new(backend.clone(), test_broker_artifact_identity());
     let mut session = BrokerSession::new();
     broker.handle_frame(&mut session, init(), "0.1.0");
     let surface = create_app(&mut broker, &mut session);
-    let app_icon = icon();
+    let app_icon = app_icon();
 
     let set_name = broker.handle_frame(
         &mut session,
@@ -191,7 +266,7 @@ fn app_identity_mutations_are_session_owned_and_projected() {
         ClientFrame::SetAppIcon {
             request_id: "req-icon".to_string(),
             app_id: surface.app_id.clone(),
-            icon: app_icon.clone(),
+            app_icon: app_icon.clone(),
         },
         "0.1.0",
     );
@@ -209,12 +284,72 @@ fn app_identity_mutations_are_session_owned_and_projected() {
     assert!(matches!(
         &identity[0],
         ServerFrame::AppIdentity { identity, .. }
-            if identity.app_name == "Renamed" && identity.icon == app_icon
+            if identity.app_name == "Renamed" && identity.app_icon == app_icon
     ));
     assert!(backend.operations().iter().any(|operation| {
         matches!(operation, BackendOperation::SyncApp(projection)
-            if projection.title.as_deref() == Some("Renamed") && projection.icon == app_icon)
+            if projection.title.as_deref() == Some("Renamed") && projection.app_icon == app_icon)
     }));
+}
+
+#[test]
+fn app_icon_variant_frame_updates_identity_and_returns_typed_rejection() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::new(backend, test_broker_artifact_identity());
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let app = create_app(&mut broker, &mut session);
+    let catalog = app_icon_catalog();
+
+    let set_catalog = broker.handle_frame(
+        &mut session,
+        ClientFrame::SetAppIcon {
+            request_id: "req-catalog".to_string(),
+            app_id: app.app_id.clone(),
+            app_icon: catalog.clone(),
+        },
+        "0.1.0",
+    );
+    assert!(
+        matches!(set_catalog[0], ServerFrame::Ack { ref request_id } if request_id == "req-catalog")
+    );
+
+    let select_files = broker.handle_frame(
+        &mut session,
+        ClientFrame::SetAppIconVariant {
+            request_id: "req-files".to_string(),
+            app_id: app.app_id.clone(),
+            variant: "files".to_string(),
+        },
+        "0.1.0",
+    );
+    assert!(
+        matches!(select_files[0], ServerFrame::Ack { ref request_id } if request_id == "req-files")
+    );
+    assert!(matches!(
+        session.app_identity(),
+        Some(identity)
+            if identity.app_icon == catalog && identity.app_icon_variant.as_deref() == Some("files")
+    ));
+
+    let missing = broker.handle_frame(
+        &mut session,
+        ClientFrame::SetAppIconVariant {
+            request_id: "req-missing".to_string(),
+            app_id: app.app_id,
+            variant: "missing".to_string(),
+        },
+        "0.1.0",
+    );
+    assert!(matches!(
+        &missing[0],
+        ServerFrame::Error { request_id: Some(request_id), code, .. }
+            if request_id == "req-missing" && code == "app-icon-variant-not-found"
+    ));
+    assert!(matches!(
+        session.app_identity(),
+        Some(identity) if identity.app_icon_variant.as_deref() == Some("files")
+    ));
 }
 
 #[test]
@@ -661,7 +796,7 @@ fn create_app<L: ExtensionLoader>(
             options: AppOptions {
                 id: Some("app".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: true,
             },
         },

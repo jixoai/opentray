@@ -7,11 +7,13 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import type { BrokerArtifactIdentity } from "@opentray/spec";
-
+import type { AppIcon } from "@opentray/spec";
 import {
-  materializeDarwinBrokerCarrier,
-  type MaterializeDarwinCarrierOptions,
-} from "./darwin-carrier";
+  ensureDarwinAppBundle,
+  type OpenTrayAppBundleOptions,
+  type OpenTrayPackageIdentity,
+} from "@opentray/packaging";
+
 import type { DaemonPaths } from "./paths";
 import {
   type BrokerNativeTarget,
@@ -37,8 +39,8 @@ const requireFromSource = createRequire(sourceUrl);
 export interface InstalledBrokerBinaryResolution {
   binary?: string;
   binaryPath?: string;
-  carrierArchive?: string;
-  carrierArchivePath?: string;
+  carrierTemplate?: string;
+  carrierTemplatePath?: string;
 }
 
 export interface ResolveInstalledBrokerBinaryOptions {
@@ -63,12 +65,13 @@ export interface ResolveBrokerCommandOptions {
     paths: DaemonPaths,
     platform: NodeJS.Platform,
   ) => Promise<string>;
-  ensureDevDarwinCarrierArchive?: (
+  ensureDevDarwinCarrierTemplate?: (
     workspaceRoot: string,
     paths: DaemonPaths,
-    brokerPath: string,
   ) => Promise<string>;
-  materializeDarwinCarrier?: (options: MaterializeDarwinCarrierOptions) => Promise<string>;
+  appBundle?: OpenTrayAppBundleOptions & { readonly path: string };
+  appIcon?: AppIcon;
+  packageIdentity?: OpenTrayPackageIdentity;
 }
 
 export interface ResolveBrokerArtifactOptions extends ResolveBrokerCommandOptions {
@@ -127,14 +130,11 @@ export const resolveBrokerCommand = async (
   );
   if (installed.binary !== undefined) {
     if (platform !== "darwin") return commandForBinary(installed.binary, paths);
-    if (installed.carrierArchive === undefined) {
+    if (options.appBundle === undefined) return commandForBinary(installed.binary, paths);
+    if (installed.carrierTemplate === undefined) {
       throw missingDarwinCarrierError(target, installed, arch);
     }
-    const binary = await (options.materializeDarwinCarrier ?? materializeDarwinBrokerCarrier)({
-      archivePath: installed.carrierArchive,
-      brokerPath: installed.binary,
-      paths,
-    });
+    const binary = await ensureDarwinBundle(options, paths, installed.binary, installed.carrierTemplate);
     return commandForBinary(binary, paths);
   }
 
@@ -147,12 +147,17 @@ export const resolveBrokerCommand = async (
       platform,
     );
     if (platform !== "darwin") return commandForBinary(binary, paths);
-    const archivePath = await (
-      options.ensureDevDarwinCarrierArchive ?? ensureDevDarwinCarrierArchive
-    )(workspaceRoot, paths, binary);
-    const carrierBinary = await (
-      options.materializeDarwinCarrier ?? materializeDarwinBrokerCarrier
-    )({ archivePath, brokerPath: binary, paths });
+    const carrierBinary =
+      options.appBundle === undefined
+        ? binary
+        : await ensureDarwinBundle(
+            options,
+            paths,
+            binary,
+            await (
+              options.ensureDevDarwinCarrierTemplate ?? ensureDevDarwinCarrierTemplate
+            )(workspaceRoot, paths),
+          );
     return commandForBinary(carrierBinary, paths);
   }
 
@@ -187,17 +192,17 @@ export const resolveInstalledBrokerBinary = async (
   }
 
   const binaryPath = join(dirname(packageJsonPath), target.binaryRelativePath);
-  const carrierArchivePath =
-    target.carrierArchiveRelativePath === undefined
+  const carrierTemplatePath =
+    target.carrierTemplateRelativePath === undefined
       ? undefined
-      : join(dirname(packageJsonPath), target.carrierArchiveRelativePath);
-  let carrierArchive: string | undefined;
-  if (carrierArchivePath !== undefined) {
+      : join(dirname(packageJsonPath), target.carrierTemplateRelativePath);
+  let carrierTemplate: string | undefined;
+  if (carrierTemplatePath !== undefined) {
     try {
       await (options.assertCarrierAccessible ?? assertInstalledCarrierAccessible)(
-        carrierArchivePath,
+        carrierTemplatePath,
       );
-      carrierArchive = carrierArchivePath;
+      carrierTemplate = carrierTemplatePath;
     } catch (error) {
       if (
         !isNodeError(error) ||
@@ -215,8 +220,8 @@ export const resolveInstalledBrokerBinary = async (
     return {
       binary: binaryPath,
       binaryPath,
-      ...(carrierArchivePath === undefined ? {} : { carrierArchivePath }),
-      ...(carrierArchive === undefined ? {} : { carrierArchive }),
+      ...(carrierTemplatePath === undefined ? {} : { carrierTemplatePath }),
+      ...(carrierTemplate === undefined ? {} : { carrierTemplate }),
     };
   } catch (error) {
     if (
@@ -225,8 +230,8 @@ export const resolveInstalledBrokerBinary = async (
     ) {
       return {
         binaryPath,
-        ...(carrierArchivePath === undefined ? {} : { carrierArchivePath }),
-        ...(carrierArchive === undefined ? {} : { carrierArchive }),
+        ...(carrierTemplatePath === undefined ? {} : { carrierTemplatePath }),
+        ...(carrierTemplate === undefined ? {} : { carrierTemplate }),
       };
     }
     throw error;
@@ -308,24 +313,36 @@ const ensureDevBrokerBinary = async (
   return binary;
 };
 
-const ensureDevDarwinCarrierArchive = async (
+const ensureDevDarwinCarrierTemplate = async (
   workspaceRoot: string,
+  _paths: DaemonPaths,
+): Promise<string> => {
+  return join(workspaceRoot, "packages/darwin-app-carrier/Info.plist");
+};
+
+const ensureDarwinBundle = async (
+  options: ResolveBrokerCommandOptions,
   paths: DaemonPaths,
   brokerPath: string,
+  templatePath: string,
 ): Promise<string> => {
-  const archivePath = join(
-    workspaceRoot,
-    "target",
-    "darwin-app-carrier",
-    `source-${paths.callerLabel}`,
-    "OpenTray.app.zip",
-  );
-  await runProcess(
-    "bash",
-    ["scripts/release/build-darwin-runtime-carrier.sh", archivePath, brokerPath],
-    workspaceRoot,
-  );
-  return archivePath;
+  const appBundle = options.appBundle;
+  if (appBundle === undefined) return brokerPath;
+  const arch = options.arch ?? process.arch;
+  if (arch !== "arm64" && arch !== "x64") {
+    throw new Error(`unsupported Darwin app bundle architecture: ${arch}`);
+  }
+  return ensureDarwinAppBundle({
+    bundlePath: appBundle.path,
+    packageName: options.packageIdentity?.name ?? paths.callerLabel,
+    appId: paths.appId,
+    appName: paths.appName,
+    target: { os: "darwin", arch },
+    brokerPath,
+    templatePath,
+    ...(options.appIcon === undefined ? {} : { appIcon: options.appIcon }),
+    ...(appBundle.reinitialize === undefined ? {} : { reinitialize: appBundle.reinitialize }),
+  });
 };
 
 const runCargoBuild = (workspaceRoot: string, targetDir?: string): Promise<void> =>
@@ -388,14 +405,14 @@ const missingDarwinCarrierError = (
   arch: string,
 ): MissingPlatformBrokerBinaryError =>
   new MissingPlatformBrokerBinaryError(
-    `unable to resolve OpenTray Darwin carrier for ${target.packageName}; expected ${resolution.carrierArchivePath ?? target.carrierArchiveRelativePath ?? "app/OpenTray.app.zip"}`,
+    `unable to resolve OpenTray Darwin app bundle template for ${target.packageName}; expected ${resolution.carrierTemplatePath ?? target.carrierTemplateRelativePath ?? "app/Info.plist"}`,
     "darwin",
     arch,
     {
       packageName: target.packageName,
-      ...(resolution.carrierArchivePath === undefined
+      ...(resolution.carrierTemplatePath === undefined
         ? {}
-        : { binaryPath: resolution.carrierArchivePath }),
+        : { binaryPath: resolution.carrierTemplatePath }),
     },
   );
 

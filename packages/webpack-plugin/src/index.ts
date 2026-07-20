@@ -1,9 +1,14 @@
+import { join } from "node:path";
+
 import {
+  buildDarwinAppBundle,
   stageOpenTrayPackage,
+  type DarwinAppBundleOptions,
   type OpenTrayArtifactInput,
   type OpenTrayPackagingApp,
   type OpenTrayPackageManifest,
   type OpenTrayPackageResult,
+  type OpenTrayDarwinAppBundleResult,
 } from "@opentray/packaging";
 
 export interface OpenTrayWebpackPluginOptions {
@@ -69,6 +74,40 @@ export interface OpenTrayWebpackPlugin {
   /** Returns the last staging result. Only populated after `afterEmit` runs. */
   readonly getLastResult: () => OpenTrayPackageResult | undefined;
 }
+
+export interface OpenTrayWebpackAppBundlePluginOptions
+  extends Omit<DarwinAppBundleOptions, "bundlePath" | "reinitialize"> {
+  readonly bundlePath?: string;
+}
+
+export interface OpenTrayWebpackAppBundlePlugin {
+  readonly name: "opentray-app-bundle";
+  apply(compiler: WebpackCompilerLike): void;
+  readonly getLastResult: () => OpenTrayDarwinAppBundleResult | undefined;
+}
+
+/** webpack lifecycle adapter for the shared Darwin app bundle contract. */
+export const openTrayAppBundlePlugin = (
+  options: OpenTrayWebpackAppBundlePluginOptions,
+): OpenTrayWebpackAppBundlePlugin => {
+  let lastResult: OpenTrayDarwinAppBundleResult | undefined;
+  return {
+    name: "opentray-app-bundle",
+    apply(compiler) {
+      compiler.hooks.afterEmit.tapAsync("OpenTrayAppBundlePlugin", async (_compilation, cb) => {
+        try {
+          const outputDir = compiler.options.output?.path ?? process.cwd();
+          const bundlePath = options.bundlePath ?? join(outputDir, `${options.appName}.app`);
+          lastResult = await buildDarwinAppBundle({ ...options, bundlePath });
+          cb();
+        } catch (error) {
+          cb(error as Error);
+        }
+      });
+    },
+    getLastResult: () => lastResult,
+  };
+};
 
 export const openTrayWebpackPlugin = (
   options: OpenTrayWebpackPluginOptions,

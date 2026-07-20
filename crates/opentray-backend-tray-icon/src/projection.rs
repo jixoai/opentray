@@ -2,7 +2,7 @@ use std::{collections::HashMap, io::Cursor};
 
 use opentray_core::{AppProjection, TrayProjection};
 use opentray_spec::{
-    AppId, Icon, IconImage, Menu, MenuItem, MenuItemId, Tooltip, TrayEvent, TrayId,
+    AppIcon, AppId, Icon, IconImage, Menu, MenuItem, MenuItemId, Tooltip, TrayEvent, TrayId,
 };
 use png::{ColorType, Decoder, Transformations};
 
@@ -11,7 +11,7 @@ pub struct TrayIconProjection {
     pub app_id: AppId,
     pub title: Option<String>,
     pub tooltip: Option<Tooltip>,
-    pub icon: Option<TrayIconAsset>,
+    pub app_icon: Option<AppIcon>,
     pub trays: Vec<TrayIconTrayProjection>,
     pub routes: TrayIconRouteTable,
 }
@@ -43,12 +43,7 @@ impl TrayIconProjection {
             app_id: projection.app.app_id.clone(),
             title: projection.title.clone(),
             tooltip: projection.tooltip.clone(),
-            icon: projection
-                .icon
-                .as_ref()
-                .and_then(TrayIconSelection::from_app_icon)
-                .map(TrayIconAsset::from_selection)
-                .transpose()?,
+            app_icon: projection.app_icon.clone(),
             trays,
             routes,
         })
@@ -131,76 +126,6 @@ impl<'a> TrayIconSelection<'a> {
             text: fallback.text.as_ref(),
             is_template: false,
         })
-    }
-
-    fn from_app_icon(icon: &'a Icon) -> Option<Self> {
-        let os = current_icon_os();
-        let platform_icon = match os {
-            IconOs::Darwin => icon
-                .darwin_icon_only
-                .as_ref()
-                .filter(|candidate| !candidate.is_template)
-                .map(|candidate| Self {
-                    image: &candidate.image,
-                    text: None,
-                    is_template: false,
-                }),
-            IconOs::Win32 => icon.win32_icon_only.as_ref().map(|image| Self {
-                image,
-                text: None,
-                is_template: false,
-            }),
-            IconOs::Linux => icon.linux_icon_only.as_ref().map(|image| Self {
-                image,
-                text: None,
-                is_template: false,
-            }),
-            IconOs::Other => None,
-        };
-        platform_icon
-            .or_else(|| {
-                icon.icon_only.as_ref().map(|image| Self {
-                    image,
-                    text: None,
-                    is_template: false,
-                })
-            })
-            .or_else(|| match os {
-                IconOs::Darwin => icon
-                    .darwin_icon_text
-                    .as_ref()
-                    .filter(|candidate| !candidate.is_template)
-                    .map(|candidate| Self {
-                        image: &candidate.image,
-                        text: Some(&candidate.text),
-                        is_template: false,
-                    }),
-                IconOs::Win32 => icon.win32_icon_text.as_ref().map(|candidate| Self {
-                    image: &candidate.image,
-                    text: Some(&candidate.text),
-                    is_template: false,
-                }),
-                IconOs::Linux => icon.linux_icon_text.as_ref().map(|candidate| Self {
-                    image: &candidate.image,
-                    text: Some(&candidate.text),
-                    is_template: false,
-                }),
-                IconOs::Other => None,
-            })
-            .or_else(|| {
-                icon.icon_text.as_ref().map(|candidate| Self {
-                    image: &candidate.image,
-                    text: Some(&candidate.text),
-                    is_template: false,
-                })
-            })
-            .or_else(|| {
-                icon.fallback.as_ref().map(|fallback| Self {
-                    image: &fallback.image,
-                    text: fallback.text.as_ref(),
-                    is_template: false,
-                })
-            })
     }
 }
 
@@ -820,7 +745,8 @@ mod tests {
     };
 
     use opentray_spec::{
-        AppRef, DarwinIcon, DarwinIconText, Icon, IconImage, IconText, Menu, MenuItem, SimpleIcon,
+        AppIcon, AppRef, DarwinIcon, DarwinIconText, Icon, IconImage, IconText, Menu, MenuItem,
+        SimpleIcon,
     };
     use png::Encoder;
 
@@ -838,7 +764,7 @@ mod tests {
             },
             title: Some("Host".to_string()),
             tooltip: None,
-            icon: None,
+            app_icon: None,
             trays: vec![
                 TrayProjection {
                     tray_id: "tray/a".to_string(),
@@ -880,7 +806,7 @@ mod tests {
             },
             title: None,
             tooltip: None,
-            icon: None,
+            app_icon: None,
             trays: vec![TrayProjection {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
@@ -916,7 +842,7 @@ mod tests {
             },
             title: None,
             tooltip: None,
-            icon: None,
+            app_icon: None,
             trays: vec![TrayProjection {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
@@ -950,7 +876,7 @@ mod tests {
             },
             title: None,
             tooltip: None,
-            icon: None,
+            app_icon: None,
             trays: vec![TrayProjection {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
@@ -989,7 +915,7 @@ mod tests {
             },
             title: None,
             tooltip: None,
-            icon: None,
+            app_icon: None,
             trays: vec![TrayProjection {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
@@ -1015,7 +941,7 @@ mod tests {
             },
             title: None,
             tooltip: None,
-            icon: None,
+            app_icon: None,
             trays: vec![TrayProjection {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),
@@ -1094,55 +1020,13 @@ mod tests {
     }
 
     #[test]
-    fn template_only_darwin_icon_is_not_projected_as_application_artwork() {
-        let projection = TrayIconProjection::from_app_projection(&projection_with_app_icon(Icon {
-            icon_only: None,
-            darwin_icon_only: Some(DarwinIcon {
-                image: rgba_image([1, 2, 3, 4]),
-                is_template: true,
-            }),
-            win32_icon_only: None,
-            linux_icon_only: None,
-            text_only: None,
-            icon_text: None,
-            darwin_icon_text: None,
-            win32_icon_text: None,
-            linux_icon_text: None,
-            fallback: None,
-        }))
-        .expect("projection");
+    fn strict_app_icon_is_preserved_without_tray_conversion() {
+        let app_icon = app_icon();
+        let projection =
+            TrayIconProjection::from_app_projection(&projection_with_app_icon(app_icon.clone()))
+                .expect("projection");
 
-        assert_eq!(projection.icon, None);
-    }
-
-    #[test]
-    fn generic_app_artwork_survives_a_template_only_darwin_candidate() {
-        let projection = TrayIconProjection::from_app_projection(&projection_with_app_icon(Icon {
-            icon_only: Some(rgba_image([9, 10, 11, 12])),
-            darwin_icon_only: Some(DarwinIcon {
-                image: rgba_image([1, 2, 3, 4]),
-                is_template: true,
-            }),
-            win32_icon_only: None,
-            linux_icon_only: None,
-            text_only: None,
-            icon_text: None,
-            darwin_icon_text: None,
-            win32_icon_text: None,
-            linux_icon_text: None,
-            fallback: None,
-        }))
-        .expect("projection");
-
-        assert_eq!(
-            projection.icon,
-            Some(TrayIconAsset::Rgba {
-                data: vec![9, 10, 11, 12],
-                width: 1,
-                height: 1,
-                is_template: false,
-            })
-        );
+        assert_eq!(projection.app_icon, Some(app_icon));
     }
 
     #[test]
@@ -1445,14 +1329,23 @@ mod tests {
         projection_with_optional_icon(Some(icon))
     }
 
-    fn projection_with_app_icon(icon: Icon) -> AppProjection {
+    fn app_icon() -> AppIcon {
+        serde_json::from_value(serde_json::json!([{
+            "platform": "darwin",
+            "format": "icns",
+            "source": { "type": "encoded", "data": [105, 99, 110, 115] }
+        }]))
+        .expect("app icon")
+    }
+
+    fn projection_with_app_icon(app_icon: AppIcon) -> AppProjection {
         AppProjection {
             app: AppRef {
                 app_id: "surface-1".to_string(),
             },
             title: Some("Status App".to_string()),
             tooltip: None,
-            icon: Some(icon),
+            app_icon: Some(app_icon),
             trays: vec![],
         }
     }
@@ -1464,7 +1357,7 @@ mod tests {
             },
             title: Some("Status App".to_string()),
             tooltip: None,
-            icon: None,
+            app_icon: None,
             trays: vec![TrayProjection {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),

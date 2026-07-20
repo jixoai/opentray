@@ -10,6 +10,15 @@ import {
 
 import { resolveBrokerArtifact, type ResolvedBrokerArtifact } from "./broker-command";
 import type { DaemonPaths } from "./paths";
+import type { AppIcon } from "@opentray/spec";
+import type {
+  OpenTrayAppBundleOptions,
+  OpenTrayPackageIdentity,
+} from "@opentray/packaging";
+import {
+  clearDarwinAppBundleOwner,
+  writeDarwinAppBundleOwner,
+} from "@opentray/packaging";
 
 const DAEMON_STDIO_ENV = "OPENTRAY_DAEMON_STDIO";
 const DEFAULT_DAEMON_LOCK_TIMEOUT_MS = 5_000;
@@ -59,9 +68,24 @@ export interface InspectDaemonOptions {
   driver: DaemonDriver;
 }
 
-export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => ({
+export interface NodeDaemonDriverOptions {
+  readonly appBundle?: OpenTrayAppBundleOptions & { readonly path: string };
+  readonly appIcon?: AppIcon;
+  readonly packageIdentity?: OpenTrayPackageIdentity;
+}
+
+export const createNodeDaemonDriver = (
+  cliEntrypoint: string,
+  options: NodeDaemonDriverOptions = {},
+): DaemonDriver => ({
   async resolveBroker(paths) {
-    return resolveBrokerArtifact(paths);
+    return resolveBrokerArtifact(paths, {
+      ...(options.appBundle === undefined ? {} : { appBundle: options.appBundle }),
+      ...(options.appIcon === undefined ? {} : { appIcon: options.appIcon }),
+      ...(options.packageIdentity === undefined
+        ? {}
+        : { packageIdentity: options.packageIdentity }),
+    });
   },
   async isAlive(pid) {
     return isProcessAlive(pid);
@@ -86,10 +110,21 @@ export const createNodeDaemonDriver = (cliEntrypoint: string): DaemonDriver => (
     });
 
     child.unref();
-    return child.pid ?? 0;
+    const pid = child.pid ?? 0;
+    if (process.platform === "darwin" && options.appBundle !== undefined && pid > 0) {
+      await writeDarwinAppBundleOwner(
+        options.appBundle.path,
+        pid,
+        broker.artifactIdentity.executableHash,
+      );
+    }
+    return pid;
   },
   async stop(pid) {
     process.kill(pid, "SIGTERM");
+    if (process.platform === "darwin" && options.appBundle !== undefined) {
+      await clearDarwinAppBundleOwner(options.appBundle.path, pid);
+    }
   },
 });
 
@@ -106,11 +141,33 @@ export const startDaemon = async ({
 
   const lock = await acquireLock(paths.lockFile, lockTimeoutMs);
   try {
-    // Darwin carrier materialization is part of broker resolution. Keep it under the same
-    // caller lifecycle lock that decides reuse/replacement so bundle bytes cannot race readiness.
-    const broker = await driver.resolveBroker(paths);
     const existingPid = await readPid(paths.pidFile);
-    if (existingPid !== undefined && (await driver.isAlive(existingPid))) {
+    let existingAlive =
+      existingPid !== undefined && (await driver.isAlive(existingPid));
+    let broker: ResolvedBrokerArtifact;
+    try {
+      // Darwin bundle materialization is part of broker resolution. The bundle owner marker
+      // rejects an incompatible live owner before any managed file is replaced.
+      broker = await driver.resolveBroker(paths);
+    } catch (error) {
+      if (
+        existingAlive &&
+        isBundleInUseError(error) &&
+        existingPid !== undefined
+      ) {
+        await driver.stop(existingPid);
+        if (!(await waitUntilStopped(driver, existingPid))) {
+          throw new Error(
+            `incompatible daemon broker did not stop within the bounded shutdown window: pid=${existingPid}`,
+          );
+        }
+        existingAlive = false;
+        broker = await driver.resolveBroker(paths);
+      } else {
+        throw error;
+      }
+    }
+    if (existingPid !== undefined && existingAlive) {
       const ready = await readReadyMetadata(paths.readyFile);
       // Liveness is not compatibility: only the exact resolved executable may win reuse.
       if (readyMatchesBroker(ready, paths, existingPid, broker)) {
@@ -304,6 +361,11 @@ const readyMatchesBroker = (
   ready.callerLabel === paths.callerLabel &&
   executablePathsEqual(ready.executablePath, broker.executablePath) &&
   brokerArtifactIdentityEquals(ready.brokerArtifactIdentity, broker.artifactIdentity);
+
+const isBundleInUseError = (error: unknown): boolean =>
+  error instanceof Error &&
+  "code" in error &&
+  error.code === "bundle_in_use";
 
 export const executablePathsEqual = (
   left: string,

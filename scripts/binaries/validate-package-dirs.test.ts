@@ -15,7 +15,7 @@ describe("Feature: native package publish validator", () => {
         executable: true,
       },
       {
-        path: "app/OpenTray.app.zip",
+        path: "app/Info.plist",
         executable: false,
       },
     ]);

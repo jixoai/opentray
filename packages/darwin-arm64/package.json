@@ -15,7 +15,7 @@
   ],
   "files": [
     "bin/opentray",
-    "app/OpenTray.app.zip",
+    "app/Info.plist",
     "README.md"
   ],
   "publishConfig": {

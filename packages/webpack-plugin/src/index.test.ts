@@ -6,10 +6,32 @@ import { describe, expect, it } from "vitest";
 
 import { formatOpenTrayArtifactStem } from "@opentray/packaging";
 
-import { openTrayWebpackPlugin, resolveWebpackEntry } from "./index";
+import { openTrayAppBundlePlugin, openTrayWebpackPlugin, resolveWebpackEntry } from "./index";
 import type { WebpackCompilerLike, WebpackOptionsLike } from "./index";
 
 describe("@opentray/webpack-plugin", () => {
+  it("delegates app bundle generation to the shared Darwin contract", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-webpack-app-bundle-"));
+    const outDir = join(root, "dist");
+    const brokerPath = join(root, "broker");
+    const templatePath = join(root, "Info.plist");
+    await writeFile(brokerPath, "broker");
+    await writeFile(templatePath, appBundleTemplate());
+    const plugin = openTrayAppBundlePlugin({
+      packageName: "@jixoai/consumer",
+      appId: "com.example.consumer",
+      appName: "Consumer",
+      target: { os: "darwin", arch: "arm64" },
+      brokerPath,
+      templatePath,
+    });
+    const compiler = createMockCompiler({ output: { path: outDir } });
+    plugin.apply(compiler);
+    await compiler.runAfterEmit();
+    expect(plugin.getLastResult()?.executablePath).toBe(
+      join(outDir, "Consumer.app/Contents/MacOS/opentray"),
+    );
+  });
   it("Scenario: Given webpack compiler options When afterEmit fires Then the shared manifest shape is emitted", async () => {
     const root = await mkdtemp(join(tmpdir(), "opentray-webpack-"));
     const outDir = join(root, "dist");
@@ -81,6 +103,9 @@ describe("@opentray/webpack-plugin", () => {
     expect(resolveWebpackEntry({ main: "src/app.ts" })).toBe("src/app.ts");
   });
 });
+
+const appBundleTemplate = (): string =>
+  `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>OpenTray</string></dict></plist>\n`;
 
 const createMockCompiler = (options: WebpackOptionsLike): WebpackCompilerLike & {
   runAfterEmit(): Promise<void>;

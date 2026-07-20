@@ -40,3 +40,16 @@ root instead of the manifest directory.
 `app.id` is the artifact address source. `app.name` is the human label. Missing
 or empty identity fails packaging instead of inventing a generic `opentray`
 artifact name.
+
+## Darwin App Bundles
+
+`buildDarwinAppBundle()` is the one bundle generator used by the Vite, esbuild,
+webpack, and tsdown adapters. It copies the selected broker into
+`Contents/MacOS/opentray`, projects the caller identity into `Info.plist`,
+writes the default ICNS into `Contents/Resources`, and commits
+`opentray-app-bundle.json` last. Runtime managed mode and plugin prebuilds
+therefore produce the same manifest and layout.
+
+`ensureDarwinAppBundle({ reinitialize: false })` validates that contract without
+writing the bundle. It rejects target, identity, broker, template, or icon drift
+with `DarwinAppBundleError`.

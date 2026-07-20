@@ -79,7 +79,7 @@ impl BrokerOptions {
         AppOptions {
             id: Some(self.app_id.clone()),
             name: Some(self.app_name.clone()),
-            icon: None,
+            app_icon: None,
             default: true,
         }
     }

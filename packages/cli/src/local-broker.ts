@@ -1,6 +1,7 @@
 import { createConnection, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { isAbsolute, resolve } from "node:path";
 
 import {
   PROTOCOL_VERSION,
@@ -12,6 +13,12 @@ import {
   type RequestId,
   type ServerFrame,
 } from "@opentray/spec";
+import type { OpenTrayAppBundleOptions } from "@opentray/packaging";
+import {
+  resolveDefaultDarwinAppBundlePath,
+  resolveOpenTrayPackageIdentity,
+  type OpenTrayPackageIdentity,
+} from "@opentray/packaging";
 
 import type { OpenTrayTransport } from "./client";
 import { resolveCallerLabel } from "./daemon/caller-label";
@@ -22,6 +29,7 @@ import {
 } from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
+import type { DaemonPaths } from "./daemon/paths";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 
@@ -50,6 +58,10 @@ export interface ConnectLocalBrokerOptions
   cliEntrypoint?: string;
   callerLabel?: string;
   expectedBrokerArtifactIdentity?: BrokerArtifactIdentity;
+  appIcon?: import("@opentray/spec").AppIcon;
+  appBundle?: OpenTrayAppBundleOptions;
+  packageName?: string;
+  packageRoot?: string;
 }
 
 interface PendingRequest {
@@ -94,7 +106,24 @@ export const connectLocalBroker = async (
     );
   }
   const cliEntrypoint = options.cliEntrypoint ?? resolveCliEntrypoint();
-  const driver = options.daemonDriver ?? createNodeDaemonDriver(cliEntrypoint);
+  const packageIdentity =
+    process.platform === "darwin" && autoStart
+      ? await resolveOpenTrayPackageIdentity({
+          ...(options.packageName === undefined ? {} : { packageName: options.packageName }),
+          ...(options.packageRoot === undefined ? {} : { packageRoot: options.packageRoot }),
+        })
+      : undefined;
+  const appBundle =
+    process.platform === "darwin" && autoStart
+      ? resolveDarwinAppBundleOptions(options.appBundle, paths, packageIdentity)
+      : undefined;
+  const driver =
+    options.daemonDriver ??
+    createNodeDaemonDriver(cliEntrypoint, {
+      ...(appBundle === undefined ? {} : { appBundle }),
+      ...(options.appIcon === undefined ? {} : { appIcon: options.appIcon }),
+      ...(packageIdentity === undefined ? {} : { packageIdentity }),
+    });
   const expectedBrokerArtifactIdentity = autoStart
     ? (await startDaemon({ paths, driver })).broker.artifactIdentity
     : options.expectedBrokerArtifactIdentity ??
@@ -113,6 +142,37 @@ export const connectLocalBroker = async (
     throw error;
   }
   return connection;
+};
+
+const resolveDarwinAppBundleOptions = (
+  configured: OpenTrayAppBundleOptions | undefined,
+  paths: DaemonPaths,
+  packageIdentity: OpenTrayPackageIdentity | undefined,
+): OpenTrayAppBundleOptions & { readonly path: string } => {
+  if (packageIdentity === undefined) {
+    throw new Error("Darwin app bundle resolution requires the caller package identity");
+  }
+  const configuredPath = configured?.path;
+  const path =
+    configuredPath === undefined
+      ? resolveDefaultDarwinAppBundlePath({
+          homeDir: paths.homeDir,
+          packageName: packageIdentity.name,
+          appName: paths.appName,
+        })
+      : typeof configuredPath === "string"
+        ? isAbsolute(configuredPath)
+          ? configuredPath
+          : resolve(packageIdentity.root, configuredPath)
+        : configuredPath.protocol === "file:"
+          ? fileURLToPath(configuredPath)
+          : (() => {
+              throw new Error(`Darwin appBundle.path must be a file URL: ${configuredPath.href}`);
+            })();
+  return {
+    path,
+    ...(configured?.reinitialize === undefined ? {} : { reinitialize: configured.reinitialize }),
+  };
 };
 
 const normalizeAppIdentityField = (

@@ -1,11 +1,21 @@
+// Orthogonal intents (maintained 2026-07-20; original user request: expose the
+// OpenTray Vite packaging adapter and move skill-creator-v2 app-icon generation into it):
+// 1. Stage Vite bundle metadata and native runtime artifacts through one adapter.
+// 2. Re-export the app-icon generator without coupling the packaging contract to a consumer.
+// Compromise: both exports share the package entrypoint because Vite resolves one public adapter
+// module and the icon plugin has no runtime dependency on the artifact manifest.
+
 import { resolve } from "node:path";
 
 import {
+  buildDarwinAppBundle,
   stageOpenTrayPackage,
+  type DarwinAppBundleOptions,
   type OpenTrayArtifactInput,
   type OpenTrayPackagingApp,
   type OpenTrayPackageManifest,
   type OpenTrayPackageResult,
+  type OpenTrayDarwinAppBundleResult,
 } from "@opentray/packaging";
 
 export interface OpenTrayVitePluginOptions {
@@ -43,9 +53,51 @@ export interface OpenTrayVitePlugin {
   readonly getLastResult: () => OpenTrayPackageResult | undefined;
 }
 
-export const openTrayVitePlugin = (
-  options: OpenTrayVitePluginOptions,
-): OpenTrayVitePlugin => {
+export interface OpenTrayViteAppBundlePluginOptions
+  extends Omit<DarwinAppBundleOptions, "bundlePath" | "reinitialize"> {
+  /** Optional output path. Defaults to `<vite outDir>/<appName>.app`. */
+  readonly bundlePath?: string;
+}
+
+export interface OpenTrayViteAppBundlePlugin {
+  readonly name: "opentray-app-bundle";
+  readonly apply: "build";
+  configResolved(config: ViteResolvedConfigLike): void;
+  writeBundle(): Promise<void>;
+  readonly getLastResult: () => OpenTrayDarwinAppBundleResult | undefined;
+}
+
+/** Vite lifecycle adapter for the shared Darwin app bundle contract. */
+export const openTrayAppBundlePlugin = (
+  options: OpenTrayViteAppBundlePluginOptions,
+): OpenTrayViteAppBundlePlugin => {
+  let config: ViteResolvedConfigLike | undefined;
+  let lastResult: OpenTrayDarwinAppBundleResult | undefined;
+  return {
+    name: "opentray-app-bundle",
+    apply: "build",
+    configResolved(resolvedConfig) {
+      config = resolvedConfig;
+    },
+    async writeBundle() {
+      const resolvedConfig = config ?? {
+        root: process.cwd(),
+        mode: "production",
+        build: { outDir: "dist" },
+      };
+      const bundlePath =
+        options.bundlePath ?? resolve(
+          resolvedConfig.root,
+          resolvedConfig.build.outDir,
+          `${options.appName}.app`,
+        );
+      lastResult = await buildDarwinAppBundle({ ...options, bundlePath });
+    },
+    getLastResult: () => lastResult,
+  };
+};
+
+export const openTrayVitePlugin = (options: OpenTrayVitePluginOptions): OpenTrayVitePlugin => {
   let config: ViteResolvedConfigLike | undefined;
   let lastResult: OpenTrayPackageResult | undefined;
 
@@ -108,3 +160,12 @@ const asOutputChunk = (value: unknown): ViteOutputChunkLike | undefined => {
 };
 
 export type { OpenTrayPackageManifest, OpenTrayPackageResult };
+
+export {
+  generateOpenTrayAppIcon,
+  openTrayAppIconPlugin,
+  type OpenTrayAppIconCacheMetadata,
+  type OpenTrayAppIconManifest,
+  type OpenTrayAppIconOptions,
+  type OpenTrayAppIconPluginOptions,
+} from "./app-icon";

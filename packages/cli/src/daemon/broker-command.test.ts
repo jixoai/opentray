@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -74,6 +74,14 @@ describe("broker command resolver", () => {
   });
 
   it("prefers the installed platform package before workspace fallback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-broker-installed-"));
+    tempDirs.push(root);
+    const brokerPath = join(root, "bin/opentray");
+    const templatePath = join(root, "app/Info.plist");
+    await mkdir(dirname(brokerPath), { recursive: true });
+    await mkdir(dirname(templatePath), { recursive: true });
+    await writeFile(brokerPath, "broker", "utf8");
+    await writeFile(templatePath, template(), "utf8");
     const paths = resolveDaemonPaths({
       homeDir: "/tmp/opentray-test",
       packageVersion: "0.1.0",
@@ -84,22 +92,18 @@ describe("broker command resolver", () => {
       platform: "darwin",
       arch: "arm64",
       resolveInstalledBrokerBinary: async (target) => ({
-        binary: `/node_modules/${target.packageName}/bin/opentray`,
-        binaryPath: `/node_modules/${target.packageName}/bin/opentray`,
-        carrierArchive: `/node_modules/${target.packageName}/app/OpenTray.app.zip`,
-        carrierArchivePath: `/node_modules/${target.packageName}/app/OpenTray.app.zip`,
+        binary: brokerPath,
+        binaryPath: brokerPath,
+        carrierTemplate: templatePath,
+        carrierTemplatePath: templatePath,
       }),
-      materializeDarwinCarrier: async ({ archivePath, brokerPath }) => {
-        expect(archivePath).toContain("OpenTray.app.zip");
-        expect(brokerPath).toContain("bin/opentray");
-        return "/runtime/OpenTray.app/Contents/MacOS/opentray";
-      },
+      appBundle: { path: join(root, "Skill Creator.app") },
       findWorkspaceRoot: async () => {
         throw new Error("workspace resolution should not run");
       },
     });
 
-    expect(command.command).toBe("/runtime/OpenTray.app/Contents/MacOS/opentray");
+    expect(command.command).toBe(join(root, "Skill Creator.app/Contents/MacOS/opentray"));
     expect(command.cwd).toBeUndefined();
   });
 
@@ -123,6 +127,14 @@ describe("broker command resolver", () => {
   });
 
   it("falls back to workspace dev build when a workspace package has not staged its binary yet", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-broker-source-"));
+    tempDirs.push(root);
+    const brokerPath = join(root, "target/debug/opentray");
+    const templatePath = join(root, "packages/darwin-app-carrier/Info.plist");
+    await mkdir(dirname(brokerPath), { recursive: true });
+    await mkdir(dirname(templatePath), { recursive: true });
+    await writeFile(brokerPath, "broker", "utf8");
+    await writeFile(templatePath, template(), "utf8");
     const paths = resolveDaemonPaths({
       homeDir: "/tmp/opentray-test",
       packageVersion: "0.1.0",
@@ -133,16 +145,15 @@ describe("broker command resolver", () => {
       platform: "darwin",
       arch: "arm64",
       resolveInstalledBrokerBinary: async () => ({
-        binaryPath: "/repo/packages/darwin-arm64/bin/opentray",
+        binaryPath: brokerPath,
       }),
-      findWorkspaceRoot: async () => "/repo",
-      ensureDevBrokerBinary: async (workspaceRoot) => `${workspaceRoot}/target/debug/opentray`,
-      ensureDevDarwinCarrierArchive: async () => "/repo/target/OpenTray.app.zip",
-      materializeDarwinCarrier: async () =>
-        "/runtime/OpenTray.app/Contents/MacOS/opentray",
+      findWorkspaceRoot: async () => root,
+      ensureDevBrokerBinary: async () => brokerPath,
+      ensureDevDarwinCarrierTemplate: async () => templatePath,
+      appBundle: { path: join(root, "Skill Creator.app") },
     });
 
-    expect(command.command).toBe("/runtime/OpenTray.app/Contents/MacOS/opentray");
+    expect(command.command).toBe(join(root, "Skill Creator.app/Contents/MacOS/opentray"));
     expect(command.cwd).toBeUndefined();
   });
 
@@ -166,7 +177,7 @@ describe("broker command resolver", () => {
     });
   });
 
-  it("rejects an installed Darwin broker whose carrier archive is missing", async () => {
+  it("rejects an installed Darwin broker whose carrier template is missing", async () => {
     const paths = resolveDaemonPaths({
       homeDir: "/tmp/opentray-test",
       packageVersion: "0.1.0",
@@ -180,16 +191,16 @@ describe("broker command resolver", () => {
         resolveInstalledBrokerBinary: async () => ({
           binary: "/node_modules/@opentray/darwin-x64/bin/opentray",
           binaryPath: "/node_modules/@opentray/darwin-x64/bin/opentray",
-          carrierArchivePath:
-            "/node_modules/@opentray/darwin-x64/app/OpenTray.app.zip",
+          carrierTemplatePath: "/node_modules/@opentray/darwin-x64/app/Info.plist",
         }),
+        appBundle: { path: "/runtime/OpenTray.app" },
       }),
     ).rejects.toMatchObject({
       code: "OPENTRAY_MISSING_PLATFORM_BROKER_BINARY",
       platform: "darwin",
       arch: "x64",
       packageName: "@opentray/darwin-x64",
-      binaryPath: "/node_modules/@opentray/darwin-x64/app/OpenTray.app.zip",
+      binaryPath: "/node_modules/@opentray/darwin-x64/app/Info.plist",
     });
   });
 
@@ -231,7 +242,7 @@ describe("installed broker package resolution", () => {
       {
         packageName: "@opentray/darwin-arm64",
         binaryRelativePath: "bin/opentray",
-        carrierArchiveRelativePath: "app/OpenTray.app.zip",
+        carrierTemplateRelativePath: "app/Info.plist",
       },
       {
         platform: "darwin",
@@ -244,8 +255,8 @@ describe("installed broker package resolution", () => {
     expect(result).toEqual({
       binary: binaryPath,
       binaryPath,
-      carrierArchive: join(dirname(packageJsonPath), "app/OpenTray.app.zip"),
-      carrierArchivePath: join(dirname(packageJsonPath), "app/OpenTray.app.zip"),
+      carrierTemplate: join(dirname(packageJsonPath), "app/Info.plist"),
+      carrierTemplatePath: join(dirname(packageJsonPath), "app/Info.plist"),
     });
   });
 
@@ -256,7 +267,7 @@ describe("installed broker package resolution", () => {
       {
         packageName: "@opentray/darwin-arm64",
         binaryRelativePath: "bin/opentray",
-        carrierArchiveRelativePath: "app/OpenTray.app.zip",
+        carrierTemplateRelativePath: "app/Info.plist",
       },
       {
         platform: "darwin",
@@ -270,8 +281,8 @@ describe("installed broker package resolution", () => {
 
     expect(result).toEqual({
       binaryPath,
-      carrierArchive: join(dirname(packageJsonPath), "app/OpenTray.app.zip"),
-      carrierArchivePath: join(dirname(packageJsonPath), "app/OpenTray.app.zip"),
+      carrierTemplate: join(dirname(packageJsonPath), "app/Info.plist"),
+      carrierTemplatePath: join(dirname(packageJsonPath), "app/Info.plist"),
     });
   });
 
@@ -280,7 +291,7 @@ describe("installed broker package resolution", () => {
       {
         packageName: "@opentray/darwin-arm64",
         binaryRelativePath: "bin/opentray",
-        carrierArchiveRelativePath: "app/OpenTray.app.zip",
+        carrierTemplateRelativePath: "app/Info.plist",
       },
       {
         platform: "darwin",
@@ -303,9 +314,12 @@ describe("broker native target", () => {
     expect(resolveBrokerNativeTarget("darwin", "arm64")).toEqual({
       packageName: "@opentray/darwin-arm64",
       binaryRelativePath: "bin/opentray",
-      carrierArchiveRelativePath: "app/OpenTray.app.zip",
+      carrierTemplateRelativePath: "app/Info.plist",
     });
   });
 });
 
 const errno = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code });
+
+const template = (): string =>
+  `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>OpenTray</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n`;

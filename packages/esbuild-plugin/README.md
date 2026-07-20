@@ -28,3 +28,8 @@ lifecycle, sessions, backend selection, or extension dispatch.
 `outDir` is resolved from the esbuild `outdir`/`outfile` option, relative to the
 esbuild `absWorkingDir`. Pass `outDir` or `mode` in the plugin options to override
 them. `entry` is inferred from `entryPoints` unless given explicitly.
+
+`openTrayAppBundlePlugin()` is the Darwin `onEnd` adapter for prebuilding a
+validated app bundle. Pass `packageName`, `appId`, `appName`, `target`,
+`brokerPath`, `templatePath`, and optional `appIcon`; output defaults to
+`<outdir>/<appName>.app`.

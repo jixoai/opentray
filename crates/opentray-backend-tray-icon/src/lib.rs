@@ -285,7 +285,7 @@ mod tests {
             },
             title: Some("Host".to_string()),
             tooltip: None,
-            icon: None,
+            app_icon: None,
             trays: vec![TrayProjection {
                 tray_id: "tray-1".to_string(),
                 title: "Tray".to_string(),

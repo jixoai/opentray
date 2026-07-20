@@ -27,3 +27,7 @@ lifecycle, sessions, backend selection, or extension dispatch.
 `outDir` is resolved from the writeBundle output options (`options.dir`). `mode`
 defaults to `production`. Pass `outDir` or `mode` in the plugin options to
 override them when running outside a real tsdown build.
+
+`openTrayAppBundlePlugin()` is the Darwin `writeBundle` adapter for prebuilding
+the shared app bundle. Its default output is `<options.dir>/<appName>.app`; all
+manifest, hash, and identity rules remain owned by `@opentray/packaging`.

@@ -962,11 +962,19 @@ impl MacosWebviewRuntime {
 }
 
 fn set_activation_policy(app: &NSApplication, app_mode: bool) {
+    // AppKit may re-read the carrier bundle artwork while promoting an accessory
+    // process into a regular Dock application. Preserve the Core App projection
+    // across that transition and explicitly invalidate the Dock tile afterward.
+    let application_icon = app.applicationIconImage();
     app.setActivationPolicy(if app_mode {
         NSApplicationActivationPolicy::Regular
     } else {
         NSApplicationActivationPolicy::Accessory
     });
+    if let Some(application_icon) = application_icon.as_deref() {
+        unsafe { app.setApplicationIconImage(Some(application_icon)) };
+        app.dockTile().display();
+    }
 }
 
 fn ensure_session_reuse_allowed(

@@ -1,18 +1,27 @@
+//
+// Orthogonal intents (maintained 2026-07-20; original user request: Dock and
+// switcher should show the consumer's application identity and artwork):
+// 1. Own native tray handles for macOS and Windows.
+// 2. Project Core App artwork into the macOS NSApplication identity.
+// 3. Keep native event routing and tray lifetime independent from app identity.
+// Compromise: tray-icon remains the shared native adapter; AppKit Dock tile
+// refresh is the smallest platform-specific operation needed after runtime icon mutation.
+
 use std::{cell::RefCell, collections::HashMap};
 
 #[cfg(target_os = "macos")]
-use std::io::Cursor;
+use std::fs;
 
 #[cfg(target_os = "macos")]
 use objc2::{AnyThread, MainThreadMarker};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSApplication, NSEvent, NSImage};
 #[cfg(target_os = "macos")]
-use objc2_foundation::{NSData, NSRect};
+use objc2_foundation::{NSData, NSProcessInfo, NSRect, NSString};
 use opentray_core::BackendError;
 #[cfg(target_os = "windows")]
 use opentray_spec::geometry::DpiScale;
-use opentray_spec::{AppId, MouseButton, TrayEvent};
+use opentray_spec::{AppIcon, AppIconSource, AppId, MouseButton, TrayEvent};
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };
@@ -62,7 +71,14 @@ impl NativeTrayIconRuntime {
 impl TrayIconRuntime for NativeTrayIconRuntime {
     fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
         #[cfg(target_os = "macos")]
-        apply_native_application_icon(projection.icon.as_ref())?;
+        apply_native_application_identity(
+            projection
+                .title
+                .as_deref()
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or(&projection.app_id),
+            projection.app_icon.as_ref(),
+        )?;
         let TrayIconProjection {
             app_id,
             trays,
@@ -201,41 +217,42 @@ impl TrayIconRuntime for NativeTrayIconRuntime {
 }
 
 #[cfg(target_os = "macos")]
-fn apply_native_application_icon(asset: Option<&TrayIconAsset>) -> Result<(), BackendError> {
+fn apply_native_application_identity(
+    title: &str,
+    app_icon: Option<&AppIcon>,
+) -> Result<(), BackendError> {
     let mtm = MainThreadMarker::new().ok_or_else(|| {
         BackendError::Failure("application icon projection requires the AppKit main thread".into())
     })?;
-    let image = asset.map(ns_application_icon).transpose()?;
+    let image = app_icon.map(ns_application_icon).transpose()?.flatten();
     let app = NSApplication::sharedApplication(mtm);
+    NSProcessInfo::processInfo().setProcessName(&NSString::from_str(title));
     unsafe { app.setApplicationIconImage(image.as_deref()) };
+    // AppKit may keep the bundle/executable artwork in the Dock until the tile
+    // is explicitly invalidated after a runtime icon mutation.
+    app.dockTile().display();
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn ns_application_icon(
-    asset: &TrayIconAsset,
-) -> Result<objc2::rc::Retained<NSImage>, BackendError> {
-    let TrayIconAsset::Rgba {
-        data,
-        width,
-        height,
-        ..
-    } = asset;
-    let mut encoded = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(Cursor::new(&mut encoded), *width, *height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .map_err(|error| BackendError::Failure(error.to_string()))?;
-        writer
-            .write_image_data(data)
-            .map_err(|error| BackendError::Failure(error.to_string()))?;
-    }
+    app_icon: &AppIcon,
+) -> Result<Option<objc2::rc::Retained<NSImage>>, BackendError> {
+    let Some(source) = app_icon.darwin() else {
+        return Err(BackendError::Failure(
+            "appIcon does not contain a Darwin ICNS asset".into(),
+        ));
+    };
+    let encoded = match source {
+        AppIconSource::Encoded { data } => data.clone(),
+        AppIconSource::File { path } => fs::read(path).map_err(|error| {
+            BackendError::Failure(format!("unable to read Darwin appIcon {path}: {error}"))
+        })?,
+    };
     let bytes = NSData::from_vec(encoded);
     NSImage::initWithData(NSImage::alloc(), &bytes)
-        .ok_or_else(|| BackendError::Failure("AppKit rejected application icon image".into()))
+        .map(Some)
+        .ok_or_else(|| BackendError::Failure("AppKit rejected Darwin ICNS appIcon".into()))
 }
 
 fn create_native_tray(

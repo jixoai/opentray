@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use opentray_spec::{AppId, AppRef, Icon, Menu, Rect, Tooltip, TrayEvent, TrayId};
+use opentray_spec::{AppIcon, AppId, AppRef, Icon, Menu, Rect, Tooltip, TrayEvent, TrayId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendCapabilities {
@@ -38,7 +38,7 @@ pub struct AppProjection {
     pub app: AppRef,
     pub title: Option<String>,
     pub tooltip: Option<Tooltip>,
-    pub icon: Option<Icon>,
+    pub app_icon: Option<AppIcon>,
     pub trays: Vec<TrayProjection>,
 }
 

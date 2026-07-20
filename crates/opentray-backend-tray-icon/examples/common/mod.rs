@@ -11,7 +11,7 @@ pub fn surface_projection() -> AppProjection {
             title: "Projection".to_string(),
             description: "Built without a native GUI loop".to_string(),
         }),
-        icon: None,
+        app_icon: None,
         trays: vec![TrayProjection {
             tray_id: "status".to_string(),
             title: "Status".to_string(),

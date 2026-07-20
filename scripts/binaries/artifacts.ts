@@ -8,7 +8,9 @@ export type NativeStageKind =
   | "runtime"
   | "webview"
   | "badge";
-export const darwinRuntimeCarrierArtifactName = "OpenTray.app.zip";
+// Darwin runtime packages publish only the bundle template. The runtime owns
+// materializing the caller-specific .app directory around the broker.
+export const darwinRuntimeCarrierArtifactName = "Info.plist";
 export const badgeDockHelperArtifactName = "OpenTrayBadgeHelper.app.zip";
 export const runtimeExecutableArtifactName = "opentray";
 
@@ -183,7 +185,11 @@ export const stageArtifact = async (
   await mkdir(dirname(absoluteDestination), { recursive: true });
   // Source control stays binary-free; local and CI staging populate package artifacts just before smoke/publish.
   await copyFile(source, absoluteDestination);
-  if (!destination.endsWith(".dll") && !destination.endsWith(".zip")) {
+  if (
+    !destination.endsWith(".dll") &&
+    !destination.endsWith(".zip") &&
+    !destination.endsWith(".plist")
+  ) {
     await chmod(absoluteDestination, 0o755);
   }
 };

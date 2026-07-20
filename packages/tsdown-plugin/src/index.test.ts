@@ -6,9 +6,29 @@ import { describe, expect, it } from "vitest";
 
 import { formatOpenTrayArtifactStem } from "@opentray/packaging";
 
-import { openTrayTsdownPlugin, resolveTsdownEntry } from "./index";
+import { openTrayAppBundlePlugin, openTrayTsdownPlugin, resolveTsdownEntry } from "./index";
 
 describe("@opentray/tsdown-plugin", () => {
+  it("delegates app bundle generation to the shared Darwin contract", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-tsdown-app-bundle-"));
+    const outDir = join(root, "dist");
+    const brokerPath = join(root, "broker");
+    const templatePath = join(root, "Info.plist");
+    await writeFile(brokerPath, "broker");
+    await writeFile(templatePath, appBundleTemplate());
+    const plugin = openTrayAppBundlePlugin({
+      packageName: "@jixoai/consumer",
+      appId: "com.example.consumer",
+      appName: "Consumer",
+      target: { os: "darwin", arch: "arm64" },
+      brokerPath,
+      templatePath,
+    });
+    await plugin.writeBundle({ dir: outDir });
+    expect(plugin.getLastResult()?.executablePath).toBe(
+      join(outDir, "Consumer.app/Contents/MacOS/opentray"),
+    );
+  });
   it("Scenario: Given tsdown writeBundle output When it fires Then the shared manifest shape is emitted", async () => {
     const root = await mkdtemp(join(tmpdir(), "opentray-tsdown-"));
     const outDir = join(root, "dist");
@@ -101,3 +121,6 @@ describe("@opentray/tsdown-plugin", () => {
     ).resolves.toBeTruthy();
   });
 });
+
+const appBundleTemplate = (): string =>
+  `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>OpenTray</string></dict></plist>\n`;

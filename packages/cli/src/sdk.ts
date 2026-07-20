@@ -3,7 +3,8 @@
 // 2. Normalize app-facing menu shorthand into the protocol model.
 // 3. Make the returned handle own and deterministically close its broker session.
 
-import type { Icon, Tooltip, TrayOptions } from "@opentray/spec";
+import type { AppIcon, Icon, Tooltip, TrayOptions } from "@opentray/spec";
+import type { OpenTrayAppBundleOptions } from "@opentray/packaging";
 
 import {
   createClient,
@@ -16,7 +17,7 @@ import {
   type CreateTrayMenu,
   type CreateTrayMenuClickHandler,
 } from "./menu-input";
-import { InvalidAppIconError, isNativeCapableAppIcon } from "./app-icon";
+import { normalizeAppIcon, validateAppIcon } from "./app-icon";
 
 export interface OpenTrayRuntimeOptions {
   endpoint?: string;
@@ -26,7 +27,8 @@ export interface OpenTrayRuntimeOptions {
   clientVersion?: string;
   appId?: string;
   appName?: string;
-  appIcon?: Icon;
+  appIcon?: AppIcon;
+  appBundle?: OpenTrayAppBundleOptions;
   autoStart?: boolean;
 }
 
@@ -53,23 +55,25 @@ export const createTray = async (
   options: CreateTrayOptions,
   runtimeOptions: OpenTrayRuntimeOptions = {}
 ): Promise<CreateTrayHandle> => {
-  if (
-    runtimeOptions.appIcon !== undefined &&
-    !isNativeCapableAppIcon(runtimeOptions.appIcon)
-  ) {
-    throw new InvalidAppIconError(process.platform);
+  if (runtimeOptions.appIcon !== undefined) {
+    await validateAppIcon(runtimeOptions.appIcon);
   }
+  const appIcon =
+    runtimeOptions.appIcon === undefined
+      ? undefined
+      : normalizeAppIcon(runtimeOptions.appIcon);
   const normalized = normalizeCreateTrayOptions(options);
-  const connection = await connectLocalBroker(runtimeOptions);
+  const connection = await connectLocalBroker({
+    ...runtimeOptions,
+    ...(appIcon === undefined ? {} : { appIcon }),
+  });
   try {
     const tray = await createClient(connection, {
       appOptions: {
         ...(runtimeOptions.appName === undefined
           ? {}
           : { name: runtimeOptions.appName }),
-        ...(runtimeOptions.appIcon === undefined
-          ? {}
-          : { icon: runtimeOptions.appIcon }),
+        ...(appIcon === undefined ? {} : { appIcon }),
       },
     }).createTray(normalized.options);
     return wrapCreateTrayHandle(tray, {

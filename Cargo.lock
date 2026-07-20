@@ -2253,6 +2253,7 @@ dependencies = [
  "opentray-core",
  "opentray-spec",
  "png 0.17.16",
+ "serde_json",
  "tao",
  "tray-icon",
  "windows-sys 0.61.2",

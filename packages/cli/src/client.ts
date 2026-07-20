@@ -3,6 +3,7 @@ import {
   type ClientFrame,
   type ClientRequestFrame,
   type AppIdentity,
+  type AppIcon,
   type ExtensionEnvelope,
   type Icon,
   type Menu,
@@ -14,7 +15,11 @@ import {
   type TrayId,
   type TrayOptions,
 } from "@opentray/spec";
-import { isNativeCapableAppIcon } from "./app-icon";
+import {
+  normalizeAppIcon,
+  selectAppIconVariant,
+  validateAppIcon,
+} from "./app-icon";
 
 import {
   resolveNativeExtensionArtifact,
@@ -67,8 +72,9 @@ export interface AppHandle {
   readonly appId: string;
   getName(): Promise<string>;
   setName(name: string): Promise<string>;
-  getIcon(): Promise<Icon | null>;
-  setIcon(icon: Icon | null): Promise<Icon | null>;
+  getAppIcon(): Promise<AppIcon | null>;
+  getAppIconVariant(): Promise<string | null>;
+  setAppIcon(iconOrVariant: AppIcon | string | null): Promise<void>;
 }
 
 export type TrayScopedEvent = Exclude<TrayEvent, { type: "ready" }>;
@@ -149,7 +155,7 @@ export interface CreateClientOptions {
   requestIdPrefix?: string;
   appOptions?: {
     name?: string;
-    icon?: Icon;
+    appIcon?: AppIcon;
   };
 }
 
@@ -180,14 +186,8 @@ export function createClient(
       if (configured?.name !== undefined) {
         await handle.setName(configured.name);
       }
-      if (configured?.icon !== undefined) {
-        await handle.setIcon(configured.icon);
-      } else if (
-        trayOptions.icon !== undefined &&
-        isNativeCapableAppIcon(trayOptions.icon) &&
-        (await handle.getIcon()) === null
-      ) {
-        await handle.setIcon(trayOptions.icon);
+      if (configured?.appIcon !== undefined) {
+        await handle.setAppIcon(configured.appIcon);
       }
       return { app, handle };
     })().catch((error: unknown) => {
@@ -448,7 +448,7 @@ const resolveDefaultAppRef = async (
 const createAppHandle = (
   transport: OpenTrayTransport,
   appId: string,
-  nextRequestId: () => RequestId,
+  nextRequestId: () => RequestId
 ): AppHandle => {
   const requestIdentity = async (): Promise<AppIdentity> => {
     const requestId = nextRequestId();
@@ -475,19 +475,41 @@ const createAppHandle = (
       expectResponse(response, requestId, "ack");
       return (await requestIdentity()).appName;
     },
-    async getIcon(): Promise<Icon | null> {
-      return (await requestIdentity()).icon ?? null;
+    async getAppIcon(): Promise<AppIcon | null> {
+      return (await requestIdentity()).appIcon ?? null;
     },
-    async setIcon(icon: Icon | null): Promise<Icon | null> {
+    async getAppIconVariant(): Promise<string | null> {
+      return (await requestIdentity()).appIconVariant ?? null;
+    },
+    async setAppIcon(iconOrVariant: AppIcon | string | null): Promise<void> {
+      if (typeof iconOrVariant === "string") {
+        const identity = await requestIdentity();
+        if (identity.appIcon === undefined) {
+          selectAppIconVariant([], iconOrVariant);
+        } else {
+          selectAppIconVariant(identity.appIcon, iconOrVariant);
+        }
+        const requestId = nextRequestId();
+        const response = await transport.request({
+          type: "set-app-icon-variant",
+          requestId,
+          appId,
+          variant: iconOrVariant,
+        });
+        expectResponse(response, requestId, "ack");
+        return;
+      }
+      if (iconOrVariant !== null) await validateAppIcon(iconOrVariant);
+      const appIcon =
+        iconOrVariant === null ? null : normalizeAppIcon(iconOrVariant);
       const requestId = nextRequestId();
       const response = await transport.request({
         type: "set-app-icon",
         requestId,
         appId,
-        icon,
+        appIcon,
       });
       expectResponse(response, requestId, "ack");
-      return icon;
     },
   };
 };

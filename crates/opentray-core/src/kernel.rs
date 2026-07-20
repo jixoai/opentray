@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use opentray_spec::{
-    AppId, AppIdentity, AppOptions, AppRef, ExtensionEnvelope, Icon, Menu, Rect, SessionId,
-    Tooltip, TrayEvent, TrayId, TrayOptions,
+    AppIcon, AppId, AppIdentity, AppOptions, AppRef, ExtensionEnvelope, Icon, Menu, Rect,
+    SessionId, Tooltip, TrayEvent, TrayId, TrayOptions, DEFAULT_APP_ICON_VARIANT,
 };
 use serde_json::Value;
 
@@ -23,6 +23,8 @@ pub enum KernelError {
         app_id: AppId,
         tray_id: TrayId,
     },
+    #[error("app icon variant not found for {app_id}: {variant}")]
+    AppIconVariantNotFound { app_id: AppId, variant: String },
     #[error(transparent)]
     Extension(#[from] ExtensionError),
     #[error("backend error: {0}")]
@@ -39,6 +41,7 @@ pub struct RoutedEvent {
 struct AppState {
     app: AppRef,
     options: AppOptions,
+    app_icon_variant: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,10 +98,17 @@ impl<B: AppBackend> Kernel<B> {
         let app = AppRef {
             app_id: options.id.clone().unwrap_or_else(|| self.allocate_app_id()),
         };
+        if let Some(existing) = self.apps.get(&app.app_id) {
+            return Ok(existing.app.clone());
+        }
         self.apps.insert(
             app.app_id.clone(),
             AppState {
                 app: app.clone(),
+                app_icon_variant: options
+                    .app_icon
+                    .as_ref()
+                    .map(|_| DEFAULT_APP_ICON_VARIANT.to_string()),
                 options,
             },
         );
@@ -175,12 +185,47 @@ impl<B: AppBackend> Kernel<B> {
         self.sync_app(app_id)
     }
 
-    pub fn set_app_icon(&mut self, app_id: &str, icon: Option<Icon>) -> Result<(), KernelError> {
+    pub fn set_app_icon(
+        &mut self,
+        app_id: &str,
+        app_icon: Option<AppIcon>,
+    ) -> Result<(), KernelError> {
         let app = self
             .apps
             .get_mut(app_id)
             .ok_or_else(|| KernelError::AppNotFound(app_id.to_string()))?;
-        app.options.icon = icon;
+        app.app_icon_variant = app_icon
+            .as_ref()
+            .map(|_| DEFAULT_APP_ICON_VARIANT.to_string());
+        app.options.app_icon = app_icon;
+        self.sync_app(app_id)
+    }
+
+    /// Selects one declared App icon variant without replacing the retained catalog.
+    pub fn set_app_icon_variant(
+        &mut self,
+        app_id: &str,
+        variant: String,
+    ) -> Result<(), KernelError> {
+        let app = self
+            .apps
+            .get_mut(app_id)
+            .ok_or_else(|| KernelError::AppNotFound(app_id.to_string()))?;
+        let available = app
+            .options
+            .app_icon
+            .as_ref()
+            .is_some_and(|catalog| catalog.has_variant(&variant));
+        if !available {
+            return Err(KernelError::AppIconVariantNotFound {
+                app_id: app_id.to_string(),
+                variant,
+            });
+        }
+        if app.app_icon_variant.as_deref() == Some(variant.as_str()) {
+            return Ok(());
+        }
+        app.app_icon_variant = Some(variant);
         self.sync_app(app_id)
     }
 
@@ -284,6 +329,17 @@ impl<B: AppBackend> Kernel<B> {
 
     pub fn projection(&self, app_id: &str) -> Result<AppProjection, KernelError> {
         let app = self.require_app(app_id)?;
+        let app_icon = match (&app.options.app_icon, &app.app_icon_variant) {
+            (Some(catalog), Some(variant)) => {
+                Some(catalog.for_variant(variant).ok_or_else(|| {
+                    KernelError::AppIconVariantNotFound {
+                        app_id: app_id.to_string(),
+                        variant: variant.clone(),
+                    }
+                })?)
+            }
+            _ => None,
+        };
         let mut trays: Vec<_> = self
             .trays
             .values()
@@ -301,7 +357,7 @@ impl<B: AppBackend> Kernel<B> {
             app: app.app.clone(),
             title: app.options.name.clone(),
             tooltip: None,
-            icon: app.options.icon.clone(),
+            app_icon,
             trays,
         })
     }
@@ -318,7 +374,8 @@ impl<B: AppBackend> Kernel<B> {
                 .filter(|value| !value.is_empty())
                 .unwrap_or(&app.app.app_id)
                 .to_string(),
-            icon: app.options.icon.clone(),
+            app_icon: app.options.app_icon.clone(),
+            app_icon_variant: app.app_icon_variant.clone(),
         })
     }
 
@@ -393,13 +450,40 @@ impl<B: AppBackend> Kernel<B> {
 
 #[cfg(test)]
 mod tests {
-    use opentray_spec::{Icon, Menu, MenuItem, MouseButton};
+    use opentray_spec::{AppIcon, Icon, Menu, MenuItem, MouseButton};
 
     use super::*;
     use crate::{BackendCapabilities, BackendOperation, FakeBackend, RecordingExtension};
 
     fn icon() -> Option<Icon> {
         Some(Icon::rgba(vec![0, 0, 0, 0], 1, 1))
+    }
+
+    fn app_icon() -> AppIcon {
+        serde_json::from_value(serde_json::json!([{
+            "platform": "darwin",
+            "format": "icns",
+            "source": { "type": "encoded", "data": [105, 99, 110, 115] }
+        }]))
+        .expect("app icon")
+    }
+
+    fn app_icon_catalog() -> AppIcon {
+        serde_json::from_value(serde_json::json!([
+            {
+                "platform": "darwin",
+                "format": "icns",
+                "variant": ["default", "empty"],
+                "source": { "type": "file", "path": "empty.icns" }
+            },
+            {
+                "platform": "darwin",
+                "format": "icns",
+                "variant": "files",
+                "source": { "type": "file", "path": "files.icns" }
+            }
+        ]))
+        .expect("app icon catalog")
     }
 
     fn tray_options(tray_id: &str, _title: &str) -> TrayOptions {
@@ -427,7 +511,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: Some("Host".to_string()),
-                icon: None,
+                app_icon: None,
                 default: true,
             })
             .expect("surface");
@@ -454,6 +538,122 @@ mod tests {
     }
 
     #[test]
+    fn repeated_explicit_app_creation_preserves_existing_identity_and_trays() {
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend);
+        let app_icon = app_icon();
+        let app = kernel
+            .create_app(AppOptions {
+                id: Some("host".to_string()),
+                name: Some("Original".to_string()),
+                app_icon: Some(app_icon.clone()),
+                default: true,
+            })
+            .expect("first app");
+        kernel
+            .create_tray("session-a".to_string(), &app, tray_options("tray-a", "A"))
+            .expect("tray");
+
+        let repeated = kernel
+            .create_app(AppOptions {
+                id: Some("host".to_string()),
+                name: None,
+                app_icon: None,
+                default: false,
+            })
+            .expect("repeated app");
+
+        assert_eq!(repeated, app);
+        assert_eq!(
+            kernel.app_identity("host").expect("identity").app_icon,
+            Some(app_icon)
+        );
+        assert_eq!(
+            kernel.projection("host").expect("projection").trays.len(),
+            1
+        );
+    }
+
+    #[test]
+    fn app_icon_variant_selection_is_atomic_and_projects_only_selected_assets() {
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend.clone());
+        let catalog = app_icon_catalog();
+        kernel
+            .create_app(AppOptions {
+                id: Some("host".to_string()),
+                name: Some("Host".to_string()),
+                app_icon: Some(catalog.clone()),
+                default: true,
+            })
+            .expect("app");
+
+        let identity = kernel.app_identity("host").expect("identity");
+        assert_eq!(identity.app_icon, Some(catalog.clone()));
+        assert_eq!(identity.app_icon_variant.as_deref(), Some("default"));
+        let default_projection = kernel.projection("host").expect("default projection");
+        let default_icon = default_projection.app_icon.expect("default icon");
+        assert_eq!(default_icon.assets().len(), 1);
+        assert!(default_icon.has_variant("default"));
+
+        kernel
+            .set_app_icon_variant("host", "files".to_string())
+            .expect("select files");
+        let files_identity = kernel.app_identity("host").expect("files identity");
+        assert_eq!(files_identity.app_icon, Some(catalog));
+        assert_eq!(files_identity.app_icon_variant.as_deref(), Some("files"));
+        let files_projection = kernel.projection("host").expect("files projection");
+        let files_icon = files_projection.app_icon.expect("files icon");
+        assert_eq!(files_icon.assets().len(), 1);
+        assert!(files_icon.has_variant("files"));
+
+        let operations_after_files = backend.operations().len();
+        kernel
+            .set_app_icon_variant("host", "files".to_string())
+            .expect("idempotent selection");
+        assert_eq!(backend.operations().len(), operations_after_files);
+
+        let prior_projection = kernel.projection("host").expect("prior projection");
+        let error = kernel
+            .set_app_icon_variant("host", "missing".to_string())
+            .expect_err("missing variant");
+        assert!(matches!(
+            error,
+            KernelError::AppIconVariantNotFound { ref variant, .. } if variant == "missing"
+        ));
+        assert_eq!(
+            kernel
+                .app_identity("host")
+                .expect("unchanged identity")
+                .app_icon_variant
+                .as_deref(),
+            Some("files")
+        );
+        assert_eq!(
+            kernel.projection("host").expect("rollback"),
+            prior_projection
+        );
+        assert_eq!(backend.operations().len(), operations_after_files);
+
+        kernel
+            .set_app_icon("host", Some(app_icon()))
+            .expect("replace catalog");
+        assert_eq!(
+            kernel
+                .app_identity("host")
+                .expect("replacement identity")
+                .app_icon_variant
+                .as_deref(),
+            Some("default")
+        );
+        kernel.set_app_icon("host", None).expect("clear icon");
+        let cleared = kernel.app_identity("host").expect("cleared identity");
+        assert_eq!(cleared.app_icon, None);
+        assert_eq!(cleared.app_icon_variant, None);
+        assert_eq!(kernel.projection("host").expect("cleared").app_icon, None);
+    }
+
+    #[test]
     fn menu_event_routes_to_owning_session() {
         let backend = FakeBackend::new(BackendCapabilities::full());
         let mut kernel = Kernel::new(backend);
@@ -461,7 +661,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");
@@ -492,7 +692,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");
@@ -529,7 +729,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: Some("Host".to_string()),
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");
@@ -554,7 +754,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: Some("Host".to_string()),
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");
@@ -580,7 +780,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");
@@ -645,7 +845,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");
@@ -678,7 +878,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");
@@ -713,7 +913,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");
@@ -740,7 +940,7 @@ mod tests {
             .create_app(AppOptions {
                 id: Some("host".to_string()),
                 name: None,
-                icon: None,
+                app_icon: None,
                 default: false,
             })
             .expect("surface");

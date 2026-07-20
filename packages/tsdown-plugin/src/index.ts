@@ -1,11 +1,14 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
+  buildDarwinAppBundle,
   stageOpenTrayPackage,
+  type DarwinAppBundleOptions,
   type OpenTrayArtifactInput,
   type OpenTrayPackagingApp,
   type OpenTrayPackageManifest,
   type OpenTrayPackageResult,
+  type OpenTrayDarwinAppBundleResult,
 } from "@opentray/packaging";
 
 export interface OpenTrayTsdownPluginOptions {
@@ -50,6 +53,48 @@ export interface OpenTrayTsdownPlugin {
   writeBundle(options: TsdownOutputOptionsLike, bundle: TsdownBundleLike): Promise<void>;
   readonly getLastResult: () => OpenTrayPackageResult | undefined;
 }
+
+export interface OpenTrayTsdownAppBundlePluginOptions
+  extends Omit<DarwinAppBundleOptions, "bundlePath" | "reinitialize"> {
+  readonly bundlePath?: string;
+}
+
+export interface OpenTrayTsdownAppBundlePlugin {
+  readonly name: "opentray-app-bundle";
+  writeBundle(options: TsdownOutputOptionsLike): Promise<void>;
+  readonly getLastResult: () => OpenTrayDarwinAppBundleResult | undefined;
+}
+
+/** tsdown lifecycle adapter for the shared Darwin app bundle contract. */
+export const openTrayAppBundlePlugin = (
+  options: OpenTrayTsdownAppBundlePluginOptions,
+): OpenTrayTsdownAppBundlePlugin => {
+  let lastResult: OpenTrayDarwinAppBundleResult | undefined;
+  return {
+    name: "opentray-app-bundle",
+    async writeBundle(outputOptions) {
+      const outDir = resolveTsdownBundleOutputDir(outputOptions);
+      const bundlePath =
+        options.bundlePath === undefined
+          ? join(outDir, `${options.appName}.app`)
+          : resolve(options.bundlePath);
+      lastResult = await buildDarwinAppBundle({ ...options, bundlePath });
+    },
+    getLastResult: () => lastResult,
+  };
+};
+
+const resolveTsdownBundleOutputDir = (
+  outputOptions: TsdownOutputOptionsLike,
+): string => {
+  if (outputOptions.dir !== undefined && outputOptions.dir.length > 0) {
+    return outputOptions.dir;
+  }
+  if (outputOptions.file !== undefined && outputOptions.file.length > 0) {
+    return resolve(outputOptions.file, "..");
+  }
+  return resolve(process.cwd(), "dist");
+};
 
 export const openTrayTsdownPlugin = (
   options: OpenTrayTsdownPluginOptions,

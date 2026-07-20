@@ -2,12 +2,23 @@
   "name": "@opentray/vite-plugin",
   "version": "0.16.0",
   "description": "Vite adapter for the OpenTray runtime artifact packaging contract.",
-  "type": "module",
+  "keywords": [
+    "app-icon",
+    "icns",
+    "opentray",
+    "vite"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/jixoai/opentray"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -15,18 +26,22 @@
     },
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
-  "sideEffects": false,
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@opentray/packaging": "workspace:*"
+    "@opentray/packaging": "workspace:*",
+    "@opentray/spec": "workspace:*",
+    "@shockpkg/icon-encoder": "^3.2.3",
+    "figma-squircle": "^1.1.0",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   },
   "peerDependencies": {
     "vite": ">=5"
@@ -35,10 +50,5 @@
     "vite": {
       "optional": true
     }
-  },
-  "devDependencies": {
-    "tsdown": "^0.22.1",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
   }
 }

@@ -129,7 +129,7 @@ pub fn create_headless_runtime(
             AppOptions {
                 id: Some(app.app_id.clone()),
                 name: Some(app.app_name.clone()),
-                icon: None,
+                app_icon: None,
                 default: true,
             },
             broker_artifact_identity,
@@ -186,7 +186,8 @@ fn runtime_app_identity(app_id: Option<String>, app_name: Option<String>) -> App
     AppIdentity {
         app_id,
         app_name,
-        icon: None,
+        app_icon: None,
+        app_icon_variant: None,
     }
 }
 

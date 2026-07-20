@@ -52,7 +52,7 @@ describe("Feature: native runtime artifact topology", () => {
       "packages/darwin-arm64/bin/opentray"
     );
     expect(darwin.runtimeCarrierArtifact).toBe(
-      "packages/darwin-arm64/app/OpenTray.app.zip"
+      "packages/darwin-arm64/app/Info.plist"
     );
     expect(darwin.webviewArtifact).toBe(
       "packages/ext-webview-darwin-arm64/lib/libopentray_ext_webview.dylib"

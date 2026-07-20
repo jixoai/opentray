@@ -15,7 +15,7 @@
     "npm:cp-bin": "bun run scripts/binaries/cp-bin.ts",
     "npm:cp-bin:runtime": "bun run scripts/binaries/cp-bin.ts --kind runtime",
     "npm:cp-bin:webview": "bun run scripts/binaries/cp-bin.ts --kind webview",
-    "prepare:linked-consumer": "pnpm -r --filter @opentray/spec --filter opentray --filter @opentray/ext-webview run build && bun run scripts/binaries/cp-bin.ts --target debug",
+    "prepare:linked-consumer": "pnpm -r --filter @opentray/spec --filter @opentray/packaging --filter opentray --filter @opentray/ext-webview --filter @opentray/vite-plugin run build && bun run scripts/binaries/cp-bin.ts --target debug",
     "release": "changeset publish",
     "release:alpha": "changeset publish --tag alpha --no-git-tag",
     "npm:bootstrap-package": "bun run scripts/npm/bootstrap-package.ts",

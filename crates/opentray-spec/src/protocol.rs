@@ -3,8 +3,8 @@ use serde_json::Value;
 
 use crate::ext::{ExpectedExtensionIdentity, ExtensionEnvelope};
 use crate::model::{
-    AppId, AppIdentity, AppOptions, AppRef, Icon, Menu, Rect, SessionId, Tooltip, TrayEvent,
-    TrayId, TrayOptions,
+    AppIcon, AppId, AppIdentity, AppOptions, AppRef, Icon, Menu, Rect, SessionId, Tooltip,
+    TrayEvent, TrayId, TrayOptions,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -213,7 +213,15 @@ pub enum ClientFrame {
         request_id: RequestId,
         #[serde(rename = "appId")]
         app_id: AppId,
-        icon: Option<Icon>,
+        #[serde(rename = "appIcon")]
+        app_icon: Option<AppIcon>,
+    },
+    SetAppIconVariant {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(rename = "appId")]
+        app_id: AppId,
+        variant: String,
     },
     CreateTray {
         #[serde(rename = "requestId")]
@@ -586,7 +594,8 @@ mod tests {
                 app: AppIdentity {
                     app_id: "com.example.build".to_string(),
                     app_name: "Build".to_string(),
-                    icon: None,
+                    app_icon: None,
+                    app_icon_variant: None,
                 },
                 caller_label: "myapp".to_string(),
                 session_count: 2,

@@ -37,7 +37,13 @@ export {
   type CreateTrayOptions,
   type OpenTrayRuntimeOptions,
 } from "./sdk";
-export { InvalidAppIconError, isNativeCapableAppIcon } from "./app-icon";
+export type { OpenTrayAppBundleOptions } from "@opentray/packaging";
+export {
+  AppIconVariantNotFoundError,
+  DEFAULT_APP_ICON_VARIANT,
+  InvalidAppIconError,
+  validateAppIcon,
+} from "./app-icon";
 export {
   type CreateTrayCheckItem,
   type CreateTrayItem,
@@ -59,6 +65,11 @@ export {
   PROTOCOL_VERSION,
   type AppId,
   type AppIdentity,
+  type AppIcon,
+  type AppIconAsset,
+  type AppIconSource,
+  type AppIconVariant,
+  type AppIconVariantOf,
   type AppOptions,
   type AppRef,
   type BrokerEndpointIdentity,

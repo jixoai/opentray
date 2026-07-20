@@ -28,3 +28,8 @@ own tray lifecycle, sessions, backend selection, or extension dispatch.
 `compiler.options.mode`. `entry` is inferred from the webpack entry config (string,
 array, `{ main }`, or an entry map). Pass `outDir`, `mode`, or `entry` in the
 plugin options to override them.
+
+`openTrayAppBundlePlugin()` is the Darwin `afterEmit` adapter for the shared
+bundle contract. It defaults to `<compiler.options.output.path>/<appName>.app`
+and accepts the same broker, template, target, and optional `appIcon` inputs as
+the bundler-neutral generator.

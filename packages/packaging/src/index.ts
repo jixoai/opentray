@@ -2,6 +2,31 @@ import { createHash } from "node:crypto";
 import { chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 
+export {
+  DarwinAppBundleError,
+  buildDarwinAppBundle,
+  clearDarwinAppBundleOwner,
+  ensureDarwinAppBundle,
+  validateDarwinAppBundle,
+  writeDarwinAppBundleOwner,
+  type DarwinAppBundleErrorCode,
+  type DarwinAppBundleManifest,
+  type DarwinAppBundleOptions,
+  type DarwinAppBundleTarget,
+  type OpenTrayAppBundleOptions,
+  type OpenTrayDarwinAppBundleResult,
+} from "./app-bundle";
+export {
+  encodeOpenTrayPackageName,
+  resolveDefaultDarwinAppBundlePath,
+  resolveOpenTrayPackageIdentity,
+  sanitizeAppBundleName,
+  OpenTrayPackageIdentityError,
+  type OpenTrayPackageIdentity,
+  type OpenTrayPackageIdentityErrorCode,
+  type ResolveOpenTrayPackageIdentityOptions,
+} from "./package-identity";
+
 export type OpenTrayArtifactRole = "runtime-host" | "native-sidecar" | "companion";
 
 export interface OpenTrayPackagingApp {

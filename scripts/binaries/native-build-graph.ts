@@ -397,13 +397,13 @@ export const executeNativeBuildExecution = async (
       );
     }
     if (kind === "runtime" && target.packageOs === "darwin") {
-      const carrierOutput = join(outputDir, darwinRuntimeCarrierArtifactName);
-      await runCommand(
-        "bash",
-        ["scripts/release/build-darwin-runtime-carrier.sh", carrierOutput, source],
+      const templateSource = join(
         workspaceRoot,
+        "packages/darwin-app-carrier/Info.plist",
       );
-      copiedFiles.push(basename(carrierOutput));
+      const templateOutput = join(outputDir, darwinRuntimeCarrierArtifactName);
+      await copyFile(templateSource, templateOutput);
+      copiedFiles.push(basename(templateOutput));
     }
   }
 

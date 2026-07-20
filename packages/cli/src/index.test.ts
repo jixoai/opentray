@@ -348,8 +348,6 @@ describe("opentray client", () => {
     expect(transport.frames.map((frame) => frame.requestId)).toEqual([
       "test-1",
       "test-2",
-      "test-3",
-      "test-4",
     ]);
   });
 
@@ -409,6 +407,7 @@ class RecordingTransport implements OpenTrayTransport {
         };
       case "set-app-name":
       case "set-app-icon":
+      case "set-app-icon-variant":
         return { type: "ack", requestId: frame.requestId };
       case "destroy-tray":
         return { type: "ack", requestId: frame.requestId };
