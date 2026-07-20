@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 9
-- Status: Shared Darwin app-bundle generation, package-derived path resolution, managed/prebuilt validation, live-owner protection, runtime launch, and all four build adapters are implemented. Documentation and linked-consumer verification remain.
-- Previous plan backup: `plans/plan-v8.md`
+- Round: 8
+- Status: Darwin App bundles now use a stable npm-package-derived path. Runtime-managed bundles are reinitialized in place for every new broker process, while explicitly prebuilt bundles are validated and launched without mutation. All `@opentray/*-plugin` adapters share one packaging implementation for prebuilding the same contract.
+- Previous plan backup: `plans/plan-v7.md`
 
 ## Workflow Command Surface
 

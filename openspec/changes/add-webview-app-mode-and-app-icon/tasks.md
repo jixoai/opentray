@@ -13,7 +13,7 @@
 - [x] 2.3 Scenario: Given Windows app mode is true When either production or comparator topology projects the extended style Then `WS_EX_APPWINDOW` is present and `WS_EX_TOOLWINDOW` is absent (traces the renamed Windows requirement).
 - [x] 2.4 Scenario: Given Windows app mode is false When the extended style is projected Then `WS_EX_TOOLWINDOW` is present and `WS_EX_APPWINDOW` is absent (traces the default utility mode requirement).
 - [x] 2.5 Scenario: Given a Darwin runtime has two app-mode windows When one closes Then the process remains regular; when the last closes Then the process returns to accessory (traces the Darwin aggregation requirement).
-- [x] 2.6 Scenario: Given explicit `appIcon`, first tray icon, and later window icon values When App identity initializes and later metadata changes Then explicit `appIcon` wins, identity is immutable, and window/page icon changes do not mutate Dock/taskbar identity (traces `app-identity`).
+- [x] 2.6 Scenario: Given a strict current-platform `appIcon`, a separate tray icon, and later window icon values When App identity initializes and later metadata changes Then only `appIcon` supplies App artwork, while tray/window/page icon changes do not mutate Dock/taskbar identity (traces `app-identity`).
 - [x] 2.7 Scenario: Given a platform lacks truthful Shell membership When app mode is requested Then capability reports absence or a typed unsupported error instead of a successful local boolean (traces platform capability truth).
 - [x] 2.8 Scenario: Given a caller session disconnects while app-mode windows exist When cleanup runs Then all native Shell projections are removed and no later tray event reveals the destroyed session (traces session ownership and cleanup).
 - [x] 2.9 Boundary: Verify that `appMode` does not implicitly alter `frameless`, `resizable`, `keepOnTop`, `autoHide`, opacity, background, title, or icon metadata.
@@ -21,6 +21,9 @@
 - [x] 2.11 Boundary: Verify that app-mode capability DTO fields are serialized symmetrically in TypeScript, protocol, Windows, macOS, and any adapter that claims support.
 - [x] 2.12 Confirm each checkbox in this file is checked only by the agent that completed and verified the task in the current working context.
 - [x] 2.13 Regression: Given the published Darwin carrier zip is staged but the SDK launches raw `bin/opentray` When `appMode` promotes the process Then the Dock exposes `opentray` plus the generic `exec` icon; require a broker-bearing caller carrier and Core App artwork projection instead.
+- [x] 2.14 Scenario: Given one native asset omits `variant` or declares `["default", "light"]` When the AppIcon catalog is normalized Then omission means `default` and the aliased asset is selectable through both declared names.
+- [x] 2.15 Scenario: Given a semantic catalog declares `empty` and `files` When the caller invokes `tray.app.setAppIcon("files")` Then Core retains the catalog, selects only the `files` projection, and no WebView command is involved.
+- [x] 2.16 Boundary: Given a missing, malformed, or platform-incomplete variant When selection is requested Then a typed error is returned and the prior active variant/native projection remains unchanged.
 
 ## 3. OpenSpec Evidence Gate
 
@@ -41,10 +44,14 @@
 - [x] 4.8 Add focused TypeScript and Rust tests for defaulting, patching, breaking-field removal, capability serialization, immutable resolution, App mutation, and badge/window metadata separation.
 - [x] 4.9 Move the shared Darwin `.app` carrier artifact contract into the core runtime distribution model; keep `opentray-core` bundle-free and add package-manifest/staging assertions for executable plus carrier completeness.
 - [x] 4.10 Move consumer app-icon normalization and ICNS generation into `@opentray/vite-plugin`; include source, built implementation, recipe, encoder versions, and output existence in the cache gate.
-- [ ] 4.11 Replace generic `Icon` app identity input with a strict `AppIcon` platform asset array in TypeScript and Rust; keep tray `Icon` unchanged.
-- [ ] 4.12 Validate native formats and platform coverage (`darwin/icns`, `windows/ico`, `linux/png|svg`) and reject invalid explicit arrays before broker connection.
-- [ ] 4.13 Remove runtime tray-icon inheritance for App identity and update App mutation/identity frames to carry `AppIcon`.
-- [ ] 4.14 Add protocol, facade, and native projection tests for platform selection, duplicate rejection, missing-current-platform rejection, and standards-only sources.
+- [x] 4.11 Replace generic `Icon` app identity input with a strict `AppIcon` platform asset array in TypeScript and Rust; keep tray `Icon` unchanged.
+- [x] 4.12 Validate native formats and platform coverage (`darwin/icns`, `windows/ico`, `linux/png|svg`) and reject invalid explicit arrays before broker connection.
+- [x] 4.13 Remove runtime tray-icon inheritance for App identity and update App mutation/identity frames to carry `AppIcon`.
+- [x] 4.14 Add protocol, facade, and native projection tests for platform selection, duplicate rejection, missing-current-platform rejection, and standards-only sources.
+- [x] 4.15 Add `variant?: string | readonly string[]` to each AppIcon asset, normalize omission to `default`, validate uniqueness per variant, and export `AppIconVariantOf<TCatalog>` for literal-name inference.
+- [x] 4.16 Rename the unreleased App handle icon methods to `getAppIcon`, `getAppIconVariant`, and `setAppIcon`; accept either a replacement catalog, a variant name, or null without adding `createApp`.
+- [x] 4.17 Add a Core protocol mutation for active App icon variant, retain catalog plus active name in App identity, project only the selected subset, and preserve state on typed rejection.
+- [x] 4.18 Add TypeScript/Rust tests for default aliases, semantic `empty/files`, duplicate-per-variant rejection, direct catalog replacement, selected-name persistence, and missing-variant rollback.
 
 ## 5. Windows Projection And Lifecycle
 
@@ -75,8 +82,9 @@
 - [ ] 7.4 Add or update consumer acceptance coverage for tray open, native close, taskbar/Dock icon removal, second tray open, retained page state, and final session cleanup.
 - [ ] 7.5 Update consumer skill and WebView README examples to teach `appMode` as the product decision and `appIcon` as App identity input.
 - [x] 7.6 Link `skill-creator-v2` directly to the local `opentray` and `@opentray/ext-webview` packages, pass an explicit non-template `appIcon`, and wire `predev` to one OpenTray preparation command that builds/stages facade, broker, carrier, and WebView artifacts.
-- [x] 7.7 Replace the consumer-local icon generator with `@opentray/vite-plugin`, use `flat-symbol.png` explicitly, and resolve source-dev tray assets from `webui/static` before stale build output.
-- [ ] 7.8 Make `@opentray/vite-plugin` emit a standards-compliant `AppIcon` manifest with ICNS, ICO, and Linux theme-size outputs; keep the generator optional for consumers.
+- [x] 7.7 Replace the consumer-local icon generator with `@opentray/vite-plugin`, use `color-symbol.png` explicitly, and resolve source-dev tray assets from `webui/static` before stale build output.
+- [x] 7.8 Make `@opentray/vite-plugin` emit a standards-compliant `AppIcon` manifest with ICNS, ICO, and Linux theme-size outputs; keep the generator optional for consumers.
+- [x] 7.9 Declare `skill-creator-v2` hand-generated native assets as `default/light/dark` variants, stage only runtime ICNS/ICO files for package builds, and do not add theme IPC or ext-webview coupling.
 
 ## 8. Verification And Task Progress
 
@@ -87,7 +95,8 @@
 - [x] 8.5 Update only task checkboxes completed and verified in the current context, then commit the task-progress update with matching code/BDD evidence.
 - [x] 8.6 Verify the linked-consumer preparation from a clean staged-artifact state, start the exact `skill-creator-v2` `pnpm dev` path without publishing, and hand macOS visual acceptance to the user.
 - [x] 8.7 Run the plugin's generation/cache tests, consumer typecheck, Svelte check, and production WebUI build; record the pre-existing daemon/socket blocker separately from the new artifact chain.
-- [ ] 8.8 Re-run strict AppIcon contract tests and linked `skill-creator-v2` preparation after the platform asset migration.
+- [x] 8.8 Re-run strict AppIcon contract tests and linked `skill-creator-v2` preparation after the platform asset migration.
+- [x] 8.9 Re-run strict variant contract tests, Core/backend projection tests, linked preparation, Skill Creator tests/typechecks/Svelte build, cache inspection, OpenSpec validate/check, and diff/format gates.
 
 ## 9. Self-Review Loop
 
@@ -99,3 +108,16 @@
 - [ ] 9.6 If review cannot exit normally, run `bun run openspec:vision -- handoff add-webview-app-mode-and-app-icon` and commit the handoff evidence before returning to user discussion.
 - [ ] 9.7 If review exits normally, archive with `openspec archive add-webview-app-mode-and-app-icon` and commit the archive result.
 - [x] 9.8 Run `bun run openspec:vision -- check add-webview-app-mode-and-app-icon` and record the final workflow gate.
+
+## 10. Stable App Bundle Provisioning
+
+- [x] 10.1 Replace the broker-bearing Darwin carrier zip with one broker binary plus a minimal carrier template in each Darwin runtime package.
+- [x] 10.2 Add package-name resolution and canonical `@scope+name` addressing for `~/.opentray/apps/<package>/<appName>.app`, independent from `callerLabel` and OpenTray version.
+- [x] 10.3 Add public `appBundle: { path?, reinitialize? }` runtime options with caller-root-relative path resolution and typed validation.
+- [x] 10.4 Reinitialize managed bundles inside the stable directory through sibling-file replacement, write the manifest last, and never mutate a live incompatible owner.
+- [x] 10.5 Add strict prebuilt mode that validates and launches a plugin-generated bundle without modifying it or falling back to managed generation.
+- [x] 10.6 Put the shared Darwin appBundle builder and manifest parser in `@opentray/packaging`.
+- [x] 10.7 Export appBundle build adapters from Vite, esbuild, webpack, and tsdown plugin packages without duplicating generation logic.
+- [x] 10.8 Add focused tests for package discovery, custom/default paths, managed regeneration, prebuilt rejection, stable-path locking, bundle manifest commit order, and every plugin hook.
+- [x] 10.9 Update public READMEs, changesets, AGENTS laws, Chinese terminology, and linked-consumer configuration.
+- [ ] 10.10 Run focused package/runtime/plugin tests, OpenSpec validation/check, build/typecheck, and the exact linked Skill Creator preparation flow; leave visual acceptance to the user.

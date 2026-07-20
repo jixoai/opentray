@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 9
-- Status: Shared Darwin app-bundle generation, package-derived path resolution, managed/prebuilt validation, live-owner protection, runtime launch, and all four build adapters are implemented. Documentation and linked-consumer verification remain.
-- Previous plan backup: `plans/plan-v8.md`
+- Round: 6
+- Status: the App identity boundary is being tightened after the first icon-toolchain pass. `appIcon` is a platform-standard asset array, not a reusable tray `Icon`; the runtime selects and validates the current-platform asset, while optional tooling generates standard `.icns`, `.ico`, and freedesktop assets.
+- Previous plan backup: `plans/plan-v5.md`
 
 ## Workflow Command Surface
 
@@ -39,20 +39,6 @@
 > 因为要快速迭代，skill-creator-v2建议先直接link本地的 opentray。你只需要确保每次我做 pnpm dev 之前的所有准备工作就行
 >
 > 我觉得我们的appIcon这个参数应该严格一点，虽然也是数组，但是是面向特定平台的数组，和trayIcon不一样。appIcon必须跟随操作系统平台的标准来。然后我们才能基于此标准去做辅助工具链。同时这样的好处是，别人可以不使用我们给的工具，开发者可以自己使用工具来做好标准平台图标的生成，然后直接使用就行了。
->
-> 我已经为 skill-creator-v2 生成了原生了 /Users/kzf/Dev/GitHub/jixoai-labs/skill-creator-v2/resources/app-icon 。不过暗色模式的支持可能得另外写代码：我们可以在appIcon里面提供一个主题变体字段。通过设置变体来切换图标`setAppIcon('dark')`
->
-> 当然也可以不使用变体，直接手动注入图标也是可以。但是声明式变体的好处，是能规范化管理
->
-> 这方面ext-weview不用适配，如果有需要开发者完全可以基于ipc自己实现一个基于变体名词安全切换图标的功能
->
-> 默认的变体名是，`"default"`，不填写就是默认default名字。可以考虑支持数组：`['default','light']`。
->
-> 变体的作用，还可以用在比如一个垃圾篓应用，存在 `empty` 和 `files` 两种变体。
->
-> 目录必须稳定；默认基于 npm 包名，例如 `~/.opentray/apps/@jixoai+skill-creator/Skill Creator.app`，同时允许 `createTray` 显式指定 `appBundle` 路径。
->
-> 每次重新生成应该有开关。运行时可以重新初始化稳定 bundle，也可以直接使用由 `@opentray/*-plugin` 预构建的 bundle。
 
 ## Objective Record
 
@@ -74,12 +60,6 @@
 | 12 | User | During rapid iteration, `skill-creator-v2` should directly link the local OpenTray checkout; every `pnpm dev` must prepare all required local artifacts first. | Add a reproducible linked-consumer preparation command and wire it into `skill-creator-v2` `predev`; do not require a publish cycle for native acceptance. |
 | 13 | User | The icon generator itself must participate in cache identity; changing `color-symbol` to `flat-symbol` must update the tray/app assets, and the whole chain must move into the linked `@opentray/vite-plugin`. | Move normalization and ICNS generation into the plugin, hash its built implementation plus source/recipe/encoder identity, rebuild it from `skill-creator-v2` `predev`, and resolve source-dev icons from `webui/static` so stale `webui/build` output cannot win. |
 | 14 | User | `appIcon` must be a strict platform-oriented array distinct from `trayIcon`; developers may provide standards-compliant assets without OpenTray's generator. | Replace generic `Icon` with a discriminated `AppIconAsset[]`: Darwin `.icns`, Windows `.ico`, and Linux freedesktop PNG/SVG entries. Select the current OS strictly and remove tray icon inheritance. |
-| 15 | User | App identity assets may declare variants and `setAppIcon("dark")` selects one; callers may still inject an AppIcon directly. WebView needs no adaptation, and application IPC may own typed variant commands. | Variants are Core App identity state, orthogonal to WebView and optional to consumers. Named selection never replaces the declared catalog. |
-| 16 | User | The default name is `default`; omission means `default`; one asset may declare aliases such as `["default", "light"]`; variants also model semantic states such as trash `empty/files`. | `variant` is a semantic state key, not a theme enum. Normalize one or many names, validate uniqueness per variant, and expose a type-level name extractor. |
-| 17 | User | A runtime App bundle must live at a stable path derived from the caller npm package name, with an explicit custom path for applications that need stronger control. | Separate npm package identity from caller labels. The default Darwin path is `~/.opentray/apps/<encoded-package-name>/<sanitized-app-name>.app`; an explicit `appBundle.path` wins. |
-| 18 | User | Reinitialization should overwrite the stable bundle rather than replace it through a temporary directory, and must be configurable so a prebuilt bundle can be used directly. | Managed mode rewrites only OpenTray-owned files through sibling-file atomic replacement inside the stable bundle and commits its manifest last. Prebuilt mode is read-only and rejects missing or incompatible bundles. |
-| 19 | User | Build-system packages can provide plugins that generate the prebuilt bundle. | `@opentray/packaging` owns one generator/manifest contract; Vite, esbuild, webpack, and tsdown packages expose lifecycle adapters over it. |
-| 20 | User | Approved the stable path, managed/prebuilt ownership, package resolution, and plugin adapter design. | The implementation may proceed without another product decision. |
 
 ### Evidence Read
 
@@ -110,8 +90,6 @@
 | macOS acceptance, 2026-07-19 | App mode produced a Dock item, but its title was `opentray` and its artwork was the generic executable icon. | Activation policy works, but carrier launch identity and App icon projection are incomplete. |
 | Microsoft Learn `shell/appids` | Windows taskbar associates processes/windows with explicit AppUserModelID; shortcut/relaunch metadata supplies application identity, and window-level identity can override process identity. | `appId` controls Shell grouping; `appIcon` is the artwork source. Do not treat tray icon selection as the Windows identity mechanism. |
 | Microsoft Learn `shell/taskbar-extensions` | Taskbar overlays are status notifications on an existing application button, not the base application icon. | Confirms ext-badge belongs to overlay/status effects, not base App icon/title. |
-| `skill-creator-v2/resources/app-icon` | The consumer now owns hand-generated Darwin light/dark ICNS and Windows light/dark ICO assets. | Proves standard native assets can bypass the generator and form a declarative variant catalog. |
-| `packages/cli/src/client.ts` | The App-scoped handle already owns App identity mutation but still uses generic `getIcon` / `setIcon` names. | Rename the unreleased API to `getAppIcon` / `setAppIcon` and let the setter accept either a catalog or a declared variant name. |
 
 ### Git Evidence
 
@@ -148,9 +126,6 @@
 | appIcon 也是数组但面向特定平台 | One cross-platform declaration may carry several OS-native assets. | Each element declares `platform` and native `format`; Linux may contribute multiple theme-size entries. |
 | Windows系统的图标匹配规则 | Windows Shell first associates a process/window with AppUserModelID, then resolves launcher/window/executable artwork. | Keep grouping identity (`appId`) separate from artwork (`appIcon`) and avoid claiming tray metadata is a Shell identity. |
 | 图标和标题的修改接口 | Runtime mutation of App identity, not badge status and not WebView window metadata. | Core protocol + public `AppHandle`; `ext-badge` remains overlay/status-only. |
-| 默认的变体名是 default | An asset without variant metadata belongs to the canonical default state. | Normalize omission and explicit `default` to the same selection key. |
-| `["default", "light"]` | One native file may serve multiple semantic names without duplicating bytes or entries. | `variant` accepts one name or a readonly name array. |
-| 垃圾篓 empty/files | Variant names describe application state, not only color scheme. | Canonical term: App Icon Variant; the application decides when state changes. |
 
 ### Demo / Spike Code
 
@@ -167,13 +142,12 @@
 | Should a process with mixed app-mode and tray-only WebViews use regular activation policy while any app-mode session is alive? | macOS activation policy is process-level, unlike Windows window extended styles. | Confirmed: Regular while any app-mode projection is live; Accessory after the last one closes/destroys. |
 | What should happen when `appIcon` is omitted or incomplete? | Runtime conversion from tray artwork would make the contract non-deterministic. | Omission uses packaged/OS identity; an explicit array must contain a valid current-platform asset or initialization fails. |
 | Where should runtime App title/icon mutation live? | Badge status and WebView window metadata are separate ownership domains. | Core protocol/kernel projection with a public `AppHandle`; ext-badge remains badge/overlay/attention only. |
-| Does icon variant switching belong in WebView? | Theme or domain state may originate anywhere and WebView must not gain App identity authority. | Confirmed: no ext-webview API; consumers may expose their own typed IPC command that calls the App handle. |
 
 ## Intent
 
 ### Surface Intent
 
-让 `skill-creator-v2` 使用一个真正的应用窗口：托盘主操作打开同一个保留窗口，窗口进入系统任务栏/切换器；用户关闭窗口后系统图标消失，但托盘仍然可以再次打开它。为此，OpenTray 用产品模式字段 `style.appMode` 取代公共 API 中的 Windows 行为字段 `showInSwitchers`，并提供顶层 `appIcon` 作为严格的平台应用身份资产数组；省略时使用平台打包或系统默认身份，不从 tray icon 推断。资产可声明 `default/light/dark` 或 `empty/files` 等语义变体，Core 只切换已声明名称，WebView 不参与 App identity 管理。
+让 `skill-creator-v2` 使用一个真正的应用窗口：托盘主操作打开同一个保留窗口，窗口进入系统任务栏/切换器；用户关闭窗口后系统图标消失，但托盘仍然可以再次打开它。为此，OpenTray 用产品模式字段 `style.appMode` 取代公共 API 中的 Windows 行为字段 `showInSwitchers`，并提供顶层 `appIcon` 作为严格的平台应用身份资产数组；省略时使用平台打包或系统默认身份，不从 tray icon 推断。
 
 ### Underlying Drive
 
@@ -188,10 +162,10 @@
 - Current platform laws: App is caller-owned; Tray is a status atom; Session owns live authority; WebView owns its extension protocol; platform adapters project already-derived state; unsupported capabilities must be explicit.
 - Core boundary: `opentray-core` means the platform-neutral kernel/crate and protocol layer. It owns App identity state and mutation contracts, but it cannot contain an `.app` bundle or depend on AppKit, native windowing, or a platform binary.
 - Runtime distribution boundary: the published Darwin runtime atom is part of OpenTray core distribution and SHALL contain the broker executable plus the shared `.app` carrier needed for Regular/Accessory activation and App identity projection. This is a package/release responsibility, not a kernel responsibility.
-- Does this fit as a regular atom: Yes. `appMode` is a common WebView shell intent; `appIcon`, its selected variant, and App identity mutation are Core/runtime identity contracts. They do not require a new public `createApp` entrypoint, a new tray event family, or an ext-webview command.
+- Does this fit as a regular atom: Yes. `appMode` is a common WebView shell intent; `appIcon` and App identity mutation are Core/runtime identity contracts. They do not require a new public `createApp` entrypoint or a new tray event family.
 - Does this require law upgrade: Yes, in two narrow places: macOS activation policy must aggregate live app-mode windows, and app-mode close/reveal must project operational visibility consistently on every supported platform.
 - Breaking update stance: Remove public `showInSwitchers` and migrate callers to `style.appMode`; do not publish a compatibility alias. Internal native variable names may remain temporarily while the adapter migration is completed.
-- User confirmations still required: none for the approved `appMode`, `appIcon`, or stable appBundle direction. Remaining Linux support and platform-visible acceptance are engineering gates, not unresolved product decisions.
+- User confirmations still required: none for the approved `appMode`/`appIcon` direction. Remaining Linux support and exact packaged-carrier implementation are engineering gates, not unresolved product decisions.
 
 ## Reverse-Inferred Design
 
@@ -228,23 +202,15 @@ The operator sees one application, not a new panel on every click. Tray and wind
 - Public platform style no longer exposes `showInSwitchers`; Windows and macOS adapters derive Shell membership from `appMode`.
 - App-facing runtime options gain optional `appIcon?: AppIcon` next to `appId` and `appName`, where `AppIcon` is a readonly array of platform-specific standard assets.
 - Every asset declares one of `darwin/icns`, `windows/ico`, or `linux/png|svg`; Linux fixed-size PNG entries carry a freedesktop theme size. Sources may be files or encoded bytes for the declared native format, but never raw RGBA, text, template, favicon, or remote URL data.
-- Each asset may declare `variant?: string | readonly string[]`. Omission means `default`; a list such as `["default", "light"]` aliases one native file into both states. Names are application-defined semantic states rather than a closed theme enum.
-- The resolver selects exactly the current platform and active variant. Duplicate Darwin/Windows entries or Linux sizes within one variant, malformed names/sources, missing `default`, missing selected variants, and explicit sets without a current-platform asset are typed validation failures. Omitted `appIcon` does not inherit from `trayIcon`; packaged/carrier/OS identity stays authoritative.
+- The resolver selects exactly the current platform's asset set. Duplicate Darwin/Windows entries, malformed source descriptors, and explicit sets without a current-platform asset are typed validation failures. Omitted `appIcon` does not inherit from `trayIcon`; packaged/carrier/OS identity stays authoritative.
 - The selected identity is frozen when App identity is initialized. Later tray or WebView icon changes do not mutate App identity unless the caller explicitly invokes the App identity setter.
-- The public SDK exposes an App-scoped handle without introducing `createApp`: `tray.app.getName()`, `tray.app.setName(name)`, `tray.app.getAppIcon()`, `tray.app.getAppIconVariant()`, and `tray.app.setAppIcon(iconOrVariant)`.
-- App-facing runtime options expose `appBundle?: { path?: string | URL; reinitialize?: boolean }`. Omission means a runtime-managed bundle at the npm-package-derived default path. `reinitialize: false` requires an explicit or default prebuilt bundle and forbids runtime mutation.
-- Default bundle addressing preserves the caller package name independently from `callerLabel`: `@jixoai/skill-creator` maps to `~/.opentray/apps/@jixoai+skill-creator/<appName>.app`. Explicit `appBundle.path` has highest precedence and relative paths resolve against the caller package root, never the broker working directory.
-- Package identity resolution precedence is explicit package metadata -> build-adapter project root -> `npm_package_name` -> the nearest package manifest above the caller entry script. The OpenTray package's own `import.meta.url` is never caller identity authority.
-- Runtime-managed generation keeps the `.app` directory stable. It writes broker, plist, icon, and manifest through sibling-file replacement inside that directory; the manifest is the final commit record. It never rewrites a bundle owned by a live incompatible broker.
-- Every `@opentray/*-plugin` exposes an appBundle build adapter backed by `@opentray/packaging`. A prebuilt bundle includes the broker, bootstrap icon, plist, and manifest required for runtime validation.
-- `setAppIcon("files")` changes only the selected name in the retained catalog; `setAppIcon(nextAppIcon)` replaces the catalog and resets selection to `default`; `setAppIcon(null)` clears explicit App artwork. A rejected selection preserves the previous catalog and projection.
-- `AppIconVariantOf<typeof appIcon>` derives `default` plus every literal name from an `as const` catalog so application IPC can stay name-safe without adding WebView coupling.
+- The public SDK exposes an App-scoped handle without introducing `createApp`: `tray.app.getName()`, `tray.app.setName(name)`, `tray.app.getIcon()`, and `tray.app.setIcon(icon)`.
 - `AppHandle.setName` mutates logical App identity and supported runtime/tray projections; it does not rename a packaged executable or a macOS bundle at runtime. `WebviewWindowHandle.setTitle` remains window-scoped.
 - Existing `primaryEvent`, `show`, `toVisible`, `close`, `destroy`, `isVisible`, and `visibleChange` remain the lifecycle verbs.
 
 ### Data Shape
 
-- Durable App identity: `(appId, appName, appIconCatalog, appIconVariant)` plus explicit runtime mutations stored in Core. `AppProjection` carries only the selected variant subset to native backends.
+- Durable App identity: `(appId, appName, resolvedAppIcon)` plus explicit runtime mutations stored in Core.
 - Windows grouping identity: stable `appId` / AppUserModelID. Windows icon artwork: native App/shortcut/window/executable source selected by the resolver. These facts must not be collapsed into one tray icon field.
 - Window declaration: `(trayId, window session, appMode, other WebView style)`, owned by the extension session.
 - Platform projection: Windows extended styles; macOS process activation policy plus window ordering; Linux capability absence or a truthful adapter projection.
@@ -256,19 +222,15 @@ The operator sees one application, not a new panel on every click. Tray and wind
 ```text
 createTray(options, runtimeOptions)
         |
-        +--> npm package identity + appBundle policy
-        |       { packageName, path?, reinitialize }
+        +--> Darwin runtime materializer
+        |       { carrier template, appId, appName }
         |              |
         |              v
-        |       ~/.opentray/apps/<package>/<appName>.app
-        |              |
-        |              +--> managed: rewrite owned files + commit manifest
-        |              |
-        |              `--> prebuilt: validate only
+        |       <runtime>/OpenTray.app/Contents/MacOS/opentray
         |
-        +--> App identity { appId, appName, appIconCatalog, activeVariant }
+        +--> App identity { appId, appName, resolvedAppIcon }
         |       |
-        |       +--> AppHandle.setName / setAppIcon(catalog | variant)
+        |       +--> AppHandle.setName / setIcon
         |
         +--> Tray projection { icon, menu, primaryEvent }
                          |
@@ -284,7 +246,7 @@ createTray(options, runtimeOptions)
 
 The kernel remains backend-neutral. The extension owns WebView commands and session state. Core owns App identity state and mutation frames; adapters consume the resulting projection. `ext-badge` owns only status overlays and attention. No layer infers app mode or App identity from a window title/icon.
 
-The Darwin runtime package publishes one broker binary and a minimal carrier template. The SDK materializes a stable package-addressed bundle and launches the broker from its executable path; it does not publish a second compressed copy of the broker inside a carrier zip. Build plugins may generate the same complete bundle ahead of time. `ext-badge` may consume that carrier contract, but it does not own an `OpenTrayBadgeHelper.app` lifecycle or make its package the source of the runtime App bundle.
+The shared Darwin carrier is composed and published by the Darwin runtime package. The SDK materializes that template inside the caller-scoped runtime directory and launches the broker from the bundle executable path; staging an unrelated idle `.app` beside a raw broker is not sufficient. `ext-badge` may consume that carrier contract, but it does not own an `OpenTrayBadgeHelper.app` lifecycle or make its package the source of the runtime App bundle.
 
 ### User Confirmation Gates
 
@@ -294,8 +256,6 @@ The Darwin runtime package publishes one broker binary and a minimal carrier tem
 | Rename compatibility | Determines whether downstream consumers get an alias. | Confirmed: breaking removal of public `showInSwitchers`. |
 | Darwin mixed-mode policy | Process activation policy is global, while window mode is local. | Confirmed: Regular while any live app-mode projection exists; Accessory otherwise. |
 | App title/icon mutation ownership | Determines whether status extension or platform-neutral identity owns the API. | Core protocol/kernel + public `AppHandle`; ext-badge remains status-only. |
-| App icon variant meaning | Determines whether Core hard-codes theme behavior. | Confirmed: arbitrary semantic name; omitted means `default`; one asset may declare one or many names. |
-| Variant switching transport | Determines whether WebView becomes App identity authority. | Confirmed: Core/App handle only; consumer IPC is optional and application-owned. |
 
 ## Intent-Driven Plan
 
@@ -313,11 +273,10 @@ The Darwin runtime package publishes one broker binary and a minimal carrier tem
 
 | Question | Why it matters | Default assumption until user answers |
 | -------- | -------------- | ------------------------------------- |
-| What is the exact carrier launch/discovery mechanism for each Darwin runtime package? | The package must ship one coherent broker-plus-carrier artifact graph without duplicating the broker or making consumers hand-install a helper. | Decided: publish one broker plus a minimal plist template; reinitialize a stable package-addressed bundle in place, or validate a plugin-built prebuilt bundle, then launch its broker executable. |
+| What is the exact carrier launch/discovery mechanism for each Darwin runtime package? | The package must ship one coherent broker-plus-carrier artifact graph without making consumers hand-install a helper. | Decided: package a broker-bearing carrier template, materialize it atomically under the caller runtime directory, set `CFBundleIdentifier`/`CFBundleName`/`CFBundleDisplayName`, then launch that bundle's broker executable. |
 | What should Linux report for `appMode` before a Shell projection is implemented? | A false success would break the capability law. | Keep `appMode` accepted only where the adapter can report truthful Shell behavior; otherwise expose capability absence or a typed unsupported result. |
 | Should App identity icon resolution reject an incompatible explicit icon or fall back? | Silent fallback can make a signed app appear with the wrong identity and hide a packaging defect. | Reject malformed, duplicate, or current-platform-missing explicit `appIcon`; only omission may use the packaged/OS identity. |
 | Should App title mutation rename the OS bundle/process? | macOS bundle display name and Windows shortcut identity are packaging/Shell metadata, not freely mutable runtime projection. | No. Mutate logical App name and supported current projections; keep window title and packaged bundle identity separate. |
-| What happens when a selected App icon variant is absent? | Silent fallback would make application state lie. | Reject with a typed error, keep the previous active variant and native projection, and never fall back to another name. |
 
 ## Rejected Paths
 
@@ -331,9 +290,6 @@ The Darwin runtime package publishes one broker binary and a minimal carrier tem
 | Reuse generic `Icon` for `appIcon` | It permits tray templates, RGBA buffers, text, and favicon-like data to masquerade as process identity. |
 | Treat title, favicon, or `window.setIcon()` as App identity | These are window/page metadata and must not mutate Dock/taskbar identity. |
 | Put App title/icon setters in `ext-badge` | Badge is an orthogonal status extension; making it the owner would force every app identity consumer to mount a status extension and would conflate base artwork with overlays. |
-| Model App icon variants as only `light/dark` | Application identity also represents semantic state such as `empty/files`; a theme enum would encode one consumer policy into Core. |
-| Add variant commands to `ext-webview` | WebView is window/page metadata and must not gain authority over process-level App identity; applications can expose typed IPC when needed. |
-| Treat variant selection as catalog replacement | It would discard declared alternatives and make repeated state switching depend on caller-side hidden storage. |
 | Use the first tray icon as an App icon fallback | Tray artwork has different template/size semantics; runtime conversion would be implicit and non-reproducible. |
 | Put the `.app` bundle in `opentray-core` | The kernel is platform-neutral and cannot contain AppKit carrier code or a native bundle; this would collapse protocol ownership into packaging. |
 | Let `ext-badge` remain the owner of the shared `.app` carrier | A status extension must not become a prerequisite for every App-mode runtime and would give badge semantics ownership of process identity. |
@@ -342,4 +298,4 @@ The Darwin runtime package publishes one broker binary and a minimal carrier tem
 
 - Default max review iterations: 2 self-review loops after the initial implementation.
 - Issue recurrence threshold: Reopen a task if the same platform/lifecycle defect appears in two independent acceptance paths.
-- Custom exit condition from intent: the change is complete only when a consumer can use `style.appMode` and an optional strict platform-standard `appIcon` catalog through the published facade, select declared semantic variants without WebView coupling, Windows and macOS expose truthful Shell behavior, close/reveal preserves one session, `@opentray/darwin-*` publishes the broker plus shared `.app` carrier, and `skill-creator-v2` no longer depends on `keepOnTop` for discoverability.
+- Custom exit condition from intent: the change is complete only when a consumer can use `style.appMode` and an optional strict platform-standard `appIcon` array through the published facade, Windows and macOS expose truthful Shell behavior, close/reveal preserves one session, `@opentray/darwin-*` publishes the broker plus shared `.app` carrier, and `skill-creator-v2` no longer depends on `keepOnTop` for discoverability.

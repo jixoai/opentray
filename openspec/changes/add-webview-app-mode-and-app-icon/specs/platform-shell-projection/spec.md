@@ -40,7 +40,13 @@ The published `@opentray/darwin-arm64` and `@opentray/darwin-x64` runtime packag
 
 `opentray-core` SHALL remain platform-neutral: it may define App identity state, protocol frames, and `AppProjection`, but it SHALL NOT contain AppKit code, `.app` bundle files, or carrier launch logic. `@opentray/ext-badge` SHALL own only badge/overlay semantics and its native library; it SHALL consume the shared carrier contract when needed and SHALL NOT be the distribution owner of the runtime carrier.
 
-The carrier SHALL contain the matching broker executable. The Node runtime SHALL materialize the carrier atomically in the caller-scoped runtime directory, project the caller `appId` and bootstrap `appName` into its bundle metadata, and launch the broker from `Contents/MacOS`. Shipping an idle helper bundle beside a separately launched raw broker SHALL NOT satisfy this requirement.
+The Darwin runtime package SHALL publish one matching broker executable and one minimal carrier template without embedding a duplicate broker in a carrier archive. The Node runtime SHALL project the caller `appId`, bootstrap `appName`, and default Darwin `appIcon` into a stable App bundle and launch the broker from `Contents/MacOS`. Shipping an idle helper bundle beside a separately launched raw broker SHALL NOT satisfy this requirement.
+
+The default bundle path SHALL be derived from the caller npm package name independently from daemon version and `callerLabel`: scoped package `@scope/name` SHALL map to `~/.opentray/apps/@scope+name/<appName>.app`. An explicit `appBundle.path` SHALL win. The runtime SHALL resolve relative explicit paths against the caller package root rather than `process.cwd()` or the broker working directory.
+
+`appBundle.reinitialize` SHALL default to `true`. Managed mode SHALL keep the `.app` directory path stable and rewrite only OpenTray-owned files through sibling-file replacement, committing the bundle manifest last. `reinitialize: false` SHALL treat the bundle as prebuilt and read-only; missing, malformed, target-incompatible, or broker-incompatible bundles SHALL return a typed error without falling back to mutation.
+
+Package-name inference SHALL prefer explicit caller metadata, then build-adapter project metadata, `npm_package_name`, and the package manifest nearest the caller entry script. An `import.meta.url` owned by OpenTray itself SHALL NOT be used as evidence for the consumer package.
 
 #### Scenario: Darwin package installs a complete runtime
 
@@ -49,11 +55,13 @@ The carrier SHALL contain the matching broker executable. The Node runtime SHALL
 - **THEN** the package can discover both the matching broker executable and shared `.app` carrier from its own artifact graph
 - **AND** no consumer-side copy, manual helper install, or `ext-badge` dependency is required.
 
-#### Scenario: Broker executes inside the caller carrier
+#### Scenario: Broker executes inside the stable caller carrier
 
-- **GIVEN** a supported Darwin runtime package contains a broker-bearing carrier template
+- **GIVEN** a supported Darwin runtime package contains one broker and a minimal carrier template
 - **WHEN** a caller starts OpenTray with `appId: "com.skill-creator"` and `appName: "Skill Creator"`
-- **THEN** the SDK materializes a caller-scoped `.app`
+- **THEN** the SDK materializes `~/.opentray/apps/<encoded-package-name>/Skill Creator.app`
+- **AND** writes the selected default ICNS into `Contents/Resources` and records `CFBundleIconFile`
+- **AND** injects the resolved broker without a second broker copy in the published package
 - **AND** the broker `current_exe()` is that bundle's `Contents/MacOS` executable
 - **AND** the Dock identity is `Skill Creator`, not the raw executable name `opentray`.
 
@@ -63,6 +71,23 @@ The carrier SHALL contain the matching broker executable. The Node runtime SHALL
 - **WHEN** the resolved carrier or broker artifact identity changes
 - **THEN** the SDK replaces the materialized carrier under the existing lifecycle lock
 - **AND** an already-running broker is reused only when its executable path and artifact identity match the current materialized bundle.
+
+#### Scenario: Prebuilt bundle remains read-only
+
+- **GIVEN** an `@opentray/*-plugin` generated a complete compatible App bundle
+- **AND** the caller passes its path with `reinitialize: false`
+- **WHEN** `createTray` starts the Darwin broker
+- **THEN** the runtime validates the bundle manifest, plist, target, executable, and hashes
+- **AND** launches the embedded broker without rewriting any bundle file
+- **AND** rejects incompatibility with a typed error rather than rebuilding it.
+
+#### Scenario: Build adapters share one bundle implementation
+
+- **GIVEN** Vite, esbuild, webpack, or tsdown integrates OpenTray packaging
+- **WHEN** its OpenTray appBundle plugin runs
+- **THEN** the adapter delegates generation to `@opentray/packaging`
+- **AND** emits the same manifest and bundle layout consumed by the runtime
+- **AND** no build adapter owns a private carrier format.
 
 #### Scenario: Core crate remains free of bundle ownership
 
