@@ -1,7 +1,8 @@
-// Orthogonal intents (2026-07-20; original user request: package-derived paths
-// must be stable and explicit paths must resolve from the caller package root):
+// Orthogonal intents (updated 2026-07-21; original user request: package-derived
+// paths must be stable and nested workspace commands must not replace the caller):
 // 1. Prove scoped npm names use the documented `@scope+name` encoding.
 // 2. Prove nearest package discovery does not depend on OpenTray's own module URL.
+// 3. Prove the running script beats ambient nested-workspace package metadata.
 
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -50,13 +51,41 @@ describe("OpenTray package identity", () => {
     await expect(readFile(identity.manifestPath, "utf8")).resolves.toContain("@jixoai/consumer");
   });
 
+  it("prefers the default running script over nested workspace package-manager metadata", async () => {
+    const root = await mkdtemp("/tmp/opentray-package-identity-");
+    roots.push(root);
+    const scriptPath = join(root, "src/daemon/main.ts");
+    const workspaceManifest = join(root, "webui/package.json");
+    await mkdir(join(root, "src/daemon"), { recursive: true });
+    await mkdir(join(root, "webui"), { recursive: true });
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "skill-creator" }));
+    await writeFile(workspaceManifest, JSON.stringify({ name: "webui" }));
+    await writeFile(scriptPath, "export {};");
+    const previousScriptPath = process.argv[1];
+    process.argv[1] = scriptPath;
+
+    try {
+      const identity = await resolveOpenTrayPackageIdentity({
+        env: { npm_package_json: workspaceManifest },
+      });
+      expect(identity.name).toBe("skill-creator");
+      expect(identity.manifestPath).toBe(join(root, "package.json"));
+    } finally {
+      if (previousScriptPath === undefined) {
+        process.argv.splice(1, 1);
+      } else {
+        process.argv[1] = previousScriptPath;
+      }
+    }
+  });
+
   it("surfaces malformed nearest package manifests instead of treating them as missing", async () => {
     const root = await mkdtemp("/tmp/opentray-package-identity-");
     roots.push(root);
     const nested = join(root, "src");
     const scriptPath = join(nested, "main.mjs");
     await mkdir(nested, { recursive: true });
-    await writeFile(join(root, "package.json"), "{\"name\":");
+    await writeFile(join(root, "package.json"), '{"name":');
     await writeFile(scriptPath, "export {};");
 
     await expect(resolveOpenTrayPackageIdentity({ scriptPath })).rejects.toMatchObject({

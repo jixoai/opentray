@@ -1,7 +1,8 @@
-// Orthogonal intents (2026-07-21; original user request: opening the stable
-// app-mode entry must launch the remembered consumer command):
+// Orthogonal intents (2026-07-21; original user requests: opening the stable
+// app-mode entry launches the remembered command and leaves durable diagnostics):
 // 1. Prove the shipped Darwin binary executes a valid descriptor without broker args.
 // 2. Prove malformed launch state exits non-zero without invoking a consumer.
+// 3. Prove carrier errors and early consumer stderr survive LaunchServices exit.
 
 #![cfg(target_os = "macos")]
 
@@ -43,6 +44,11 @@ fn darwin_carrier_cold_launch_executes_the_persisted_vector_once() {
                 .display()
         )
     );
+    wait_for_log(&fixture.log, "consumer stderr diagnostic");
+    let log = fs::read_to_string(&fixture.log).expect("read carrier log");
+    assert!(log.contains("consumer stderr diagnostic"));
+    assert!(log.contains("consumer-spawned"));
+    assert!(log.contains("\"pid\":"));
 }
 
 #[test]
@@ -63,13 +69,31 @@ fn darwin_carrier_cold_launch_rejects_unknown_descriptor_fields() {
 
     assert!(!output.status.success());
     assert!(!marker.exists());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("opentray-launch.json"));
+    let log = fs::read_to_string(&fixture.log).expect("read carrier log");
+    assert!(log.contains("opentray-launch.json"));
+    assert!(log.contains("launch-error"));
+}
+
+#[test]
+fn darwin_carrier_logs_a_missing_descriptor_without_a_terminal() {
+    let fixture = CarrierFixture::new("missing");
+
+    let output = Command::new(&fixture.executable)
+        .output()
+        .expect("run Darwin carrier");
+
+    assert!(!output.status.success());
+    let log = fs::read_to_string(&fixture.log).expect("read carrier log");
+    assert!(log.contains("launch-error"));
+    assert!(log.contains("opentray-launch.json"));
+    assert!(!log.contains("processEnv"));
 }
 
 struct CarrierFixture {
     root: PathBuf,
     executable: PathBuf,
     descriptor: PathBuf,
+    log: PathBuf,
 }
 
 impl CarrierFixture {
@@ -84,6 +108,7 @@ impl CarrierFixture {
         ));
         let executable = root.join("Test.app/Contents/MacOS/opentray");
         let descriptor = root.join("Test.app/Contents/Resources/opentray-launch.json");
+        let log = root.join("Test.app/Contents/Resources/opentray-launch.log");
         fs::create_dir_all(executable.parent().expect("executable parent"))
             .expect("create carrier executable directory");
         fs::create_dir_all(descriptor.parent().expect("descriptor parent"))
@@ -95,6 +120,7 @@ impl CarrierFixture {
             root,
             executable,
             descriptor,
+            log,
         }
     }
 
@@ -102,7 +128,7 @@ impl CarrierFixture {
         let script = self.root.join("consumer.sh");
         fs::write(
             &script,
-            "#!/bin/sh\nprintf '%s|%s\\n' \"$1\" \"$PWD\" >> \"$2\"\n",
+            "#!/bin/sh\nprintf '%s|%s\\n' \"$1\" \"$PWD\" >> \"$2\"\nprintf 'consumer stderr diagnostic\\n' >&2\n",
         )
         .expect("write consumer script");
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
@@ -133,4 +159,17 @@ fn wait_for_file(path: &Path) {
         thread::sleep(Duration::from_millis(20));
     }
     panic!("consumer marker was not created: {}", path.display());
+}
+
+fn wait_for_log(path: &Path, expected: &str) {
+    for _ in 0..100 {
+        if fs::read_to_string(path)
+            .map(|value| value.contains(expected))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("carrier log did not contain {expected}: {}", path.display());
 }

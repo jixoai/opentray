@@ -61,3 +61,9 @@ generation. The strict schema contains only `schemaVersion`, `command`, `args`,
 and `cwd`; it never contains a shell string or environment map. The `opentray`
 SDK commits this state after a successful local broker handshake, including for
 validated prebuilt bundles.
+
+After that commit, the runtime converges dead OpenTray-owned bundles with the same
+`CFBundleIdentifier` under `~/.opentray/apps` and the known legacy carrier path. It unregisters
+stale paths from LaunchServices before removal, preserves the current path and any live owner
+marker, and reports skipped/removal failures to the caller runtime log. This is deliberately a
+runtime operation; plugin-generated prebuilt assets remain read-only.

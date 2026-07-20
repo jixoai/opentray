@@ -66,12 +66,12 @@ entry relaunch the consumer with the last or explicitly configured command):
 - [x] 7.1 Back up round-1 `plans/plan.md`, enter review iteration 1, and capture the exact installed broker/bundle graph before changing implementation.
 - [x] 7.2 Reproduce the red facts: two physical same-AppId bundles, wrong `webui` package ownership, missing launch descriptor on the online broker graph, and detached stdio pointing to `/dev/null`.
 - [x] 7.3 Commit revised plan/spec/task/review evidence before corrective product-code work.
-- [ ] 7.4 BDD: the running consumer script identity beats ambient nested-workspace `npm_package_json`, while explicit package metadata still wins.
-- [ ] 7.5 BDD: after successful handshake and descriptor commit, dead OpenTray-owned legacy/wrong-package same-AppId bundles are unregistered and removed; live owners and failed initialization are preserved.
-- [ ] 7.6 BDD: default broker stdout/stderr append to caller-scoped `runtime/broker.log`, with explicit `inherit` and `ignore` overrides.
-- [ ] 7.7 BDD: missing descriptors, spawn failures, spawn PID, and early consumer stderr append to bundle-local `opentray-launch.log` without persisting environment state.
-- [ ] 7.8 Implement caller identity precedence, post-handshake identity convergence, and persistent broker/carrier logs without adding launch state to Core.
-- [ ] 7.9 Update `AGENTS.md`, `i18n.zh.md`, and package READMEs with the convergence and diagnostics laws.
-- [ ] 7.10 Rebuild/stage the local native runtime, apply a real pnpm workspace link in `skill-creator-v2`, and prove the consumer resolves this checkout rather than online `0.17.0`.
-- [ ] 7.11 Run focused TypeScript/Rust tests, repository build/verify, OpenSpec validation/check, and `git diff --check`.
-- [ ] 7.12 Run `skill-creator-v2` through `pnpm dev`; capture the sole current bundle, descriptor, broker hash, and both documented log paths, then return Dock visual/pinned-click acceptance to the owner.
+- [x] 7.4 BDD: the running consumer script identity beats ambient nested-workspace `npm_package_json`, while explicit package metadata still wins.
+- [x] 7.5 BDD: after successful handshake and descriptor commit, dead OpenTray-owned legacy/wrong-package same-AppId bundles are unregistered and removed; live owners and failed initialization are preserved.
+- [x] 7.6 BDD: default broker stdout/stderr append to caller-scoped `runtime/broker.log`, with explicit `inherit` and `ignore` overrides.
+- [x] 7.7 BDD: missing descriptors, spawn failures, spawn PID, and early consumer stderr append to bundle-local `opentray-launch.log` without persisting environment state.
+- [x] 7.8 Implement caller identity precedence, post-handshake identity convergence, and persistent broker/carrier logs without adding launch state to Core.
+- [x] 7.9 Update `AGENTS.md`, `i18n.zh.md`, and package READMEs with the convergence and diagnostics laws.
+- [x] 7.10 Rebuild/stage the local native runtime, apply a real pnpm workspace link in `skill-creator-v2`, and prove the consumer resolves this checkout rather than online `0.17.0`.
+- [x] 7.11 Run focused TypeScript/Rust tests, repository build/verify, OpenSpec validation/check, and `git diff --check`.
+- [x] 7.12 Run `skill-creator-v2` through `pnpm dev`; capture the sole current bundle, descriptor, broker hash, and both documented log paths, then return Dock visual/pinned-click acceptance to the owner.

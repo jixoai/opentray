@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { BrokerArtifactIdentity } from "@opentray/spec";
 
+import type { ResolvedBrokerArtifact } from "./broker-command";
 import type { DaemonDriver } from "./lifecycle";
 import {
+  createNodeDaemonDriver,
   executablePathsEqual,
   inspectDaemon,
   resolveBrokerStdio,
@@ -40,10 +43,47 @@ describe("daemon lifecycle", () => {
     ).toBe(true);
   });
 
-  it("keeps broker stdio quiet by default and allows explicit inherit for debugging", () => {
-    expect(resolveBrokerStdio(undefined)).toBe("ignore");
-    expect(resolveBrokerStdio("quiet")).toBe("ignore");
+  it("persists broker stdio by default and keeps explicit inherit/ignore overrides", () => {
+    expect(resolveBrokerStdio(undefined)).toBe("log");
+    expect(resolveBrokerStdio("quiet")).toBe("log");
     expect(resolveBrokerStdio("inherit")).toBe("inherit");
+    expect(resolveBrokerStdio("ignore")).toBe("ignore");
+  });
+
+  it("appends detached broker stderr to the caller runtime log", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createNodeDaemonDriver("/fixture/cli.mjs", { env: {} });
+    const broker = {
+      command: process.execPath,
+      args: ["-e", "console.error('native broker diagnostic')"],
+      executablePath: process.execPath,
+      artifactIdentity: brokerIdentity("log-child"),
+    } satisfies ResolvedBrokerArtifact;
+
+    await driver.spawnBroker(paths, broker);
+    await waitForLog(paths.brokerLog, "native broker diagnostic");
+
+    expect(await readFile(paths.brokerLog, "utf8")).toContain("native broker diagnostic");
+  });
+
+  it("records the exact detached broker spawn error", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createNodeDaemonDriver("/fixture/cli.mjs", { env: {} });
+    const broker = {
+      command: join(homeDir, "missing-opentray"),
+      args: [],
+      executablePath: join(homeDir, "missing-opentray"),
+      artifactIdentity: brokerIdentity("missing-child"),
+    } satisfies ResolvedBrokerArtifact;
+
+    await expect(driver.spawnBroker(paths, broker)).resolves.toBe(0);
+    await waitForLog(paths.brokerLog, "broker-spawn-error");
+    const log = await readFile(paths.brokerLog, "utf8");
+    expect(log).toContain("broker-spawn-error");
+    expect(log).toContain("ENOENT");
+    expect(log).toContain(broker.command);
   });
 
   it("starts once and reuses the healthy same-version broker", async () => {
@@ -279,3 +319,15 @@ const createExitedDriver = (): DaemonDriver => ({
   },
   async stop() {},
 });
+
+const waitForLog = async (path: string, expected: string): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      if ((await readFile(path, "utf8")).includes(expected)) return;
+    } catch {
+      // The detached process may not have opened the file yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${expected} in ${path}`);
+};

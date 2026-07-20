@@ -19,9 +19,11 @@ mod windows_transport;
 use std::{
     env,
     error::Error,
+    fs::{File, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use opentray_spec::{
@@ -132,25 +134,67 @@ fn run_app_entrypoint() -> Result<(), Box<dyn Error>> {
     // descriptor is intentionally separate from the immutable bundle manifest.
     let executable = env::current_exe()?.canonicalize()?;
     let descriptor_path = resolve_app_launch_descriptor_path(&executable)?;
-    let descriptor = parse_app_launch_descriptor(&descriptor_path)?;
-    let child = Command::new(&descriptor.command)
+    let log_path = resolve_app_launch_log_path(&descriptor_path)?;
+    let mut log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|error| {
+            format!(
+                "unable to open Darwin app launch log {}: {error}",
+                log_path.display()
+            )
+        })?;
+    append_app_launch_log(&mut log, "carrier-start", &descriptor_path, serde_json::json!({}))?;
+    let descriptor = match parse_app_launch_descriptor(&descriptor_path) {
+        Ok(descriptor) => descriptor,
+        Err(error) => {
+            let _ = append_app_launch_log(
+                &mut log,
+                "launch-error",
+                &descriptor_path,
+                serde_json::json!({ "error": error.to_string() }),
+            );
+            return Err(error);
+        }
+    };
+    append_app_launch_log(
+        &mut log,
+        "descriptor-read",
+        &descriptor_path,
+        serde_json::json!({ "command": descriptor.command, "cwd": descriptor.cwd }),
+    )?;
+    let stdout = log.try_clone()?;
+    let stderr = log.try_clone()?;
+    let child = match Command::new(&descriptor.command)
         .args(&descriptor.args)
         .current_dir(&descriptor.cwd)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
         .spawn()
-        .map_err(|error| {
-            format!(
+    {
+        Ok(child) => child,
+        Err(error) => {
+            let message = format!(
                 "unable to launch consumer from Darwin app bundle {}: {error}",
                 descriptor_path.display()
-            )
-        })?;
-    eprintln!(
-        "opentray app carrier launched consumer pid={} from {}",
-        child.id(),
-        descriptor_path.display()
-    );
+            );
+            let _ = append_app_launch_log(
+                &mut log,
+                "launch-error",
+                &descriptor_path,
+                serde_json::json!({ "error": message }),
+            );
+            return Err(message.into());
+        }
+    };
+    append_app_launch_log(
+        &mut log,
+        "consumer-spawned",
+        &descriptor_path,
+        serde_json::json!({ "pid": child.id() }),
+    )?;
     Ok(())
 }
 
@@ -197,6 +241,50 @@ fn resolve_app_launch_descriptor_path(executable: &Path) -> Result<PathBuf, Box<
         .parent()
         .ok_or("carrier executable is missing app bundle root")?;
     Ok(bundle_dir.join("Contents/Resources/opentray-launch.json"))
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_app_launch_log_path(descriptor: &Path) -> Result<PathBuf, Box<dyn Error>> {
+    let resources = descriptor
+        .parent()
+        .ok_or("app launch descriptor has no Resources directory")?;
+    Ok(resources.join("opentray-launch.log"))
+}
+
+#[cfg(target_os = "macos")]
+fn append_app_launch_log(
+    log: &mut File,
+    event: &str,
+    descriptor: &Path,
+    fields: serde_json::Value,
+) -> Result<(), Box<dyn Error>> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let mut record = serde_json::Map::new();
+    record.insert("timestamp".to_string(), serde_json::json!(timestamp));
+    record.insert("event".to_string(), serde_json::json!(event));
+    record.insert(
+        "descriptorPath".to_string(),
+        serde_json::json!(descriptor.to_string_lossy()),
+    );
+    if let Some(bundle_path) = descriptor
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+    {
+        record.insert(
+            "bundlePath".to_string(),
+            serde_json::json!(bundle_path.to_string_lossy()),
+        );
+    }
+    if let serde_json::Value::Object(fields) = fields {
+        record.extend(fields);
+    }
+    writeln!(log, "{}", serde_json::Value::Object(record))?;
+    log.flush()?;
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]

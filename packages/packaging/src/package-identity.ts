@@ -48,16 +48,16 @@ export const resolveOpenTrayPackageIdentity = async (
     if (fromScript !== undefined) return fromScript;
   }
 
+  const fromScript = await readScriptIdentity();
+  if (fromScript !== undefined) return fromScript;
+
+  // Package-manager environment metadata describes the command runner. It is
+  // only a fallback when the actual consumer script has no package boundary.
   const env = options.env ?? process.env;
   const environmentManifest = env.npm_package_json;
   if (environmentManifest !== undefined) {
     const fromEnvironment = await readManifestIdentity(environmentManifest);
     if (fromEnvironment !== undefined) return fromEnvironment;
-  }
-
-  if (options.scriptPath === undefined) {
-    const fromScript = await readScriptIdentity();
-    if (fromScript !== undefined) return fromScript;
   }
 
   const fromCwd = await readNearestPackageIdentity(process.cwd());
@@ -78,9 +78,7 @@ export const encodeOpenTrayPackageName = (packageName: string): string => {
       "consumer package name must not be empty",
     );
   }
-  const encoded = trimmed
-    .replaceAll("/", "+")
-    .replace(/[<>:"\\|?*\u0000-\u001f]/gu, "-");
+  const encoded = trimmed.replaceAll("/", "+").replace(/[<>:"\\|?*\u0000-\u001f]/gu, "-");
   if (encoded === "." || encoded === ".." || encoded.includes("..")) {
     throw new OpenTrayPackageIdentityError(
       "invalid_package_name",

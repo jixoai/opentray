@@ -1,5 +1,5 @@
 import { createServer, type Server, type Socket } from "node:net";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -72,7 +72,16 @@ describe("local broker client", () => {
     const driver = createSocketBrokerDriver();
     cleanup.push(driver.close);
     const bundlePath = join(homeDir, ".opentray/apps/@example+app/Example App.app");
-    await prepareBundle(bundlePath);
+    const staleBundle = join(homeDir, ".opentray/apps/webui/Example App.app");
+    const legacyBundle = join(
+      homeDir,
+      ".opentray/0.1.0/example-app/runtime/darwin-carrier/OpenTray.app",
+    );
+    await Promise.all([
+      prepareBundle(bundlePath, "example-app"),
+      prepareBundle(staleBundle, "example-app"),
+      prepareLegacyBundle(legacyBundle, "example-app"),
+    ]);
 
     const first = await connectLocalBroker({
       homeDir,
@@ -106,6 +115,10 @@ describe("local broker client", () => {
     });
 
     expect(driver.spawned).toBe(1);
+    await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(legacyBundle)).rejects.toMatchObject({ code: "ENOENT" });
+    const brokerLog = join(homeDir, ".opentray/0.1.0/example-app/runtime/broker.log");
+    expect(await readFile(brokerLog, "utf8")).toContain("bundle-identity-convergence");
     expect(await readDarwinAppLaunchDescriptor(bundlePath)).toEqual({
       schemaVersion: 1,
       command: "/usr/bin/node",
@@ -154,7 +167,11 @@ describe("local broker client", () => {
     const homeDir = await makeTempHome();
     await writeFile(join(homeDir, "package.json"), JSON.stringify({ name: "@example/app" }));
     const bundlePath = join(homeDir, ".opentray/apps/@example+app/Example App.app");
-    await prepareBundle(bundlePath);
+    const staleBundle = join(homeDir, ".opentray/apps/webui/Example App.app");
+    await Promise.all([
+      prepareBundle(bundlePath, "example-app"),
+      prepareBundle(staleBundle, "example-app"),
+    ]);
     await writeFile(
       join(bundlePath, "Contents/Resources/opentray-launch.json"),
       `${JSON.stringify({
@@ -189,6 +206,7 @@ describe("local broker client", () => {
       args: ["/tmp/previous.mjs"],
       cwd: "/tmp/previous",
     });
+    await expect(access(staleBundle)).resolves.toBeUndefined();
   });
 
   it("routes tray-bounds responses back to the pending request", async () => {
@@ -240,10 +258,23 @@ const makeTempHome = async (): Promise<string> => {
   return dir;
 };
 
-const prepareBundle = async (bundlePath: string): Promise<void> => {
+const prepareBundle = async (bundlePath: string, appId?: string): Promise<void> => {
   const resources = join(bundlePath, "Contents/Resources");
   await mkdir(resources, { recursive: true });
-  await writeFile(join(resources, "opentray-app-bundle.json"), "{}\n");
+  await writeFile(
+    join(resources, "opentray-app-bundle.json"),
+    `${JSON.stringify(appId === undefined ? {} : { schemaVersion: 1, appId })}\n`,
+  );
+};
+
+const prepareLegacyBundle = async (bundlePath: string, appId: string): Promise<void> => {
+  await mkdir(join(bundlePath, "Contents/Resources"), { recursive: true });
+  await mkdir(join(bundlePath, "Contents/MacOS"), { recursive: true });
+  await writeFile(join(bundlePath, "Contents/MacOS/opentray"), "broker");
+  await writeFile(
+    join(bundlePath, "Contents/Info.plist"),
+    `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>opentray</string><key>CFBundleIdentifier</key><string>${appId}</string></dict></plist>\n`,
+  );
 };
 
 const createSocketBrokerDriver = (

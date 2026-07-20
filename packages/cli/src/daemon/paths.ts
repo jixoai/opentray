@@ -26,6 +26,7 @@ export interface DaemonPaths {
   pidFile: string;
   lockFile: string;
   readyFile: string;
+  brokerLog: string;
 }
 
 export const resolveDaemonPaths = ({
@@ -37,15 +38,10 @@ export const resolveDaemonPaths = ({
   platform = process.platform,
 }: DaemonPathOptions): DaemonPaths => {
   const identity = createBrokerEndpointIdentity(
-    callerLabel === undefined
-      ? { packageVersion }
-      : { packageVersion, callerLabel }
+    callerLabel === undefined ? { packageVersion } : { packageVersion, callerLabel },
   );
   const resolvedAppId = normalizeAppIdentityField(appId, identity.callerLabel);
-  const resolvedAppName = normalizeAppIdentityField(
-    appName,
-    identity.callerLabel
-  );
+  const resolvedAppName = normalizeAppIdentityField(appName, identity.callerLabel);
   const normalizedHome = homeDir.replace(/[\\/]+$/u, "");
   const stateRoot = `${normalizedHome}/.opentray/${identity.packageVersion}/${identity.callerLabel}`;
   const runtimeDir = `${stateRoot}/runtime`;
@@ -67,13 +63,11 @@ export const resolveDaemonPaths = ({
     pidFile: `${runtimeDir}/broker.pid`,
     lockFile: `${runtimeDir}/broker.lock`,
     readyFile: `${runtimeDir}/ready.json`,
+    brokerLog: `${runtimeDir}/broker.log`,
   };
 };
 
-const normalizeAppIdentityField = (
-  value: string | undefined,
-  fallback: string
-): string => {
+const normalizeAppIdentityField = (value: string | undefined, fallback: string): string => {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed.length === 0 ? fallback : trimmed;
 };

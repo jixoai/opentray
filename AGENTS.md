@@ -8,7 +8,8 @@ implementation-aware caching; make appIcon a strict platform-standard asset arra
 tray Icon so consumers may supply independently generated native assets; add semantic App icon
 variants whose omitted name is default and whose selection remains Core-owned; let a stable
 app-mode entry relaunch the latest `process.argv` invocation or an explicit launch script
-(2026-07-21)):
+; eliminate duplicate same-AppId Dock carriers and make detached broker/carrier failures
+observable in stable logs (2026-07-21)):
 1. Preserve the tray-first App/Tray/Session platform laws.
 2. Preserve native runtime and extension package boundaries across macOS and Windows.
 3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
@@ -69,6 +70,9 @@ The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `sk
 - Core `opentray` declarations cover generic tray/runtime contracts. Typed WebView window methods, events, and style fields belong to `@opentray/ext-webview`; absence from the core declaration file is package-boundary evidence, not a missing extension capability.
 - A manifest and lockfile describe the requested dependency graph, not the installed graph. Consumer diagnosis must record `pnpm why`, resolved package versions, and `require.resolve()` or equivalent real paths before attributing strict type failures to a published SDK.
 - A normal package-manager install is the consumer contract. Deleting `node_modules`, clearing caches, restarting a broker manually, or setting `OPENTRAY_EXT_PATH` are diagnostic operations only; OpenTray must not require them to obtain a coherent broker/facade/native-extension graph.
+- Stable Darwin Bundle ownership follows the package nearest the running consumer script. Ambient `npm_package_json` describes the nested package-manager runner and is only a fallback; it must not rename a caller's stable Bundle to `webui` or another workspace package.
+- After a successful local handshake and launch-descriptor commit, the runtime converges dead OpenTray-owned bundles with the same `CFBundleIdentifier`: it unregisters them from LaunchServices and removes them, while preserving the current Bundle and any live owner marker. Failed initialization never performs this cleanup.
+- Detached broker stdout/stderr append to `<runtimeDir>/broker.log` by default. `OPENTRAY_DAEMON_STDIO=inherit` is interactive debugging; `ignore` is an explicit silence choice. A non-empty unknown value must not silently discard diagnostics.
 - Earlier dynamic extension discovery checked the broker working directory's top-level `node_modules` platform package before facade-nested and pnpm virtual-store candidates. The current facade path instead resolves one real library from the declaring facade's dependency closure and the broker treats that absolute request as authoritative; it never falls back to diagnostic candidates or reconstructs package roots for that request.
 - For native command-surface diagnosis, record the library actually loaded by the broker (`lsof -p <pid>` on macOS), then read the `package.json` beside that exact library and compare its hash with the intended virtual-store artifact. `require.resolve()` from the consumer root may identify the same stale top-level package; neither it nor `pnpm why` is sufficient alone.
 - Package-manager resolution belongs to the Node SDK, which can resolve an official extension's platform package relative to the facade package that declared it. The facade may declare a platform-neutral artifact descriptor, but it must not import native packages into its public interface. The broker must receive an exact resolved library path instead of reconstructing npm/pnpm/Yarn/Bun topology in Rust.
@@ -190,6 +194,9 @@ mode directly:
 - The stable bundle is a single-writer resource. A live incompatible owner must not be overwritten:
   the runtime may stop its own caller-scoped broker and retry, while a different live owner receives
   a typed `bundle_in_use` failure. Build adapters delegate generation to `@opentray/packaging`.
+- A successful local handshake makes the current validated Bundle the sole managed carrier for its
+  App identity. Dead wrong-package and legacy carriers are unregistered and removed after the
+  descriptor commit; live owner markers are preserved and reported in `broker.log`.
 
 ## App Launch Command Law
 
@@ -207,8 +214,13 @@ mode directly:
   read-only after validation. The launch descriptor remains explicitly runtime-owned and mutable;
   incompatible prebuilt bundles fail before launch state is updated.
 - The Darwin carrier accepts a cold launch only with no arguments or one LaunchServices
-  `-psn_*` argument, strictly parses the descriptor, spawns the vector once with null stdio, and
-  exits without a shell or child wait. The private `broker` subcommand remains unchanged.
+  `-psn_*` argument, strictly parses the descriptor, appends carrier events to
+  `Contents/Resources/opentray-launch.log`, spawns the vector once without a shell, routes child
+  stdout/stderr to that log, and exits without waiting. The private `broker` subcommand remains
+  unchanged.
+- `opentray-launch.log` records descriptor/bundle paths, command and cwd identity, spawned PID,
+  and exact read/parse/spawn errors without persisting the process environment. It is the first
+  diagnostic surface for a pinned Dock entry that fails to relaunch.
 - Cold launch after process exit is distinct from a live-process Dock reopen. Windows and Linux
   taskbar entries are not persistent launchers merely because a window uses `appMode`; those
   platforms require their own shortcut/launcher atoms before equivalent persistence is claimed.

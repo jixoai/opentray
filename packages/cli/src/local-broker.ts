@@ -9,7 +9,8 @@
 import { createConnection, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { appendFile, mkdir } from "node:fs/promises";
 
 import {
   PROTOCOL_VERSION,
@@ -21,12 +22,10 @@ import {
   type RequestId,
   type ServerFrame,
 } from "@opentray/spec";
-import type {
-  OpenTrayAppBundleOptions,
-  OpenTrayAppLaunchDescriptor,
-} from "@opentray/packaging";
+import type { OpenTrayAppBundleOptions, OpenTrayAppLaunchDescriptor } from "@opentray/packaging";
 import {
   resolveDefaultDarwinAppBundlePath,
+  convergeDarwinAppBundleIdentity,
   resolveOpenTrayPackageIdentity,
   updateDarwinAppLaunchDescriptor,
   type OpenTrayPackageIdentity,
@@ -34,21 +33,14 @@ import {
 
 import type { OpenTrayTransport } from "./client";
 import { resolveCallerLabel } from "./daemon/caller-label";
-import {
-  createNodeDaemonDriver,
-  startDaemon,
-  type DaemonDriver,
-} from "./daemon/lifecycle";
+import { createNodeDaemonDriver, startDaemon, type DaemonDriver } from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
 import type { DaemonPaths } from "./daemon/paths";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 
-export type LocalRuntimeEventFrame = Extract<
-  ServerFrame,
-  { type: "event" | "ext-event" }
->;
+export type LocalRuntimeEventFrame = Extract<ServerFrame, { type: "event" | "ext-event" }>;
 
 export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
@@ -58,8 +50,7 @@ export interface LocalBrokerClient extends OpenTrayTransport {
   close(): Promise<void>;
 }
 
-export interface ConnectLocalBrokerOptions
-  extends Partial<BrokerEndpointIdentityOptions> {
+export interface ConnectLocalBrokerOptions extends Partial<BrokerEndpointIdentityOptions> {
   endpoint?: string;
   homeDir?: string;
   appId?: string;
@@ -95,15 +86,13 @@ interface BrokerSocket {
 }
 
 export const connectLocalBroker = async (
-  options: ConnectLocalBrokerOptions = {}
+  options: ConnectLocalBrokerOptions = {},
 ): Promise<LocalBrokerClient> => {
-  const packageVersion =
-    options.packageVersion ?? (await readPackageVersion(packageJsonUrl));
+  const packageVersion = options.packageVersion ?? (await readPackageVersion(packageJsonUrl));
   const clientVersion = options.clientVersion ?? packageVersion;
   const appId = normalizeAppIdentityField(options.appId);
   const appName = normalizeAppIdentityField(options.appName);
-  const callerLabel =
-    options.callerLabel ?? appName ?? appId ?? resolveCallerLabel();
+  const callerLabel = options.callerLabel ?? appName ?? appId ?? resolveCallerLabel();
   const paths = resolveDaemonPaths({
     homeDir: options.homeDir ?? process.env.OPENTRAY_HOME ?? homedir(),
     packageVersion,
@@ -114,9 +103,7 @@ export const connectLocalBroker = async (
   const endpoint = options.endpoint ?? paths.endpoint;
   const autoStart = options.autoStart ?? endpoint === paths.endpoint;
   if (autoStart && endpoint !== paths.endpoint) {
-    throw new Error(
-      "local broker autoStart requires the derived same-version endpoint"
-    );
+    throw new Error("local broker autoStart requires the derived same-version endpoint");
   }
   const cliEntrypoint = options.cliEntrypoint ?? resolveCliEntrypoint();
   const packageIdentity =
@@ -139,8 +126,8 @@ export const connectLocalBroker = async (
     });
   const expectedBrokerArtifactIdentity = autoStart
     ? (await startDaemon({ paths, driver })).broker.artifactIdentity
-    : options.expectedBrokerArtifactIdentity ??
-      (await driver.resolveBroker(paths)).artifactIdentity;
+    : (options.expectedBrokerArtifactIdentity ??
+      (await driver.resolveBroker(paths)).artifactIdentity);
   const socket = await connectSocket(endpoint);
   const connection = new LocalBrokerConnection(socket, endpoint, callerLabel);
 
@@ -152,12 +139,41 @@ export const connectLocalBroker = async (
     );
     if (appBundle !== undefined && options.appLaunch !== undefined) {
       await updateDarwinAppLaunchDescriptor(appBundle.path, options.appLaunch);
+      const convergence = await convergeDarwinAppBundleIdentity({
+        currentBundlePath: appBundle.path,
+        appId: paths.appId,
+        managedAppsRoot: resolve(paths.homeDir, ".opentray/apps"),
+        legacyRuntimeRoot: resolve(paths.homeDir, ".opentray"),
+        legacyBundlePaths: [resolve(paths.runtimeDir, "darwin-carrier/OpenTray.app")],
+      });
+      await appendBrokerDiagnostic(paths.brokerLog, {
+        event: "bundle-identity-convergence",
+        removed: convergence.removed,
+        skippedLiveOwner: convergence.skippedLiveOwner,
+        failedUnregister: convergence.failedUnregister,
+      });
     }
   } catch (error) {
     await connection.close();
     throw error;
   }
   return connection;
+};
+
+const appendBrokerDiagnostic = async (
+  path: string,
+  value: Readonly<Record<string, unknown>>,
+): Promise<void> => {
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(
+      path,
+      `${JSON.stringify({ timestamp: new Date().toISOString(), ...value })}\n`,
+      "utf8",
+    );
+  } catch {
+    // Diagnostics must never turn a successful tray connection into a failure.
+  }
 };
 
 const resolveDarwinAppBundleOptions = (
@@ -191,9 +207,7 @@ const resolveDarwinAppBundleOptions = (
   };
 };
 
-const normalizeAppIdentityField = (
-  value: string | undefined
-): string | undefined => {
+const normalizeAppIdentityField = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 };
@@ -204,9 +218,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
   sessionId = "";
 
   private buffer = "";
-  private readonly listeners = new Set<
-    (frame: LocalRuntimeEventFrame) => void
-  >();
+  private readonly listeners = new Set<(frame: LocalRuntimeEventFrame) => void>();
   private readonly pending = new Map<RequestId, PendingRequest>();
   private ready:
     | {
@@ -218,7 +230,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
   constructor(
     private readonly socket: BrokerSocket,
     endpoint: string,
-    callerLabel: string
+    callerLabel: string,
   ) {
     this.endpoint = endpoint;
     this.callerLabel = callerLabel;
@@ -239,11 +251,9 @@ class LocalBrokerConnection implements LocalBrokerClient {
     protocolVersion: number,
     expectedBrokerArtifactIdentity: BrokerArtifactIdentity,
   ): Promise<void> {
-    const ready = new Promise<Extract<ServerFrame, { type: "ready" }>>(
-      (resolve, reject) => {
-        this.ready = { resolve, reject };
-      }
-    );
+    const ready = new Promise<Extract<ServerFrame, { type: "ready" }>>((resolve, reject) => {
+      this.ready = { resolve, reject };
+    });
     this.write({
       type: "init",
       protocolVersion,
@@ -251,10 +261,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
     });
     const frame = await ready;
     if (
-      !brokerArtifactIdentityEquals(
-        frame.brokerArtifactIdentity,
-        expectedBrokerArtifactIdentity,
-      )
+      !brokerArtifactIdentityEquals(frame.brokerArtifactIdentity, expectedBrokerArtifactIdentity)
     ) {
       throw new Error(
         `broker artifact identity mismatch: expected=${JSON.stringify(expectedBrokerArtifactIdentity)} actual=${JSON.stringify(frame.brokerArtifactIdentity)}`,
@@ -308,9 +315,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
   private dispatchLine(line: string): void {
     const parsed = parseServerFrame(line);
     if (!parsed.ok || parsed.frame === undefined) {
-      this.rejectAll(
-        new Error(`${parsed.error ?? "invalid server frame"}: ${line}`)
-      );
+      this.rejectAll(new Error(`${parsed.error ?? "invalid server frame"}: ${line}`));
       return;
     }
 
@@ -403,8 +408,6 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
 };
 
 const resolveCliEntrypoint = (): string => {
-  const suffix = fileURLToPath(import.meta.url).endsWith(".ts")
-    ? "cli.ts"
-    : "cli.mjs";
+  const suffix = fileURLToPath(import.meta.url).endsWith(".ts") ? "cli.ts" : "cli.mjs";
   return fileURLToPath(new URL(`./${suffix}`, import.meta.url));
 };

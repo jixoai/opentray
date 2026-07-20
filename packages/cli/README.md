@@ -155,6 +155,16 @@ Cold launch is currently a Darwin carrier capability. A live retained session
 continues to use tray/window reveal, and ordinary Windows/Linux taskbar entries
 are not claimed as persistent post-exit launchers.
 
+### Runtime diagnostics
+
+Detached brokers append stdout and stderr to the caller-scoped
+`<home>/.opentray/<package-version>/<caller-label>/runtime/broker.log` by default.
+Set `OPENTRAY_DAEMON_STDIO=inherit` for an interactive terminal or
+`OPENTRAY_DAEMON_STDIO=ignore` when silence is deliberate. When a Darwin app
+carrier is opened without the private `broker` arguments, its
+`Contents/Resources/opentray-launch.log` records descriptor parsing, spawn PID or
+error, and the relaunched consumer's stdout/stderr.
+
 ## Runtime Ownership
 
 OpenTray does not ask developers to create a public broker object. The application process or an application-owned background service imports `opentray`, calls `createTray()`, and owns its event handlers. Calling the returned handle's `destroy()` removes the tray and closes the caller-owned broker session; repeated calls share the same teardown. Process exit remains the final fallback rather than a required cleanup mechanism.

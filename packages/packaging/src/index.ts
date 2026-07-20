@@ -6,10 +6,13 @@ export {
   DarwinAppBundleError,
   buildDarwinAppBundle,
   clearDarwinAppBundleOwner,
+  convergeDarwinAppBundleIdentity,
   ensureDarwinAppBundle,
   validateDarwinAppBundle,
   writeDarwinAppBundleOwner,
   type DarwinAppBundleErrorCode,
+  type DarwinAppBundleIdentityConvergenceOptions,
+  type DarwinAppBundleIdentityConvergenceResult,
   type DarwinAppBundleManifest,
   type DarwinAppBundleOptions,
   type DarwinAppBundleTarget,
@@ -349,10 +352,7 @@ const resolveArtifactRecord = (
     Object.entries(artifacts).map(([key, artifact]) => [key, join(artifactRoot, artifact.path)]),
   );
 
-const inferArtifactRoot = (
-  manifestPath: string,
-  manifest: OpenTrayPackageManifest,
-): string => {
+const inferArtifactRoot = (manifestPath: string, manifest: OpenTrayPackageManifest): string => {
   const manifestRoot = dirname(manifestPath);
   return basename(manifestRoot) === manifest.artifactStem ? dirname(manifestRoot) : manifestRoot;
 };
@@ -404,10 +404,7 @@ const parseManifestArtifactRecord = (
   );
 };
 
-const parseManifestArtifact = (
-  value: unknown,
-  field: string,
-): OpenTrayManifestArtifact => {
+const parseManifestArtifact = (value: unknown, field: string): OpenTrayManifestArtifact => {
   const record = requireRecord(value, field);
   const role = requireString(record.role, `${field}.role`);
   if (role !== "runtime-host" && role !== "native-sidecar" && role !== "companion") {
@@ -429,9 +426,7 @@ const requireRecord = (value: unknown, field: string): Readonly<Record<string, u
 
 const requireString = (value: unknown, field: string): string => {
   if (typeof value !== "string" || value.length === 0) {
-    throw invalidManifest(
-      `OpenTray package manifest field must be a non-empty string: ${field}`,
-    );
+    throw invalidManifest(`OpenTray package manifest field must be a non-empty string: ${field}`);
   }
   return value;
 };

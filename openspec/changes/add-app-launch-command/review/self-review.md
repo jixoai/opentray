@@ -6,7 +6,7 @@
 - Iteration: 1
 - Recurring issue counts: none; all issue counts are 0
 - Exit-condition judgment: rejected by owner acceptance; two Dock identities appeared and a pinned entry did not relaunch the consumer.
-- Next loop action: round 2 corrects package identity, stale bundle convergence, and persistent daemon/carrier diagnostics before repeating owner acceptance.
+- Next loop action: owner performs the remaining Dock visual and pinned-click acceptance against the linked local runtime.
 
 ## Intent Alignment
 
@@ -22,11 +22,11 @@
 | Core and live-session boundaries remain unchanged | No Core/spec protocol changes; `broker` remains the only broker entry command and live reveal never reads the cold-launch descriptor | Aligned |
 | Release intent is explicit | `.changeset/calm-app-launch.md` plans the fixed release line from `opentray` and `@opentray/packaging` | Aligned |
 
-## Deviations From Intent
+## Round 2 Resolution
 
-1. The round-1 implementation did not converge older OpenTray-owned bundles with the same `CFBundleIdentifier`; a pinned path could therefore differ from the running path.
-2. Default package discovery allowed nested `npm_package_json=webui` to address the stable bundle even though the running consumer belongs to `skill-creator`.
-3. Detached broker and carrier stdio were discarded, so a manual Dock failure had no durable evidence.
+1. Package identity now resolves the nearest package manifest from the running consumer script before ambient `npm_package_json`; explicit `packageRoot`/`packageName` remains authoritative.
+2. After successful handshake and descriptor commit, convergence scans `~/.opentray/apps` plus versioned legacy runtime carriers, unregisters dead same-AppId OpenTray bundles, and preserves live owners or failed initialization.
+3. Detached broker output defaults to the caller runtime `broker.log`; explicit `inherit` and `ignore` remain available. The Darwin carrier writes `opentray-launch.log` and forwards relaunched consumer stdout/stderr there.
 
 ## New Questions For User
 
@@ -36,10 +36,10 @@
 
 - HTML report: `review/self-review.html`
 - Command/evidence paths: `packages/cli/src/app-launch.test.ts`, `packages/cli/src/local-broker.test.ts`, `packages/packaging/src/app-launch.test.ts`, `packages/packaging/src/app-bundle.test.ts`, `crates/opentray-bin/tests/app_launch.rs`
-- Commands passed: `pnpm run build`; `pnpm run verify`; `cargo test -p opentray-bin --test app_launch -- --nocapture`; `bun run openspec:vision -- validate add-app-launch-command`; `git diff --check`
-- Git commits reviewed: `c1c9a66 docs(spec): prepare add-app-launch-command for apply`; `f3ddf42 feat: relaunch consumers from Darwin app bundles`
-- Uncommitted paths at review creation: `plans/plan.md`, `tasks.md`, `review/self-review.md`, and `review/self-review.html`; these belong to the self-review evidence commit
-- Task checkboxes updated by this working context: BDD 2.1-2.7, gates 3.1-3.2, implementation 4.1-4.10, verification 5.1-5.7, and review 6.1-6.2/6.7; archive/conditional loop items remain open
+- Commands passed: focused packaging/CLI tests; `cargo test -p opentray-bin --test app_launch`; `pnpm run build`; `pnpm run verify`; `bun run openspec:vision -- validate add-app-launch-command`; `bun run openspec:vision -- check add-app-launch-command`; `git diff --check`
+- Runtime evidence passed: local `pnpm link` resolves `opentray` to `packages/cli`; `pnpm dev` produced one `~/.opentray/apps/skill-creator/Skill Creator.app`; broker log recorded removal of the legacy and `webui` carriers; direct carrier cold launch created a new daemon and appended `carrier-start`, `descriptor-read`, and `consumer-spawned` records.
+- Git commits reviewed: `c1c9a66 docs(spec): prepare add-app-launch-command for apply`; `f3ddf42 feat: relaunch consumers from Darwin app bundles`; `3ceabd3 docs(spec): reopen app launch acceptance`
+- Task checkboxes updated by this working context: BDD 2.1-2.7, gates 3.1-3.2, implementation 4.1-4.10, verification 5.1-5.7, review 6.1-6.2/6.7, and corrective loop 7.4-7.12; archive item remains open pending owner acceptance
 - Residual warnings: existing `vendor/tray-icon` unnecessary `unsafe` warnings only
 
 ## HTML Review Report
