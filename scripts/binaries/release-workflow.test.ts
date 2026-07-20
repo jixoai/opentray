@@ -75,6 +75,9 @@ describe("Feature: release native binary CI law", () => {
     expect(packedJob).toContain("- name: Build publish artifacts");
     expect(packedJob).toContain("run: pnpm run build");
     expect(releaseJob).toContain("- packed-consumer");
+    expect(releaseJob.indexOf("- name: Build publish artifacts")).toBeLessThan(
+      releaseJob.indexOf("- name: Verify"),
+    );
     expect(prepareJob).toContain("pnpm run version-packages");
     expect(prepareJob).toContain('git commit -m "chore: version packages"');
     expect(prepareJob).toContain('source_ref="$(git rev-parse HEAD)"');

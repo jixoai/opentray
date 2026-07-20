@@ -361,11 +361,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify
-        run: pnpm run verify
-
       - name: Build publish artifacts
         run: pnpm run build
+
+      - name: Verify
+        run: pnpm run verify
 
       - name: Download native artifacts
         if: needs.plan-native.outputs.enabled == 'true'
