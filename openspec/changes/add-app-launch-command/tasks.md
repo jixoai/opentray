@@ -49,14 +49,14 @@ entry relaunch the consumer with the last or explicitly configured command):
 - [x] 5.4 Run a Darwin visible cold-launch smoke with a temporary consumer script and verify exactly one child invocation; do not treat this as final Dock visual acceptance.
 - [x] 5.5 Run `pnpm run build`, `pnpm run verify`, and `git diff --check` at the narrowest viable scope before the final gate.
 - [x] 5.6 Run `bun run openspec:vision -- validate add-app-launch-command` again after implementation.
-- [ ] 5.7 Run `bun run openspec:vision -- commit-check add-app-launch-command --phase self-review` before writing review evidence.
+- [x] 5.7 Run `bun run openspec:vision -- commit-check add-app-launch-command --phase self-review` before writing review evidence.
 
 ## 6. Self-Review Loop
 
-- [ ] 6.1 Generate `review/self-review.md` comparing the implementation against `plans/plan.md`, every spec requirement, and every BDD task.
-- [ ] 6.2 Generate separate `review/self-review.html` containing structured runtime evidence and the cold-launch boundary; visual Dock acceptance remains user-owned.
+- [x] 6.1 Generate `review/self-review.md` comparing the implementation against `plans/plan.md`, every spec requirement, and every BDD task.
+- [x] 6.2 Generate separate `review/self-review.html` containing structured runtime evidence and the cold-launch boundary; visual Dock acceptance remains user-owned.
 - [ ] 6.3 If review updates OpenSpec artifacts or reopens tasks, commit those artifact changes before another implementation loop.
 - [ ] 6.4 If the review enters a real loop, run `bun run openspec:vision -- review-state add-app-launch-command` and record iteration/recurrence state.
 - [ ] 6.5 If review cannot exit normally, run `bun run openspec:vision -- handoff add-app-launch-command` and commit the handoff evidence before returning to user discussion.
 - [ ] 6.6 If review exits normally, run `openspec archive add-app-launch-command` and commit the archive result.
-- [ ] 6.7 Run `bun run openspec:vision -- check add-app-launch-command` and decide whether the change exits or returns to a backed-up plan revision.
+- [x] 6.7 Run `bun run openspec:vision -- check add-app-launch-command` and decide whether the change exits or returns to a backed-up plan revision.

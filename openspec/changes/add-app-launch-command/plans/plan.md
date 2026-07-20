@@ -17,7 +17,7 @@ silently claimed by this change.
 ## Current Round
 
 - Round: 1
-- Status: Implementation and repository verification complete; self-review pending.
+- Status: Self-review complete; owner Dock acceptance and archive pending.
 - Previous plan backup: none; this is a new change.
 
 ## Workflow Command Surface
@@ -71,8 +71,8 @@ silently claimed by this change.
 | Checkpoint | Expected commit evidence | Current status |
 | ---------- | ------------------------ | -------------- |
 | OpenSpec artifacts before apply | Commit containing `plans/plan.md`, specs, and `tasks.md` before product-code work starts | Committed as `c1c9a66 docs(spec): prepare add-app-launch-command for apply`. |
-| Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | Implementation commit pending. |
-| Self-review updates | Commit containing review output and any reopened or added OpenSpec tasks before the next apply loop | Pending. |
+| Task-progress commits | Commit containing current-context task checkbox updates plus matching code/BDD evidence | Committed as `f3ddf42 feat: relaunch consumers from Darwin app bundles`. |
+| Self-review updates | Commit containing review output and any reopened or added OpenSpec tasks before the next apply loop | Self-review commit pending. |
 | Normal archive | Commit containing `openspec archive <change>` result | Pending. |
 | Abnormal handoff | Commit containing `HANDOFF.md` / `vN.HANDOFF.md` evidence before returning to user discussion | Not expected. |
 
@@ -207,7 +207,7 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - [x] 2. Write specs from the intent.
 - [x] 3. Write BDD tasks from specs.
 - [x] 4. Implement tasks.
-- [ ] 5. Self-review against intent and decide whether to loop.
+- [x] 5. Self-review against intent and decide whether to loop.
 
 ## Open Questions
 
