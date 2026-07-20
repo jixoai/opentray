@@ -1,13 +1,12 @@
 <!--
-Orthogonal intents (updated 2026-07-21; original user requests: an app-mode entry
-left in the Dock/taskbar must relaunch the consumer; owner acceptance then found
-two Dock identities, a pinned entry that could not relaunch, and no durable daemon
-diagnostics):
+Orthogonal intents (2026-07-20; original user request: an app-mode entry left in
+the Dock/taskbar must be able to start the consumer again, remember the latest
+invocation when no command is configured, and allow an explicit launch command):
 1. Define the public App Launch Command contract at the runtime seam.
 2. Persist the latest launch invocation in a stable Darwin app bundle.
 3. Make a cold launch from the bundle execute the consumer without a shell.
-4. Converge legacy/wrong-package Darwin bundles onto one live App identity.
-5. Preserve durable broker/carrier diagnostics and platform boundaries.
+4. Preserve managed/prebuilt bundle ownership and compatibility boundaries.
+5. Record the platform scope and the running-process Dock reopen boundary.
 Compromise: Darwin is the only platform with a stable OpenTray app carrier today;
 Windows taskbar persistence needs a separate shortcut/launcher atom and is not
 silently claimed by this change.
@@ -17,9 +16,9 @@ silently claimed by this change.
 
 ## Current Round
 
-- Round: 2
-- Status: Owner acceptance rejected round 1; diagnosis and corrective apply pending.
-- Previous plan backup: `plans/plan-v1.md`.
+- Round: 1
+- Status: Self-review complete; owner Dock acceptance and archive pending.
+- Previous plan backup: none; this is a new change.
 
 ## Workflow Command Surface
 
@@ -54,9 +53,6 @@ silently claimed by this change.
 | 1 | User | An app-mode Dock/taskbar entry must remain useful after the tray process exits; clicking it must start the application again. | A stable carrier needs a cold-launch path, not only a retained broker window. |
 | 2 | User | The launch command is configurable but may be empty; an empty value uses `process.argv`. | `undefined`/`null` normalize to a captured executable, argument list, and working directory. |
 | 3 | User | After one successful launch, the next launch reuses the previous `process.argv`; developers may provide a launch script explicitly. | Persist the latest normalized command and overwrite it on each successful runtime initialization. |
-| 4 | User | `pnpm dev` shows two Dock icons; hiding the window removes one. | A stable carrier is not sufficient while another OpenTray-owned bundle with the same App identity remains registered. |
-| 5 | User | Pinning one icon, exiting, and clicking the pinned icon does not relaunch Skill Creator. | The sole surviving Dock path must be the current validated stable bundle and must contain the latest launch descriptor. |
-| 6 | User | Manual acceptance needs daemon logs that expose the actual error. | Broker and cold-carrier output must be durable by default and documented at deterministic paths. |
 
 ### Evidence Read
 
@@ -69,11 +65,6 @@ silently claimed by this change.
 | `packages/darwin-app-carrier/Info.plist` | The stable carrier identifies the broker executable as the bundle executable. | The carrier can be the launch trampoline without adding AppKit to the platform-neutral Core. |
 | `openspec/changes/add-webview-app-mode-and-app-icon` | App mode and stable Darwin bundle identity are already specified separately. | This change extends the runtime carrier with launch intent instead of reopening that completed design. |
 | `AGENTS.md` Darwin Runtime Carrier Law | The Darwin runtime package owns the broker plus shared `.app` carrier; Core must remain platform neutral. | The launcher stays in packaging/runtime/carrier atoms and is not an AppProjection field. |
-| Owner acceptance runtime graph | `~/.opentray/2.0.0/skill-creator/runtime/darwin-carrier/OpenTray.app` and `~/.opentray/apps/webui/Skill Creator.app` both declare `com.skill-creator`. | LaunchServices can retain a pinned path different from the running bundle, producing duplicate and dead Dock identities. |
-| Installed module resolution | `skill-creator-v2` resolves the online `opentray@0.17.0` graph; its bundle broker hash matches that installed platform package, not the local checkout. | Local acceptance must use a real pnpm workspace override/link and rebuilt native package projection. |
-| `packages/packaging/src/package-identity.ts` | Ambient `npm_package_json` currently beats the default running script path. | `pnpm --dir webui dev` incorrectly addresses the stable bundle as package `webui` instead of `skill-creator`. |
-| `packages/cli/src/daemon/lifecycle.ts` | Detached broker stdio defaults to `ignore`. | Native broker failures disappear into `/dev/null`, preventing owner-assisted diagnosis. |
-| `crates/opentray-bin/src/main.rs` | Cold carrier and spawned consumer use null stdout/stderr. | LaunchServices failures and early consumer exit are invisible even when the carrier resolves the descriptor. |
 
 ### Git Evidence
 
@@ -136,8 +127,6 @@ When an ordinary application-mode entry is opened from the Dock after the tray p
 3. The consumer exits; the stable app entry remains usable in the Dock.
 4. Opening that entry launches the recorded consumer once, without a shell or manual repair.
 5. If the developer configured a command, that command is launched instead; the carrier never guesses or concatenates shell text.
-6. A previous OpenTray-owned bundle with the same App identity is unregistered and removed only after the current bundle is proven live; one Dock identity remains.
-7. Broker and cold-launch failures append to deterministic log files without requiring a debug environment variable.
 
 ## Platform Diagnosis
 
@@ -160,17 +149,13 @@ createTray(appMode + appLaunch?)
      v
 stable .app + last launch descriptor
      |
-     +--> handshake + descriptor commit
-     |              |
-     |              +--> unregister/remove stale same-AppId bundles
-     |
 consumer exits
      |
      v
 Dock/Finder opens .app
      |
      v
-carrier logs -> reads descriptor -> spawns consumer with log stdio -> carrier exits
+carrier reads descriptor -> spawns consumer -> carrier exits
 ```
 
 Opening a retained live app is not silently converted into a second consumer. The existing broker/session lifecycle remains authoritative while it is alive.
@@ -204,9 +189,9 @@ The descriptor schema is versioned and strict. It stores no environment variable
 ### Architecture Shape
 
 - `opentray-core`: unchanged; no Node command or process spawning.
-- `@opentray/packaging`: owns descriptor type, validation, path, atomic persistence, bundle identity inspection, and owner-safe stale-bundle removal.
-- `opentray` SDK: resolves the running consumer script before nested package-manager environment metadata, snapshots the invocation, owns deterministic runtime log paths, and reconciles stale bundle identities only after handshake plus descriptor commit.
-- `opentray-bin` Darwin carrier: with no `broker` subcommand, resolves its own `.app` resources, appends carrier/consumer diagnostics, spawns the vector without a shell, and exits; with `broker`, behavior is unchanged apart from SDK-owned log redirection.
+- `@opentray/packaging`: owns descriptor type, validation, path, atomic persistence, and managed/prebuilt lifecycle semantics.
+- `opentray` SDK: snapshots/normalizes the Node invocation and passes the descriptor through local broker resolution.
+- `opentray-bin` Darwin carrier: with no `broker` subcommand, resolves its own `.app` resource descriptor, spawns the vector detached with null stdio, and exits; with `broker`, behavior is unchanged.
 - Windows/Linux: retain current no-argument usage behavior until a platform launcher atom is specified.
 
 ### User Confirmation Gates
@@ -218,13 +203,11 @@ The descriptor schema is versioned and strict. It stores no environment variable
 
 ## Intent-Driven Plan
 
-- [x] 1. Research and align the original launch-command intent.
-- [x] 2. Implement and self-review the round-1 cold-launch path.
-- [x] 3. Capture the owner rejection and reproduce the incoherent installed/bundle graph.
-- [ ] 4. Commit the round-2 specs and red BDD surface.
-- [ ] 5. Correct package identity, bundle convergence, and durable diagnostics.
-- [ ] 6. Verify through the real linked `skill-creator-v2` `pnpm dev` graph.
-- [ ] 7. Return the sole remaining Dock visual/click acceptance to the owner.
+- [x] 1. Research and align intent.
+- [x] 2. Write specs from the intent.
+- [x] 3. Write BDD tasks from specs.
+- [x] 4. Implement tasks.
+- [x] 5. Self-review against intent and decide whether to loop.
 
 ## Open Questions
 
@@ -248,4 +231,4 @@ The descriptor schema is versioned and strict. It stores no environment variable
 
 - Default max review iterations: 2.
 - Issue recurrence threshold: reopen the plan after one repeated mismatch between descriptor, bundle, or carrier behavior.
-- Custom exit condition from intent: a real Darwin `.app` cold launch must execute the configured/default consumer vector once; the current consumer must converge to one OpenTray-owned same-AppId bundle; failures must be present in documented logs; and a normal published `pnpm install` must remain sufficient for the runtime path.
+- Custom exit condition from intent: a real Darwin `.app` cold launch must execute the configured/default consumer vector once, and normal `pnpm install` must still be sufficient for the runtime path.

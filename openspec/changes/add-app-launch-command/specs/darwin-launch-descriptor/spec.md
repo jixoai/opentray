@@ -1,9 +1,11 @@
 <!--
 Orthogonal intents (2026-07-20; original user request: remember the last launch
-command in the stable app entry):
+command in the stable app entry; updated 2026-07-21 after owner acceptance found
+multiple same-AppId OpenTray bundles and a dead pinned path):
 1. Define the durable descriptor separate from artifact compatibility metadata.
 2. Make updates atomic and schema-validated.
 3. Preserve managed/prebuilt bundle ownership semantics.
+4. Converge OpenTray-owned App identity only after the new path is valid.
 -->
 
 ## ADDED Requirements
@@ -62,3 +64,31 @@ next successful runtime initialization.
 - **WHEN** the runtime attempts to initialize it
 - **THEN** it SHALL fail before writing `opentray-launch.json`
 
+### Requirement: Darwin App Identity Convergence
+
+After a successful local broker handshake and launch-descriptor commit, the runtime SHALL treat
+the current validated bundle as the sole OpenTray-owned carrier for its `CFBundleIdentifier`.
+It SHALL inspect the managed apps root and the caller's known legacy runtime-carrier location,
+unregister stale same-AppId bundles from LaunchServices, and remove them only when they are not
+the current bundle and have no live owner. Cleanup SHALL be best-effort diagnostics after success;
+it SHALL never invalidate the running session.
+
+#### Scenario: Wrong nested-workspace and legacy bundles converge
+
+- **GIVEN** the current validated bundle belongs to `skill-creator`
+- **AND** OpenTray-owned `webui/Skill Creator.app` and legacy `runtime/darwin-carrier/OpenTray.app`
+  bundles declare the same App identifier
+- **WHEN** the current broker handshake and launch-descriptor commit succeed
+- **THEN** OpenTray SHALL unregister and remove the two stale bundles and retain the current bundle
+
+#### Scenario: A live owner prevents destructive cleanup
+
+- **GIVEN** a stale same-AppId bundle has an owner marker whose process is alive
+- **WHEN** identity convergence runs
+- **THEN** OpenTray SHALL preserve that bundle and record a skipped-live-owner diagnostic
+
+#### Scenario: Failed initialization preserves the previous launcher
+
+- **GIVEN** a new bundle fails validation, broker readiness, handshake, or descriptor commit
+- **WHEN** runtime initialization returns the failure
+- **THEN** OpenTray SHALL not unregister or remove any previous same-AppId bundle

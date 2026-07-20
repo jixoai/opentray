@@ -1,10 +1,12 @@
 <!--
 Orthogonal intents (2026-07-20; original user request: omitted app launch
 configuration uses the current process invocation, while developers may supply
-their own launch script):
+their own launch script; updated 2026-07-21 after nested `pnpm --dir` execution
+addressed the stable bundle to the wrong workspace package):
 1. Define the public runtime launch-command shape.
 2. Normalize automatic and explicit invocations deterministically.
 3. Keep launch state out of the platform-neutral Core projection.
+4. Resolve stable Bundle ownership from the running consumer package.
 -->
 
 ## ADDED Requirements
@@ -58,3 +60,24 @@ reported as a successful launch-state update.
 - **WHEN** `createTray` initializes its connection
 - **THEN** it SHALL not create or mutate a Darwin app-bundle launch descriptor
 
+### Requirement: Running Consumer Package Identity
+
+The Node runtime SHALL derive the default stable app-bundle address from the package nearest to
+the running consumer script. Explicit `packageRoot`/`packageName` or `projectRoot` metadata SHALL
+remain authoritative. When the default script path and ambient package-manager metadata disagree,
+the script package SHALL win because `npm_package_json` may describe a nested workspace command
+rather than the process that owns `createTray()`.
+
+#### Scenario: Nested workspace command does not rename the app-bundle owner
+
+- **GIVEN** `pnpm --dir webui dev` supplies `npm_package_json` for `webui`
+- **AND** the running script belongs to the root `skill-creator` package
+- **WHEN** OpenTray resolves the default Darwin app-bundle path
+- **THEN** it SHALL use the `skill-creator` package identity and SHALL not create an
+  `.opentray/apps/webui` bundle
+
+#### Scenario: Explicit package metadata remains authoritative
+
+- **GIVEN** a build adapter or runtime explicitly supplies package root/name metadata
+- **WHEN** OpenTray resolves the app-bundle owner
+- **THEN** it SHALL use the explicit package metadata before script, environment, or cwd discovery

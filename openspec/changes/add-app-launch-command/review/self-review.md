@@ -5,8 +5,8 @@
 - Change: `add-app-launch-command`
 - Iteration: 1
 - Recurring issue counts: none; all issue counts are 0
-- Exit-condition judgment: implementation and automated Darwin cold-launch conditions are met; archive remains deferred until the owner completes the real Dock acceptance in `skill-creator-v2`
-- Next loop action: no implementation loop; run owner acceptance, then archive on acceptance or return to a backed-up plan if behavior differs
+- Exit-condition judgment: rejected by owner acceptance; two Dock identities appeared and a pinned entry did not relaunch the consumer.
+- Next loop action: round 2 corrects package identity, stale bundle convergence, and persistent daemon/carrier diagnostics before repeating owner acceptance.
 
 ## Intent Alignment
 
@@ -24,11 +24,13 @@
 
 ## Deviations From Intent
 
-1. None within the approved Darwin cold-launch scope. Live-process Dock reopen and Windows/Linux persistent launchers remain deliberately excluded by the plan and specs.
+1. The round-1 implementation did not converge older OpenTray-owned bundles with the same `CFBundleIdentifier`; a pinned path could therefore differ from the running path.
+2. Default package discovery allowed nested `npm_package_json=webui` to address the stable bundle even though the running consumer belongs to `skill-creator`.
+3. Detached broker and carrier stdio were discarded, so a manual Dock failure had no durable evidence.
 
 ## New Questions For User
 
-1. After fully exiting the `skill-creator-v2` caller and broker, does clicking its stable Dock entry relaunch the expected application with the accepted title and icon? This is the remaining owner-owned visual acceptance, not an unresolved API decision.
+1. After round-2 automated and runtime evidence is green, does the sole Skill Creator Dock entry remain visually correct and relaunch after being pinned? This remains owner-owned visual acceptance.
 
 ## Evidence
 
