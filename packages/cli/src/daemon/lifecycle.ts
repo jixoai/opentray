@@ -4,10 +4,22 @@
 // 2. Reject liveness-only reuse through exact ready artifact identity.
 // 3. Preserve Darwin stable-bundle live-owner protection.
 // 4. Persist detached broker output and early exit identity unless explicitly overridden.
-// 5. Bound native cold-start readiness without terminating a healthy carrier prematurely.
+// 5. Bound native cold-start readiness and recover caller locks left by dead processes.
 
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, appendFile, mkdir, open, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  link,
+  mkdir,
+  open,
+  readFile,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 
@@ -27,6 +39,7 @@ const DAEMON_STDIO_ENV = "OPENTRAY_DAEMON_STDIO";
 const DAEMON_POLL_INTERVAL_MS = 50;
 const DEFAULT_DAEMON_READY_TIMEOUT_MS = 10_000;
 const DEFAULT_DAEMON_LOCK_TIMEOUT_MS = DEFAULT_DAEMON_READY_TIMEOUT_MS + 5_000;
+const ABANDONED_RECLAIM_CLAIM_MS = 1_000;
 
 export type DaemonStartResult =
   | {
@@ -227,7 +240,7 @@ export const startDaemon = async ({
 }: StartDaemonOptions): Promise<DaemonStartResult> => {
   await mkdir(paths.runtimeDir, { recursive: true });
 
-  const lock = await acquireLock(paths.lockFile, lockTimeoutMs);
+  const lock = await acquireDaemonLock(paths.lockFile, lockTimeoutMs);
   try {
     const existingPid = await readPid(paths.pidFile);
     let existingAlive = existingPid !== undefined && (await driver.isAlive(existingPid));
@@ -471,23 +484,25 @@ export const executablePathsEqual = (
   return normalize(left) === normalize(right);
 };
 
-const acquireLock = async (
+export const acquireDaemonLock = async (
   lockFile: string,
   timeoutMs: number,
 ): Promise<{
   release(): Promise<void>;
 }> => {
   const deadline = Date.now() + timeoutMs;
+  const owner = `${JSON.stringify({ pid: process.pid, token: randomUUID() })}\n`;
   while (Date.now() <= deadline) {
     try {
       const handle = await open(
         lockFile,
         constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
       );
-      await handle.writeFile(`${process.pid}\n`, "utf8");
+      await handle.writeFile(owner, "utf8");
       return {
         async release() {
           await handle.close();
+          if ((await readLockSource(lockFile)) !== owner) return;
           await unlink(lockFile).catch((error: unknown) => {
             if (!isNodeError(error) || error.code !== "ENOENT") {
               throw error;
@@ -497,6 +512,7 @@ const acquireLock = async (
       };
     } catch (error) {
       if (isNodeError(error) && error.code === "EEXIST") {
+        if (await reclaimDeadLockOwner(lockFile)) continue;
         await sleep(25);
         continue;
       }
@@ -507,12 +523,89 @@ const acquireLock = async (
   throw new Error(`timed out acquiring daemon lock: ${lockFile}`);
 };
 
+const reclaimDeadLockOwner = async (lockFile: string): Promise<boolean> => {
+  const observed = await readLockSource(lockFile);
+  if (observed === undefined) return true;
+  const owner = parseLockOwner(observed);
+  if (owner === undefined || isProcessAlive(owner.pid)) return false;
+
+  const claimFile = `${lockFile}.reclaim-${createHash("sha256").update(observed).digest("hex").slice(0, 16)}`;
+  try {
+    await link(lockFile, claimFile);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return true;
+    if (isNodeError(error) && error.code === "EEXIST") {
+      await clearAbandonedReclaimClaim(claimFile);
+      return false;
+    }
+    throw error;
+  }
+
+  try {
+    // Only the hard-link claim winner may remove this exact dead owner inode.
+    if ((await readLockSource(lockFile)) !== observed || isProcessAlive(owner.pid)) return false;
+    try {
+      await unlink(lockFile);
+      return true;
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") return true;
+      throw error;
+    }
+  } finally {
+    await unlink(claimFile).catch((error: unknown) => {
+      if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+    });
+  }
+};
+
+const clearAbandonedReclaimClaim = async (claimFile: string): Promise<void> => {
+  try {
+    const claim = await stat(claimFile);
+    if (Date.now() - claim.ctimeMs < ABANDONED_RECLAIM_CLAIM_MS) return;
+    await unlink(claimFile);
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+  }
+};
+
+const readLockSource = async (lockFile: string): Promise<string | undefined> => {
+  try {
+    return await readFile(lockFile, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+};
+
+const parseLockOwner = (source: string): { readonly pid: number } | undefined => {
+  const legacyPid = Number(source.trim());
+  if (Number.isInteger(legacyPid) && legacyPid > 0) return { pid: legacyPid };
+
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    return undefined;
+  }
+  if (
+    !isRecord(value) ||
+    typeof value.pid !== "number" ||
+    !Number.isInteger(value.pid) ||
+    value.pid <= 0 ||
+    typeof value.token !== "string" ||
+    value.token.length === 0
+  ) {
+    return undefined;
+  }
+  return { pid: value.pid };
+};
+
 const isProcessAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return !(isNodeError(error) && error.code === "ESRCH");
   }
 };
 

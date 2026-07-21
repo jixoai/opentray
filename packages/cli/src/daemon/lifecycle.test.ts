@@ -1,3 +1,10 @@
+// Orthogonal intents (updated 2026-07-21; original user request: interrupted
+// starts must not leave Skill Creator permanently unable to mount its tray):
+// 1. Prove broker start, reuse, replacement, stop, restart, and inspection.
+// 2. Prove exact artifact readiness and bounded native cold-start behavior.
+// 3. Prove caller lock serialization, stale-owner recovery, and owner-safe release.
+// 4. Prove detached broker diagnostics and cross-platform executable identity.
+
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +17,7 @@ import type { BrokerArtifactIdentity } from "@opentray/spec";
 import type { ResolvedBrokerArtifact } from "./broker-command";
 import type { DaemonDriver } from "./lifecycle";
 import {
+  acquireDaemonLock,
   createNodeDaemonDriver,
   executablePathsEqual,
   inspectDaemon,
@@ -188,6 +196,52 @@ describe("daemon lifecycle", () => {
     expect(driver.spawned).toHaveLength(1);
   });
 
+  it.each([
+    ["legacy PID-only", "2147483647\n"],
+    ["tokenized", `${JSON.stringify({ pid: 2_147_483_647, token: "dead-owner" })}\n`],
+  ])("recovers a %s runtime lock owned by a dead caller", async (_kind, source) => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver();
+    await mkdir(paths.runtimeDir, { recursive: true });
+    await writeFile(paths.lockFile, source, "utf8");
+
+    const started = await startDaemon({ paths, driver, lockTimeoutMs: 100 });
+
+    expect(started.status).toBe("started");
+    expect(driver.spawned).toEqual([started.pid]);
+  });
+
+  it("does not remove a replacement caller lock during delayed release", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    await mkdir(paths.runtimeDir, { recursive: true });
+    const lock = await acquireDaemonLock(paths.lockFile, 100);
+    const replacement = `${JSON.stringify({ pid: process.pid, token: "replacement" })}\n`;
+    await rm(paths.lockFile, { force: true });
+    await writeFile(paths.lockFile, replacement, "utf8");
+
+    await lock.release();
+
+    expect(await readFile(paths.lockFile, "utf8")).toBe(replacement);
+  });
+
+  it("serializes concurrent recovery of the same dead caller lock", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver(25);
+    await mkdir(paths.runtimeDir, { recursive: true });
+    await writeFile(paths.lockFile, "2147483647\n", "utf8");
+
+    const [first, second] = await Promise.all([
+      startDaemon({ paths, driver, lockTimeoutMs: 500 }),
+      startDaemon({ paths, driver, lockTimeoutMs: 500 }),
+    ]);
+
+    expect(new Set([first.pid, second.pid]).size).toBe(1);
+    expect(driver.spawned).toHaveLength(1);
+  });
+
   it("waits longer than readiness polling before a concurrent start reuses the winner", async () => {
     const homeDir = await makeTempHome();
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
@@ -219,9 +273,7 @@ describe("daemon lifecycle", () => {
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
     const driver = createDelayedReadyDriver(1_000);
 
-    await expect(
-      startDaemon({ paths, driver, readinessTimeoutMs: 25 }),
-    ).rejects.toThrow(
+    await expect(startDaemon({ paths, driver, readinessTimeoutMs: 25 })).rejects.toThrow(
       `after 25ms: pid=50000; readyFile=${paths.readyFile}; brokerLog=${paths.brokerLog}`,
     );
 
@@ -235,9 +287,7 @@ describe("daemon lifecycle", () => {
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
     const driver = createExitedDriver();
 
-    await expect(startDaemon({ paths, driver })).rejects.toThrow(
-      `brokerLog=${paths.brokerLog}`,
-    );
+    await expect(startDaemon({ paths, driver })).rejects.toThrow(`brokerLog=${paths.brokerLog}`);
   });
 
   it("restarts by stopping and starting the same version endpoint", async () => {

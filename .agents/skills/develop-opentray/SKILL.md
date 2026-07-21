@@ -48,16 +48,14 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 
 - `appLaunch` is a cold process-entry vector. A live Darwin Dock reopen emits
   `reopenRequested` and must never execute it.
-- In a Vite/package-manager development graph, persist the top-level supervisor
-  that reconstructs the complete server, daemon, and WebView tree. Use an
-  absolute package-manager entry and address the workspace that owns Vite
-  directly, such as `process.execPath`,
-  `args: [absolute npm_execpath, "--dir", absolute webui dir, "dev"]`, and the
-  repository-root `cwd`.
+- In a Vite development graph, persist the top-level supervisor that reconstructs
+  the complete server, daemon, and WebView tree. Use the absolute JavaScript
+  runtime with Vite's real `node_modules/vite/bin/vite.js` entry and the frontend
+  workspace as `cwd`.
 - Do not persist only a daemon child, a shell string, or a bare `pnpm` command.
   The complete transitive command graph must work without the interactive
-  terminal's `PATH`; an absolute first executable does not make a nested bare
-  package-manager invocation safe under Finder/LaunchServices.
+  terminal's `PATH`; pnpm scripts and `.bin/vite` shell shims still perform a
+  nested bare runtime lookup and are not safe under Finder/LaunchServices.
 - Before accepting a linked consumer, run its source workspace's documented
   staging command so facade, broker, carrier, and native extensions come from
   one built graph. A registry install must not need this source-only step.
@@ -65,6 +63,9 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
   carrier/AppKit startup, remain inside the caller-lock budget, and preserve PID
   liveness plus exact artifact-identity checks on every poll. Timeout errors must
   point to the caller-scoped broker log.
+- Treat caller locks as recoverable ownership records. Preserve a live PID,
+  reclaim a dead PID automatically, and validate a unique owner token before
+  release so interrupted callers never require manual lock deletion.
 
 ## Verification Baseline
 

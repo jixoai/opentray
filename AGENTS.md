@@ -10,7 +10,8 @@ variants whose omitted name is default and whose selection remains Core-owned; l
 app-mode entry relaunch the latest `process.argv` invocation or an explicit launch script
 ; eliminate duplicate same-AppId Dock carriers and make detached broker/carrier failures
 observable in stable logs; make a live Dock click reveal and focus the latest retained app-mode
-WebView without spawning a second consumer (2026-07-21)):
+WebView without spawning a second consumer; recover tray startup after an interrupted caller leaves
+a stale broker lock (2026-07-21)):
 1. Preserve the tray-first App/Tray/Session platform laws.
 2. Preserve native runtime and extension package boundaries across macOS and Windows.
 3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
@@ -238,14 +239,17 @@ mode directly:
   capabilities on macOS and Windows. They remain orthogonal to visibility, even where a native
   substrate must also raise or restore the window to obtain foreground focus.
 - Development launch descriptors must reconstruct the supervisor that owns the complete app tree.
-  A pnpm/Vite consumer should persist `process.execPath` with the absolute `npm_execpath` and
-  directly address the Vite-owning workspace, for example
-  `[npm_execpath, "--dir", absoluteWebuiDir, "dev"]` plus repository-root `cwd`. Every transitive
-  command must resolve from the package graph or be absolute; never persist only the daemon child,
-  a shell string, or a graph that later invokes a bare package-manager name under Finder.
+  A Vite consumer should persist the absolute JavaScript runtime with Vite's real
+  `node_modules/vite/bin/vite.js` entry and the frontend workspace as `cwd`. Do not persist pnpm,
+  a package script, or a `.bin/vite` shell shim: each adds another bare runtime lookup that Finder's
+  minimal `PATH` cannot satisfy. Never persist only the daemon child or a shell string.
 - A source-linked consumer must stage the matching facade, broker/carrier, and native extension
   artifacts before runtime acceptance. This is a link-development prerequisite only; a registry
   install must remain coherent after normal package-manager installation.
+- Caller serialization state is recoverable ownership, not an operator repair burden.
+  `broker.lock` records the caller PID and a unique token; contention preserves a live PID but
+  automatically reclaims a dead owner, including the earlier PID-only format. Release removes the
+  lock only when its token still matches, so delayed cleanup cannot delete a replacement owner.
 
 ## Windows Tray WebView Laws
 
