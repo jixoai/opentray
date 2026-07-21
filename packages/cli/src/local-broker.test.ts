@@ -1,3 +1,10 @@
+// Orthogonal intents (2026-07-21; original user requests: persist the latest
+// Darwin app launch command, converge stale Dock identities, and ship one
+// coherent broker/runtime graph):
+// 1. Verify caller-scoped broker startup and artifact identity handshakes.
+// 2. Verify Darwin app-bundle mutation only after a successful handshake.
+// 3. Verify request routing and deterministic connection teardown.
+
 import { createServer, type Server, type Socket } from "node:net";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -19,6 +26,7 @@ import { resolveDaemonPaths } from "./daemon/paths";
 
 const tempDirs: string[] = [];
 const cleanup: Array<() => Promise<void>> = [];
+const itOnDarwin = process.platform === "darwin" ? it : it.skip;
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((close) => close()));
@@ -66,7 +74,7 @@ describe("local broker client", () => {
     await connection.close();
   });
 
-  it("commits the latest app launch descriptor when a compatible broker is reused", async () => {
+  itOnDarwin("commits the latest app launch descriptor when a compatible broker is reused", async () => {
     const homeDir = await makeTempHome();
     await writeFile(join(homeDir, "package.json"), JSON.stringify({ name: "@example/app" }));
     const driver = createSocketBrokerDriver();
@@ -114,19 +122,21 @@ describe("local broker client", () => {
       daemonDriver: driver,
     });
 
-    expect(driver.spawned).toBe(1);
-    await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(legacyBundle)).rejects.toMatchObject({ code: "ENOENT" });
-    const brokerLog = join(homeDir, ".opentray/0.1.0/example-app/runtime/broker.log");
-    expect(await readFile(brokerLog, "utf8")).toContain("bundle-identity-convergence");
-    expect(await readDarwinAppLaunchDescriptor(bundlePath)).toEqual({
-      schemaVersion: 1,
-      command: "/usr/bin/node",
-      args: ["/tmp/latest.mjs", "--dev"],
-      cwd: "/tmp/latest",
-    });
-
-    await second.close();
+    try {
+      expect(driver.spawned).toBe(1);
+      await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(legacyBundle)).rejects.toMatchObject({ code: "ENOENT" });
+      const brokerLog = join(homeDir, ".opentray/0.1.0/example-app/runtime/broker.log");
+      expect(await readFile(brokerLog, "utf8")).toContain("bundle-identity-convergence");
+      expect(await readDarwinAppLaunchDescriptor(bundlePath)).toEqual({
+        schemaVersion: 1,
+        command: "/usr/bin/node",
+        args: ["/tmp/latest.mjs", "--dev"],
+        cwd: "/tmp/latest",
+      });
+    } finally {
+      await second.close();
+    }
   });
 
   it("does not mutate a local app bundle through a successful external connection", async () => {
