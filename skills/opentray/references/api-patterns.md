@@ -1,11 +1,18 @@
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: public Skill examples
+must match the installed package exports used by projects such as skill-creator-v2):
+1. Teach the current top-level tray and event API.
+2. Keep official extensions tray-scoped.
+3. Isolate low-level custom transport guidance from ordinary applications.
+-->
+
 # API Patterns
 
 Use this reference when the user asks how to write code with OpenTray.
 
 ## Main Public Pieces
 
-- `runTrayApp(main, options?)`: first-app helper that owns the visible-runtime host loop and exposes a self-contained `createTray` callback for quick starts.
-- `createTray(options, runtimeOptions?)`: top-level entrypoint that resolves a runtime connection (default visible runtime binding, or an explicit runtime mode) and creates one tray.
+- `createTray(options, runtimeOptions?)`: top-level entrypoint that resolves the installed caller-scoped runtime and creates one tray.
 - `TrayHandle.setId` does not exist; the tray `id` is set at creation time and is immutable.
 - `TrayHandle.setMenu()`, `setTooltip()`, `setIcon()`: mutate one tray contribution. There is no `setTitle()` — visible text is part of icon projection.
 - `TrayHandle.extend(extension)`: mount an official extension onto the tray (e.g. `tray.extend(WebviewExt)`).
@@ -19,10 +26,6 @@ OpenTray no longer exposes `createSpace`, `resolveDefaultSpace`, or `createApp`.
 The `opentray` package re-exports common application types: `CreateTrayOptions`, `TrayIcon`, `TrayMenu`, `TrayTooltip`, `TrayEvent`, `TrayBoundsResult`, and the lower-level protocol frame types. Prefer these names over `Parameters<typeof createTray>` or direct `@opentray/spec` imports in ordinary application code.
 
 `primaryEvent` is an additive role on a normal menu item. It still emits `menuClick`, so handle it through item-local `onMenuClick` for simple commands or `tray.onMenuClick(...)` for centralized routing. Use `tray.onTrayClick(...)` for independent raw tray-icon clicks. Do not create a separate `bindPrimaryEvent` API unless the event ontology changes.
-
-Use `runTrayApp()` when the user wants the smallest first app and does not want to reason about host-thread choreography yet.
-
-The `runTrayApp()` callback executes in the app worker. Keep it self-contained; import official extensions such as `@opentray/ext-webview` inside the callback when the first app needs them.
 
 ## Typical Shape
 
@@ -85,4 +88,4 @@ Use `createClient(connection)` only when the user explicitly needs custom transp
 
 ## Extension Shape
 
-Official extensions attach through the tray handle, not by reaching into private broker details. `@opentray/ext-webview` is the current reference example (see `references/ext-webview.md`).
+Official extensions attach through the tray handle, not by reaching into private broker details. `@opentray/ext-webview` is the current reference example (see `ext-webview.md`).

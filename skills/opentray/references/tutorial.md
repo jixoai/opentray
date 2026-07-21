@@ -1,53 +1,43 @@
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: make the public Skill
+teach package consumers rather than OpenTray repository mechanics):
+1. Grow one consumer from a tray into retained extension windows.
+2. Keep runtime identity and application lifecycle explicit.
+3. Route advanced decisions to focused public references.
+-->
+
 # Progressive Tutorial
 
-Use this reference when the user wants the shortest path to a first OpenTray app, then a gradual path into lower-level control.
+Use this reference to grow one installed-package integration without exposing
+OpenTray repository internals.
 
-## Stage 1: First App
-
-Use `runTrayApp()` from `opentray/node` when the user wants the smallest working app and does not want to think about main-thread vs worker setup.
-
-```ts
-import { runTrayApp } from "opentray/node";
-
-await runTrayApp(async ({ createTray }) => {
-  const tray = await createTray({
-    id: "com.example.first-app",
-    icon: { "text-only": "OT" },
-    menu: { items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }] },
-  });
-  tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
-}, { autoExitAfterMs: 1500 });
-```
-
-Rules for the first stage:
-
-- Keep the callback self-contained.
-- Use `createTray()` only inside the callback.
-- Let the helper own the visible-runtime host loop.
-
-## Stage 2: Direct Tray Control
-
-Use `createTray()` directly when the user already owns the process shape and only needs tray behavior.
+## Stage 1: Own One Tray
 
 ```ts
 import { createTray } from "opentray";
 
-const tray = await createTray({
-  id: "com.example.status",
-  icon: { type: "file", path: "./tray.png", text: "Status" },
-  tooltip: { title: "Status", description: "Background service is running" },
-  menu: { items: [{ type: "item", id: 1, title: "Open" }] },
-});
+const tray = await createTray(
+  {
+    id: "com.example.status",
+    icon: { "text-only": "OT" },
+    menu: { items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }] },
+  },
+  {
+    appId: "com.example.status",
+    appName: "Example Status",
+  },
+);
 ```
 
-## Stage 3: Events And Mutation
+The application process owns this handle and its event handlers. Keep the
+process alive; call `tray.destroy()` during final application teardown.
 
-Add menu and tray events after the first tray is visible.
+## Stage 2: Route Events And Mutation
 
 ```ts
 tray.onMenuClick(({ itemId }) => {
   if (itemId === 1) {
-    // open the app surface or trigger the primary action
+    // Open the application surface or execute the primary command.
   }
 });
 
@@ -58,24 +48,41 @@ await tray.setIcon({
 });
 ```
 
-## Stage 4: Official Extensions
+Mutate the existing tray instead of rebuilding it. Use handle events when the
+application needs one router, logging, permission checks, or stable IDs.
 
-Mount official capability atoms through the tray handle.
+## Stage 3: Add A Retained WebView
 
 ```ts
-const { WebviewExt } = await import("@opentray/ext-webview");
+import { WebviewExt } from "@opentray/ext-webview";
+
 const webviewTray = tray.extend(WebviewExt);
 const panel = webviewTray.createWebviewWindow({
-  html: "<main>Hello</main>",
+  url,
   width: 360,
   height: 220,
 });
 
-tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
+tray.onMenuClick(({ itemId }) => {
+  if (itemId === 1) void panel.show();
+});
 ```
 
-## Stage 5: Low-Level Ownership
+Create one handle and retain it. Repeated activations restore that session;
+`destroy()` is page-runtime teardown, not ordinary dismissal. Read
+`ext-webview.md` for content, placement, permissions, and native-window APIs.
 
-Use `runVisibleRuntimeHost()` only when the user needs to own the visible host loop directly.
+## Stage 4: Choose The Window Role
 
-That path is for advanced process choreography, diagnostics, or custom runtime ownership. It is not the first app path.
+Use `style.appMode: true` for a normal desktop application window and keep the
+default `false` for a tray utility. The role is independent from `keepOnTop`,
+`autoHide`, frameless chrome, material, and visibility. Read `app-mode.md` for
+warm Dock reopen, cold `appLaunch`, and development-supervisor decisions.
+
+## Stage 5: Package And Accept The Application
+
+Choose the adapter matching the consumer's existing bundler; do not change
+bundlers only for OpenTray. Read `bundling.md`, then run the consumer's real
+production build and lifecycle command. Use `visual-acceptance.md` to verify the
+tray, retained window, process-exit relaunch, and cleanup behavior that the
+product actually claims.

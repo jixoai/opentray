@@ -1,6 +1,14 @@
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: make skills/opentray
+serve application developers such as skill-creator-v2, never OpenTray source contributors):
+1. Install one coherent published dependency graph.
+2. Create and own the first tray through the public SDK.
+3. Route consumers to public lifecycle and acceptance guidance.
+-->
+
 # Getting Started
 
-Use this reference when the user asks how to install OpenTray or create a first tray.
+Use this reference when adding OpenTray to an application for the first time.
 
 ## Install
 
@@ -8,127 +16,80 @@ Use this reference when the user asks how to install OpenTray or create a first 
 pnpm add opentray
 ```
 
-`opentray` resolves the current platform runtime package through optional dependencies. The user installs the top-level package; they do not import platform binary packages directly.
-
-For agent-assisted usage, install the consumer-facing OpenTray skill:
+Add official extensions beside the SDK when needed:
 
 ```bash
-npx skills add jixiao/opentray --skill opentray
+pnpm add opentray @opentray/ext-webview
 ```
 
-## Protocol-Line Installs
+`opentray` resolves the current platform runtime through optional dependencies.
+Do not install or import a platform binary package directly.
 
-`latest` means newest published package version. It is convenient, but it is not a compatibility contract across `opentray`, official extensions, and platform binary atoms. For full version-selection rules, read `references/versioning.md`.
-
-Use an OpenTray protocol-line dist-tag when you want a compatible package closure:
+For agent-assisted application development, install the public Skill:
 
 ```bash
-pnpm add opentray@stable-A-B @opentray/ext-webview@stable-A-B
+npx skills add jixoai/opentray --skill opentray
 ```
 
-For alpha testing on the same OpenTray protocol line:
+Use `latest` for the newest published packages. When the application needs an
+explicit compatibility line, install `opentray` and official extensions from
+the same `stable-A-B` or `alpha-A-B` tag; read `versioning.md` before choosing.
 
-```bash
-pnpm add opentray@alpha-A-B @opentray/ext-webview@alpha-A-B
-```
+## First Tray
 
-Replace `A-B` with the current line from `@opentray/spec`. The protocol-line tag is extension-agnostic. Do not look for tags such as `stable-webview-1-0`; runtime compatibility is still enforced by the daemon handshake and extension ABI checks.
-
-## First Flow
-
-1. Import `runTrayApp` from `opentray/node` for the first app path.
-2. Use the callback to create one tray and react to one menu item.
-3. Let the helper own the visible-runtime host loop.
-4. Switch to `createTray()` directly only when you already own the process shape.
-
-Typical first app:
+Call `createTray()` from the application process or application-owned service
+that should own the tray lifetime:
 
 ```ts
-import { runTrayApp } from "opentray/node";
+import {
+  createTray,
+  type CreateTrayHandle,
+  type CreateTrayOptions,
+  type TrayIcon,
+} from "opentray";
 
-await runTrayApp(
-  async ({ createTray }) => {
-    const tray = await createTray({
-      id: "com.example.status",
-      icon: { "text-only": "OT" },
-      menu: {
-        items: [{ type: "item", id: 1, title: "Quit", primaryEvent: true }],
-      },
-    });
-    tray.onMenuClick(({ itemId }) => void (itemId === 1 && tray.destroy()));
-  },
-  { autoExitAfterMs: 1500 }
-);
-```
-
-If the user already owns the runtime/process boundary, use the lower-level direct tray path:
-
-1. Import the top-level SDK from `opentray`.
-2. Call `createTray(...)` with an `id`, plus optional `tooltip`, `icon`, and `menu`.
-3. Mutate the tray through the returned handle: `setMenu`, `setTooltip`, `setIcon`, `loadExtension`, `extend`, etc.
-4. Consume events through `onMenuClick` / `onTrayClick` / `onTrayDoubleClick` / `listen`.
-
-Typical consumer entrypoint:
-
-```ts
-import { createTray, type CreateTrayOptions, type TrayIcon } from "opentray";
-
-const icon: TrayIcon = { type: "file", path: "./tray.png" };
+const icon: TrayIcon = { "text-only": "OT" };
+let tray: CreateTrayHandle;
 const options: CreateTrayOptions = {
   id: "com.example.status",
-  tooltip: { title: "OpenTray", description: "Status" },
   icon,
   menu: {
     items: [
       {
-        title: "Open",
+        title: "Quit",
         primaryEvent: true,
-        onMenuClick: () => {
-          // Simple local command.
-        },
+        onMenuClick: () => void tray.destroy(),
       },
-      "-",
-      ["More", [{ id: 20, title: "Settings" }, "Quit"]],
     ],
   },
 };
 
-const tray = await createTray(options);
-
-tray.onMenuClick(({ itemId }) => {
-  if (itemId === 20) {
-    // Centralized routing for stable menu ids.
-  }
-});
-
-tray.onTrayClick(({ button, x, y }) => {
-  // Raw tray activation, independent from menu item primaryEvent.
+tray = await createTray(options, {
+  appId: "com.example.status",
+  appName: "Example Status",
 });
 ```
 
-Visible tray text is part of icon projection (`icon.text`, `icon["text-only"]`, or `icon["icon-text"].text`), not a top-level tray `title`. If no visible icon/text survives projection, native tray backends fall back to the runtime `appName`. There is no `tray.setTitle()`; update text through `setIcon(...)`.
+Keep the owning process alive for as long as its tray should exist. The returned
+handle owns the session created by top-level `createTray()`; `destroy()` removes
+the tray and closes that session exactly once.
 
-Use the public types exported by `opentray` (`CreateTrayOptions`, `CreateTrayHandle`, `TrayIcon`, `TrayMenu`, `TrayTooltip`) instead of deriving shapes with `typeof` in app code. Top-level `createTray(...)` and its returned `setMenu(...)` accept app-facing menu shorthand; import `@opentray/spec` directly only for low-level protocol tooling.
+## Public Shape
 
-Item-local `onMenuClick` is useful for one-off commands, but it does not replace handle events. Keep `tray.onMenuClick(...)` for stable ID routing and `tray.onTrayClick(...)` for raw tray-icon activation.
+- `primaryEvent` marks one normal menu item as the tray's primary action; it
+  still emits the ordinary `menuClick` event.
+- Use item-local `onMenuClick` for declaration-local commands and
+  `tray.onMenuClick(...)` for centralized routing with stable item IDs.
+- Use `tray.onTrayClick(...)` for raw tray-icon activation independent of the
+  primary menu role.
+- Visible text belongs to `icon.text`, `icon["text-only"]`, or
+  `icon["icon-text"].text`; there is no `tray.setTitle()`.
+- Use the public types exported by `opentray`. Import `@opentray/spec` directly
+  only for low-level protocol tooling.
 
-Runtime identity (app id/name) is separate from tray projection and is passed as the second argument when a host needs explicit diagnostic identity:
+## Verify In The Consumer
 
-```ts
-await createTray(options, { appId: "com.example.status", appName: "Status" });
-```
-
-Use the lower-level transport APIs (`createClient`) only for custom protocol work.
-
-For ready-made examples:
-
-```bash
-pnpm --filter opentray example:first-app
-pnpm --filter opentray example:basic
-```
-
-This is useful for learning the request/response flow, but the public consumer path should start from the top-level `opentray` exports.
-
-## Real Native Acceptance
-
-For a real native tray (and optional WebView), use the source-tree visual acceptance recipes in `references/visual-acceptance.md`. The public `opentray` CLI binary does not expose daemon lifecycle or smoke subcommands; smoke orchestration is a workflow over example scripts, not a CLI subcommand.
+Inspect the application's `package.json`, run its normal install and typecheck,
+then start the real command that owns its complete process tree. Follow
+`visual-acceptance.md`; ordinary package consumption must not require cache
+deletion, artifact preparation, or a manually started OpenTray daemon.

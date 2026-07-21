@@ -31,22 +31,23 @@ Use `tray.extend(WebviewExt)` for new code. It returns a tray-scoped WebView cap
 First panel:
 
 ```ts
-import { runTrayApp } from "opentray/node";
+import { WebviewExt } from "@opentray/ext-webview";
+import { createTray } from "opentray";
 
-await runTrayApp(async ({ createTray }) => {
-  const { WebviewExt } = await import("@opentray/ext-webview");
-  const tray = (await createTray({
+const tray = (await createTray(
+  {
     id: "com.example.panel",
     icon: { "text-only": "OT" },
     menu: { items: [{ type: "item", id: 1, title: "Open", primaryEvent: true }] },
-  })).extend(WebviewExt);
-  const panel = tray.createWebviewWindow({
-    html: "<main>Hello</main>",
-    width: 360,
-    height: 220,
-  });
-  tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
+  },
+  { appId: "com.example.panel", appName: "Example Panel" },
+)).extend(WebviewExt);
+const panel = tray.createWebviewWindow({
+  html: "<main>Hello</main>",
+  width: 360,
+  height: 220,
 });
+tray.onMenuClick(({ itemId }) => void (itemId === 1 && panel.show()));
 ```
 
 If a tray already exists:
@@ -62,19 +63,6 @@ const panel = webviewTray.createWebviewWindow({
 });
 
 await panel.show();
-```
-
-`attachWebview(tray)` returns a legacy `WebviewHandle` with the older `show`/`hide`/`navigate` command surface. Keep it for compatibility only:
-
-```ts
-import { attachWebview } from "@opentray/ext-webview";
-
-await attachWebview(tray).show({
-  type: "show",
-  html: "<main>Hello</main>",
-  width: 360,
-  height: 220,
-});
 ```
 
 Supported host commands:
@@ -152,21 +140,9 @@ Do not auto-inject titlebars, drag strips, or CSS into the user's HTML. For over
 
 Lightweight tray panels usually behave like desktop cards. If the whole document develops root-level scrollbars, the experience often feels less native than choosing a better window size, responsive card layout, or an intentional internal scroll region. Explain that product tradeoff instead of prescribing a universal CSS block.
 
-`example:placement` is the source-tree demo for `WebviewPlacementKit` tray, screen, and edge placement. `example:mediaQuery` is the source-tree demo for responsive native-window behavior (`mediaQueryKit` plus `styleKit`).
-
-## Examples
-
-Protocol-only facade example:
-
-```bash
-pnpm --filter @opentray/ext-webview example:webview
-```
-
-Real native smoke is a visual acceptance recipe, not an `opentray` CLI subcommand. In a source checkout, use:
-
-```bash
-OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:debug-runtime-tray
-```
+Validate placement and responsive native-window behavior through the consumer
+application that owns those policies. Use `references/visual-acceptance.md` for
+the package-consumer acceptance matrix.
 
 ## Platform Truth
 

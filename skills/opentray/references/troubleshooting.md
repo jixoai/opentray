@@ -1,24 +1,65 @@
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: troubleshoot published
+OpenTray from the consumer project without leaking source-repository controls):
+1. Diagnose installed dependency and artifact coherence.
+2. Diagnose tray, WebView, and app relaunch chains from persistent evidence.
+3. Keep manual repair steps outside the normal consumer contract.
+-->
+
 # Troubleshooting
 
-Use this reference when the user can install OpenTray but something local is missing or unsupported.
+Use this reference when a consumer can install OpenTray but native behavior is
+missing, stale, or unsupported.
 
-## Tray Never Appears
+## Establish Installed Truth
 
-- There is no `opentray daemon health` CLI command. The public CLI only prints a usage pointer.
-- For first apps, switch to `runTrayApp()` from `opentray/node` so the visible host loop is owned by the helper.
-- If the user intentionally calls `createTray()` directly, the default transport uses the in-process visible runtime binding. Check that the host main thread is running `runVisibleRuntimeHost()` from `opentray/node` and that the platform runtime package resolved.
-- On Linux, the visible binding path is unsupported until the KSNI backend grows an honest visible runtime contract; use `{ runtime: "headless-binding" }` or `{ runtime: "local-broker" }` for diagnostics.
+Record the requested and resolved graph before changing state:
 
-## WebView Window Does Not Appear
+```bash
+pnpm why opentray @opentray/ext-webview
+pnpm exec tsc --noEmit
+```
 
-- Confirm the user installed both `opentray` and `@opentray/ext-webview`.
-- Use the visual acceptance recipe or workspace examples to verify extension loading.
-- Capability gaps should fail explicitly; do not describe an invisible or fake window as success.
+Inspect `package.json`, the lockfile, and real module resolution from the
+consumer workspace. A manifest declares intent; it does not prove which facade,
+platform package, broker, or native extension the running process loaded.
 
-## Icon Looks Missing
+## Tray Does Not Appear
 
-Current native icon support is `rgba`. Other typed icon shapes may still return unsupported until decoder/file-policy work is implemented.
+- Confirm the consumer's real process entry remains alive after `createTray()`.
+- Confirm `createTray()` is reached and its promise succeeds before blaming the
+  native backend.
+- Read the caller-scoped `broker.log` named by any startup error.
+- Verify the installed current-platform runtime package exists in the resolved
+  `opentray` dependency closure.
+- Do not look for `opentray daemon health`; there is no public daemon CLI.
 
-## Extension Loader Debugging
+## WebView Does Not Appear
 
-`OPENTRAY_EXT_PATH` can point the daemon at an explicit extension directory for debugging, but the normal release path is package-adjacent resolution from the requested facade package.
+- Confirm both `opentray` and `@opentray/ext-webview` resolve from a compatible
+  protocol line.
+- Keep one `WebviewWindowHandle`; call the first `show()` before expecting warm
+  reopen behavior.
+- Use `isVisible()`, `visibleChange`, and `toVisible()` instead of a private
+  shown/hidden boolean.
+- Linux has no official `@opentray/ext-webview` native runtime.
+
+## Pinned Dock Entry Does Not Relaunch
+
+1. Read `opentray-launch.json` and verify that `command`, `args`, and `cwd`
+   describe the complete consumer supervisor.
+2. Execute that exact vector from the recorded cwd.
+3. Read the adjacent `opentray-launch.log` for parse/spawn/child errors.
+4. Read the caller-scoped `broker.log` and the consumer's own daemon log.
+
+Persist a public lifecycle command such as `dist/cli.js start`, not a raw daemon
+child. A healthy existing owner should receive open/focus; an absent owner should
+start the complete graph.
+
+## Normal Install Contract
+
+Deleting `node_modules`, clearing caches, manually restarting brokers, setting
+source-only artifact paths, or rebuilding OpenTray are diagnostic experiments,
+not consumer setup. If ordinary installation yields an incoherent graph, report
+the resolved versions, real paths, broker log, and loaded native artifact as an
+OpenTray defect.

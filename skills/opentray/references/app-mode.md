@@ -241,17 +241,9 @@ This takeover is an application responsibility. OpenTray persists and executes
 the declared vector; it cannot infer how a consumer's daemon, Vite server, IPC
 registry, or proxy should be rebuilt.
 
-Source-link development has one additional preparation step: build and stage
-the matching OpenTray facade, broker/carrier, and native extension artifacts
-before running the consumer:
-
-```bash
-# Run from the linked OpenTray source checkout before starting the consumer.
-pnpm run prepare:linked-consumer
-```
-
-A registry install must remain coherent after a normal package-manager install
-and must not require that source-only step.
+A normal package-manager install must provide one coherent facade,
+broker/carrier, and native-extension graph. Do not add cache deletion, source
+staging, or repository-local build commands to an application's startup path.
 
 ## Diagnose A Failed Relaunch
 
@@ -280,5 +272,5 @@ may provide diagnostic evidence, but it is not part of the consumer contract.
 | Close or minimize a running app window, then click its Dock entry | The retained MRU app-mode window becomes visible and focused. |
 | Fully exit the consumer, then click a pinned macOS Dock entry | The stable carrier starts the complete application supervisor and opens usable content. |
 | Broker exits while the consumer daemon remains | The public lifecycle command repairs ownership and rebuilds the runtime graph. |
-| Start development while a production daemon owns the same identity | Development performs the bounded takeover and produces exactly one Dock identity/session. |
+| Start development while a production daemon owns the same identity | The consumer's development supervisor performs the bounded takeover and produces exactly one Dock identity/session. |
 | Click the tray primary item repeatedly | One retained window toggles from native `isVisible()` / `visibleChange`; no duplicate WebView is created. |

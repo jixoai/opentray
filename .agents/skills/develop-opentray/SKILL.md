@@ -3,6 +3,14 @@ name: develop-opentray
 description: Develop and refactor the OpenTray repository while preserving kernel/runtime laws, backend boundaries, extension host contracts, native packaging, release workflow, and visual acceptance. Use when changing `crates/*`, `packages/*`, OpenSpec artifacts, release CI, native examples, or official extension packages inside this repo.
 ---
 
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: keep source checkout,
+linked-consumer staging, and workspace smoke guidance internal to .agents/skills):
+1. Route repository contributors to source-level platform laws.
+2. Preserve internal build, staging, release, and visual-acceptance workflows.
+3. Keep package-consumer tutorials owned by skills/opentray.
+-->
+
 # Develop OpenTray
 
 ## Overview
@@ -39,10 +47,13 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 
 ## Documentation Rules
 
+- Treat `skills/opentray` as an installed-package consumer Skill. Keep source
+  checkout commands, workspace filters, linked-consumer staging, native build
+  paths, contributor smoke tests, and release operations inside `.agents/skills`.
 - Do not hard-code version numbers (e.g. `v0.9`, `0.9.x`) in user or contributor docs. Versions go stale on the next release; describe behavior by model, not by version ("the current tray-first model", "an earlier surface model", "the daemon era"). This applies to README files, skill references, and AGENTS-style guides alike.
 - The rule above is about fixed numeric labels in prose. Typed runtime fields such as `packageVersion`, `<package-version>` path segments, or `@opentray/spec` protocol-line values are variables, not version numbers in documentation — do not strip those.
 - Keep code examples consistent with the actual public exports. Do not reach for removed APIs (`createSpace`, `resolveDefaultSpace`, `tray.setTitle`) even when documenting history; show the real current surface (`createTray`, `setIcon({ text })`).
-- Prefer concrete example script names that exist in `package.json` (e.g. `example:debug-runtime-tray`). Verify a script name before writing it into a doc; never invent an `example:mediaQuery`-style name that does not resolve.
+- Prefer concrete example script names that exist in `package.json` (e.g. `example:debug-runtime-tray`). Verify every script name before writing it into documentation.
 
 ## Development App Launch Rule
 
@@ -59,6 +70,11 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 - Before accepting a linked consumer, run its source workspace's documented
   staging command so facade, broker, carrier, and native extensions come from
   one built graph. A registry install must not need this source-only step.
+
+```bash
+pnpm run prepare:linked-consumer
+```
+
 - Treat readiness as a bounded native cold-start budget. It must cover Darwin
   carrier/AppKit startup, remain inside the caller-lock budget, and preserve PID
   liveness plus exact artifact-identity checks on every poll. Timeout errors must

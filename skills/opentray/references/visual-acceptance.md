@@ -1,61 +1,76 @@
-# Visual Acceptance
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: public acceptance must
+run inside projects such as skill-creator-v2, never inside the OpenTray source workspace):
+1. Verify the installed dependency graph through the consumer's real entrypoint.
+2. Separate automated checks from human-visible native acceptance.
+3. Preserve platform-specific claims and teardown evidence.
+-->
 
-Use this reference when the user asks to smoke-test OpenTray or prove a real native tray/window path.
+# Consumer Acceptance
 
-## Rule
+Use this reference after integrating published OpenTray packages into an
+application. The consumer project is the test surface; do not clone or build the
+OpenTray repository to validate a registry installation.
 
-The public `opentray` CLI binary does not expose daemon lifecycle or smoke subcommands. Do not tell users to run `opentray daemon ...` or `opentray smoke ...`.
+## Before Starting
 
-Smoke is a workflow over the source-tree example scripts. Before running one, explain that it can start a real native tray/window, write versioned runtime state under `$OPENTRAY_HOME/.opentray/<package-version>/runtime` or the user's home directory, create visible tray/window UI, and load native extensions. The owning process controls cleanup; normal exit removes its tray contribution.
+1. Run the consumer's normal package-manager install.
+2. Inspect its `package.json` and identify the real development and production
+   entrypoints.
+3. Confirm paired official packages resolve to one compatible protocol line.
+4. Record the consumer's own supervisor/daemon log location.
 
-## Consumer Smoke Shape
-
-For a package-user smoke, create a temporary project, install the needed packages, and run a short SDK script that calls `createTray()` and, when needed, attaches `@opentray/ext-webview`.
-
-Minimum install:
-
-```bash
-pnpm add opentray @opentray/ext-webview
-```
-
-Useful checks:
-
-- the SDK script runs against the in-process visible runtime binding by default
-- a visible tray appears
-- WebView loads from `@opentray/ext-webview`
-- normal exit (or `tray.destroy()` / closing the connection) removes the tray contribution
-- the first-app helper can be used for the same fast path, while direct `createTray()` remains the lower-level route
-
-## Source Checkout Smoke
-
-When the user is inside the OpenTray repo, prefer workspace examples. These are the real script names (from `packages/cli/package.json`):
+Useful dependency evidence:
 
 ```bash
-pnpm --filter opentray example:first-app
-OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1 pnpm --filter opentray example:debug-runtime-tray
-pnpm --filter opentray example:placement
-pnpm --filter opentray example:tray-panel
-pnpm --filter opentray example:webview-control
-pnpm --filter opentray example:mediaQuery
-pnpm --filter opentray example:badge
+pnpm why opentray @opentray/ext-webview
+pnpm exec tsc --noEmit
 ```
 
-Notes on what each proves:
+Do not delete `node_modules`, clear caches, stage source artifacts, or set an
+extension path before collecting the installed-graph evidence.
 
-- `example:debug-runtime-tray` — real native tray + WebView, single primary action (set `OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1` to auto-show the window).
-- `example:placement` — `WebviewPlacementKit.watch()`, tray/screen/edge placement, page-owned frameless drag.
-- `example:tray-panel` — glass tray-anchored panel with a transparent root (preferred over `webview-control` for glass-window guidance).
-- `example:webview-control` — capability exerciser; starts opaque and enables overlay probes by default (use `-- --no-overlay` to test the disabled branch).
-- `example:mediaQuery` — responsive native-window behavior through `styleKit.apply(...)`, `mediaQueryKit.match(...)`, and size constraints.
-- `example:badge` — `@opentray/ext-badge` WebView IPC debug panel.
+## Tray Acceptance
 
-Lynx contributor acceptance is maintained in the independent
-[`jixoai/opentray-ext-lynx`](https://github.com/jixoai/opentray-ext-lynx) repository.
+Run the consumer's actual entrypoint and verify:
 
-Use `OPENTRAY_EXAMPLE_EXIT_AFTER_MS=<ms>` only for examples that support timed exit.
+- one visible tray contribution appears
+- the primary tray action emits the expected ordinary `menuClick`
+- menu text follows authoritative application/window state
+- repeated activation reuses the same retained window or command owner
+- application teardown removes the tray exactly once
 
-For the pure Node visible-binding host loop (host main thread + worker), use:
+## App-Mode Acceptance
 
-```bash
-pnpm --filter opentray example:visible-binding
+For `style.appMode: true`:
+
+- Windows: the visible window participates in taskbar and Alt+Tab
+- macOS: the visible window participates in Dock and Command-Tab
+- closing or minimizing a running window, then activating the live app entry,
+  restores and focuses the most recently active retained app-mode window
+- `keepOnTop` remains unnecessary unless the product explicitly wants z-order
+
+For a pinned macOS Dock entry, fully exit the consumer and activate the entry
+again. The stable carrier must start the complete application supervisor and
+open usable content, not only a raw child daemon.
+
+## Development And Production
+
+When both modes share one app identity, verify each direction independently:
+
+```text
+production owner -> start development -> one development owner
+development owner -> start production -> one production owner
 ```
+
+The consumer must wait for its old PID and IPC endpoint to release before the
+new supervisor claims OpenTray. Duplicate Dock identities or trays indicate an
+application ownership defect, not an acceptance pass.
+
+## Evidence Boundary
+
+Automated typechecks and unit tests prove API usage, not native visibility.
+Human-visible verification owns tray appearance, window focus, Dock/taskbar
+membership, icon quality, and close/reopen behavior. Linux core support must not
+be reported as Linux WebView support; `@opentray/ext-webview` currently provides
+native runtimes only for macOS and Windows.

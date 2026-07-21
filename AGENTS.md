@@ -338,6 +338,9 @@ packages/*/README.md       package-specific public API contract
 - Do not place package-consumer tutorials in `.agents/skills/*`; those Skills
   govern contributors changing this repository and may expose internal source,
   release, or architecture assumptions that installed-package users do not own.
+- Do not place source checkout paths, workspace scripts, linked-consumer
+  staging, native build commands, contributor smoke tests, or release operations
+  in `skills/opentray`; a normal package-manager install is its starting state.
 
 - Prefer durable platform-law changes over glue code.
 - Keep package boundaries explicit and boring.

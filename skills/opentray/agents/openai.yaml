@@ -1,4 +1,4 @@
 interface:
   display_name: "OpenTray"
   short_description: "Install and use OpenTray from the public API"
-  default_prompt: "Use $opentray to help install, integrate, smoke-test, or troubleshoot OpenTray as a package user."
+  default_prompt: "Use $opentray to install, integrate, validate, or troubleshoot published OpenTray packages in an application."
