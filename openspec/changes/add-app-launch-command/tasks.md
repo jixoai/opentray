@@ -99,3 +99,19 @@ entry relaunch the consumer with the last or explicitly configured command):
 - [x] 9.7 BDD: a healthy broker that publishes exact readiness after more than two seconds succeeds
   within the named 10-second budget; early exit, identity mismatch, timeout cleanup, and caller-lock
   serialization retain their existing authority.
+
+## 10. Owner Acceptance Rejection / Round 5 Stale Lock And Direct Vite Entry
+
+- [x] 10.1 Back up the round-5 plan and record the dead production lock plus the exact
+  `.bin/vite -> bare node` Finder failure before implementation.
+- [ ] 10.2 BDD: a PID-only or tokenized `broker.lock` owned by a dead process is reclaimed and the
+  next `startDaemon()` reaches exact readiness without manual cleanup.
+- [ ] 10.3 BDD: lock release validates its owner token and cannot remove a replacement lock.
+- [ ] 10.4 Adapt Skill Creator's development descriptor to execute the real Vite `bin/vite.js`
+  with absolute Node and WebUI cwd, without `npm_execpath`, pnpm, or a `.bin` shim.
+- [ ] 10.5 Isolate Skill Creator's detached CLI lifecycle test from the operator's OpenTray home
+  and disable its native tray projection so tests cannot leave production broker locks or bundles.
+- [ ] 10.6 Rebuild and stage the linked OpenTray graph, then use the existing dead production lock
+  to prove `pnpm skill-creator start` self-recovers and mounts the tray.
+- [ ] 10.7 Prove `pnpm dev` mounts the tray and its persisted descriptor cold-launches the Vite,
+  daemon, and WebView graph under a Finder-like minimal environment.

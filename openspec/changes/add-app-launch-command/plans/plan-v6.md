@@ -11,7 +11,7 @@ diagnostics):
 6. Reopen a live app-mode runtime from the Dock without spawning a second consumer.
 7. Require development launch descriptors to restore the complete Vite -> daemon -> WebView tree
    without depending on the interactive terminal's PATH.
-8. Keep broker startup bounded while automatically recovering coordination state left by dead callers.
+8. Give a healthy native broker a bounded readiness budget that covers Darwin carrier startup.
 Compromise: Darwin is the only platform with a stable OpenTray app carrier today;
 Windows taskbar persistence needs a separate shortcut/launcher atom and is not
 silently claimed by this change.
@@ -21,10 +21,10 @@ silently claimed by this change.
 
 ## Current Round
 
-- Round: 6
-- Status: Round-5 acceptance exposed a stale caller lock and a transitive shell-shim PATH
-  dependency; both exact failure chains are reproduced and reopened for corrective evidence.
-- Previous plan backup: `plans/plan-v6.md`.
+- Round: 5
+- Status: Round-4 acceptance exposed a separate pre-readiness termination; the three failure
+  chains are reproduced and the corrective specification is ready for implementation evidence.
+- Previous plan backup: `plans/plan-v5.md`.
 
 ## Workflow Command Surface
 
@@ -61,9 +61,6 @@ silently claimed by this change.
 > 1. pnpm skill-creator start 不启动托盘，相关测试无法进行。
 > 2. pnpm dev 启动托盘后，点击 dock 图标，可以聚焦窗口。关闭窗口再点击也可以打开窗口。但是退出托盘后，点击dock 图标无法启动。
 
-> 1. 还是没有修复：pnpm skill-creator start 不启动托盘，相关测试无法进行。
-> 2. 现在连 pnpm dev 也无法启动托盘了。
-
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -82,7 +79,6 @@ silently claimed by this change.
 | 10 | User | The Skill Creator persistence rule belongs in its `AGENTS.md`, not in this implementation. | Record incompatible-content reset versus I/O failure; do not change the consumer registry code. |
 | 11 | User | `pnpm skill-creator start` did not mount the tray, blocking production-path acceptance. | Treat a linked consumer's staged broker and extension artifacts as an explicit test precondition and preserve the exact broker failure in durable logs. |
 | 12 | User | Warm Dock reopen works, but clicking the pinned Dock entry after tray exit does not restart development. | Require the persisted development vector's complete subprocess graph to work in LaunchServices' minimal environment, not only in the terminal that first ran `pnpm dev`. |
-| 13 | User | Production start still does not mount a tray, and development start has now regressed too. | A failed acceptance run must preserve and recover caller coordination state; development launch must bypass every shell shim that performs another PATH lookup. |
 
 ### Evidence Read
 
@@ -107,9 +103,6 @@ silently claimed by this change.
 | `skill-creator-v2` production daemon log | Two pre-build linked runs timed out waiting for broker readiness, while the same command mounted successfully after `prepare:linked-consumer`; `lsof` then showed the linked source WebView dylib. | Linked acceptance must stage the source broker and native extension before either production or development runtime tests. |
 | `broker.log` timestamps from the failed production start | The healthy Darwin broker began at `04:22:02.681`, emitted its startup line, and was terminated by SDK `SIGTERM` at `04:22:05.240` before publishing readiness. | The former optimistic polling window was shorter than a valid carrier/AppKit cold start; readiness needs a named native-startup budget while preserving liveness and artifact checks. |
 | Lifecycle red BDD | A broker that stays alive and writes exact ready metadata after 2.2 seconds fails only under the former polling limit. | The regression can be proven without a GUI and must not weaken early-exit or identity-mismatch rejection. |
-| `opentray-launch.log` after the readiness correction | Absolute Node starts absolute pnpm, but pnpm executes `webui/node_modules/.bin/vite`; that shell shim fails with `exec: node: not found`. | An absolute first executable does not make a transitive shell shim PATH-independent; Skill Creator must execute Vite's real JavaScript entry with the absolute Node binary. |
-| `~/.opentray/2.0.0/skill-creator/runtime/broker.lock` | The lock contains dead PID `7001`; `acquireLock()` only polls `EEXIST` and never checks owner liveness. | One interrupted test or caller process permanently blocks every later production and development tray start until the SDK recovers the dead owner automatically. |
-| `skill-creator-v2/test/cli-lifecycle.test.ts` | A detached production daemon test changes `SKILL_CREATOR_HOME` but still starts a real tray against the default OpenTray home. | Consumer tests must disable or isolate tray runtime state so a test-runner exit cannot poison the operator's production lock and bundle graph. |
 
 ### Git Evidence
 
@@ -176,8 +169,6 @@ When an ordinary application-mode entry is opened from the Dock, the user should
 7. Broker and cold-launch failures append to deterministic log files without requiring a debug environment variable.
 8. A healthy native broker may finish carrier/AppKit initialization within a bounded 10-second
    readiness budget; early exit and artifact mismatch still fail immediately with the broker log path.
-9. A caller that dies while holding `broker.lock` cannot permanently disable the app: the next
-   start proves the recorded owner is dead, reclaims the lock, and mounts the tray without manual cleanup.
 
 ## Platform Diagnosis
 
@@ -229,7 +220,7 @@ interface OpenTrayRuntimeOptions {
 }
 ```
 
-`undefined` and `null` mean auto snapshot. The normalized persisted vector is `{ command, args, cwd }`. `command` is an executable path/name, never a shell expression. Development consumers must persist a PATH-independent supervisor vector. Skill Creator executes Vite's real `bin/vite.js` with the absolute Node executable and the WebUI directory as `cwd`; it does not pass through pnpm, a package script, or a `.bin` shell shim. A package manager may help resolve that file during the original interactive run, but it must not remain in the persisted cold-launch chain.
+`undefined` and `null` mean auto snapshot. The normalized persisted vector is `{ command, args, cwd }`. `command` is an executable path/name, never a shell expression. Development consumers must explicitly persist their package-manager entry and a PATH-independent argument vector (for Skill Creator, the resolved Node + pnpm entry directly invokes `--dir <repo>/webui dev`) so a cold Dock launch restores Vite as well as the daemon. Every transitive command in that script graph must either be package-manager resolved or absolute; the first executable being absolute does not make a nested bare `pnpm` safe.
 
 ### Data Shape
 
@@ -248,9 +239,7 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - `opentray` SDK: resolves the running consumer script before nested package-manager environment metadata, snapshots the invocation, owns deterministic runtime log paths, and reconciles stale bundle identities only after handshake plus descriptor commit.
 - `opentray` daemon lifecycle: waits up to the named 10-second native readiness budget, checks
   process liveness and exact ready artifact identity on every poll, keeps the default caller lock
-  budget above that window, terminates the child only after a proved exit, mismatch, or timeout,
-  and stores a PID plus unique owner token so dead caller locks are recoverable and releases cannot
-  delete a replacement owner's lock.
+  budget above that window, and terminates the child only after a proved exit, mismatch, or timeout.
 - `opentray-bin` Darwin carrier: with no `broker` subcommand, resolves its own `.app` resources, appends carrier/consumer diagnostics, spawns the vector without a shell, and exits; with `broker`, it also bridges AppKit `applicationShouldHandleReopen:` into the generic broker event loop.
 - `@opentray/ext-webview`: owns app-mode window selection and exposes `focus()`; it must not be reimplemented in `opentray-core`.
 - Native broker/Core event seam: transports a generic app reopen intent; Core never selects or commands a WebView window.
@@ -273,9 +262,7 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - [x] 6. Verify through the real linked `skill-creator-v2` `pnpm dev` graph.
 - [x] 7. Return the sole remaining Dock visual/click acceptance to the owner.
 - [x] 8. Implement and verify the confirmed warm reopen, explicit focus, and development launch-vector behavior.
-- [x] 9. Close the first Finder environment, linked-native preparation, and native readiness gaps found by owner acceptance.
-- [ ] 10. Replace Skill Creator's transitive shell-shim launch vector, recover stale broker locks,
-  isolate consumer lifecycle tests, and verify both real start commands against the linked runtime.
+- [ ] 9. Close the Finder environment, linked-native preparation, and native readiness gaps found by owner acceptance.
 
 ## Open Questions
 
@@ -293,8 +280,6 @@ The descriptor schema is versioned and strict. It stores no environment variable
 | Persist one shell command string | Quoting, injection, and platform shell differences make it unsafe and non-deterministic. |
 | Put launch command in `opentray-app-bundle.json` | Mutable runtime state would invalidate or blur immutable artifact compatibility. |
 | Store all `process.env` | It can persist secrets and does not represent a stable app identity. |
-| Persist pnpm or `.bin/vite` for development cold launch | Both eventually execute a shell shim that looks up bare `node` in Finder's minimal PATH. Persist the real Vite JavaScript entry under the absolute Node executable. |
-| Ignore or manually delete `broker.lock` | It turns an abnormal caller exit into permanent operator repair and does not protect a replacement owner from an old release. |
 | Add launch command to Core `AppProjection` | The command is a Node/carrier concern, not a platform-neutral tray projection. |
 | Claim Windows taskbar persistence now | A live taskbar button is not a durable launcher after process exit. |
 
@@ -302,4 +287,4 @@ The descriptor schema is versioned and strict. It stores no environment variable
 
 - Default max review iterations: 2.
 - Issue recurrence threshold: reopen the plan after one repeated mismatch between descriptor, bundle, or carrier behavior.
-- Custom exit condition from intent: a real Darwin `.app` cold launch must execute the configured/default consumer vector once; a live Dock reopen must restore/focus the most recent app-mode window without a second consumer; the current consumer must converge to one OpenTray-owned same-AppId bundle; a dead lock owner must recover without manual deletion; failures must be present in documented logs; and a normal published `pnpm install` must remain sufficient for the runtime path.
+- Custom exit condition from intent: a real Darwin `.app` cold launch must execute the configured/default consumer vector once; a live Dock reopen must restore/focus the most recent app-mode window without a second consumer; the current consumer must converge to one OpenTray-owned same-AppId bundle; failures must be present in documented logs; and a normal published `pnpm install` must remain sufficient for the runtime path.
