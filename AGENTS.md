@@ -11,7 +11,8 @@ app-mode entry relaunch the latest `process.argv` invocation or an explicit laun
 ; eliminate duplicate same-AppId Dock carriers and make detached broker/carrier failures
 observable in stable logs; make a live Dock click reveal and focus the latest retained app-mode
 WebView without spawning a second consumer; recover tray startup after an interrupted caller leaves
-a stale broker lock (2026-07-21)):
+a stale broker lock; publish skill-creator-v2 appMode adaptation decisions under the public
+skills/opentray tree instead of repository-internal skills (2026-07-21)):
 1. Preserve the tray-first App/Tray/Session platform laws.
 2. Preserve native runtime and extension package boundaries across macOS and Windows.
 3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
@@ -21,6 +22,7 @@ a stale broker lock (2026-07-21)):
 7. Preserve the split between platform-neutral Core identity contracts and Darwin runtime carrier packaging.
 8. Preserve App icon catalog/variant state without giving WebView, badge, or tray projections App identity authority.
 9. Preserve stable App launch intent without promoting Node process commands into Core protocol state.
+10. Preserve public consumer documentation ownership separately from repository-internal agent law.
 Compromise: AGENTS.md is the required project-wide agent SSOT, so these law families cannot be
 physically split without losing the single discovery entrypoint required by repository tooling.
 -->
@@ -319,6 +321,23 @@ bun run openspec:vision -- backup-plan <change>
 ```
 
 ## Engineering Preferences
+
+### Documentation Ownership
+
+```text
+README.md                  capability discovery and shortest public path
+skills/opentray/           public consumer decisions, scenarios, and tutorials
+.agents/skills/*           repository-internal development and maintenance law
+packages/*/README.md       package-specific public API contract
+```
+
+- Keep detailed consumer integration guidance in `skills/opentray`; every
+  progressive reference must be reachable directly from its `SKILL.md`.
+- Keep the root README concise. It may introduce a capability and link the
+  public Skill, but it must not duplicate full lifecycle decision trees.
+- Do not place package-consumer tutorials in `.agents/skills/*`; those Skills
+  govern contributors changing this repository and may expose internal source,
+  release, or architecture assumptions that installed-package users do not own.
 
 - Prefer durable platform-law changes over glue code.
 - Keep package boundaries explicit and boring.

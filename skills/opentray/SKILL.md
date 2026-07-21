@@ -1,7 +1,16 @@
 ---
 name: opentray
-description: OpenTray user guide for installing `opentray`, creating trays, loading official extensions such as `@opentray/ext-webview`, running visual acceptance recipes from source examples, and troubleshooting local usage. Use when the task is about consuming OpenTray as a package rather than modifying the OpenTray repository internals.
+description: OpenTray user guide for installing `opentray`, creating trays, loading official extensions such as `@opentray/ext-webview`, choosing ordinary `style.appMode` windows versus tray utilities, implementing warm Dock reopen and cold `appLaunch` flows, running visual acceptance recipes, and troubleshooting local usage. Use when the task is about consuming OpenTray as a package rather than modifying the OpenTray repository internals.
 ---
+
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: publish detailed appMode
+adaptation guidance from skill-creator-v2 under skills/opentray, not the repository-internal
+.agents skills):
+1. Route package consumers to the smallest relevant public reference.
+2. Preserve consumer-facing API and platform-truth rules.
+3. Keep detailed scenario tutorials progressively loaded from references.
+-->
 
 # OpenTray
 
@@ -16,6 +25,7 @@ Use this skill when the user wants to build with OpenTray, not hack on the repo.
 - For a progressive path from first tray to extensions and host control, read `references/tutorial.md`.
 - Public API patterns and examples: read `references/api-patterns.md`.
 - Scenario decision cards for common app shapes: read `references/scenarios.md`.
+- Ordinary application windows versus tray utilities, warm Dock reopen, cold `appLaunch`, and development supervisors: read `references/app-mode.md`.
 - Runtime/daemon lifecycle (library-level, not CLI): read `references/daemon-ops.md`.
 - Reintroducing or auditing a broker/daemon process: read `references/daemon-best-practices.md`.
 - Packaging through a bundler (Vite/esbuild/tsdown/webpack) or writing a custom adapter: read `references/bundling.md`.

@@ -1,3 +1,12 @@
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: keep the root README
+brief while making the existence of appMode discoverable and routing detailed consumer
+decisions to the public skills/opentray guide):
+1. Introduce the tray-first public model and shortest working API path.
+2. Make major public capabilities discoverable without duplicating decision tutorials.
+3. Record repository/package ownership and contributor verification entrypoints.
+-->
+
 # OpenTray
 
 OpenTray is a desktop status runtime for Node/Deno/Bun CLI and AI-skill ecosystems.
@@ -127,6 +136,30 @@ menu shorthand. Lower-level `createClient(...)` remains protocol-only for tools
 that need exact wire shapes.
 
 If you already own the host process, `createTray()` remains the lower-level tray API.
+
+## Application-Mode Windows
+
+`@opentray/ext-webview` windows are tray-owned utilities by default. Set
+`style.appMode: true` when a WebView should behave as an ordinary desktop
+application window: it participates in the Windows taskbar and Alt+Tab, or the
+macOS Dock and Command-Tab.
+
+```ts
+import { WebviewExt } from "@opentray/ext-webview";
+
+const window = tray.extend(WebviewExt).createWebviewWindow({
+  url,
+  width: 960,
+  height: 720,
+  style: { appMode: true, autoHide: false },
+});
+```
+
+`appMode` does not imply `keepOnTop`, frameless chrome, auto-hide, material, or
+visibility behavior. Read the public
+[application-mode decision guide](skills/opentray/references/app-mode.md) for
+normal apps, tray utilities, mixed-window products, Dock reopen, cold
+`appLaunch`, development supervisors, and diagnostics.
 
 ## Packaging
 

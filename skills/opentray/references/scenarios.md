@@ -1,3 +1,11 @@
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: teach consumers when an
+appMode window is appropriate and keep the detailed lifecycle tutorial public):
+1. Select a product shape before composing OpenTray capability atoms.
+2. Keep ordinary application and tray utility roles explicit in examples.
+3. Route detailed lifecycle and platform decisions to focused references.
+-->
+
 # OpenTray Scenario Cards
 
 Use this reference when a user wants an app shape rather than a single API. Pick the closest card, explain the decision, then compose atoms. Do not silently mutate user HTML/CSS.
@@ -148,12 +156,29 @@ await new WebviewPlacementKit({ screen }).watch(window, {
 
 Use this when the app should feel like a normal desktop window.
 
-Why: native chrome already handles title, drag, resize, accessibility, and platform conventions. Do not choose frameless unless the product needs custom chrome.
+Why: `appMode` places the window in ordinary application switching surfaces,
+while native chrome handles title, drag, resize, accessibility, and platform
+conventions. Do not choose frameless unless the product needs custom chrome.
 
 ```ts
-await window.show({
+const appWindow = tray.extend(WebviewExt).createWebviewWindow({
+  url,
+  width: 960,
+  height: 720,
   title: "Status",
   icon: { type: "href", href: "/favicon.ico" },
   nativeWindowApi: true,
+  style: {
+    appMode: true,
+    autoHide: false,
+    frameless: false,
+  },
 });
+
+await appWindow.show();
 ```
+
+This window participates in the Windows taskbar and Alt+Tab or the macOS Dock
+and Command-Tab. Its runtime `appName` and `appIcon` remain separate from the
+window title and icon. Read [`app-mode.md`](app-mode.md) for tray/Dock reopen,
+process-exit relaunch, mixed-window apps, and development command decisions.

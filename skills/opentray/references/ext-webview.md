@@ -1,3 +1,11 @@
+<!--
+Orthogonal intents (maintained 2026-07-21; original user request: keep detailed appMode
+consumer decisions in the public skills/opentray tree):
+1. Introduce the official WebView extension facade and retained-window lifecycle.
+2. Route application-mode lifecycle decisions without duplicating their tutorial.
+3. Preserve placement, native window, platform, and geometry capability truth.
+-->
+
 # ext-webview
 
 Use this reference when the user asks how to use the official OpenTray WebView extension.
@@ -88,6 +96,20 @@ Supported host commands:
 Page-side `navigator.opentrayWindow.show()` and `hide()` are reversible visibility controls for an existing window session. They are not content replacement verbs; use `setContent`, `navigate`, or `destroy` when that is the actual product intent.
 
 Host-side `createWebviewWindow(options)` is the bootstrap declaration for one tray-scoped session. Call it once, keep that `WebviewWindowHandle`, and call `show()` / `hide()` for repeated tray activations. After the first successful show, `show()` must restore visibility without replaying startup width, height, style, content, or native API flags. Use `resizeTo`, `moveTo`, `setStyle`, `setBackground`, `setMinimumSize`, `setMaximumSize`, `setContent`, or `navigate` when a real mutation is intended.
+
+## Application Mode
+
+Set `style.appMode: true` only when the WebView is an ordinary application
+window. The default `false` is a tray utility outside normal switching
+surfaces. `appMode` is independent from `autoHide`, `keepOnTop`, frameless
+chrome, background material, and current visibility.
+
+The extension supplies the default warm-reopen behavior for bootstrapped
+app-mode windows: a live Darwin Dock reopen selects the most recently active
+candidate, calls `toVisible()`, and then calls `focus()`. A process-exit relaunch
+instead uses the runtime `appLaunch` vector. Read
+[`app-mode.md`](app-mode.md) before designing ordinary app, mixed-window,
+development, or persistent Dock-launch flows.
 
 ## Placement Kit
 
