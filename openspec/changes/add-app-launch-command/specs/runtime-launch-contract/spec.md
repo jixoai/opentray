@@ -45,10 +45,20 @@ the launch command to the Core `AppProjection` or tray protocol.
 
 - **GIVEN** a consumer runs under a Vite development supervisor
 - **WHEN** it configures its OpenTray app launch command
-- **THEN** the persisted vector SHALL invoke the package-manager development script from the
-  repository root (for example, an absolute `pnpm` executable with `args: ["dev"]`)
+- **THEN** the persisted vector SHALL invoke the package-manager development entry through an
+  absolute executable and SHALL address the frontend supervisor without a nested bare package-manager command
 - **AND** a cold Dock launch SHALL restore the supervisor, daemon, proxy, and WebView URL together
 - **AND** it SHALL not persist only the daemon child entry as a substitute
+- **AND** every transitive command needed to reach that supervisor SHALL resolve from the package
+  graph or use an absolute path instead of assuming the interactive terminal's `PATH`
+
+#### Scenario: LaunchServices provides no package-manager PATH
+
+- **GIVEN** the persisted development vector is executed by Finder or Dock with a minimal `PATH`
+- **WHEN** its package script graph starts the frontend supervisor
+- **THEN** no step SHALL invoke a bare package-manager executable
+- **AND** the process graph SHALL reach the Vite server and daemon exactly as an interactive
+  development launch does
 
 ### Requirement: Last Successful Invocation
 

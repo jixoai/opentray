@@ -9,8 +9,7 @@ diagnostics):
 4. Converge legacy/wrong-package Darwin bundles onto one live App identity.
 5. Preserve durable broker/carrier diagnostics and platform boundaries.
 6. Reopen a live app-mode runtime from the Dock without spawning a second consumer.
-7. Require development launch descriptors to restore the complete Vite -> daemon -> WebView tree
-   without depending on the interactive terminal's PATH.
+7. Require development launch descriptors to restore the complete Vite -> daemon -> WebView tree.
 Compromise: Darwin is the only platform with a stable OpenTray app carrier today;
 Windows taskbar persistence needs a separate shortcut/launcher atom and is not
 silently claimed by this change.
@@ -20,10 +19,10 @@ silently claimed by this change.
 
 ## Current Round
 
-- Round: 4
-- Status: Owner acceptance reproduced a Finder-only cold launch failure and a linked-native
-  preparation race; corrective implementation is pending.
-- Previous plan backup: `plans/plan-v4.md`.
+- Round: 3
+- Status: Round 3 implementation and source-tree cold/warm verification are complete; the
+  remaining Dock visual acceptance belongs to the owner.
+- Previous plan backup: `plans/plan-v3.md`.
 
 ## Workflow Command Surface
 
@@ -57,9 +56,6 @@ silently claimed by this change.
 
 > 最后是我说的这个 skill-creator-v2 这个项目的新增的最佳实践，你可能需要帮它记录到项目AGENTS.md中，你不用开发，我会直接提醒skill-creator-v2自己做出修复。
 
-> 1. pnpm skill-creator start 不启动托盘，相关测试无法进行。
-> 2. pnpm dev 启动托盘后，点击 dock 图标，可以聚焦窗口。关闭窗口再点击也可以打开窗口。但是退出托盘后，点击dock 图标无法启动。
-
 ## Objective Record
 
 ### Requirement-Bearing Q&A
@@ -76,8 +72,6 @@ silently claimed by this change.
 | 8 | User | A running app-mode Dock click must show and focus the most recently active app-mode window. | The live carrier needs a platform-neutral reopen intent and an extension-owned default projection. |
 | 9 | User | OpenTray should expose a lower-level focus operation while supplying the default reopen behavior. | Add a typed WebView `focus()` capability without moving WebView policy into Core. |
 | 10 | User | The Skill Creator persistence rule belongs in its `AGENTS.md`, not in this implementation. | Record incompatible-content reset versus I/O failure; do not change the consumer registry code. |
-| 11 | User | `pnpm skill-creator start` did not mount the tray, blocking production-path acceptance. | Treat a linked consumer's staged broker and extension artifacts as an explicit test precondition and preserve the exact broker failure in durable logs. |
-| 12 | User | Warm Dock reopen works, but clicking the pinned Dock entry after tray exit does not restart development. | Require the persisted development vector's complete subprocess graph to work in LaunchServices' minimal environment, not only in the terminal that first ran `pnpm dev`. |
 
 ### Evidence Read
 
@@ -98,8 +92,6 @@ silently claimed by this change.
 | `winit` macOS platform documentation | Winit intentionally does not expose `applicationShouldHandleReopen:`; applications must install an AppKit delegate. | The native broker must bridge Dock reopen into its generic event loop instead of inferring it from `resumed`. |
 | `packages/ext-webview/src/index.ts` and native runtimes | `toVisible()` reveals retained windows; macOS focuses during reveal while Windows already has an internal focus path. | Expose `focus()` and compose `toVisible()` plus `focus()` for the default reopen projection. |
 | `skill-creator-v2/AGENTS.md` | The consumer already records safeParse terminology but lacks the complete content-failure versus I/O boundary. | Update only the guide with the agreed reset rule; do not alter its registry implementation. |
-| `opentray-launch.log` after the rejected cold click | The carrier read the expected absolute Node + pnpm entry and spawned it, then the root `dev` script failed at its nested bare `pnpm --dir webui dev` with `sh: pnpm: command not found`. | An absolute first executable is insufficient when a later script step still assumes the interactive terminal PATH. |
-| `skill-creator-v2` production daemon log | Two pre-build linked runs timed out waiting for broker readiness, while the same command mounted successfully after `prepare:linked-consumer`; `lsof` then showed the linked source WebView dylib. | Linked acceptance must stage the source broker and native extension before either production or development runtime tests. |
 
 ### Git Evidence
 
@@ -215,7 +207,7 @@ interface OpenTrayRuntimeOptions {
 }
 ```
 
-`undefined` and `null` mean auto snapshot. The normalized persisted vector is `{ command, args, cwd }`. `command` is an executable path/name, never a shell expression. Development consumers must explicitly persist their package-manager entry and a PATH-independent argument vector (for Skill Creator, the resolved Node + pnpm entry directly invokes `--dir <repo>/webui dev`) so a cold Dock launch restores Vite as well as the daemon. Every transitive command in that script graph must either be package-manager resolved or absolute; the first executable being absolute does not make a nested bare `pnpm` safe.
+`undefined` and `null` mean auto snapshot. The normalized persisted vector is `{ command, args, cwd }`. `command` is an executable path/name, never a shell expression. Development consumers must explicitly persist their package-manager entry (for Skill Creator, the resolved absolute `pnpm` executable with `args: ["dev"]` and repository-root `cwd`) so a cold Dock launch restores Vite as well as the daemon.
 
 ### Data Shape
 
@@ -254,7 +246,6 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - [x] 6. Verify through the real linked `skill-creator-v2` `pnpm dev` graph.
 - [x] 7. Return the sole remaining Dock visual/click acceptance to the owner.
 - [x] 8. Implement and verify the confirmed warm reopen, explicit focus, and development launch-vector behavior.
-- [ ] 9. Close the Finder environment and linked-native preparation gaps found by owner acceptance.
 
 ## Open Questions
 

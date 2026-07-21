@@ -87,3 +87,12 @@ entry relaunch the consumer with the last or explicitly configured command):
 - [x] 8.6 Adapt `skill-creator-v2` development tray initialization to persist the resolved absolute package-manager vector for `pnpm dev` from the repository root.
 - [x] 8.7 Update only `skill-creator-v2/AGENTS.md` with the agreed incompatible-content reset versus I/O failure boundary; do not change its registry code.
 - [x] 8.8 Run focused Rust/TypeScript tests, rebuild the linked OpenTray artifacts, and validate the cold and warm Dock paths with durable logs.
+
+## 9. Owner Acceptance Rejection / Round 4 Finder Environment And Linked Runtime
+
+- [x] 9.1 Back up the round-3 plan and capture both exact failure surfaces before implementation.
+- [ ] 9.2 BDD: a development launch vector directly addresses the Vite-owning workspace and contains no nested bare package-manager dependency.
+- [ ] 9.3 BDD: the real stable bundle cold-launches the complete Skill Creator development graph under a minimal Finder-like `PATH`.
+- [ ] 9.4 Record linked native staging as a required preparation gate before Skill Creator production/development acceptance.
+- [ ] 9.5 Improve early broker failure diagnostics so a pre-readiness exit names the durable broker log instead of appearing only as a generic timeout.
+- [ ] 9.6 Rebuild linked artifacts and verify `pnpm skill-creator start`, warm reopen, close/reopen, tray exit, and cold Dock relaunch at the real consumer boundary.
