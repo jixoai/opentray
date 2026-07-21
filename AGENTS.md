@@ -1,5 +1,5 @@
 <!--
-Orthogonal intents (maintained 2026-07-21; original user requests: investigate a macOS
+Orthogonal intents (maintained 2026-07-22; original user requests: investigate a macOS
 pnpm-pub window that stopped responding to hide operations until daemon restart; determine why
 skill-creator-v2's Hide Window and primaryEvent fail against the latest OpenTray packages; ensure
 ordinary consumers need only a normal package-manager install for a coherent native runtime;
@@ -12,7 +12,9 @@ app-mode entry relaunch the latest `process.argv` invocation or an explicit laun
 observable in stable logs; make a live Dock click reveal and focus the latest retained app-mode
 WebView without spawning a second consumer; recover tray startup after an interrupted caller leaves
 a stale broker lock; publish skill-creator-v2 appMode adaptation decisions under the public
-skills/opentray tree instead of repository-internal skills (2026-07-21)):
+skills/opentray tree instead of repository-internal skills; make repeated development starts
+replace the actual prior development owner rather than only probing the production endpoint
+(2026-07-22)):
 1. Preserve the tray-first App/Tray/Session platform laws.
 2. Preserve native runtime and extension package boundaries across macOS and Windows.
 3. Record runtime artifact compatibility, lifecycle, and diagnosis laws.
@@ -245,6 +247,13 @@ mode directly:
   `node_modules/vite/bin/vite.js` entry and the frontend workspace as `cwd`. Do not persist pnpm,
   a package script, or a `.bin/vite` shell shim: each adds another bare runtime lookup that Finder's
   minimal `PATH` cannot satisfy. Never persist only the daemon child or a shell string.
+- Development runtime ownership is replaceable state owned by the consumer. A new development
+  start must discover and stop the previous development owner, wait for its daemon PID and actual
+  IPC endpoint to release, and let its Vite supervisor exit before claiming the replacement. A
+  lifecycle command that checks only the production endpoint is incomplete: it may report `ENOENT`
+  while the development endpoint is occupied. OpenTray must not be changed to guess consumer
+  homes, registries, or supervisor trees; classify this as a consumer adapter defect unless
+  coherent OpenTray artifact evidence proves otherwise.
 - A source-linked consumer must stage the matching facade, broker/carrier, and native extension
   artifacts before runtime acceptance. This is a link-development prerequisite only; a registry
   install must remain coherent after normal package-manager installation.

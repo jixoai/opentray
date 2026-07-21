@@ -1,6 +1,7 @@
 <!--
-Orthogonal intents (maintained 2026-07-21; original user request: troubleshoot published
-OpenTray from the consumer project without leaking source-repository controls):
+Orthogonal intents (maintained 2026-07-22; original user request: troubleshoot published
+OpenTray from the consumer project without leaking source-repository controls, including
+split production/development endpoint ownership):
 1. Diagnose installed dependency and artifact coherence.
 2. Diagnose tray, WebView, and app relaunch chains from persistent evidence.
 3. Keep manual repair steps outside the normal consumer contract.
@@ -55,6 +56,28 @@ platform package, broker, or native extension the running process loaded.
 Persist a public lifecycle command such as `dist/cli.js start`, not a raw daemon
 child. A healthy existing owner should receive open/focus; an absent owner should
 start the complete graph.
+
+## Stop Reports `ENOENT`, But Development Start Says The Socket Is Occupied
+
+This is usually split endpoint ownership, not a stale socket. Production and
+development often derive different homes, socket paths, or registry files. The
+stop command queried the production profile while the running development
+supervisor owns the development profile.
+
+1. Record the exact `command`, `args`, and `cwd` from `opentray-launch.json`.
+2. Read the consumer's lifecycle/daemon log and identify the active profile,
+   endpoint, daemon PID, and supervisor PID.
+3. Invoke the consumer's public stop operation for that active profile; it must
+   be safe when no owner exists and must wait for both PID exit and endpoint
+   release.
+4. Confirm the old Vite supervisor exits as a consequence of daemon shutdown.
+5. Start the replacement supervisor and verify one daemon, one endpoint, one
+   Vite server, and one OpenTray session remain.
+
+Do not delete the endpoint file, kill every process matching a package name, or
+change OpenTray's endpoint format from the consumer side. If the consumer cannot
+discover its active development owner, fix that lifecycle command before
+debugging native tray behavior.
 
 ## Normal Install Contract
 

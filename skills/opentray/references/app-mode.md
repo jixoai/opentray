@@ -1,7 +1,7 @@
 <!--
-Orthogonal intents (maintained 2026-07-21; original user request: summarize the
-skill-creator-v2 appMode adaptation as a public consumer tutorial with decisions for
-different runtime scenarios):
+Orthogonal intents (maintained 2026-07-22; original user request: summarize the
+skill-creator-v2 appMode adaptation as a public consumer tutorial, including repeatable
+development-owner takeover, with decisions for different runtime scenarios):
 1. Select the desktop Shell role independently from other window style facts.
 2. Separate retained-window reveal, warm Dock reopen, and cold process relaunch.
 3. Define production lifecycle commands and development supervisor launch vectors.
@@ -237,9 +237,30 @@ stop production daemon
   -> claim one OpenTray session
 ```
 
+The same rule applies when replacing a development owner:
+
+```text
+discover the active development owner
+  -> request its public stop operation
+  -> wait for the old daemon PID and development IPC endpoint to release
+  -> confirm its Vite supervisor has exited
+  -> start the replacement Vite supervisor and daemon
+  -> claim one OpenTray session
+```
+
+Production and development may deliberately use different homes, socket paths,
+or registries. A lifecycle command that checks only the production endpoint can
+therefore report `ENOENT` while a development endpoint is still owned. The
+consumer's stop/start commands must discover the active owner across both
+profiles, make stop idempotent, and wait for endpoint release before spawning a
+replacement. Never remove a socket file or kill an unrelated PID to repair this
+split ownership state.
+
 This takeover is an application responsibility. OpenTray persists and executes
 the declared vector; it cannot infer how a consumer's daemon, Vite server, IPC
-registry, or proxy should be rebuilt.
+registry, or proxy should be rebuilt. OpenTray does require the consumer to
+expose one actionable lifecycle command for the actual active owner so a Dock
+relaunch and a repeated development start cannot create two supervisors.
 
 A normal package-manager install must provide one coherent facade,
 broker/carrier, and native-extension graph. Do not add cache deletion, source
@@ -273,4 +294,6 @@ may provide diagnostic evidence, but it is not part of the consumer contract.
 | Fully exit the consumer, then click a pinned macOS Dock entry | The stable carrier starts the complete application supervisor and opens usable content. |
 | Broker exits while the consumer daemon remains | The public lifecycle command repairs ownership and rebuilds the runtime graph. |
 | Start development while a production daemon owns the same identity | The consumer's development supervisor performs the bounded takeover and produces exactly one Dock identity/session. |
+| Start development while an earlier development owner is alive | The old daemon and its Vite supervisor exit, the development endpoint is released, and the replacement claims exactly one owner/session. |
+| Stop when only the development endpoint is alive | The consumer discovers and stops the development owner instead of reporting only the absent production socket. |
 | Click the tray primary item repeatedly | One retained window toggles from native `isVisible()` / `visibleChange`; no duplicate WebView is created. |

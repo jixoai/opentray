@@ -1,6 +1,7 @@
 <!--
-Orthogonal intents (maintained 2026-07-21; original user request: public acceptance must
-run inside projects such as skill-creator-v2, never inside the OpenTray source workspace):
+Orthogonal intents (maintained 2026-07-22; original user request: public acceptance must
+run inside projects such as skill-creator-v2, never inside the OpenTray source workspace,
+and must prove development-owner replacement without duplicate runtimes):
 1. Verify the installed dependency graph through the consumer's real entrypoint.
 2. Separate automated checks from human-visible native acceptance.
 3. Preserve platform-specific claims and teardown evidence.
@@ -61,11 +62,16 @@ When both modes share one app identity, verify each direction independently:
 ```text
 production owner -> start development -> one development owner
 development owner -> start production -> one production owner
+development owner -> start development again -> one replacement development owner
 ```
 
-The consumer must wait for its old PID and IPC endpoint to release before the
-new supervisor claims OpenTray. Duplicate Dock identities or trays indicate an
-application ownership defect, not an acceptance pass.
+For every takeover, run the consumer's public lifecycle command and verify the
+old daemon PID, its actual IPC endpoint, and its supervisor all release before
+the new owner claims OpenTray. The stop command must discover the active
+development endpoint when the production endpoint is absent; a production
+`ENOENT` message while a development socket is occupied is a failed acceptance,
+not a harmless warning. Duplicate Dock identities, trays, Vite servers, or
+daemons indicate an application ownership defect, not an acceptance pass.
 
 ## Evidence Boundary
 

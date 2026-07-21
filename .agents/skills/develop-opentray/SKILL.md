@@ -4,7 +4,7 @@ description: Develop and refactor the OpenTray repository while preserving kerne
 ---
 
 <!--
-Orthogonal intents (maintained 2026-07-21; original user request: keep source checkout,
+Orthogonal intents (maintained 2026-07-22; original user request: keep source checkout,
 linked-consumer staging, and workspace smoke guidance internal to .agents/skills):
 1. Route repository contributors to source-level platform laws.
 2. Preserve internal build, staging, release, and visual-acceptance workflows.
@@ -70,6 +70,12 @@ Use this skill for repo-internal OpenTray work. Keep `opentray-core` boring, kee
 - Before accepting a linked consumer, run its source workspace's documented
   staging command so facade, broker, carrier, and native extensions come from
   one built graph. A registry install must not need this source-only step.
+- A repeated development start is a consumer runtime-ownership concern unless
+  collected broker/carrier evidence shows an OpenTray artifact defect. Review
+  the consumer's lifecycle registry, active development endpoint, daemon PID,
+  and Vite supervisor before changing core or native code. Keep the detailed
+  takeover tutorial in `skills/opentray`; this maintainer Skill records only
+  the boundary and evidence required to classify the issue.
 
 ```bash
 pnpm run prepare:linked-consumer
