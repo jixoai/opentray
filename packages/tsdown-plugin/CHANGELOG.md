@@ -1,5 +1,12 @@
 # @opentray/tsdown-plugin
 
+## 0.18.0
+
+### Patch Changes
+
+- Updated dependencies [f3ddf42]
+  - @opentray/packaging@0.18.0
+
 ## 0.17.0
 
 ### Minor Changes

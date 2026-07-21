@@ -1,6 +1,6 @@
 {
   "name": "@opentray/windows-x64",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "OpenTray runtime artifact package for Windows x64.",
   "license": "MIT",
   "repository": {
