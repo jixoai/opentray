@@ -11,7 +11,6 @@ diagnostics):
 6. Reopen a live app-mode runtime from the Dock without spawning a second consumer.
 7. Require development launch descriptors to restore the complete Vite -> daemon -> WebView tree
    without depending on the interactive terminal's PATH.
-8. Give a healthy native broker a bounded readiness budget that covers Darwin carrier startup.
 Compromise: Darwin is the only platform with a stable OpenTray app carrier today;
 Windows taskbar persistence needs a separate shortcut/launcher atom and is not
 silently claimed by this change.
@@ -21,10 +20,10 @@ silently claimed by this change.
 
 ## Current Round
 
-- Round: 5
-- Status: Round-4 acceptance exposed a separate pre-readiness termination; the three failure
-  chains are reproduced and the corrective specification is ready for implementation evidence.
-- Previous plan backup: `plans/plan-v5.md`.
+- Round: 4
+- Status: Owner acceptance reproduced a Finder-only cold launch failure and a linked-native
+  preparation race; corrective implementation is pending.
+- Previous plan backup: `plans/plan-v4.md`.
 
 ## Workflow Command Surface
 
@@ -101,8 +100,6 @@ silently claimed by this change.
 | `skill-creator-v2/AGENTS.md` | The consumer already records safeParse terminology but lacks the complete content-failure versus I/O boundary. | Update only the guide with the agreed reset rule; do not alter its registry implementation. |
 | `opentray-launch.log` after the rejected cold click | The carrier read the expected absolute Node + pnpm entry and spawned it, then the root `dev` script failed at its nested bare `pnpm --dir webui dev` with `sh: pnpm: command not found`. | An absolute first executable is insufficient when a later script step still assumes the interactive terminal PATH. |
 | `skill-creator-v2` production daemon log | Two pre-build linked runs timed out waiting for broker readiness, while the same command mounted successfully after `prepare:linked-consumer`; `lsof` then showed the linked source WebView dylib. | Linked acceptance must stage the source broker and native extension before either production or development runtime tests. |
-| `broker.log` timestamps from the failed production start | The healthy Darwin broker began at `04:22:02.681`, emitted its startup line, and was terminated by SDK `SIGTERM` at `04:22:05.240` before publishing readiness. | The former optimistic polling window was shorter than a valid carrier/AppKit cold start; readiness needs a named native-startup budget while preserving liveness and artifact checks. |
-| Lifecycle red BDD | A broker that stays alive and writes exact ready metadata after 2.2 seconds fails only under the former polling limit. | The regression can be proven without a GUI and must not weaken early-exit or identity-mismatch rejection. |
 
 ### Git Evidence
 
@@ -167,8 +164,6 @@ When an ordinary application-mode entry is opened from the Dock, the user should
 5. If the developer configured a command, that command is launched instead; the carrier never guesses or concatenates shell text.
 6. A previous OpenTray-owned bundle with the same App identity is unregistered and removed only after the current bundle is proven live; one Dock identity remains.
 7. Broker and cold-launch failures append to deterministic log files without requiring a debug environment variable.
-8. A healthy native broker may finish carrier/AppKit initialization within a bounded 10-second
-   readiness budget; early exit and artifact mismatch still fail immediately with the broker log path.
 
 ## Platform Diagnosis
 
@@ -237,9 +232,6 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - `opentray-core`: unchanged; no Node command or process spawning.
 - `@opentray/packaging`: owns descriptor type, validation, path, atomic persistence, bundle identity inspection, and owner-safe stale-bundle removal.
 - `opentray` SDK: resolves the running consumer script before nested package-manager environment metadata, snapshots the invocation, owns deterministic runtime log paths, and reconciles stale bundle identities only after handshake plus descriptor commit.
-- `opentray` daemon lifecycle: waits up to the named 10-second native readiness budget, checks
-  process liveness and exact ready artifact identity on every poll, keeps the default caller lock
-  budget above that window, and terminates the child only after a proved exit, mismatch, or timeout.
 - `opentray-bin` Darwin carrier: with no `broker` subcommand, resolves its own `.app` resources, appends carrier/consumer diagnostics, spawns the vector without a shell, and exits; with `broker`, it also bridges AppKit `applicationShouldHandleReopen:` into the generic broker event loop.
 - `@opentray/ext-webview`: owns app-mode window selection and exposes `focus()`; it must not be reimplemented in `opentray-core`.
 - Native broker/Core event seam: transports a generic app reopen intent; Core never selects or commands a WebView window.
@@ -262,7 +254,7 @@ The descriptor schema is versioned and strict. It stores no environment variable
 - [x] 6. Verify through the real linked `skill-creator-v2` `pnpm dev` graph.
 - [x] 7. Return the sole remaining Dock visual/click acceptance to the owner.
 - [x] 8. Implement and verify the confirmed warm reopen, explicit focus, and development launch-vector behavior.
-- [ ] 9. Close the Finder environment, linked-native preparation, and native readiness gaps found by owner acceptance.
+- [ ] 9. Close the Finder environment and linked-native preparation gaps found by owner acceptance.
 
 ## Open Questions
 

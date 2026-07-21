@@ -96,3 +96,6 @@ entry relaunch the consumer with the last or explicitly configured command):
 - [ ] 9.4 Record linked native staging as a required preparation gate before Skill Creator production/development acceptance.
 - [ ] 9.5 Improve early broker failure diagnostics so a pre-readiness exit names the durable broker log instead of appearing only as a generic timeout.
 - [ ] 9.6 Rebuild linked artifacts and verify `pnpm skill-creator start`, warm reopen, close/reopen, tray exit, and cold Dock relaunch at the real consumer boundary.
+- [ ] 9.7 BDD: a healthy broker that publishes exact readiness after more than two seconds succeeds
+  within the named 10-second budget; early exit, identity mismatch, timeout cleanup, and caller-lock
+  serialization retain their existing authority.
