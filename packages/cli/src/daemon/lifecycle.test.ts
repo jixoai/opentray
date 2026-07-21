@@ -67,6 +67,25 @@ describe("daemon lifecycle", () => {
     expect(await readFile(paths.brokerLog, "utf8")).toContain("native broker diagnostic");
   });
 
+  it("records a detached broker exit before readiness", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createNodeDaemonDriver("/fixture/cli.mjs", { env: {} });
+    const broker = {
+      command: process.execPath,
+      args: ["-e", "process.exit(17)"],
+      executablePath: process.execPath,
+      artifactIdentity: brokerIdentity("exit-child"),
+    } satisfies ResolvedBrokerArtifact;
+
+    await driver.spawnBroker(paths, broker);
+    await waitForLog(paths.brokerLog, '"event":"broker-exit"');
+
+    const log = await readFile(paths.brokerLog, "utf8");
+    expect(log).toContain('"code":17');
+    expect(log).toContain('"signal":null');
+  });
+
   it("records the exact detached broker spawn error", async () => {
     const homeDir = await makeTempHome();
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
@@ -184,13 +203,40 @@ describe("daemon lifecycle", () => {
     expect([first.status, second.status].sort()).toEqual(["already-running", "started"]);
   });
 
+  it("allows a healthy Darwin broker more than two seconds to publish readiness", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createDelayedReadyDriver(2_200);
+
+    const started = await startDaemon({ paths, driver });
+
+    expect(started.status).toBe("started");
+    expect(driver.stopped).toEqual([]);
+  });
+
+  it("stops and cleans a broker that exceeds the configured readiness budget", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createDelayedReadyDriver(1_000);
+
+    await expect(
+      startDaemon({ paths, driver, readinessTimeoutMs: 25 }),
+    ).rejects.toThrow(
+      `after 25ms: pid=50000; readyFile=${paths.readyFile}; brokerLog=${paths.brokerLog}`,
+    );
+
+    expect(driver.stopped).toEqual([50_000]);
+    await expect(readFile(paths.pidFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(paths.readyFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("reports broker exit before readiness instead of masking it as a timeout", async () => {
     const homeDir = await makeTempHome();
     const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
     const driver = createExitedDriver();
 
     await expect(startDaemon({ paths, driver })).rejects.toThrow(
-      "daemon broker exited before readiness",
+      `brokerLog=${paths.brokerLog}`,
     );
   });
 
@@ -319,6 +365,35 @@ const createExitedDriver = (): DaemonDriver => ({
   },
   async stop() {},
 });
+
+const createDelayedReadyDriver = (
+  readyDelayMs: number,
+): DaemonDriver & { readonly stopped: number[] } => {
+  const alive = new Set<number>();
+  const stopped: number[] = [];
+
+  return {
+    stopped,
+    async resolveBroker(paths) {
+      return resolvedBroker(paths);
+    },
+    async isAlive(pid) {
+      return alive.has(pid);
+    },
+    async spawnBroker(paths, broker) {
+      const pid = 50_000;
+      alive.add(pid);
+      setTimeout(() => {
+        void writeReadyFile(paths, pid, broker.artifactIdentity).catch(() => undefined);
+      }, readyDelayMs);
+      return pid;
+    },
+    async stop(pid) {
+      stopped.push(pid);
+      alive.delete(pid);
+    },
+  };
+};
 
 const waitForLog = async (path: string, expected: string): Promise<void> => {
   for (let attempt = 0; attempt < 100; attempt += 1) {

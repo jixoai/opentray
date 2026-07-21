@@ -74,6 +74,10 @@ The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `sk
 - Stable Darwin Bundle ownership follows the package nearest the running consumer script. Ambient `npm_package_json` describes the nested package-manager runner and is only a fallback; it must not rename a caller's stable Bundle to `webui` or another workspace package.
 - After a successful local handshake and launch-descriptor commit, the runtime converges dead OpenTray-owned bundles with the same `CFBundleIdentifier`: it unregisters them from LaunchServices and removes them, while preserving the current Bundle and any live owner marker. Failed initialization never performs this cleanup.
 - Detached broker stdout/stderr append to `<runtimeDir>/broker.log` by default. `OPENTRAY_DAEMON_STDIO=inherit` is interactive debugging; `ignore` is an explicit silence choice. A non-empty unknown value must not silently discard diagnostics.
+- Broker readiness is a bounded native cold-start budget, not a fixed number of optimistic polling
+  attempts. The default budget must cover Darwin carrier/AppKit initialization, and the caller lock
+  budget must cover that readiness window. Every poll still validates PID liveness and exact artifact
+  identity; timeout diagnostics must name the broker log before terminating the child.
 - Earlier dynamic extension discovery checked the broker working directory's top-level `node_modules` platform package before facade-nested and pnpm virtual-store candidates. The current facade path instead resolves one real library from the declaring facade's dependency closure and the broker treats that absolute request as authoritative; it never falls back to diagnostic candidates or reconstructs package roots for that request.
 - For native command-surface diagnosis, record the library actually loaded by the broker (`lsof -p <pid>` on macOS), then read the `package.json` beside that exact library and compare its hash with the intended virtual-store artifact. `require.resolve()` from the consumer root may identify the same stale top-level package; neither it nor `pnpm why` is sufficient alone.
 - Package-manager resolution belongs to the Node SDK, which can resolve an official extension's platform package relative to the facade package that declared it. The facade may declare a platform-neutral artifact descriptor, but it must not import native packages into its public interface. The broker must receive an exact resolved library path instead of reconstructing npm/pnpm/Yarn/Bun topology in Rust.
@@ -235,8 +239,13 @@ mode directly:
   substrate must also raise or restore the window to obtain foreground focus.
 - Development launch descriptors must reconstruct the supervisor that owns the complete app tree.
   A pnpm/Vite consumer should persist `process.execPath` with the absolute `npm_execpath` and
-  `"dev"` arguments plus repository-root `cwd`; never persist only the daemon child, a shell
-  string, or a bare package-manager name.
+  directly address the Vite-owning workspace, for example
+  `[npm_execpath, "--dir", absoluteWebuiDir, "dev"]` plus repository-root `cwd`. Every transitive
+  command must resolve from the package graph or be absolute; never persist only the daemon child,
+  a shell string, or a graph that later invokes a bare package-manager name under Finder.
+- A source-linked consumer must stage the matching facade, broker/carrier, and native extension
+  artifacts before runtime acceptance. This is a link-development prerequisite only; a registry
+  install must remain coherent after normal package-manager installation.
 
 ## Windows Tray WebView Laws
 

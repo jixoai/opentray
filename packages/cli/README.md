@@ -160,17 +160,22 @@ launchers.
 
 Development callers must describe the command that owns the complete process
 tree. For a pnpm/Vite app, persist `process.execPath` with the absolute
-`npm_execpath` and `"dev"` arguments plus the repository-root `cwd`. Persisting
-only a daemon child, a shell string, or a bare `pnpm` command cannot reliably
-restore Vite, its proxy, and the final WebView URL from a Dock cold launch.
+`npm_execpath` and directly address the Vite-owning workspace, for example
+`[npm_execpath, "--dir", absoluteWebuiDir, "dev"]`, plus the repository-root
+`cwd`. Every transitive command must resolve from the package graph or be
+absolute. Persisting only a daemon child, a shell string, or a script that later
+invokes bare `pnpm` cannot reliably restore Vite, its proxy, and the final
+WebView URL from Finder's minimal environment.
 
 ### Runtime diagnostics
 
 Detached brokers append stdout and stderr to the caller-scoped
 `<home>/.opentray/<package-version>/<caller-label>/runtime/broker.log` by default.
 Set `OPENTRAY_DAEMON_STDIO=inherit` for an interactive terminal or
-`OPENTRAY_DAEMON_STDIO=ignore` when silence is deliberate. When a Darwin app
-carrier is opened without the private `broker` arguments, its
+`OPENTRAY_DAEMON_STDIO=ignore` when silence is deliberate. Broker readiness uses
+a bounded native cold-start budget while continuing to validate process liveness
+and exact artifact identity; early-exit and timeout errors include the broker log
+path. When a Darwin app carrier is opened without the private `broker` arguments, its
 `Contents/Resources/opentray-launch.log` records descriptor parsing, spawn PID or
 error, and the relaunched consumer's stdout/stderr.
 

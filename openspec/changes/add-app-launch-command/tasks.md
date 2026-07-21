@@ -91,11 +91,11 @@ entry relaunch the consumer with the last or explicitly configured command):
 ## 9. Owner Acceptance Rejection / Round 4 Finder Environment And Linked Runtime
 
 - [x] 9.1 Back up the round-3 plan and capture both exact failure surfaces before implementation.
-- [ ] 9.2 BDD: a development launch vector directly addresses the Vite-owning workspace and contains no nested bare package-manager dependency.
-- [ ] 9.3 BDD: the real stable bundle cold-launches the complete Skill Creator development graph under a minimal Finder-like `PATH`.
-- [ ] 9.4 Record linked native staging as a required preparation gate before Skill Creator production/development acceptance.
-- [ ] 9.5 Improve early broker failure diagnostics so a pre-readiness exit names the durable broker log instead of appearing only as a generic timeout.
-- [ ] 9.6 Rebuild linked artifacts and verify `pnpm skill-creator start`, warm reopen, close/reopen, tray exit, and cold Dock relaunch at the real consumer boundary.
-- [ ] 9.7 BDD: a healthy broker that publishes exact readiness after more than two seconds succeeds
+- [x] 9.2 BDD: a development launch vector directly addresses the Vite-owning workspace and contains no nested bare package-manager dependency.
+- [x] 9.3 BDD: the real stable bundle cold-launches the complete Skill Creator development graph under a minimal Finder-like `PATH`.
+- [x] 9.4 Record linked native staging as a required preparation gate before Skill Creator production/development acceptance.
+- [x] 9.5 Improve early broker failure diagnostics so a pre-readiness exit names the durable broker log instead of appearing only as a generic timeout.
+- [x] 9.6 Rebuild linked artifacts and verify `pnpm skill-creator start`, warm reopen, close/reopen, tray exit, and cold Dock relaunch at the real consumer boundary.
+- [x] 9.7 BDD: a healthy broker that publishes exact readiness after more than two seconds succeeds
   within the named 10-second budget; early exit, identity mismatch, timeout cleanup, and caller-lock
   serialization retain their existing authority.

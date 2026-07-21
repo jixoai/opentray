@@ -3,7 +3,8 @@
 // 1. Start, inspect, restart, and stop one caller-scoped broker under a lock.
 // 2. Reject liveness-only reuse through exact ready artifact identity.
 // 3. Preserve Darwin stable-bundle live-owner protection.
-// 4. Persist detached broker output unless the operator explicitly overrides it.
+// 4. Persist detached broker output and early exit identity unless explicitly overridden.
+// 5. Bound native cold-start readiness without terminating a healthy carrier prematurely.
 
 import { constants } from "node:fs";
 import { access, appendFile, mkdir, open, readFile, rm, unlink, writeFile } from "node:fs/promises";
@@ -23,7 +24,9 @@ import type { OpenTrayAppBundleOptions, OpenTrayPackageIdentity } from "@opentra
 import { clearDarwinAppBundleOwner, writeDarwinAppBundleOwner } from "@opentray/packaging";
 
 const DAEMON_STDIO_ENV = "OPENTRAY_DAEMON_STDIO";
-const DEFAULT_DAEMON_LOCK_TIMEOUT_MS = 5_000;
+const DAEMON_POLL_INTERVAL_MS = 50;
+const DEFAULT_DAEMON_READY_TIMEOUT_MS = 10_000;
+const DEFAULT_DAEMON_LOCK_TIMEOUT_MS = DEFAULT_DAEMON_READY_TIMEOUT_MS + 5_000;
 
 export type DaemonStartResult =
   | {
@@ -58,6 +61,7 @@ export interface StartDaemonOptions {
   paths: DaemonPaths;
   driver: DaemonDriver;
   lockTimeoutMs?: number;
+  readinessTimeoutMs?: number;
 }
 
 export interface StopDaemonOptions {
@@ -175,6 +179,20 @@ export const createNodeDaemonDriver = (
         "utf8",
       ).catch(() => undefined);
     });
+    child.once("exit", (code, signal) => {
+      if (stdio !== "log") return;
+      void appendFile(
+        paths.brokerLog,
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          event: "broker-exit",
+          command: broker.command,
+          code,
+          signal,
+        })}\n`,
+        "utf8",
+      ).catch(() => undefined);
+    });
 
     child.unref();
     const pid = child.pid ?? 0;
@@ -205,6 +223,7 @@ export const startDaemon = async ({
   paths,
   driver,
   lockTimeoutMs = DEFAULT_DAEMON_LOCK_TIMEOUT_MS,
+  readinessTimeoutMs = DEFAULT_DAEMON_READY_TIMEOUT_MS,
 }: StartDaemonOptions): Promise<DaemonStartResult> => {
   await mkdir(paths.runtimeDir, { recursive: true });
 
@@ -257,7 +276,7 @@ export const startDaemon = async ({
     }
     await writeFile(paths.pidFile, `${pid}\n`, "utf8");
     try {
-      await waitForReadyFile(paths, driver, pid, broker);
+      await waitForReadyFile(paths, driver, pid, broker, readinessTimeoutMs);
     } catch (error) {
       if (await driver.isAlive(pid)) {
         await driver.stop(pid);
@@ -336,7 +355,7 @@ const waitUntilStopped = async (driver: DaemonDriver, pid: number): Promise<bool
     if (!(await driver.isAlive(pid))) {
       return true;
     }
-    await sleep(50);
+    await sleep(DAEMON_POLL_INTERVAL_MS);
   }
   return false;
 };
@@ -346,8 +365,10 @@ const waitForReadyFile = async (
   driver: DaemonDriver,
   pid: number,
   broker: ResolvedBrokerArtifact,
+  timeoutMs: number,
 ): Promise<void> => {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
     const ready = await readReadyMetadata(paths.readyFile);
     if (readyMatchesBroker(ready, paths, pid, broker)) {
       return;
@@ -359,13 +380,17 @@ const waitForReadyFile = async (
     }
     if (!(await driver.isAlive(pid))) {
       throw new Error(
-        `daemon broker exited before readiness: pid=${pid}; readyFile=${paths.readyFile}; set ${DAEMON_STDIO_ENV}=inherit to inspect broker stderr`,
+        `daemon broker exited before readiness: pid=${pid}; readyFile=${paths.readyFile}; brokerLog=${paths.brokerLog}; set ${DAEMON_STDIO_ENV}=inherit to mirror broker stderr`,
       );
     }
-    await sleep(50);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    await sleep(Math.min(DAEMON_POLL_INTERVAL_MS, remainingMs));
   }
 
-  throw new Error(`timed out waiting for daemon readiness: ${paths.readyFile}`);
+  throw new Error(
+    `timed out waiting for daemon readiness after ${timeoutMs}ms: pid=${pid}; readyFile=${paths.readyFile}; brokerLog=${paths.brokerLog}; set ${DAEMON_STDIO_ENV}=inherit to mirror broker stderr`,
+  );
 };
 
 const readReadyMetadata = async (readyFile: string): Promise<BrokerReadyMetadata | undefined> => {
