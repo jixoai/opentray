@@ -4,6 +4,7 @@ consumer decisions in the public skills/opentray tree):
 1. Introduce the official WebView extension facade and retained-window lifecycle.
 2. Route application-mode lifecycle decisions without duplicating their tutorial.
 3. Preserve placement, native window, platform, and geometry capability truth.
+4. Define an implementation-ready overlay safe-area and bridge-readiness contract.
 -->
 
 # ext-webview
@@ -137,6 +138,54 @@ For tray-anchored panels, prefer `getBounds()` as the source of truth after user
 ## Overlay and Frameless Guidance
 
 Do not auto-inject titlebars, drag strips, or CSS into the user's HTML. For overlay titlebars, explain that the page should deliberately read `navigator.opentrayWindow.overlay.getTitlebarAreaRect()` and bind native drag behavior with `startAppRegionDrag()` where the product wants drag. For borderless panels, remind the user that once native controls disappear, their app owns controls, focus states, and accessibility.
+
+### Control-Safe Overlay Titlebar
+
+Resolve the native window bridge through all public compatibility projections used
+by the installed extension:
+
+```ts
+import type { WebviewNavigatorWindow } from "@opentray/ext-webview";
+
+const nav = navigator as Navigator & {
+  opentrayWindow?: WebviewNavigatorWindow;
+  window?: WebviewNavigatorWindow;
+  opentray?: { window?: WebviewNavigatorWindow };
+};
+const nativeWindow = nav.opentrayWindow ?? nav.window ?? nav.opentray?.window;
+```
+
+`getTitlebarAreaRect()` returns the page area available beside native controls. It
+does not return the controls themselves. Convert it into horizontal safe padding:
+
+```ts
+const CONTROL_MARGIN = 4;
+const leftControlInset = Math.max(0, Math.round(rect.x));
+const rightControlInset = Math.max(
+  0,
+  Math.round(innerWidth - rect.x - rect.width),
+);
+const safeLeft = leftControlInset + (leftControlInset > 0 ? CONTROL_MARGIN : 0);
+const safeRight = rightControlInset + (rightControlInset > 0 ? CONTROL_MARGIN : 0);
+```
+
+Keep product titlebar height independent from `rect.height`; that field describes
+the native overlay observation and must not expand a deliberately compact row.
+Subscribe to `overlay.listen("geometrychange", ...)` and recompute from each event.
+
+A host declaration may render titlebar chrome before the injected bridge becomes
+observable to the framework lifecycle. Missing bridge state on the first render is
+therefore pending, not proof that no native overlay exists. Retain a small visual
+fallback, perform a bounded post-mount retry, then replace it with measured geometry
+and the live subscription. Stop retries and unsubscribe on teardown. Never leave a
+declared native overlay permanently at fallback padding, and never guess a fixed
+traffic-light or caption-button width.
+
+For a host-declared overlay, bridge presence is sufficient to call
+`getTitlebarAreaRect()`. Do not gate that measurement on `overlay.visible`: it is a
+presentation hint, while the host declaration owns overlay selection and the geometry
+method owns the control-safe boundary. Treating the hint as measurement authority can
+leave content permanently beneath native controls.
 
 Lightweight tray panels usually behave like desktop cards. If the whole document develops root-level scrollbars, the experience often feels less native than choosing a better window size, responsive card layout, or an intentional internal scroll region. Explain that product tradeoff instead of prescribing a universal CSS block.
 

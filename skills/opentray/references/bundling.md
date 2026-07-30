@@ -4,6 +4,7 @@ must serve installed-package consumers and contain no OpenTray workspace test co
 1. Explain the shared packaging manifest contract.
 2. Select and configure the consumer's existing bundler adapter.
 3. Validate emitted consumer artifacts through the consumer build.
+4. Route Vite consumers through the official cross-platform App icon generator.
 -->
 
 # Bundling
@@ -36,6 +37,50 @@ The adapter never owns tray lifecycle, session authority, backend selection, or 
 | webpack | `@opentray/webpack-plugin` | `afterEmit` | `output.path` | Existing webpack pipelines |
 
 All adapters write the **same manifest shape**. Pick by your existing toolchain — do not switch bundlers just for OpenTray. Each adapter makes the host bundler an optional peer dependency, so the package imports cleanly even when the host is absent.
+
+## Generate Application Icons With Vite
+
+`appIcon` is native application identity, not a tray icon or page favicon. A Vite
+consumer should use `openTrayAppIconPlugin` instead of hand-encoding or checking in
+parallel ICNS, ICO, and Linux PNG implementations:
+
+```ts
+import { openTrayAppIconPlugin } from "@opentray/vite-plugin";
+import { fileURLToPath } from "node:url";
+
+export default {
+  plugins: [
+    openTrayAppIconPlugin({
+      sourcePath: fileURLToPath(
+        new URL("./resources/brand-symbol.svg", import.meta.url),
+      ),
+    }),
+  ],
+};
+```
+
+The plugin runs during both `vite dev` and `vite build`. It generates a strict
+cross-platform `AppIcon` catalog plus a relocatable `app-icon.json` manifest:
+
+```text
+static/icons/
+|- app-icon.icns
+|- app-icon.ico
+|- app-icon.json
+|- app-icon.png
+`- linux/<size>x<size>/app-icon.png
+```
+
+Vite projects whose public directory is not `static` must set the output options
+to paths inside their actual public directory. The runtime must consume those
+generated paths; do not keep a second hand-authored App icon catalog beside them.
+Tray artwork remains independent because menu-bar templates and App identity have
+different platform contracts.
+
+The source image is the consumer's brand symbol. The generator owns the native
+safe-area tile, platform encoders, Linux sizes, cache identity, and ICNS density
+metadata. A favicon or already-rounded platform icon is not a substitute for that
+source contract.
 
 ## Configuration Examples
 

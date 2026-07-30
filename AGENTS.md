@@ -129,6 +129,15 @@ mode directly:
   derived from the common application mode.
 - `appMode` does not imply framelessness, auto-hide, material, or titlebar composition. Those
   remain orthogonal style facts.
+- Overlay consumers resolve the native window through `navigator.opentrayWindow`, the compatible
+  `navigator.window` projection, or `navigator.opentray.window`; a host-declared overlay that is
+  not observable on first framework render remains pending and receives only bounded retry.
+  Once a host-declared overlay bridge exists, its `visible` hint cannot veto
+  `getTitlebarAreaRect()` measurement; declaration owns selection and geometry owns safety.
+  `getTitlebarAreaRect()` describes the safe page area beside controls: horizontal padding derives
+  from its left/right exclusion plus a small content margin, while product titlebar height remains
+  independent from the reported native height. Consumers subscribe to geometry changes and never
+  guess platform control widths or leave a declared overlay permanently on fallback padding.
 
 ## App Icon Law
 
@@ -159,6 +168,11 @@ mode directly:
 - Omitted `appIcon` never inherits tray artwork. Packaged/carrier identity wins when present, then
   the operating-system executable/default artwork applies. This keeps tray templates and App
   identity independently reproducible.
+- Vite consumers should use `openTrayAppIconPlugin` to generate ICNS, ICO, Linux PNGs, and the
+  relocatable AppIcon manifest from one explicit brand-symbol source. The plugin runs in dev and
+  build; consumers with a non-`static` public directory set explicit output paths and make runtime
+  App identity consume those generated assets. Hand-maintained native encoders or a favicon-derived
+  parallel catalog are not equivalent. Tray artwork remains separately owned.
 - Creating an already-known explicit `appId` is idempotent. It returns the existing App identity
   without clearing its name, icon, or trays; callers use the App mutation API for deliberate
   identity changes.

@@ -30,9 +30,9 @@ real behavior, and diagnose the installed runtime graph.
 - Scenario decision cards for common app shapes: read `references/scenarios.md`.
 - Ordinary application windows versus tray utilities, warm Dock reopen, cold `appLaunch`, and development supervisors: read `references/app-mode.md`.
 - Runtime ownership, application process lifetime, and persistent logs: read `references/runtime-ownership.md`.
-- Packaging through a bundler (Vite/esbuild/tsdown/webpack) or writing a custom adapter: read `references/bundling.md`.
+- Packaging through a bundler (Vite/esbuild/tsdown/webpack), generating platform-correct App icons with `openTrayAppIconPlugin`, or writing a custom adapter: read `references/bundling.md`.
 - Consumer-project acceptance matrix: read `references/visual-acceptance.md`.
-- Official WebView extension usage: read `references/ext-webview.md`.
+- Official WebView extension usage, overlay titlebar safe-area computation, and native drag regions: read `references/ext-webview.md`.
 - Common local issues and capability limits: read `references/troubleshooting.md`.
 
 ## Consumer Rules
