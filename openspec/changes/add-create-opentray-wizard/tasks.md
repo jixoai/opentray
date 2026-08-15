@@ -25,6 +25,11 @@ app through a WebUI wizard):
 - [x] 2.15 BDD: Given the native PTY dependency is unavailable, when a command is submitted, then the wizard degrades to pipe mode with a notice and stays fully functional (spec: create-wizard / Interactive Terminal Preview).
 - [x] 2.16 BDD: Given a PTY-attached command, when the terminal is resized, then the pseudo-terminal adopts the new columns and rows (spec: create-wizard / Interactive Terminal Preview).
 - [x] 2.17 BDD: Given an unrelated local process listens on a new port while the preview runs, when the wizard polls, then that port is not listed as a service (spec: create-wizard / HTTP Service Discovery From Port Diffing).
+- [ ] 2.18 BDD: Given a PTY-attached command emitting non-UTF-8 bytes, when output streams, then bytes reach the renderer base64-encoded and unmodified (spec: create-wizard / Interactive Terminal Preview).
+- [ ] 2.19 BDD: Given a confirmed service, when its tab exists, then the nav bar shows an editable URL with working back/forward (spec: create-wizard / Chrome-style Tabs Panel).
+- [ ] 2.20 BDD: Given one confirmed and one unconfirmed port, when tabs render, then exactly one iframe tab exists (spec: create-wizard / Chrome-style Tabs Panel).
+- [ ] 2.21 BDD: Given services in the terminal status bar, when one is clicked, then the matching-hostname iframe tab activates (spec: create-wizard / Chrome-style Tabs Panel).
+- [ ] 2.22 BDD: Given untouched placeholder-backed fields, when the user confirms, then the frozen identity uses placeholder defaults (spec: create-wizard / Placeholder Defaults And Icon Input).
 - [x] 2.5 BDD: Given a command opening 19080 then 19081, when both verify as HTTP, then both are listed with 19080 selected (spec: create-wizard / HTTP service discovery from port diffing).
 - [x] 2.6 BDD: Given a user-edited appName, when a later scrape returns another title, then the edited value is preserved (spec: create-wizard / Favicon/title scrape with default derivation).
 - [x] 2.7 BDD: Given `npx somecommand start --xx`, when defaults derive, then appId is `start.somecommand.npx` (spec: create-wizard / Favicon/title scrape with default derivation).
@@ -63,6 +68,16 @@ app through a WebUI wizard):
 - [x] 4.17 Update README/skill docs and extend the changeset with the interactive-terminal capability.
 - [x] 4.18 Carry the wizard session token in every browser-side API call (Authorization header) and in the EventSource URL.
 - [x] 4.19 Filter port discovery by preview-process-tree ownership (lsof/netstat PID columns, recursive `pgrep -P` walk on POSIX) so foreign loopback listeners are never adopted as services.
+
+## 4c. Implementation (Round 4 — objective transport, tabs panel, react-shadcn)
+
+- [ ] 4.20 Switch the PTY runtime to prebuilt `@lydell/node-pty` with unchanged runtime probing and pipe fallback.
+- [ ] 4.21 Rework transport to objective base64 byte frames: PTY output b64-framed on SSE, input endpoint accepts b64 bytes, no server-side UTF-8 decoding.
+- [ ] 4.22 Build the react-shadcn webui (Vite + React + Tailwind + radix/shadcn components) as a workspace package with static build output.
+- [ ] 4.23 Implement the Chrome-style tabs panel: terminal tab, per-service iframe tabs, context navigation bar (command vs editable URL with back/forward/reload), terminal status bar (cursor, selection, clickable services).
+- [ ] 4.24 Rework the form to placeholder-based defaults with a dedicated icon input; confirmation resolves empty fields to placeholder defaults.
+- [ ] 4.25 Serve built webui assets from the wizard server with token-guarded page + public static asset routes.
+- [ ] 4.26 Update tests, docs, changeset; browser-accept the full flow.
 
 ## 5. Verification
 

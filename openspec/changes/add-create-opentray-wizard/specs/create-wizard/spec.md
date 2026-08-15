@@ -59,15 +59,26 @@ an editable state with the exit code and stderr visible.
 
 The WebUI SHALL render the preview command through a real terminal emulator
 (ghostty-web, xterm.js-compatible API) instead of a plain-text console, and
-SHOULD attach the command to a pseudo-terminal so interactive stdin works
-(keystrokes, prompts, TUI output). The terminal panel SHALL appear immediately
-when the user triggers Run, before any process output or state event arrives.
-Terminal output SHALL stream to the page over the event stream, terminal input
-SHALL be forwarded through a session-guarded input endpoint, and terminal
-resize SHALL propagate to the pseudo-terminal. When the native PTY dependency
-is unavailable, the wizard SHALL degrade to non-interactive pipe mode, render
-output through the same terminal surface with a visible notice, and reject
-input endpoints clearly instead of failing the wizard.
+SHALL attach the command to a pseudo-terminal so interactive stdin works
+(keystrokes, prompts, TUI output). The pseudo-terminal runtime SHALL be a
+prebuilt per-platform distribution (`@lydell/node-pty`) so a normal
+package-manager install needs no compilation toolchain. Terminal output SHALL
+be transported as raw bytes without any server-side decoding or analysis: the
+backend SHALL frame PTY output bytes base64-encoded onto the event stream and
+the frontend SHALL decode them to bytes before writing into the terminal, so
+even malformed byte sequences reach the renderer unchanged. Terminal input
+SHALL take the reverse path (bytes from the terminal's data event, base64 to
+the session-guarded input endpoint). The terminal panel SHALL appear
+immediately when the user triggers Run, before any process output or state
+event arrives, and terminal resize SHALL propagate to the pseudo-terminal.
+When the native PTY dependency is unavailable, the wizard SHALL degrade to
+non-interactive pipe mode with a visible notice instead of failing.
+
+#### Scenario: Raw bytes pass through unmodified
+
+- **GIVEN** a PTY-attached command emitting bytes that are not valid UTF-8
+- **WHEN** the output streams to the WebUI
+- **THEN** the backend SHALL transport those bytes base64-encoded without replacement or decoding, and the terminal SHALL receive them verbatim for rendering
 
 #### Scenario: Terminal panel appears instantly on Run
 
@@ -79,19 +90,86 @@ input endpoints clearly instead of failing the wizard.
 
 - **GIVEN** a PTY-attached preview command reading stdin
 - **WHEN** the user types into the terminal and the input is posted to the input endpoint
-- **THEN** the command SHALL receive the keystrokes and its response SHALL stream back to the terminal
+- **THEN** the command SHALL receive the exact keystroke bytes and its response SHALL stream back to the terminal
 
 #### Scenario: PTY unavailability degrades without breaking the wizard
 
 - **GIVEN** the native PTY dependency failed to load or install
 - **WHEN** a command is submitted
-- **THEN** the wizard SHALL run it in pipe mode, stream output to the terminal with a non-interactive notice, and keep discovery/scrape/materialize fully functional
+- **THEN** the wizard SHALL run it in pipe mode, stream output with a non-interactive notice, and keep discovery/scrape/materialize fully functional
 
 #### Scenario: Resize propagates to the pseudo-terminal
 
 - **GIVEN** a PTY-attached preview command
 - **WHEN** the terminal is resized and the new dimensions are posted
 - **THEN** the pseudo-terminal SHALL adopt the new columns and rows
+
+### Requirement: Chrome-style Tabs Panel With Context Navigation
+
+The WebUI SHALL present the terminal and service previews inside one
+Chrome-style tabs panel (built with react-shadcn components) instead of
+separate panels. The panel SHALL provide one terminal tab plus one iframe tab
+per discovered service. A navigation bar above the content SHALL be
+context-sensitive: on the terminal tab it SHALL display the running command;
+on an iframe tab it SHALL display the service URL in an editable input with
+back, forward, and reload controls backed by a per-tab navigation history.
+An iframe tab SHALL be created automatically only after a discovered port has
+been confirmed to answer an HTTP request; multiple confirmed ports SHALL open
+multiple tabs. The terminal tab SHALL carry a bottom status bar showing at
+least the cursor position and selection range read from the terminal buffer,
+plus the discovered HTTP services as clickable entries that jump to the
+matching iframe tab by URL hostname. Service previews are auxiliary: their
+absence SHALL never block the core app-creation flow.
+
+#### Scenario: Terminal tab shows the command in the navigation bar
+
+- **GIVEN** a running preview command on the terminal tab
+- **WHEN** the terminal tab is active
+- **THEN** the navigation bar SHALL display the command the user submitted
+
+#### Scenario: Iframe tab supports editing, back, and forward
+
+- **GIVEN** an open iframe tab for a confirmed service
+- **WHEN** the user edits the URL and navigates, then presses back and forward
+- **THEN** the iframe SHALL follow the per-tab history entries
+
+#### Scenario: Confirmed services auto-open tabs; unconfirmed do not
+
+- **GIVEN** the preview command listens on two ports and one answers HTTP
+- **WHEN** discovery polls
+- **THEN** the confirmed port SHALL have an iframe tab and the unconfirmed port SHALL NOT
+
+#### Scenario: Status bar links jump to the matching iframe tab
+
+- **GIVEN** discovered services with open iframe tabs
+- **WHEN** the user clicks a service entry in the terminal status bar
+- **THEN** the tabs panel SHALL activate the iframe tab whose URL hostname matches
+
+#### Scenario: No services does not block app creation
+
+- **GIVEN** a running command with no confirmed HTTP service
+- **WHEN** the user proceeds
+- **THEN** the form SHALL remain completable with placeholder defaults and materialization SHALL stay available
+
+### Requirement: Placeholder Defaults And Icon Input
+
+The wizard form SHALL present auto-derived defaults as input placeholders
+(appId derivation, scraped title as appName) rather than filled values: an
+empty input SHALL mean "use the default" and confirmation SHALL resolve empty
+fields to their placeholder defaults. The form SHALL include a dedicated icon
+input with its own placeholder describing the fallback behavior (custom icon
+path or scraped favicon; first-letter glyph when neither is available).
+
+#### Scenario: Empty fields resolve to placeholder defaults
+
+- **GIVEN** a submitted command with scraped title and derived appId shown as placeholders
+- **WHEN** the user confirms without editing
+- **THEN** the frozen identity SHALL use the placeholder default values
+
+#### Scenario: Icon input carries a placeholder
+
+- **GIVEN** the form is rendered
+- **THEN** the icon input SHALL display a placeholder describing the icon source fallback chain
 
 ### Requirement: HTTP Service Discovery From Port Diffing
 

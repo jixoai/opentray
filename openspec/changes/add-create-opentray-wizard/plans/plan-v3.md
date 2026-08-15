@@ -2,15 +2,13 @@
 
 ## Current Round
 
-- Round: 4
-- Status: Owner acceptance approved the terminal but demanded objective byte
-  passthrough (server must never decode/analyze stdio; ghostty-web owns all
-  rendering even for malformed bytes), a prebuilt PTY distribution
-  (@lydell/node-pty, as used by ../openspecui), a Chrome-like tabs panel
-  unifying terminal + iframe with a context-sensitive navigation bar and a
-  terminal status bar, placeholder-based defaults with a dedicated icon input,
-  and a react-shadcn rebuild of the page.
-- Previous plan backup: `plans/plan-v3.md`.
+- Round: 3
+- Status: Browser acceptance of the interactive terminal passed end-to-end
+  (keystrokes reach the PTY), but exposed two wizard defects: page API calls
+  lacked the session token (every browser POST 401'd), and port discovery
+  adopted unrelated loopback listeners (Chrome DevTools sockets) as services.
+  Discovery now requires ownership by the preview process tree.
+- Previous plan backup: `plans/plan-v2.md`.
 
 ## Workflow Command Surface
 
@@ -48,7 +46,6 @@
 | 1 | User | Full seven-step wizard specification (verbatim above), including: WebUI entry, immediate local run with shell output, favicon/title scrape, default appId derivation `start.somecommand.npx`, multi-port listing with iframe preview and switch-triggered re-scrape polling, frozen-form Dialog, Pending→Success states with open-app button and taskbar/Dock pinning hint. | This is the complete product contract; the wizard exists to collect OpenTray's required parameters, scraping/appId are only helpers. |
 | 2 | Assistant | Presented implementation plan (package shape, module decomposition, HTTP API, scaffold contract, icon pipeline via `@opentray/vite-plugin`, materialize pipeline, tests, OpenSpec workflow). | Plan approved by user; becomes the traceability source for specs/tasks. |
 | 3 | User | 实测反馈：点击"运行"后界面没有立刻出现 shell 面板；应改用 xterm.js 或 ghostty-web（建议）渲染真实终端，因为命令可能需要交互才能有效果。 | Two requirements: (a) instant panel feedback on Run; (b) real interactive terminal (PTY) rendered by ghostty-web, with graceful degradation when the native PTY is unavailable. |
-| 4 | User | 终端协议可能有问题，需要完全客观传输 stdio（前端 ghostty-web 分析渲染，即便异常）；确认底层是否用 node-pty、是否 prebuild 版本，参考 ../openspecui 的 pty 前后端实现。终端+iframe 整合为 Chrome 式 Tabs 面板（Terminal tab 显示命令、Iframe tab 显示可编辑 URL 且支持前进后退）；iframe 仅在嗅探到 TCP 监听且 HTTP 确认后自动打开（多端口多 tab）；Terminal tab 底部状态栏显示光标位置/选区范围/嗅探到的 HTTP 服务（点击跳转对应 Iframe tab，按 hostname 匹配）；Iframe tab 是辅助，嗅探不到不影响创建应用；默认值显示为 input placeholder（含专门的图标 input）；用 react-shadcn 重构页面。 | Round-4 scope: objective base64 byte passthrough, @lydell/node-pty prebuilt, tabs panel with context nav + status bar, placeholder defaults + icon input, react-shadcn SPA webui. |
 
 ### Evidence Read
 
