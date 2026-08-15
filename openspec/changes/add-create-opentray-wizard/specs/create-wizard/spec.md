@@ -55,6 +55,44 @@ an editable state with the exit code and stderr visible.
 - **WHEN** chunks arrive
 - **THEN** the WebUI SHALL append each chunk as a log event over the event stream
 
+### Requirement: Interactive Terminal Preview
+
+The WebUI SHALL render the preview command through a real terminal emulator
+(ghostty-web, xterm.js-compatible API) instead of a plain-text console, and
+SHOULD attach the command to a pseudo-terminal so interactive stdin works
+(keystrokes, prompts, TUI output). The terminal panel SHALL appear immediately
+when the user triggers Run, before any process output or state event arrives.
+Terminal output SHALL stream to the page over the event stream, terminal input
+SHALL be forwarded through a session-guarded input endpoint, and terminal
+resize SHALL propagate to the pseudo-terminal. When the native PTY dependency
+is unavailable, the wizard SHALL degrade to non-interactive pipe mode, render
+output through the same terminal surface with a visible notice, and reject
+input endpoints clearly instead of failing the wizard.
+
+#### Scenario: Terminal panel appears instantly on Run
+
+- **GIVEN** the wizard page with a command entered
+- **WHEN** the user clicks Run
+- **THEN** the terminal panel SHALL be visible immediately without waiting for process output or a state event
+
+#### Scenario: Interactive input reaches the command
+
+- **GIVEN** a PTY-attached preview command reading stdin
+- **WHEN** the user types into the terminal and the input is posted to the input endpoint
+- **THEN** the command SHALL receive the keystrokes and its response SHALL stream back to the terminal
+
+#### Scenario: PTY unavailability degrades without breaking the wizard
+
+- **GIVEN** the native PTY dependency failed to load or install
+- **WHEN** a command is submitted
+- **THEN** the wizard SHALL run it in pipe mode, stream output to the terminal with a non-interactive notice, and keep discovery/scrape/materialize fully functional
+
+#### Scenario: Resize propagates to the pseudo-terminal
+
+- **GIVEN** a PTY-attached preview command
+- **WHEN** the terminal is resized and the new dimensions are posted
+- **THEN** the pseudo-terminal SHALL adopt the new columns and rows
+
 ### Requirement: HTTP Service Discovery From Port Diffing
 
 The wizard SHALL snapshot the set of listening TCP ports before spawning the

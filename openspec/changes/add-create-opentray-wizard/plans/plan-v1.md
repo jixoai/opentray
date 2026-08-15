@@ -2,11 +2,9 @@
 
 ## Current Round
 
-- Round: 2
-- Status: Owner acceptance found the preview shell panel appears late and is
-  read-only; reopened to add a real interactive terminal (ghostty-web renderer
-  + PTY preview) and instant panel feedback.
-- Previous plan backup: `plans/plan-v1.md`.
+- Round: 1
+- Status: Research plan locked from the approved implementation plan; ready for specs/tasks.
+- Previous plan backup: none (first version).
 
 ## Workflow Command Surface
 
@@ -43,7 +41,6 @@
 | ---- | ------- | ---------------- | ---------------- |
 | 1 | User | Full seven-step wizard specification (verbatim above), including: WebUI entry, immediate local run with shell output, favicon/title scrape, default appId derivation `start.somecommand.npx`, multi-port listing with iframe preview and switch-triggered re-scrape polling, frozen-form Dialog, Pending→Success states with open-app button and taskbar/Dock pinning hint. | This is the complete product contract; the wizard exists to collect OpenTray's required parameters, scraping/appId are only helpers. |
 | 2 | Assistant | Presented implementation plan (package shape, module decomposition, HTTP API, scaffold contract, icon pipeline via `@opentray/vite-plugin`, materialize pipeline, tests, OpenSpec workflow). | Plan approved by user; becomes the traceability source for specs/tasks. |
-| 3 | User | 实测反馈：点击"运行"后界面没有立刻出现 shell 面板；应改用 xterm.js 或 ghostty-web（建议）渲染真实终端，因为命令可能需要交互才能有效果。 | Two requirements: (a) instant panel feedback on Run; (b) real interactive terminal (PTY) rendered by ghostty-web, with graceful degradation when the native PTY is unavailable. |
 
 ### Evidence Read
 
@@ -59,8 +56,6 @@
 | `packages/cli/examples/_support/dev-server.ts` | Merges `NO_PROXY=localhost,127.0.0.1,::1` at module load so loopback fetches bypass proxies. | Same guard required for wizard scraping probes. |
 | `.changeset/config.json` | Fixed release group lists all `@opentray/*` + `opentray`; changesets + trusted publishing. | `create-opentray` must join the fixed group with a minor changeset. |
 | `pnpm-workspace.yaml` | Workspace globs `packages/*`. | New package at `packages/create` is picked up automatically. |
-| npm `ghostty-web` 0.4.0 (coder/ghostty-web, MIT) | xterm.js-API-compatible WASM terminal; ships `dist/ghostty-web.js` + `ghostty-vt.wasm`; zero runtime deps. | Adopt as the wizard terminal renderer (user-recommended); vendored as static assets, no build step. |
-| npm `node-pty` | Canonical PTY spawn; native module compiled on install. | Optional dependency with runtime feature detection; pipe-mode fallback keeps `npx create-opentray` working without a toolchain. |
 
 ### Git Evidence
 
@@ -178,9 +173,6 @@ HTTP API on 127.0.0.1 with token guard: `GET /api/events` (SSE), `POST /api/comm
 
 | Path | Why rejected |
 | ---- | ------------ |
-| xterm.js as renderer | ghostty-web is user-recommended, ships Ghostty's battle-tested VT parser as WASM with an xterm.js-compatible API, and needs no addon stack; xterm.js remains the fallback shape of the API so migration stays trivial. |
-| Hard `node-pty` dependency | A required native module would break `npx create-opentray` on machines without a compile toolchain, violating the normal-install consumer law; optional dependency + pipe fallback preserves it. |
-| WebSocket transport for terminal I/O | Adds a server dependency and upgrade handling; SSE output + batched POST input on loopback is sufficient for prompt-level interactivity with zero new server deps. |
 | Raw favicon bytes as `AppIcon` | Violates App Icon Law (URLs/favicons/RGBA invalid); rejected in favor of the sanctioned generator. |
 | Persisting a shell string or bare `npx` in appLaunch | Violates App Launch Law PATH-independence; rejected in favor of absolute interpreter + entry vector. |
 | Teaching users the SDK instead of a wizard | Defeats the product intent ("直接创建出一个本地应用程序"). |
