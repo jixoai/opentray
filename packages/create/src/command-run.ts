@@ -1,16 +1,23 @@
 // Orthogonal intents (maintained 2026-07-22; original user requests: run the
 // start command once and stream its shell output; owner acceptance then asked
-// for a real interactive terminal because commands may need stdin):
+// for a real interactive terminal with completely objective stdio transport —
+// the renderer owns all analysis):
 // 1. Spawn the tokenized command without a shell whenever possible.
-// 2. Prefer a pseudo-terminal so interactive stdin, prompts, and TUI output work.
-// 3. Degrade to pipe mode when the native PTY dependency is unavailable.
-// 4. Own process-tree teardown on stop/exit across POSIX and Windows.
+// 2. Prefer a pseudo-terminal (prebuilt @lydell/node-pty) for interactive stdin.
+// 3. Transport the binding's strings VERBATIM: no re-decoding, no analysis.
+//    node-pty's contract is a UTF-8 text channel (invalid bytes become U+FFFD
+//    inside the binding, split multibyte chars are joined there — same
+//    semantics as the ../openspecui reference stack). The wizard adds zero
+//    interpretation on top; ghostty-web owns all rendering.
+// 4. Degrade to pipe mode when the native PTY dependency is unavailable.
+// 5. Own process-tree teardown on stop/exit across POSIX and Windows.
 
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 
 export interface CommandRunEvent {
   readonly type: "stdout" | "stderr" | "exit" | "spawn-error" | "pty-ready" | "pty-unavailable";
+  /** The PTY binding's output chunk, verbatim; rendering is the frontend's job. */
   readonly chunk?: string;
   readonly code?: number | null;
   readonly message?: string;
@@ -37,7 +44,7 @@ export interface CommandRun {
   readonly pty: boolean;
   readonly exited: Promise<{ code: number | null; spawnError?: string }>;
   readonly output: readonly string[];
-  /** Write keystrokes to the command's stdin (PTY mode only). */
+  /** Write terminal input bytes to the command's stdin (PTY mode only). */
   write(data: string): void;
   /** Resize the pseudo-terminal (PTY mode only). */
   resize(size: CommandRunTerminalSize): void;
@@ -50,7 +57,7 @@ const SHELL_METACHARS = /[<>&|;$`"'%]/u;
 export const needsShell = (tokens: readonly string[]): boolean =>
   tokens.some((token) => SHELL_METACHARS.test(token) && token.length > 1);
 
-/** Minimal shape of the node-pty module this module needs. */
+/** Minimal shape of the node-pty API this module needs (@lydell/node-pty is API-compatible). */
 interface PtyModule {
   spawn(
     file: string,
@@ -89,50 +96,19 @@ export const loadPtyModule = (
 };
 
 const defaultPtyProbe = async (): Promise<PtyModule | undefined> => {
-  try {
-    const require = createRequire(import.meta.url);
-    const raw: unknown = require("node-pty");
-    const module = raw as { spawn?: unknown } & Record<string, unknown>;
-    if (typeof module.spawn !== "function") {
-      return undefined;
-    }
-    await healSpawnHelperPermissions(raw);
-    return raw as PtyModule;
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * npm tarballs can strip the execute bit from node-pty's prebuilt
- * `spawn-helper`, making every spawn fail with `posix_spawnp failed`. The
- * package's own post-install repairs this; when a package manager skipped it
- * (observed with pnpm), restore the bit next to the loaded binding.
- */
-const healSpawnHelperPermissions = async (ptyModule: unknown): Promise<void> => {
-  if (process.platform === "win32") {
-    return;
-  }
-  try {
-    const require = createRequire(import.meta.url);
-    const packageJsonPath = require.resolve("node-pty/package.json");
-    const { dirname, join } = await import("node:path");
-    const { access, chmod, constants, readdir } = await import("node:fs/promises");
-    const prebuildsDir = join(dirname(packageJsonPath), "prebuilds");
-    for (const entry of await readdir(prebuildsDir, { withFileTypes: true }).catch(() => [])) {
-      if (!entry.isDirectory()) {
-        continue;
+  const require = createRequire(import.meta.url);
+  for (const request of ["@lydell/node-pty", "node-pty"]) {
+    try {
+      const raw: unknown = require(request);
+      const module = raw as { spawn?: unknown };
+      if (typeof module.spawn === "function") {
+        return raw as PtyModule;
       }
-      const helper = join(prebuildsDir, entry.name, "spawn-helper");
-      try {
-        await access(helper, constants.X_OK);
-      } catch {
-        await chmod(helper, 0o755).catch(() => undefined);
-      }
+    } catch {
+      // Try the next candidate distribution.
     }
-  } catch {
-    // Healing is best-effort; a genuinely broken PTY falls back to pipe mode.
   }
+  return undefined;
 };
 
 /** Test seam: reset the cached PTY probe. */
@@ -159,7 +135,7 @@ export const startCommandRun = async (options: CommandRunOptions): Promise<Comma
       options.onEvent({
         type: "pty-unavailable",
         message:
-          "node-pty 不可用，预览以非交互模式运行（无法向命令输入内容）。安装 build 工具链后重装 create-opentray 可启用交互。",
+          "node-pty 不可用，预览以非交互模式运行（无法向命令输入内容）。可安装 @lydell/node-pty 启用交互。",
       });
     }
   }
@@ -181,9 +157,6 @@ const startPtyRun = (options: CommandRunOptions, ptyModule: PtyModule): CommandR
       ring.splice(0, ring.length - ringLimit);
     }
   };
-  // A PTY delivers bytes that may split UTF-8 sequences across chunks; decode
-  // incrementally so the event stream always carries valid strings.
-  const decoder = new TextDecoder("utf-8");
 
   const ptyProcess = ptyModule.spawn(command, args, {
     name: "xterm-256color",
@@ -205,12 +178,11 @@ const startPtyRun = (options: CommandRunOptions, ptyModule: PtyModule): CommandR
     });
   });
   ptyProcess.onData((data) => {
-    const text = decoder.decode(Buffer.from(data, "binary"), { stream: true });
-    if (text.length === 0) {
+    if (data.length === 0) {
       return;
     }
-    append(text);
-    onEvent({ type: "stdout", chunk: text });
+    append(data);
+    onEvent({ type: "stdout", chunk: data });
   });
 
   let killPromise: Promise<void> | undefined;
@@ -292,10 +264,12 @@ const startPipeRun = (options: CommandRunOptions): CommandRun => {
     if (stream === null) {
       return;
     }
-    stream.setEncoding("utf8");
-    stream.on("data", (chunk: string) => {
-      append(chunk);
-      onEvent({ type, chunk });
+    // Pipe fallback: standard one-shot UTF-8 text decode (the degraded path);
+    // the renderer still owns all rendering.
+    stream.on("data", (chunk: Buffer | string) => {
+      const text = Buffer.from(chunk).toString("utf8");
+      append(text);
+      onEvent({ type, chunk: text });
     });
   };
   pipe(child.stdout, "stdout");

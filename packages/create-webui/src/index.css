@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/* shadcn/ui design tokens (dark-first for the wizard). */
+:root {
+  --background: #0b0e14;
+  --foreground: #e7edf7;
+  --card: #121722;
+  --card-foreground: #e7edf7;
+  --popover: #171e2b;
+  --popover-foreground: #e7edf7;
+  --primary: #3d8bff;
+  --primary-foreground: #ffffff;
+  --secondary: #171e2b;
+  --secondary-foreground: #b7c3d8;
+  --muted: #171e2b;
+  --muted-foreground: #8b98ad;
+  --accent: #1d2736;
+  --accent-foreground: #e7edf7;
+  --destructive: #ff6b6b;
+  --destructive-foreground: #ffffff;
+  --border: #232c3d;
+  --input: #232c3d;
+  --ring: #3d8bff;
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+}

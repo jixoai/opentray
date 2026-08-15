@@ -1,38 +1,52 @@
-// Copies the wizard WebUI and its vendored terminal-renderer assets into dist
-// so the published package serves everything statically without a bundler.
-// `src/webui/index.html` remains the single hand-written source.
-import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
+// Copies the built create-webui SPA (React + shadcn) into the wizard package's
+// dist/webui, plus the ghostty-web WASM at the document root path where the
+// renderer resolves it (/ghostty-vt.wasm).
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const source = resolve(root, "src/webui/index.html");
-const webuiDir = resolve(root, "dist/webui");
+const webuiDist = resolve(root, "..", "create-webui", "dist");
+const target = resolve(root, "dist", "webui");
 
-mkdirSync(webuiDir, { recursive: true });
-copyFileSync(source, resolve(webuiDir, "index.html"));
-console.log(`copied wizard webui: ${source} -> ${webuiDir}/index.html`);
+if (!existsSync(resolve(webuiDist, "index.html"))) {
+  throw new Error(
+    `create-webui build output is missing: ${webuiDist}/index.html — run "pnpm --filter @opentray/create-webui build" first`,
+  );
+}
 
-// Vendor ghostty-web (xterm.js-compatible WASM terminal) next to the page so
-// the module-relative `./ghostty-vt.wasm` resolution works from /vendor/.
+mkdirSync(target, { recursive: true });
+const copyDir = (from, to) => {
+  for (const entry of readdirSync(from)) {
+    const source = resolve(from, entry);
+    const destination = resolve(to, entry);
+    if (statSync(source).isDirectory()) {
+      mkdirSync(destination, { recursive: true });
+      copyDir(source, destination);
+      continue;
+    }
+    copyFileSync(source, destination);
+    console.log(`copied webui asset: ${source} -> ${destination}`);
+  }
+};
+copyDir(webuiDist, target);
+
+// ghostty-web's WASM loader resolves document-relative candidates
+// (./ghostty-vt.wasm, /ghostty-vt.wasm); place it at the webui root so both
+// resolve against the wizard origin.
 const require = createRequire(import.meta.url);
-const vendorDir = resolve(webuiDir, "vendor");
-mkdirSync(vendorDir, { recursive: true });
-// Deep imports are blocked by ghostty-web's exports map; resolve the main
-// module and walk from the package root.
 const ghosttyRoot = dirname(dirname(require.resolve("ghostty-web")));
-const assets = [
-  [resolve(ghosttyRoot, "dist/ghostty-web.js"), "ghostty-web.js"],
-  [resolve(ghosttyRoot, "ghostty-vt.wasm"), "ghostty-vt.wasm"],
-];
-for (const [from, name] of assets) {
-  copyFileSync(from, resolve(vendorDir, name));
-  console.log(`vendored terminal asset: ${from} -> ${vendorDir}/${name}`);
-}
+const wasmSource = resolve(ghosttyRoot, "ghostty-vt.wasm");
+copyFileSync(wasmSource, resolve(target, "ghostty-vt.wasm"));
+console.log(`copied ghostty wasm: ${wasmSource} -> ${resolve(target, "ghostty-vt.wasm")}`);
 
-// Sanity: the vendor directory must contain exactly the whitelisted assets.
-const vendored = readdirSync(vendorDir).sort();
-if (vendored.join(",") !== "ghostty-vt.wasm,ghostty-web.js") {
-  throw new Error(`unexpected vendor assets: ${vendored.join(",")}`);
-}
+// Legacy /vendor/* routes stay available for older embedded consumers.
+const vendorDir = resolve(target, "vendor");
+mkdirSync(vendorDir, { recursive: true });
+copyFileSync(
+  resolve(ghosttyRoot, "dist", "ghostty-web.js"),
+  resolve(vendorDir, "ghostty-web.js"),
+);
+copyFileSync(wasmSource, resolve(vendorDir, "ghostty-vt.wasm"));
+console.log(`refreshed vendor assets in ${vendorDir}`);

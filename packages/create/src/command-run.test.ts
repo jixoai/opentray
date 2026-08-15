@@ -38,6 +38,13 @@ describe("needsShell", () => {
   });
 });
 
+/** Concatenate transported output chunks (they are already strings). */
+const allDecoded = (events: readonly CommandRunEvent[]): string =>
+  events
+    .filter((e) => e.type === "stdout" || e.type === "stderr")
+    .map((e) => e.chunk ?? "")
+    .join("");
+
 describe("startCommandRun PTY mode", () => {
   it(
     "attaches through a PTY, forwards stdin, and streams responses",
@@ -65,17 +72,54 @@ describe("startCommandRun PTY mode", () => {
       expect(run.pty).toBe(true);
       expect(run.pid).toBeGreaterThan(0);
 
-      await waitFor(() => events.some((e) => e.type === "stdout" && e.chunk?.includes("PROMPT>")));
+      await waitFor(() => allDecoded(events).includes("PROMPT>"));
       run.write("hello\n");
-      await waitFor(() =>
-        events.some((e) => e.type === "stdout" && (e.chunk ?? "").includes("ECHO:hello")),
-      );
+      await waitFor(() => allDecoded(events).includes("ECHO:hello"));
       const exited = await run.exited;
       expect(exited.code).toBe(0);
       expect(events.some((e) => e.type === "pty-ready")).toBe(true);
     },
     20_000,
   );
+
+  it("transports output verbatim with zero server-side interpretation", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "pty-bytes-test-"));
+    const scriptPath = join(workDir, "raw-bytes.cjs");
+    await writeFile(
+      scriptPath,
+      [
+        "// Invalid UTF-8 first, then a split emoji across delayed writes.",
+        "process.stdout.write(Buffer.from([0xff, 0xfe]));",
+        "setTimeout(() => {",
+        "  process.stdout.write(Buffer.from([0xf0]));", // emoji lead byte alone
+        "  setTimeout(() => {",
+        "    process.stdout.write(Buffer.from([0x9f, 0x8e, 0x89, 0x0a]));", // completes 🎉
+        "    setTimeout(() => process.exit(0), 100);",
+        "  }, 60);",
+        "}, 40);",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const { events, onEvent } = collectEvents();
+    const run = await startCommandRun({
+      tokens: [process.execPath, scriptPath],
+      cwd: workDir,
+      onEvent,
+    });
+    await run.exited;
+    const transported = allDecoded(events);
+
+    // Split multibyte char: joined by the binding, transported whole.
+    expect(transported.includes("\u{1F389}")).toBe(true);
+    // Invalid bytes: the binding's own U+FFFD replacement passes through —
+    // and crucially, no double-mangling (a binary re-encode would turn
+    // U+FFFD into \u00FD garbage).
+    expect(transported.includes("\uFFFD\uFFFD")).toBe(true);
+    expect(transported.includes("\u00FD")).toBe(false);
+    // Exact reference: identical to consuming @lydell/node-pty directly.
+    expect(transported).toBe(await referencePtyCapture(workDir, scriptPath));
+  }, 20_000);
 
   it("resizes the pseudo-terminal without throwing", async () => {
     const workDir = await mkdtemp(join(tmpdir(), "pty-resize-test-"));
@@ -115,12 +159,46 @@ describe("startCommandRun fallback mode", () => {
       // Input endpoints are no-ops in fallback, not crashes.
       run.write("ignored");
       run.resize({ cols: 80, rows: 24 });
-      await waitFor(() =>
-        events.some((e) => e.type === "stdout" && e.chunk?.includes("READY")),
-      );
+      await waitFor(() => allDecoded(events).includes("READY"));
     } finally {
       await run.kill();
       resetPtyProbeCache();
     }
   }, 20_000);
 });
+
+/** Capture what the PTY binding delivers directly, as the objectivity reference. */
+const referencePtyCapture = async (cwd: string, scriptPath: string): Promise<string> => {
+  const { createRequire } = await import("node:module");
+  const require = createRequire(import.meta.url);
+  const pty = require("@lydell/node-pty") as {
+    spawn: (
+      file: string,
+      args: readonly string[],
+      options: {
+        name: string;
+        cols: number;
+        rows: number;
+        cwd: string;
+        env: Record<string, string>;
+      },
+    ) => {
+      onData(listener: (data: string) => void): void;
+      onExit(listener: (event: { exitCode: number }) => void): void;
+    };
+  };
+  const proc = pty.spawn(process.execPath, [scriptPath], {
+    name: "xterm-256color",
+    cols: 100,
+    rows: 30,
+    cwd,
+    env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
+  });
+  let captured = "";
+  return await new Promise<string>((resolve) => {
+    proc.onData((data) => {
+      captured += data;
+    });
+    proc.onExit(() => resolve(captured));
+  });
+};

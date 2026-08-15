@@ -13,7 +13,7 @@ import {
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { WizardEvent, WizardSession } from "./wizard";
@@ -47,7 +47,7 @@ export const createWizardServer = async (
 
   const session = createSession(emit);
 
-  const indexHtml = await readFile(resolveWebUiPath(), "utf8").catch(() => undefined);
+  const indexHtml = await readWebUiIndex();
 
   const server: Server = createServer((request, response) => {
     void handle(request, response).catch((error: unknown) => {
@@ -96,6 +96,17 @@ export const createWizardServer = async (
       request.once("close", () => {
         clients.delete(response);
       });
+      return;
+    }
+
+    if (url.pathname.startsWith("/assets/")) {
+      await handleAssetFile(url.pathname, response);
+      return;
+    }
+
+    // ghostty-web resolves its WASM document-relative: /ghostty-vt.wasm.
+    if (url.pathname === "/ghostty-vt.wasm") {
+      await handleAssetFile("/ghostty-vt.wasm", response);
       return;
     }
 
@@ -182,6 +193,57 @@ const ghosttyPackageFile = (relative: string): string => {
   }
 };
 
+const ASSET_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".html": "text/html; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".json": "application/json",
+};
+
+/**
+ * Serve one file from the built webui directory (dist/webui). Only simple
+ * relative names are accepted: resolve first, then require the resolved path
+ * to stay inside the webui root, so traversal cannot escape.
+ */
+const handleAssetFile = async (
+  pathname: string,
+  response: ServerResponse,
+): Promise<void> => {
+  const relative = pathname.replace(/^\/+/, "");
+  if (relative.length === 0 || relative.includes("\u0000")) {
+    respond(response, 404, "text/plain", "not found\n");
+    return;
+  }
+  // Built package layout first; source checkout falls back to create-webui's
+  // vite output. Resolve-then-contain so traversal cannot escape any root.
+  const roots = [
+    join(moduleDir(), "webui"),
+    join(moduleDir(), "..", "..", "create-webui", "dist"),
+  ];
+  for (const root of roots) {
+    const resolved = resolve(root, relative);
+    if (!(resolved === root || resolved.startsWith(`${root}${sep}`))) {
+      continue;
+    }
+    const bytes = await readFile(resolved).catch(() => undefined);
+    if (bytes === undefined) {
+      continue;
+    }
+    const extension = extname(resolved).toLowerCase();
+    response.writeHead(200, {
+      "content-type": ASSET_CONTENT_TYPES[extension] ?? "application/octet-stream",
+      "content-length": bytes.length,
+      "cache-control": "no-store",
+    });
+    response.end(bytes);
+    return;
+  }
+  respond(response, 404, "text/plain", "not found\n");
+};
+
 const handleVendorAsset = async (pathname: string, response: ServerResponse): Promise<void> => {
   const asset = VENDOR_ASSETS[pathname];
   if (asset === undefined) {
@@ -240,7 +302,7 @@ const handleApi = async (
     }
     case "/api/form": {
       const patch: Record<string, string> = {};
-      for (const key of ["appId", "appName", "targetDir", "pm"] as const) {
+      for (const key of ["appId", "appName", "iconPath", "targetDir", "pm"] as const) {
         const value = body[key];
         if (typeof value === "string") {
           patch[key] = value;
@@ -285,6 +347,16 @@ const handleApi = async (
         return;
       }
       session.terminalInput(data);
+      respond(response, 200, "application/json", '{"ok":true}\n');
+      return;
+    }
+    case "/api/icon-source": {
+      const path = typeof body.path === "string" ? body.path.trim() : "";
+      if (path.length === 0) {
+        respond(response, 400, "application/json", '{"error":"path is required"}\n');
+        return;
+      }
+      session.updateForm({ iconPath: path });
       respond(response, 200, "application/json", '{"ok":true}\n');
       return;
     }
@@ -389,10 +461,20 @@ const respond = (
   response.end(body);
 };
 
-const resolveWebUiPath = (): string => {
-  // Works in both layouts: dist/webui/index.html (built package) and
-  // src/webui/index.html (source checkout development).
-  return join(moduleDir(), "webui", "index.html");
+/** Built package: dist/webui/index.html; source checkout falls back to the create-webui vite output. */
+const webUiIndexPaths = (): readonly string[] => [
+  join(moduleDir(), "webui", "index.html"),
+  join(moduleDir(), "..", "..", "create-webui", "dist", "index.html"),
+];
+
+const readWebUiIndex = async (): Promise<string | undefined> => {
+  for (const candidate of webUiIndexPaths()) {
+    const html = await readFile(candidate, "utf8").catch(() => undefined);
+    if (html !== undefined) {
+      return html;
+    }
+  }
+  return undefined;
 };
 
 /** Token fingerprint helper used in tests and diagnostics. */

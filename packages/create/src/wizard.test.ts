@@ -105,8 +105,16 @@ const serviceEvent = (events: readonly WizardEvent[]) => {
   return serviceEvents.at(-1);
 };
 
+/** Latest form event's defaults (placeholder suggestions). */
+const lastFormDefaults = (events: readonly WizardEvent[]) => {
+  const formEvents = events.filter(
+    (event): event is Extract<WizardEvent, { type: "form" }> => event.type === "form",
+  );
+  return formEvents.at(-1)?.defaults;
+};
+
 describe("wizard session", () => {
-  it("walks idle → running → discovered and fills defaults from the scrape", async () => {
+  it("walks idle → running → discovered and updates placeholder defaults from the scrape", async () => {
     const harness = createHarness();
     await harness.session.submitCommand("npx somecommand start --xx");
     expect(harness.session.state).toBe("running");
@@ -115,10 +123,22 @@ describe("wizard session", () => {
     harness.setListeners(new Set([19080]));
     await waitFor(() => harness.session.state === "discovered");
 
-    await waitFor(() => harness.session.form.appName === "Scraped Title");
-    expect(harness.session.form.appId).toBe("start.somecommand.npx");
+    await waitFor(() => lastFormDefaults(harness.events)?.appName === "Scraped Title");
+    // Values stay empty (placeholders carry the suggestions).
+    expect(harness.session.form.appName).toBe("");
+    expect(harness.session.form.appId).toBe("");
+    expect(lastFormDefaults(harness.events)?.appId).toBe("start.somecommand.npx");
     expect(harness.session.selectedPort).toBe(19080);
-    expect(harness.session.form.targetDir).toBe("/tmp/wizard-cwd/start-somecommand-npx");
+    expect(lastFormDefaults(harness.events)?.targetDir).toBe(
+      "/tmp/wizard-cwd/start-somecommand-npx",
+    );
+    // The nav bar learns the raw command.
+    expect(
+      harness.events.some(
+        (event) =>
+          event.type === "command-display" && event.command === "npx somecommand start --xx",
+      ),
+    ).toBe(true);
   });
 
   it("never overwrites user-edited fields", async () => {
@@ -152,21 +172,24 @@ describe("wizard session", () => {
     expect(harness.session.selectedPort).toBe(19081);
   });
 
-  it("freezes the form at confirmation so later scrapes cannot mutate it", async () => {
+  it("freezes resolved placeholder defaults at confirmation", async () => {
     const harness = createHarness();
     await harness.session.submitCommand("npx somecommand start --xx");
     harness.setScrape({ title: "Frozen Title" });
     harness.setListeners(new Set([19080]));
     await waitFor(() => harness.session.state === "discovered");
-    await waitFor(() => harness.session.form.appName === "Frozen Title");
+    await waitFor(() => lastFormDefaults(harness.events)?.appName === "Frozen Title");
 
+    // Untouched fields resolve to their placeholder defaults at confirm.
     harness.session.confirm();
     expect(harness.session.state).toBe("frozen");
-    const frozenName = harness.session.form.appName;
+    expect(harness.session.form.appName).toBe("Frozen Title");
+    expect(harness.session.form.appId).toBe("start.somecommand.npx");
+    expect(harness.session.form.targetDir).toBe("/tmp/wizard-cwd/start-somecommand-npx");
 
     harness.setScrape({ title: "Post-freeze Title" });
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(harness.session.form.appName).toBe(frozenName);
+    expect(harness.session.form.appName).toBe("Frozen Title");
   });
 
   it("refuses confirm without a selected service", async () => {
@@ -214,10 +237,10 @@ describe("wizard session", () => {
 
     await session.submitCommand("npx tool start");
     expect(session.state).toBe("running");
-    // The running state must be the first emitted event, before any await on
-    // temp dirs, listener baselines, or PTY probes.
-    expect(events[0]?.type).toBe("state");
-    expect(events[0]).toMatchObject({ type: "state", state: "running" });
+    // The running state must be emitted before any awaits (temp dirs, listener
+    // baselines, PTY probes); only the synchronous command display precedes it.
+    expect(events[0]?.type).toBe("command-display");
+    expect(events[1]).toMatchObject({ type: "state", state: "running" });
 
     session.terminalInput("hi\n");
     session.terminalResize({ cols: 120, rows: 40 });
@@ -293,7 +316,7 @@ describe("wizard session", () => {
     await session.submitCommand("npx somecommand start --xx");
     listeners = new Set([19080]);
     await waitFor(() => session.state === "discovered");
-    await waitFor(() => session.form.appName === "Materialize Title");
+    await waitFor(() => lastFormDefaults(events)?.appName === "Materialize Title");
 
     session.confirm();
     await session.create();

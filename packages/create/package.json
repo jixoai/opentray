@@ -24,7 +24,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsdown src/index.ts src/bin.ts --format esm --dts && node scripts/copy-webui.mjs",
+    "build": "pnpm --filter @opentray/create-webui build && tsdown src/index.ts src/bin.ts --format esm --dts && node scripts/copy-webui.mjs",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -34,7 +34,7 @@
     "@opentray/vite-plugin": "workspace:*"
   },
   "optionalDependencies": {
-    "node-pty": "^1.0.0"
+    "@lydell/node-pty": "^1.1.0"
   },
   "devDependencies": {
     "ghostty-web": "^0.4.0",

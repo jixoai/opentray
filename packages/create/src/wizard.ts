@@ -46,21 +46,34 @@ export type WizardState =
 export interface WizardFormValues {
   readonly appId: string;
   readonly appName: string;
+  readonly iconPath: string;
   readonly targetDir: string;
   readonly pm: "npm" | "pnpm" | "bun";
+}
+
+/** Placeholder suggestions shown in the form; empty fields resolve to these. */
+export interface WizardFormDefaults {
+  readonly appId: string;
+  readonly appName: string;
+  readonly targetDir: string;
 }
 
 export type WizardEvent =
   | { readonly type: "state"; readonly state: WizardState; readonly reason?: string }
   | { readonly type: "log"; readonly stream: "stdout" | "stderr"; readonly chunk: string }
   | { readonly type: "term-mode"; readonly interactive: boolean; readonly message?: string }
+  | { readonly type: "command-display"; readonly command: string }
   | {
       readonly type: "services";
       readonly services: readonly DiscoveredService[];
       readonly selectedPort: number | undefined;
     }
   | { readonly type: "scrape"; readonly port: number; readonly title?: string; readonly hasIcon: boolean }
-  | { readonly type: "form"; readonly values: WizardFormValues; readonly defaults: WizardFormValues }
+  | {
+      readonly type: "form";
+      readonly values: WizardFormValues;
+      readonly defaults: WizardFormDefaults;
+    }
   | { readonly type: "materialize-log"; readonly message: string }
   | { readonly type: "materialize-step"; readonly step: string; readonly message: string }
   | {
@@ -110,6 +123,7 @@ export interface WizardSession {
 interface FieldTouched {
   appId: boolean;
   appName: boolean;
+  iconPath: boolean;
   targetDir: boolean;
   pm: boolean;
 }
@@ -132,13 +146,16 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let tempIconDir: string | undefined;
   let currentIconPath: string | undefined;
   let currentTokens: readonly string[] = [];
+  let currentCommand = "";
+  let scrapedTitle: string | undefined;
   let resolvedVector: LaunchVector | undefined;
   let frozenForm: WizardFormValues | undefined;
-  const touched: FieldTouched = { appId: false, appName: false, targetDir: false, pm: false };
+  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, targetDir: false, pm: false };
   let form: WizardFormValues = {
     appId: "",
     appName: "",
-    targetDir: options.cwd,
+    iconPath: "",
+    targetDir: "",
     pm:
       options.packageManager ??
       detectPackageManager([], process.env.npm_config_user_agent),
@@ -171,17 +188,21 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     });
   };
 
+  /**
+   * Placeholder defaults: scrapes and derivations update the *suggestions*,
+   * never the user's values. Empty values mean "use the default".
+   */
+  const currentDefaults = (): WizardFormDefaults => {
+    const effectiveAppId = form.appId.trim().length > 0 ? form.appId : deriveDefaultAppId(currentTokens);
+    return {
+      appId: deriveDefaultAppId(currentTokens),
+      appName: scrapedTitle ?? deriveDefaultAppName(currentTokens),
+      targetDir: join(options.cwd, toProjectDirectoryName(effectiveAppId)),
+    };
+  };
+
   const publishForm = (): void => {
-    emit({
-      type: "form",
-      values: form,
-      defaults: {
-        appId: deriveDefaultAppId(currentTokens),
-        appName: deriveDefaultAppName(currentTokens),
-        targetDir: join(options.cwd, toProjectDirectoryName(form.appId || deriveDefaultAppId(currentTokens))),
-        pm: form.pm,
-      },
-    });
+    emit({ type: "form", values: form, defaults: currentDefaults() });
   };
 
   const scrapeOnce = async (): Promise<void> => {
@@ -201,38 +222,16 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (scraped.iconPath !== undefined) {
         currentIconPath = scraped.iconPath;
       }
+      if (scraped.title !== undefined) {
+        scrapedTitle = scraped.title;
+      }
       emit({
         type: "scrape",
         port,
         ...(scraped.title === undefined ? {} : { title: scraped.title }),
         hasIcon: scraped.iconPath !== undefined,
       });
-      const patch: {
-        appName?: string;
-        appId?: string;
-        targetDir?: string;
-      } = {};
-      if (!touched.appName && scraped.title !== undefined) {
-        patch.appName = scraped.title;
-      }
-      if (!touched.appId && currentTokens.length > 0 && form.appId.length === 0) {
-        patch.appId = deriveDefaultAppId(currentTokens);
-      }
-      if (!touched.targetDir && (form.appId.length > 0 || currentTokens.length > 0)) {
-        patch.targetDir = join(
-          options.cwd,
-          toProjectDirectoryName(patch.appId ?? form.appId ?? deriveDefaultAppId(currentTokens)),
-        );
-      }
-      if (Object.keys(patch).length > 0) {
-        form = {
-          ...form,
-          ...(patch.appName === undefined ? {} : { appName: patch.appName }),
-          ...(patch.appId === undefined ? {} : { appId: patch.appId }),
-          ...(patch.targetDir === undefined ? {} : { targetDir: patch.targetDir }),
-        };
-        publishForm();
-      }
+      publishForm();
     } finally {
       scraping = false;
     }
@@ -323,11 +322,15 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       form = {
         appId: "",
         appName: "",
-        targetDir: options.cwd,
+        iconPath: "",
+        targetDir: "",
         pm:
           options.packageManager ??
           detectPackageManager([], process.env.npm_config_user_agent),
       };
+      currentCommand = command;
+      scrapedTitle = undefined;
+      emit({ type: "command-display", command });
       tempIconDir = await mkdtemp(join(tmpdir(), "create-opentray-"));
 
       const listListeners =
@@ -438,7 +441,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       publishForm();
     },
 
-    /** Forward terminal keystrokes to the PTY-attached preview command. */
+    /** Forward base64-encoded terminal keystroke bytes to the preview command. */
     terminalInput(data) {
       if (state !== "running" && state !== "discovered") {
         return;
@@ -461,15 +464,20 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (selectedPort === undefined) {
         throw new Error("cannot confirm without a selected service");
       }
-      if (form.appId.length === 0) {
-        form = { ...form, appId: deriveDefaultAppId(currentTokens) };
+      // Empty fields resolve to their placeholder defaults.
+      const defaults = currentDefaults();
+      const resolvedForm: WizardFormValues = {
+        ...form,
+        appId: form.appId.trim().length > 0 ? form.appId : defaults.appId,
+        appName: form.appName.trim().length > 0 ? form.appName : defaults.appName,
+        targetDir:
+          form.targetDir.trim().length > 0 ? form.targetDir : defaults.targetDir,
+      };
+      // A user-entered icon path wins over the scraped favicon.
+      if (resolvedForm.iconPath.trim().length > 0) {
+        currentIconPath = resolvedForm.iconPath.trim();
       }
-      if (form.appName.length === 0) {
-        form = { ...form, appName: deriveDefaultAppName(currentTokens) };
-      }
-      if (form.targetDir.trim().length === 0) {
-        form = { ...form, targetDir: join(options.cwd, toProjectDirectoryName(form.appId)) };
-      }
+      form = resolvedForm;
       stopTimers();
       frozenForm = { ...form };
       setState("frozen");
@@ -563,5 +571,5 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
 /** Exposed for tests: the touched-field bookkeeping semantics. */
 export const createFieldTouchedTracker = (): { touched: FieldTouched } => ({
-  touched: { appId: false, appName: false, targetDir: false, pm: false },
+  touched: { appId: false, appName: false, iconPath: false, targetDir: false, pm: false },
 });

@@ -9,27 +9,24 @@ npx create-opentray
 
 ## What it does
 
-1. Starts a token-guarded WebUI on `127.0.0.1` and opens your browser.
+1. Starts a token-guarded WebUI (React + shadcn/ui) on `127.0.0.1` and opens
+   your browser.
 2. You paste a start command (e.g. `npx somecommand start --xx`). It runs
-   immediately in a **real interactive terminal** (ghostty-web renderer over a
-   PTY): you can answer prompts and interact with the command while the wizard
-   watches it. If the optional native PTY dependency is unavailable, the
-   preview degrades to a read-only terminal with a visible notice.
-3. Ports the command's own process tree starts listening on are diffed against
-   a pre-spawn baseline; each new HTTP service is listed (foreign listeners
-   such as browser DevTools sockets are never adopted). The first service is
-   selected by default.
-4. The selected service is polled: its `<title>` becomes the default app name
-   and its favicon the default icon source. The default appId is derived from
-   the command tokens before the first option, reversed and dot-joined
-   (`npx somecommand start --xx` → `start.somecommand.npx`). Every value stays
-   editable; edits win over later scrapes.
-5. Switching services rescrapes and previews the service in an iframe.
-6. 确定创建 freezes the form (later scrapes can no longer change it), shows a
-   confirmation dialog, then 确认生成 runs the pipeline with live logs:
-   scaffold → icon generation → dependency install → first launch → (macOS)
-   stable bundle verification.
-7. Success offers 打开应用 plus a platform pinning hint (Windows taskbar /
+   immediately in a **real interactive terminal** inside a Chrome-style tabs
+   panel: prompts, TUI output, and keystrokes all work.
+3. Confirmed HTTP services (TCP listener owned by the command's process tree
+   **and** answering an HTTP probe) each open an iframe tab automatically; the
+   tab's navigation bar shows an editable URL with back/forward/reload backed
+   by a per-tab history. The terminal tab's status bar shows cursor position,
+   selection range, and clickable service entries that jump to the matching
+   iframe tab by hostname.
+4. Auto-derived defaults (scraped title, favicon, derived appId) are shown as
+   **input placeholders** — an empty field means "use the default"; edits win
+   over later scrapes. A dedicated icon input carries the icon fallback chain.
+5. 确定创建 freezes the resolved identity, shows a confirmation dialog, then
+   确认生成 runs the pipeline with live logs: scaffold → icon generation →
+   dependency install → first launch → (macOS) stable bundle verification.
+6. Success offers 打开应用 plus a platform pinning hint (Windows taskbar /
    macOS Dock).
 
 ## CLI
@@ -63,13 +60,16 @@ the tray menu.
 
 ## Platform notes
 
-- **Interactive preview terminal**: rendered by
-  [ghostty-web](https://github.com/coder/ghostty-web) (Ghostty's VT parser
-  compiled to WASM, xterm.js-compatible API) and attached through `node-pty`,
-  so prompts and TUI output work while the wizard watches the command.
-  `node-pty` is an optional dependency — when it cannot build, the preview
-  falls back to a read-only terminal with a visible notice; the wizard itself
-  keeps working.
+- **Objective terminal transport**: the preview runs through
+  [@lydell/node-pty](https://github.com/lydell/node-pty) (prebuilt per-platform
+  binaries; no compiler needed) and is rendered by
+  [ghostty-web](https://github.com/coder/ghostty-web). The backend forwards the
+  PTY binding's chunks verbatim — no re-decoding, no analysis; the renderer
+  owns every escape sequence. Invalid bytes are replaced with U+FFFD *inside
+  the PTY binding* (its documented text-channel contract, shared with every
+  node-pty consumer); the wizard adds no interpretation on top.
+- The optional PTY dependency degrades to a read-only pipe mode with a visible
+  notice when it cannot load; the wizard itself keeps working.
 - The generated app runs the command supervised but headless (output goes to
   `app.log`); commands that require an interactive TTY at runtime are not
   supported inside the generated app.

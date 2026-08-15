@@ -150,4 +150,26 @@ describe("wizard server", () => {
       await server.close();
     }
   });
+
+  it("serves built webui assets with traversal guards", async () => {
+    const { server } = await createTestServer();
+    try {
+      const page = await fetch(new URL(`/?token=${server.token}`, server.url));
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("id=\"root\"");
+
+      // The built SPA's wasm sits at the document root where ghostty-web looks.
+      const wasm = await fetch(new URL("/ghostty-vt.wasm", server.url));
+      expect(wasm.status).toBe(200);
+      expect(wasm.headers.get("content-type")).toBe("application/wasm");
+
+      const traversal = await fetch(new URL("/assets/..%2f..%2fpackage.json", server.url));
+      expect(traversal.status).toBe(404);
+
+      const missing = await fetch(new URL("/assets/does-not-exist.js", server.url));
+      expect(missing.status).toBe(404);
+    } finally {
+      await server.close();
+    }
+  });
 });

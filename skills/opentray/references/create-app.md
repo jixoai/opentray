@@ -21,20 +21,23 @@ npx create-opentray            # in the directory that should own the project
 npx create-opentray my-app     # or an explicit target directory
 ```
 
-1. The wizard serves on `127.0.0.1` at a tokened URL and opens the browser.
-   `--no-open` prints the URL instead.
+1. The wizard serves a React + shadcn/ui page on `127.0.0.1` at a tokened URL
+   and opens the browser. `--no-open` prints the URL instead.
 2. Paste the start command. It runs once in a real interactive terminal
-   (ghostty-web over a PTY): answer prompts and interact with the command
-   while the wizard watches it. If the optional `node-pty` native dependency
-   is unavailable, the preview degrades to read-only with a visible notice.
-3. HTTP services opened by the command's own process tree appear as clickable
-   links (first one selected); unrelated loopback listeners such as browser
-   DevTools sockets are never adopted. Switching restarts favicon/title
-   scraping for the newly selected service and previews it in an iframe.
-4. The form fills defaults: title → app name, favicon → icon source, and the
-   appId from the pre-option command segment reversed and dot-joined
-   (`npx somecommand start --xx` → `start.somecommand.npx`). Edit anything;
-   edits win over later scrapes.
+   (ghostty-web over a prebuilt `@lydell/node-pty` PTY) inside a Chrome-style
+   tabs panel. The backend transports the PTY's chunks verbatim — the renderer
+   owns every escape sequence; prompts and TUI output work. If the optional PTY
+   dependency is unavailable, the preview degrades to read-only with a notice.
+3. Confirmed services (owned TCP listener + HTTP probe) each open an iframe tab
+   with an editable URL, back/forward/reload, and a per-tab history. The
+   terminal tab's status bar shows cursor/selection plus clickable service
+   entries that jump to the matching iframe tab by hostname. Unrelated loopback
+   listeners (browser DevTools sockets) are never adopted.
+4. The form shows auto-derived defaults (scraped title, derived appId) as
+   **placeholders**: an empty field means "use the default" and confirmation
+   resolves them; edits win over later scrapes. A dedicated icon input carries
+   the icon fallback chain (scraped favicon → custom path → first-letter
+   glyph).
 5. 确定创建 freezes the form and shows the confirmation dialog. 确认生成
    streams pipeline logs (scaffold → icon → install → first launch → macOS
    bundle) and ends in a Success dialog with 打开应用 and the platform
