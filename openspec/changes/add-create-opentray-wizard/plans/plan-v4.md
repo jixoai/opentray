@@ -2,13 +2,15 @@
 
 ## Current Round
 
-- Round: 5
-- Status: Owner testing found the terminal still completely unresponsive (the
-  Radix tabs content unmounts the terminal when switching tabs, destroying the
-  canvas/input handler), and asked that the form be directly usable without
-  running the command — running is only a preview that validates the command
-  and scrapes defaults. Walkthrough must use ego-browser.
-- Previous plan backup: `plans/plan-v4.md`.
+- Round: 4
+- Status: Owner acceptance approved the terminal but demanded objective byte
+  passthrough (server must never decode/analyze stdio; ghostty-web owns all
+  rendering even for malformed bytes), a prebuilt PTY distribution
+  (@lydell/node-pty, as used by ../openspecui), a Chrome-like tabs panel
+  unifying terminal + iframe with a context-sensitive navigation bar and a
+  terminal status bar, placeholder-based defaults with a dedicated icon input,
+  and a react-shadcn rebuild of the page.
+- Previous plan backup: `plans/plan-v3.md`.
 
 ## Workflow Command Surface
 
@@ -47,7 +49,6 @@
 | 2 | Assistant | Presented implementation plan (package shape, module decomposition, HTTP API, scaffold contract, icon pipeline via `@opentray/vite-plugin`, materialize pipeline, tests, OpenSpec workflow). | Plan approved by user; becomes the traceability source for specs/tasks. |
 | 3 | User | 实测反馈：点击"运行"后界面没有立刻出现 shell 面板；应改用 xterm.js 或 ghostty-web（建议）渲染真实终端，因为命令可能需要交互才能有效果。 | Two requirements: (a) instant panel feedback on Run; (b) real interactive terminal (PTY) rendered by ghostty-web, with graceful degradation when the native PTY is unavailable. |
 | 4 | User | 终端协议可能有问题，需要完全客观传输 stdio（前端 ghostty-web 分析渲染，即便异常）；确认底层是否用 node-pty、是否 prebuild 版本，参考 ../openspecui 的 pty 前后端实现。终端+iframe 整合为 Chrome 式 Tabs 面板（Terminal tab 显示命令、Iframe tab 显示可编辑 URL 且支持前进后退）；iframe 仅在嗅探到 TCP 监听且 HTTP 确认后自动打开（多端口多 tab）；Terminal tab 底部状态栏显示光标位置/选区范围/嗅探到的 HTTP 服务（点击跳转对应 Iframe tab，按 hostname 匹配）；Iframe tab 是辅助，嗅探不到不影响创建应用；默认值显示为 input placeholder（含专门的图标 input）；用 react-shadcn 重构页面。 | Round-4 scope: objective base64 byte passthrough, @lydell/node-pty prebuilt, tabs panel with context nav + status bar, placeholder defaults + icon input, react-shadcn SPA webui. |
-| 5 | User | 用 ego-browser 走查；自己实测终端仍然完全无反应。且即便命令没有"运行"，表单也应能直接填写使用——运行只是为了测试可用和抓取可用作默认值的信息。 | Round-5 scope: terminal input must survive tab switches and respond to plain user clicks (ego-browser-verified); the identity form is always editable from idle, with defaults derivable from the command without running (prime) and a manual service port fallback. |
 
 ### Evidence Read
 

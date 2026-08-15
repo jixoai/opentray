@@ -104,6 +104,49 @@ non-interactive pipe mode with a visible notice instead of failing.
 - **WHEN** the terminal is resized and the new dimensions are posted
 - **THEN** the pseudo-terminal SHALL adopt the new columns and rows
 
+#### Scenario: Plain click-and-type works and survives tab switches
+
+- **GIVEN** a PTY-attached preview command and the wizard tabs panel
+- **WHEN** the user clicks the terminal surface with the mouse and types, including after switching to a service tab and back
+- **THEN** the keystrokes SHALL reach the command; the terminal instance SHALL NOT be destroyed by tab switches
+
+### Requirement: Usable Form Without Running The Command
+
+The identity form SHALL be visible and editable from the idle state, before
+any command is run. Running the command SHALL be optional: it exists to
+preview the command, validate it, and scrape default values. The wizard SHALL
+derive placeholder defaults (appId from the pre-option command segment,
+target directory from the appId) from the submitted command text without
+spawning it. The form SHALL include an optional manual service-port input so
+materialization can proceed without any discovered service; discovery results
+SHALL prefill that input when present. Confirmation SHALL succeed using the
+manual port when no service was discovered, and SHALL fail with a clear
+message only when neither a discovered service nor a manual port exists.
+
+#### Scenario: Idle form is fully usable
+
+- **GIVEN** the wizard page in the idle state
+- **WHEN** the user fills every identity field without ever pressing Run
+- **THEN** confirmation and materialization SHALL proceed normally
+
+#### Scenario: Defaults derive without spawning
+
+- **GIVEN** an idle form and a command typed into the command bar
+- **WHEN** the command text is primed (debounced input or blur)
+- **THEN** the appId and target-dir placeholders SHALL reflect the derivation without any process being spawned
+
+#### Scenario: Manual port substitutes for discovery
+
+- **GIVEN** no discovered service and a manual port entered in the form
+- **WHEN** the user confirms and generates
+- **THEN** materialization SHALL use the manual port and the app SHALL point at that service URL
+
+#### Scenario: Missing port fails clearly
+
+- **GIVEN** neither a discovered service nor a manual port
+- **WHEN** the user tries to confirm
+- **THEN** the wizard SHALL reject with a clear message instead of materializing
+
 ### Requirement: Chrome-style Tabs Panel With Context Navigation
 
 The WebUI SHALL present the terminal and service previews inside one

@@ -30,6 +30,10 @@ app through a WebUI wizard):
 - [x] 2.20 BDD: Given one confirmed and one unconfirmed port, when tabs render, then exactly one iframe tab exists (spec: create-wizard / Chrome-style Tabs Panel).
 - [x] 2.21 BDD: Given services in the terminal status bar, when one is clicked, then the matching-hostname iframe tab activates (spec: create-wizard / Chrome-style Tabs Panel).
 - [x] 2.22 BDD: Given untouched placeholder-backed fields, when the user confirms, then the frozen identity uses placeholder defaults (spec: create-wizard / Placeholder Defaults And Icon Input).
+- [ ] 2.23 BDD: Given the terminal and a service tab, when the user switches tabs and back then clicks and types, then keystrokes still reach the command (spec: create-wizard / Interactive Terminal Preview).
+- [ ] 2.24 BDD: Given the idle form, when all fields are filled without running, then confirm and materialize proceed (spec: create-wizard / Usable Form Without Running).
+- [ ] 2.25 BDD: Given command text primed without spawning, when placeholders render, then appId/targetDir derive from the command text (spec: create-wizard / Usable Form Without Running).
+- [ ] 2.26 BDD: Given no service discovered and a manual port, when confirmed, then materialization uses the manual port (spec: create-wizard / Usable Form Without Running).
 - [x] 2.5 BDD: Given a command opening 19080 then 19081, when both verify as HTTP, then both are listed with 19080 selected (spec: create-wizard / HTTP service discovery from port diffing).
 - [x] 2.6 BDD: Given a user-edited appName, when a later scrape returns another title, then the edited value is preserved (spec: create-wizard / Favicon/title scrape with default derivation).
 - [x] 2.7 BDD: Given `npx somecommand start --xx`, when defaults derive, then appId is `start.somecommand.npx` (spec: create-wizard / Favicon/title scrape with default derivation).
@@ -78,6 +82,13 @@ app through a WebUI wizard):
 - [x] 4.24 Rework the form to placeholder-based defaults with a dedicated icon input; confirmation resolves empty fields to placeholder defaults.
 - [x] 4.25 Serve built webui assets from the wizard server with token-guarded page + public static asset routes.
 - [x] 4.26 Update tests, docs, changeset; browser-accept the full flow.
+
+## 4d. Implementation (Round 5 — responsive terminal, form without run)
+
+- [ ] 4.27 Keep the terminal tab mounted across tab switches (forceMount) so the ghostty instance is never destroyed; verify click-and-type works after switching tabs.
+- [ ] 4.28 Add /api/prime deriving placeholder defaults from command text without spawning; debounce client-side priming on command input.
+- [ ] 4.29 Make the form visible/editable from idle; add a manual service-port input prefilled by discovery; confirm resolves manual port; create rejects clearly when no port at all.
+- [ ] 4.30 ego-browser walkthrough of the full flow (click-and-type terminal, tab switch survival, form-without-run creation), recorded in review notes.
 
 ## 5. Verification
 
