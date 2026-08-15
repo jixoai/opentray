@@ -126,10 +126,12 @@ export const main = async (argv: readonly string[]): Promise<number> => {
   }
   ensureLoopbackNoProxy();
 
+  // pnpm/npm run scripts execute with the package directory as cwd; INIT_CWD
+  // preserves the directory the user actually invoked the command from, which
+  // is the intuitive default for where the generated project should land.
+  const invocationDir = process.env.INIT_CWD || process.cwd();
   const cwd = resolve(
-    options.targetDir === undefined
-      ? process.cwd()
-      : resolve(process.cwd(), options.targetDir),
+    options.targetDir === undefined ? invocationDir : resolve(invocationDir, options.targetDir),
   );
   const dependencyRange = await readDependencyRange();
 

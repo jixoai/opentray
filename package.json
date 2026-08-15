@@ -9,6 +9,8 @@
     "test:openspec:vision": "bun test scripts/openspec/vision-driven.test.ts",
     "test:openspec:vision2": "bun test scripts/openspec/vision2-driven.test.ts",
     "packages:list": "pnpm -r list --depth -1",
+    "create-opentray": "bun run packages/create/src/bin.ts",
+    "create-opentray:dist": "node packages/create/dist/bin.mjs",
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",

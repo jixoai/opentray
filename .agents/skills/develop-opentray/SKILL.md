@@ -102,6 +102,12 @@ git diff --check
 
 For visual changes, also run the relevant smoke command from `references/visual-acceptance.md`.
 
+Wizard smoke testing (`create-opentray` package): from any target directory,
+`pnpm --dir <repo> create-opentray` runs the wizard from source and
+`pnpm --dir <repo> create-opentray:dist` from the built `dist/` bin. Both
+honor `INIT_CWD`, so the generated project defaults to the invoking directory,
+not the workspace root.
+
 Lynx host-window work is owned by the independent
 [`jixoai/opentray-ext-lynx`](https://github.com/jixoai/opentray-ext-lynx) repository;
 the core repository only verifies the generic extension boundary.
