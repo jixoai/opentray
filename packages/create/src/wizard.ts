@@ -17,6 +17,7 @@ import {
   type CommandRunEvent,
 } from "./command-run";
 import {
+  collectProcessTreePids,
   createPortDiscovery,
   listListeningPorts,
   type DiscoveredService,
@@ -52,6 +53,7 @@ export interface WizardFormValues {
 export type WizardEvent =
   | { readonly type: "state"; readonly state: WizardState; readonly reason?: string }
   | { readonly type: "log"; readonly stream: "stdout" | "stderr"; readonly chunk: string }
+  | { readonly type: "term-mode"; readonly interactive: boolean; readonly message?: string }
   | {
       readonly type: "services";
       readonly services: readonly DiscoveredService[];
@@ -78,6 +80,8 @@ export interface WizardOptions {
   readonly spawnRun?: typeof startCommandRun;
   readonly listListeners?: () => Promise<ReadonlySet<number>>;
   readonly verifyHttp?: (port: number) => Promise<boolean>;
+  /** Test/embedding seam for listener ownership. */
+  readonly listPortOwners?: () => Promise<import("./port-scan").ListenerOwners>;
   readonly scrape?: typeof scrapeService;
   readonly resolveVector?: typeof resolveLaunchVector;
   /** Test/embedding seam for the materialize pipeline. */
@@ -96,6 +100,8 @@ export interface WizardSession {
   submitCommand(command: string): Promise<void>;
   selectService(port: number): void;
   updateForm(patch: Partial<WizardFormValues>): void;
+  terminalInput(data: string): void;
+  terminalResize(size: { cols: number; rows: number }): void;
   confirm(): void;
   create(): Promise<void>;
   stop(): Promise<void>;
@@ -327,19 +333,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       const listListeners =
         options.listListeners ?? (() => listListeningPorts(process.platform));
       const baseline = await listListeners().catch(() => new Set<number>());
-      discovery = createPortDiscovery({
-        baseline,
-        ...(options.listListeners === undefined
-          ? {}
-          : { listListeners: () => options.listListeners!() }),
-        ...(options.verifyHttp === undefined ? {} : { verifyHttp: options.verifyHttp }),
-      });
 
+      // Emit the running state before spawning so the terminal panel appears
+      // the instant Run fires, ahead of any process output or probe.
       setState("running");
       publishForm();
 
       const spawnRun = options.spawnRun ?? startCommandRun;
-      run = spawnRun({
+      run = await spawnRun({
         tokens: tokenized.tokens,
         cwd: options.cwd,
         onEvent: (event: CommandRunEvent) => {
@@ -348,6 +349,18 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               type: "log",
               stream: event.type,
               chunk: event.chunk ?? "",
+            });
+            return;
+          }
+          if (event.type === "pty-ready") {
+            emit({ type: "term-mode", interactive: true });
+            return;
+          }
+          if (event.type === "pty-unavailable") {
+            emit({
+              type: "term-mode",
+              interactive: false,
+              ...(event.message === undefined ? {} : { message: event.message }),
             });
             return;
           }
@@ -373,6 +386,25 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           setState("failed", spawnError);
         }
         void code;
+      });
+
+      // Discovery starts after spawn so port ownership can be resolved from
+      // the live preview PID tree; foreign listeners are never adopted.
+      discovery = createPortDiscovery({
+        baseline,
+        ...(options.listListeners === undefined
+          ? {}
+          : { listListeners: () => options.listListeners!() }),
+        ...(options.verifyHttp === undefined ? {} : { verifyHttp: options.verifyHttp }),
+        ...(options.listPortOwners === undefined
+          ? {}
+          : { listOwners: options.listPortOwners }),
+        ...(run.pid === undefined
+          ? {}
+          : {
+              resolveOwnerPids: () =>
+                collectProcessTreePids(run?.pid ?? 0, options.platform ?? process.platform),
+            }),
       });
 
       startDiscoveryPolling();
@@ -404,6 +436,22 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       }
       form = { ...form, ...patch };
       publishForm();
+    },
+
+    /** Forward terminal keystrokes to the PTY-attached preview command. */
+    terminalInput(data) {
+      if (state !== "running" && state !== "discovered") {
+        return;
+      }
+      run?.write(data);
+    },
+
+    /** Forward terminal dimensions to the pseudo-terminal. */
+    terminalResize(size) {
+      if (state !== "running" && state !== "discovered") {
+        return;
+      }
+      run?.resize(size);
     },
 
     confirm() {

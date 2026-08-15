@@ -20,10 +20,11 @@ app through a WebUI wizard):
 - [x] 2.2 BDD: Given a POST without token or with a non-loopback Host, when it hits a mutating endpoint, then it is rejected 401/403 with unchanged state (spec: create-wizard / Wizard entry and loopback WebUI).
 - [x] 2.3 BDD: Given a command that fails immediately, when it is submitted, then the WebUI receives exit code/stderr and returns to an editable retry state (spec: create-wizard / Run command once with live shell output).
 - [x] 2.4 BDD: Given a running command writing output, when chunks arrive, then the SSE stream appends log events (spec: create-wizard / Run command once with live shell output).
-- [ ] 2.13 BDD: Given the wizard page with a command entered, when the user clicks Run, then the terminal panel is visible immediately before any output or state event (spec: create-wizard / Interactive Terminal Preview).
-- [ ] 2.14 BDD: Given a PTY-attached command reading stdin, when keystrokes are posted to the input endpoint, then the command receives them and its response streams back (spec: create-wizard / Interactive Terminal Preview).
-- [ ] 2.15 BDD: Given the native PTY dependency is unavailable, when a command is submitted, then the wizard degrades to pipe mode with a notice and stays fully functional (spec: create-wizard / Interactive Terminal Preview).
-- [ ] 2.16 BDD: Given a PTY-attached command, when the terminal is resized, then the pseudo-terminal adopts the new columns and rows (spec: create-wizard / Interactive Terminal Preview).
+- [x] 2.13 BDD: Given the wizard page with a command entered, when the user clicks Run, then the terminal panel is visible immediately before any output or state event (spec: create-wizard / Interactive Terminal Preview).
+- [x] 2.14 BDD: Given a PTY-attached command reading stdin, when keystrokes are posted to the input endpoint, then the command receives them and its response streams back (spec: create-wizard / Interactive Terminal Preview).
+- [x] 2.15 BDD: Given the native PTY dependency is unavailable, when a command is submitted, then the wizard degrades to pipe mode with a notice and stays fully functional (spec: create-wizard / Interactive Terminal Preview).
+- [x] 2.16 BDD: Given a PTY-attached command, when the terminal is resized, then the pseudo-terminal adopts the new columns and rows (spec: create-wizard / Interactive Terminal Preview).
+- [x] 2.17 BDD: Given an unrelated local process listens on a new port while the preview runs, when the wizard polls, then that port is not listed as a service (spec: create-wizard / HTTP Service Discovery From Port Diffing).
 - [x] 2.5 BDD: Given a command opening 19080 then 19081, when both verify as HTTP, then both are listed with 19080 selected (spec: create-wizard / HTTP service discovery from port diffing).
 - [x] 2.6 BDD: Given a user-edited appName, when a later scrape returns another title, then the edited value is preserved (spec: create-wizard / Favicon/title scrape with default derivation).
 - [x] 2.7 BDD: Given `npx somecommand start --xx`, when defaults derive, then appId is `start.somecommand.npx` (spec: create-wizard / Favicon/title scrape with default derivation).
@@ -54,12 +55,14 @@ app through a WebUI wizard):
 
 ## 4b. Implementation (Round 2 — interactive terminal)
 
-- [ ] 4.12 Add optional `node-pty` dependency with runtime feature detection and pipe-mode fallback in `command-run.ts` (write/resize/run events, PTY tree teardown).
-- [ ] 4.13 Add `term` SSE events (stream-decoded UTF-8), `/api/terminal-input` and `/api/terminal-resize` endpoints, and static `/vendor/ghostty-web` asset serving with traversal guards.
-- [ ] 4.14 Reorder `submitCommand` so the running state is emitted before baseline snapshotting, for instant panel feedback.
-- [ ] 4.15 Replace the WebUI console with a ghostty-web terminal (vendored JS+WASM, FitAddon sizing, batched input flush, plain-text fallback when the module cannot load).
-- [ ] 4.16 Vendor ghostty-web assets in the build script; add it as a build-time devDependency.
-- [ ] 4.17 Update README/skill docs and extend the changeset with the interactive-terminal capability.
+- [x] 4.12 Add optional `node-pty` dependency with runtime feature detection and pipe-mode fallback in `command-run.ts` (write/resize/run events, PTY tree teardown).
+- [x] 4.13 Add `term` SSE events (stream-decoded UTF-8), `/api/terminal-input` and `/api/terminal-resize` endpoints, and static `/vendor/ghostty-web` asset serving with traversal guards.
+- [x] 4.14 Reorder `submitCommand` so the running state is emitted before baseline snapshotting, for instant panel feedback.
+- [x] 4.15 Replace the WebUI console with a ghostty-web terminal (vendored JS+WASM, FitAddon sizing, batched input flush, plain-text fallback when the module cannot load).
+- [x] 4.16 Vendor ghostty-web assets in the build script; add it as a build-time devDependency.
+- [x] 4.17 Update README/skill docs and extend the changeset with the interactive-terminal capability.
+- [x] 4.18 Carry the wizard session token in every browser-side API call (Authorization header) and in the EventSource URL.
+- [x] 4.19 Filter port discovery by preview-process-tree ownership (lsof/netstat PID columns, recursive `pgrep -P` walk on POSIX) so foreign loopback listeners are never adopted as services.
 
 ## 5. Verification
 

@@ -47,7 +47,7 @@ describe("wizard pipeline integration", () => {
     if (!tokens.ok) return;
 
     const baseline = await listListeningPorts(process.platform);
-    const run = startCommandRun({
+    const run = await startCommandRun({
       tokens: tokens.tokens,
       cwd: workDir,
       onEvent: () => {},

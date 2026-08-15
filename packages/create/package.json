@@ -33,7 +33,11 @@
     "@opentray/spec": "workspace:*",
     "@opentray/vite-plugin": "workspace:*"
   },
+  "optionalDependencies": {
+    "node-pty": "^1.0.0"
+  },
   "devDependencies": {
+    "ghostty-web": "^0.4.0",
     "tsdown": "^0.22.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"

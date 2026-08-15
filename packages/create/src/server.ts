@@ -11,6 +11,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -98,6 +99,11 @@ export const createWizardServer = async (
       return;
     }
 
+    if (url.pathname.startsWith("/vendor/")) {
+      await handleVendorAsset(url.pathname, response);
+      return;
+    }
+
     if (url.pathname.startsWith("/api/")) {
       if (!isAuthorized(request, url, token)) {
         respond(response, 401, "application/json", '{"error":"unauthorized"}\n');
@@ -135,6 +141,69 @@ export const createWizardServer = async (
         server.close(() => resolve());
       }),
   };
+};
+
+/** Whitelisted static terminal-renderer assets; exact names only, no traversal. */
+const VENDOR_ASSETS: Readonly<
+  Record<string, { contentType: string; candidates: () => readonly string[] }>
+> = {
+  "/vendor/ghostty-web.js": {
+    contentType: "text/javascript; charset=utf-8",
+    candidates: () => [
+      join(moduleDir(), "webui", "vendor", "ghostty-web.js"),
+      ghosttyPackageFile("dist/ghostty-web.js"),
+    ],
+  },
+  "/vendor/ghostty-vt.wasm": {
+    contentType: "application/wasm",
+    candidates: () => [
+      join(moduleDir(), "webui", "vendor", "ghostty-vt.wasm"),
+      ghosttyPackageFile("ghostty-vt.wasm"),
+      ghosttyPackageFile("dist/ghostty-vt.wasm"),
+    ],
+  },
+};
+
+const moduleDir = (): string => dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Resolve a file inside the installed ghostty-web package. Deep paths are
+ * blocked by the package `exports` map, so resolve the exported main module
+ * and walk from the package root instead.
+ */
+const ghosttyPackageFile = (relative: string): string => {
+  try {
+    const require = createRequire(import.meta.url);
+    const main = require.resolve("ghostty-web");
+    const packageRoot = dirname(dirname(main));
+    return join(packageRoot, relative);
+  } catch {
+    return "";
+  }
+};
+
+const handleVendorAsset = async (pathname: string, response: ServerResponse): Promise<void> => {
+  const asset = VENDOR_ASSETS[pathname];
+  if (asset === undefined) {
+    respond(response, 404, "text/plain", "not found\n");
+    return;
+  }
+  for (const candidate of asset.candidates()) {
+    if (candidate.length === 0) {
+      continue;
+    }
+    const bytes = await readFile(candidate).catch(() => undefined);
+    if (bytes !== undefined) {
+      response.writeHead(200, {
+        "content-type": asset.contentType,
+        "content-length": bytes.length,
+        "cache-control": "no-store",
+      });
+      response.end(bytes);
+      return;
+    }
+  }
+  respond(response, 404, "text/plain", "terminal renderer asset is missing\n");
 };
 
 const handleApi = async (
@@ -207,6 +276,27 @@ const handleApi = async (
           `${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`,
         );
       }
+      return;
+    }
+    case "/api/terminal-input": {
+      const data = typeof body.data === "string" ? body.data : undefined;
+      if (data === undefined) {
+        respond(response, 400, "application/json", '{"error":"data is required"}\n');
+        return;
+      }
+      session.terminalInput(data);
+      respond(response, 200, "application/json", '{"ok":true}\n');
+      return;
+    }
+    case "/api/terminal-resize": {
+      const cols = Number(body.cols);
+      const rows = Number(body.rows);
+      if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) {
+        respond(response, 400, "application/json", '{"error":"cols and rows are required"}\n');
+        return;
+      }
+      session.terminalResize({ cols, rows });
+      respond(response, 200, "application/json", '{"ok":true}\n');
       return;
     }
     case "/api/stop": {
@@ -300,10 +390,9 @@ const respond = (
 };
 
 const resolveWebUiPath = (): string => {
-  // dist/webui/index.html when running from the built package; fall back to
-  // the source checkout layout for development.
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  return join(moduleDir, "webui", "index.html");
+  // Works in both layouts: dist/webui/index.html (built package) and
+  // src/webui/index.html (source checkout development).
+  return join(moduleDir(), "webui", "index.html");
 };
 
 /** Token fingerprint helper used in tests and diagnostics. */

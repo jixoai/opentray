@@ -16,6 +16,9 @@ export interface DiscoveredService {
 
 export type ListenersRunner = (platform: NodeJS.Platform) => Promise<ReadonlySet<number>>;
 
+/** Listener snapshot with process ownership: port -> owning PIDs. */
+export type ListenerOwners = ReadonlyMap<number, ReadonlySet<number>>;
+
 /** Loopback service URL for a discovered port. */
 export const serviceUrl = (port: number): string => `http://127.0.0.1:${port}`;
 
@@ -39,6 +42,20 @@ export const listListeningPorts: ListenersRunner = async (platform) => {
   return listLsofListeningPorts();
 };
 
+/** Listeners with ownership; used to attribute ports to the preview process tree. */
+export const listListeningPortOwners = async (
+  platform: NodeJS.Platform = process.platform,
+): Promise<ListenerOwners> => {
+  if (platform === "win32") {
+    const stdout = await runCapture("netstat", ["-ano", "-p", "tcp"]).catch(() => "");
+    return parseNetstatPortOwners(stdout);
+  }
+  const stdout = await runCapture("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pPn"]).catch(
+    () => "",
+  );
+  return parseLsofPortOwners(stdout);
+};
+
 const listLsofListeningPorts = async (): Promise<ReadonlySet<number>> => {
   const stdout = await runCapture("lsof", [
     "-nP",
@@ -48,6 +65,65 @@ const listLsofListeningPorts = async (): Promise<ReadonlySet<number>> => {
     "Pn",
   ]);
   return parseLsofPorts(stdout);
+};
+
+/**
+ * Parse `lsof -F pPn` output into port -> owning PIDs. The field stream is
+ * `p<pid>`, `P<proto>`, `n<host:port>` per socket, so each address inherits
+ * the most recent pid field.
+ */
+export const parseLsofPortOwners = (stdout: string): ListenerOwners => {
+  const owners = new Map<number, Set<number>>();
+  let currentPid: number | undefined;
+  for (const line of stdout.split("\n")) {
+    if (line.startsWith("p")) {
+      const pid = Number.parseInt(line.slice(1), 10);
+      currentPid = Number.isInteger(pid) ? pid : undefined;
+      continue;
+    }
+    if (!line.startsWith("n")) {
+      continue;
+    }
+    const hostPort = line.slice(1);
+    const index = hostPort.lastIndexOf(":");
+    if (index < 0) {
+      continue;
+    }
+    const port = Number.parseInt(hostPort.slice(index + 1), 10);
+    if (!Number.isInteger(port) || port <= 0 || currentPid === undefined) {
+      continue;
+    }
+    const pids = owners.get(port) ?? new Set<number>();
+    pids.add(currentPid);
+    owners.set(port, pids);
+  }
+  return owners;
+};
+
+/** Parse `netstat -ano -p tcp` into port -> owning PIDs (PID is the last column). */
+export const parseNetstatPortOwners = (stdout: string): ListenerOwners => {
+  const owners = new Map<number, Set<number>>();
+  for (const rawLine of stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (!line.toLowerCase().includes("listening")) {
+      continue;
+    }
+    const columns = line.split(/\s+/);
+    const local = columns.find((column) => column.includes(":"));
+    const pid = Number.parseInt(columns[columns.length - 1] ?? "", 10);
+    if (local === undefined || !Number.isInteger(pid)) {
+      continue;
+    }
+    const index = local.lastIndexOf(":");
+    const port = Number.parseInt(local.slice(index + 1), 10);
+    if (!Number.isInteger(port) || port <= 0) {
+      continue;
+    }
+    const pids = owners.get(port) ?? new Set<number>();
+    pids.add(pid);
+    owners.set(port, pids);
+  }
+  return owners;
 };
 
 export const parseLsofPorts = (stdout: string): ReadonlySet<number> => {
@@ -175,11 +251,45 @@ export const verifyHttpService = async (port: number, timeoutMs = 2_000): Promis
   }
 };
 
+/** Collect a PID and every descendant (BFS over `pgrep -P` on POSIX). */
+export const collectProcessTreePids = async (
+  rootPid: number,
+  platform: NodeJS.Platform = process.platform,
+  options: { runCapture?: typeof runCapture } = {},
+): Promise<ReadonlySet<number>> => {
+  const capture = options.runCapture ?? runCapture;
+  const tree = new Set<number>([rootPid]);
+  if (platform === "win32") {
+    // Windows tree enumeration needs CIM queries; direct ownership covers the
+    // common single-process dev server. taskkill /T still tears down children.
+    return tree;
+  }
+  const frontier = [rootPid];
+  while (frontier.length > 0) {
+    const pid = frontier.shift();
+    if (pid === undefined) {
+      break;
+    }
+    const stdout = await capture("pgrep", ["-P", String(pid)]).catch(() => "");
+    for (const line of stdout.split("\n")) {
+      const child = Number.parseInt(line.trim(), 10);
+      if (Number.isInteger(child) && child > 0 && !tree.has(child)) {
+        tree.add(child);
+        frontier.push(child);
+      }
+    }
+  }
+  return tree;
+};
+
 export interface PortDiscoveryOptions {
   readonly platform?: NodeJS.Platform;
   readonly baseline: ReadonlySet<number>;
   readonly listListeners?: ListenersRunner;
   readonly verifyHttp?: (port: number) => Promise<boolean>;
+  /** Resolves the PIDs whose listeners count as services (preview process tree). */
+  readonly resolveOwnerPids?: () => Promise<ReadonlySet<number>>;
+  readonly listOwners?: () => Promise<ListenerOwners>;
   readonly intervalMs?: number;
 }
 
@@ -199,6 +309,7 @@ export const createPortDiscovery = (options: PortDiscoveryOptions): PortDiscover
   const platform = options.platform ?? process.platform;
   const listListeners = options.listListeners ?? listListeningPorts;
   const verifyHttp = options.verifyHttp ?? verifyHttpService;
+  const listOwners = options.listOwners ?? (() => listListeningPortOwners(platform));
   const services = new Map<number, DiscoveredService>();
   const verifying = new Set<number>();
   const rejected = new Set<number>();
@@ -214,6 +325,21 @@ export const createPortDiscovery = (options: PortDiscoveryOptions): PortDiscover
     } catch {
       return [];
     }
+
+    // Ownership filter: only ports owned by the preview process tree may
+    // become services, so foreign loopback listeners (browser DevTools
+    // sockets, sync daemons) are never adopted.
+    let owners: ListenerOwners | undefined;
+    let ownerPids: ReadonlySet<number> | undefined;
+    if (options.resolveOwnerPids !== undefined) {
+      const [ownerMap, pids] = await Promise.all([
+        listOwners().catch(() => undefined),
+        options.resolveOwnerPids().catch(() => undefined),
+      ]);
+      owners = ownerMap;
+      ownerPids = pids;
+    }
+
     const added: DiscoveredService[] = [];
     const pending: Promise<void>[] = [];
     for (const port of listeners) {
@@ -222,6 +348,17 @@ export const createPortDiscovery = (options: PortDiscoveryOptions): PortDiscover
       }
       if (verifying.has(port)) {
         continue;
+      }
+      if (owners !== undefined && ownerPids !== undefined) {
+        const portOwners = owners.get(port);
+        const owned =
+          portOwners !== undefined &&
+          [...portOwners].some((pid) => ownerPids.has(pid));
+        if (!owned) {
+          // Another process owns this listener; ignore it permanently unless
+          // ownership changes (re-checked next poll while unknown).
+          continue;
+        }
       }
       verifying.add(port);
       pending.push(
@@ -260,7 +397,10 @@ export const createPortDiscovery = (options: PortDiscoveryOptions): PortDiscover
   };
 };
 
-const runCapture = (command: string, args: readonly string[]): Promise<string> =>
+export const runCapture = async (
+  command: string,
+  args: readonly string[],
+): Promise<string> =>
   new Promise((resolve, reject) => {
     execFile(
       command,

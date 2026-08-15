@@ -29,12 +29,15 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
   let verified: readonly number[] = [];
   let scrapeState: MutableScrapeState = {};
 
-  const fakeRun = (options: CommandRunOptions): CommandRun => {
+  const fakeRun = async (options: CommandRunOptions): Promise<CommandRun> => {
     void options;
     return {
       pid: 4321,
+      pty: false,
       exited: neverResolve(),
       output: [],
+      write: () => {},
+      resize: () => {},
       kill: async () => {},
     };
   };
@@ -48,6 +51,8 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
     spawnRun: fakeRun,
     listListeners: async () => listeners,
     verifyHttp: async (port) => verified.includes(port),
+    listPortOwners: async () =>
+      new Map([...listeners].map((port) => [port, new Set<number>([4321])])),
     pollIntervalMs: 1,
     scrapeIntervalMs: 1,
     scrape: async (port): Promise<ScrapeResult> => ({
@@ -170,6 +175,62 @@ describe("wizard session", () => {
     expect(() => harness.session.confirm()).toThrow("selected service");
   });
 
+  it("emits the running state immediately and forwards terminal I/O", async () => {
+    const writes: string[] = [];
+    const resizes: { cols: number; rows: number }[] = [];
+    const events: WizardEvent[] = [];
+    let listeners = new Set<number>();
+    const session = createWizardSession({
+      cwd: "/tmp/wizard-cwd",
+      skipInstall: true,
+      force: true,
+      dependencyRange: "^0.0.0-test",
+      emit: (event) => events.push(event),
+      spawnRun: async () => ({
+        pid: 555,
+        pty: true,
+        exited: neverResolve(),
+        output: [],
+        write: (data) => writes.push(data),
+        resize: (size) => resizes.push(size),
+        kill: async () => {},
+      }),
+      listListeners: async () => listeners,
+      verifyHttp: async () => true,
+      listPortOwners: async () =>
+        new Map([...listeners].map((port) => [port, new Set<number>([555])])),
+      scrape: async (): Promise<ScrapeResult> => ({
+        ok: true,
+        title: "T",
+        iconPath: undefined,
+        iconUrl: undefined,
+      }),
+      resolveVector: async ({ tokens, cwd }) => ({
+        command: `/resolved/${tokens[0]}`,
+        args: tokens.slice(1),
+        cwd,
+      }),
+    });
+
+    await session.submitCommand("npx tool start");
+    expect(session.state).toBe("running");
+    // The running state must be the first emitted event, before any await on
+    // temp dirs, listener baselines, or PTY probes.
+    expect(events[0]?.type).toBe("state");
+    expect(events[0]).toMatchObject({ type: "state", state: "running" });
+
+    session.terminalInput("hi\n");
+    session.terminalResize({ cols: 120, rows: 40 });
+    expect(writes).toEqual(["hi\n"]);
+    expect(resizes).toEqual([{ cols: 120, rows: 40 }]);
+
+    listeners = new Set([19080]);
+    await waitFor(() => session.state === "discovered");
+    // Terminal stays live after discovery.
+    session.terminalInput("more\n");
+    expect(writes).toEqual(["hi\n", "more\n"]);
+  });
+
   it("materializes through the frozen form and reaches success", async () => {
     const events: WizardEvent[] = [];
     let runKilled = false;
@@ -181,16 +242,21 @@ describe("wizard session", () => {
       dependencyRange: "^0.0.0-test",
       platform: "linux",
       emit: (event) => events.push(event),
-      spawnRun: (): CommandRun => ({
+      spawnRun: async (): Promise<CommandRun> => ({
         pid: 100,
+        pty: false,
         exited: neverResolve(),
         output: [],
+        write: () => {},
+        resize: () => {},
         kill: async () => {
           runKilled = true;
         },
       }),
       listListeners: async () => listeners,
       verifyHttp: async () => true,
+      listPortOwners: async () =>
+        new Map([...listeners].map((port) => [port, new Set<number>([100])])),
       scrape: async (): Promise<ScrapeResult> => ({
         ok: true,
         title: "Materialize Title",

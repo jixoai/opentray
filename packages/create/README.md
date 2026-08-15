@@ -11,9 +11,14 @@ npx create-opentray
 
 1. Starts a token-guarded WebUI on `127.0.0.1` and opens your browser.
 2. You paste a start command (e.g. `npx somecommand start --xx`). It runs
-   immediately; the WebUI streams its shell output.
-3. Ports the command starts listening on are diffed against a pre-spawn
-   baseline; each new HTTP service is listed. The first is selected by default.
+   immediately in a **real interactive terminal** (ghostty-web renderer over a
+   PTY): you can answer prompts and interact with the command while the wizard
+   watches it. If the optional native PTY dependency is unavailable, the
+   preview degrades to a read-only terminal with a visible notice.
+3. Ports the command's own process tree starts listening on are diffed against
+   a pre-spawn baseline; each new HTTP service is listed (foreign listeners
+   such as browser DevTools sockets are never adopted). The first service is
+   selected by default.
 4. The selected service is polled: its `<title>` becomes the default app name
    and its favicon the default icon source. The default appId is derived from
    the command tokens before the first option, reversed and dot-joined
@@ -58,6 +63,16 @@ the tray menu.
 
 ## Platform notes
 
+- **Interactive preview terminal**: rendered by
+  [ghostty-web](https://github.com/coder/ghostty-web) (Ghostty's VT parser
+  compiled to WASM, xterm.js-compatible API) and attached through `node-pty`,
+  so prompts and TUI output work while the wizard watches the command.
+  `node-pty` is an optional dependency — when it cannot build, the preview
+  falls back to a read-only terminal with a visible notice; the wizard itself
+  keeps working.
+- The generated app runs the command supervised but headless (output goes to
+  `app.log`); commands that require an interactive TTY at runtime are not
+  supported inside the generated app.
 - macOS: the stable `.app` bundle is materialized by the OpenTray runtime on
   first launch; 打开应用 uses `open <bundle>.app` (cold launch via the launch
   descriptor, warm reopen focuses the retained window). Pin it to the Dock.

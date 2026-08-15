@@ -97,18 +97,26 @@ input endpoints clearly instead of failing the wizard.
 
 The wizard SHALL snapshot the set of listening TCP ports before spawning the
 command, poll the listener set while the command runs, and list every new
-listening port that answers an HTTP probe as a discovered service in
-first-seen order. The first verified service SHALL be selected by default and
-the user SHALL be able to switch selection. While no service appears the
-wizard SHALL keep polling and expose manual port entry as a fallback. Listener
-enumeration SHALL use `lsof` on macOS/Linux and `netstat` or PowerShell on
-Windows.
+listening port owned by the preview command's process tree that answers an
+HTTP probe as a discovered service in first-seen order. Ports owned by other
+processes (for example a browser's DevTools sockets) SHALL NOT be listed. The
+first verified service SHALL be selected by default and the user SHALL be able
+to switch selection. While no service appears the wizard SHALL keep polling
+and expose manual port entry as a fallback. Listener enumeration SHALL use
+`lsof` on macOS/Linux and `netstat` or PowerShell on Windows, with process
+ownership from the listener PID columns.
 
 #### Scenario: Multiple services list in first-seen order
 
 - **GIVEN** a command opens ports 19080 then 19081
 - **WHEN** both answer HTTP probes
 - **THEN** the WebUI SHALL list both services with 19080 selected by default
+
+#### Scenario: Foreign listeners are not adopted as services
+
+- **GIVEN** an unrelated local process (for example a browser DevTools socket) listens on a new port while the preview command runs
+- **WHEN** the wizard polls
+- **THEN** that port SHALL NOT appear in the service list
 
 #### Scenario: No service yet keeps waiting with fallback
 

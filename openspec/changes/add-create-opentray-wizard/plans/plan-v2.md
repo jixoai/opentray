@@ -2,13 +2,11 @@
 
 ## Current Round
 
-- Round: 3
-- Status: Browser acceptance of the interactive terminal passed end-to-end
-  (keystrokes reach the PTY), but exposed two wizard defects: page API calls
-  lacked the session token (every browser POST 401'd), and port discovery
-  adopted unrelated loopback listeners (Chrome DevTools sockets) as services.
-  Discovery now requires ownership by the preview process tree.
-- Previous plan backup: `plans/plan-v2.md`.
+- Round: 2
+- Status: Owner acceptance found the preview shell panel appears late and is
+  read-only; reopened to add a real interactive terminal (ghostty-web renderer
+  + PTY preview) and instant panel feedback.
+- Previous plan backup: `plans/plan-v1.md`.
 
 ## Workflow Command Surface
 

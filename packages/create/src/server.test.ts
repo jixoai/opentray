@@ -101,4 +101,53 @@ describe("wizard server", () => {
       await server.close();
     }
   });
+
+  it("validates terminal input and resize payloads", async () => {
+    const { server } = await createTestServer();
+    try {
+      const input = await post(new URL("/api/terminal-input", server.url), { data: "ls\n" }, {
+        authorization: `Bearer ${server.token}`,
+      });
+      expect(input.status).toBe(200);
+
+      const missing = await post(new URL("/api/terminal-input", server.url), {}, {
+        authorization: `Bearer ${server.token}`,
+      });
+      expect(missing.status).toBe(400);
+
+      const resize = await post(
+        new URL("/api/terminal-resize", server.url),
+        { cols: 120, rows: 40 },
+        { authorization: `Bearer ${server.token}` },
+      );
+      expect(resize.status).toBe(200);
+
+      const badResize = await post(
+        new URL("/api/terminal-resize", server.url),
+        { cols: -1, rows: 0 },
+        { authorization: `Bearer ${server.token}`,
+          "content-type": "application/json" },
+      );
+      expect(badResize.status).toBe(400);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("serves only whitelisted vendor assets", async () => {
+    const { server } = await createTestServer();
+    try {
+      const script = await fetch(new URL("/vendor/ghostty-web.js", server.url));
+      expect(script.status).toBe(200);
+      expect(script.headers.get("content-type")).toContain("text/javascript");
+
+      const traversal = await fetch(new URL("/vendor/..%2f..%2fpackage.json", server.url));
+      expect(traversal.status).toBe(404);
+
+      const unknown = await fetch(new URL("/vendor/not-an-asset.js", server.url));
+      expect(unknown.status).toBe(404);
+    } finally {
+      await server.close();
+    }
+  });
 });
