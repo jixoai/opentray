@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>create-opentray</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #121722; --panel2: #171e2b; --line: #232c3d;
+    --text: #e7edf7; --muted: #8b98ad; --accent: #3d8bff; --accent2: #2f6fd0;
+    --ok: #34c98e; --warn: #f5b73d; --err: #ff6b6b; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin-bottom: 22px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], select {
+    width: 100%; background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 9px 11px; font-size: 14px; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  button {
+    background: var(--accent); border: none; color: #fff; border-radius: 8px;
+    padding: 9px 18px; font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  button:hover { background: var(--accent2); }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); font-weight: 400; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #command { font-family: var(--mono); }
+  .console {
+    background: #05070b; border: 1px solid var(--line); border-radius: 8px;
+    font-family: var(--mono); font-size: 12px; padding: 12px; height: 220px;
+    overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: #b7c3d8;
+  }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    border: 1px solid var(--line); background: var(--panel2); color: var(--muted);
+    padding: 6px 12px; border-radius: 999px; cursor: pointer; font-family: var(--mono); font-size: 12px;
+  }
+  .chip.active { border-color: var(--accent); color: #fff; background: rgba(61,139,255,.15); }
+  iframe { width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.running { color: var(--warn); border-color: var(--warn); }
+  .badge.discovered { color: var(--ok); border-color: var(--ok); }
+  .badge.failed { color: var(--err); border-color: var(--err); }
+  dialog {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 14px; padding: 0; width: min(560px, 92vw);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.6); backdrop-filter: blur(3px); }
+  .dlg-head { padding: 18px 22px 6px; font-size: 17px; font-weight: 700; }
+  .dlg-body { padding: 8px 22px 18px; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; font-size: 13px; }
+  .kv b { color: var(--muted); font-weight: 500; }
+  .kv span { font-family: var(--mono); word-break: break-all; }
+  .dlg-log { background: #05070b; border: 1px solid var(--line); border-radius: 8px; font-family: var(--mono); font-size: 11.5px; padding: 10px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
+  .steps { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .step { font-size: 11px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .step.active { color: var(--warn); border-color: var(--warn); }
+  .step.done { color: var(--ok); border-color: var(--ok); }
+  .success-ico { font-size: 40px; }
+  .err-text { color: var(--err); }
+  .ok-text { color: var(--ok); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>create-opentray</h1>
+  <div class="sub">把任意启动命令打包成 OpenTray 托管的本地应用 <span id="stateBadge" class="badge">idle</span></div>
+
+  <div class="card" id="cmdCard">
+    <label>启动命令（例如 npx somecommand start --xx）</label>
+    <div class="row">
+      <input type="text" id="command" placeholder="npx somecommand start --xx" style="flex:1" />
+      <button id="runBtn">运行</button>
+      <button id="stopBtn" class="ghost" disabled>停止</button>
+    </div>
+    <div class="hint" id="cmdHint">命令会立即在本地运行一次，用于发现端口并抓取图标与标题。</div>
+  </div>
+
+  <div class="card hidden" id="logCard">
+    <label>Shell 输出</label>
+    <div class="console" id="console"></div>
+  </div>
+
+  <div class="card hidden" id="svcCard">
+    <label>发现的服务（点击切换，切换后重新抓取 favicon/title）</label>
+    <div class="chips" id="chips"></div>
+    <label style="margin-top:14px">预览</label>
+    <iframe id="preview" sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
+    <div class="hint" id="frameHint" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card hidden" id="formCard">
+    <label>OpenTray 应用参数（自动填充的值可修改；修改后不再被轮询覆盖）</label>
+    <div class="grid2">
+      <div>
+        <label>App ID</label>
+        <input type="text" id="appId" placeholder="start.somecommand.npx" />
+      </div>
+      <div>
+        <label>应用名称</label>
+        <input type="text" id="appName" placeholder="从页面标题抓取" />
+      </div>
+      <div>
+        <label>目标目录</label>
+        <input type="text" id="targetDir" />
+      </div>
+      <div>
+        <label>包管理器</label>
+        <select id="pm"><option value="npm">npm</option><option value="pnpm">pnpm</option><option value="bun">bun</option></select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button id="confirmBtn" disabled>确定创建应用</button>
+      <span class="hint">确认后表单将固定，不再随轮询变化。</span>
+    </div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg-head" id="dlgTitle">确认应用信息</div>
+  <div class="dlg-body">
+    <div id="dlgConfirm">
+      <div class="kv" id="dlgKv"></div>
+      <div class="row" style="margin-top:18px; justify-content:flex-end">
+        <button class="ghost" id="dlgBack">返回修改</button>
+        <button id="dlgGo">确认生成</button>
+      </div>
+    </div>
+    <div id="dlgPending" class="hidden">
+      <div class="steps" id="steps"></div>
+      <div class="dlg-log" id="dlgLog"></div>
+    </div>
+    <div id="dlgSuccess" class="hidden">
+      <div class="row"><span class="success-ico">✅</span><b>应用已生成</b></div>
+      <div class="kv" id="dlgSuccessKv" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:16px; justify-content:flex-end">
+        <button id="dlgOpenApp">打开应用</button>
+      </div>
+      <div class="hint" id="pinHint" style="margin-top:12px"></div>
+    </div>
+    <div id="dlgFailed" class="hidden">
+      <div class="row"><span class="success-ico">⚠️</span><b>生成失败</b></div>
+      <div class="err-text" id="dlgError" style="margin-top:8px"></div>
+      <div class="row" style="margin-top:16px; justify-content:flex-end">
+        <button class="ghost" id="dlgRetry">返回重试</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const state = { form: null, services: [], selectedPort: undefined, wizardState: "idle", frozen: null, result: null };
+
+const api = (path, body) =>
+  fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+
+function setStateBadge(s) {
+  const b = $("stateBadge");
+  b.textContent = s;
+  b.className = "badge " + (s === "discovered" || s === "success" ? s : s === "running" || s === "materializing" ? "running" : s === "failed" ? "failed" : "");
+}
+
+function appendConsole(text, stream) {
+  const el = $("console");
+  el.textContent += text;
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderServices() {
+  const chips = $("chips");
+  chips.textContent = "";
+  for (const svc of state.services) {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (svc.port === state.selectedPort ? " active" : "");
+    chip.textContent = ":" + svc.port + (svc.title ? " · " + svc.title : "");
+    chip.onclick = () => { void api("/api/select-service", { port: svc.port }); };
+    chips.appendChild(chip);
+  }
+  const preview = $("preview");
+  if (state.selectedPort) {
+    preview.classList.remove("hidden");
+    preview.src = "http://127.0.0.1:" + state.selectedPort + "/";
+    $("frameHint").textContent = "若预览空白，服务可能拒绝 iframe 嵌入；可在浏览器直接打开 http://127.0.0.1:" + state.selectedPort + "/";
+  }
+}
+
+function renderForm(values) {
+  state.form = values;
+  if (document.activeElement !== $("appId")) $("appId").value = values.appId;
+  if (document.activeElement !== $("appName")) $("appName").value = values.appName;
+  if (document.activeElement !== $("targetDir")) $("targetDir").value = values.targetDir;
+  $("pm").value = values.pm;
+  $("confirmBtn").disabled = !(state.wizardState === "discovered" || state.wizardState === "running");
+}
+
+const FORM_FIELDS = ["appId", "appName", "targetDir", "pm"];
+for (const field of FORM_FIELDS) {
+  $(field).addEventListener("input", () => {
+    if (state.wizardState === "frozen" || state.wizardState === "materializing" || state.wizardState === "success") return;
+    const patch = {}; patch[field] = $(field).value;
+    void api("/api/form", patch);
+  });
+  $(field).addEventListener("change", () => {
+    const patch = {}; patch[field] = $(field).value;
+    void api("/api/form", patch);
+  });
+}
+
+$("runBtn").onclick = async () => {
+  const command = $("command").value.trim();
+  if (!command) return;
+  $("runBtn").disabled = true;
+  await api("/api/command", { command });
+  $("runBtn").disabled = false;
+};
+$("stopBtn").onclick = () => void api("/api/stop");
+$("confirmBtn").onclick = () => void api("/api/confirm");
+
+function openDialog() { $("dlg").showModal(); }
+
+$("dlgBack").onclick = () => { $("dlg").close(); };
+$("dlgGo").onclick = () => void api("/api/create");
+$("dlgRetry").onclick = () => { $("dlg").close(); };
+$("dlgOpenApp").onclick = async () => {
+  // Open-app is executed by the wizard host; the WebUI requests it via the stop
+  // surface extension below.
+  await api("/api/open-app");
+};
+
+function showDlgSection(id) {
+  for (const section of ["dlgConfirm", "dlgPending", "dlgSuccess", "dlgFailed"]) {
+    $(section).classList.toggle("hidden", section !== id);
+  }
+}
+
+function renderConfirmDialog() {
+  const f = state.frozen ?? state.form;
+  $("dlgTitle").textContent = "确认应用信息";
+  $("dlgKv").textContent = "";
+  const rows = [
+    ["App ID", f.appId], ["应用名称", f.appName], ["目标目录", f.targetDir],
+    ["服务端口", state.selectedPort != null ? ":" + state.selectedPort : "—"],
+    ["包管理器", f.pm],
+  ];
+  for (const [k, v] of rows) {
+    const b = document.createElement("b"); b.textContent = k;
+    const s = document.createElement("span"); s.textContent = String(v ?? "");
+    $("dlgKv").append(b, s);
+  }
+  showDlgSection("dlgConfirm");
+  openDialog();
+}
+
+const STEP_ORDER = ["scaffold", "icon", "install", "launch", "bundle"];
+const stepState = {};
+function renderSteps() {
+  const box = $("steps");
+  box.textContent = "";
+  for (const step of STEP_ORDER) {
+    const el = document.createElement("span");
+    const st = stepState[step] ?? (isStepDone(step) ? "done" : "");
+    el.className = "step " + st;
+    el.textContent = step;
+    box.appendChild(el);
+  }
+}
+function isStepDone(step) { return stepState[step] === "done"; }
+
+function appendDlgLog(message) {
+  const el = $("dlgLog");
+  el.textContent += message + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderSuccess() {
+  $("dlgTitle").textContent = "应用已生成";
+  $("dlgSuccessKv").textContent = "";
+  const r = state.result ?? {};
+  const rows = [["项目目录", r.projectDir]];
+  if (r.bundlePath) rows.push(["macOS Bundle", r.bundlePath]);
+  for (const [k, v] of rows) {
+    const b = document.createElement("b"); b.textContent = k;
+    const s = document.createElement("span"); s.textContent = v;
+    $("dlgSuccessKv").append(b, s);
+  }
+  $("pinHint").textContent = state.pinHint ?? "";
+  showDlgSection("dlgSuccess");
+}
+
+const source = new EventSource("/api/events");
+source.onmessage = (ev) => {
+  const event = JSON.parse(ev.data);
+  switch (event.type) {
+    case "state": {
+      state.wizardState = event.state;
+      setStateBadge(event.state);
+      $("stopBtn").disabled = !(event.state === "running" || event.state === "discovered");
+      if (event.state === "running" || event.state === "discovered") {
+        $("logCard").classList.remove("hidden");
+        $("svcCard").classList.remove("hidden");
+        $("formCard").classList.remove("hidden");
+      }
+      if (event.state === "frozen") {
+        state.frozen = state.form;
+        renderConfirmDialog();
+      }
+      if (event.state === "materializing") {
+        $("dlgTitle").textContent = "正在生成应用…";
+        showDlgSection("dlgPending");
+        renderSteps();
+      }
+      if (event.state === "success") {
+        markAllDone();
+        renderSuccess();
+      }
+      if (event.state === "failed") {
+        if ($("dlg").open) {
+          $("dlgTitle").textContent = "生成失败";
+          $("dlgError").textContent = event.reason ?? "未知错误";
+          showDlgSection("dlgFailed");
+        }
+        $("cmdHint").textContent = event.reason ?? "命令失败，可修改后重试。";
+      }
+      break;
+    }
+    case "log":
+      appendConsole(event.chunk ?? "", event.stream);
+      break;
+    case "services":
+      state.services = event.services;
+      state.selectedPort = event.selectedPort;
+      renderServices();
+      $("confirmBtn").disabled = !(state.wizardState === "discovered" || state.wizardState === "running");
+      break;
+    case "scrape":
+      for (const svc of state.services) {
+        if (svc.port === event.port && event.title) svc.title = event.title;
+      }
+      renderServices();
+      break;
+    case "form":
+      if (state.wizardState !== "frozen" && state.wizardState !== "materializing") renderForm(event.values);
+      break;
+    case "materialize-step": {
+      if (stepState[event.step] !== "done") stepState[event.step] = "active";
+      renderSteps();
+      appendDlgLog("[" + event.step + "] " + event.message);
+      break;
+    }
+    case "materialize-log":
+      appendDlgLog(event.message);
+      break;
+    case "success": {
+      state.result = event;
+      state.pinHint = event.pinHint;
+      markAllDone();
+      renderSuccess();
+      break;
+    }
+  }
+  // Mark prior steps done when a new step starts.
+  if (event.type === "materialize-step") {
+    const idx = STEP_ORDER.indexOf(event.step);
+    for (let i = 0; i < idx; i++) stepState[STEP_ORDER[i]] = "done";
+    renderSteps();
+  }
+};
+
+// Mark every pipeline step done when success arrives.
+function markAllDone() { for (const s of STEP_ORDER) stepState[s] = "done"; renderSteps(); }
+</script>
+</body>
+</html>

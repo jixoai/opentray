@@ -24,6 +24,7 @@ real behavior, and diagnose the installed runtime graph.
 ## Quick Routing
 
 - First install and first-app path: read `references/getting-started.md`.
+- Turning an existing start command into an app via the `create-opentray` wizard: read `references/create-app.md`.
 - Version selection, protocol-line tags, and install drift: read `references/versioning.md`.
 - For a progressive path from first tray to extensions and host control, read `references/tutorial.md`.
 - Public API patterns and examples: read `references/api-patterns.md`.

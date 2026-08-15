@@ -20,6 +20,10 @@ The current platform model is tray-first:
 
 OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Application code calls `createTray()` directly and owns foreground/background lifetime itself.
 
+Already have a command that serves HTTP locally? `npx create-opentray` wraps it
+into an OpenTray-hosted app through a browser wizard — see the
+[create-app guide](./skills/opentray/references/create-app.md).
+
 For the first app, call `createTray()` directly. The default runtime starts the local broker automatically:
 
 ```ts

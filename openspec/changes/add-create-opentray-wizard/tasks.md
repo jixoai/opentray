@@ -31,26 +31,26 @@ app through a WebUI wizard):
 
 ## 3. OpenSpec Evidence Gate
 
-- [ ] 3.1 Run `bun run openspec:vision -- validate add-create-opentray-wizard` and fix strict schema/format errors.
-- [ ] 3.2 Run `bun run openspec:vision -- commit-check add-create-opentray-wizard --phase research-plan` and commit the ready plan/spec/task artifacts before product-code work starts.
+- [x] 3.1 Run `bun run openspec:vision -- validate add-create-opentray-wizard` and fix strict schema/format errors.
+- [x] 3.2 Run `bun run openspec:vision -- commit-check add-create-opentray-wizard --phase research-plan` and commit the ready plan/spec/task artifacts before product-code work starts.
 
 ## 4. Implementation
 
-- [ ] 4.1 Scaffold `packages/create` (package.json with bin/dist/files, tsconfig, vitest config, build copying the WebUI into dist, README contract) and add it to `.changeset/config.json` fixed group plus a minor changeset.
-- [ ] 4.2 Implement `tokenize.ts` + `app-id.ts` (shell-style splitting; pre-option segment reversal) with unit tests.
-- [ ] 4.3 Implement `port-scan.ts` (baseline snapshot, lsof/netstat/PowerShell listeners, HTTP verify) with fixture tests.
-- [ ] 4.4 Implement `scrape.ts` (NO_PROXY merge, title/favicon candidate ranking, temp-file download, first-letter fallback) with unit tests.
-- [ ] 4.5 Implement `command-run.ts` (spawn modes, ring buffer, exit reporting, tree kill on POSIX/Windows).
-- [ ] 4.6 Implement `launch-vector.ts` (absolute interpreter+entry resolution, PATH-independence) with unit tests.
-- [ ] 4.7 Implement `scaffold.ts` (opentray.app.json, main.mjs template, package.json, README) with artifact tests.
-- [ ] 4.8 Implement `materialize.ts` + `open-app.ts` (icon generation via vite-plugin generator, pm detection/install, detached first launch, ready marker, macOS bundle gate, open/focus).
-- [ ] 4.9 Implement `wizard.ts` state machine + `server.ts` (SSE, token/Host guard, JSON API) with API tests.
-- [ ] 4.10 Implement `bin.ts` (flag parsing, browser open per platform, signal cleanup) and the single-file `webui/index.html`.
-- [ ] 4.11 Add consumer documentation under `skills/opentray` and root README link.
+- [x] 4.1 Scaffold `packages/create` (package.json with bin/dist/files, tsconfig, vitest config, build copying the WebUI into dist, README contract) and add it to `.changeset/config.json` fixed group plus a minor changeset.
+- [x] 4.2 Implement `tokenize.ts` + `app-id.ts` (shell-style splitting; pre-option segment reversal) with unit tests.
+- [x] 4.3 Implement `port-scan.ts` (baseline snapshot, lsof/netstat/PowerShell listeners, HTTP verify) with fixture tests.
+- [x] 4.4 Implement `scrape.ts` (NO_PROXY merge, title/favicon candidate ranking, temp-file download, first-letter fallback) with unit tests.
+- [x] 4.5 Implement `command-run.ts` (spawn modes, ring buffer, exit reporting, tree kill on POSIX/Windows).
+- [x] 4.6 Implement `launch-vector.ts` (absolute interpreter+entry resolution, PATH-independence) with unit tests.
+- [x] 4.7 Implement `scaffold.ts` (opentray.app.json, main.mjs template, package.json, README) with artifact tests.
+- [x] 4.8 Implement `materialize.ts` + `open-app.ts` (icon generation via vite-plugin generator, pm detection/install, detached first launch, ready marker, macOS bundle gate, open/focus).
+- [x] 4.9 Implement `wizard.ts` state machine + `server.ts` (SSE, token/Host guard, JSON API) with API tests.
+- [x] 4.10 Implement `bin.ts` (flag parsing, browser open per platform, signal cleanup) and the single-file `webui/index.html`.
+- [x] 4.11 Add consumer documentation under `skills/opentray` and root README link.
 
 ## 5. Verification
 
-- [ ] 5.1 Run package vitest suites (tokenizer, appId, port fixtures, scrape, freeze semantics, launch vector, scaffold artifacts, server guard).
-- [ ] 5.2 Run an integration test driving CommandRun→discovery→scrape→scaffold against a `node -e` HTTP server command in a temp dir with `--skip-install`.
+- [x] 5.1 Run package vitest suites (tokenizer, appId, port fixtures, scrape, freeze semantics, launch vector, scaffold artifacts, server guard).
+- [x] 5.2 Run an integration test driving CommandRun→discovery→scrape→scaffold against a `node -e` HTTP server command in a temp dir with `--skip-install`.
 - [ ] 5.3 Run repo gates: `pnpm run build`, `pnpm run verify`, `openspec validate --all --strict`, `git diff --check`.
 - [ ] 5.4 Manual visual acceptance: built bin drives a real browser wizard run end-to-end on macOS (Dock icon/name, open-app cold/warm), recorded in review notes.
