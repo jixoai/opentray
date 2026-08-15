@@ -192,10 +192,10 @@ describe("wizard session", () => {
     expect(harness.session.form.appName).toBe("Frozen Title");
   });
 
-  it("refuses confirm without a selected service", async () => {
+  it("refuses confirm without a service port", async () => {
     const harness = createHarness();
     await harness.session.submitCommand("npx somecommand start --xx");
-    expect(() => harness.session.confirm()).toThrow("selected service");
+    expect(() => harness.session.confirm()).toThrow("服务端口");
   });
 
   it("emits the running state immediately and forwards terminal I/O", async () => {
@@ -252,6 +252,138 @@ describe("wizard session", () => {
     // Terminal stays live after discovery.
     session.terminalInput("more\n");
     expect(writes).toEqual(["hi\n", "more\n"]);
+  });
+
+  it("primes placeholder defaults from command text without spawning", async () => {
+    let spawned = 0;
+    const events: WizardEvent[] = [];
+    const session = createWizardSession({
+      cwd: "/tmp/wizard-cwd",
+      skipInstall: true,
+      force: true,
+      dependencyRange: "^0.0.0-test",
+      emit: (event) => events.push(event),
+      spawnRun: async () => {
+        spawned += 1;
+        return {
+          pid: 1,
+          pty: false,
+          exited: neverResolve(),
+          output: [],
+          write: () => {},
+          resize: () => {},
+          kill: async () => {},
+        };
+      },
+      listListeners: async () => new Set<number>(),
+      verifyHttp: async () => false,
+      scrape: async (): Promise<ScrapeResult> => ({
+        ok: true,
+        title: undefined,
+        iconPath: undefined,
+        iconUrl: undefined,
+      }),
+      resolveVector: async ({ tokens, cwd }) => ({
+        command: `/resolved/${tokens[0]}`,
+        args: tokens.slice(1),
+        cwd,
+      }),
+    });
+
+    session.prime("npx primed-tool start --xx");
+    expect(spawned).toBe(0);
+    expect(session.state).toBe("idle");
+    const defaults = lastFormDefaults(events);
+    expect(defaults?.appId).toBe("start.primed-tool.npx");
+    expect(defaults?.targetDir).toBe("/tmp/wizard-cwd/start-primed-tool-npx");
+  });
+
+  it("confirms and materializes from idle with a manual port (no run)", async () => {
+    const events: WizardEvent[] = [];
+    let materializePort = -1;
+    const session = createWizardSession({
+      cwd: "/tmp/wizard-cwd",
+      skipInstall: true,
+      force: true,
+      dependencyRange: "^0.0.0-test",
+      platform: "linux",
+      emit: (event) => events.push(event),
+      listListeners: async () => new Set<number>(),
+      verifyHttp: async () => false,
+      scrape: async (): Promise<ScrapeResult> => ({
+        ok: true,
+        title: undefined,
+        iconPath: undefined,
+        iconUrl: undefined,
+      }),
+      resolveVector: async ({ tokens, cwd }) => ({
+        command: `/resolved/${tokens[0]}`,
+        args: tokens.slice(1),
+        cwd,
+      }),
+      materializeContext: {
+        generateIcon: (async () => ({
+          schemaVersion: 1,
+          sourceSha256: "",
+          sourceImplementationSha256: null,
+          implementationSha256: "",
+          recipeVersion: "",
+          sharpVersion: "",
+          iconEncoderVersion: "",
+          figmaSquircleVersion: "",
+          outputPath: "",
+          icnsOutputPath: "",
+          icoOutputPath: "",
+          linuxPngOutputPaths: [],
+          manifestOutputPath: "",
+          appIcon: [],
+        })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
+        firstLaunchEntry: async () => ({ pid: 999, ready: Promise.resolve() }),
+        waitMs: async () => {},
+        runInstall: async ({ log }) => {
+          void log;
+        },
+      },
+    });
+    void materializePort;
+
+    session.prime("npx manual-port-tool serve");
+    session.updateForm({ servicePort: "19080" });
+    session.confirm();
+    expect(session.state).toBe("frozen");
+    expect(session.form.appId).toBe("serve.manual-port-tool.npx");
+    expect(session.form.servicePort).toBe("19080");
+    await session.create();
+    expect(session.state).toBe("success");
+    const success = events.find(
+      (event): event is Extract<WizardEvent, { type: "success" }> => event.type === "success",
+    );
+    expect(success).toBeDefined();
+  });
+
+  it("rejects confirmation when neither a service nor a manual port exists", async () => {
+    const session = createWizardSession({
+      cwd: "/tmp/wizard-cwd",
+      skipInstall: true,
+      force: true,
+      dependencyRange: "^0.0.0-test",
+      emit: () => {},
+      listListeners: async () => new Set<number>(),
+      verifyHttp: async () => false,
+      scrape: async (): Promise<ScrapeResult> => ({
+        ok: true,
+        title: undefined,
+        iconPath: undefined,
+        iconUrl: undefined,
+      }),
+      resolveVector: async ({ tokens, cwd }) => ({
+        command: `/resolved/${tokens[0]}`,
+        args: tokens.slice(1),
+        cwd,
+      }),
+    });
+    session.prime("npx portless-tool serve");
+    expect(() => session.confirm()).toThrow("服务端口");
   });
 
   it("materializes through the frozen form and reaches success", async () => {

@@ -47,6 +47,7 @@ export interface WizardFormValues {
   readonly appId: string;
   readonly appName: string;
   readonly iconPath: string;
+  readonly servicePort: string;
   readonly targetDir: string;
   readonly pm: "npm" | "pnpm" | "bun";
 }
@@ -111,6 +112,8 @@ export interface WizardSession {
   readonly form: WizardFormValues;
   readonly result: MaterializeResult | undefined;
   submitCommand(command: string): Promise<void>;
+  /** Derive placeholder defaults from command text without spawning anything. */
+  prime(command: string): void;
   selectService(port: number): void;
   updateForm(patch: Partial<WizardFormValues>): void;
   terminalInput(data: string): void;
@@ -124,6 +127,7 @@ interface FieldTouched {
   appId: boolean;
   appName: boolean;
   iconPath: boolean;
+  servicePort: boolean;
   targetDir: boolean;
   pm: boolean;
 }
@@ -150,11 +154,13 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let scrapedTitle: string | undefined;
   let resolvedVector: LaunchVector | undefined;
   let frozenForm: WizardFormValues | undefined;
-  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, targetDir: false, pm: false };
+  let resolvedServicePort: number | undefined;
+  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, servicePort: false, targetDir: false, pm: false };
   let form: WizardFormValues = {
     appId: "",
     appName: "",
     iconPath: "",
+    servicePort: "",
     targetDir: "",
     pm:
       options.packageManager ??
@@ -218,6 +224,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       );
       if (selectedPort !== port) {
         return; // selection moved during scrape
+      }
+      if (!touched.servicePort && form.servicePort !== String(port)) {
+        form = { ...form, servicePort: String(port) };
       }
       if (scraped.iconPath !== undefined) {
         currentIconPath = scraped.iconPath;
@@ -323,6 +332,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         appId: "",
         appName: "",
         iconPath: "",
+        ...(touched.servicePort ? { servicePort: form.servicePort } : { servicePort: "" }),
         targetDir: "",
         pm:
           options.packageManager ??
@@ -413,6 +423,20 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       startDiscoveryPolling();
     },
 
+    prime(command) {
+      if (state === "frozen" || state === "materializing" || state === "success") {
+        return;
+      }
+      const tokenized = tokenizeCommandLine(command);
+      if (!tokenized.ok) {
+        return; // keep previous placeholders for empty/invalid drafts
+      }
+      currentTokens = tokenized.tokens;
+      currentCommand = command;
+      emit({ type: "command-display", command });
+      publishForm();
+    },
+
     selectService(port) {
       if (state !== "discovered" && state !== "running") {
         return;
@@ -429,7 +453,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
 
     updateForm(patch) {
-      if (state !== "running" && state !== "discovered") {
+      if (state !== "idle" && state !== "running" && state !== "discovered" && state !== "failed") {
         return;
       }
       for (const key of Object.keys(patch) as (keyof WizardFormValues)[]) {
@@ -458,12 +482,20 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
 
     confirm() {
-      if (state !== "discovered" && state !== "running") {
+      if (state !== "idle" && state !== "running" && state !== "discovered" && state !== "failed") {
         throw new Error(`cannot confirm while ${state}`);
       }
-      if (selectedPort === undefined) {
-        throw new Error("cannot confirm without a selected service");
+      // The service port comes from discovery or the manual form input; without
+      // either, materialization cannot address the app window.
+      const manualPort = Number.parseInt(form.servicePort.trim(), 10);
+      const port =
+        Number.isInteger(manualPort) && manualPort > 0 && manualPort < 65_536
+          ? manualPort
+          : selectedPort;
+      if (port === undefined) {
+        throw new Error("缺少服务端口：请运行命令嗅探端口，或在表单中手动填写端口");
       }
+      resolvedServicePort = port;
       // Empty fields resolve to their placeholder defaults.
       const defaults = currentDefaults();
       const resolvedForm: WizardFormValues = {
@@ -492,8 +524,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (currentTokens.length === 0) {
         throw new Error("no command recorded");
       }
-      if (selectedPort === undefined) {
-        throw new Error("no service selected");
+      if (resolvedServicePort === undefined) {
+        throw new Error("no service port resolved");
       }
       setState("materializing");
 
@@ -521,7 +553,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               appId: frozen.appId,
               appName: frozen.appName,
               command: resolvedVector,
-              service: { port: selectedPort },
+              service: { port: resolvedServicePort },
               window: { width: 1_200, height: 800 },
             },
             targetDir: frozen.targetDir,
@@ -571,5 +603,5 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
 /** Exposed for tests: the touched-field bookkeeping semantics. */
 export const createFieldTouchedTracker = (): { touched: FieldTouched } => ({
-  touched: { appId: false, appName: false, iconPath: false, targetDir: false, pm: false },
+  touched: { appId: false, appName: false, iconPath: false, servicePort: false, targetDir: false, pm: false },
 });

@@ -18,7 +18,15 @@ import { tokenizeCommandLine } from "./tokenize";
 const serverScript = `const http = require("node:http");
 const server = http.createServer((req, res) => {
   if (req.url.startsWith("/icon.png")) {
-    const bytes = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(256, 9)]);
+    const bytes = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      // Minimal IHDR chunk (1x1, 8-bit RGBA) so the bytes are a decodable PNG.
+      Buffer.from([0x00, 0x00, 0x00, 0x0d]),
+      Buffer.from("IHDR", "latin1"),
+      Buffer.from([0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00]),
+      Buffer.from([0x1f, 0x15, 0xc4, 0x89]),
+      Buffer.alloc(256, 9),
+    ]);
     res.writeHead(200, { "content-type": "image/png" });
     res.end(bytes);
     return;
@@ -69,7 +77,7 @@ describe("wizard pipeline integration", () => {
       expect(scraped.ok).toBe(true);
       expect(scraped.title).toBe("Integration Service");
       expect(scraped.iconPath).toBeDefined();
-      expect(await readFile(scraped.iconPath!)).toHaveLength(256 + 8);
+      expect(await readFile(scraped.iconPath!)).toHaveLength(256 + 8 + 25);
 
       const targetDir = join(workDir, "project");
       const scaffold = await writeScaffold({

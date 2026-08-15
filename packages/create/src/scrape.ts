@@ -213,11 +213,56 @@ export const scrapeService = async (
     if (icon.contentType.includes("text/html") || icon.contentType.includes("image/svg")) {
       continue;
     }
+    // A corrupt favicon must never fail materialization later: only accept
+    // bytes with a recognizable raster signature; otherwise fall through to
+    // the glyph default.
+    if (!hasRasterImageSignature(icon.bytes)) {
+      continue;
+    }
     const iconPath = await writeIconTemp(icon.bytes, options.tempDir);
     return { ok: true, title, iconPath, iconUrl: url };
   }
 
   return { ok: true, title, iconPath: undefined, iconUrl: undefined };
+};
+
+/** Recognizable raster image signatures (PNG/JPEG/GIF/ICO/BMP/WebP). */
+const hasRasterImageSignature = (bytes: Buffer): boolean => {
+  if (bytes.length < 16) {
+    return false;
+  }
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a &&
+    bytes.subarray(12, 16).toString("latin1") === "IHDR"
+  ) {
+    return true; // PNG with a well-formed leading IHDR chunk
+  }
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return true; // JPEG
+  }
+  if (
+    bytes.subarray(0, 4).toString("latin1") === "RIFF" &&
+    bytes.subarray(8, 12).toString("latin1") === "WEBP"
+  ) {
+    return true; // WebP
+  }
+  if (bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x01 && bytes[3] === 0x00) {
+    return true; // ICO
+  }
+  if (bytes.subarray(0, 6).toString("latin1").startsWith("GIF8")) {
+    return true; // GIF
+  }
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) {
+    return true; // BMP
+  }
+  return false;
 };
 
 const writeIconTemp = async (bytes: Buffer, tempDir?: string): Promise<string> => {

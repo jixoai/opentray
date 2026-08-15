@@ -27,6 +27,7 @@ const EMPTY_VALUES: WizardFormValues = {
   appId: "",
   appName: "",
   iconPath: "",
+  servicePort: "",
   targetDir: "",
   pm: "npm",
 };
@@ -217,12 +218,21 @@ export function App(): React.JSX.Element {
 
   // ---- actions ----
   const running = wizardState === "running" || wizardState === "discovered";
-  // The form stays visible after confirmation so the frozen values remain readable.
-  const showForm =
-    running ||
-    wizardState === "frozen" ||
-    wizardState === "materializing" ||
-    wizardState === "success";
+  const manualPort = (() => {
+    const parsed = Number.parseInt(values.servicePort, 10);
+    return Number.isInteger(parsed) && parsed > 0 && parsed < 65_536 ? parsed : undefined;
+  })();
+  // The form is the core flow: usable from idle, before any command runs.
+  const showForm = true;
+  React.useEffect(() => {
+    const trimmed = command.trim();
+    if (trimmed.length === 0) return;
+    const timer = window.setTimeout(() => {
+      void api("/api/prime", { command: trimmed });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [command]);
+
   const runCommand = async (): Promise<void> => {
     const trimmed = command.trim();
     if (trimmed.length === 0) return;
@@ -377,15 +387,17 @@ export function App(): React.JSX.Element {
           />
           <div className="mt-4 flex items-center gap-3">
             <Button
-              disabled={selectedPort === undefined || !running}
+              disabled={manualPort === undefined && selectedPort === undefined}
               onClick={() => void confirmCreate()}
             >
               确定创建应用
             </Button>
             <span className="text-xs text-muted-foreground">
-              {selectedPort === undefined
-                ? "等待确认的 HTTP 服务（未嗅探到也可手动继续）"
-                : `已选服务 :${selectedPort}（点击状态栏服务可切换）`}
+              {manualPort !== undefined
+                ? `将使用手动端口 :${manualPort}`
+                : selectedPort !== undefined
+                  ? `已选服务 :${selectedPort}（点击状态栏服务可切换）`
+                  : "可先运行命令嗅探端口，或直接在表单中手动填写端口"}
             </span>
           </div>
         </section>

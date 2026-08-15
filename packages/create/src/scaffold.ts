@@ -119,6 +119,7 @@ export const createEntrySource = (config: ScaffoldAppConfig): string => `#!/usr/
 // in an OpenTray tray + appMode window. Quit lives in the tray menu.
 import { spawn, execFile } from "node:child_process";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
+import http from "node:http";
 import net from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -180,16 +181,101 @@ const killCommand = () => {
 let appIcon;
 try {
   const manifest = JSON.parse(await readFile(resolve(PROJECT_DIR, "app-icon", "app-icon.json"), "utf8"));
-  appIcon = manifest.appIcon;
+  // The manifest stores project-relative source paths; OpenTray validates file
+  // sources against the caller's cwd, so canonicalize them to absolute paths
+  // before dispatch (a reused broker cwd must never reinterpret App identity).
+  appIcon = manifest.appIcon.map((asset) => (
+    asset.source?.type === "file" && !asset.source.path.startsWith("/")
+      ? { ...asset, source: { ...asset.source, path: resolve(PROJECT_DIR, "app-icon", asset.source.path) } }
+      : asset
+  ));
 } catch {
   appIcon = undefined;
 }
 
-await waitForPort(config.service.port, 30_000).catch(async (error) => {
+const httpAnswers = (port) => new Promise((resolvePromise) => {
+  const request = http.get({ host: "127.0.0.1", port, path: "/", timeout: 1500 }, (response) => {
+    response.resume();
+    resolvePromise(response.statusCode !== undefined && response.statusCode > 0);
+  });
+  request.once("timeout", () => { request.destroy(); resolvePromise(false); });
+  request.once("error", () => resolvePromise(false));
+});
+
+const listProcessTreePids = async (rootPid) => {
+  if (process.platform === "win32") return [rootPid];
+  const pids = new Set([rootPid]);
+  const frontier = [rootPid];
+  while (frontier.length > 0) {
+    const pid = frontier.pop();
+    const children = await new Promise((resolvePromise) => {
+      execFile("pgrep", ["-P", String(pid)], (error, stdout) => {
+        resolvePromise(error ? [] : stdout.split("\\n").map((line) => Number(line)).filter((n) => Number.isInteger(n) && n > 0));
+      });
+    });
+    for (const child of children) {
+      if (!pids.has(child)) { pids.add(child); frontier.push(child); }
+    }
+  }
+  return [...pids];
+};
+
+const listOwnedListeningPorts = async (rootPid) => {
+  if (process.platform === "win32") return [];
+  const mine = new Set((await listProcessTreePids(rootPid)).map((pid) => String(pid)));
+  const output = await new Promise((resolvePromise) => {
+    execFile("lsof", ["-F", "pPn", "-i", "TCP", "-sTCP:LISTEN"], (error, stdout) => {
+      resolvePromise(error ? "" : stdout);
+    });
+  });
+  const ports = new Set();
+  let currentPid = "";
+  for (const line of output.split("\\n")) {
+    if (line.length === 0) continue;
+    const tag = line[0];
+    const value = line.slice(1);
+    if (tag === "p") currentPid = value;
+    else if (tag === "n" && currentPid !== "" && mine.has(currentPid)) {
+      const port = Number(value.split(":").pop());
+      if (Number.isInteger(port) && port > 0) ports.add(port);
+    }
+  }
+  return [...ports];
+};
+
+// Dynamic-port commands (listen(0)) bind a fresh port on every spawn, so the
+// frozen preview port may never open. Prefer the frozen port, but adopt any
+// HTTP-verified listener owned by this command's process tree — the same
+// ownership semantics the wizard used during preview.
+const waitForServicePort = async (frozenPort, timeoutMs) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastScan = 0;
+  let adoptedCandidates = [];
+  for (;;) {
+    try { await waitForPort(frozenPort, 1_500); return frozenPort; } catch {}
+    for (const candidate of adoptedCandidates) {
+      if (await httpAnswers(candidate)) return candidate;
+    }
+    if (Date.now() - lastScan > 5_000) {
+      lastScan = Date.now();
+      const owned = await listOwnedListeningPorts(command.pid).catch(() => []);
+      adoptedCandidates = owned.filter((port) => port !== frozenPort && port > 0);
+    }
+    if (Date.now() > deadline) {
+      throw new Error(\`service did not answer on 127.0.0.1:\${frozenPort} within \${timeoutMs}ms\`);
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+  }
+};
+
+const servicePort = await waitForServicePort(config.service.port, 30_000).catch(async (error) => {
   await logSink(\`[create-opentray] \${error.message}\\n\`, "utf8");
   await killCommand();
   throw error;
 });
+if (servicePort !== config.service.port) {
+  await logSink(\`[create-opentray] adopted dynamic service port \${servicePort} (frozen port \${config.service.port} never opened)\\n\`, "utf8");
+}
 
 const tray = await createTray({
   id: config.appId,
@@ -212,7 +298,7 @@ const tray = await createTray({
 });
 
 const webview = tray.extend(WebviewExt).createWebviewWindow({
-  url: \`http://127.0.0.1:\${config.service.port}\`,
+  url: \`http://127.0.0.1:\${servicePort}\`,
   width: config.window.width,
   height: config.window.height,
   title: config.appName,
@@ -242,5 +328,5 @@ tray.onMenuClick(({ itemId }) => {
 process.on("SIGINT", () => void quit());
 process.on("SIGTERM", () => void quit());
 
-console.log(\`\${READY_MARK_PREFIX} \${JSON.stringify({ appId: config.appId, port: config.service.port })}\`);
+console.log(\`\${READY_MARK_PREFIX} \${JSON.stringify({ appId: config.appId, port: servicePort })}\`);
 `;

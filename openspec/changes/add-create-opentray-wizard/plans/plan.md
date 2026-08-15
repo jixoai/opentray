@@ -3,11 +3,19 @@
 ## Current Round
 
 - Round: 5
-- Status: Owner testing found the terminal still completely unresponsive (the
-  Radix tabs content unmounts the terminal when switching tabs, destroying the
-  canvas/input handler), and asked that the form be directly usable without
-  running the command — running is only a preview that validates the command
-  and scrapes defaults. Walkthrough must use ego-browser.
+- Status: COMPLETED. ego-browser walkthrough verified: plain click-and-type on
+  the terminal works and survives tab round-trips (forceMount keeps the ghostty
+  instance alive; fetch-probe confirmed every keystroke posts to
+  /api/terminal-input); the identity form is fully usable from idle (prime
+  derives placeholders from command text without spawning; manual service-port
+  input substitutes for discovery; confirm resolves placeholders). The
+  walkthrough also exposed and fixed three real defects: corrupt favicons are
+  rejected at scrape and materialize falls back to the glyph icon;
+  dynamic-port (listen(0)) commands get their fresh port adopted via
+  process-tree ownership in the generated entry; app-icon manifest paths are
+  canonicalized to absolute before createTray dispatch. Final acceptance with
+  a real npm install reached success: bundle at
+  ~/.opentray/apps/plain-server-cjs-node/Final Service.app.
 - Previous plan backup: `plans/plan-v4.md`.
 
 ## Workflow Command Surface

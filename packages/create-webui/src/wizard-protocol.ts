@@ -11,6 +11,7 @@ export interface WizardFormValues {
   appId: string;
   appName: string;
   iconPath: string;
+  servicePort: string;
   targetDir: string;
   pm: "npm" | "pnpm" | "bun";
 }

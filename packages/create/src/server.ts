@@ -290,6 +290,16 @@ const handleApi = async (
       respond(response, 200, "application/json", '{"ok":true}\n');
       return;
     }
+    case "/api/prime": {
+      const command = typeof body.command === "string" ? body.command : "";
+      if (command.trim().length === 0) {
+        respond(response, 400, "application/json", '{"error":"command is required"}\n');
+        return;
+      }
+      session.prime(command);
+      respond(response, 200, "application/json", '{"ok":true}\n');
+      return;
+    }
     case "/api/select-service": {
       const port = Number(body.port);
       if (!Number.isInteger(port) || port <= 0) {
@@ -302,7 +312,7 @@ const handleApi = async (
     }
     case "/api/form": {
       const patch: Record<string, string> = {};
-      for (const key of ["appId", "appName", "iconPath", "targetDir", "pm"] as const) {
+      for (const key of ["appId", "appName", "iconPath", "servicePort", "targetDir", "pm"] as const) {
         const value = body[key];
         if (typeof value === "string") {
           patch[key] = value;

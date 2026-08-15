@@ -19,6 +19,9 @@ import { generateOpenTrayAppIcon } from "@opentray/vite-plugin";
 
 import { tcpProbe } from "./port-scan";
 import { writeGlyphIconTemp } from "./scrape";
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 import { toProjectDirectoryName } from "./app-id";
 import { writeScaffold, type ScaffoldAppConfig, type ScaffoldResult } from "./scaffold";
 
@@ -135,15 +138,34 @@ export const materialize = async (
     input.iconSourcePath ??
     (await writeGlyphIconTemp(input.config.appName, scaffold.appIconDir));
   const generate = context.generateIcon ?? generateOpenTrayAppIcon;
-  const iconMetadata = await generate({
-    sourcePath: iconSource,
-    icnsOutputPath: join(scaffold.appIconDir, "app-icon.icns"),
-    icoOutputPath: join(scaffold.appIconDir, "app-icon.ico"),
-    linuxOutputDirectory: join(scaffold.appIconDir, "linux"),
-    manifestOutputPath: join(scaffold.appIconDir, "app-icon.json"),
-    outputPath: join(scaffold.appIconDir, "app-icon.png"),
-    cachePath: join(scaffold.appIconDir, ".cache.json"),
-  });
+  const generateIntoScaffold = async (sourcePath: string) =>
+    generate({
+      sourcePath,
+      icnsOutputPath: join(scaffold.appIconDir, "app-icon.icns"),
+      icoOutputPath: join(scaffold.appIconDir, "app-icon.ico"),
+      linuxOutputDirectory: join(scaffold.appIconDir, "linux"),
+      manifestOutputPath: join(scaffold.appIconDir, "app-icon.json"),
+      outputPath: join(scaffold.appIconDir, "app-icon.png"),
+      cachePath: join(scaffold.appIconDir, ".cache.json"),
+    });
+  let iconMetadata;
+  try {
+    iconMetadata = await generateIntoScaffold(iconSource);
+  } catch (error) {
+    if (iconSource === input.iconSourcePath) {
+      // A user/scraped icon that cannot be decoded must never fail the whole
+      // materialization: fall back to the first-letter glyph.
+      context.log({
+        type: "log",
+        message: `icon source unusable (${errorMessage(error)}); falling back to glyph icon`,
+      });
+      iconMetadata = await generateIntoScaffold(
+        await writeGlyphIconTemp(input.config.appName, scaffold.appIconDir),
+      );
+    } else {
+      throw error;
+    }
+  }
   context.log({
     type: "log",
     message: `icon assets: icns + ico + ${iconMetadata.linuxPngOutputPaths.length} linux pngs`,

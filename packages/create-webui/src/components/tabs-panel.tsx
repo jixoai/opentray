@@ -162,7 +162,7 @@ export function TabsPanel({
           ))}
         </TabsList>
 
-        <TabsContent value="terminal" className="flex-1 flex flex-col mt-0">
+        <TabsContent value="terminal" forceMount className="flex-1 flex flex-col mt-0">
           <div
             ref={terminalHostRef}
             className="min-h-[260px] flex-1 bg-[#05070b] px-1"

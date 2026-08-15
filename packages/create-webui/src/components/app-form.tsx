@@ -75,6 +75,18 @@ export function AppForm({
         />
       </div>
       <div>
+        <Label htmlFor="servicePort">服务端口</Label>
+        <Input
+          id="servicePort"
+          className="mt-1 font-mono"
+          inputMode="numeric"
+          disabled={disabled}
+          value={values.servicePort}
+          placeholder="运行命令后自动嗅探；或手动填写"
+          onChange={(event) => onPatch({ servicePort: event.target.value })}
+        />
+      </div>
+      <div>
         <Label htmlFor="pm">包管理器</Label>
         <Select
           value={values.pm}

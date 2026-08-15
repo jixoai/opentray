@@ -19,7 +19,12 @@ import {
 
 const PNG_BYTES = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  Buffer.alloc(128, 7),
+  // IHDR chunk: length 13, type, 1x1 8-bit RGBA, CRC.
+  Buffer.from([0x00, 0x00, 0x00, 0x0d]),
+  Buffer.from("IHDR", "latin1"),
+  Buffer.from([0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00]),
+  Buffer.from([0x1f, 0x15, 0xc4, 0x89]),
+  Buffer.alloc(64, 7),
 ]);
 
 describe("extractTitle", () => {
@@ -152,6 +157,26 @@ describe("scrapeService", () => {
     expect(result.iconPath).toBeUndefined();
   });
 
+  it("rejects a corrupt PNG favicon and falls back to no icon", async () => {
+    // Signature followed by garbage (no IHDR chunk) — decoders reject it, and
+    // materialization must never inherit such a file.
+    const corrupt = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.alloc(256, 0),
+    ]);
+    const result = await scrapeService(19084, {
+      fetch: fetchMock({
+        pageHtml:
+          '<html><head><title>Corrupt Icon</title><link rel="icon" href="/bad.png" sizes="128x128"></head><body></body></html>',
+        iconBytes: new Map([["http://127.0.0.1:19084/bad.png", corrupt]]),
+      }),
+      tempDir: await mkdtemp(join(tmpdir(), "scrape-test-")),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.title).toBe("Corrupt Icon");
+    expect(result.iconPath).toBeUndefined();
+  });
+
   it("returns ok false when the page fetch fails", async () => {
     const result = await scrapeService(19083, {
       fetch: fetchMock({ pageOk: false }),
@@ -178,4 +203,5 @@ describe("glyph fallback", () => {
     const path = await writeGlyphIconTemp("Dev", dir);
     expect(await readFile(path, "utf8")).toContain(">D<");
   });
+
 });
