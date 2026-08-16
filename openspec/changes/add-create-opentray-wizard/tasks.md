@@ -99,7 +99,8 @@ app through a WebUI wizard):
 - [x] 4.32 Emit run-status lifecycle events on spawn/exit; stop discovery polling at exit; allow re-submission after process death.
 - [x] 4.33 WebUI: buffer log chunks until the terminal is ready and flush after; prewarm the ghostty module at page load.
 - [x] 4.34 WebUI: single Run/Interrupt toggle button bound to process liveness; command input editable again after death.
-- [x] 4.35 ego-browser walkthrough with the owner's exact commands: `npx @deepseek-ai/dsh web` (port-occupied error visible) and `--port 19000` (service discovered), button toggle, external kill restore.
+- [x] 4.35 ego-browser walkthrough
+- [x] 4.36 Align the dev script runtime with the openspecui reference: run the wizard via tsx (Node) so the native PTY is fully interactive on the developer path; Bun detection remains as defensive pipe degradation only. with the owner's exact commands: `npx @deepseek-ai/dsh web` (port-occupied error visible) and `--port 19000` (service discovered), button toggle, external kill restore.
 
 ## 5. Verification
 

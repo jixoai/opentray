@@ -19,7 +19,13 @@
   initializing is silently dropped (no pending buffer), the Run button does
   not become an Interrupt button while the command is alive, and an
   externally-killed process is not reflected (button stays disabled).
-- Previous plan backup: `plans/plan-v5.md`. ego-browser walkthrough verified: plain click-and-type on
+- Previous plan backup: `plans/plan-v5.md`.
+- Round 7 correction: the owner identified the Bun skip as treating symptoms.
+  The openspecui reference project solves this by never hosting the PTY under
+  Bun — its server runs on Node via tsx while Bun serves tooling scripts. The
+  repo dev script now runs the wizard through tsx (Node runtime), restoring
+  the fully interactive PTY on the developer path; the Bun detection stays as
+  defensive degradation only. ego-browser walkthrough verified: plain click-and-type on
   the terminal works and survives tab round-trips (forceMount keeps the ghostty
   instance alive; fetch-probe confirmed every keystroke posts to
   /api/terminal-input); the identity form is fully usable from idle (prime
