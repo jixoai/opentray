@@ -19,6 +19,9 @@ export interface CreateDialogProps {
   open: boolean;
   phase: "confirm" | "pending" | "success" | "failed";
   frozenValues: WizardFormValues;
+  /** Resolved icon thumbnail (chosen candidate/upload), when any. */
+  iconSrc: string | undefined;
+  iconLabel: string;
   selectedPort: number | undefined;
   currentStep: string;
   logs: readonly string[];
@@ -33,6 +36,8 @@ export function CreateDialog({
   open,
   phase,
   frozenValues,
+  iconSrc,
+  iconLabel,
   selectedPort,
   currentStep,
   logs,
@@ -75,8 +80,11 @@ export function CreateDialog({
               <dt className="text-muted-foreground">应用名称</dt>
               <dd className="break-all">{frozenValues.appName}</dd>
               <dt className="text-muted-foreground">图标</dt>
-              <dd className="font-mono break-all">
-                {frozenValues.iconPath || "favicon / 首字母图标"}
+              <dd className="flex items-center gap-2 break-all">
+                {iconSrc !== undefined ? (
+                  <img src={iconSrc} alt="应用图标" className="size-6 rounded object-contain" />
+                ) : null}
+                <span className="font-mono">{iconLabel}</span>
               </dd>
               <dt className="text-muted-foreground">目标目录</dt>
               <dd className="font-mono break-all">{frozenValues.targetDir}</dd>

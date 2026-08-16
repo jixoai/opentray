@@ -1,3 +1,7 @@
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { createWizardServer } from "./server";
@@ -5,17 +9,17 @@ import { createWizardSession, type WizardEvent } from "./wizard";
 
 const createTestServer = async () => {
   const events: WizardEvent[] = [];
+  const session = createWizardSession({
+    cwd: "/tmp/wizard-cwd",
+    skipInstall: true,
+    force: true,
+    dependencyRange: "^0.0.0-test",
+    emit: (event) => events.push(event),
+  });
   const server = await createWizardServer(
-    (emit) =>
-      createWizardSession({
-        cwd: "/tmp/wizard-cwd",
-        skipInstall: true,
-        force: true,
-        dependencyRange: "^0.0.0-test",
-        emit,
-      }),
+    () => session,
   );
-  return { events, server };
+  return { events, server, session };
 };
 
 const post = async (
@@ -146,6 +150,52 @@ describe("wizard server", () => {
 
       const unknown = await fetch(new URL("/vendor/not-an-asset.js", server.url));
       expect(unknown.status).toBe(404);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("serves scraped icon bytes and accepts uploads", async () => {
+    const { server, session } = await createTestServer();
+    try {
+      // Simulate a scraped candidate via the session seam.
+      const dir = await mkdtemp(join(tmpdir(), "icon-ep-test-"));
+      const iconPath = join(dir, "icon-0.bin");
+      await writeFile(iconPath, Buffer.from("fake-png-bytes-0123456789"));
+      session.replaceIconCandidates(19090, [
+        { index: 0, url: "http://127.0.0.1:19090/favicon.svg", path: iconPath, width: 512, height: 512, format: "svg" },
+      ]);
+
+      const bytes = await fetch(
+        new URL(`/api/icon-data/19090/0?token=${server.token}`, server.url),
+      );
+      expect(bytes.status).toBe(200);
+      expect(bytes.headers.get("content-type")).toBe("image/svg+xml");
+      expect(await bytes.text()).toContain("fake-png-bytes");
+
+      // Unauthorized without a token.
+      const denied = await fetch(new URL("/api/icon-data/19090/0", server.url));
+      expect(denied.status).toBe(401);
+
+      // Wrong port scope → not found.
+      const wrongPort = await fetch(
+        new URL(`/api/icon-data/19091/0?token=${server.token}`, server.url),
+      );
+      expect(wrongPort.status).toBe(404);
+
+      // Raw upload persists and reports a server-side path.
+      const upload = await fetch(new URL("/api/icon-upload", server.url), {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${server.token}`,
+          "content-type": "image/png",
+        },
+        body: Buffer.alloc(128, 3),
+      });
+      expect(upload.status).toBe(200);
+      const { path } = (await upload.json()) as { path: string };
+      expect(path.length).toBeGreaterThan(0);
+      expect(await readFile(path, "utf8").catch(() => "")).toHaveLength(128);
     } finally {
       await server.close();
     }

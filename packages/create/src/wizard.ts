@@ -6,7 +6,8 @@
 //    confirmation so no later poll can mutate it.
 // 3. Coordinate preview run, discovery polling, scrape polling, and teardown.
 
-import { mkdtemp } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,7 +23,7 @@ import {
   listListeningPorts,
   type DiscoveredService,
 } from "./port-scan";
-import { scrapeService } from "./scrape";
+import { scrapeService, type ScrapedIcon } from "./scrape";
 import { tokenizeCommandLine } from "./tokenize";
 import {
   detectPackageManager,
@@ -71,6 +72,7 @@ export type WizardEvent =
       readonly selectedPort: number | undefined;
     }
   | { readonly type: "scrape"; readonly port: number; readonly title?: string; readonly hasIcon: boolean }
+  | { readonly type: "icons"; readonly port: number; readonly icons: readonly ScrapedIcon[] }
   | {
       readonly type: "form";
       readonly values: WizardFormValues;
@@ -112,6 +114,16 @@ export interface WizardSession {
   readonly selectedPort: number | undefined;
   /** True while the preview process is alive (Run button shows Interrupt). */
   readonly runAlive: boolean;
+  /** Latest scraped icon candidates for the selected service, ranked by clarity. */
+  readonly iconCandidates: readonly ScrapedIcon[];
+  /** Persist an uploaded image into the session temp dir; returns its path. */
+  saveIconUpload(bytes: Buffer): Promise<string>;
+  /** Candidate lookup scoped to the port it was scraped from. */
+  iconCandidate(port: number, index: number): ScrapedIcon | undefined;
+  /** Select a scraped candidate as the icon source (marks the field touched). */
+  selectIconCandidate(port: number, index: number): boolean;
+  /** Test/extension seam: replace the scraped candidate set for a port. */
+  replaceIconCandidates(port: number, icons: readonly ScrapedIcon[]): void;
   readonly form: WizardFormValues;
   readonly result: MaterializeResult | undefined;
   submitCommand(command: string): Promise<void>;
@@ -152,6 +164,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let scraping = false;
   let tempIconDir: string | undefined;
   let currentIconPath: string | undefined;
+  let iconCandidates: readonly ScrapedIcon[] = [];
+  let iconPort: number | undefined;
   let currentTokens: readonly string[] = [];
   let currentCommand = "";
   let scrapedTitle: string | undefined;
@@ -232,17 +246,20 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (!touched.servicePort && form.servicePort !== String(port)) {
         form = { ...form, servicePort: String(port) };
       }
-      if (scraped.iconPath !== undefined) {
-        currentIconPath = scraped.iconPath;
-      }
+      // Candidates always refresh (possibly to an empty list); the clearest
+      // one remains the empty-field default.
+      iconCandidates = scraped.icons;
+      iconPort = port;
+      currentIconPath = scraped.icons[0]?.path;
       if (scraped.title !== undefined) {
         scrapedTitle = scraped.title;
       }
+      emit({ type: "icons", port, icons: scraped.icons });
       emit({
         type: "scrape",
         port,
         ...(scraped.title === undefined ? {} : { title: scraped.title }),
-        hasIcon: scraped.iconPath !== undefined,
+        hasIcon: scraped.icons.length > 0,
       });
       publishForm();
     } finally {
@@ -309,6 +326,34 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     get runAlive() {
       return runAlive;
     },
+    get iconCandidates() {
+      return iconCandidates;
+    },
+    iconCandidate(port, index) {
+      if (iconPort !== port) {
+        return undefined;
+      }
+      return iconCandidates.find((icon) => icon.index === index);
+    },
+    replaceIconCandidates(port, icons) {
+      iconPort = port;
+      iconCandidates = icons;
+    },
+
+    selectIconCandidate(port, index) {
+      if (state === "frozen" || state === "materializing" || state === "success") {
+        return false;
+      }
+      const candidate = session.iconCandidate(port, index);
+      if (candidate === undefined) {
+        return false;
+      }
+      touched.iconPath = true;
+      currentIconPath = candidate.path;
+      form = { ...form, iconPath: candidate.path };
+      publishForm();
+      return true;
+    },
     get form() {
       return form;
     },
@@ -332,6 +377,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       selectedPort = undefined;
       currentTokens = tokenized.tokens;
       currentIconPath = undefined;
+      iconCandidates = [];
       touched.appId = false;
       touched.appName = false;
       touched.targetDir = false;
@@ -453,6 +499,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       currentCommand = command;
       emit({ type: "command-display", command });
       publishForm();
+    },
+
+    async saveIconUpload(bytes) {
+      const dir = tempIconDir ?? (tempIconDir = await mkdtemp(join(tmpdir(), "create-opentray-")));
+      const name = `upload-${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.bin`;
+      const path = join(dir, name);
+      await writeFile(path, bytes);
+      return path;
     },
 
     selectService(port) {

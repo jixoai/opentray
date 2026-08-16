@@ -16,8 +16,10 @@ import { Input } from "@/components/ui/input";
 import {
   api,
   hostnameOf,
+  iconDataUrl,
   openEventStream,
   type DiscoveredService,
+  type IconCandidate,
   type WizardEvent,
   type WizardFormDefaults,
   type WizardFormValues,
@@ -49,6 +51,10 @@ export function App(): React.JSX.Element {
   const [services, setServices] = React.useState<readonly DiscoveredService[]>([]);
   const [selectedPort, setSelectedPort] = React.useState<number | undefined>();
   const [hasScrapedIcon, setHasScrapedIcon] = React.useState(false);
+  const [iconCandidates, setIconCandidates] = React.useState<IconCandidate[]>([]);
+  const [iconCandidatesPort, setIconCandidatesPort] = React.useState<number | undefined>();
+  const [selectedIconRef, setSelectedIconRef] = React.useState<string | undefined>();
+  const [uploadedIconUrl, setUploadedIconUrl] = React.useState<string | undefined>();
   const [activeTab, setActiveTab] = React.useState("terminal");
   const [iframeTabs, setIframeTabs] = React.useState<IframeTab[]>([]);
   const [status, setStatus] = React.useState<TerminalStatusBarState>({
@@ -77,6 +83,17 @@ export function App(): React.JSX.Element {
   valuesRef.current = values;
   const stateRef = React.useRef(wizardState);
   stateRef.current = wizardState;
+
+/** Whether the tracked selection no longer exists in the latest candidates. */
+const selectedIconRefStale = (
+  icons: readonly IconCandidate[],
+  ref: string | undefined,
+  port: number,
+): boolean => {
+  if (ref === undefined) return false;
+  const index = Number.parseInt(ref.split(":")[1] ?? "", 10);
+  return !icons.some((icon) => icon.index === index) || ref.split(":")[0] !== String(port);
+};
 
   // ---- ghostty prewarm: module + WASM load at page load, before any Run ----
   React.useEffect(() => {
@@ -188,6 +205,7 @@ export function App(): React.JSX.Element {
           // One iframe tab per confirmed service (TCP + HTTP verified).
           setIframeTabs((previous) => {
             const next = [...previous];
+            let added: number | undefined;
             for (const service of payload.services) {
               const existing = next.find((tab) => tab.port === service.port);
               if (existing === undefined) {
@@ -197,12 +215,25 @@ export function App(): React.JSX.Element {
                   history: [service.url],
                   historyIndex: 0,
                 });
+                added = service.port;
               }
+            }
+            if (added !== undefined) {
+              // A newly sniffed service opens its tab and takes focus.
+              setActiveTab(`svc-${added}`);
             }
             return next;
           });
           break;
         }
+        case "icons":
+          setIconCandidates(payload.icons);
+          setIconCandidatesPort(payload.port);
+          // Server-side selection reset: revert to the default candidate.
+          if (selectedIconRefStale(payload.icons, selectedIconRef, payload.port)) {
+            setSelectedIconRef(undefined);
+          }
+          break;
         case "scrape":
           setHasScrapedIcon(payload.hasIcon);
           break;
@@ -238,6 +269,24 @@ export function App(): React.JSX.Element {
     dialogOpenRef.current = dialogOpen;
   }, [dialogOpen]);
 
+  // Resolved icon for the confirm/success dialog.
+  const selectedCandidateIndex =
+    selectedIconRef === undefined ? undefined : Number.parseInt(selectedIconRef.split(":")[1] ?? "", 10);
+  const dialogIconSrc =
+    uploadedIconUrl !== undefined
+      ? uploadedIconUrl
+      : iconCandidatesPort !== undefined && selectedCandidateIndex !== undefined && iconCandidates.some((c) => c.index === selectedCandidateIndex)
+        ? iconDataUrl(iconCandidatesPort, selectedCandidateIndex)
+        : iconCandidatesPort !== undefined && iconCandidates[0] !== undefined && selectedIconRef === undefined
+          ? iconDataUrl(iconCandidatesPort, iconCandidates[0].index)
+          : undefined;
+  const dialogIconLabel =
+    uploadedIconUrl !== undefined
+      ? "本地图片"
+      : iconCandidates[0] !== undefined
+        ? `${iconCandidates[0].width}×${iconCandidates[0].height} ${iconCandidates[0].format.toUpperCase()}`
+        : "首字母图标";
+
   // ---- actions ----
   const running = wizardState === "running" || wizardState === "discovered";
   const manualPort = (() => {
@@ -266,6 +315,10 @@ export function App(): React.JSX.Element {
     setIframeTabs([]);
     setServices([]);
     setHasScrapedIcon(false);
+    setIconCandidates([]);
+    setIconCandidatesPort(undefined);
+    setSelectedIconRef(undefined);
+    setUploadedIconUrl(undefined);
     await api("/api/command", { command: trimmed });
   };
 
@@ -412,7 +465,46 @@ export function App(): React.JSX.Element {
             values={values}
             defaults={defaults}
             frozen={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
-            hasScrapedIcon={hasScrapedIcon}
+            iconCandidates={iconCandidates}
+            iconCandidatesPort={iconCandidatesPort}
+            uploadedIconUrl={uploadedIconUrl}
+            selectedIconRef={selectedIconRef}
+            onPickIconCandidate={(candidate) => {
+              if (iconCandidatesPort === undefined) return;
+              setSelectedIconRef(`${iconCandidatesPort}:${candidate.index}`);
+              setUploadedIconUrl(undefined);
+              void api("/api/icon-select", {
+                port: iconCandidatesPort,
+                index: candidate.index,
+              });
+            }}
+            onUploadIcon={(file) => {
+              const preview = URL.createObjectURL(file);
+              setUploadedIconUrl(preview);
+              setSelectedIconRef(undefined);
+              void file.arrayBuffer().then((buffer) => {
+                void fetch("/api/icon-upload", {
+                  method: "POST",
+                  headers: {
+                    "content-type": file.type || "application/octet-stream",
+                    authorization: `Bearer ${new URLSearchParams(location.search).get("token") ?? ""}`,
+                  },
+                  body: buffer,
+                })
+                  .then((response) => response.json() as Promise<{ path?: string }>)
+                  .then(({ path }) => {
+                    if (path === undefined || path.length === 0) return;
+                    setValues((previous) => ({ ...previous, iconPath: path }));
+                  })
+                  .catch(() => undefined);
+              });
+            }}
+            onClearIcon={() => {
+              setSelectedIconRef(undefined);
+              setUploadedIconUrl(undefined);
+              setValues((previous) => ({ ...previous, iconPath: "" }));
+              void api("/api/form", { iconPath: "" });
+            }}
             onPatch={(patch) => {
               setValues((previous) => ({ ...previous, ...patch }));
               void api("/api/form", patch);
@@ -440,6 +532,8 @@ export function App(): React.JSX.Element {
         open={dialogOpen}
         phase={dialogPhase}
         frozenValues={frozenValues}
+        iconSrc={dialogIconSrc}
+        iconLabel={dialogIconLabel}
         selectedPort={selectedPort}
         currentStep={currentStep}
         logs={dialogLogs}

@@ -102,11 +102,11 @@ app through a WebUI wizard):
 - [x] 4.35 ego-browser walkthrough
 - [x] 4.36 Align the dev script runtime with the openspecui reference (superseded by 4.37).
 - [x] 4.37 Implement the Bun-native PTY backend (see plan history).
-- [ ] 4.38 Rewrite the scraper: collect all link/favicon candidates + /favicon.ico, decode true dimensions (sharp; ICO via directory/PNG-payload/DIB extraction), perceptual-hash dedupe, rank by clarity; never skip SVG.
-- [ ] 4.39 Wizard/server: icon-candidates state + `icons` event; GET /api/icon-data/:port/:index (token auth); POST /api/icon-upload saving a local image to the session temp dir.
-- [ ] 4.40 WebUI: tabs strip above the toolbar; forceMount keep-alive for all tab contents (iframe must not reload); auto-open+focus a newly sniffed service tab.
-- [ ] 4.41 WebUI: square icon FileInput (drag/click upload with preview) + candidate thumbnails ranked by clarity, click fills the icon; full-width row; success dialog shows the chosen icon.
-- [ ] 4.42 ego-browser walkthrough with `npx @deepseek-ai/dsh web --port 0`: tabs order, iframe no-reload, SVG candidate visible+selectable, auto-focus, full create flow. with the owner's exact commands: `npx @deepseek-ai/dsh web` (port-occupied error visible) and `--port 19000` (service discovered), button toggle, external kill restore.
+- [x] 4.38 Rewrite the scraper: collect all link/favicon candidates + /favicon.ico, decode true dimensions (sharp; ICO via directory/PNG-payload/DIB extraction), perceptual-hash dedupe, rank by clarity; never skip SVG.
+- [x] 4.39 Wizard/server: icon-candidates state + `icons` event; GET /api/icon-data/:port/:index (token auth); POST /api/icon-upload saving a local image to the session temp dir.
+- [x] 4.40 WebUI: tabs strip above the toolbar; forceMount keep-alive for all tab contents (iframe must not reload); auto-open+focus a newly sniffed service tab.
+- [x] 4.41 WebUI: square icon FileInput (drag/click upload with preview) + candidate thumbnails ranked by clarity, click fills the icon; full-width row; success dialog shows the chosen icon.
+- [x] 4.42 ego-browser walkthrough with `npx @deepseek-ai/dsh web --port 0`: tabs order, iframe no-reload, SVG candidate visible+selectable, auto-focus, full create flow. with the owner's exact commands: `npx @deepseek-ai/dsh web` (port-occupied error visible) and `--port 19000` (service discovered), button toggle, external kill restore.
 
 ## 5. Verification
 

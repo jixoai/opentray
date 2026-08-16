@@ -124,6 +124,9 @@ importers:
       '@opentray/vite-plugin':
         specifier: workspace:*
         version: link:../vite-plugin
+      sharp:
+        specifier: ^0.33.5
+        version: 0.33.5
     devDependencies:
       ghostty-web:
         specifier: ^0.4.0

@@ -15,14 +15,19 @@ npx create-opentray
    immediately in a **real interactive terminal** inside a Chrome-style tabs
    panel: prompts, TUI output, and keystrokes all work.
 3. Confirmed HTTP services (TCP listener owned by the command's process tree
-   **and** answering an HTTP probe) each open an iframe tab automatically; the
-   tab's navigation bar shows an editable URL with back/forward/reload backed
-   by a per-tab history. The terminal tab's status bar shows cursor position,
+   **and** answering an HTTP probe) each open an iframe tab automatically —
+   newly sniffed tabs take focus — and stay alive across switches. The tab
+   strip sits above the context toolbar; on service tabs it shows an editable
+   URL with back/forward/reload backed by a per-tab history. The terminal tab's status bar shows cursor position,
    selection range, and clickable service entries that jump to the matching
    iframe tab by hostname.
-4. Auto-derived defaults (scraped title, favicon, derived appId) are shown as
+4. Auto-derived defaults (scraped title, derived appId) are shown as
    **input placeholders** — an empty field means "use the default"; edits win
-   over later scrapes. A dedicated icon input carries the icon fallback chain.
+   over later scrapes. The icon row is a square file picker plus scraped
+   candidates: every icon the page declares (SVG, apple-touch-icon, sized
+   PNG sets, /favicon.ico) is collected, measured by true pixel clarity,
+   deduplicated perceptually, and ranked; clicking a candidate (or uploading
+   a local image) selects it, and the clearest candidate is the default.
 5. 确定创建 freezes the resolved identity, shows a confirmation dialog, then
    确认生成 runs the pipeline with live logs: scaffold → icon generation →
    dependency install → first launch → (macOS) stable bundle verification.

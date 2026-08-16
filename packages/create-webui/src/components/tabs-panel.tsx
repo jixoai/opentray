@@ -90,62 +90,8 @@ export function TabsPanel({
 
   return (
     <div className="flex flex-col rounded-xl border border-border bg-card overflow-hidden">
-      {/* Context navigation bar */}
-      <div className="flex h-11 items-center gap-2 border-b border-border px-3">
-        {activeIframe === undefined ? (
-          <>
-            <TerminalIcon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate font-mono text-xs text-muted-foreground">
-              {command || "尚未运行命令"}
-            </span>
-          </>
-        ) : (
-          <>
-            <Button
-              variant="ghost"
-              size="iconSm"
-              disabled={!canBack}
-              onClick={() => onIframeHistoryMove(activeIframe.port, -1)}
-              aria-label="后退"
-            >
-              <ArrowLeft />
-            </Button>
-            <Button
-              variant="ghost"
-              size="iconSm"
-              disabled={!canForward}
-              onClick={() => onIframeHistoryMove(activeIframe.port, 1)}
-              aria-label="前进"
-            >
-              <ArrowRight />
-            </Button>
-            <Button
-              variant="ghost"
-              size="iconSm"
-              onClick={() => onIframeNavigate(activeIframe.port, activeIframe.url, "replace")}
-              aria-label="重新加载"
-            >
-              <RotateCw />
-            </Button>
-            <Globe className="size-4 shrink-0 text-muted-foreground" />
-            <Input
-              className="h-7 font-mono text-xs"
-              value={navDraft}
-              placeholder="输入 URL 跳转"
-              onChange={(event) => setNavDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                const next = normalizeUrl(navDraft);
-                if (next !== undefined) {
-                  onIframeNavigate(activeIframe.port, next, "push");
-                }
-              }}
-            />
-          </>
-        )}
-      </div>
-
       <Tabs value={activeTab} onValueChange={onActiveTabChange} className="flex-1 flex flex-col">
+        {/* Tabs strip first (browser convention), then the context toolbar. */}
         <TabsList>
           <TabsTrigger value="terminal">
             <TerminalIcon className="size-3.5" />
@@ -161,6 +107,61 @@ export function TabsPanel({
             </TabsTrigger>
           ))}
         </TabsList>
+
+        {/* Context navigation bar */}
+        <div className="flex h-11 items-center gap-2 border-y border-border px-3">
+          {activeIframe === undefined ? (
+            <>
+              <TerminalIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono text-xs text-muted-foreground">
+                {command || "尚未运行命令"}
+              </span>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                size="iconSm"
+                disabled={!canBack}
+                onClick={() => onIframeHistoryMove(activeIframe.port, -1)}
+                aria-label="后退"
+              >
+                <ArrowLeft />
+              </Button>
+              <Button
+                variant="ghost"
+                size="iconSm"
+                disabled={!canForward}
+                onClick={() => onIframeHistoryMove(activeIframe.port, 1)}
+                aria-label="前进"
+              >
+                <ArrowRight />
+              </Button>
+              <Button
+                variant="ghost"
+                size="iconSm"
+                onClick={() => onIframeNavigate(activeIframe.port, activeIframe.url, "replace")}
+                aria-label="重新加载"
+              >
+                <RotateCw />
+              </Button>
+              <Globe className="size-4 shrink-0 text-muted-foreground" />
+              <Input
+                className="h-7 font-mono text-xs"
+                value={navDraft}
+                placeholder="输入 URL 跳转"
+                onChange={(event) => setNavDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  const next = normalizeUrl(navDraft);
+                  if (next !== undefined) {
+                    onIframeNavigate(activeIframe.port, next, "push");
+                  }
+                }}
+              />
+            </>
+          )}
+        </div>
 
         <TabsContent value="terminal" forceMount className="flex-1 flex flex-col mt-0">
           <div
@@ -207,6 +208,7 @@ export function TabsPanel({
           <TabsContent
             key={tab.port}
             value={`svc-${tab.port}`}
+            forceMount
             className="flex-1 mt-0"
             style={{ display: activeTab === `svc-${tab.port}` ? "block" : "none" }}
           >

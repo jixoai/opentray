@@ -62,7 +62,20 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
       ok: true,
       title: scrapeState.title,
       iconPath: scrapeState.iconPath,
-      iconUrl: scrapeState.iconPath === undefined ? undefined : `http://127.0.0.1:${port}/x.png`,
+      ...(scrapeState.iconPath === undefined
+        ? { icons: [] }
+        : {
+            icons: [
+              {
+                index: 0,
+                url: `http://127.0.0.1:${port}/x.png`,
+                path: scrapeState.iconPath,
+                width: 128,
+                height: 128,
+                format: "png",
+              },
+            ],
+          }),
     }),
     resolveVector: async ({ tokens, cwd }) => ({
       command: `/resolved/${tokens[0]}`,
@@ -234,7 +247,7 @@ describe("wizard session", () => {
         ok: true,
         title: "T",
         iconPath: undefined,
-        iconUrl: undefined,
+        icons: [],
       }),
       pollIntervalMs: 1,
       scrapeIntervalMs: 1,
@@ -318,7 +331,7 @@ describe("wizard session", () => {
         ok: true,
         title: undefined,
         iconPath: undefined,
-        iconUrl: undefined,
+        icons: [],
       }),
       resolveVector: async ({ tokens, cwd }) => ({
         command: `/resolved/${tokens[0]}`,
@@ -351,7 +364,7 @@ describe("wizard session", () => {
         ok: true,
         title: undefined,
         iconPath: undefined,
-        iconUrl: undefined,
+        icons: [],
       }),
       resolveVector: async ({ tokens, cwd }) => ({
         command: `/resolved/${tokens[0]}`,
@@ -411,7 +424,7 @@ describe("wizard session", () => {
         ok: true,
         title: undefined,
         iconPath: undefined,
-        iconUrl: undefined,
+        icons: [],
       }),
       resolveVector: async ({ tokens, cwd }) => ({
         command: `/resolved/${tokens[0]}`,
@@ -453,7 +466,7 @@ describe("wizard session", () => {
         ok: true,
         title: "Materialize Title",
         iconPath: undefined,
-        iconUrl: undefined,
+        icons: [],
       }),
       resolveVector: async ({ tokens, cwd }) => ({
         command: `/resolved/${tokens[0]}`,

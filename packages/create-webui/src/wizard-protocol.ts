@@ -16,6 +16,15 @@ export interface WizardFormValues {
   pm: "npm" | "pnpm" | "bun";
 }
 
+/** One scraped icon candidate (ranked by clarity, deduplicated). */
+export interface IconCandidate {
+  index: number;
+  url: string;
+  width: number;
+  height: number;
+  format: string;
+}
+
 export interface WizardFormDefaults {
   appId: string;
   appName: string;
@@ -43,6 +52,7 @@ export type WizardEvent =
       selectedPort: number | undefined;
     }
   | { type: "scrape"; port: number; title?: string; hasIcon: boolean }
+  | { type: "icons"; port: number; icons: IconCandidate[] }
   | { type: "form"; values: WizardFormValues; defaults: WizardFormDefaults }
   | { type: "materialize-log"; message: string }
   | { type: "materialize-step"; step: string; message: string }
@@ -67,6 +77,10 @@ export const api = (path: string, body: Record<string, unknown> = {}): Promise<R
 
 export const openEventStream = (): EventSource =>
   new EventSource(`/api/events?token=${encodeURIComponent(WIZARD_TOKEN)}`);
+
+/** Candidate thumbnail source (img tags cannot send auth headers). */
+export const iconDataUrl = (port: number, index: number): string =>
+  `/api/icon-data/${port}/${index}?token=${encodeURIComponent(WIZARD_TOKEN)}`;
 
 /** Match a service URL to an iframe tab by hostname (port-agnostic). */
 export const hostnameOf = (url: string): string => {

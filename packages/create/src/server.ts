@@ -115,7 +115,36 @@ export const createWizardServer = async (
       return;
     }
 
-    if (url.pathname.startsWith("/api/")) {
+    // Icon bytes for candidate thumbnails: <img> tags cannot send headers, so
+  // auth accepts the same ?token= query the SSE stream uses.
+  const iconDataMatch = /^\/api\/icon-data\/(\d+)\/(\d+)$/.exec(url.pathname);
+  if (iconDataMatch !== null) {
+    if (!isAuthorized(request, url, token)) {
+      respond(response, 401, "text/plain", "unauthorized\n");
+      return;
+    }
+    const port = Number.parseInt(iconDataMatch[1] as string, 10);
+    const index = Number.parseInt(iconDataMatch[2] as string, 10);
+    const candidate = session.iconCandidate(port, index);
+    if (candidate === undefined) {
+      respond(response, 404, "text/plain", "not found\n");
+      return;
+    }
+    const bytes = await readFile(candidate.path).catch(() => undefined);
+    if (bytes === undefined) {
+      respond(response, 404, "text/plain", "not found\n");
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": ICON_CONTENT_TYPES[candidate.format] ?? "application/octet-stream",
+      "content-length": bytes.length,
+      "cache-control": "no-store",
+    });
+    response.end(bytes);
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/")) {
       if (!isAuthorized(request, url, token)) {
         respond(response, 401, "application/json", '{"error":"unauthorized"}\n');
         return;
@@ -191,6 +220,15 @@ const ghosttyPackageFile = (relative: string): string => {
   } catch {
     return "";
   }
+};
+
+const ICON_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  png: "image/png",
+  svg: "image/svg+xml",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  ico: "image/x-icon",
 };
 
 const ASSET_CONTENT_TYPES: Readonly<Record<string, string>> = {
@@ -278,6 +316,22 @@ const handleApi = async (
     respond(response, 405, "application/json", '{"error":"method not allowed"}\n');
     return;
   }
+  if (pathname === "/api/icon-upload") {
+    // Raw image bytes in the request body — must not pass the JSON reader.
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) {
+      const piece = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      chunks.push(piece);
+    }
+    const bytes = Buffer.concat(chunks);
+    if (bytes.length < 64) {
+      respond(response, 400, "application/json", '{"error":"image bytes are required"}\n');
+      return;
+    }
+    const path = await session.saveIconUpload(bytes);
+    respond(response, 200, "application/json", JSON.stringify({ path }) + "\n");
+    return;
+  }
   const body = await readJsonBody(request);
   switch (pathname) {
     case "/api/command": {
@@ -358,6 +412,17 @@ const handleApi = async (
       }
       session.terminalInput(data);
       respond(response, 200, "application/json", '{"ok":true}\n');
+      return;
+    }
+    case "/api/icon-select": {
+      const port = typeof body.port === "number" ? body.port : Number.NaN;
+      const index = typeof body.index === "number" ? body.index : Number.NaN;
+      if (!Number.isInteger(port) || !Number.isInteger(index)) {
+        respond(response, 400, "application/json", '{"error":"port and index are required"}\n');
+        return;
+      }
+      const ok = session.selectIconCandidate(port, index);
+      respond(response, 200, "application/json", JSON.stringify({ ok }) + "\n");
       return;
     }
     case "/api/icon-source": {

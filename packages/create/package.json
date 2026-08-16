@@ -31,7 +31,8 @@
   "dependencies": {
     "@opentray/packaging": "workspace:*",
     "@opentray/spec": "workspace:*",
-    "@opentray/vite-plugin": "workspace:*"
+    "@opentray/vite-plugin": "workspace:*",
+    "sharp": "^0.33.5"
   },
   "optionalDependencies": {
     "@lydell/node-pty": "^1.1.0"

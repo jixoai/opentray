@@ -3,7 +3,15 @@
 ## Current Round
 
 - Round: 8
-- Status: Owner review of the tabbed preview found: the tabs belong ABOVE the
+- Status: COMPLETED with `npx @deepseek-ai/dsh web --port 0` end to end:
+  tabs render above the context toolbar (verified by DOM geometry 117<153);
+  service tabs stay alive across switches (iframe load count 0 over a
+  round-trip); the dynamic port was discovered, its tab auto-focused, and the
+  SVG favicon became a loaded 50×50 candidate that fills the icon on click;
+  the confirm dialog previews the chosen SVG; generation reached success with
+  the favicon (no glyph fallback) materializing the stable bundle
+  ~/.opentray/apps/web-dsh-npx/DeepSeek Harness.app. Earlier findings that
+  motivated this round: the tabs belong ABOVE the
   context toolbar (current order is inverted); iframe tabs reload on every
   switch (content not kept alive); favicon scraping silently fails for SVG
   icons (`npx @deepseek-ai/dsh web --port 0` serves `/favicon.svg` — title

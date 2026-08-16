@@ -93,32 +93,34 @@ describe("favicon ranking", () => {
   });
 });
 
-describe("scrapeService", () => {
-  const html = (title: string): string =>
-    `<html><head><title>${title}</title>` +
-    `<link rel="icon" href="/small.png" sizes="16x16">` +
-    `<link rel="icon" href="/big.png" sizes="256x256">` +
-    `</head><body>ok</body></html>`;
+const fetchMock = (options: {
+  pageHtml?: string;
+  pageOk?: boolean;
+  iconBytes?: Map<string, Buffer>;
+}): ScrapeFetch => ({
+  async page(url) {
+    if (options.pageOk === false) {
+      return { ok: false, status: 0, body: "", headers: {} };
+    }
+    return { ok: true, status: 200, body: options.pageHtml ?? html("Scraped Title"), headers: {} };
+  },
+  async bytes(url) {
+    const bytes = options.iconBytes?.get(url);
+    if (bytes === undefined) {
+      return { ok: false, status: 404, bytes: Buffer.alloc(0), contentType: "" };
+    }
+    return { ok: true, status: 200, bytes, contentType: "image/png" };
+  },
+});
 
-  const fetchMock = (options: {
-    pageHtml?: string;
-    pageOk?: boolean;
-    iconBytes?: Map<string, Buffer>;
-  }): ScrapeFetch => ({
-    async page(url) {
-      if (options.pageOk === false) {
-        return { ok: false, status: 0, body: "", headers: {} };
-      }
-      return { ok: true, status: 200, body: options.pageHtml ?? html("Scraped Title"), headers: {} };
-    },
-    async bytes(url) {
-      const bytes = options.iconBytes?.get(url);
-      if (bytes === undefined) {
-        return { ok: false, status: 404, bytes: Buffer.alloc(0), contentType: "" };
-      }
-      return { ok: true, status: 200, bytes, contentType: "image/png" };
-    },
-  });
+const html = (title: string): string =>
+  `<html><head><title>${title}</title>` +
+  `<link rel="icon" href="/small.png" sizes="16x16">` +
+  `<link rel="icon" href="/big.png" sizes="256x256">` +
+  `</head><body>ok</body></html>`;
+
+describe("scrapeService", () => {
+
 
   it("scrapes the title and the largest favicon to a temp file", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "scrape-test-"));
@@ -204,4 +206,128 @@ describe("glyph fallback", () => {
     expect(await readFile(path, "utf8")).toContain(">D<");
   });
 
+
+
+});
+
+describe("icon candidate collection", () => {
+  /** Distinct art patterns: aHash must tell them apart at any size. */
+  const patternPng = async (size: number, pattern: "checker" | "gradient" | "stripes"): Promise<Buffer> => {
+    const sharpModule = await import("sharp");
+    const raw = Buffer.alloc(size * size * 3);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const idx = (y * size + x) * 3;
+        let shade: number;
+        if (pattern === "checker") {
+          shade = (Math.floor(x / Math.max(1, size / 8)) + Math.floor(y / Math.max(1, size / 8))) % 2 === 0 ? 230 : 20;
+        } else if (pattern === "gradient") {
+          shade = Math.floor((x / size) * 255);
+        } else {
+          shade = y % 2 === 0 ? 240 : 40;
+        }
+        raw[idx] = shade;
+        raw[idx + 1] = shade;
+        raw[idx + 2] = shade;
+      }
+    }
+    return sharpModule.default(raw, { raw: { width: size, height: size, channels: 3 } }).png().toBuffer();
+  };
+
+  it("collects an SVG favicon instead of skipping it", async () => {
+    const svg = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg>',
+    );
+    const result = await scrapeService(19085, {
+      fetch: fetchMock({
+        pageHtml:
+          '<html><head><title>SVG Site</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"></head><body></body></html>',
+        iconBytes: new Map([["http://127.0.0.1:19085/favicon.svg", svg]]),
+      }),
+      tempDir: await mkdtemp(join(tmpdir(), "scrape-test-")),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.title).toBe("SVG Site");
+    expect(result.icons).toHaveLength(1);
+    expect(result.icons[0]?.format).toBe("svg");
+    // viewBox-driven clarity ranks it as a large scalable source.
+    expect(result.icons[0]?.width).toBe(24);
+    expect(result.iconPath).toBe(result.icons[0]?.path);
+  });
+
+  it("collects multiple candidates ranked by true pixel clarity", async () => {
+    const small = await patternPng(16, "stripes");
+    const large = await patternPng(256, "gradient");
+    const result = await scrapeService(19086, {
+      fetch: fetchMock({
+        pageHtml:
+          '<html><head><title>Multi</title>' +
+          '<link rel="icon" href="/small.png" sizes="16x16">' +
+          '<link rel="apple-touch-icon" href="/large.png">' +
+          '</head><body></body></html>',
+        iconBytes: new Map([
+          ["http://127.0.0.1:19086/small.png", small],
+          ["http://127.0.0.1:19086/large.png", large],
+        ]),
+      }),
+      tempDir: await mkdtemp(join(tmpdir(), "scrape-test-")),
+    });
+    expect(result.icons).toHaveLength(2);
+    expect(result.icons[0]?.url).toBe("http://127.0.0.1:19086/large.png");
+    expect(result.icons[0]?.width).toBe(256);
+    expect(result.icons[1]?.width).toBe(16);
+  });
+
+  it("hides near-duplicate images (same art, other size)", async () => {
+    const small = await patternPng(32, "checker"); // same art as `large`…
+    const large = await patternPng(512, "checker"); // …scaled up → duplicate
+    const distinct = await patternPng(64, "gradient");
+    const result = await scrapeService(19087, {
+      fetch: fetchMock({
+        pageHtml:
+          '<html><head><title>Dedupe</title>' +
+          '<link rel="icon" href="/a.png" sizes="32x32">' +
+          '<link rel="icon" href="/b.png" sizes="512x512">' +
+          '<link rel="icon" href="/c.png" sizes="64x64">' +
+          '</head><body></body></html>',
+        iconBytes: new Map([
+          ["http://127.0.0.1:19087/a.png", small],
+          ["http://127.0.0.1:19087/b.png", large],
+          ["http://127.0.0.1:19087/c.png", distinct],
+        ]),
+      }),
+      tempDir: await mkdtemp(join(tmpdir(), "scrape-test-")),
+    });
+    expect(result.icons).toHaveLength(2);
+    // The clearest surviving copy of the duplicate pair wins.
+    expect(result.icons[0]?.url).toBe("http://127.0.0.1:19087/b.png");
+    expect(result.icons.map((i) => i.url)).not.toContain("http://127.0.0.1:19087/a.png");
+  });
+
+  it("cracks an ICO container to its largest frame", async () => {
+    const pngFrame = await patternPng(256, "stripes");
+    // ICONDIR + one directory entry pointing at the PNG payload.
+    const header = Buffer.alloc(6 + 16);
+    header.writeUInt16LE(0, 0); // reserved
+    header.writeUInt16LE(1, 2); // type icon
+    header.writeUInt16LE(1, 4); // count
+    header[6] = 0; // width 256
+    header[7] = 0; // height 256
+    header.writeUInt16LE(1, 8); // colors
+    header.writeUInt16LE(32, 12); // bpp
+    header.writeUInt32LE(pngFrame.length, 14);
+    header.writeUInt32LE(6 + 16, 18);
+    const ico = Buffer.concat([header, pngFrame]);
+    const result = await scrapeService(19088, {
+      fetch: fetchMock({
+        pageHtml:
+          '<html><head><title>ICO Site</title></head><body></body></html>',
+        iconBytes: new Map([["http://127.0.0.1:19088/favicon.ico", ico]]),
+      }),
+      tempDir: await mkdtemp(join(tmpdir(), "scrape-test-")),
+    });
+    expect(result.icons).toHaveLength(1);
+    expect(result.icons[0]?.format).toBe("png");
+    expect(result.icons[0]?.width).toBe(256);
+  });
 });
