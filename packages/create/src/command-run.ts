@@ -96,6 +96,12 @@ export const loadPtyModule = (
 };
 
 const defaultPtyProbe = async (): Promise<PtyModule | undefined> => {
+  // Bun loads the native module and spawns fine, but its PTY read thread never
+  // delivers onData — a silent empty terminal (verified 2026-08-16). Node is
+  // the supported interactive host; under Bun degrade to pipes immediately.
+  if (process.versions.bun !== undefined) {
+    return undefined;
+  }
   const require = createRequire(import.meta.url);
   for (const request of ["@lydell/node-pty", "node-pty"]) {
     try {
@@ -135,7 +141,9 @@ export const startCommandRun = async (options: CommandRunOptions): Promise<Comma
       options.onEvent({
         type: "pty-unavailable",
         message:
-          "node-pty 不可用，预览以非交互模式运行（无法向命令输入内容）。可安装 @lydell/node-pty 启用交互。",
+          process.versions.bun !== undefined
+            ? "Bun 运行时无法转发原生 PTY 输出，预览以非交互模式运行。使用 node 运行（如 npx create-opentray）可获得交互终端。"
+            : "node-pty 不可用，预览以非交互模式运行（无法向命令输入内容）。可安装 @lydell/node-pty 启用交互。",
       });
     }
   }

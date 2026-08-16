@@ -7,6 +7,18 @@ import * as React from "react";
 
 type GhosttyModule = typeof import("ghostty-web");
 
+// Shared import+init promise: prewarming at page load means the terminal is
+// ready the instant the user clicks Run instead of racing the first output.
+let ghosttyReady: Promise<GhosttyModule> | undefined;
+
+export const prewarmGhostty = (): void => {
+  ghosttyReady ??= (async () => {
+    const ghostty = (await import("ghostty-web")) as GhosttyModule;
+    await ghostty.init();
+    return ghostty;
+  })();
+};
+
 export interface TerminalHandle {
   write(data: string): void;
   reset(): void;
@@ -30,8 +42,8 @@ export async function createGhosttyTerminal(
 ): Promise<TerminalHandle | undefined> {
   let ghostty: GhosttyModule;
   try {
-    ghostty = (await import("ghostty-web")) as GhosttyModule;
-    await ghostty.init();
+    prewarmGhostty();
+    ghostty = await ghosttyReady!;
   } catch {
     return undefined;
   }

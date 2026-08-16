@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createWizardSession, type WizardEvent, type WizardOptions } from "./wizard";
-import type { CommandRun, CommandRunOptions } from "./command-run";
+import type { CommandRun, CommandRunEvent, CommandRunOptions } from "./command-run";
 import type { DiscoveredService } from "./port-scan";
 import type { ScrapeResult } from "./scrape";
 import type { MaterializeContext } from "./materialize";
@@ -16,6 +16,7 @@ interface Harness {
   setVerified(ports: readonly number[]): void;
   setScrape(result: MutableScrapeState): void;
   emitRunExit(code: number | null): void;
+  killRun(): void;
 }
 
 interface MutableScrapeState {
@@ -29,8 +30,10 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
   let verified: readonly number[] = [];
   let scrapeState: MutableScrapeState = {};
 
+  let runOnEvent: ((event: CommandRunEvent) => void) | undefined;
+
   const fakeRun = async (options: CommandRunOptions): Promise<CommandRun> => {
-    void options;
+    runOnEvent = options.onEvent;
     return {
       pid: 4321,
       pty: false,
@@ -82,7 +85,12 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
     setScrape(next) {
       scrapeState = next;
     },
-    emitRunExit() {},
+    emitRunExit() {
+      runOnEvent?.({ type: "exit", code: 1 });
+    },
+    killRun() {
+      runOnEvent?.({ type: "exit", code: 137 });
+    },
   };
 };
 
@@ -228,6 +236,8 @@ describe("wizard session", () => {
         iconPath: undefined,
         iconUrl: undefined,
       }),
+      pollIntervalMs: 1,
+      scrapeIntervalMs: 1,
       resolveVector: async ({ tokens, cwd }) => ({
         command: `/resolved/${tokens[0]}`,
         args: tokens.slice(1),
@@ -252,6 +262,33 @@ describe("wizard session", () => {
     // Terminal stays live after discovery.
     session.terminalInput("more\n");
     expect(writes).toEqual(["hi\n", "more\n"]);
+  });
+
+  it("emits run-status lifecycle and keeps discovered state when the process dies", async () => {
+    const harness = createHarness();
+    await harness.session.submitCommand("npx somecommand start --xx");
+    // Spawn emitted running:true.
+    expect(
+      harness.events.some(
+        (event) => event.type === "run-status" && event.running === true,
+      ),
+    ).toBe(true);
+
+    harness.setListeners(new Set([19080]));
+    await waitFor(() => harness.session.state === "discovered");
+    // Externally kill: the fake run's exit must flip liveness and stop timers
+    // without destroying the discovered state.
+    await harness.killRun();
+    await waitFor(() =>
+      harness.events.some(
+        (event) => event.type === "run-status" && event.running === false,
+      ),
+    );
+    expect(harness.session.runAlive).toBe(false);
+    expect(harness.session.state).toBe("discovered");
+    // Re-submission is allowed after the process died.
+    await harness.session.submitCommand("npx other-tool serve");
+    expect(harness.session.state).toBe("running");
   });
 
   it("primes placeholder defaults from command text without spawning", async () => {
@@ -461,5 +498,5 @@ describe("wizard session", () => {
     expect(success?.projectDir).toContain("start-somecommand-npx");
     expect(success?.pinHint).toBeTruthy();
     expect(session.result?.projectDir).toContain("start-somecommand-npx");
-  });
+  }, 20_000);
 });

@@ -35,6 +35,7 @@ export type WizardEvent =
   | { type: "state"; state: WizardState; reason?: string }
   | { type: "log"; stream: "stdout" | "stderr"; chunk: string }
   | { type: "term-mode"; interactive: boolean; message?: string }
+  | { type: "run-status"; running: boolean; code?: number | null }
   | { type: "command-display"; command: string }
   | {
       type: "services";

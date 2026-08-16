@@ -70,6 +70,14 @@ the tray menu.
   node-pty consumer); the wizard adds no interpretation on top.
 - The optional PTY dependency degrades to a read-only pipe mode with a visible
   notice when it cannot load; the wizard itself keeps working.
+- **Bun runtime**: `@lydell/node-pty` loads and spawns under Bun but its
+  output callback never delivers, so the wizard skips the PTY under Bun and
+  degrades to pipe mode with a notice (visible in the tab and the terminal).
+  Command output, discovery, and materialization all keep working; run the
+  wizard with Node (`npx create-opentray`) for the interactive terminal.
+- The Run button becomes an Interrupt button while the preview process is
+  alive and returns to Run when the process exits — including when it is
+  killed outside the wizard.
 - The generated app runs the command supervised but headless (output goes to
   `app.log`); commands that require an interactive TTY at runtime are not
   supported inside the generated app.

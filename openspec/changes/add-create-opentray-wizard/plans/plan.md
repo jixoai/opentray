@@ -3,7 +3,16 @@
 ## Current Round
 
 - Round: 6
-- Status: Owner retest still shows a completely empty terminal. Reproduction
+- Status: COMPLETED. Root cause of the empty terminal: under Bun (the
+  `pnpm create-opentray` path) @lydell/node-pty spawns but never delivers
+  onData. Fixed by skipping the native PTY under Bun (pipe fallback with a
+  visible notice — verified the EADDRINUSE stack renders, cursor 23:90) plus
+  pending-output buffering and ghostty prewarm so renderer startup can never
+  drop output. Run/Interrupt toggle verified with the owner's exact commands:
+  `npx @deepseek-ai/dsh web` shows the port-occupied error and restores Run
+  on exit; `--port 19000` reaches discovered (tab, port, and title
+  auto-filled); killing the process externally restores Run. Node dist path
+  re-verified interactive (PTY + output + lifecycle). Reproduction
   under bun (the `pnpm create-opentray` smoke path) proved @lydell/node-pty
   spawns but its onData never delivers under Bun, so zero output events reach
   the page; additionally output arriving while the ghostty renderer is still

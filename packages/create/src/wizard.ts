@@ -63,6 +63,7 @@ export type WizardEvent =
   | { readonly type: "state"; readonly state: WizardState; readonly reason?: string }
   | { readonly type: "log"; readonly stream: "stdout" | "stderr"; readonly chunk: string }
   | { readonly type: "term-mode"; readonly interactive: boolean; readonly message?: string }
+  | { readonly type: "run-status"; readonly running: boolean; readonly code?: number | null }
   | { readonly type: "command-display"; readonly command: string }
   | {
       readonly type: "services";
@@ -109,6 +110,8 @@ export interface WizardSession {
   readonly state: WizardState;
   readonly services: readonly DiscoveredService[];
   readonly selectedPort: number | undefined;
+  /** True while the preview process is alive (Run button shows Interrupt). */
+  readonly runAlive: boolean;
   readonly form: WizardFormValues;
   readonly result: MaterializeResult | undefined;
   submitCommand(command: string): Promise<void>;
@@ -155,6 +158,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let resolvedVector: LaunchVector | undefined;
   let frozenForm: WizardFormValues | undefined;
   let resolvedServicePort: number | undefined;
+  let runAlive = false;
   const touched: FieldTouched = { appId: false, appName: false, iconPath: false, servicePort: false, targetDir: false, pm: false };
   let form: WizardFormValues = {
     appId: "",
@@ -302,6 +306,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     get selectedPort() {
       return selectedPort;
     },
+    get runAlive() {
+      return runAlive;
+    },
     get form() {
       return form;
     },
@@ -310,7 +317,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
 
     async submitCommand(command) {
-      if (state !== "idle" && state !== "failed" && state !== "running") {
+      if (state !== "idle" && state !== "failed" && state !== "running" && state !== "discovered") {
         throw new Error(`cannot submit a command while ${state}`);
       }
       const tokenized = tokenizeCommandLine(command);
@@ -319,6 +326,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         return;
       }
       await session.stop();
+      runAlive = false;
       stopped = false;
       services = [];
       selectedPort = undefined;
@@ -383,8 +391,16 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             return;
           }
           if (event.type === "exit") {
+            // The process died (own exit, interrupt, or external kill): stop
+            // polling and tell the UI the run control can go back to Run.
+            runAlive = false;
+            stopTimers();
+            emit({
+              type: "run-status",
+              running: false,
+              ...(event.code === undefined ? {} : { code: event.code }),
+            });
             if (state === "running" && services.length === 0) {
-              stopTimers();
               setState(
                 "failed",
                 `command exited with ${event.code ?? "signal"} before any service appeared`,
@@ -420,6 +436,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             }),
       });
 
+      runAlive = true;
+      emit({ type: "run-status", running: true });
       startDiscoveryPolling();
     },
 

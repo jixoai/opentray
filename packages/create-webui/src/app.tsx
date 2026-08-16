@@ -7,6 +7,7 @@ import { CreateDialog } from "@/components/create-dialog";
 import { TabsPanel, type IframeTab, type TerminalStatusBarState } from "@/components/tabs-panel";
 import {
   createGhosttyTerminal,
+  prewarmGhostty,
   type TerminalHandle,
 } from "@/components/terminal-pane";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,7 @@ const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: 
 export function App(): React.JSX.Element {
   const [command, setCommand] = React.useState("");
   const [panelOpen, setPanelOpen] = React.useState(false);
+  const [runAlive, setRunAlive] = React.useState(false);
   const [wizardState, setWizardState] = React.useState<WizardState>("idle");
   const [failReason, setFailReason] = React.useState<string | undefined>();
   const [displayCommand, setDisplayCommand] = React.useState("");
@@ -69,10 +71,17 @@ export function App(): React.JSX.Element {
 
   const terminalHostRef = React.useRef<HTMLDivElement>(null);
   const terminalRef = React.useRef<TerminalHandle | undefined>(undefined);
+  /** Chunks that arrived before the renderer was ready, flushed in order. */
+  const pendingOutputRef = React.useRef<string[]>([]);
   const valuesRef = React.useRef(values);
   valuesRef.current = values;
   const stateRef = React.useRef(wizardState);
   stateRef.current = wizardState;
+
+  // ---- ghostty prewarm: module + WASM load at page load, before any Run ----
+  React.useEffect(() => {
+    prewarmGhostty();
+  }, []);
 
   // ---- ghostty terminal mount (host element exists once the panel opens) ----
   React.useEffect(() => {
@@ -88,6 +97,10 @@ export function App(): React.JSX.Element {
       }
       terminalRef.current = handle;
       setTermReady(true);
+      // Flush anything that arrived while the renderer was loading.
+      const pending = pendingOutputRef.current;
+      pendingOutputRef.current = [];
+      for (const chunk of pending) handle.write(chunk);
       handle.onData((data) => {
         if (interactiveRef.current) void api("/api/terminal-input", { data });
       });
@@ -141,21 +154,30 @@ export function App(): React.JSX.Element {
           }
           break;
         case "log": {
-          // Objective passthrough: write exactly what arrived.
+          // Objective passthrough: write exactly what arrived. Until the
+          // renderer is live, buffer instead of dropping.
           if (terminalRef.current !== undefined) {
             terminalRef.current.write(payload.chunk);
           } else if (termFallbackRef.current !== undefined) {
             setTermFallback((prev) => (prev ?? "") + payload.chunk);
+          } else {
+            pendingOutputRef.current.push(payload.chunk);
           }
           break;
         }
         case "term-mode":
           setInteractive(payload.interactive);
           if (!payload.interactive && payload.message !== undefined) {
-            terminalRef.current?.write(
-              `\u001b[33m${payload.message}\u001b[0m\r\n`,
-            );
+            const notice = `\u001b[33m${payload.message}\u001b[0m\r\n`;
+            if (terminalRef.current !== undefined) {
+              terminalRef.current.write(notice);
+            } else {
+              pendingOutputRef.current.push(notice);
+            }
           }
+          break;
+        case "run-status":
+          setRunAlive(payload.running);
           break;
         case "command-display":
           setDisplayCommand(payload.command);
@@ -326,24 +348,35 @@ export function App(): React.JSX.Element {
           className="font-mono"
           placeholder="npx somecommand start --xx"
           value={command}
-          disabled={running}
+          disabled={runAlive}
           onChange={(event) => setCommand(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !running) void runCommand();
+            if (event.key === "Enter" && !runAlive) void runCommand();
           }}
         />
-        <Button disabled={running} onClick={() => void runCommand()}>
-          <Play />
-          运行
-        </Button>
-        <Button
-          variant="outline"
-          disabled={!running}
-          onClick={() => void api("/api/stop", {})}
-        >
-          <Square />
-          停止
-        </Button>
+        {runAlive ? (
+          <Button
+            variant="destructive"
+            onClick={() => void api("/api/stop", {})}
+            aria-label="中断命令"
+          >
+            <Square />
+            中断
+          </Button>
+        ) : (
+          <Button
+            disabled={
+              wizardState === "materializing" ||
+              wizardState === "frozen" ||
+              wizardState === "success"
+            }
+            onClick={() => void runCommand()}
+            aria-label="运行命令"
+          >
+            <Play />
+            运行
+          </Button>
+        )}
       </div>
       {wizardState === "failed" && failReason !== undefined ? (
         <p className="font-mono text-xs text-red-400">{failReason}</p>
