@@ -134,23 +134,23 @@ non-interactive pipe mode with a visible notice instead of failing.
 - **WHEN** the advanced tray picker renders
 - **THEN** it SHALL also offer solid-color conversions of the candidates, deduplicated among themselves, and clicking any candidate SHALL select it as the tray icon
 
-#### Scenario: Show-startup-terminal renders the shared PTY tab
+#### Scenario: Show-startup-terminal opens a dedicated terminal window
 
 - **GIVEN** the advanced option enabled for a generated app
 - **WHEN** the app starts
-- **THEN** its window SHALL open immediately with the SAME terminal tab component the wizard uses (command display + status bar including listened ports), streaming the command's PTY output interactively
+- **THEN** it SHALL open a SEPARATE window dedicated to the terminal, reusing the wizard's terminal-page components (command bar + status bar including listened ports), streaming the command's PTY output interactively
 
-#### Scenario: Show-address-bar renders the shared iframe tab with Navigation API
+#### Scenario: Show-address-bar wraps service windows with an address bar
 
 - **GIVEN** the advanced option enabled for a generated app
-- **WHEN** its window renders service tabs
-- **THEN** they SHALL use the SAME iframe tab component with a top address bar whose navigation state is managed through the Web Navigation API (`window.navigation`), degrading gracefully where unavailable
+- **WHEN** a listened port opens its own dedicated window
+- **THEN** the window SHALL render an address-bar wrapper page (bar on top, service in an iframe) whose navigation state is managed through the Web Navigation API (`window.navigation`), degrading gracefully where unavailable; with the option off, port windows open the service URL directly
 
-#### Scenario: Every listened port opens automatically
+#### Scenario: Every listened port opens its own window
 
-- **GIVEN** a running generated app (or wizard preview)
+- **GIVEN** a running generated app
 - **WHEN** multiple owned ports are listening
-- **THEN** each SHALL have its own tab opened automatically
+- **THEN** each SHALL have its own dedicated window opened automatically
 
 #### Scenario: Detached ports mark the window title
 

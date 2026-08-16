@@ -3,7 +3,11 @@
 ## Current Round
 
 - Round: 9
-- Status: Owner approved the icon candidates and tabs behavior; new demands:
+- Status: In progress; round-9b correction from the owner: the generated app
+  must NOT embed the whole tabs panel. showStartupTerminal opens a DEDICATED
+  terminal window; every listened HTTP port opens its own DEDICATED window
+  (address-bar wrapper page when showAddressBar is on, direct URL otherwise).
+  Original scope that still stands: and tabs behavior; new demands:
   trayIcon must be configurable and default to the appIcon choice; an advanced
   panel offers trayIcon selection with EXTRA solid-color candidates (deduped),
   a show-startup-terminal option (default off) that renders the command's PTY
