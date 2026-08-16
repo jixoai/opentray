@@ -7,9 +7,9 @@
 //    generated entry's ready marker plus the stable Darwin bundle.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, stat, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   resolveDefaultDarwinAppBundlePath,
@@ -18,6 +18,30 @@ import {
 import { generateOpenTrayAppIcon } from "@opentray/vite-plugin";
 
 import { tcpProbe } from "./port-scan";
+import { fileURLToPath } from "node:url";
+import { access } from "node:fs/promises";
+
+const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+
+/** Prebuilt shell UI: prefer the packaged copy (dist/shell), else the
+ *  workspace build next to this package. */
+const resolveShellAssetsDir = async (): Promise<string | undefined> => {
+  const candidates = [
+    join(moduleDirectory, "shell"),
+    // Source checkout: moduleDirectory is packages/create/src → ../dist/shell.
+    join(moduleDirectory, "..", "dist", "shell"),
+    // tsdown chunk layout: moduleDirectory is packages/create/dist → ./shell
+    // (covered above) — plus a direct workspace fallback.
+    join(moduleDirectory, "..", "create-webui", "dist"),
+  ];
+  for (const candidate of candidates) {
+    if (await access(join(candidate, "index.html")).then(() => true, () => false)) {
+      return candidate;
+    }
+  }
+  return undefined;
+};
+const shellAssetsDir = await resolveShellAssetsDir();
 import { writeGlyphIconTemp } from "./scrape";
 
 const errorMessage = (error: unknown): string =>
@@ -34,6 +58,10 @@ export interface MaterializeInput {
   readonly targetDir: string;
   readonly dependencyRange: string;
   readonly iconSourcePath: string | undefined;
+  /** Tray icon source; defaults to the app icon source when omitted. */
+  readonly trayIconSourcePath?: string;
+  /** Generated-app shell options (startup terminal / address bar). */
+  readonly shell?: { showTerminal: boolean; showAddressBar: boolean };
   readonly packageManager: "npm" | "pnpm" | "bun";
   readonly skipInstall: boolean;
   readonly force: boolean;
@@ -125,11 +153,16 @@ export const materialize = async (
   }
 
   step("scaffold", "writing project files");
+  const shell = input.shell;
   const scaffold = await writeScaffold({
-    config: input.config,
+    config: {
+      ...input.config,
+      ...(shell === undefined ? {} : { shell }),
+    },
     targetDir,
     dependencyRange: input.dependencyRange,
     skipInstall: input.skipInstall,
+    ...(shellAssetsDir === undefined ? {} : { shellAssetsDir }),
   });
   context.log({ type: "log", message: `wrote ${scaffold.writtenFiles.join(", ")}` });
 
@@ -170,6 +203,39 @@ export const materialize = async (
     type: "log",
     message: `icon assets: icns + ico + ${iconMetadata.linuxPngOutputPaths.length} linux pngs`,
   });
+
+  step("icon", "writing tray icon asset");
+  // The tray icon defaults to the app icon source; solid variants already
+  // carry tray-appropriate sizing and transparency from the scraper.
+  const traySource = input.trayIconSourcePath ?? iconSource;
+  let trayAsset: { path: string; template: boolean } | undefined;
+  if (traySource === input.trayIconSourcePath || traySource !== input.iconSourcePath) {
+    const trayPath = join(scaffold.appIconDir, "tray-icon.png");
+    try {
+      const sharpModule = await import("sharp");
+      await sharpModule.default(traySource, { failOn: "none" })
+        .resize(128, 128, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toFile(trayPath);
+      trayAsset = { path: "app-icon/tray-icon.png", template: false };
+      context.log({ type: "log", message: "tray icon: app-icon/tray-icon.png" });
+    } catch (error) {
+      context.log({
+        type: "log",
+        message: `tray icon unavailable (${errorMessage(error)}); falling back to text tray`,
+      });
+    }
+  }
+
+
+  if (trayAsset !== undefined) {
+    // Amend the frozen config with the generated tray asset path so main.mjs
+    // wires it into the tray icon candidates.
+    const configPath = join(scaffold.projectDir, "opentray.app.json");
+    const raw = JSON.parse(await readFile(configPath, "utf8"));
+    raw.trayIcon = trayAsset;
+    await writeFile(configPath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+  }
 
   if (!input.skipInstall) {
     step("install", `installing dependencies with ${input.packageManager}`);
@@ -249,8 +315,19 @@ export const runPackageManagerInstall = async (options: RunInstallOptions): Prom
  * entry prints its ready marker. The child is unref'd so the wizard can exit
  * without taking the generated app down.
  */
+/**
+ * The generated app may embed a native PTY (@lydell/node-pty), which requires
+ * a Node host (Bun loads it but never delivers output). Always launch the
+ * generated entry with Node: prefer the Node currently executing the wizard,
+ * else resolve `node` from PATH.
+ */
+const nodeExecutable = (): string =>
+  process.versions.bun === undefined && process.execPath.includes("node")
+    ? process.execPath
+    : "node";
+
 export const firstLaunchEntry = async (projectDir: string): Promise<FirstLaunchHandle> => {
-  const child: ChildProcess = spawn(process.execPath, [join(projectDir, "main.mjs")], {
+  const child: ChildProcess = spawn(nodeExecutable(), [join(projectDir, "main.mjs")], {
     cwd: projectDir,
     stdio: ["ignore", "pipe", "inherit"],
     detached: true,

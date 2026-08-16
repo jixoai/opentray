@@ -18,3 +18,17 @@ self-contained OpenTray-hosted app project (tray + appMode WebView window +
 generated platform icon catalog + absolute shell-free launch vector) with a
 pending-log pipeline and a success dialog that can open the app and hints at
 taskbar/Dock pinning.
+
+Round 9: the wizard gains an advanced panel — a tray-icon picker (defaults to
+the app icon choice, additionally offers alpha-derived solid black/white
+silhouettes deduplicated by perceptual hash) and two generated-app window
+options, both off by default: `showStartupTerminal` opens a DEDICATED terminal
+window streaming the command's PTY (command bar, ghostty canvas, status bar
+with live listened ports), and `showAddressBar` wraps each service window in
+an address-bar page managed through the Web Navigation API (same-origin
+pseudo-routes drive the iframe; history fallback where the API is absent).
+Every listened HTTP port opens its own dedicated window; a port that stops
+listening marks its window title `(detached)` and recovers when it returns.
+Generated entries always launch with Node (a native PTY requires it even when
+the wizard itself runs under Bun), and generated apps ship the prebuilt shell
+UI plus `@lydell/node-pty` only when the terminal window is enabled.

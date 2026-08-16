@@ -16,7 +16,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { WizardEvent, WizardSession } from "./wizard";
+import type { WizardEvent, WizardFormValues, WizardSession } from "./wizard";
 import { openMaterializedApp } from "./open-app";
 
 export interface WizardServerHandle {
@@ -365,10 +365,19 @@ const handleApi = async (
       return;
     }
     case "/api/form": {
-      const patch: Record<string, string> = {};
-      for (const key of ["appId", "appName", "iconPath", "servicePort", "targetDir", "pm"] as const) {
+      const patch: Partial<{ -readonly [K in keyof WizardFormValues]: WizardFormValues[K] }> = {};
+      for (const key of ["appId", "appName", "iconPath", "trayIconPath", "servicePort", "targetDir"] as const) {
         const value = body[key];
         if (typeof value === "string") {
+          patch[key] = value;
+        }
+      }
+      if (body.pm === "npm" || body.pm === "pnpm" || body.pm === "bun") {
+        patch.pm = body.pm;
+      }
+      for (const key of ["showStartupTerminal", "showAddressBar"] as const) {
+        const value = body[key];
+        if (typeof value === "boolean") {
           patch[key] = value;
         }
       }
@@ -412,6 +421,17 @@ const handleApi = async (
       }
       session.terminalInput(data);
       respond(response, 200, "application/json", '{"ok":true}\n');
+      return;
+    }
+    case "/api/tray-icon-select": {
+      const port = typeof body.port === "number" ? body.port : Number.NaN;
+      const index = typeof body.index === "number" ? body.index : Number.NaN;
+      if (!Number.isInteger(port) || !Number.isInteger(index)) {
+        respond(response, 400, "application/json", '{"error":"port and index are required"}\n');
+        return;
+      }
+      const ok = session.selectTrayIconCandidate(port, index);
+      respond(response, 200, "application/json", JSON.stringify({ ok }) + "\n");
       return;
     }
     case "/api/icon-select": {

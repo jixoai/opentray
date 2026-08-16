@@ -2,8 +2,8 @@
 
 ## Current Round
 
-- Round: 9
-- Status: In progress; round-9b correction from the owner: the generated app
+- Round: 9 (round-9b dedicated-windows correction applied and verified)
+- Status: Implementation and walkthrough complete (owner correction applied): the generated app
   must NOT embed the whole tabs panel. showStartupTerminal opens a DEDICATED
   terminal window; every listened HTTP port opens its own DEDICATED window
   (address-bar wrapper page when showAddressBar is on, direct URL otherwise).

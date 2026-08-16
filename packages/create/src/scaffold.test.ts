@@ -65,7 +65,7 @@ describe("writeScaffold", () => {
     expect(entry).toContain("taskkill");
     expect(entry).toContain("opentray: ready");
     // The persisted launch vector must be shell-free and absolute.
-    expect(entry).toContain("command: process.execPath");
+    expect(entry).toContain('command: process.versions.bun !== undefined ? "node" : process.execPath');
   });
 });
 

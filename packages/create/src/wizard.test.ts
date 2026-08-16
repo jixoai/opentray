@@ -73,6 +73,7 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
                 width: 128,
                 height: 128,
                 format: "png",
+                variant: "original",
               },
             ],
           }),
@@ -409,7 +410,7 @@ describe("wizard session", () => {
       (event): event is Extract<WizardEvent, { type: "success" }> => event.type === "success",
     );
     expect(success).toBeDefined();
-  });
+  }, 20_000);
 
   it("rejects confirmation when neither a service nor a manual port exists", async () => {
     const session = createWizardSession({
@@ -446,6 +447,8 @@ describe("wizard session", () => {
       force: true,
       dependencyRange: "^0.0.0-test",
       platform: "linux",
+      pollIntervalMs: 1,
+      scrapeIntervalMs: 1,
       emit: (event) => events.push(event),
       spawnRun: async (): Promise<CommandRun> => ({
         pid: 100,

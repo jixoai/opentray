@@ -59,7 +59,28 @@ A self-contained project (public packages only):
   scraped favicon (or a first-letter glyph when nothing usable was found),
   through the same generator as `openTrayAppIconPlugin`. Raw favicon bytes are
   never used as App identity.
-- `package.json` — depends on `opentray` and `@opentray/ext-webview`.
+- `package.json` — depends on `opentray` and `@opentray/ext-webview`, plus
+  `@lydell/node-pty` only when 显示启动终端 is enabled.
+- `app-shell-server.mjs` + `app-shell/` (only when a shell option is enabled) —
+  a local host on `127.0.0.1` serving the prebuilt shell pages, the PTY
+  stream, and live port state.
+
+### Generated-app window modes
+
+- **显示启动终端** — the command runs through a PTY and a dedicated terminal
+  window opens beside the service: command bar, the same ghostty renderer the
+  wizard uses, and a status bar showing cursor, size, and every listened port.
+  Typing flows back to the command through the shell server.
+- **显示地址栏** — each service window renders behind an address bar managed
+  through the Web Navigation API: address entries are same-origin `?url=`
+  pseudo-routes that are intercepted, so only the service iframe navigates and
+  back/forward traverse real Navigation entries (history fallback where the
+  API is absent). Without the option, service windows open the URL directly.
+- Every listened HTTP port owned by the command opens its own dedicated window
+  automatically. When a port stops listening, that window's title becomes
+  `AppName (detached)` until the port returns.
+- Generated entries launch with Node even when the wizard ran under Bun: the
+  native PTY transport requires a Node host.
 
 ## After creation
 

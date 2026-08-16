@@ -163,7 +163,7 @@ describe("wizard server", () => {
       const iconPath = join(dir, "icon-0.bin");
       await writeFile(iconPath, Buffer.from("fake-png-bytes-0123456789"));
       session.replaceIconCandidates(19090, [
-        { index: 0, url: "http://127.0.0.1:19090/favicon.svg", path: iconPath, width: 512, height: 512, format: "svg" },
+        { index: 0, url: "http://127.0.0.1:19090/favicon.svg", path: iconPath, width: 512, height: 512, format: "svg", variant: "original" },
       ]);
 
       const bytes = await fetch(

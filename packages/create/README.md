@@ -50,18 +50,41 @@ create-opentray [targetDir] [--no-open] [--port <n>] [--pm npm|pnpm|bun]
 
 ```
 <project>/
-  package.json          deps: opentray, @opentray/ext-webview
-  opentray.app.json     frozen identity, command vector, service port, window size
-  main.mjs              entry: supervises the command, owns tray + appMode window
+  package.json          deps: opentray, @opentray/ext-webview (+ @lydell/node-pty
+                        when the startup terminal is enabled)
+  opentray.app.json     frozen identity, command vector, service port, window size,
+                        tray icon, shell options
+  main.mjs              entry: supervises the command, owns tray + windows
+  app-shell-server.mjs  local shell host (only when a shell option is enabled):
+                        serves app-shell/ + SSE state + terminal input
+  app-shell/            prebuilt shell UI pages (terminal.html, browse.html)
   app-icon/             generated ICNS/ICO/Linux PNGs + app-icon.json manifest
+                        (+ tray-icon.png when a tray icon is configured)
   README.md
 ```
 
 The entry spawns the recorded command (output → `app.log`), waits for the
 service port via TCP, then calls `createTray` with the frozen `appId`,
-`appName`, generated `appIcon`, and an explicit absolute `appLaunch` vector,
-and opens an `appMode: true` WebView window on the service URL. Quit lives in
-the tray menu.
+`appName`, generated `appIcon`, an optional tray icon, and an explicit absolute
+`appLaunch` vector, and opens an `appMode: true` WebView window on the service
+URL. Quit lives in the tray menu.
+
+### Shell options (dedicated windows)
+
+- 显示启动终端 — the command runs through a PTY and a DEDICATED terminal
+  window opens: command bar on top, the same ghostty renderer the wizard uses,
+  status bar with cursor, size, and live listened ports (detached ports are
+  marked). Input flows back through the shell server.
+- 显示地址栏 — every service window renders as an address-bar wrapper: the bar
+  sits above the service iframe and navigation is managed through the Web
+  Navigation API (same-origin `?url=` pseudo-routes are intercepted so only
+  the iframe moves; a history fallback covers engines without the API). With
+  the option off, service windows open the service URL directly.
+- Every listened HTTP port owned by the command opens its own window
+  automatically; when a port stops listening, its window title becomes
+  `AppName (detached)` and reverts when the port returns.
+- Generated entries always launch with Node even when the wizard ran under Bun
+  (the native PTY transport requires a Node host).
 
 ## Platform notes
 

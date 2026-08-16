@@ -3,6 +3,11 @@ import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Real-timer tests (discovery polling, materialize pipelines) are sensitive
+  // to CPU contention under parallel workers; keep files sequential.
+  test: {
+    fileParallelism: false,
+  },
   resolve: {
     alias: {
       "@opentray/spec": resolve(__dirname, "../spec/src/index.ts"),

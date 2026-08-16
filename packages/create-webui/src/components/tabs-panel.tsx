@@ -51,6 +51,25 @@ interface TabsPanelProps {
   onJumpToService(port: number): void;
 }
 
+/** Web Navigation API guard: the address bar is managed through
+ * window.navigation (currentEntry + navigate events) when available;
+ * history API is never used for the address bar. */
+const navigationApi = (): Navigation | undefined =>
+  typeof window !== "undefined" && "navigation" in window
+    ? (window as { navigation?: Navigation }).navigation
+    : undefined;
+
+const navigateViaApi = (url: string): boolean => {
+  const nav = navigationApi();
+  if (nav === undefined) return false;
+  try {
+    nav.navigate(url);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const normalizeUrl = (raw: string): string | undefined => {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return undefined;

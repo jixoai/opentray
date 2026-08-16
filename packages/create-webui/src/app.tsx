@@ -1,8 +1,10 @@
 /** create-opentray wizard page: command bar + tabs panel + identity form. */
-import { Play, Square } from "lucide-react";
+import { Play, Settings2, Square } from "lucide-react";
 import * as React from "react";
 
+import { AdvancedPanel } from "@/components/advanced-panel";
 import { AppForm } from "@/components/app-form";
+import { IconPicker } from "@/components/icon-picker";
 import { CreateDialog } from "@/components/create-dialog";
 import { TabsPanel, type IframeTab, type TerminalStatusBarState } from "@/components/tabs-panel";
 import {
@@ -30,9 +32,12 @@ const EMPTY_VALUES: WizardFormValues = {
   appId: "",
   appName: "",
   iconPath: "",
+  trayIconPath: "",
   servicePort: "",
   targetDir: "",
   pm: "npm",
+  showStartupTerminal: false,
+  showAddressBar: false,
 };
 const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "" };
 
@@ -55,6 +60,9 @@ export function App(): React.JSX.Element {
   const [iconCandidatesPort, setIconCandidatesPort] = React.useState<number | undefined>();
   const [selectedIconRef, setSelectedIconRef] = React.useState<string | undefined>();
   const [uploadedIconUrl, setUploadedIconUrl] = React.useState<string | undefined>();
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [selectedTrayRef, setSelectedTrayRef] = React.useState<string | undefined>();
+  const [uploadedTrayUrl, setUploadedTrayUrl] = React.useState<string | undefined>();
   const [activeTab, setActiveTab] = React.useState("terminal");
   const [iframeTabs, setIframeTabs] = React.useState<IframeTab[]>([]);
   const [status, setStatus] = React.useState<TerminalStatusBarState>({
@@ -319,6 +327,8 @@ const selectedIconRefStale = (
     setIconCandidatesPort(undefined);
     setSelectedIconRef(undefined);
     setUploadedIconUrl(undefined);
+    setSelectedTrayRef(undefined);
+    setUploadedTrayUrl(undefined);
     await api("/api/command", { command: trimmed });
   };
 
@@ -456,6 +466,73 @@ const selectedIconRefStale = (
         <pre className="max-h-56 overflow-auto rounded-xl border border-border bg-card p-3 font-mono text-xs whitespace-pre-wrap">
           {termFallback}
         </pre>
+      ) : null}
+
+      {/* Advanced options */}
+      {showForm ? (
+        <div>
+          {!advancedOpen ? (
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen(true)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Settings2 className="size-3.5" />
+              高级选项
+            </button>
+          ) : null}
+          <AdvancedPanel
+            open={advancedOpen}
+            onOpenChange={setAdvancedOpen}
+            frozen={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
+            values={values}
+            candidates={iconCandidates}
+            candidatesPort={iconCandidatesPort}
+            selectedTrayRef={selectedTrayRef}
+            uploadedTrayUrl={uploadedTrayUrl}
+            onPickTray={(candidate) => {
+              if (iconCandidatesPort === undefined) return;
+              setSelectedTrayRef(`${iconCandidatesPort}:${candidate.index}`);
+              setUploadedTrayUrl(undefined);
+              void api("/api/tray-icon-select", {
+                port: iconCandidatesPort,
+                index: candidate.index,
+              });
+            }}
+            onUploadTray={(file) => {
+              const preview = URL.createObjectURL(file);
+              setUploadedTrayUrl(preview);
+              setSelectedTrayRef(undefined);
+              void file.arrayBuffer().then((buffer) => {
+                void fetch("/api/icon-upload", {
+                  method: "POST",
+                  headers: {
+                    "content-type": file.type || "application/octet-stream",
+                    authorization: `Bearer ${new URLSearchParams(location.search).get("token") ?? ""}`,
+                  },
+                  body: buffer,
+                })
+                  .then((response) => response.json() as Promise<{ path?: string }>)
+                  .then(({ path }) => {
+                    if (path === undefined || path.length === 0) return;
+                    setValues((previous) => ({ ...previous, trayIconPath: path }));
+                    void api("/api/form", { trayIconPath: path });
+                  })
+                  .catch(() => undefined);
+              });
+            }}
+            onClearTray={() => {
+              setSelectedTrayRef(undefined);
+              setUploadedTrayUrl(undefined);
+              setValues((previous) => ({ ...previous, trayIconPath: "" }));
+              void api("/api/form", { trayIconPath: "" });
+            }}
+            onPatch={(patch) => {
+              setValues((previous) => ({ ...previous, ...patch }));
+              void api("/api/form", patch);
+            }}
+          />
+        </div>
       ) : null}
 
       {/* Identity form */}

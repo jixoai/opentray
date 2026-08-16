@@ -17,11 +17,14 @@ import { join } from "node:path";
 
 import { ensureLoopbackNoProxy, serviceUrl } from "./port-scan";
 
+/** Variant tag: the original art, or a solid-color silhouette derived from it. */
+export type IconVariant = "original" | "solid-black" | "solid-white";
+
 /** One scraped icon candidate, ranked and deduplicated. */
 export interface ScrapedIcon {
   /** Index within the candidate list (stable for /api/icon-data/:port/:index). */
   readonly index: number;
-  /** Absolute URL the bytes came from. */
+  /** Absolute URL the bytes came from (variants inherit their source URL). */
   readonly url: string;
   /** Absolute temp file holding the icon bytes. */
   readonly path: string;
@@ -30,6 +33,11 @@ export interface ScrapedIcon {
   readonly height: number;
   /** png | svg | jpeg | webp | gif | ico (ico payloads are extracted to png). */
   readonly format: string;
+  /** Which art this entry carries (originals feed the app-icon picker; the
+   *  advanced tray picker also shows solid variants). */
+  readonly variant: IconVariant;
+  /** Index of the original candidate a variant was derived from. */
+  readonly variantOf?: number;
 }
 
 export interface ScrapeResult {
@@ -269,24 +277,100 @@ export const scrapeService = async (
 
   // Rank by true clarity: pixel area descending (SVG scales infinitely, so
   // intrinsic (or default 512) dimensions rank it with the clearest sources).
-  collected.sort((a, b) => b.width * b.height - a.width * a.height);
-  const icons: ScrapedIcon[] = collected.map((c, index) => ({
-    index,
-    url: c.url,
-    path: c.path,
-    width: c.width,
-    height: c.height,
-    format: c.format,
-  }));
+  collected.sort((a, b) => b.width * a.height === a.width * b.height ? 0 : b.width * b.height - a.width * a.height);
+  const originals = collected.map((c, order) => ({ ...c, order }));
+
+  // Solid-color silhouettes (tray/template candidates): alpha mask filled
+  // with one color, rendered at a tray-appropriate size, deduped among
+  // themselves — identical silhouettes from different sources collapse.
+  const solids: { url: string; path: string; variant: IconVariant; variantOf: number; hash: string | undefined }[] = [];
+  for (const original of originals) {
+    for (const variant of ["solid-black", "solid-white"] as const) {
+      const solid = await renderSolidSilhouette(original.path, variant === "solid-black" ? black : white);
+      if (solid === undefined) {
+        continue;
+      }
+      const hash = await iconPerceptualHash(solid);
+      if (hash !== undefined && solids.some((s) => s.hash !== undefined && hamming(hash, s.hash) <= 6)) {
+        continue;
+      }
+      const path = await writeIconTemp(solid, dir);
+      solids.push({ url: original.url, path, variant, variantOf: original.order, hash });
+    }
+  }
+
+  const icons: ScrapedIcon[] = [
+    ...originals.map<ScrapedIcon>((c) => ({
+      index: c.order,
+      url: c.url,
+      path: c.path,
+      width: c.width,
+      height: c.height,
+      format: c.format,
+      variant: "original",
+    })),
+    ...solids.map<ScrapedIcon>((s, i) => ({
+      index: originals.length + i,
+      url: s.url,
+      path: s.path,
+      width: SOLID_SIZE,
+      height: SOLID_SIZE,
+      format: "png",
+      variant: s.variant,
+      variantOf: s.variantOf,
+    })),
+  ];
 
   return {
     ok: true,
     title,
-    iconPath: icons[0]?.path,
-    ...(icons[0] === undefined ? {} : { iconUrl: icons[0].url }),
+    iconPath: originals[0]?.path,
+    ...(originals[0] === undefined ? {} : { iconUrl: originals[0].url }),
     icons,
   };
-};
+}
+
+const black = { r: 0, g: 0, b: 0 };
+const white = { r: 255, g: 255, b: 255 };
+const SOLID_SIZE = 128;
+
+/**
+ * Render a solid-color silhouette from an icon's alpha mask (RGB discarded,
+ * alpha kept) — the shape language macOS tray templates want. Non-decodable
+ * sources (e.g. corrupt bytes) return undefined instead of failing the scrape.
+ */
+const renderSolidSilhouette = async (
+  sourcePath: string,
+  color: { r: number; g: number; b: number },
+): Promise<Buffer | undefined> => {
+  try {
+    const sharpModule = await import("sharp");
+    const sharp = sharpModule.default;
+    const { data, info } = await sharp(sourcePath, { failOn: "none" })
+      .resize(SOLID_SIZE, SOLID_SIZE, {
+        fit: "contain",
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    if (info.channels !== 4) {
+      return undefined;
+    }
+    const out = Buffer.alloc(data.length);
+    for (let i = 0; i < data.length; i += 4) {
+      out[i] = color.r;
+      out[i + 1] = color.g;
+      out[i + 2] = color.b;
+      out[i + 3] = data[i + 3] ?? 0;
+    }
+    return sharp(out, { raw: { width: info.width, height: info.height, channels: 4 } })
+      .png()
+      .toBuffer();
+  } catch {
+    return undefined;
+  }
+};;
 
 /** Recognizable raster image signatures (PNG/JPEG/GIF/ICO/BMP/WebP). */
 const hasRasterImageSignature = (bytes: Buffer): boolean => {

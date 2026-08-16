@@ -48,9 +48,15 @@ export interface WizardFormValues {
   readonly appId: string;
   readonly appName: string;
   readonly iconPath: string;
+  /** Empty = follow the app icon choice (default). */
+  readonly trayIconPath: string;
   readonly servicePort: string;
   readonly targetDir: string;
   readonly pm: "npm" | "pnpm" | "bun";
+  /** Advanced: render the command PTY in the generated app (default false). */
+  readonly showStartupTerminal: boolean;
+  /** Advanced: address-bar service tabs in the generated app (default false). */
+  readonly showAddressBar: boolean;
 }
 
 /** Placeholder suggestions shown in the form; empty fields resolve to these. */
@@ -122,6 +128,8 @@ export interface WizardSession {
   iconCandidate(port: number, index: number): ScrapedIcon | undefined;
   /** Select a scraped candidate as the icon source (marks the field touched). */
   selectIconCandidate(port: number, index: number): boolean;
+  /** Select a candidate (original or solid variant) as the TRAY icon. */
+  selectTrayIconCandidate(port: number, index: number): boolean;
   /** Test/extension seam: replace the scraped candidate set for a port. */
   replaceIconCandidates(port: number, icons: readonly ScrapedIcon[]): void;
   readonly form: WizardFormValues;
@@ -142,9 +150,12 @@ interface FieldTouched {
   appId: boolean;
   appName: boolean;
   iconPath: boolean;
+  trayIconPath: boolean;
   servicePort: boolean;
   targetDir: boolean;
   pm: boolean;
+  showStartupTerminal: boolean;
+  showAddressBar: boolean;
 }
 
 export const createWizardSession = (options: WizardOptions): WizardSession => {
@@ -164,6 +175,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let scraping = false;
   let tempIconDir: string | undefined;
   let currentIconPath: string | undefined;
+  let currentTrayIconPath: string | undefined;
   let iconCandidates: readonly ScrapedIcon[] = [];
   let iconPort: number | undefined;
   let currentTokens: readonly string[] = [];
@@ -173,13 +185,16 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let frozenForm: WizardFormValues | undefined;
   let resolvedServicePort: number | undefined;
   let runAlive = false;
-  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, servicePort: false, targetDir: false, pm: false };
+  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, trayIconPath: false, servicePort: false, targetDir: false, pm: false, showStartupTerminal: false, showAddressBar: false };
   let form: WizardFormValues = {
     appId: "",
     appName: "",
     iconPath: "",
+    trayIconPath: "",
     servicePort: "",
     targetDir: "",
+    showStartupTerminal: false,
+    showAddressBar: false,
     pm:
       options.packageManager ??
       detectPackageManager([], process.env.npm_config_user_agent),
@@ -340,6 +355,21 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       iconCandidates = icons;
     },
 
+    selectTrayIconCandidate(port, index) {
+      if (state === "frozen" || state === "materializing" || state === "success") {
+        return false;
+      }
+      const candidate = session.iconCandidate(port, index);
+      if (candidate === undefined) {
+        return false;
+      }
+      touched.trayIconPath = true;
+      currentTrayIconPath = candidate.path;
+      form = { ...form, trayIconPath: candidate.path };
+      publishForm();
+      return true;
+    },
+
     selectIconCandidate(port, index) {
       if (state === "frozen" || state === "materializing" || state === "success") {
         return false;
@@ -350,7 +380,13 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       }
       touched.iconPath = true;
       currentIconPath = candidate.path;
-      form = { ...form, iconPath: candidate.path };
+      if (!touched.trayIconPath) {
+        // Default coupling: the tray follows the app icon until overridden.
+        currentTrayIconPath = candidate.path;
+        form = { ...form, iconPath: candidate.path, trayIconPath: candidate.path };
+      } else {
+        form = { ...form, iconPath: candidate.path };
+      }
       publishForm();
       return true;
     },
@@ -377,6 +413,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       selectedPort = undefined;
       currentTokens = tokenized.tokens;
       currentIconPath = undefined;
+      currentTrayIconPath = undefined;
       iconCandidates = [];
       touched.appId = false;
       touched.appName = false;
@@ -386,8 +423,11 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         appId: "",
         appName: "",
         iconPath: "",
+        ...(touched.trayIconPath ? { trayIconPath: form.trayIconPath } : { trayIconPath: "" }),
         ...(touched.servicePort ? { servicePort: form.servicePort } : { servicePort: "" }),
         targetDir: "",
+        ...(touched.showStartupTerminal ? { showStartupTerminal: form.showStartupTerminal } : { showStartupTerminal: false }),
+        ...(touched.showAddressBar ? { showAddressBar: form.showAddressBar } : { showAddressBar: false }),
         pm:
           options.packageManager ??
           detectPackageManager([], process.env.npm_config_user_agent),
@@ -570,7 +610,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       resolvedServicePort = port;
       // Empty fields resolve to their placeholder defaults.
       const defaults = currentDefaults();
-      const resolvedForm: WizardFormValues = {
+      let resolvedForm: WizardFormValues = {
         ...form,
         appId: form.appId.trim().length > 0 ? form.appId : defaults.appId,
         appName: form.appName.trim().length > 0 ? form.appName : defaults.appName,
@@ -581,6 +621,15 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (resolvedForm.iconPath.trim().length > 0) {
         currentIconPath = resolvedForm.iconPath.trim();
       }
+      // The tray icon defaults to the resolved app icon choice.
+      const resolvedTrayIconPath =
+        resolvedForm.trayIconPath.trim().length > 0
+          ? resolvedForm.trayIconPath.trim()
+          : resolvedForm.iconPath.trim().length > 0
+            ? resolvedForm.iconPath.trim()
+            : (currentIconPath ?? "");
+      resolvedForm = { ...resolvedForm, trayIconPath: resolvedTrayIconPath };
+      currentTrayIconPath = resolvedTrayIconPath;
       form = resolvedForm;
       stopTimers();
       frozenForm = { ...form };
@@ -631,6 +680,13 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             targetDir: frozen.targetDir,
             dependencyRange: options.dependencyRange,
             iconSourcePath: currentIconPath,
+            ...(currentTrayIconPath === undefined
+              ? {}
+              : { trayIconSourcePath: currentTrayIconPath }),
+            shell: {
+              showTerminal: frozen.showStartupTerminal,
+              showAddressBar: frozen.showAddressBar,
+            },
             packageManager: frozen.pm,
             skipInstall: options.skipInstall,
             force: options.force,
@@ -675,5 +731,5 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
 /** Exposed for tests: the touched-field bookkeeping semantics. */
 export const createFieldTouchedTracker = (): { touched: FieldTouched } => ({
-  touched: { appId: false, appName: false, iconPath: false, servicePort: false, targetDir: false, pm: false },
+  touched: { appId: false, appName: false, iconPath: false, trayIconPath: false, servicePort: false, targetDir: false, pm: false, showStartupTerminal: false, showAddressBar: false },
 });

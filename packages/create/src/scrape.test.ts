@@ -248,11 +248,15 @@ describe("icon candidate collection", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.title).toBe("SVG Site");
-    expect(result.icons).toHaveLength(1);
-    expect(result.icons[0]?.format).toBe("svg");
+    const originals = result.icons.filter((i) => i.variant === "original");
+    expect(originals).toHaveLength(1);
+    expect(originals[0]?.format).toBe("svg");
     // viewBox-driven clarity ranks it as a large scalable source.
-    expect(result.icons[0]?.width).toBe(24);
-    expect(result.iconPath).toBe(result.icons[0]?.path);
+    expect(originals[0]?.width).toBe(24);
+    expect(result.iconPath).toBe(originals[0]?.path);
+    // Solid silhouettes derived from the SVG join the candidate list.
+    const solids = result.icons.filter((i) => i.variant !== "original");
+    expect(solids.map((s) => s.variant).sort()).toEqual(["solid-black", "solid-white"]);
   });
 
   it("collects multiple candidates ranked by true pixel clarity", async () => {
@@ -272,10 +276,11 @@ describe("icon candidate collection", () => {
       }),
       tempDir: await mkdtemp(join(tmpdir(), "scrape-test-")),
     });
-    expect(result.icons).toHaveLength(2);
-    expect(result.icons[0]?.url).toBe("http://127.0.0.1:19086/large.png");
-    expect(result.icons[0]?.width).toBe(256);
-    expect(result.icons[1]?.width).toBe(16);
+    const originals = result.icons.filter((i) => i.variant === "original");
+    expect(originals).toHaveLength(2);
+    expect(originals[0]?.url).toBe("http://127.0.0.1:19086/large.png");
+    expect(originals[0]?.width).toBe(256);
+    expect(originals[1]?.width).toBe(16);
   });
 
   it("hides near-duplicate images (same art, other size)", async () => {
@@ -298,10 +303,11 @@ describe("icon candidate collection", () => {
       }),
       tempDir: await mkdtemp(join(tmpdir(), "scrape-test-")),
     });
-    expect(result.icons).toHaveLength(2);
+    const originals = result.icons.filter((i) => i.variant === "original");
+    expect(originals).toHaveLength(2);
     // The clearest surviving copy of the duplicate pair wins.
-    expect(result.icons[0]?.url).toBe("http://127.0.0.1:19087/b.png");
-    expect(result.icons.map((i) => i.url)).not.toContain("http://127.0.0.1:19087/a.png");
+    expect(originals[0]?.url).toBe("http://127.0.0.1:19087/b.png");
+    expect(originals.map((i) => i.url)).not.toContain("http://127.0.0.1:19087/a.png");
   });
 
   it("cracks an ICO container to its largest frame", async () => {
@@ -326,8 +332,9 @@ describe("icon candidate collection", () => {
       }),
       tempDir: await mkdtemp(join(tmpdir(), "scrape-test-")),
     });
-    expect(result.icons).toHaveLength(1);
-    expect(result.icons[0]?.format).toBe("png");
-    expect(result.icons[0]?.width).toBe(256);
+    const originals = result.icons.filter((i) => i.variant === "original");
+    expect(originals).toHaveLength(1);
+    expect(originals[0]?.format).toBe("png");
+    expect(originals[0]?.width).toBe(256);
   });
 });

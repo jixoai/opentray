@@ -50,3 +50,28 @@ copyFileSync(
 );
 copyFileSync(wasmSource, resolve(vendorDir, "ghostty-vt.wasm"));
 console.log(`refreshed vendor assets in ${vendorDir}`);
+
+// Generated-app window pages (terminal / browse wrappers) with relative asset
+// paths, self-contained under dist/shell. terminal.html doubles as the
+// directory index for the shell server's SPA fallback.
+const shellTarget = resolve(root, "dist", "shell");
+mkdirSync(shellTarget, { recursive: true });
+for (const entry of readdirSync(webuiDist)) {
+  if (entry === "index.html") {
+    continue; // wizard page, not part of the generated-app shell
+  }
+  const source = resolve(webuiDist, entry);
+  if (statSync(source).isDirectory()) {
+    mkdirSync(resolve(shellTarget, entry), { recursive: true });
+    for (const asset of readdirSync(source)) {
+      copyFileSync(resolve(source, asset), resolve(shellTarget, entry, asset));
+    }
+  } else {
+    copyFileSync(source, resolve(shellTarget, entry));
+    // The terminal page doubles as the SPA index for bare-root requests.
+    if (entry === "terminal.html") {
+      copyFileSync(source, resolve(shellTarget, "index.html"));
+    }
+  }
+}
+console.log(`shell assets copied to ${shellTarget}`);

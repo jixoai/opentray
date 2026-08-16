@@ -11,18 +11,25 @@ export interface WizardFormValues {
   appId: string;
   appName: string;
   iconPath: string;
+  trayIconPath: string;
   servicePort: string;
   targetDir: string;
   pm: "npm" | "pnpm" | "bun";
+  showStartupTerminal: boolean;
+  showAddressBar: boolean;
 }
 
 /** One scraped icon candidate (ranked by clarity, deduplicated). */
+export type IconVariant = "original" | "solid-black" | "solid-white";
+
 export interface IconCandidate {
   index: number;
   url: string;
   width: number;
   height: number;
   format: string;
+  variant: IconVariant;
+  variantOf?: number;
 }
 
 export interface WizardFormDefaults {
