@@ -122,6 +122,37 @@ non-interactive pipe mode with a visible notice instead of failing.
 - **WHEN** a preview command starts
 - **THEN** the wizard SHALL fall back to pipe transport with a visible notice instead of a silent empty terminal
 
+#### Scenario: Tabs sit above the context toolbar
+
+- **GIVEN** the tabs panel
+- **WHEN** it renders
+- **THEN** the tab strip SHALL appear above the context toolbar (command on the terminal tab, URL bar on service tabs)
+
+#### Scenario: Service tabs are kept alive across switches
+
+- **GIVEN** an open service tab whose page has loaded
+- **WHEN** the user switches to another tab and back
+- **THEN** the service page SHALL NOT reload; its state SHALL persist
+
+#### Scenario: A newly sniffed service opens and focuses its tab
+
+- **GIVEN** the terminal tab active and a new owned HTTP service confirmed
+- **WHEN** the service tab is created
+- **THEN** the panel SHALL switch to it automatically
+
+#### Scenario: Icon candidates are ranked, deduplicated, and clickable
+
+- **GIVEN** a service whose HTML declares multiple icons (SVG, apple-touch-icon, sized PNGs)
+- **WHEN** the page is scraped
+- **THEN** every decodable candidate SHALL be collected with its true pixel dimensions, ranked by clarity descending, near-duplicate images SHALL be hidden, and each candidate SHALL be shown as a clickable thumbnail that fills the app icon on click
+- **AND** the icon input SHALL be a square file picker (with local upload) occupying its own full row, not a text placeholder
+
+#### Scenario: SVG favicons are scraped
+
+- **GIVEN** a page declaring `<link rel="icon" type="image/svg+xml" href="/favicon.svg">`
+- **WHEN** scraped
+- **THEN** the SVG SHALL be collected as a candidate (never silently skipped) and remain usable for icon generation
+
 #### Scenario: Run button reflects process lifecycle
 
 - **GIVEN** a preview command running
