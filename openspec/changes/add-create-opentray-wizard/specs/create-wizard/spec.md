@@ -110,11 +110,17 @@ non-interactive pipe mode with a visible notice instead of failing.
 - **WHEN** output chunks arrive before the terminal instance is ready
 - **THEN** the chunks SHALL be buffered and flushed in order once ready; no byte SHALL be dropped due to renderer startup
 
-#### Scenario: Bun runtime degrades to read-only pipes with a notice
+#### Scenario: Bun runtime attaches through the built-in Terminal API
 
-- **GIVEN** the wizard running under the Bun runtime, where the native PTY's output callback never delivers
+- **GIVEN** the wizard running under Bun with `Bun.Terminal` available (Bun ≥ 1.2.19)
 - **WHEN** a preview command starts
-- **THEN** the wizard SHALL fall back to pipe transport with a visible notice instead of a silent empty terminal, and SHALL still use the native PTY under Node runtimes
+- **THEN** the terminal SHALL attach through `Bun.Terminal` + `Bun.spawn({ terminal })` with full interactivity, and SHALL NOT load the node-pty optional dependency
+
+#### Scenario: Missing PTY backends degrade to read-only pipes with a notice
+
+- **GIVEN** a runtime with neither `Bun.Terminal` nor a loadable node-pty
+- **WHEN** a preview command starts
+- **THEN** the wizard SHALL fall back to pipe transport with a visible notice instead of a silent empty terminal
 
 #### Scenario: Run button reflects process lifecycle
 

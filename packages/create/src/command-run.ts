@@ -124,27 +124,175 @@ export const resetPtyProbeCache = (): void => {
 
 const DEFAULT_TERMINAL_SIZE: CommandRunTerminalSize = { cols: 100, rows: 30 };
 
+/** Minimal shapes of Bun's native PTY (Bun ≥ 1.2.19). */
+interface BunTerminalOptions {
+  cols?: number;
+  rows?: number;
+  name?: string;
+  data?: (terminal: unknown, data: Uint8Array<ArrayBuffer>) => void;
+  exit?: (terminal: unknown, exitCode: number, signal: string | null) => void;
+}
+
+interface BunTerminal {
+  write(data: string | BufferSource): number;
+  resize(cols: number, rows: number): void;
+  close(): void;
+}
+
+interface BunProcess {
+  readonly pid: number;
+  readonly exited: Promise<number>;
+  kill(signal?: number | string): void;
+}
+
+interface BunRuntime {
+  Terminal: new (options: BunTerminalOptions) => BunTerminal;
+  spawn(
+    command: readonly string[],
+    options: { terminal: BunTerminal; cwd?: string; env?: Record<string, string> },
+  ): BunProcess;
+}
+
+/** The Bun global when running under Bun with the native Terminal API. */
+export const bunTerminalRuntime = (): BunRuntime | undefined => {
+  const runtime = (globalThis as { Bun?: unknown }).Bun;
+  if (typeof runtime !== "object" || runtime === null) {
+    return undefined;
+  }
+  const candidate = runtime as Partial<BunRuntime>;
+  if (typeof candidate.Terminal !== "function" || typeof candidate.spawn !== "function") {
+    return undefined;
+  }
+  return candidate as BunRuntime;
+};
+
+/**
+ * Native Bun PTY backend: `Bun.Terminal` + `Bun.spawn({ terminal })`. Under
+ * Bun this replaces @lydell/node-pty entirely — the optional native module
+ * loads but never delivers output under Bun, while the built-in Terminal is
+ * first-class (verified Bun 1.3.14: output, stdin echo, resize, exit codes).
+ */
+export const startBunTerminalRun = (
+  options: CommandRunOptions,
+  bun: BunRuntime,
+): CommandRun => {
+  const [command, ...args] = options.tokens;
+  if (command === undefined) {
+    return emptyRun(options, "command is empty");
+  }
+  const size = options.terminalSize ?? DEFAULT_TERMINAL_SIZE;
+  const ring: string[] = [];
+  const ringLimit = options.ringLimit ?? 200;
+  const decoder = new TextDecoder();
+  const append = (chunk: string): void => {
+    ring.push(chunk);
+    if (ring.length > ringLimit) {
+      ring.splice(0, ring.length - ringLimit);
+    }
+  };
+
+  const terminal = new bun.Terminal({
+    cols: size.cols,
+    rows: size.rows,
+    name: "xterm-256color",
+    data: (_terminal, data) => {
+      // Objective passthrough: decode the PTY's bytes verbatim; rendering and
+      // all analysis stay in the frontend renderer.
+      const text = decoder.decode(data);
+      if (text.length === 0) {
+        return;
+      }
+      append(text);
+      options.onEvent({ type: "stdout", chunk: text });
+    },
+  });
+
+  const proc = bun.spawn([command, ...args], {
+    terminal,
+    cwd: options.cwd ?? globalThis.process.cwd(),
+    env: {
+      ...globalThis.process.env,
+      ...options.env,
+      TERM: "xterm-256color",
+    } as Record<string, string>,
+  });
+  options.onEvent({ type: "pty-ready" });
+
+  const exited = proc.exited.then((code) => {
+    options.onEvent({ type: "exit", code });
+    return { code };
+  });
+
+  let killPromise: Promise<void> | undefined;
+  return {
+    pid: proc.pid,
+    pty: true,
+    exited,
+    output: ring,
+    write(data) {
+      terminal.write(data);
+    },
+    resize({ cols, rows }) {
+      terminal.resize(cols, rows);
+    },
+    kill() {
+      killPromise ??= (async () => {
+        // Closing the PTY sends SIGHUP to the session (children included);
+        // the direct kill covers processes that detached the terminal.
+        try {
+          proc.kill();
+        } catch {
+          // already dead
+        }
+        try {
+          terminal.close();
+        } catch {
+          // already closed
+        }
+        await exited.catch(() => undefined);
+      })();
+      return killPromise;
+    },
+  };
+};
+
 export const startCommandRun = async (options: CommandRunOptions): Promise<CommandRun> => {
   if (options.pty !== false) {
-    const ptyModule = await loadPtyModule();
-    if (ptyModule !== undefined) {
+    const bun = bunTerminalRuntime();
+    if (bun !== undefined) {
       try {
-        return startPtyRun(options, ptyModule);
+        return startBunTerminalRun(options, bun);
       } catch (error) {
         // PTY spawn failures fall through to pipe mode so the wizard stays usable.
         options.onEvent({
           type: "spawn-error",
-          message: `pty spawn failed: ${error instanceof Error ? error.message : String(error)}`,
+          message: `bun terminal spawn failed: ${error instanceof Error ? error.message : String(error)}`,
         });
       }
-    } else {
+    } else if (process.versions.bun !== undefined) {
       options.onEvent({
         type: "pty-unavailable",
         message:
-          process.versions.bun !== undefined
-            ? "Bun 运行时无法转发原生 PTY 输出，预览以非交互模式运行。使用 node 运行（如 npx create-opentray）可获得交互终端。"
-            : "node-pty 不可用，预览以非交互模式运行（无法向命令输入内容）。可安装 @lydell/node-pty 启用交互。",
+          "Bun 版本缺少 Bun.Terminal（需要 Bun ≥ 1.2.19），预览以非交互模式运行。",
       });
+    } else {
+      const ptyModule = await loadPtyModule();
+      if (ptyModule !== undefined) {
+        try {
+          return startPtyRun(options, ptyModule);
+        } catch (error) {
+          options.onEvent({
+            type: "spawn-error",
+            message: `pty spawn failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      } else {
+        options.onEvent({
+          type: "pty-unavailable",
+          message:
+            "node-pty 不可用，预览以非交互模式运行（无法向命令输入内容）。可安装 @lydell/node-pty 启用交互。",
+        });
+      }
     }
   }
   return startPipeRun(options);

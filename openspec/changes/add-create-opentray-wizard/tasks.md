@@ -100,7 +100,8 @@ app through a WebUI wizard):
 - [x] 4.33 WebUI: buffer log chunks until the terminal is ready and flush after; prewarm the ghostty module at page load.
 - [x] 4.34 WebUI: single Run/Interrupt toggle button bound to process liveness; command input editable again after death.
 - [x] 4.35 ego-browser walkthrough
-- [x] 4.36 Align the dev script runtime with the openspecui reference: run the wizard via tsx (Node) so the native PTY is fully interactive on the developer path; Bun detection remains as defensive pipe degradation only. with the owner's exact commands: `npx @deepseek-ai/dsh web` (port-occupied error visible) and `--port 19000` (service discovered), button toggle, external kill restore.
+- [x] 4.36 Align the dev script runtime with the openspecui reference (superseded by 4.37).
+- [x] 4.37 Implement the Bun-native PTY backend: Bun.Terminal + Bun.spawn({ terminal }) preferred whenever present, node-pty under Node, pipe degradation only when neither exists; verified interactively under Bun 1.3.14 (click-and-type, echo, stdin-driven discovery, external kill restore). with the owner's exact commands: `npx @deepseek-ai/dsh web` (port-occupied error visible) and `--port 19000` (service discovered), button toggle, external kill restore.
 
 ## 5. Verification
 

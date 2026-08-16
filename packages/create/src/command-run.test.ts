@@ -45,6 +45,105 @@ const allDecoded = (events: readonly CommandRunEvent[]): string =>
     .map((e) => e.chunk ?? "")
     .join("");
 
+describe("startCommandRun Bun.Terminal backend", () => {
+  interface StubRun {
+    dataListener?: (data: Uint8Array) => void;
+    writes: string[];
+    resizes: { cols: number; rows: number }[];
+    closed: boolean;
+  }
+
+  const installBunStub = (): { run: StubRun; exitNow: (code: number) => void } => {
+    const run: StubRun = { writes: [], resizes: [], closed: false };
+    let exitListener: ((code: number) => void) | undefined;
+    const terminalInstance = {
+      write: (data: string) => {
+        run.writes.push(data);
+        return data.length;
+      },
+      resize: (cols: number, rows: number) => {
+        run.resizes.push({ cols, rows });
+      },
+      close: () => {
+        run.closed = true;
+      },
+    };
+    const previous = (globalThis as { Bun?: unknown }).Bun;
+    (globalThis as { Bun?: unknown }).Bun = {
+      Terminal: class {
+        constructor(options: { data?: (t: unknown, d: Uint8Array) => void }) {
+          run.dataListener = (data) => options.data?.(this, data);
+        }
+        write = (data: string) => {
+          run.writes.push(data);
+          return data.length;
+        };
+        resize = (cols: number, rows: number) => {
+          run.resizes.push({ cols, rows });
+        };
+        close = () => {
+          run.closed = true;
+        };
+      },
+      spawn: (command: readonly string[], options: { terminal: unknown }) => {
+        void options;
+        return {
+          pid: 777,
+          exited: new Promise<number>((resolve) => {
+            exitListener = resolve;
+          }),
+          kill: () => {
+            exitListener?.(0);
+          },
+        };
+      },
+    };
+    return {
+      run,
+      exitNow: (code) => exitListener?.(code),
+    };
+  };
+
+  it("prefers Bun.Terminal when present and forwards bytes both ways", async () => {
+    const { run, exitNow } = installBunStub();
+    try {
+      const { events, onEvent } = collectEvents();
+      const started = startCommandRun({
+        tokens: [process.execPath, "stub.cjs"],
+        cwd: "/tmp",
+        onEvent,
+      });
+      const commandRun = await started;
+      expect(commandRun.pty).toBe(true);
+      expect(commandRun.pid).toBe(777);
+      expect(events.some((e) => e.type === "pty-ready")).toBe(true);
+
+      // PTY output → stdout chunk verbatim.
+      run.dataListener?.(new TextEncoder().encode("hello-from-bun-terminal"));
+      expect(allDecoded(events)).toContain("hello-from-bun-terminal");
+
+      // Input → terminal.write verbatim; resize → terminal.resize.
+      commandRun.write("hi\n");
+      commandRun.resize({ cols: 120, rows: 40 });
+      expect(run.writes).toEqual(["hi\n"]);
+      expect(run.resizes).toEqual([{ cols: 120, rows: 40 }]);
+
+      // Process exit → exit event with code.
+      exitNow(3);
+      const exited = await commandRun.exited;
+      expect(exited.code).toBe(3);
+      expect(events.some((e) => e.type === "exit" && e.code === 3)).toBe(true);
+
+      // Kill closes the terminal too.
+      await commandRun.kill();
+      expect(run.closed).toBe(true);
+    } finally {
+      delete (globalThis as { Bun?: unknown }).Bun;
+      void (globalThis as { Bun?: unknown }).Bun;
+    }
+  });
+});
+
 describe("startCommandRun PTY mode", () => {
   it(
     "attaches through a PTY, forwards stdin, and streams responses",
