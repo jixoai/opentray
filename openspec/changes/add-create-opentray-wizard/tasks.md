@@ -34,6 +34,9 @@ app through a WebUI wizard):
 - [x] 2.24 BDD: Given the idle form, when all fields are filled without running, then confirm and materialize proceed (spec: create-wizard / Usable Form Without Running).
 - [x] 2.25 BDD: Given command text primed without spawning, when placeholders render, then appId/targetDir derive from the command text (spec: create-wizard / Usable Form Without Running).
 - [x] 2.26 BDD: Given no service discovered and a manual port, when confirmed, then materialization uses the manual port (spec: create-wizard / Usable Form Without Running).
+- [ ] 2.27 BDD: Given output arriving before the renderer is ready, when the terminal finishes loading, then buffered chunks flush in order (spec: create-wizard / Interactive Terminal Preview).
+- [ ] 2.28 BDD: Given the wizard under Bun, when a preview command runs, then output flows through pipe fallback with a visible notice (spec: create-wizard / Interactive Terminal Preview).
+- [ ] 2.29 BDD: Given a running command, when the process is killed externally, then a run-status event restores the Run button (spec: create-wizard / Interactive Terminal Preview).
 - [x] 2.5 BDD: Given a command opening 19080 then 19081, when both verify as HTTP, then both are listed with 19080 selected (spec: create-wizard / HTTP service discovery from port diffing).
 - [x] 2.6 BDD: Given a user-edited appName, when a later scrape returns another title, then the edited value is preserved (spec: create-wizard / Favicon/title scrape with default derivation).
 - [x] 2.7 BDD: Given `npx somecommand start --xx`, when defaults derive, then appId is `start.somecommand.npx` (spec: create-wizard / Favicon/title scrape with default derivation).
@@ -89,6 +92,14 @@ app through a WebUI wizard):
 - [x] 4.28 Add /api/prime deriving placeholder defaults from command text without spawning; debounce client-side priming on command input.
 - [x] 4.29 Make the form visible/editable from idle; add a manual service-port input prefilled by discovery; confirm resolves manual port; create rejects clearly when no port at all.
 - [x] 4.30 ego-browser walkthrough of the full flow (click-and-type terminal, tab switch survival, form-without-run creation), recorded in review notes.
+
+## 4e. Implementation (Round 6 — Bun-safe output, run lifecycle button)
+
+- [ ] 4.31 Skip the native PTY under Bun (onData never delivers) and degrade to pipes with an explanatory notice.
+- [ ] 4.32 Emit run-status lifecycle events on spawn/exit; stop discovery polling at exit; allow re-submission after process death.
+- [ ] 4.33 WebUI: buffer log chunks until the terminal is ready and flush after; prewarm the ghostty module at page load.
+- [ ] 4.34 WebUI: single Run/Interrupt toggle button bound to process liveness; command input editable again after death.
+- [ ] 4.35 ego-browser walkthrough with the owner's exact commands: `npx @deepseek-ai/dsh web` (port-occupied error visible) and `--port 19000` (service discovered), button toggle, external kill restore.
 
 ## 5. Verification
 

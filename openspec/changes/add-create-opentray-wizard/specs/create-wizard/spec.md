@@ -104,6 +104,24 @@ non-interactive pipe mode with a visible notice instead of failing.
 - **WHEN** the terminal is resized and the new dimensions are posted
 - **THEN** the pseudo-terminal SHALL adopt the new columns and rows
 
+#### Scenario: Output is buffered while the renderer loads
+
+- **GIVEN** a preview command producing output while the ghostty renderer is still initializing
+- **WHEN** output chunks arrive before the terminal instance is ready
+- **THEN** the chunks SHALL be buffered and flushed in order once ready; no byte SHALL be dropped due to renderer startup
+
+#### Scenario: Bun runtime degrades to read-only pipes with a notice
+
+- **GIVEN** the wizard running under the Bun runtime, where the native PTY's output callback never delivers
+- **WHEN** a preview command starts
+- **THEN** the wizard SHALL fall back to pipe transport with a visible notice instead of a silent empty terminal, and SHALL still use the native PTY under Node runtimes
+
+#### Scenario: Run button reflects process lifecycle
+
+- **GIVEN** a preview command running
+- **WHEN** the command is alive
+- **THEN** the run control SHALL present an Interrupt action; when the process exits or is killed externally, the run control SHALL return to Run and the command input SHALL become editable again
+
 #### Scenario: Plain click-and-type works and survives tab switches
 
 - **GIVEN** a PTY-attached preview command and the wizard tabs panel

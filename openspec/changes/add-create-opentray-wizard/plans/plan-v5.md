@@ -2,15 +2,8 @@
 
 ## Current Round
 
-- Round: 6
-- Status: Owner retest still shows a completely empty terminal. Reproduction
-  under bun (the `pnpm create-opentray` smoke path) proved @lydell/node-pty
-  spawns but its onData never delivers under Bun, so zero output events reach
-  the page; additionally output arriving while the ghostty renderer is still
-  initializing is silently dropped (no pending buffer), the Run button does
-  not become an Interrupt button while the command is alive, and an
-  externally-killed process is not reflected (button stays disabled).
-- Previous plan backup: `plans/plan-v5.md`. ego-browser walkthrough verified: plain click-and-type on
+- Round: 5
+- Status: COMPLETED. ego-browser walkthrough verified: plain click-and-type on
   the terminal works and survives tab round-trips (forceMount keeps the ghostty
   instance alive; fetch-probe confirmed every keystroke posts to
   /api/terminal-input); the identity form is fully usable from idle (prime
@@ -62,7 +55,6 @@
 | 2 | Assistant | Presented implementation plan (package shape, module decomposition, HTTP API, scaffold contract, icon pipeline via `@opentray/vite-plugin`, materialize pipeline, tests, OpenSpec workflow). | Plan approved by user; becomes the traceability source for specs/tasks. |
 | 3 | User | 实测反馈：点击"运行"后界面没有立刻出现 shell 面板；应改用 xterm.js 或 ghostty-web（建议）渲染真实终端，因为命令可能需要交互才能有效果。 | Two requirements: (a) instant panel feedback on Run; (b) real interactive terminal (PTY) rendered by ghostty-web, with graceful degradation when the native PTY is unavailable. |
 | 4 | User | 终端协议可能有问题，需要完全客观传输 stdio（前端 ghostty-web 分析渲染，即便异常）；确认底层是否用 node-pty、是否 prebuild 版本，参考 ../openspecui 的 pty 前后端实现。终端+iframe 整合为 Chrome 式 Tabs 面板（Terminal tab 显示命令、Iframe tab 显示可编辑 URL 且支持前进后退）；iframe 仅在嗅探到 TCP 监听且 HTTP 确认后自动打开（多端口多 tab）；Terminal tab 底部状态栏显示光标位置/选区范围/嗅探到的 HTTP 服务（点击跳转对应 Iframe tab，按 hostname 匹配）；Iframe tab 是辅助，嗅探不到不影响创建应用；默认值显示为 input placeholder（含专门的图标 input）；用 react-shadcn 重构页面。 | Round-4 scope: objective base64 byte passthrough, @lydell/node-pty prebuilt, tabs panel with context nav + status bar, placeholder defaults + icon input, react-shadcn SPA webui. |
-| 5b | User | Reproduction round: still no terminal output at all with `npx @deepseek-ai/dsh web` (should error, port occupied) and `npx @deepseek-ai/dsh web --port 19000` (should succeed). After running, the Run button must become an Interrupt button; killing the process externally must be detected and restore the Run button. | Round-6 scope: Bun-safe PTY degradation, pending-output buffering + renderer prewarm, run-status lifecycle events, Run/Interrupt toggle button. |
 | 5 | User | 用 ego-browser 走查；自己实测终端仍然完全无反应。且即便命令没有"运行"，表单也应能直接填写使用——运行只是为了测试可用和抓取可用作默认值的信息。 | Round-5 scope: terminal input must survive tab switches and respond to plain user clicks (ego-browser-verified); the identity form is always editable from idle, with defaults derivable from the command without running (prime) and a manual service port fallback. |
 
 ### Evidence Read
