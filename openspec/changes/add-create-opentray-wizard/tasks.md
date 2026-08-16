@@ -114,3 +114,13 @@ app through a WebUI wizard):
 - [x] 5.2 Run an integration test driving CommandRun→discovery→scrape→scaffold against a `node -e` HTTP server command in a temp dir with `--skip-install`.
 - [ ] 5.3 Run repo gates: `pnpm run build`, `pnpm run verify`, `openspec validate --all --strict`, `git diff --check`.
 - [ ] 5.4 Manual visual acceptance: built bin drives a real browser wizard run end-to-end on macOS (Dock icon/name, open-app cold/warm), recorded in review notes.
+
+## 4f. Implementation (Round 9 — tray icon, advanced panel, generated-app shell)
+
+- [ ] 4.43 Scraper: build solid-color variants (black/white) of every candidate via sharp alpha masks; aHash-dedupe variants; unified candidate list tagged with variant metadata.
+- [ ] 4.44 Wizard/server: trayIconPath + showStartupTerminal + showAddressBar form fields; tray-candidate select endpoint; defaults resolve tray icon = app icon choice.
+- [ ] 4.45 Materialize: generate downscaled tray icon PNG (template variant for darwin when solid); write shell config; conditionally add @lydell/node-pty dependency and shell UI assets.
+- [ ] 4.46 Scaffold: shell-enabled main.mjs (immediate window, PTY spawn+ring, shell HTTP server with SSE/state/input endpoints, continuous multi-port monitor, detach detection, title control incl. no-shell setTitle path) + tray icon wiring.
+- [ ] 4.47 create-webui: extract shared IconPicker; advanced panel (tray picker + two checkboxes); TabsPanel props for optional terminal/address bar; Navigation-API-managed address bar with fallback; new shell entry page + vite multi-entry relative-base build.
+- [ ] 4.48 Tests: scraper variants, form fields/config passthrough, scaffold shell template, server endpoints.
+- [ ] 4.49 ego-browser walkthrough: wizard advanced flow with `npx @deepseek-ai/dsh web --port 0`; generated app run: startup terminal streams, ports auto-open, address bar navigates (Navigation API), killing the service marks the title `(detached)`.

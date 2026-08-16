@@ -122,6 +122,42 @@ non-interactive pipe mode with a visible notice instead of failing.
 - **WHEN** a preview command starts
 - **THEN** the wizard SHALL fall back to pipe transport with a visible notice instead of a silent empty terminal
 
+#### Scenario: Tray icon defaults to the app icon choice
+
+- **GIVEN** the identity form
+- **WHEN** an app icon is scraped, selected, or uploaded
+- **THEN** the tray icon SHALL default to the same choice, remain independently selectable in the advanced panel, and the generated project SHALL receive a platform-suitable tray icon asset
+
+#### Scenario: Advanced panel offers solid-color tray candidates
+
+- **GIVEN** scraped icon candidates
+- **WHEN** the advanced tray picker renders
+- **THEN** it SHALL also offer solid-color conversions of the candidates, deduplicated among themselves, and clicking any candidate SHALL select it as the tray icon
+
+#### Scenario: Show-startup-terminal renders the shared PTY tab
+
+- **GIVEN** the advanced option enabled for a generated app
+- **WHEN** the app starts
+- **THEN** its window SHALL open immediately with the SAME terminal tab component the wizard uses (command display + status bar including listened ports), streaming the command's PTY output interactively
+
+#### Scenario: Show-address-bar renders the shared iframe tab with Navigation API
+
+- **GIVEN** the advanced option enabled for a generated app
+- **WHEN** its window renders service tabs
+- **THEN** they SHALL use the SAME iframe tab component with a top address bar whose navigation state is managed through the Web Navigation API (`window.navigation`), degrading gracefully where unavailable
+
+#### Scenario: Every listened port opens automatically
+
+- **GIVEN** a running generated app (or wizard preview)
+- **WHEN** multiple owned ports are listening
+- **THEN** each SHALL have its own tab opened automatically
+
+#### Scenario: Detached ports mark the window title
+
+- **GIVEN** an open service tab whose port stops listening
+- **WHEN** the detach is detected
+- **THEN** the window title SHALL read `XXXX (detached)` until the port listens again
+
 #### Scenario: Tabs sit above the context toolbar
 
 - **GIVEN** the tabs panel
