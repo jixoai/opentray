@@ -60,9 +60,9 @@ export function AppForm({
   const [dragOver, setDragOver] = React.useState(false);
 
   return (
-    <div className="grid grid-cols-1 gap-x-4 gap-y-1 md:grid-cols-2">
+    <div className="grid grid-cols-1 gap-y-1">
       {/* Icon picker: square file input + scraped candidates, full row. */}
-      <div className="md:col-span-2">
+      <div>
         <Label>应用图标</Label>
         <div className="mt-1.5 flex flex-wrap items-start gap-3">
           <button

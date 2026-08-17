@@ -77,7 +77,7 @@ export function AdvancedPanel({
           </span>
         </AccordionTrigger>
         <AccordionContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3">
             <div>
               <Label>参数输入模式</Label>
               <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
@@ -216,7 +216,7 @@ export function AdvancedPanel({
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3">
             <div className="flex items-start gap-3 rounded-lg border border-border p-3">
               <Switch
                 id="showStartupTerminal"

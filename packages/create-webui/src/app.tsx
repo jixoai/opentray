@@ -406,13 +406,13 @@ const selectedIconRefStale = (
           : "secondary";
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 p-5">
+    <div className="flex h-screen w-full flex-col overflow-hidden md:flex-row">
+      {/* List pane: the stable main view at mobile width, independently
+          scrollable; the detail pane appearing never shifts it. */}
+      <div className="flex w-full flex-col gap-4 overflow-y-auto border-b border-border p-5 md:h-full md:w-[430px] md:shrink-0 md:border-b-0 md:border-r">
       <header className="flex items-center gap-3">
         <h1 className="text-lg font-bold">create-opentray</h1>
-        <span className="text-xs text-muted-foreground">
-          把任意启动命令打包成 OpenTray 托管的本地应用
-        </span>
-        <Badge variant={stateBadge} className="ml-auto">
+        <Badge variant={stateBadge} className="ml-auto shrink-0">
           {wizardState}
         </Badge>
       </header>
@@ -490,29 +490,6 @@ const selectedIconRefStale = (
       </div>
       {wizardState === "failed" && failReason !== undefined ? (
         <p className="font-mono text-xs text-red-400">{failReason}</p>
-      ) : null}
-
-      {/* Tabs panel (terminal + service previews) */}
-      {panelOpen ? (
-        <TabsPanel
-          command={displayCommand}
-          terminalHostRef={terminalHostRef}
-          terminalReady={termReady}
-          interactive={interactive}
-          status={status}
-          services={[...services]}
-          iframeTabs={iframeTabs}
-          activeTab={activeTab}
-          onActiveTabChange={setActiveTab}
-          onIframeNavigate={navigateIframe}
-          onIframeHistoryMove={moveHistory}
-          onJumpToService={jumpToService}
-        />
-      ) : null}
-      {termFallback !== undefined ? (
-        <pre className="max-h-56 overflow-auto rounded-xl border border-border bg-card p-3 font-mono text-xs whitespace-pre-wrap">
-          {termFallback}
-        </pre>
       ) : null}
 
       {/* Advanced options (accordion: 命令选项 + 应用选项) */}
@@ -642,6 +619,34 @@ const selectedIconRefStale = (
             </span>
           </div>
         </section>
+      ) : null}
+      </div>
+
+      {/* Detail pane: tabs (terminal + service previews) appear here ONLY
+          once a command has been started — never inside the list pane. */}
+      {panelOpen ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+          <TabsPanel
+            command={displayCommand}
+            terminalHostRef={terminalHostRef}
+            terminalReady={termReady}
+            interactive={interactive}
+            status={status}
+            services={[...services]}
+            iframeTabs={iframeTabs}
+            activeTab={activeTab}
+            onActiveTabChange={setActiveTab}
+            onIframeNavigate={navigateIframe}
+            onIframeHistoryMove={moveHistory}
+            onJumpToService={jumpToService}
+            className="min-h-[480px] flex-1"
+          />
+          {termFallback !== undefined ? (
+            <pre className="max-h-56 overflow-auto rounded-xl border border-border bg-card p-3 font-mono text-xs whitespace-pre-wrap">
+              {termFallback}
+            </pre>
+          ) : null}
+        </div>
       ) : null}
 
       <CreateDialog

@@ -49,6 +49,8 @@ interface TabsPanelProps {
   onIframeNavigate(port: number, url: string, mode: "push" | "replace"): void;
   onIframeHistoryMove(port: number, delta: -1 | 1): void;
   onJumpToService(port: number): void;
+  /** Layout hook for the detail pane (e.g. "h-full" to fill it). */
+  className?: string;
 }
 
 /** Web Navigation API guard: the address bar is managed through
@@ -93,6 +95,7 @@ export function TabsPanel({
   onIframeNavigate,
   onIframeHistoryMove,
   onJumpToService,
+  className,
 }: TabsPanelProps): React.JSX.Element {
   const activeIframe = iframeTabs.find((tab) => `svc-${tab.port}` === activeTab);
   const [navDraft, setNavDraft] = React.useState("");
@@ -108,7 +111,7 @@ export function TabsPanel({
     activeIframe.historyIndex < activeIframe.history.length - 1;
 
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-card overflow-hidden">
+    <div className={cn("flex flex-col rounded-xl border border-border bg-card overflow-hidden", className)}>
       <Tabs value={activeTab} onValueChange={onActiveTabChange} className="flex-1 flex flex-col">
         {/* Tabs strip first (browser convention), then the context toolbar. */}
         <TabsList>
