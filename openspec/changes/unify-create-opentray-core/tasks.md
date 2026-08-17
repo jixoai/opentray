@@ -34,7 +34,7 @@
 - [x] 3.11 Make `imageSmoothingEnabled` govern every app-foreground/tray resize and participate in cache identity; map `developerMode` only to WebView `devtools` admission.
 - [x] 3.12 Implement normalized direct-command, POSIX shell, and PowerShell export plans, including embedded uploaded resources, force-copy metadata, shell-safe quoting, and env-risk metadata without value logging.
 - [x] 3.13 Delete/supersede legacy config and marker authority in the new path without adding compatibility readers or migrations.
-- [ ] 3.14 When a new problem surfaces, create a typed issue with `bun run openspec:vision2 -- issues unify-create-opentray-core --new <bug|task|decision|risk|question> --title "<title>"` instead of silently expanding this plan.
+- [x] 3.14 When a new problem surfaces, create a typed issue with `bun run openspec:vision2 -- issues unify-create-opentray-core --new <bug|task|decision|risk|question> --title "<title>"` instead of silently expanding this plan.
 - [x] 3.15 Update only current-context task checkboxes and commit them with matching BDD/implementation evidence; do not add legacy plan backups or self-review loops.
 
 ## 4. Verification
@@ -45,14 +45,14 @@
 - [ ] 4.4 Run Windows parser/process/link tests on the current host as preparatory evidence, then require a Windows agent to verify junction/symlink creation, process-tree stop, listener ownership, PowerShell export execution, and path/quoting behavior before release acceptance.
 - [x] 4.5 Run focused icon tests proving smoothing on/off behavior for app and tray outputs and stable cache invalidation.
 - [x] 4.6 Run `bun run openspec:vision2 -- validate unify-create-opentray-core`.
-- [ ] 4.7 Run `bun run openspec:vision2 -- issues unify-create-opentray-core --validate` and inspect `--group-by group`.
+- [x] 4.7 Run `bun run openspec:vision2 -- issues unify-create-opentray-core --validate` and inspect `--group-by group`.
 - [x] 4.8 Run the relevant package build/typecheck/tests followed by `pnpm run verify` and `git diff --check`.
 - [ ] 4.9 Run `bun run openspec:vision2 -- commit-check unify-create-opentray-core --phase close` before closing overview work.
 
 ## 5. Close
 
-- [ ] 5.1 Keep `toc.md` aligned with every Core spec and dependency statement.
-- [ ] 5.2 Close or resolve every active issue under `issues/*.md` with valid dependency references.
-- [ ] 5.3 Run `bun run openspec:vision2 -- check unify-create-opentray-core`; iterate on structural or open-issue results rather than retrying blindly.
+- [x] 5.1 Keep `toc.md` aligned with every Core spec and dependency statement.
+- [x] 5.2 Close or resolve every active issue under `issues/*.md` with valid dependency references.
+- [x] 5.3 Run `bun run openspec:vision2 -- check unify-create-opentray-core`; iterate on structural or open-issue results rather than retrying blindly.
 - [ ] 5.4 Archive only after Core implementation, cross-platform evidence, dependent contract compatibility, and normal close gates are complete; commit archive movement separately.
 

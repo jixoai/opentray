@@ -2,7 +2,7 @@
 
 - [x] 1.1 Re-read this interview, `unify-create-opentray-core`, `add-create-opentray-cli`, current WebUI source/tokens/components/protocol, and both supplied logo assets before implementation.
 - [x] 1.2 Confirm this Change declares `schema: vision2`, aggregates all WebUI work, and starts Apply only after the Core contract has an implementation-ready artifact commit.
-- [ ] 1.3 Resolve and record current official shadcn/UI Base registry and Base UI documentation at implementation time; do not hard-code a stale "latest" version from this plan.
+- [x] 1.3 Resolved at implementation time (2026-08-18): `@base-ui/react@1.7.0` (npm latest) with component sources fetched from the current official shadcn Base registry (`ui.shadcn.com/r/index.json` base-documented items, `code/apps/v4/registry/bases/base/ui/*`); versions recorded here, not frozen into specs.
 - [x] 1.4 Produce the required page-wide component inventory with user job, current shape, selected shadcn/Base UI or justified native/custom choice, states, keyboard model, accessible relationships, RTL, and theme behavior.
 - [x] 1.5 Inventory every hard-coded visible string, aria label, status/error, Markdown document, direction-sensitive icon/layout, and dark-only token before editing.
 
@@ -55,14 +55,14 @@
 - [ ] 4.8 Run native-visible macOS acceptance for created/restarted app identity/icon/DevTools mode and record Dock-pin cleanup as manual; defer Windows-native WebView/taskbar evidence to the Windows agent without promoting macOS truth.
 - [ ] 4.9 Obtain owner visual acceptance after automated evidence for typography, density, component fit, brand/logo use, light/dark balance, RTL, Markdown reading, and destructive clarity; automation prepares but does not replace human aesthetic judgment.
 - [x] 4.10 Run `bun run openspec:vision2 -- validate redesign-create-opentray-webui`.
-- [ ] 4.11 Run `bun run openspec:vision2 -- issues redesign-create-opentray-webui --validate` and inspect `--group-by group`.
+- [x] 4.11 Run `bun run openspec:vision2 -- issues redesign-create-opentray-webui --validate` and inspect `--group-by group`.
 - [x] 4.12 Run WebUI build/typecheck/tests, packed WebUI integration, `pnpm run verify`, and `git diff --check`.
 - [ ] 4.13 Run `bun run openspec:vision2 -- commit-check redesign-create-opentray-webui --phase close` before closing overview work.
 
 ## 5. Close
 
-- [ ] 5.1 Keep `toc.md` aligned with every WebUI spec and Core/CLI dependency gate.
-- [ ] 5.2 Close or resolve every active issue with valid dependency references.
-- [ ] 5.3 Run `bun run openspec:vision2 -- check redesign-create-opentray-webui` and resolve structural/open-issue results.
+- [x] 5.1 Keep `toc.md` aligned with every WebUI spec and Core/CLI dependency gate.
+- [x] 5.2 Close or resolve every active issue with valid dependency references.
+- [x] 5.3 Run `bun run openspec:vision2 -- check redesign-create-opentray-webui` and resolve structural/open-issue results.
 - [ ] 5.4 Archive only after Core/CLI integration, automated accessibility/responsive evidence, owner visual acceptance, platform-labeled evidence, and normal close gates complete; commit archive movement separately.
 

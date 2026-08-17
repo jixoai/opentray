@@ -12,7 +12,7 @@
 - [x] 2.3 Scenario: Given config plus one explicit override When planned Then only that field changes (spec: create-cli-command-tree / precedence).
 - [x] 2.4 Scenario: Given a broken-link v1 app When `app list --json` runs Then stable status and both paths are emitted without mutation (spec: create-cli-app-management / registry procedures).
 - [x] 2.5 Scenario: Given a live app When edit/uninstall runs without stop authorization Then `app_running` is returned and no mutation occurs (spec: create-cli-app-management / edit).
-- [ ] 2.6 Scenario: Given a linked target When uninstall runs without purge Then output explicitly says target retained and OS pins remain manual (spec: create-cli-app-management / uninstall).
+- [x] 2.6 Scenario: Given a linked target When uninstall runs without purge Then output explicitly says target retained and OS pins remain manual (spec: create-cli-app-management / uninstall).
 - [x] 2.7 Scenario: Given env entries When export lacks acknowledgement Then no complete command/script or env value is emitted (spec: create-cli-app-management / export).
 - [x] 2.8 Scenario: Given `skill`, `skill list`, and `skill read SKILL.md` When run from a packed install Then English AI Skill content and stable relative paths are returned (spec: create-cli-skill).
 - [x] 2.9 Scenario: Given traversal or a Windows separator escape When skill read runs Then access is denied outside the packaged root (spec: create-cli-skill / contained access).
@@ -30,7 +30,7 @@
 - [x] 3.8 Author the English public `skills/create-opentray` AI Skill and package it with stable `skill`, `skill list`, and `skill read` contained access.
 - [x] 3.9 Update root and create-opentray READMEs for the new command surface, breaking v1 layout, destructive semantics, Windows limitations, and supplied logo ownership.
 - [x] 3.10 Add Windows-safe path/file-URL/PowerShell handling without `/bin/sh` assumptions or POSIX separator leakage.
-- [ ] 3.11 When a new problem surfaces, create a typed issue with `bun run openspec:vision2 -- issues add-create-opentray-cli --new <bug|task|decision|risk|question> --title "<title>"`.
+- [x] 3.11 When a new problem surfaces, create a typed issue with `bun run openspec:vision2 -- issues add-create-opentray-cli --new <bug|task|decision|risk|question> --title "<title>"`.
 - [x] 3.12 Update only current-context task checkboxes with matching evidence; do not add plan backups or self-review loops.
 
 ## 4. Verification
@@ -42,14 +42,14 @@
 - [ ] 4.5 Run a Windows agent acceptance for create/list/edit/stop/restart/uninstall against a real v1 registration and report it separately from non-Windows fixture evidence.
 - [x] 4.6 Inspect the root repository README and packed create-opentray README to confirm both supplied logos render from stable owned paths.
 - [x] 4.7 Run `bun run openspec:vision2 -- validate add-create-opentray-cli`.
-- [ ] 4.8 Run `bun run openspec:vision2 -- issues add-create-opentray-cli --validate` and inspect `--group-by group`.
+- [x] 4.8 Run `bun run openspec:vision2 -- issues add-create-opentray-cli --validate` and inspect `--group-by group`.
 - [x] 4.9 Run relevant package build/typecheck/tests, packed consumer verification, `pnpm run verify`, and `git diff --check`.
 - [ ] 4.10 Run `bun run openspec:vision2 -- commit-check add-create-opentray-cli --phase close` before closing overview work.
 
 ## 5. Close
 
-- [ ] 5.1 Keep `toc.md` aligned with every CLI spec and the Core dependency.
-- [ ] 5.2 Close or resolve every active issue with valid dependency references.
-- [ ] 5.3 Run `bun run openspec:vision2 -- check add-create-opentray-cli` and resolve structural/open-issue results.
+- [x] 5.1 Keep `toc.md` aligned with every CLI spec and the Core dependency.
+- [x] 5.2 Close or resolve every active issue with valid dependency references.
+- [x] 5.3 Run `bun run openspec:vision2 -- check add-create-opentray-cli` and resolve structural/open-issue results.
 - [ ] 5.4 Archive only after Core compatibility, packed-package evidence, POSIX and Windows acceptance, and normal close gates complete; commit archive movement separately.
 
