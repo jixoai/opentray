@@ -127,7 +127,10 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
 
 const waitFor = async (
   predicate: () => boolean,
-  timeoutMs = 2_000,
+  // Generous budget: the suite shares a process with real sharp pipelines
+  // (1024² icon compositions) whose CPU bursts stall these real-timer polls;
+  // 2s flaked under that contention.
+  timeoutMs = 15_000,
 ): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

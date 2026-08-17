@@ -52,3 +52,12 @@ foreground scale control. The bundled squircle-masked backgrounds round the
 composite's corners; macOS ICNS encodes from the best-practice 824-in-1024
 variant while Windows/Linux keep the full 1024. The tray icon stays on the
 raw source (never the composed image).
+
+Icon-composition repair: luminance analysis now reads the source at full
+size (a fit-contain downscale letterboxed non-square art with sharp's
+default opaque-black padding, measuring white logos as dark and suggesting
+the white background for white art), the foreground's original pixels are
+preserved on every background (the silhouette-tint pass painted white icons
+black), and every composition — including the transparent background — is
+clipped to the bundled squircle alpha via a dest-in mask so macOS gets
+rounded corners.

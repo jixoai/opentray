@@ -1,12 +1,15 @@
 /**
  * App-icon composition (owner round-12): the user's foreground icon is
  * composited onto one of three BACKGROUNDS — black, white, or transparent —
- * and the foreground is auto-tinted for contrast against that background.
- * macOS receives the result at 824px inside the 1024 canvas (platform
- * best practice: macOS masks ~10% margins); Windows takes the full 1024.
+ * and the background is auto-selected for contrast with the artwork's own
+ * luminance. The foreground's ORIGINAL PIXELS are always preserved (never
+ * recolored); macOS receives an 824px-content variant inside the 1024 canvas
+ * (platform best practice), Windows/Linux take the full 1024.
  *
- * The bundled background PNGs already carry the squircle alpha mask, which
- * is what rounds the composite's corners on macOS.
+ * The bundled background PNGs carry the squircle alpha mask. That mask is the
+ * owner's clipping law (invert → polarize → mask): it is applied to EVERY
+ * composition — including the transparent background, whose square source
+ * would otherwise render un-rounded on macOS.
  */
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -36,6 +39,8 @@ const BACKGROUND_FILES: Record<Exclude<IconBackground, "transparent">, string> =
   white: "create-openspec-template-iOS-Default-1024@1x.png",
 };
 
+const TRANSPARENT: sharp.Color = { r: 0, g: 0, b: 0, alpha: 0 };
+
 const backgroundCache = new Map<Exclude<IconBackground, "transparent">, Buffer>();
 
 const assetsDirectory = (): string =>
@@ -57,57 +62,59 @@ const loadBackground = async (
   return bytes;
 };
 
+/** Full-resolution RGBA pixels of a source (no geometry-altering resize). */
+const foregroundRaw = async (
+  sourcePath: string,
+): Promise<{ data: Buffer; width: number; height: number }> => {
+  const { data, info } = await sharp(sourcePath, { failOn: "none" })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height };
+};
+
 /**
- * Mean luminance of the opaque pixels (0 = black … 1 = white); a fully
- * transparent image reports undefined. Alpha-weighted so faint specks
- * cannot skew the reading.
+ * Mean luminance of the artwork's own pixels (0 = black … 1 = white);
+ * effectively-empty images report undefined. Alpha-weighted so transparent
+ * regions contribute nothing. The source is read at FULL size: a
+ * fit-contain downscale would letterbox non-square art with sharp's default
+ * OPAQUE BLACK padding and drag white artwork toward "dark" (the round-12
+ * defect that made a white icon suggest the white background).
  */
 export const foregroundLuminance = async (
   sourcePath: string,
 ): Promise<number | undefined> => {
-  const { data, info } = await sharp(sourcePath, { failOn: "none" })
-    .ensureAlpha()
-    .resize(64, 64, { fit: "contain" })
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const { data, width, height } = await foregroundRaw(sourcePath);
   let weight = 0;
   let sum = 0;
-  const channels = info.channels;
-  for (let i = 0; i < data.length; i += channels) {
+  for (let i = 0; i < data.length; i += 4) {
     const a = (data[i + 3] ?? 0) / 255;
     if (a <= 0) continue;
     const lum =
-      (0.299 * (data[i] ?? 0) +
-        0.587 * (data[i + 1] ?? 0) +
-        0.114 * (data[i + 2] ?? 0)) /
+      (0.299 * (data[i] ?? 0) + 0.587 * (data[i + 1] ?? 0) + 0.114 * (data[i + 2] ?? 0)) /
       255;
     weight += a;
     sum += lum * a;
   }
-  if (weight < info.width * info.height * 0.02) {
+  if (weight < width * height * 0.02) {
     return undefined; // effectively empty
   }
   return sum / weight;
 };
 
 /**
- * Opaque coverage ratio (0–1): the fraction of the canvas the foreground
- * actually paints. A fully opaque square (logo shot on solid background)
+ * Opaque coverage ratio (0–1): the fraction of the source canvas the artwork
+ * actually paints. A fully opaque image (logo shot on a solid background)
  * reports 1 — the case where the TRANSPARENT background must be used so the
  * user's own art shows through untouched.
  */
 export const foregroundCoverage = async (sourcePath: string): Promise<number> => {
-  const { data, info } = await sharp(sourcePath, { failOn: "none" })
-    .ensureAlpha()
-    .resize(64, 64, { fit: "contain" })
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const { data, width, height } = await foregroundRaw(sourcePath);
   let opaque = 0;
-  const channels = info.channels;
-  for (let i = 0; i < data.length; i += channels) {
+  for (let i = 0; i < data.length; i += 4) {
     if ((data[i + 3] ?? 0) > 16) opaque += 1;
   }
-  return opaque / (info.width * info.height);
+  return opaque / (width * height);
 };
 
 /** Owner rule: pick the background for a foreground automatically. */
@@ -120,20 +127,67 @@ export const autoBackground = (options: {
   if (options.coverage >= 0.985) {
     return "transparent";
   }
-  // Light artwork → dark background; dark artwork → light background.
+  // Light artwork → dark background; dark artwork → light background. The
+  // artwork's own pixels stay untouched either way.
   return options.luminance !== undefined && options.luminance > 0.5
     ? "black"
     : "white";
 };
 
+let squircleMaskPromise: Promise<Buffer> | undefined;
+
 /**
- * Composite the app icon.
- *
- * Foreground treatment: the artwork is normalized to a SINGLE-COLOR layer by
- * using its alpha as a mask (this is exactly what the scraper's solid
- * silhouettes are) — white when it must read against the black background,
- * black against white. On the transparent background the ORIGINAL pixels
- * pass through untouched (no recoloring of the user's art).
+ * The squircle clip mask (1024², single channel) extracted from the bundled
+ * background's alpha: 255 inside the rounded tile, 0 outside.
+ */
+const squircleMask = (): Promise<Buffer> => {
+  squircleMaskPromise ??= (async () => {
+    const bg = await loadBackground("white");
+    const { data, info } = await sharp(bg, { failOn: "none" })
+      .ensureAlpha()
+      .extractChannel("alpha")
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    if (info.width !== APP_ICON_CANVAS || info.height !== APP_ICON_CANVAS) {
+      throw new Error("squircle mask must be 1024×1024");
+    }
+    return data;
+  })();
+  return squircleMaskPromise;
+};
+
+/** Clip an RGBA buffer to the squircle via a dest-in alpha mask. */
+const clipToSquircle = async (bytes: Buffer): Promise<Buffer> => {
+  const mask = await squircleMask();
+  // Overlay whose alpha IS the mask; dest-in keeps the destination only
+  // where the mask is opaque (joinChannel does not reliably replace alpha).
+  const overlay = Buffer.alloc(APP_ICON_CANVAS * APP_ICON_CANVAS * 4);
+  for (let i = 0; i < APP_ICON_CANVAS * APP_ICON_CANVAS; i += 1) {
+    const o = i * 4;
+    overlay[o] = 255;
+    overlay[o + 1] = 255;
+    overlay[o + 2] = 255;
+    overlay[o + 3] = mask[i] ?? 0;
+  }
+  return sharp(bytes)
+    .composite([
+      {
+        input: overlay,
+        blend: "dest-in",
+        left: 0,
+        top: 0,
+        raw: { width: APP_ICON_CANVAS, height: APP_ICON_CANVAS, channels: 4 },
+      },
+    ])
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+};
+
+/**
+ * Composite the app icon. The foreground's ORIGINAL pixels are preserved on
+ * every background — the background choice provides the contrast, not a
+ * recolor of the artwork (the round-12 defect that painted a white icon
+ * black).
  *
  * Output: `app-composited.png` at CANVAS size, plus `app-composited-macos.png`
  * where the foreground is re-rendered at 824px (background kept at 1024 —
@@ -168,55 +222,36 @@ export const composeAppIcon = async (options: {
     const fgSize = Math.round(contentSize * scale);
     const offset = Math.round((APP_ICON_CANVAS - fgSize) / 2);
 
-    // Alpha-mask the foreground into a solid-color layer.
-    const { data: fgRaw, info: fgInfo } = await sharp(options.foregroundPath, {
-      failOn: "none",
-    })
-      .ensureAlpha()
-      .resize(fgSize, fgSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const mask = Buffer.alloc(fgSize * fgSize);
-    for (let i = 0; i < fgSize * fgSize; i += 1) {
-      mask[i] = fgRaw[i * fgInfo.channels + 3] ?? 0;
-    }
-
-    let base: sharp.Sharp;
-    if (options.background === "transparent") {
-      base = sharp({
-        create: {
-          width: APP_ICON_CANVAS,
-          height: APP_ICON_CANVAS,
-          channels: 4,
-          background: { r: 0, g: 0, b: 0, alpha: 0 },
-        },
-      });
-      // Original pixels pass through on the transparent background.
-      const original = await sharp(options.foregroundPath, { failOn: "none" })
-        .resize(fgSize, fgSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-        .png()
-        .toBuffer();
-      const bytes = await base
-        .composite([{ input: original, top: offset, left: offset }])
-        .png({ compressionLevel: 9 })
-        .toBuffer();
-      const path = join(compositionDir, `app-composited${suffix}.png`);
-      await writeFile(path, bytes);
-      return path;
-    }
-
-    const color = options.background === "black" ? 255 : 0;
-    const layer = await sharp(mask, {
-      raw: { width: fgSize, height: fgSize, channels: 1 },
-    })
-      .tint({ r: color, g: color, b: color })
+    // The artwork, scaled with TRANSPARENT letterboxing (sharp's default
+    // contain-padding is opaque black).
+    const foreground = await sharp(options.foregroundPath, { failOn: "none" })
+      .resize(fgSize, fgSize, { fit: "contain", background: TRANSPARENT })
       .png()
       .toBuffer();
-    const bgBytes = await loadBackground(options.background);
-    const bytes = await sharp(bgBytes)
-      .composite([{ input: layer, top: offset, left: offset }])
+
+    const base =
+      options.background === "transparent"
+        ? sharp({
+            create: {
+              width: APP_ICON_CANVAS,
+              height: APP_ICON_CANVAS,
+              channels: 4,
+              background: TRANSPARENT,
+            },
+          })
+        : sharp(await loadBackground(options.background));
+
+    const composed = await base
+      .composite([{ input: foreground, top: offset, left: offset }])
       .png({ compressionLevel: 9 })
       .toBuffer();
+
+    // Every composition is clipped to the squircle: the bundled backgrounds
+    // already carry the mask in their alpha, and a transparent background
+    // would otherwise leave the source's square corners visible on macOS.
+    const bytes =
+      options.background === "transparent" ? await clipToSquircle(composed) : composed;
+
     const path = join(compositionDir, `app-composited${suffix}.png`);
     await writeFile(path, bytes);
     return path;

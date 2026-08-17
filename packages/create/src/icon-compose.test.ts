@@ -95,7 +95,9 @@ describe("composeAppIcon", () => {
       expect(cornerAlpha, `${label} corner alpha`).toBe(0);
     }
 
-    // The macOS variant renders its foreground at 824/1024 of the size.
+    // The macOS variant renders its foreground at 824/1024 of the windows
+    // variant's size. The circle spans 48/64 of the fg box, so the expected
+    // widths follow from geometry (canvas * scale * 0.75).
     const fgBox = async (path: string): Promise<number> => {
       const { data, info } = await sharp(path).raw().toBuffer({ resolveWithObject: true });
       let min = Infinity;
@@ -114,10 +116,55 @@ describe("composeAppIcon", () => {
     };
     const windowsSize = await fgBox(result.compositePath);
     const macosSize = await fgBox(result.macOSPath);
-    expect(Math.round(windowsSize)).toBeGreaterThanOrEqual(
-      Math.round(MACOS_CONTENT_SIZE * 0.8) - 4,
+    expect(windowsSize).toBeCloseTo(APP_ICON_CANVAS * 0.8 * 0.75, -1);
+    expect(macosSize).toBeCloseTo(MACOS_CONTENT_SIZE * 0.8 * 0.75, -1);
+    expect(macosSize / windowsSize).toBeCloseTo(MACOS_CONTENT_SIZE / APP_ICON_CANVAS, 2);
+
+    // ORIGINAL pixels are preserved: the dark circle stays dark on the white
+    // background (no silhouette recolor), and the surrounding background is
+    // the bundled white tile.
+    const { data } = await sharp(result.compositePath).raw().toBuffer({ resolveWithObject: true });
+    const px = (x: number, y: number): readonly number[] => {
+      const i = (y * APP_ICON_CANVAS + x) * 4;
+      return [data[i]!, data[i + 1]!, data[i + 2]!, data[i + 3]!];
+    };
+    expect(px(512, 512)[0]).toBeLessThan(80); // art
+    expect(px(512, 120)[0]).toBeGreaterThan(200); // white bg above the art
+  });
+
+  it("does not letterbox non-square WHITE art into a dark reading (round-12 defect)", async () => {
+    // A wide white logo previously hit sharp's default OPAQUE BLACK contain
+    // padding in the analysis downscale, measuring ~0.3 and suggesting the
+    // WHITE background for WHITE art.
+    const wide = await writeTemp(
+      "wide-white.svg",
+      Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><rect x="5" y="5" width="90" height="30" fill="#ffffff"/></svg>`,
+      ),
     );
-    expect(Math.round(macosSize)).toBeLessThan(windowsSize);
+    expect(await foregroundLuminance(wide)).toBeGreaterThan(0.95);
+    expect(autoBackground({ luminance: await foregroundLuminance(wide), coverage: await foregroundCoverage(wide) })).toBe(
+      "black",
+    );
+  });
+
+  it("keeps WHITE artwork white on the auto (black) background", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "icon-compose-out-"));
+    const foreground = await writeTemp("white.svg", svg("#ffffff"));
+    const result = await composeAppIcon({
+      foregroundPath: foreground,
+      background: "black",
+      outputDir: dir,
+    });
+    const { data } = await sharp(result.compositePath).raw().toBuffer({ resolveWithObject: true });
+    const px = (x: number, y: number): readonly number[] => {
+      const i = (y * APP_ICON_CANVAS + x) * 4;
+      return [data[i]!, data[i + 1]!, data[i + 2]!, data[i + 3]!];
+    };
+    // The white circle stays WHITE (round-12 defect: it was painted black).
+    expect(px(512, 512)[0]).toBeGreaterThan(230);
+    // Outside the art: the bundled dark tile.
+    expect(px(512, 100)[0]).toBeLessThan(80);
   });
 
   it("passes original pixels through on the transparent background", async () => {
@@ -142,5 +189,9 @@ describe("composeAppIcon", () => {
     expect(data[i]!).toBeGreaterThan(150);
     expect(data[i]!).toBeLessThan(255); // resized, but red channel dominates
     expect(data[i]! > data[i + 1]!).toBe(true);
+    // The transparent background is still clipped to the squircle: an
+    // opaque square source would otherwise render un-rounded on macOS.
+    const corner = (60 * APP_ICON_CANVAS + 60) * 4;
+    expect(data[corner + 3]!).toBe(0);
   });
 });
