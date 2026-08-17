@@ -81,3 +81,10 @@ canvas — previously only the foreground art shrank while the tile ran
 edge-to-edge, so the Dock icon still filled all available space. The
 shipped ICNS ic10 representation now measures tile width 824 at offset
 100 (ICO stays full-bleed), guarded by a whole-tile bbox regression test.
+
+Slider responsiveness repair: the debounce refactor had moved the local
+state update into the debounced callback, leaving the controlled range
+input pinned to its old value — the slider would not move under the
+pointer even though requests fired. Local state (slider position, label,
+background selection) now updates instantly; only the server pipeline
+(form patch + 1024² recompose) waits for the debounce settle.

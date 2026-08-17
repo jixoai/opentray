@@ -198,13 +198,23 @@ const selectedIconRefStale = (
     const foreground = effectiveIconForeground();
     void recomposeIcon(foreground, iconBackground, scale);
   }, 250);
+  /** Instant local state (the slider is controlled); server work debounces. */
+  const handleIconScaleChange = (scale: number): void => {
+    setIconScale(scale);
+    onIconScaleChangeDebounced(scale);
+  };
 
-  const onIconBackgroundChange = useDebouncedCallback((background: IconBackground) => {
-    iconBackgroundManualRef.current = true;
+  const onIconBackgroundChangeDebounced = useDebouncedCallback((background: IconBackground) => {
     void api("/api/form", { iconBackground: background });
     const foreground = effectiveIconForeground();
     void recomposeIcon(foreground, background, iconScale);
   }, 120);
+  /** Instant selection state; server work debounces. */
+  const handleIconBackgroundChange = (background: IconBackground): void => {
+    iconBackgroundManualRef.current = true;
+    setIconBackground(background);
+    onIconBackgroundChangeDebounced(background);
+  };
 
   /** Effective foreground for composition: pick/upload wins, else scraped default. */
   const effectiveIconForeground = (): string | undefined =>
@@ -675,8 +685,8 @@ const selectedIconRefStale = (
         iconComposeError={iconComposeError}
         iconBackground={iconBackground}
         iconScale={iconScale}
-        onIconBackgroundChange={onIconBackgroundChange}
-        onIconScaleChange={onIconScaleChangeDebounced}
+        onIconBackgroundChange={handleIconBackgroundChange}
+        onIconScaleChange={handleIconScaleChange}
         selectedTrayRef={selectedTrayRef}
         uploadedTrayUrl={uploadedTrayUrl}
         selectedPort={selectedPort}
