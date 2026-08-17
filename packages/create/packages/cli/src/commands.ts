@@ -492,7 +492,7 @@ const appExportCommand = (context: CliContext): CommandModule => ({
     yargs
       .positional("app-id", { type: "string", demandOption: true })
       .option("format", { type: "string", choices: ["command", "sh", "ps1"], default: "command", describe: "direct command, POSIX shell script, or PowerShell script" })
-      .option("output", { type: "string", describe: "write the script to a file instead of stdout" })
+      .option("output", { type: "string", alias: "o", describe: "write the script to a file instead of stdout" })
       .option("force-copy", { type: "boolean", default: false, describe: "explicitly allow long embedded data in the direct command" })
       .option("acknowledge-env", { type: "boolean", default: false, describe: "acknowledge that complete output includes environment values" })
       .option("json", { type: "boolean", default: false }),
@@ -675,7 +675,9 @@ const webCommand = (context: CliContext): CommandModule => ({
   builder: (yargs: Argv) =>
     yargs
       .option("port", { type: "number", describe: "bind the wizard server to a specific loopback port" })
-      .option("no-open", { type: "boolean", default: false, describe: "do not open the default browser" })
+      // Idiomatic yargs negation: declaring `open` (default true) makes
+      // --no-open its strict-mode-safe negation.
+      .option("open", { type: "boolean", default: true, describe: "open the default browser (negate with --no-open)" })
       .option("json", { type: "boolean", default: false, hidden: true }),
   handler: async (argv) => {
     if (context.runWeb === undefined) {
@@ -684,9 +686,10 @@ const webCommand = (context: CliContext): CommandModule => ({
       return;
     }
     const port = argv.port as number | undefined;
+    const open = argv.open !== false; // --no-open negates to false
     exitSetter(context)(await context.runWeb({
       ...(port === undefined ? {} : { port }),
-      open: (argv["no-open"] as boolean) !== true,
+      open,
     }));
   },
 });
