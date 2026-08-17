@@ -152,6 +152,19 @@ non-interactive pipe mode with a visible notice instead of failing.
 - **WHEN** multiple owned ports are listening
 - **THEN** each SHALL have its own dedicated window opened automatically
 
+#### Scenario: The service port is never hard-bound
+
+- **GIVEN** any generated app (with or without shell options)
+- **WHEN** it needs the service address
+- **THEN** the port SHALL come exclusively from runtime sniffing (owned-listener scan plus HTTP verification); a recorded preview port is informational only and MUST NOT be addressed without verification
+- **AND** the wizard form SHALL NOT offer a manual service-port input
+- **AND** with no sniffed port at confirm time the app SHALL still materialize and sniff when it runs the command itself
+
+#### Scenario: The target directory needs no form field
+
+- **GIVEN** the wizard form
+- **THEN** it SHALL NOT expose a target-directory input; the CLI positional argument and the derived default own that decision
+
 #### Scenario: Detached ports mark the window title
 
 - **GIVEN** an open service tab whose port stops listening

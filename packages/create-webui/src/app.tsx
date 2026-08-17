@@ -3,6 +3,7 @@ import { Play, Settings2, Square } from "lucide-react";
 import * as React from "react";
 
 import { AdvancedPanel } from "@/components/advanced-panel";
+import { TagInput } from "@/components/tag-input";
 import { AppForm } from "@/components/app-form";
 import { IconPicker } from "@/components/icon-picker";
 import { CreateDialog } from "@/components/create-dialog";
@@ -25,6 +26,8 @@ import {
   type WizardEvent,
   type WizardFormDefaults,
   type WizardFormValues,
+  DEFAULT_COMMAND_OPTIONS,
+  type WizardCommandOptions,
   type WizardState,
 } from "@/wizard-protocol";
 
@@ -33,16 +36,19 @@ const EMPTY_VALUES: WizardFormValues = {
   appName: "",
   iconPath: "",
   trayIconPath: "",
-  servicePort: "",
-  targetDir: "",
   pm: "npm",
   showStartupTerminal: false,
   showAddressBar: false,
 };
-const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "" };
+const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "" };
 
 export function App(): React.JSX.Element {
   const [command, setCommand] = React.useState("");
+  const [argv, setArgv] = React.useState<string[]>([]);
+  const [commandOptions, setCommandOptions] = React.useState<WizardCommandOptions>(
+    DEFAULT_COMMAND_OPTIONS,
+  );
+  const advancedRef = React.useRef<HTMLDivElement>(null);
   const [panelOpen, setPanelOpen] = React.useState(false);
   const [runAlive, setRunAlive] = React.useState(false);
   const [wizardState, setWizardState] = React.useState<WizardState>("idle");
@@ -207,6 +213,9 @@ const selectedIconRefStale = (
         case "command-display":
           setDisplayCommand(payload.command);
           break;
+        case "command-options":
+          setCommandOptions(payload.options);
+          break;
         case "services": {
           setServices(payload.services);
           setSelectedPort(payload.selectedPort);
@@ -297,10 +306,6 @@ const selectedIconRefStale = (
 
   // ---- actions ----
   const running = wizardState === "running" || wizardState === "discovered";
-  const manualPort = (() => {
-    const parsed = Number.parseInt(values.servicePort, 10);
-    return Number.isInteger(parsed) && parsed > 0 && parsed < 65_536 ? parsed : undefined;
-  })();
   // The form is the core flow: usable from idle, before any command runs.
   const showForm = true;
   React.useEffect(() => {
@@ -314,7 +319,7 @@ const selectedIconRefStale = (
 
   const runCommand = async (): Promise<void> => {
     const trimmed = command.trim();
-    if (trimmed.length === 0) return;
+    if (commandOptions.argsMode === "string" && trimmed.length === 0) return;
     // Instant feedback: open the panel (and reset the terminal) before the
     // POST round-trip or any output event.
     setPanelOpen(true);
@@ -329,6 +334,11 @@ const selectedIconRefStale = (
     setUploadedIconUrl(undefined);
     setSelectedTrayRef(undefined);
     setUploadedTrayUrl(undefined);
+    if (commandOptions.argsMode === "array") {
+      if (argv.length === 0 || (argv[0] ?? "").trim().length === 0) return;
+      await api("/api/command", { argv });
+      return;
+    }
     await api("/api/command", { command: trimmed });
   };
 
@@ -405,18 +415,44 @@ const selectedIconRefStale = (
         </Badge>
       </header>
 
-      {/* Command bar */}
+      {/* Command bar: settings button opens the advanced accordion */}
       <div className="flex gap-2">
-        <Input
-          className="font-mono"
-          placeholder="npx somecommand start --xx"
-          value={command}
-          disabled={runAlive}
-          onChange={(event) => setCommand(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !runAlive) void runCommand();
+        {commandOptions.argsMode === "array" ? (
+          <TagInput
+            tags={argv}
+            onTagsChange={(tags) => setArgv([...tags])}
+            disabled={runAlive}
+            aria-label="命令参数（argv）"
+            className="focus:outline-none"
+          />
+        ) : (
+          <Input
+            className="font-mono"
+            placeholder="npx somecommand start --xx"
+            value={command}
+            disabled={runAlive}
+            onChange={(event) => setCommand(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !runAlive) void runCommand();
+            }}
+          />
+        )}
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="命令高级选项"
+          title="命令高级选项"
+          disabled={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
+          onClick={() => {
+            setAdvancedOpen(true);
+            // Let the panel mount, then bring it into view.
+            window.setTimeout(() => {
+              advancedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 50);
           }}
-        />
+        >
+          <Settings2 />
+        </Button>
         {runAlive ? (
           <Button
             variant="destructive"
@@ -468,24 +504,22 @@ const selectedIconRefStale = (
         </pre>
       ) : null}
 
-      {/* Advanced options */}
-      {showForm ? (
-        <div>
-          {!advancedOpen ? (
-            <button
-              type="button"
-              onClick={() => setAdvancedOpen(true)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <Settings2 className="size-3.5" />
-              高级选项
-            </button>
-          ) : null}
+      {/* Advanced options (accordion: 命令选项 + 应用选项) */}
+      {advancedOpen ? (
+        <div ref={advancedRef}>
           <AdvancedPanel
-            open={advancedOpen}
-            onOpenChange={setAdvancedOpen}
+            open
             frozen={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
             values={values}
+            commandOptions={commandOptions}
+            onCommandOptionsChange={(next) => {
+              setCommandOptions(next);
+              void api("/api/command-options", {
+                cwd: next.cwd,
+                env: next.env,
+                argsMode: next.argsMode,
+              });
+            }}
             candidates={iconCandidates}
             candidatesPort={iconCandidatesPort}
             selectedTrayRef={selectedTrayRef}
@@ -588,18 +622,11 @@ const selectedIconRefStale = (
             }}
           />
           <div className="mt-4 flex items-center gap-3">
-            <Button
-              disabled={manualPort === undefined && selectedPort === undefined}
-              onClick={() => void confirmCreate()}
-            >
-              确定创建应用
-            </Button>
+            <Button onClick={() => void confirmCreate()}>确定创建应用</Button>
             <span className="text-xs text-muted-foreground">
-              {manualPort !== undefined
-                ? `将使用手动端口 :${manualPort}`
-                : selectedPort !== undefined
-                  ? `已选服务 :${selectedPort}（点击状态栏服务可切换）`
-                  : "可先运行命令嗅探端口，或直接在表单中手动填写端口"}
+              {selectedPort !== undefined
+                ? `已选服务 :${selectedPort}（点击状态栏服务可切换）`
+                : "未运行也不影响：应用启动时会自行嗅探命令的监听端口"}
             </span>
           </div>
         </section>

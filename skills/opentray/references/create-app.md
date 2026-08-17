@@ -38,7 +38,16 @@ npx create-opentray my-app     # or an explicit target directory
    resolves them; edits win over later scrapes. A dedicated icon input carries
    the icon fallback chain (scraped favicon → custom path → first-letter
    glyph).
-5. 确定创建 freezes the form and shows the confirmation dialog. 确认生成
+5. 高级选项 — the settings button beside the command bar opens an accordion.
+   命令选项 configures execution: 参数输入模式 (数组/argv mode commits ONE
+   argv element per tag, verbatim — no string splitting), 工作目录 (cwd),
+   and 环境变量 (env overlay, also persisted into the generated app).
+   应用选项 holds the tray-icon picker (defaults to the app icon choice;
+   solid black/white silhouettes derived from every candidate) and the two
+   generated-app window options, both off by default: 显示启动终端 and
+   显示地址栏. Service ports are never hard-bound: the generated app sniffs
+   the command's owned listening ports at runtime.
+6. 确定创建 freezes the form and shows the confirmation dialog. 确认生成
    streams pipeline logs (scaffold → icon → install → first launch → macOS
    bundle) and ends in a Success dialog with 打开应用 and the platform
    pinning hint.

@@ -86,15 +86,11 @@ export function CreateDialog({
                 ) : null}
                 <span className="font-mono">{iconLabel}</span>
               </dd>
-              <dt className="text-muted-foreground">目标目录</dt>
-              <dd className="font-mono break-all">{frozenValues.targetDir}</dd>
               <dt className="text-muted-foreground">服务端口</dt>
               <dd className="font-mono">
-                {(() => {
-                  const manual = Number.parseInt(frozenValues.servicePort, 10);
-                  const port = Number.isInteger(manual) && manual > 0 ? manual : selectedPort;
-                  return port ? `:${port}` : "—";
-                })()}
+                {selectedPort !== undefined
+                  ? `:${selectedPort}（生成后运行时重新嗅探）`
+                  : "运行时嗅探"}
               </dd>
               <dt className="text-muted-foreground">包管理器</dt>
               <dd>{frozenValues.pm}</dd>

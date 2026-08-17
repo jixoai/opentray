@@ -132,7 +132,7 @@ ${options.skipInstall === true ? "Install dependencies first, then:" : ""}
 npm run start
 \`\`\`
 
-- Service: ${`http://127.0.0.1:${options.config.service.port}`}
+- Service: ${options.config.service.port > 0 ? `http://127.0.0.1:${options.config.service.port} (preview hint; re-sniffed at runtime)` : "sniffed at runtime from the command's owned listening ports"}
 - Command: \`${options.config.command.command} ${options.config.command.args.join(" ")}\`
 - Logs: \`app.log\`
 

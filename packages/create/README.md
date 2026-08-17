@@ -28,10 +28,20 @@ npx create-opentray
    PNG sets, /favicon.ico) is collected, measured by true pixel clarity,
    deduplicated perceptually, and ranked; clicking a candidate (or uploading
    a local image) selects it, and the clearest candidate is the default.
-5. 确定创建 freezes the resolved identity, shows a confirmation dialog, then
+5. 高级选项 — the settings button beside the command bar opens an accordion:
+   - 命令选项: 参数输入模式 (string vs 数组/argv — array mode commits ONE argv
+     element per tag, verbatim, never splitting strings), 工作目录 (cwd),
+     and 环境变量 (env overlay; also persisted into the generated app).
+   - 应用选项: the tray-icon picker (defaults to the app icon choice; solid
+     black/white silhouettes derived from every candidate) and the two
+     generated-app window options 显示启动终端 / 显示地址栏 (both default off).
+   Service ports are NEVER hard-bound: the form has no manual port input, and
+   the generated app resolves its address exclusively by sniffing the
+   command's owned listening ports (HTTP-verified) at runtime.
+6. 确定创建 freezes the resolved identity, shows a confirmation dialog, then
    确认生成 runs the pipeline with live logs: scaffold → icon generation →
    dependency install → first launch → (macOS) stable bundle verification.
-6. Success offers 打开应用 plus a platform pinning hint (Windows taskbar /
+7. Success offers 打开应用 plus a platform pinning hint (Windows taskbar /
    macOS Dock).
 
 ## CLI

@@ -57,7 +57,10 @@ describe("writeScaffold", () => {
     expect(entry).toContain("appMode: true");
     expect(entry).toContain("http://127.0.0.1:${servicePort}");
     // Dynamic-port commands must be rediscovered through process-tree ownership.
-    expect(entry).toContain("waitForServicePort(config.service.port");
+    // Ports come exclusively from runtime sniffing (owner law): the frozen
+    // preview port is never addressed without verification.
+    expect(entry).toContain("sniffServicePort");
+    expect(entry).not.toContain("waitForServicePort");
     expect(entry).toContain("start.somecommand.npx");
     expect(entry).toContain("Somecommand Start");
     expect(entry).toContain('app-icon", "app-icon.json');

@@ -124,3 +124,11 @@ app through a WebUI wizard):
 - [x] 4.47 create-webui: shared IconPicker; advanced panel (tray picker + two window-mode checkboxes); dedicated terminal.html page (command bar + status bar + PTY) and browse.html address-bar wrapper page (Navigation API with fallback); vite multi-entry relative-base build.
 - [x] 4.48 Tests: scraper variants, form fields/config passthrough, scaffold shell template, server endpoints.
 - [x] 4.49 ego-browser walkthrough: wizard advanced flow with `npx @deepseek-ai/dsh web --port 0`; generated app run: startup terminal streams, ports auto-open, address bar navigates (Navigation API), killing the service marks the title `(detached)`. Evidence: dedicated windows verified via CGWindowList (2 service 1200x828 + terminal 900x588 with `— Terminal` title), Navigation API sameDocument traversal verified, detach state verified through shell events; the final titlebar string was blocked from direct observation by a session TCC screen-recording change (window-name reads returned nil for ALL processes), with the setTitle path exercised by the proven detach state machine.
+- [x] 4.50 Owner round-10 corrections: service ports NEVER hard-bound (manual
+      port input removed; entry sniffs owned HTTP-verified ports exclusively;
+      monitor no longer seeds the frozen port), 目标目录 form field removed
+      (CLI positional owns it), and command options join the advanced panel as
+      an accordion (命令选项: argv array input via TagInput — verbatim elements,
+      no splitting; cwd; env overlay persisted into the generated app; 应用选项:
+      tray icon + window modes), opened by a settings button beside the
+      command bar that scrolls the panel into view.

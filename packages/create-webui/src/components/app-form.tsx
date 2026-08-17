@@ -195,18 +195,6 @@ export function AppForm({
         />
       </div>
       <div>
-        <Label htmlFor="servicePort">服务端口</Label>
-        <Input
-          id="servicePort"
-          className="mt-1 font-mono"
-          inputMode="numeric"
-          disabled={disabled}
-          value={values.servicePort}
-          placeholder="运行命令后自动嗅探；或手动填写"
-          onChange={(event) => onPatch({ servicePort: event.target.value })}
-        />
-      </div>
-      <div>
         <Label htmlFor="pm">包管理器</Label>
         <Select
           value={values.pm}
@@ -222,17 +210,6 @@ export function AppForm({
             <SelectItem value="bun">bun</SelectItem>
           </SelectContent>
         </Select>
-      </div>
-      <div className="md:col-span-2">
-        <Label htmlFor="targetDir">目标目录</Label>
-        <Input
-          id="targetDir"
-          className="mt-1 font-mono"
-          disabled={disabled}
-          value={values.targetDir}
-          placeholder={defaults.targetDir || "当前目录下按 App ID 命名"}
-          onChange={(event) => onPatch({ targetDir: event.target.value })}
-        />
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { readFile } from "node:fs/promises";
 import { createWizardSession, type WizardEvent, type WizardOptions } from "./wizard";
 import type { CommandRun, CommandRunEvent, CommandRunOptions } from "./command-run";
 import type { DiscoveredService } from "./port-scan";
@@ -10,6 +11,7 @@ const neverResolve = (): Promise<{ code: number | null }> =>
   new Promise<{ code: number | null }>(() => {});
 
 interface Harness {
+  lastRunOptions(): CommandRunOptions | undefined;
   events: WizardEvent[];
   session: ReturnType<typeof createWizardSession>;
   setListeners(listeners: ReadonlySet<number>): void;
@@ -31,9 +33,11 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
   let scrapeState: MutableScrapeState = {};
 
   let runOnEvent: ((event: CommandRunEvent) => void) | undefined;
+  let lastRunOptions: CommandRunOptions | undefined;
 
   const fakeRun = async (options: CommandRunOptions): Promise<CommandRun> => {
     runOnEvent = options.onEvent;
+    lastRunOptions = options;
     return {
       pid: 4321,
       pty: false,
@@ -89,6 +93,7 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
   return {
     events,
     session,
+    lastRunOptions: () => lastRunOptions,
     setListeners(next) {
       listeners = new Set(next);
       verified = [...next];
@@ -151,9 +156,6 @@ describe("wizard session", () => {
     expect(harness.session.form.appId).toBe("");
     expect(lastFormDefaults(harness.events)?.appId).toBe("start.somecommand.npx");
     expect(harness.session.selectedPort).toBe(19080);
-    expect(lastFormDefaults(harness.events)?.targetDir).toBe(
-      "/tmp/wizard-cwd/start-somecommand-npx",
-    );
     // The nav bar learns the raw command.
     expect(
       harness.events.some(
@@ -207,17 +209,19 @@ describe("wizard session", () => {
     expect(harness.session.state).toBe("frozen");
     expect(harness.session.form.appName).toBe("Frozen Title");
     expect(harness.session.form.appId).toBe("start.somecommand.npx");
-    expect(harness.session.form.targetDir).toBe("/tmp/wizard-cwd/start-somecommand-npx");
 
     harness.setScrape({ title: "Post-freeze Title" });
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(harness.session.form.appName).toBe("Frozen Title");
   });
 
-  it("refuses confirm without a service port", async () => {
+  it("confirms without a sniffed port and records the zero hint", async () => {
     const harness = createHarness();
     await harness.session.submitCommand("npx somecommand start --xx");
-    expect(() => harness.session.confirm()).toThrow("服务端口");
+    // No service was sniffed (listeners empty): confirm must still succeed —
+    // the generated app sniffs ports at runtime; the frozen hint is 0.
+    harness.session.confirm();
+    expect(harness.session.state).toBe("frozen");
   });
 
   it("emits the running state immediately and forwards terminal I/O", async () => {
@@ -346,10 +350,9 @@ describe("wizard session", () => {
     expect(session.state).toBe("idle");
     const defaults = lastFormDefaults(events);
     expect(defaults?.appId).toBe("start.primed-tool.npx");
-    expect(defaults?.targetDir).toBe("/tmp/wizard-cwd/start-primed-tool-npx");
   });
 
-  it("confirms and materializes from idle with a manual port (no run)", async () => {
+  it("confirms and materializes from idle without any run", async () => {
     const events: WizardEvent[] = [];
     let materializePort = -1;
     const session = createWizardSession({
@@ -399,11 +402,9 @@ describe("wizard session", () => {
     void materializePort;
 
     session.prime("npx manual-port-tool serve");
-    session.updateForm({ servicePort: "19080" });
     session.confirm();
     expect(session.state).toBe("frozen");
     expect(session.form.appId).toBe("serve.manual-port-tool.npx");
-    expect(session.form.servicePort).toBe("19080");
     await session.create();
     expect(session.state).toBe("success");
     const success = events.find(
@@ -412,7 +413,7 @@ describe("wizard session", () => {
     expect(success).toBeDefined();
   }, 20_000);
 
-  it("rejects confirmation when neither a service nor a manual port exists", async () => {
+  it("confirms from a primed command with no sniffed service", async () => {
     const session = createWizardSession({
       cwd: "/tmp/wizard-cwd",
       skipInstall: true,
@@ -434,8 +435,82 @@ describe("wizard session", () => {
       }),
     });
     session.prime("npx portless-tool serve");
-    expect(() => session.confirm()).toThrow("服务端口");
+    session.confirm();
+    expect(session.state).toBe("frozen");
   });
+
+  it("submits argv verbatim in array mode with custom cwd and env", async () => {
+    const harness = createHarness();
+    harness.session.updateCommandOptions({
+      argsMode: "array",
+      cwd: "sub/dir",
+      env: [
+        { key: "FOO", value: "bar" },
+        { key: "", value: "skipped" },
+        { key: "BAZ", value: "qux" },
+      ],
+    });
+    await harness.session.submitCommand(["npx", "weird arg with  spaces", "--x=1"]);
+    // Array elements pass through VERBATIM — no string splitting ever runs.
+    expect(harness.lastRunOptions()?.tokens).toEqual([
+      "npx",
+      "weird arg with  spaces",
+      "--x=1",
+    ]);
+    // cwd resolves against the wizard cwd; env overlay drops empty keys.
+    expect(harness.lastRunOptions()?.cwd).toBe("/tmp/wizard-cwd/sub/dir");
+    expect(harness.lastRunOptions()?.env).toEqual({ FOO: "bar", BAZ: "qux" });
+    // The command display joins for presentation only.
+    const display = harness.events.find(
+      (event): event is Extract<WizardEvent, { type: "command-display" }> =>
+        event.type === "command-display",
+    );
+    expect(display?.command).toBe("npx weird arg with  spaces --x=1");
+  });
+
+  it("keeps the env overlay on the frozen launch vector", async () => {
+    const harness = createHarness({
+      materializeContext: {
+        generateIcon: (async () => ({
+          schemaVersion: 1,
+          sourceSha256: "",
+          sourceImplementationSha256: null,
+          implementationSha256: "",
+          recipeVersion: "",
+          sharpVersion: "",
+          iconEncoderVersion: "",
+          figmaSquircleVersion: "",
+          outputPath: "",
+          icnsOutputPath: "",
+          icoOutputPath: "",
+          linuxPngOutputPaths: [],
+          manifestOutputPath: "",
+          appIcon: [],
+        })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
+        firstLaunchEntry: async () => ({ pid: 999, ready: Promise.resolve() }),
+        waitMs: async () => {},
+        runInstall: async () => {},
+        platform: "linux",
+      },
+    });
+    harness.session.updateCommandOptions({
+      argsMode: "string",
+      env: [{ key: "TOKEN", value: "sekret" }],
+    });
+    await harness.session.submitCommand("npx somecommand start --xx");
+    harness.setListeners(new Set([19080]));
+    await waitFor(() => harness.session.state === "discovered");
+    harness.session.confirm();
+    await harness.session.create();
+    expect(harness.session.state).toBe("success");
+    // The frozen config carries the env overlay for the generated app.
+    const configPath = harness.session.result?.scaffold.configPath;
+    expect(configPath).toBeDefined();
+    const frozenConfig = JSON.parse(
+      await readFile(configPath as string, "utf8"),
+    ) as { command: { env?: Record<string, string> } };
+    expect(frozenConfig.command.env).toEqual({ TOKEN: "sekret" });
+  }, 20_000);
 
   it("materializes through the frozen form and reaches success", async () => {
     const events: WizardEvent[] = [];

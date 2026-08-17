@@ -16,7 +16,13 @@ import { readFile } from "node:fs/promises";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { WizardEvent, WizardFormValues, WizardSession } from "./wizard";
+import type {
+  WizardCommandOptions,
+  WizardEnvEntry,
+  WizardEvent,
+  WizardFormValues,
+  WizardSession,
+} from "./wizard";
 import { openMaterializedApp } from "./open-app";
 
 export interface WizardServerHandle {
@@ -335,12 +341,49 @@ const handleApi = async (
   const body = await readJsonBody(request);
   switch (pathname) {
     case "/api/command": {
+      // Array form: argv elements used verbatim (array input mode).
+      if (Array.isArray(body.argv)) {
+        const argv = body.argv.filter((element: unknown): element is string => typeof element === "string");
+        if (argv.length === 0 || (argv[0] ?? "").trim().length === 0) {
+          respond(response, 400, "application/json", '{"error":"argv requires the program element"}\n');
+          return;
+        }
+        await session.submitCommand(argv);
+        respond(response, 200, "application/json", '{"ok":true}\n');
+        return;
+      }
       const command = typeof body.command === "string" ? body.command : "";
       if (command.trim().length === 0) {
         respond(response, 400, "application/json", '{"error":"command is required"}\n');
         return;
       }
       await session.submitCommand(command);
+      respond(response, 200, "application/json", '{"ok":true}\n');
+      return;
+    }
+    case "/api/command-options": {
+      const patch: Partial<{ -readonly [K in keyof WizardCommandOptions]: WizardCommandOptions[K] }> = {};
+      if (typeof body.cwd === "string") {
+        patch.cwd = body.cwd;
+      }
+      if (body.argsMode === "string" || body.argsMode === "array") {
+        patch.argsMode = body.argsMode;
+      }
+      if (Array.isArray(body.env)) {
+        const entries: WizardEnvEntry[] = [];
+        for (const entry of body.env) {
+          if (
+            typeof entry === "object" &&
+            entry !== null &&
+            typeof (entry as { key?: unknown }).key === "string" &&
+            typeof (entry as { value?: unknown }).value === "string"
+          ) {
+            entries.push({ key: (entry as { key: string }).key, value: (entry as { value: string }).value });
+          }
+        }
+        patch.env = entries;
+      }
+      session.updateCommandOptions(patch);
       respond(response, 200, "application/json", '{"ok":true}\n');
       return;
     }
@@ -366,7 +409,7 @@ const handleApi = async (
     }
     case "/api/form": {
       const patch: Partial<{ -readonly [K in keyof WizardFormValues]: WizardFormValues[K] }> = {};
-      for (const key of ["appId", "appName", "iconPath", "trayIconPath", "servicePort", "targetDir"] as const) {
+      for (const key of ["appId", "appName", "iconPath", "trayIconPath"] as const) {
         const value = body[key];
         if (typeof value === "string") {
           patch[key] = value;

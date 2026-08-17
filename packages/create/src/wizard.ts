@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { deriveDefaultAppId, deriveDefaultAppName, toProjectDirectoryName } from "./app-id";
 import {
@@ -35,6 +35,27 @@ import type { LaunchVector } from "./launch-vector";
 import { resolveLaunchVector } from "./launch-vector";
 import { pinningHint } from "./open-app";
 
+export interface WizardEnvEntry {
+  readonly key: string;
+  readonly value: string;
+}
+
+/** Command execution options (advanced): working directory, custom env, and
+ *  the input mode — array mode takes argv elements verbatim (no string
+ *  splitting), string mode tokenizes one command line. */
+export interface WizardCommandOptions {
+  /** Empty = the wizard's working directory. */
+  readonly cwd: string;
+  readonly env: readonly WizardEnvEntry[];
+  readonly argsMode: "string" | "array";
+}
+
+export const DEFAULT_COMMAND_OPTIONS: WizardCommandOptions = {
+  cwd: "",
+  env: [],
+  argsMode: "string",
+};
+
 export type WizardState =
   | "idle"
   | "running"
@@ -50,8 +71,6 @@ export interface WizardFormValues {
   readonly iconPath: string;
   /** Empty = follow the app icon choice (default). */
   readonly trayIconPath: string;
-  readonly servicePort: string;
-  readonly targetDir: string;
   readonly pm: "npm" | "pnpm" | "bun";
   /** Advanced: render the command PTY in the generated app (default false). */
   readonly showStartupTerminal: boolean;
@@ -63,7 +82,6 @@ export interface WizardFormValues {
 export interface WizardFormDefaults {
   readonly appId: string;
   readonly appName: string;
-  readonly targetDir: string;
 }
 
 export type WizardEvent =
@@ -72,6 +90,7 @@ export type WizardEvent =
   | { readonly type: "term-mode"; readonly interactive: boolean; readonly message?: string }
   | { readonly type: "run-status"; readonly running: boolean; readonly code?: number | null }
   | { readonly type: "command-display"; readonly command: string }
+  | { readonly type: "command-options"; readonly options: WizardCommandOptions }
   | {
       readonly type: "services";
       readonly services: readonly DiscoveredService[];
@@ -134,9 +153,13 @@ export interface WizardSession {
   replaceIconCandidates(port: number, icons: readonly ScrapedIcon[]): void;
   readonly form: WizardFormValues;
   readonly result: MaterializeResult | undefined;
-  submitCommand(command: string): Promise<void>;
+  /** String form is tokenized; array form is taken as argv verbatim (array
+   *  input mode — no string splitting is ever applied to it). */
+  submitCommand(command: string | readonly string[]): Promise<void>;
   /** Derive placeholder defaults from command text without spawning anything. */
-  prime(command: string): void;
+  prime(command: string | readonly string[]): void;
+  readonly commandOptions: WizardCommandOptions;
+  updateCommandOptions(patch: Partial<WizardCommandOptions>): void;
   selectService(port: number): void;
   updateForm(patch: Partial<WizardFormValues>): void;
   terminalInput(data: string): void;
@@ -151,8 +174,6 @@ interface FieldTouched {
   appName: boolean;
   iconPath: boolean;
   trayIconPath: boolean;
-  servicePort: boolean;
-  targetDir: boolean;
   pm: boolean;
   showStartupTerminal: boolean;
   showAddressBar: boolean;
@@ -185,14 +206,13 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let frozenForm: WizardFormValues | undefined;
   let resolvedServicePort: number | undefined;
   let runAlive = false;
-  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, trayIconPath: false, servicePort: false, targetDir: false, pm: false, showStartupTerminal: false, showAddressBar: false };
+  let commandOptions: WizardCommandOptions = { ...DEFAULT_COMMAND_OPTIONS };
+  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false };
   let form: WizardFormValues = {
     appId: "",
     appName: "",
     iconPath: "",
     trayIconPath: "",
-    servicePort: "",
-    targetDir: "",
     showStartupTerminal: false,
     showAddressBar: false,
     pm:
@@ -236,7 +256,6 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     return {
       appId: deriveDefaultAppId(currentTokens),
       appName: scrapedTitle ?? deriveDefaultAppName(currentTokens),
-      targetDir: join(options.cwd, toProjectDirectoryName(effectiveAppId)),
     };
   };
 
@@ -257,9 +276,6 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       );
       if (selectedPort !== port) {
         return; // selection moved during scrape
-      }
-      if (!touched.servicePort && form.servicePort !== String(port)) {
-        form = { ...form, servicePort: String(port) };
       }
       // Candidates always refresh (possibly to an empty list); the clearest
       // one remains the empty-field default.
@@ -326,6 +342,27 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         }
       })();
     }, options.pollIntervalMs ?? 1_000);
+  };
+
+  /** Resolve the command cwd: empty = the wizard's working directory. */
+  const effectiveCwd = (): string => {
+    const custom = commandOptions.cwd.trim();
+    return custom.length > 0 ? resolve(options.cwd, custom) : options.cwd;
+  };
+
+  /** Build the env overlay from configured entries (empty keys skipped). */
+  const commandEnv = (): Record<string, string> => {
+    const env: Record<string, string> = {};
+    for (const entry of commandOptions.env) {
+      if (entry.key.trim().length > 0) {
+        env[entry.key.trim()] = entry.value;
+      }
+    }
+    return env;
+  };
+
+  const publishCommandOptions = (): void => {
+    emit({ type: "command-options", options: commandOptions });
   };
 
   const session: WizardSession = {
@@ -401,9 +438,18 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (state !== "idle" && state !== "failed" && state !== "running" && state !== "discovered") {
         throw new Error(`cannot submit a command while ${state}`);
       }
-      const tokenized = tokenizeCommandLine(command);
-      if (!tokenized.ok) {
-        setState("failed", tokenized.error);
+      // Array mode: the caller supplied argv elements directly — they are
+      // used verbatim and NEVER re-split. String mode: tokenize one line.
+      const tokens = typeof command === "string" ? undefined : command;
+      let tokenized: ReturnType<typeof tokenizeCommandLine> | undefined;
+      if (tokens === undefined) {
+        tokenized = tokenizeCommandLine(command as string);
+        if (!tokenized.ok) {
+          setState("failed", tokenized.error);
+          return;
+        }
+      } else if (tokens.length === 0 || tokens[0]!.trim().length === 0) {
+        setState("failed", "数组模式至少需要程序元素（第一个参数）");
         return;
       }
       await session.stop();
@@ -411,30 +457,27 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       stopped = false;
       services = [];
       selectedPort = undefined;
-      currentTokens = tokenized.tokens;
+      currentTokens = tokens ?? tokenized!.tokens;
       currentIconPath = undefined;
       currentTrayIconPath = undefined;
       iconCandidates = [];
       touched.appId = false;
       touched.appName = false;
-      touched.targetDir = false;
       touched.pm = false;
       form = {
         appId: "",
         appName: "",
         iconPath: "",
         ...(touched.trayIconPath ? { trayIconPath: form.trayIconPath } : { trayIconPath: "" }),
-        ...(touched.servicePort ? { servicePort: form.servicePort } : { servicePort: "" }),
-        targetDir: "",
         ...(touched.showStartupTerminal ? { showStartupTerminal: form.showStartupTerminal } : { showStartupTerminal: false }),
         ...(touched.showAddressBar ? { showAddressBar: form.showAddressBar } : { showAddressBar: false }),
         pm:
           options.packageManager ??
           detectPackageManager([], process.env.npm_config_user_agent),
       };
-      currentCommand = command;
+      currentCommand = typeof command === "string" ? command : command.join(" ");
       scrapedTitle = undefined;
-      emit({ type: "command-display", command });
+      emit({ type: "command-display", command: currentCommand });
       tempIconDir = await mkdtemp(join(tmpdir(), "create-opentray-"));
 
       const listListeners =
@@ -447,9 +490,11 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       publishForm();
 
       const spawnRun = options.spawnRun ?? startCommandRun;
+      const envOverlay = commandEnv();
       run = await spawnRun({
-        tokens: tokenized.tokens,
-        cwd: options.cwd,
+        tokens: currentTokens,
+        cwd: effectiveCwd(),
+        ...(Object.keys(envOverlay).length === 0 ? {} : { env: envOverlay }),
         onEvent: (event: CommandRunEvent) => {
           if (event.type === "stdout" || event.type === "stderr") {
             emit({
@@ -531,6 +576,17 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (state === "frozen" || state === "materializing" || state === "success") {
         return;
       }
+      if (typeof command !== "string") {
+        // Array mode: argv verbatim; nothing is ever re-split.
+        if (command.length === 0 || command[0]!.trim().length === 0) {
+          return;
+        }
+        currentTokens = command;
+        currentCommand = command.join(" ");
+        emit({ type: "command-display", command: currentCommand });
+        publishForm();
+        return;
+      }
       const tokenized = tokenizeCommandLine(command);
       if (!tokenized.ok) {
         return; // keep previous placeholders for empty/invalid drafts
@@ -539,6 +595,18 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       currentCommand = command;
       emit({ type: "command-display", command });
       publishForm();
+    },
+
+    get commandOptions() {
+      return commandOptions;
+    },
+
+    updateCommandOptions(patch) {
+      if (state === "frozen" || state === "materializing" || state === "success") {
+        return;
+      }
+      commandOptions = { ...commandOptions, ...patch };
+      publishCommandOptions();
     },
 
     async saveIconUpload(bytes) {
@@ -597,25 +665,17 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (state !== "idle" && state !== "running" && state !== "discovered" && state !== "failed") {
         throw new Error(`cannot confirm while ${state}`);
       }
-      // The service port comes from discovery or the manual form input; without
-      // either, materialization cannot address the app window.
-      const manualPort = Number.parseInt(form.servicePort.trim(), 10);
-      const port =
-        Number.isInteger(manualPort) && manualPort > 0 && manualPort < 65_536
-          ? manualPort
-          : selectedPort;
-      if (port === undefined) {
-        throw new Error("缺少服务端口：请运行命令嗅探端口，或在表单中手动填写端口");
-      }
-      resolvedServicePort = port;
+      // Ports come exclusively from runtime sniffing: the preview's discovered
+      // port is recorded as an informational hint (0 when never sniffed); the
+      // generated app resolves the real address by scanning its own command
+      // tree. A manual port input must not exist.
+      resolvedServicePort = selectedPort ?? 0;
       // Empty fields resolve to their placeholder defaults.
       const defaults = currentDefaults();
       let resolvedForm: WizardFormValues = {
         ...form,
         appId: form.appId.trim().length > 0 ? form.appId : defaults.appId,
         appName: form.appName.trim().length > 0 ? form.appName : defaults.appName,
-        targetDir:
-          form.targetDir.trim().length > 0 ? form.targetDir : defaults.targetDir,
       };
       // A user-entered icon path wins over the scraped favicon.
       if (resolvedForm.iconPath.trim().length > 0) {
@@ -645,9 +705,6 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (currentTokens.length === 0) {
         throw new Error("no command recorded");
       }
-      if (resolvedServicePort === undefined) {
-        throw new Error("no service port resolved");
-      }
       setState("materializing");
 
       // Free the service port: the generated app will spawn the command itself.
@@ -659,8 +716,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       try {
         resolvedVector = await (options.resolveVector ?? resolveLaunchVector)({
           tokens: currentTokens,
-          cwd: options.cwd,
+          cwd: effectiveCwd(),
         });
+        // Persist the configured env overlay onto the frozen vector; the
+        // generated app merges it over its own environment when spawning.
+        const envOverlay = commandEnv();
+        if (Object.keys(envOverlay).length > 0) {
+          resolvedVector = { ...resolvedVector, env: envOverlay };
+        }
       } catch (error) {
         setState("failed", error instanceof Error ? error.message : String(error));
         return;
@@ -674,10 +737,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               appId: frozen.appId,
               appName: frozen.appName,
               command: resolvedVector,
-              service: { port: resolvedServicePort },
+              service: { port: resolvedServicePort ?? 0 },
               window: { width: 1_200, height: 800 },
             },
-            targetDir: frozen.targetDir,
+            targetDir: join(options.cwd, toProjectDirectoryName(frozen.appId)),
             dependencyRange: options.dependencyRange,
             iconSourcePath: currentIconPath,
             ...(currentTrayIconPath === undefined
@@ -731,5 +794,5 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
 /** Exposed for tests: the touched-field bookkeeping semantics. */
 export const createFieldTouchedTracker = (): { touched: FieldTouched } => ({
-  touched: { appId: false, appName: false, iconPath: false, trayIconPath: false, servicePort: false, targetDir: false, pm: false, showStartupTerminal: false, showAddressBar: false },
+  touched: { appId: false, appName: false, iconPath: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false },
 });

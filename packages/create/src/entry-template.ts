@@ -38,6 +38,9 @@ const hasShell = shellOptions !== null && (shellOptions.showTerminal || shellOpt
 const showTerminal = shellOptions !== null && shellOptions.showTerminal === true;
 const shellApi = hasShell ? await import("./app-shell-server.mjs") : null;
 
+// Configured env overlay (advanced command options); empty by default.
+const commandEnv = ${JSON.stringify(config.command.env ?? {})};
+
 let command;
 let commandExited = false;
 if (showTerminal) {
@@ -56,7 +59,7 @@ if (showTerminal) {
       cols: 100,
       rows: 30,
       cwd,
-      env: { ...process.env, TERM: "xterm-256color" },
+      env: { ...process.env, ...commandEnv, TERM: "xterm-256color" },
     });
     shellApi?.registerPty(pty);
     pty.onData((chunk) => {
@@ -79,7 +82,7 @@ if (command === undefined) {
   const child = spawn(config.command.command, [...config.command.args], {
     cwd: resolve(PROJECT_DIR, config.command.cwd),
     stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
+    env: { ...process.env, ...commandEnv },
     windowsHide: true,
   });
   child.stdout.setEncoding("utf8");
@@ -190,46 +193,38 @@ const listOwnedListeningPorts = async (rootPid) => {
   return [...ports];
 };
 
-// Dynamic-port commands (listen(0)) bind a fresh port on every spawn, so the
-// frozen preview port may never open. Prefer the frozen port, but adopt any
-// HTTP-verified listener owned by this command's process tree — the same
-// ownership semantics the wizard used during preview.
-const waitForServicePort = async (frozenPort, timeoutMs) => {
+// PORTS COME EXCLUSIVELY FROM SNIFFING (owner law): scan the command's
+// process tree for listening ports and HTTP-verify each candidate. The
+// recorded preview port is informational only and is never addressed
+// without verification; dynamic-port commands (listen(0)) therefore behave
+// identically to fixed-port ones.
+const sniffServicePort = async (timeoutMs) => {
   const deadline = Date.now() + timeoutMs;
-  let lastScan = 0;
-  let adoptedCandidates = [];
   for (;;) {
-    try { await waitForPort(frozenPort, 1_500); return frozenPort; } catch {}
-    for (const candidate of adoptedCandidates) {
-      if (await httpAnswers(candidate)) return candidate;
-    }
-    if (Date.now() - lastScan > 5_000) {
-      lastScan = Date.now();
-      const owned = await listOwnedListeningPorts(command.pid).catch(() => []);
-      adoptedCandidates = owned.filter((port) => port !== frozenPort && port > 0);
+    const owned = await listOwnedListeningPorts(command.pid).catch(() => []);
+    for (const port of owned.filter((p) => p > 0)) {
+      if (await httpAnswers(port)) return port;
     }
     if (Date.now() > deadline) {
-      throw new Error(\`service did not answer on 127.0.0.1:\${frozenPort} within \${timeoutMs}ms\`);
+      throw new Error("no HTTP service found among the command's listening ports within " + timeoutMs + "ms");
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
   }
 };
 
-// Shell mode: start the local shell server first so the window can open
-// immediately (round 9); the service port resolution still gates the plain
-// path and the monitor's initial tab.
+// Shell mode: start the local shell server first so windows can open
+// immediately; the monitor below sniffs services continuously.
 const shellPort = hasShell ? await shellApi.listenShell() : null;
 
+// Plain mode needs one verified address before opening its single window;
+// shell mode defers entirely to the continuous monitor.
 const servicePort = hasShell
-  ? await waitForServicePort(config.service.port, 30_000).catch(() => config.service.port)
-  : await waitForServicePort(config.service.port, 30_000).catch(async (error) => {
-      await logSink(\`[create-opentray] \${error.message}\n\`, "utf8");
+  ? null
+  : await sniffServicePort(30_000).catch(async (error) => {
+      await logSink(\`[create-opentray] \${error.message}\\n\`, "utf8");
       await killCommand();
       throw error;
     });
-if (servicePort !== config.service.port) {
-  await logSink(\`[create-opentray] adopted dynamic service port \${servicePort} (frozen port \${config.service.port} never opened)\n\`, "utf8");
-}
 
 const trayIcon = ${JSON.stringify(config.trayIcon ?? null)};
 const trayIconCandidates = trayIcon === null
@@ -324,7 +319,6 @@ if (hasShell) {
   // Continuous owned-port monitor: every listening port gets its own window,
   // and a port that stops listening marks THAT window's title (detached).
   const seenPorts = new Set();
-  seenPorts.add(servicePort);
   const monitor = setInterval(async () => {
     try {
       const owned = await listOwnedListeningPorts(command.pid).catch(() => []);
@@ -387,6 +381,6 @@ tray.onMenuClick(({ itemId }) => {
 process.on("SIGINT", () => void quit());
 process.on("SIGTERM", () => void quit());
 
-console.log(\`\${READY_MARK_PREFIX} \${JSON.stringify({ appId: config.appId, port: servicePort })}\`);
+console.log(\`\${READY_MARK_PREFIX} \${JSON.stringify({ appId: config.appId, ...(servicePort === null ? {} : { port: servicePort }) })}\`);
 
 `;

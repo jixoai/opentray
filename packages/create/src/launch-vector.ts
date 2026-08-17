@@ -13,6 +13,8 @@ export interface LaunchVector {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
+  /** Optional explicit env overlay merged over the runtime environment. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export interface ResolveLaunchVectorOptions {

@@ -12,8 +12,6 @@ export interface WizardFormValues {
   appName: string;
   iconPath: string;
   trayIconPath: string;
-  servicePort: string;
-  targetDir: string;
   pm: "npm" | "pnpm" | "bun";
   showStartupTerminal: boolean;
   showAddressBar: boolean;
@@ -35,8 +33,25 @@ export interface IconCandidate {
 export interface WizardFormDefaults {
   appId: string;
   appName: string;
-  targetDir: string;
 }
+
+export interface WizardEnvEntry {
+  key: string;
+  value: string;
+}
+
+export interface WizardCommandOptions {
+  /** Empty = the wizard's working directory. */
+  cwd: string;
+  env: WizardEnvEntry[];
+  argsMode: "string" | "array";
+}
+
+export const DEFAULT_COMMAND_OPTIONS: WizardCommandOptions = {
+  cwd: "",
+  env: [],
+  argsMode: "string",
+};
 
 export type WizardState =
   | "idle"
@@ -53,6 +68,7 @@ export type WizardEvent =
   | { type: "term-mode"; interactive: boolean; message?: string }
   | { type: "run-status"; running: boolean; code?: number | null }
   | { type: "command-display"; command: string }
+  | { type: "command-options"; options: WizardCommandOptions }
   | {
       type: "services";
       services: DiscoveredService[];
