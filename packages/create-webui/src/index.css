@@ -107,3 +107,33 @@ body {
   background-size: 10px 10px;
   background-position: 0 0, 5px 5px;
 }
+
+/* Unified scrollbars (owner round-11): thin, transparent track, subtle thumb
+   on the dark-first theme — applies to every scroll container (list pane,
+   detail pane, terminal fallback pre). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
