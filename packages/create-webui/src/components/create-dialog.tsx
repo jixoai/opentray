@@ -35,6 +35,8 @@ export interface CreateDialogProps {
   onOpenApp(): void;
   /** Dialog dismissal (X / Esc / overlay / 完成). */
   onClose(): void;
+  /** Confirm-phase rejection reason (409s must not vanish). */
+  confirmError: string | undefined;
   onOpenChange(open: boolean): void;
 }
 
@@ -55,6 +57,7 @@ export function CreateDialog({
   onCreate,
   onOpenApp,
   onClose,
+  confirmError,
   onOpenChange,
 }: CreateDialogProps): React.JSX.Element {
   const logRef = React.useRef<HTMLDivElement>(null);
@@ -74,7 +77,15 @@ export function CreateDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // Pending generation must not be dismissable: losing the dialog
+        // strands the wizard with no way to reach 完成/打开应用.
+        if (phase === "pending" && next === false) return;
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="max-w-xl">
         {phase === "confirm" ? (
           <>
@@ -133,6 +144,9 @@ export function CreateDialog({
               <dt className="text-muted-foreground">包管理器</dt>
               <dd>{frozenValues.pm}</dd>
             </dl>
+            {confirmError !== undefined ? (
+              <p className="text-xs font-medium text-red-400">{confirmError}</p>
+            ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onBack}>
                 返回修改

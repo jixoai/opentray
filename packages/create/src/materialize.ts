@@ -60,6 +60,8 @@ export interface MaterializeInput {
   readonly targetDir: string;
   readonly dependencyRange: string;
   readonly iconSourcePath: string | undefined;
+  /** True when the tray source is a solid silhouette (darwin template). */
+  readonly trayIconIsSolid?: boolean;
   /** Icon composition (owner round-12): background + foreground scale. */
   readonly iconBackground?: IconBackground;
   readonly iconScale?: number;
@@ -181,7 +183,7 @@ export const materialize = async (
         .toFile(trayPath);
       // Solid-silhouette sources are single-color art: darwin templates let
       // macOS tint them for light/dark menu bars.
-      const template = traySource.includes("-solid-");
+      const template = input.trayIconIsSolid === true;
       trayIconConfig = { path: "app-icon/tray-icon.png", template };
       context.log({
         type: "log",

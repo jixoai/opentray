@@ -80,6 +80,8 @@ export function App(): React.JSX.Element {
   const [iconScale, setIconScale] = React.useState<number>(0.8);
   /** The foreground path the current composition was built from. */
   const composedForRef = React.useRef<string | undefined>(undefined);
+  /** Latest foreground the recompose callback is working on (supersede guard). */
+  const recomposeForRef = React.useRef<string | undefined>(undefined);
   /** True once the user manually picked a background for the current foreground. */
   const iconBackgroundManualRef = React.useRef(false);
   /** True after the first form event adopted the server composition state. */
@@ -148,8 +150,8 @@ const selectedIconRefStale = (
       composedForRef.current = undefined;
       return;
     }
-    if (foreground === composedForRef.current) {
-      return; // already composed with this exact foreground
+    if (foreground === composedForRef.current && iconComposition !== undefined) {
+      return; // already composed (successfully) with this exact foreground
     }
     void (async () => {
       try {
@@ -231,12 +233,15 @@ const selectedIconRefStale = (
         setIconAnalysis(undefined);
         setIconComposition(undefined);
         composedForRef.current = undefined;
+        recomposeForRef.current = undefined;
         return;
       }
+      recomposeForRef.current = foregroundPath;
       try {
         const analysisResponse = await api("/api/icon-analyze", { path: foregroundPath });
         if (!analysisResponse.ok) throw new Error("analyze failed");
         const analysis = (await analysisResponse.json()) as IconAnalysis;
+        if (recomposeForRef.current !== foregroundPath) return; // superseded
         setIconAnalysis(analysis);
         const composeResponse = await api("/api/icon-compose", {
           foregroundPath,
@@ -245,6 +250,7 @@ const selectedIconRefStale = (
         });
         if (!composeResponse.ok) throw new Error("compose failed");
         const composed = (await composeResponse.json()) as IconComposition;
+        if (recomposeForRef.current !== foregroundPath) return; // superseded
         setIconComposition(composed);
         composedForRef.current = foregroundPath;
       } catch {
@@ -396,6 +402,11 @@ const selectedIconRefStale = (
           if (selectedIconRefStale(payload.icons, selectedIconRef, payload.port)) {
             setSelectedIconRef(undefined);
           }
+          // Tray parity: a stale port:index would 404 and shadow the valid
+          // authoritative path match.
+          if (selectedIconRefStale(payload.icons, selectedTrayRef, payload.port)) {
+            setSelectedTrayRef(undefined);
+          }
           break;
         case "scrape":
           setHasScrapedIcon(payload.hasIcon);
@@ -470,10 +481,12 @@ const selectedIconRefStale = (
   // serving candidate when possible.
   const dialogTraySrc = (() => {
     if (uploadedTrayUrl !== undefined) return uploadedTrayUrl;
-    const trayPath = frozenValues.trayIconPath.trim();
-    if (trayPath.length === 0 && values.trayIconPath.trim().length > 0) {
-      // Follow-the-app default with no explicit pick: mirror the app preview.
-      return undefined;
+    // The authoritative server path wins: a port-scoped selection ref can go
+    // stale across runs and 404, shadowing this valid match.
+    const authoritative = values.trayIconPath.trim();
+    if (authoritative.length > 0 && iconCandidatesPort !== undefined) {
+      const hit = iconCandidates.find((c) => c.path === authoritative);
+      if (hit !== undefined) return iconDataUrl(iconCandidatesPort, hit.index);
     }
     const match = /^([^:]+):(\d+)$/.exec(selectedTrayRef ?? "");
     if (match !== null) {
@@ -483,12 +496,9 @@ const selectedIconRefStale = (
         return iconDataUrl(port, index);
       }
     }
-    // No live ref (stale across runs): find the candidate whose path matches
-    // the authoritative server value.
-    const authoritative = values.trayIconPath.trim();
-    if (authoritative.length > 0 && iconCandidatesPort !== undefined) {
-      const hit = iconCandidates.find((c) => c.path === authoritative);
-      if (hit !== undefined) return iconDataUrl(iconCandidatesPort, hit.index);
+    if (authoritative.length === 0) {
+      // Follow-the-app default with no explicit pick: text-tray fallback.
+      return undefined;
     }
     return undefined;
   })();
@@ -571,16 +581,28 @@ const selectedIconRefStale = (
     );
   };
 
+  const [confirmError, setConfirmError] = React.useState<string | undefined>();
+
   const confirmCreate = async (): Promise<void> => {
+    // A drag/tap sitting inside the debounce window must land BEFORE the
+    // form freezes, or the dialog previews values materialize never sees.
+    onIconScaleChangeDebounced.flush();
+    onIconBackgroundChangeDebounced.flush();
     // Re-confirming after 返回修改 must reopen the dialog: the frozen state
     // event only fires on the FIRST freeze, so the button alone would leave
     // the wizard stuck with no visible confirm UI.
     setDialogPhase("confirm");
     setDialogOpen(true);
     try {
-      await api("/api/confirm", {});
+      const response = await api("/api/confirm", {});
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { error?: string };
+        setConfirmError(detail.error ?? `确认失败（${response.status}）`);
+        return;
+      }
+      setConfirmError(undefined);
     } catch {
-      // state event will surface the reason
+      setConfirmError("确认请求失败");
     }
   };
   React.useEffect(() => {
@@ -832,6 +854,7 @@ const selectedIconRefStale = (
         onBack={() => setDialogOpen(false)}
         onCreate={() => void createApp()}
         onOpenApp={() => void api("/api/open-app", {})}
+        confirmError={confirmError}
         onClose={() => setDialogOpen(false)}
       />
     </div>

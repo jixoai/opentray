@@ -75,6 +75,8 @@ export interface OpenTrayAppIconOptions {
 export interface OpenTrayAppIconCacheMetadata {
   readonly schemaVersion: number;
   readonly sourceSha256: string;
+  readonly macosSourceSha256?: string;
+  readonly composed?: boolean;
   readonly sourceImplementationSha256: string | null;
   readonly implementationSha256: string;
   readonly recipeVersion: string;
@@ -148,6 +150,10 @@ export async function generateOpenTrayAppIcon(
   const metadata = await createCacheMetadata({
     sourcePath: options.sourcePath,
     implementationPath,
+    ...(options.composed === true ? { composed: true } : {}),
+    ...(options.macosSourcePath === undefined
+      ? {}
+      : { macosSourcePath: options.macosSourcePath }),
     outputPath,
     icnsOutputPath,
     icoOutputPath,
@@ -210,6 +216,10 @@ export function openTrayAppIconPlugin(
         options.cachePath ?? path.resolve(config.root, ".cache/app-icon.json");
       generation ??= generateOpenTrayAppIcon({
         sourcePath: path.resolve(options.sourcePath),
+        ...(options.composed === true ? { composed: true } : {}),
+        ...(options.macosSourcePath === undefined
+          ? {}
+          : { macosSourcePath: path.resolve(options.macosSourcePath) }),
         outputPath,
         icnsOutputPath,
         icoOutputPath,
@@ -226,6 +236,10 @@ async function createCacheMetadata(options: {
   sourcePath: string;
   implementationPath: string;
   implementationSourcePath?: string;
+  /** Pass-through mode: skip glyph re-tiling (part of cache identity). */
+  composed?: boolean;
+  /** Separate macOS content source (part of cache identity). */
+  macosSourcePath?: string;
   outputPath: string;
   icnsOutputPath: string;
   icoOutputPath: string;
@@ -266,6 +280,10 @@ async function createCacheMetadata(options: {
   return {
     schemaVersion: CACHE_SCHEMA_VERSION,
     sourceSha256: await sha256(options.sourcePath),
+    ...(options.macosSourcePath === undefined
+      ? {}
+      : { macosSourceSha256: await sha256(options.macosSourcePath) }),
+    ...(options.composed === true ? { composed: true } : {}),
     sourceImplementationSha256:
       sourceImplementationPath === null
         ? null
@@ -459,6 +477,8 @@ function sameCacheIdentity(
   return (
     actual.schemaVersion === expected.schemaVersion &&
     actual.sourceSha256 === expected.sourceSha256 &&
+    actual.macosSourceSha256 === expected.macosSourceSha256 &&
+    actual.composed === expected.composed &&
     actual.sourceImplementationSha256 === expected.sourceImplementationSha256 &&
     actual.implementationSha256 === expected.implementationSha256 &&
     actual.recipeVersion === expected.recipeVersion &&
@@ -483,6 +503,9 @@ function isCacheMetadata(
   return (
     typeof record.schemaVersion === "number" &&
     typeof record.sourceSha256 === "string" &&
+    (record.macosSourceSha256 === undefined ||
+      typeof record.macosSourceSha256 === "string") &&
+    (record.composed === undefined || typeof record.composed === "boolean") &&
     (record.sourceImplementationSha256 === null ||
       typeof record.sourceImplementationSha256 === "string") &&
     typeof record.implementationSha256 === "string" &&

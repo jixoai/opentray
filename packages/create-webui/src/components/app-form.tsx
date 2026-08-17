@@ -186,6 +186,9 @@ export function AppForm({
                   src={composedIconUrl(iconComposition.key)}
                   alt="图标合成预览"
                   className="size-full object-contain"
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
                 />
               ) : (
                 <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">

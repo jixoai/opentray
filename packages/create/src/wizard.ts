@@ -264,6 +264,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let tempIconDir: string | undefined;
   let currentIconPath: string | undefined;
   let currentTrayIconPath: string | undefined;
+  let trayIconIsSolid = false;
   let iconCandidates: readonly ScrapedIcon[] = [];
   let iconPort: number | undefined;
   let currentTokens: readonly string[] = [];
@@ -273,6 +274,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let frozenForm: WizardFormValues | undefined;
   let resolvedServicePort: number | undefined;
   let resolvedTargetDir: string | undefined;
+  let frozenIconPath: string | undefined;
   let runAlive = false;
   let commandOptions: WizardCommandOptions = { ...DEFAULT_COMMAND_OPTIONS };
   let composeIconDir: string | undefined;
@@ -381,6 +383,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       );
       if (selectedPort !== port) {
         return; // selection moved during scrape
+      }
+      const stateNow = state as WizardState;
+      if (stateNow === "frozen" || stateNow === "materializing" || stateNow === "success") {
+        return; // a confirm froze the form mid-scrape: never mutate identity
       }
       // Candidates always refresh (possibly to an empty list); the clearest
       // one remains the empty-field default.
@@ -517,6 +523,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       }
       touched.trayIconPath = true;
       currentTrayIconPath = candidate.path;
+      trayIconIsSolid = candidate.variant !== "original";
       form = { ...form, trayIconPath: candidate.path };
       publishForm();
       return true;
@@ -576,10 +583,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       refreshTargetDirExists();
       currentIconPath = undefined
       currentTrayIconPath = undefined;
+      trayIconIsSolid = false;
       iconCandidates = [];
       touched.appId = false;
       touched.appName = false;
       touched.pm = false;
+      // Cross-run consistency: the client tray UI resets on every new run;
+      // a stale server-side tray pick would silently win at materialize.
+      touched.trayIconPath = false;
       form = {
         appId: "",
         appName: "",
@@ -743,6 +754,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
 
     async composeIcon(options) {
+      if (state === "frozen" || state === "materializing" || state === "success") {
+        throw new Error("cannot compose while frozen");
+      }
       const background = options.background ?? iconBackground ?? "transparent";
       const scale = options.scale ?? iconScale ?? DEFAULT_ICON_SCALE;
       const composed = await composeAppIcon({
@@ -795,14 +809,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
 
     updateForm(patch) {
+      if (state !== "idle" && state !== "running" && state !== "discovered" && state !== "failed") {
+        return; // frozen/materializing: no form mutation, composition included
+      }
       if (patch.iconBackground !== undefined) {
         iconBackground = patch.iconBackground;
       }
       if (patch.iconScale !== undefined) {
         iconScale = patch.iconScale;
-      }
-      if (state !== "idle" && state !== "running" && state !== "discovered" && state !== "failed") {
-        return;
       }
       for (const key of Object.keys(patch) as (keyof WizardFormValues)[]) {
         if (patch[key] !== undefined && patch[key] !== form[key]) {
@@ -851,6 +865,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (resolvedForm.iconPath.trim().length > 0) {
         currentIconPath = resolvedForm.iconPath.trim();
       }
+      // The icon source materialize uses is FROZEN at confirm: the user's
+      // explicit value when set, else the scraped default captured here.
+      // Never the live currentIconPath, which an in-flight scrape could
+      // still swap (review round: post-freeze overwrite race).
+      frozenIconPath = currentIconPath;
+
       // The tray icon defaults to the resolved app icon choice.
       const resolvedTrayIconPath =
         resolvedForm.trayIconPath.trim().length > 0
@@ -912,7 +932,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             },
             targetDir: resolvedTargetDir ?? currentDefaults().targetDir,
             dependencyRange: options.dependencyRange,
-            iconSourcePath: currentIconPath,
+            iconSourcePath: frozenIconPath ?? currentIconPath,
             ...(frozen.iconBackground === undefined
               ? {}
               : { iconBackground: frozen.iconBackground }),
@@ -922,6 +942,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             ...(currentTrayIconPath === undefined
               ? {}
               : { trayIconSourcePath: currentTrayIconPath }),
+            ...(trayIconIsSolid ? { trayIconIsSolid: true } : {}),
             shell: {
               showTerminal: frozen.showStartupTerminal,
               showAddressBar: frozen.showAddressBar,

@@ -1,6 +1,6 @@
 {
   "name": "create-opentray",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Turn any start command that serves HTTP locally into an OpenTray-hosted desktop app.",
   "type": "module",
   "license": "MIT",

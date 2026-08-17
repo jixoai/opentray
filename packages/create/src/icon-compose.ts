@@ -248,12 +248,11 @@ export const composeAppIcon = async (options: {
       .png({ compressionLevel: 9 })
       .toBuffer();
 
-    // Every composition is clipped to the squircle: the bundled backgrounds
-    // already carry the mask in their alpha, and a transparent background
-    // would otherwise leave the source's square corners visible on macOS.
-    return options.background === "transparent"
-      ? await clipToSquircle(composed)
-      : composed;
+    // Every composition is clipped to the squircle. The bundled backgrounds
+    // carry the mask in their own alpha, but OVER compositing still lets the
+    // foreground's square corners escape the tile at large scales — so the
+    // clip runs for ALL backgrounds, not just the transparent one.
+    return clipToSquircle(composed);
   };
 
   const writeVariant = async (bytes: Buffer, suffix: string): Promise<string> => {
