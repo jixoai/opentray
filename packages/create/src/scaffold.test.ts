@@ -55,7 +55,7 @@ describe("writeScaffold", () => {
     expect(entry).toContain('from "opentray"');
     expect(entry).toContain('from "@opentray/ext-webview"');
     expect(entry).toContain("appMode: true");
-    expect(entry).toContain("http://127.0.0.1:${servicePort}");
+    expect(entry).toContain("ensureServiceWindow(servicePort)");
     // Dynamic-port commands must be rediscovered through process-tree ownership.
     // Ports come exclusively from runtime sniffing (owner law): the frozen
     // preview port is never addressed without verification.
@@ -65,10 +65,11 @@ describe("writeScaffold", () => {
     expect(entry).toContain("Somecommand Start");
     expect(entry).toContain('app-icon", "app-icon.json');
     expect(entry).toContain("primaryEvent");
-    expect(entry).toContain("taskkill");
+    expect(entry).not.toContain("taskkill");
+    expect(entry).not.toContain("waitForPort");
     expect(entry).toContain("opentray: ready");
     // The persisted launch vector must be shell-free and absolute.
-    expect(entry).toContain('command: process.versions.bun !== undefined ? "node" : process.execPath');
+    expect(entry).toContain("command: nodeRuntime()");
   });
 });
 

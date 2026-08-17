@@ -78,7 +78,8 @@ export interface MaterializeResult {
   readonly scaffold: ScaffoldResult;
   readonly projectDir: string;
   readonly bundlePath: string | undefined;
-  readonly firstLaunch: { readonly pid: number };
+  /** Absent under --skip-install (no node_modules → no first launch). */
+  readonly firstLaunch?: { readonly pid: number };
 }
 
 export interface MaterializeContext {
@@ -291,7 +292,6 @@ export const materialize = async (
     message: `icon assets: icns + ico + ${iconMetadata.linuxPngOutputPaths.length} linux pngs`,
   });
 
-  step("icon", "writing tray icon asset");
   if (!input.skipInstall) {
     step("install", `installing dependencies with ${input.packageManager}`);
     const runInstall = context.runInstall ?? runPackageManagerInstall;
@@ -302,6 +302,18 @@ export const materialize = async (
     });
   } else {
     step("install", "skipping dependency install (--skip-install)");
+  }
+
+  if (input.skipInstall) {
+    // No node_modules → the entry's `import "opentray"` cannot resolve, so a
+    // first launch would only fail the whole creation. The project is
+    // complete; launching is the user's step after installing.
+    step("launch", "skipping first launch (--skip-install)");
+    context.log({
+      type: "log",
+      message: "install dependencies and run `node main.mjs` to launch",
+    });
+    return { scaffold, projectDir: scaffold.projectDir, bundlePath: undefined };
   }
 
   step("launch", "first launch of the generated app");

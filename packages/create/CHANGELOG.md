@@ -4,6 +4,18 @@
 
 ### Patch-type additions (folded pre-release)
 
+- Generated-app runtime hardening from the cross-review: the lsof scan
+  passes -nP (named-service ports like 5000 previously printed as service
+  names, parsed to NaN, and were silently dropped — verified live), the
+  per-port window monitor runs in BOTH modes with HTTP verification before
+  any port is addressed (plain mode previously opened one window for a
+  nondeterministic first port), plain mode routes through the same
+  ensureServiceWindow machinery (duplicate window object removed), the
+  appLaunch vector resolves node's absolute path under a Bun-hosted wizard
+  (bare "node" failed launchd's minimal PATH), --skip-install no longer
+  first-launches (no node_modules made the whole creation fail on the ready
+  gate), and the dead waitForPort/taskkill/plainWindow code is gone.
+
 - WebUI follow-ups from the cross-review: recompose failures clear the stale
   luminance readout, the frozen-values dialog snapshot prefers the server's
   resolved form (App ID/name no longer render empty), 确定创建应用 disables
