@@ -430,7 +430,14 @@ const selectedIconRefStale = (
           "flex w-full flex-col gap-4 overflow-y-auto p-5 max-md:min-h-screen " +
           (panelOpen ? "md:border-r md:border-border" : "")
         }
-        style={{ gridColumn: panelOpen ? "1" : "2", gridRow: "1", transition: "border-color 450ms" }}
+        style={{
+          gridColumn: panelOpen ? "1" : "2",
+          gridRow: "1",
+          transition: "border-color 450ms",
+          // Reserve the gutter so the scrollbar appearing/disappearing never
+          // shifts the pane content (thin scrollbars take layout room).
+          scrollbarGutter: "stable",
+        }}
       >
       <header className="flex items-center gap-3">
         <h1 className="text-lg font-bold">create-opentray</h1>
@@ -561,6 +568,7 @@ const selectedIconRefStale = (
       <div
         className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto p-4 max-md:hidden"
         style={{
+          scrollbarGutter: "stable",
           gridColumn: panelOpen ? "2" : "3",
           gridRow: "1",
           opacity: panelOpen ? 1 : 0,
