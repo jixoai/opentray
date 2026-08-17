@@ -405,11 +405,38 @@ const selectedIconRefStale = (
           ? "destructive"
           : "secondary";
 
+  // Grid-driven list→detail transition (owner round-11): the page is ONE
+  // grid whose template columns animate from a centered single column to
+  // "list + detail" — the browser interpolates the column sizes, so the list
+  // pane glides from center to left while the detail pane grows in.
+  // Column plan: closed = [edge | list(center) | edge]; open = [list | detail | 0].
+  // The list and detail live in FIXED tracks (1 and 2) so the browser only
+  // animates track WIDTHS between the two states — the modern grid-template
+  // interpolation the owner asked for.
+  const gridTemplate = panelOpen
+    ? "minmax(0, 430px) minmax(0, 1fr) minmax(0, 0fr)"
+    : "minmax(0, 1fr) minmax(0, var(--list-w)) minmax(0, 1fr)";
+
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden md:flex-row">
+    <div
+      className="grid h-screen w-full overflow-hidden"
+      style={{
+        // --list-w caps the centered list at the mobile width (with page
+        // padding) and drives the closed-state middle column.
+        ["--list-w" as string]: "min(430px, 100vw - 40px)",
+        gridTemplateColumns: gridTemplate,
+        transition: "grid-template-columns 450ms cubic-bezier(0.4, 0, 0.2, 1)",
+      }}
+    >
       {/* List pane: the stable main view at mobile width, independently
           scrollable; the detail pane appearing never shifts it. */}
-      <div className="flex w-full flex-col gap-4 overflow-y-auto border-b border-border p-5 md:h-full md:w-[430px] md:shrink-0 md:border-b-0 md:border-r">
+      <div
+        className={
+          "flex w-full flex-col gap-4 overflow-y-auto p-5 max-md:min-h-screen " +
+          (panelOpen ? "md:border-r md:border-border" : "")
+        }
+        style={{ gridColumn: panelOpen ? "1" : "2", gridRow: "1", transition: "border-color 450ms" }}
+      >
       <header className="flex items-center gap-3">
         <h1 className="text-lg font-bold">create-opentray</h1>
         <Badge variant={stateBadge} className="ml-auto shrink-0">
@@ -622,32 +649,44 @@ const selectedIconRefStale = (
       ) : null}
       </div>
 
-      {/* Detail pane: tabs (terminal + service previews) appear here ONLY
-          once a command has been started — never inside the list pane. */}
-      {panelOpen ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-          <TabsPanel
-            command={displayCommand}
-            terminalHostRef={terminalHostRef}
-            terminalReady={termReady}
-            interactive={interactive}
-            status={status}
-            services={[...services]}
-            iframeTabs={iframeTabs}
-            activeTab={activeTab}
-            onActiveTabChange={setActiveTab}
-            onIframeNavigate={navigateIframe}
-            onIframeHistoryMove={moveHistory}
-            onJumpToService={jumpToService}
-            className="min-h-[480px] flex-1"
-          />
-          {termFallback !== undefined ? (
-            <pre className="max-h-56 overflow-auto rounded-xl border border-border bg-card p-3 font-mono text-xs whitespace-pre-wrap">
-              {termFallback}
-            </pre>
-          ) : null}
-        </div>
-      ) : null}
+      {/* Detail pane: lives in the second grid column. The column itself
+          animates from 0fr; content mounts only once a command starts so the
+          terminal/iframe state still resets between runs. */}
+      <div
+        className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto p-4 max-md:hidden"
+        style={{
+          gridColumn: panelOpen ? "2" : "3",
+          gridRow: "1",
+          opacity: panelOpen ? 1 : 0,
+          visibility: panelOpen ? "visible" : "hidden",
+          transition: "opacity 450ms cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear " + (panelOpen ? "0s" : "450ms"),
+        }}
+      >
+        {panelOpen ? (
+          <>
+            <TabsPanel
+              command={displayCommand}
+              terminalHostRef={terminalHostRef}
+              terminalReady={termReady}
+              interactive={interactive}
+              status={status}
+              services={[...services]}
+              iframeTabs={iframeTabs}
+              activeTab={activeTab}
+              onActiveTabChange={setActiveTab}
+              onIframeNavigate={navigateIframe}
+              onIframeHistoryMove={moveHistory}
+              onJumpToService={jumpToService}
+              className="min-h-[480px] flex-1"
+            />
+            {termFallback !== undefined ? (
+              <pre className="max-h-56 overflow-auto rounded-xl border border-border bg-card p-3 font-mono text-xs whitespace-pre-wrap">
+                {termFallback}
+              </pre>
+            ) : null}
+          </>
+        ) : null}
+      </div>
 
       <CreateDialog
         open={dialogOpen}
