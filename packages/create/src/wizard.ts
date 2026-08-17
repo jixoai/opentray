@@ -213,6 +213,8 @@ export interface WizardSession {
   trackIconComposition(composition: WizardIconComposition): void;
   /** Look up a registered composition by cache key. */
   iconComposition(key: string): WizardIconComposition | undefined;
+  /** Wizard-owned icon source roots (containment for icon routes). */
+  iconSourceRoots(): readonly string[];
   /** Auto-suggestion for the foreground (background + reason). */
   analyzeIconForeground(foregroundPath: string): Promise<WizardIconAnalysis>;
   readonly form: WizardFormValues;
@@ -275,6 +277,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let resolvedServicePort: number | undefined;
   let resolvedTargetDir: string | undefined;
   let frozenIconPath: string | undefined;
+  let submitting = false;
   let runAlive = false;
   let commandOptions: WizardCommandOptions = { ...DEFAULT_COMMAND_OPTIONS };
   let composeIconDir: string | undefined;
@@ -560,6 +563,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (state !== "idle" && state !== "failed" && state !== "running" && state !== "discovered") {
         throw new Error(`cannot submit a command while ${state}`);
       }
+      // Concurrent posts double-spawn: the awaits below would overwrite the
+      // first run reference, orphaning it (unkillable, holding the port).
+      if (submitting) {
+        throw new Error("a command submission is already in flight");
+      }
+      submitting = true;
       // Array mode: the caller supplied argv elements directly — they are
       // used verbatim and NEVER re-split. String mode: tokenize one line.
       const tokens = typeof command === "string" ? undefined : command;
@@ -567,10 +576,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (tokens === undefined) {
         tokenized = tokenizeCommandLine(command as string);
         if (!tokenized.ok) {
+          submitting = false;
           setState("failed", tokenized.error);
           return;
         }
       } else if (tokens.length === 0 || tokens[0]!.trim().length === 0) {
+        submitting = false;
         setState("failed", "数组模式至少需要程序元素（第一个参数）");
         return;
       }
@@ -670,6 +681,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           }
         },
       });
+      submitting = false;
       void run.exited.then(async ({ code, spawnError }) => {
         if (state === "running" && services.length === 0 && spawnError !== undefined) {
           stopTimers();
@@ -779,6 +791,13 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
     trackIconComposition(composition) {
       iconCompositions.set(composition.key, composition);
+    },
+
+    iconSourceRoots() {
+      return [
+        ...(tempIconDir !== undefined ? [tempIconDir] : []),
+        ...(composeIconDir !== undefined ? [composeIconDir] : []),
+      ];
     },
 
     iconComposition(key) {

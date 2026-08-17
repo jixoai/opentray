@@ -340,6 +340,17 @@ const handleVendorAsset = async (pathname: string, response: ServerResponse): Pr
   respond(response, 404, "text/plain", "terminal renderer asset is missing\n");
 };
 
+/** Containment: icon routes must only read sources the wizard itself
+ *  produced (its temp dirs / saved uploads), never arbitrary paths. */
+const isWizardOwnedIconPath = (session: WizardSession, target: string): boolean => {
+  for (const root of session.iconSourceRoots()) {
+    if (root.length > 0 && target.startsWith(root + sep)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const handleApi = async (
   pathname: string,
   request: IncomingMessage,
@@ -510,6 +521,10 @@ const handleApi = async (
         respond(response, 400, "application/json", '{"error":"path is required"}\n');
         return;
       }
+      if (!isWizardOwnedIconPath(session, path)) {
+        respond(response, 403, "application/json", '{"error":"path is not a wizard icon source"}\n');
+        return;
+      }
       try {
         const analysis = await session.analyzeIconForeground(path);
         respond(response, 200, "application/json", JSON.stringify(analysis) + "\n");
@@ -522,6 +537,10 @@ const handleApi = async (
       const foregroundPath = typeof body.foregroundPath === "string" ? body.foregroundPath.trim() : "";
       if (foregroundPath.length === 0) {
         respond(response, 400, "application/json", '{"error":"foregroundPath is required"}\n');
+        return;
+      }
+      if (!isWizardOwnedIconPath(session, foregroundPath)) {
+        respond(response, 403, "application/json", '{"error":"foregroundPath is not a wizard icon source"}\n');
         return;
       }
       const background =

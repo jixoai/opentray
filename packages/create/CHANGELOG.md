@@ -2,6 +2,14 @@
 
 ## 0.19.0
 
+### Patch-type additions (folded pre-release)
+
+- Follow-up hardening from the cross-review: concurrent /api/command posts
+  are rejected while a submission is in flight (the await gap previously
+  double-spawned and orphaned the first run), and /api/icon-analyze +
+  /api/icon-compose require paths under the wizard's own icon source roots
+  (arbitrary filesystem paths get 403 instead of a token-gated file probe).
+
 ### Minor Changes
 
 - 0d84e3d: Add the `create-opentray` npm initializer. `npx create-opentray` opens a local
