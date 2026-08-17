@@ -27,8 +27,7 @@ import {
   autoBackground,
   compositionCacheKey,
   composeAppIcon,
-  foregroundCoverage,
-  foregroundLuminance,
+  foregroundStats,
 } from "./icon-compose";
 import { scrapeService, writeGlyphIconTemp, type ScrapedIcon } from "./scrape";
 import { tokenizeCommandLine } from "./tokenize";
@@ -545,6 +544,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (!touched.trayIconPath) {
         // Default coupling: the tray follows the app icon until overridden.
         currentTrayIconPath = candidate.path;
+        trayIconIsSolid = candidate.variant !== "original";
         form = { ...form, iconPath: candidate.path, trayIconPath: candidate.path };
       } else {
         form = { ...form, iconPath: candidate.path };
@@ -754,14 +754,17 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
 
     async analyzeIconForeground(foregroundPath) {
-      const [luminance, coverage] = await Promise.all([
-        foregroundLuminance(foregroundPath).catch(() => undefined),
-        foregroundCoverage(foregroundPath).catch(() => 1),
-      ]);
+      // One decode serves both metrics (huge uploads must not double their
+      // full-resolution buffers). A decode failure falls back consistently
+      // to the WHITE suggestion — never transparent (which would silently
+      // replace undecodable art with the glyph path).
+      const stats = await foregroundStats(foregroundPath).catch(() => ({
+        luminance: undefined,
+        coverage: 0,
+      }));
       return {
-        luminance,
-        coverage,
-        suggested: autoBackground({ luminance, coverage }),
+        ...stats,
+        suggested: autoBackground(stats),
       };
     },
 
@@ -840,6 +843,11 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       for (const key of Object.keys(patch) as (keyof WizardFormValues)[]) {
         if (patch[key] !== undefined && patch[key] !== form[key]) {
           touched[key] = true;
+          if (key === "trayIconPath") {
+            // Typed/unknown tray sources carry no solid provenance; a stale
+            // flag from an earlier solid pick would mis-tint custom art.
+            trayIconIsSolid = false;
+          }
         }
       }
       form = { ...form, ...patch };

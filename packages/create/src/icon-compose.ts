@@ -62,15 +62,52 @@ const loadBackground = async (
   return bytes;
 };
 
-/** Full-resolution RGBA pixels of a source (no geometry-altering resize). */
+/**
+ * Full-resolution RGBA pixels of a source (no geometry-altering resize).
+ * `.rotate()` applies EXIF orientation so phone-photo icons compose upright.
+ * SVG density is raised so large-viewBox art rasterizes instead of hitting
+ * the pixel limit wholesale.
+ */
 const foregroundRaw = async (
   sourcePath: string,
 ): Promise<{ data: Buffer; width: number; height: number }> => {
-  const { data, info } = await sharp(sourcePath, { failOn: "none" })
+  // SVG raster size derives from viewBox BEFORE any resize can cap it, so a
+  // huge viewBox trips sharp's input-pixel limit at decode time. Lift the
+  // limit (the pipeline itself bounds the raster) and sample statistics at
+  // a bounded size.
+  const { data, info } = await sharp(sourcePath, {
+    failOn: "none",
+    density: 72,
+    limitInputPixels: false,
+  })
+    .rotate()
+    .resize(512, 512, { fit: "inside", withoutEnlargement: false })
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
   return { data, width: info.width, height: info.height };
+};
+
+/** Both analysis metrics from ONE decode (huge uploads must not double). */
+export const foregroundStats = async (
+  sourcePath: string,
+): Promise<{ luminance: number | undefined; coverage: number }> => {
+  const { data, width, height } = await foregroundRaw(sourcePath);
+  let weight = 0;
+  let sum = 0;
+  let opaque = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const a = (data[i + 3] ?? 0) / 255;
+    if (a > 0) {
+      const lum =
+        (0.299 * (data[i] ?? 0) + 0.587 * (data[i + 1] ?? 0) + 0.114 * (data[i + 2] ?? 0)) / 255;
+      weight += a;
+      sum += lum * a;
+    }
+    if ((data[i + 3] ?? 0) > 16) opaque += 1;
+  }
+  const luminance = weight < width * height * 0.02 ? undefined : sum / weight;
+  return { luminance, coverage: opaque / (width * height) };
 };
 
 /**
@@ -226,7 +263,12 @@ export const composeAppIcon = async (options: {
 
     // The artwork, scaled with TRANSPARENT letterboxing (sharp's default
     // contain-padding is opaque black).
-    const foreground = await sharp(options.foregroundPath, { failOn: "none" })
+    const foreground = await sharp(options.foregroundPath, {
+      failOn: "none",
+      density: 72,
+      limitInputPixels: false,
+    })
+      .rotate()
       .resize(fgSize, fgSize, { fit: "contain", background: TRANSPARENT })
       .png()
       .toBuffer();

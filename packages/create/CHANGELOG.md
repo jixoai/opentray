@@ -4,6 +4,20 @@
 
 ### Patch-type additions (folded pre-release)
 
+- Icon-pipeline hardening from the cross-review: analysis decodes ONCE
+  (both luminance and coverage shared a full-resolution buffer pair — huge
+  uploads doubled ~576 MB each), EXIF-oriented JPEGs compose upright
+  (.rotate() added to analysis and composition), large-viewBox SVGs no
+  longer fail the whole chain (sharp derives raster size from viewBox
+  before any resize can cap it — the input-pixel limit is lifted and the
+  raster bounded inside the pipeline; verified with a 20000×20000 viewBox
+  end-to-end), an analysis decode failure now consistently suggests the
+  white background (never transparent, which silently swapped the art for
+  the glyph), materialize's composed-source encoder failures degrade to
+  the glyph like raw-source failures instead of failing the creation, and
+  the tray solid-provenance flag stays in sync across the default-coupling
+  branch and typed-path updates.
+
 - Generated-app runtime hardening from the cross-review: the lsof scan
   passes -nP (named-service ports like 5000 previously printed as service
   names, parsed to NaN, and were silently dropped — verified live), the

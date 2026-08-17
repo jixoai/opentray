@@ -273,19 +273,16 @@ export const materialize = async (
       catalogSource !== undefined ? catalogSource : iconSource,
     );
   } catch (error) {
-    if (catalogSource === undefined || catalogSource === input.iconSourcePath) {
-      // A user/scraped icon that cannot be decoded must never fail the whole
-      // materialization: fall back to the first-letter glyph.
-      context.log({
-        type: "log",
-        message: `icon source unusable (${errorMessage(error)}); falling back to glyph icon`,
-      });
-      iconMetadata = await generateIntoScaffold(
-        await writeGlyphIconTemp(input.config.appName, scaffold.appIconDir),
-      );
-    } else {
-      throw error;
-    }
+    // BOTH routes degrade to the glyph: an undecodable raw source AND an
+    // encoder-side failure of a composed source must never fail the whole
+    // materialization (the review flagged the asymmetric rethrow).
+    context.log({
+      type: "log",
+      message: `icon source unusable (${errorMessage(error)}); falling back to glyph icon`,
+    });
+    iconMetadata = await generateIntoScaffold(
+      await writeGlyphIconTemp(input.config.appName, scaffold.appIconDir),
+    );
   }
   context.log({
     type: "log",
