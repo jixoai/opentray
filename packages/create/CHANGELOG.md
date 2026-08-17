@@ -4,6 +4,13 @@
 
 ### Patch-type additions (folded pre-release)
 
+- WebUI follow-ups from the cross-review: recompose failures clear the stale
+  luminance readout, the frozen-values dialog snapshot prefers the server's
+  resolved form (App ID/name no longer render empty), 确定创建应用 disables
+  while frozen (a stale confirm could 409 silently), background buttons
+  expose aria-pressed, the composition error is role=alert, and the preview
+  container carries role=img.
+
 - Follow-up hardening from the cross-review: concurrent /api/command posts
   are rejected while a submission is in flight (the await gap previously
   double-spawned and orphaned the first run), and /api/icon-analyze +

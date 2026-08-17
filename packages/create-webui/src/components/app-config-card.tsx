@@ -235,7 +235,9 @@ export function AppConfigCard({
       </Accordion>
 
       <div className="mt-4 flex items-center gap-3">
-        <Button onClick={onConfirm}>确定创建应用</Button>
+        <Button onClick={onConfirm} disabled={frozen}>
+          确定创建应用
+        </Button>
         <span className="text-xs text-muted-foreground">
           {selectedPort !== undefined
             ? `已选服务 :${selectedPort}（点击状态栏服务可切换）`

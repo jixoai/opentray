@@ -178,6 +178,7 @@ export function AppForm({
         <div className="mt-3 rounded-lg border border-border p-3">
           <div className="flex items-start gap-3">
             <div
+              role="img"
               className="icon-checker size-14 shrink-0 overflow-hidden rounded-[10px]"
               aria-label="图标合成预览"
             >
@@ -204,6 +205,7 @@ export function AppForm({
                     key={bg}
                     type="button"
                     disabled={disabled}
+                    aria-pressed={iconBackground === bg}
                     onClick={() => onIconBackgroundChange(bg)}
                     className={cn(
                       "flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] transition-colors",
@@ -239,7 +241,9 @@ export function AppForm({
                 />
               </div>
               {iconComposeError !== undefined ? (
-                <p className="mt-1.5 text-[11px] font-medium text-red-400">{iconComposeError}</p>
+                <p role="alert" className="mt-1.5 text-[11px] font-medium text-red-400">
+                  {iconComposeError}
+                </p>
               ) : null}
               {iconAnalysis !== undefined ? (
                 <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">

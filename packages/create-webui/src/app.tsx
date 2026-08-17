@@ -254,6 +254,7 @@ const selectedIconRefStale = (
         setIconComposition(composed);
         composedForRef.current = foregroundPath;
       } catch {
+        setIconAnalysis(undefined);
         setIconComposition(undefined);
         setIconComposeError("图标合成失败，预览未更新");
       }
@@ -607,7 +608,11 @@ const selectedIconRefStale = (
   };
   React.useEffect(() => {
     if (wizardState === "frozen") {
-      setFrozenValues(valuesRef.current);
+      // The server resolves placeholders in its frozen form (empty inputs
+      // mean "use the default") and emits it right after the state event;
+      // prefer that resolved snapshot over the client's raw input state,
+      // with the client state as the pre-event fallback.
+      setFrozenValues({ ...valuesRef.current, ...values });
     }
   }, [wizardState]);
 
