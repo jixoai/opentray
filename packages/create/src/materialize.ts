@@ -7,7 +7,7 @@
 //    generated entry's ready marker plus the stable Darwin bundle.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { readdir, stat, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -158,12 +158,45 @@ export const materialize = async (
     await rm(targetDir, { recursive: true, force: true });
   }
 
+  // Tray icon FIRST (owner law: the tray defaults to the app icon): the PNG
+  // is written into the target's app-icon dir (created here) so the value is
+  // part of the config the entry template renders with — main.mjs previously
+  // baked a stale null because the config was amended only AFTER scaffolding.
+  const appIconDir = join(targetDir, "app-icon");
+  await mkdir(appIconDir, { recursive: true });
+  const traySource = input.trayIconSourcePath ?? input.iconSourcePath;
+  let trayIconConfig: { path: string; template: boolean } | undefined;
+  if (traySource !== undefined) {
+    const trayPath = join(appIconDir, "tray-icon.png");
+    try {
+      const sharpModule = await import("sharp");
+      await sharpModule.default(traySource, { failOn: "none" })
+        .resize(128, 128, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toFile(trayPath);
+      // Solid-silhouette sources are single-color art: darwin templates let
+      // macOS tint them for light/dark menu bars.
+      const template = traySource.includes("-solid-");
+      trayIconConfig = { path: "app-icon/tray-icon.png", template };
+      context.log({
+        type: "log",
+        message: `tray icon: app-icon/tray-icon.png${template ? " (template)" : ""}`,
+      });
+    } catch (error) {
+      context.log({
+        type: "log",
+        message: `tray icon unavailable (${errorMessage(error)}); falling back to text tray`,
+      });
+    }
+  }
+
   step("scaffold", "writing project files");
   const shell = input.shell;
   const scaffold = await writeScaffold({
     config: {
       ...input.config,
       ...(shell === undefined ? {} : { shell }),
+      ...(trayIconConfig === undefined ? {} : { trayIcon: trayIconConfig }),
     },
     targetDir,
     dependencyRange: input.dependencyRange,
@@ -211,45 +244,6 @@ export const materialize = async (
   });
 
   step("icon", "writing tray icon asset");
-  // Tray icon asset — ALWAYS generated when there is any icon source: the
-  // tray defaults to the app icon choice (owner law) and only falls back to
-  // the text projection when no source exists at all. Solid-variant sources
-  // are single-color silhouettes: mark them darwin templates so macOS can
-  // tint them for light/dark menu bars.
-  const traySource = input.trayIconSourcePath ?? iconSource;
-  let trayAsset: { path: string; template: boolean } | undefined;
-  if (traySource !== undefined) {
-    const trayPath = join(scaffold.appIconDir, "tray-icon.png");
-    try {
-      const sharpModule = await import("sharp");
-      await sharpModule.default(traySource, { failOn: "none" })
-        .resize(128, 128, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-        .png()
-        .toFile(trayPath);
-      const template = traySource.includes("-solid-");
-      trayAsset = { path: "app-icon/tray-icon.png", template };
-      context.log({
-        type: "log",
-        message: `tray icon: app-icon/tray-icon.png${template ? " (template)" : ""}`,
-      });
-    } catch (error) {
-      context.log({
-        type: "log",
-        message: `tray icon unavailable (${errorMessage(error)}); falling back to text tray`,
-      });
-    }
-  }
-
-
-  if (trayAsset !== undefined) {
-    // Amend the frozen config with the generated tray asset path so main.mjs
-    // wires it into the tray icon candidates.
-    const configPath = join(scaffold.projectDir, "opentray.app.json");
-    const raw = JSON.parse(await readFile(configPath, "utf8"));
-    raw.trayIcon = trayAsset;
-    await writeFile(configPath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
-  }
-
   if (!input.skipInstall) {
     step("install", `installing dependencies with ${input.packageManager}`);
     const runInstall = context.runInstall ?? runPackageManagerInstall;
