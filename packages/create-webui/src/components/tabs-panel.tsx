@@ -112,7 +112,7 @@ export function TabsPanel({
 
   return (
     <div className={cn("flex flex-col rounded-xl border border-border bg-card overflow-hidden", className)}>
-      <Tabs value={activeTab} onValueChange={onActiveTabChange} className="flex-1 flex flex-col">
+      <Tabs value={activeTab} onValueChange={onActiveTabChange} className="flex min-h-0 flex-1 flex-col">
         {/* Tabs strip first (browser convention), then the context toolbar. */}
         <TabsList>
           <TabsTrigger value="terminal">
@@ -185,45 +185,19 @@ export function TabsPanel({
           )}
         </div>
 
-        <TabsContent value="terminal" forceMount className="flex-1 flex flex-col mt-0">
+        <TabsContent
+          value="terminal"
+          forceMount
+          className="mt-0 min-h-0 flex-1"
+          style={{ display: activeTab === "terminal" ? "flex" : "none", flexDirection: "column" }}
+        >
           <div
             ref={terminalHostRef}
-            className="min-h-[260px] flex-1 bg-[#05070b] px-1"
-            style={{ display: activeTab === "terminal" ? "block" : "none" }}
+            className="min-h-0 min-w-0 flex-1 bg-[#05070b] px-1"
           />
           {!terminalReady ? (
             <div className="p-3 text-xs text-muted-foreground">正在加载终端渲染器…</div>
           ) : null}
-          {/* Terminal status bar: cursor, selection, and clickable services. */}
-          <div className="flex items-center gap-3 border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground overflow-x-auto">
-            <span className="font-mono whitespace-nowrap">
-              光标 {status.cursorY}:{status.cursorX}
-            </span>
-            <span className="font-mono whitespace-nowrap">
-              {status.cols}×{status.rows}
-            </span>
-            <span className="font-mono whitespace-nowrap">
-              {status.selection === undefined
-                ? "无选区"
-                : `选区 ${status.selection.start.y}:${status.selection.start.x} – ${status.selection.end.y}:${status.selection.end.x}`}
-            </span>
-            <span className="w-px h-3 bg-border" />
-            {services.length === 0 ? (
-              <span>嗅探 HTTP 服务中…（未发现不影响创建应用）</span>
-            ) : (
-              services.map((service) => (
-                <Badge
-                  key={service.port}
-                  variant={activeTab === `svc-${service.port}` ? "default" : "secondary"}
-                  className="cursor-pointer font-mono whitespace-nowrap"
-                  onClick={() => onJumpToService(service.port)}
-                >
-                  :{service.port}
-                  {service.title ? ` · ${service.title}` : ""}
-                </Badge>
-              ))
-            )}
-          </div>
         </TabsContent>
 
         {iframeTabs.map((tab) => (
@@ -231,18 +205,51 @@ export function TabsPanel({
             key={tab.port}
             value={`svc-${tab.port}`}
             forceMount
-            className="flex-1 mt-0"
-            style={{ display: activeTab === `svc-${tab.port}` ? "block" : "none" }}
+            className="mt-0 min-h-0 flex-1"
+            style={{ display: activeTab === `svc-${tab.port}` ? "flex" : "none", flexDirection: "column" }}
           >
             <iframe
               title={`service-${tab.port}`}
               src={tab.url}
-              className="h-full min-h-[320px] w-full border-0 bg-white"
+              className="min-h-0 w-full flex-1 border-0 bg-white"
               sandbox="allow-same-origin allow-scripts allow-forms"
             />
           </TabsContent>
         ))}
       </Tabs>
+
+      {/* Status bar lives at the PANEL level: it belongs to the whole panel
+          (terminal cursor/size/selection + service jumps), never inside the
+          terminal tab content — that put it under iframe address bars. */}
+      <div className="flex h-8 shrink-0 items-center gap-3 overflow-x-auto border-t border-border px-3 text-[11px] text-muted-foreground">
+        <span className="font-mono whitespace-nowrap">
+          光标 {status.cursorY}:{status.cursorX}
+        </span>
+        <span className="font-mono whitespace-nowrap">
+          {status.cols}×{status.rows}
+        </span>
+        <span className="font-mono whitespace-nowrap">
+          {status.selection === undefined
+            ? "无选区"
+            : `选区 ${status.selection.start.y}:${status.selection.start.x} – ${status.selection.end.y}:${status.selection.end.x}`}
+        </span>
+        <span className="h-3 w-px bg-border" />
+        {services.length === 0 ? (
+          <span>嗅探 HTTP 服务中…（未发现不影响创建应用）</span>
+        ) : (
+          services.map((service) => (
+            <Badge
+              key={service.port}
+              variant={activeTab === `svc-${service.port}` ? "default" : "secondary"}
+              className="cursor-pointer font-mono whitespace-nowrap"
+              onClick={() => onJumpToService(service.port)}
+            >
+              :{service.port}
+              {service.title ? ` · ${service.title}` : ""}
+            </Badge>
+          ))
+        )}
+      </div>
     </div>
   );
 }
