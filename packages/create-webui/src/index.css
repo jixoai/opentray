@@ -62,3 +62,28 @@ body {
     -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei",
     sans-serif;
 }
+
+/* Transparency checkerboard for icon previews: scraped/uploaded icons may be
+   fully transparent in places, and a solid dark surface makes black artwork
+   (or solid-white tray silhouettes) invisible. Mid-tone cool grays keep BOTH
+   black and white artwork legible on the dark-first theme. */
+.icon-checker {
+  background-color: #dfe4ec;
+  background-image:
+    linear-gradient(
+      45deg,
+      #b7c1d0 25%,
+      transparent 25%,
+      transparent 75%,
+      #b7c1d0 75%
+    ),
+    linear-gradient(
+      45deg,
+      #b7c1d0 25%,
+      transparent 25%,
+      transparent 75%,
+      #b7c1d0 75%
+    );
+  background-size: 10px 10px;
+  background-position: 0 0, 5px 5px;
+}

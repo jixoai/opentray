@@ -82,7 +82,7 @@ export function CreateDialog({
               <dt className="text-muted-foreground">图标</dt>
               <dd className="flex items-center gap-2 break-all">
                 {iconSrc !== undefined ? (
-                  <img src={iconSrc} alt="应用图标" className="size-6 rounded object-contain" />
+                  <img src={iconSrc} alt="应用图标" className="icon-checker size-6 rounded object-contain" />
                 ) : null}
                 <span className="font-mono">{iconLabel}</span>
               </dd>

@@ -72,7 +72,7 @@ export function IconPicker({
         )}
       >
         {uploadedUrl !== undefined ? (
-          <img src={uploadedUrl} alt="已选图标" className="size-full object-contain" />
+          <img src={uploadedUrl} alt="已选图标" className="icon-checker size-full rounded object-contain" />
         ) : (
           <span className="flex flex-col items-center gap-1 text-muted-foreground">
             <Upload className="size-4" />
@@ -113,11 +113,10 @@ export function IconPicker({
                 }
                 onClick={() => onPick(candidate)}
                 className={cn(
-                  "flex size-12 items-center justify-center overflow-hidden rounded-lg border bg-popover p-1 transition-all",
+                  "icon-checker flex size-12 items-center justify-center overflow-hidden rounded-lg border p-1 transition-all",
                   picked || isDefault
                     ? "border-primary ring-2 ring-primary/60"
                     : "border-border hover:border-primary/60",
-                  candidate.variant === "solid-white" && "bg-neutral-200",
                   disabled && "opacity-50",
                 )}
               >

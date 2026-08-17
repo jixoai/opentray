@@ -89,7 +89,7 @@ export function AppForm({
             )}
           >
             {uploadedIconUrl !== undefined ? (
-              <img src={uploadedIconUrl} alt="已选图标" className="size-full object-contain" />
+              <img src={uploadedIconUrl} alt="已选图标" className="icon-checker size-full rounded object-contain" />
             ) : (
               <span className="flex flex-col items-center gap-1 text-muted-foreground">
                 <Upload className="size-4" />
@@ -132,7 +132,7 @@ export function AppForm({
                     title={`${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`}
                     onClick={() => onPickIconCandidate(candidate)}
                     className={cn(
-                      "flex size-14 items-center justify-center overflow-hidden rounded-lg border bg-popover p-1 transition-all",
+                      "icon-checker flex size-14 items-center justify-center overflow-hidden rounded-lg border p-1 transition-all",
                       picked || isDefault
                         ? "border-primary ring-2 ring-primary/60"
                         : "border-border hover:border-primary/60",
