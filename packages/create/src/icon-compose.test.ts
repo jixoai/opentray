@@ -132,6 +132,42 @@ describe("composeAppIcon", () => {
     expect(px(512, 120)[0]).toBeGreaterThan(200); // white bg above the art
   });
 
+  it("renders the WHOLE tile at 824-in-1024 for macOS (not just the art)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "icon-compose-out-"));
+    const foreground = await writeTemp("dark.svg", svg("#111111"));
+    const result = await composeAppIcon({
+      foregroundPath: foreground,
+      background: "white",
+      outputDir: dir,
+    });
+    // Opaque-tile bounding box per variant: columns whose alpha > 0.
+    const tileBox = async (path: string): Promise<{ left: number; width: number }> => {
+      const { data, info } = await sharp(path).raw().toBuffer({ resolveWithObject: true });
+      let left = Infinity;
+      let right = -Infinity;
+      for (let x = 0; x < info.width; x += 1) {
+        let opaque = false;
+        for (let y = 0; y < info.height && !opaque; y += 4) {
+          if ((data[(y * info.width + x) * 4 + 3] ?? 0) > 16) opaque = true;
+        }
+        if (opaque) {
+          left = Math.min(left, x);
+          right = Math.max(right, x);
+        }
+      }
+      return { left, width: right - left + 1 };
+    };
+    const windows = await tileBox(result.compositePath);
+    const macos = await tileBox(result.macOSPath);
+    // Windows/Linux form: the tile fills the canvas edge-to-edge.
+    expect(windows.left).toBeLessThanOrEqual(4);
+    expect(windows.width).toBeGreaterThanOrEqual(APP_ICON_CANVAS - 8);
+    // macOS form: the WHOLE tile scales to 824, centered with transparent
+    // margins — the defect scaled only the art and left the tile full-bleed.
+    expect(macos.width).toBeCloseTo(MACOS_CONTENT_SIZE, -1);
+    expect(macos.left).toBeCloseTo((APP_ICON_CANVAS - MACOS_CONTENT_SIZE) / 2, -1);
+  });
+
   it("does not letterbox non-square WHITE art into a dark reading (round-12 defect)", async () => {
     // A wide white logo previously hit sharp's default OPAQUE BLACK contain
     // padding in the analysis downscale, measuring ~0.3 and suggesting the

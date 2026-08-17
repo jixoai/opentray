@@ -88,9 +88,10 @@ recolored — over one of three backgrounds: light art → black, dark art →
 white, fully-opaque art → transparent. Live preview, auto/manual selection,
 and a 50–95% foreground scale control. Every composition is clipped to the
 squircle alpha carried by the bundled backgrounds (including the transparent
-one), which rounds the composite's corners on macOS; macOS ICNS encodes from
-the best-practice 824-in-1024 variant while Windows/Linux use the full 1024.
-The tray icon stays on the raw source.
+one), which rounds the composite's corners on macOS. For macOS the ENTIRE tile
+(background + art) is scaled to 824 and centered on the transparent 1024
+canvas — Dock icons since Big Sur carry those margins — while Windows/Linux
+use the full-bleed 1024. The tray icon stays on the raw source.
   README.md
 ```
 

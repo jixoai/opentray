@@ -74,3 +74,10 @@ resolution falls back to the authoritative server trayIconPath when the
 port-scoped selection ref goes stale across runs, and re-confirming after
 返回修改 reopens the dialog (the frozen event only fired on first freeze,
 leaving the wizard with no visible confirm UI).
+
+macOS icon margin repair: the 824-in-1024 best practice now scales the
+WHOLE composed tile (background included) to 824 centered on a transparent
+canvas — previously only the foreground art shrank while the tile ran
+edge-to-edge, so the Dock icon still filled all available space. The
+shipped ICNS ic10 representation now measures tile width 824 at offset
+100 (ICO stays full-bleed), guarded by a whole-tile bbox regression test.

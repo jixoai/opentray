@@ -189,10 +189,12 @@ const clipToSquircle = async (bytes: Buffer): Promise<Buffer> => {
  * recolor of the artwork (the round-12 defect that painted a white icon
  * black).
  *
- * Output: `app-composited.png` at CANVAS size, plus `app-composited-macos.png`
- * where the foreground is re-rendered at 824px (background kept at 1024 —
- * macOS masks the margins, so the squircle stays crisp while content lands
- * at the best-practice scale).
+ * Output: `app-composited.png` at CANVAS size (Windows/Linux form — the tile
+ * fills the canvas), plus `app-composited-macos.png` where the ENTIRE tile
+ * (background + art) is scaled to 824 and centered on the transparent 1024
+ * canvas. Dock icons since Big Sur carry those margins instead of running
+ * edge-to-edge; scaling only the art (the earlier defect) left the tile
+ * filling all available space.
  */
 export const composeAppIcon = async (options: {
   readonly foregroundPath: string;
@@ -218,8 +220,8 @@ export const composeAppIcon = async (options: {
   const compositionDir = join(outputDir, key);
   await mkdir(compositionDir, { recursive: true });
 
-  const build = async (contentSize: number, suffix: string): Promise<string> => {
-    const fgSize = Math.round(contentSize * scale);
+  const buildComposite = async (): Promise<Buffer> => {
+    const fgSize = Math.round(APP_ICON_CANVAS * scale);
     const offset = Math.round((APP_ICON_CANVAS - fgSize) / 2);
 
     // The artwork, scaled with TRANSPARENT letterboxing (sharp's default
@@ -249,16 +251,33 @@ export const composeAppIcon = async (options: {
     // Every composition is clipped to the squircle: the bundled backgrounds
     // already carry the mask in their alpha, and a transparent background
     // would otherwise leave the source's square corners visible on macOS.
-    const bytes =
-      options.background === "transparent" ? await clipToSquircle(composed) : composed;
+    return options.background === "transparent"
+      ? await clipToSquircle(composed)
+      : composed;
+  };
 
+  const writeVariant = async (bytes: Buffer, suffix: string): Promise<string> => {
     const path = join(compositionDir, `app-composited${suffix}.png`);
     await writeFile(path, bytes);
     return path;
   };
 
-  const compositePath = await build(APP_ICON_CANVAS, "");
-  const macOSPath = await build(MACOS_CONTENT_SIZE, "-macos");
+  const full = await buildComposite();
+  const macOSMargin = Math.round((APP_ICON_CANVAS - MACOS_CONTENT_SIZE) / 2);
+  const macOSBytes = await sharp(full)
+    .resize(MACOS_CONTENT_SIZE, MACOS_CONTENT_SIZE, { kernel: sharp.kernel.lanczos3 })
+    .extend({
+      top: macOSMargin,
+      bottom: macOSMargin,
+      left: macOSMargin,
+      right: macOSMargin,
+      background: TRANSPARENT,
+    })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+
+  const compositePath = await writeVariant(full, "");
+  const macOSPath = await writeVariant(macOSBytes, "-macos");
   return { compositePath, macOSPath, background: options.background };
 };
 

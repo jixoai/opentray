@@ -7,6 +7,10 @@ export default defineConfig({
   // to CPU contention under parallel workers; keep files sequential.
   test: {
     fileParallelism: false,
+    // Real-timer tests share the process with real sharp pipelines (1024²
+    // icon compositions) whose CPU bursts stall polling loops; 5s per-test
+    // flaked under that contention.
+    testTimeout: 30_000,
   },
   resolve: {
     alias: {
