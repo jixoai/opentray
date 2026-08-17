@@ -48,6 +48,7 @@ export function App(): React.JSX.Element {
   const [commandOptions, setCommandOptions] = React.useState<WizardCommandOptions>(
     DEFAULT_COMMAND_OPTIONS,
   );
+  const [defaultCwd, setDefaultCwd] = React.useState("");
   const advancedRef = React.useRef<HTMLDivElement>(null);
   const [panelOpen, setPanelOpen] = React.useState(false);
   const [runAlive, setRunAlive] = React.useState(false);
@@ -215,6 +216,7 @@ const selectedIconRefStale = (
           break;
         case "command-options":
           setCommandOptions(payload.options);
+          setDefaultCwd(payload.defaultCwd);
           break;
         case "services": {
           setServices(payload.services);
@@ -512,6 +514,7 @@ const selectedIconRefStale = (
             frozen={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
             values={values}
             commandOptions={commandOptions}
+            defaultCwd={defaultCwd}
             onCommandOptionsChange={(next) => {
               setCommandOptions(next);
               void api("/api/command-options", {

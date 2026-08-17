@@ -40,8 +40,10 @@ npx create-opentray my-app     # or an explicit target directory
    glyph).
 5. 高级选项 — the settings button beside the command bar opens an accordion.
    命令选项 configures execution: 参数输入模式 (数组/argv mode commits ONE
-   argv element per tag, verbatim — no string splitting), 工作目录 (cwd),
-   and 环境变量 (env overlay, also persisted into the generated app).
+   argv element per tag, verbatim — no string splitting), 工作目录 (cwd;
+   the default is the USER_HOME directory, shown in full, and relative
+   paths resolve from there), and 环境变量 (env overlay, also persisted
+   into the generated app).
    应用选项 holds the tray-icon picker (defaults to the app icon choice;
    solid black/white silhouettes derived from every candidate) and the two
    generated-app window options, both off by default: 显示启动终端 and

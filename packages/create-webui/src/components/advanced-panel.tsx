@@ -28,6 +28,8 @@ export interface AdvancedPanelProps {
   frozen: boolean;
   values: WizardFormValues;
   commandOptions: WizardCommandOptions;
+  /** Resolved USER_HOME default — displayed in full as the cwd placeholder. */
+  defaultCwd: string;
   onCommandOptionsChange(options: WizardCommandOptions): void;
   candidates: IconCandidate[];
   candidatesPort: number | undefined;
@@ -44,6 +46,7 @@ export function AdvancedPanel({
   frozen,
   values,
   commandOptions,
+  defaultCwd,
   onCommandOptionsChange,
   candidates,
   candidatesPort,
@@ -104,16 +107,22 @@ export function AdvancedPanel({
             <div>
               <Label htmlFor="cmd-cwd">工作目录 (cwd)</Label>
               <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                留空使用当前目录；相对路径按当前目录解析。
+                留空使用用户主目录（下方完整路径）；相对路径按主目录解析。
               </p>
               <Input
                 id="cmd-cwd"
                 className="mt-0 font-mono text-xs"
                 disabled={frozen}
                 value={commandOptions.cwd}
-                placeholder="默认：当前目录"
+                placeholder={defaultCwd.length > 0 ? `默认：${defaultCwd}` : "默认：用户主目录"}
+                title={defaultCwd}
                 onChange={(event) => patchCommand({ cwd: event.target.value })}
               />
+              {defaultCwd.length > 0 && commandOptions.cwd.trim().length === 0 ? (
+                <p className="mt-1 font-mono text-[11px] break-all text-muted-foreground">
+                  {defaultCwd}
+                </p>
+              ) : null}
             </div>
           </div>
           <div>

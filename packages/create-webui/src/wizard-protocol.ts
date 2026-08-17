@@ -68,7 +68,11 @@ export type WizardEvent =
   | { type: "term-mode"; interactive: boolean; message?: string }
   | { type: "run-status"; running: boolean; code?: number | null }
   | { type: "command-display"; command: string }
-  | { type: "command-options"; options: WizardCommandOptions }
+  | {
+      type: "command-options";
+      options: WizardCommandOptions;
+      defaultCwd: string;
+    }
   | {
       type: "services";
       services: DiscoveredService[];

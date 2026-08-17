@@ -265,10 +265,13 @@ describe("wizard session", () => {
 
     await session.submitCommand("npx tool start");
     expect(session.state).toBe("running");
+    // The session publishes its initial command-options snapshot (with the
+    // resolved USER_HOME default) at creation; drop it for this assertion.
+    const runEvents = events[0]?.type === "command-options" ? events.slice(1) : events;
     // The running state must be emitted before any awaits (temp dirs, listener
     // baselines, PTY probes); only the synchronous command display precedes it.
-    expect(events[0]?.type).toBe("command-display");
-    expect(events[1]).toMatchObject({ type: "state", state: "running" });
+    expect(runEvents[0]?.type).toBe("command-display");
+    expect(runEvents[1]).toMatchObject({ type: "state", state: "running" });
 
     session.terminalInput("hi\n");
     session.terminalResize({ cols: 120, rows: 40 });
@@ -440,7 +443,7 @@ describe("wizard session", () => {
   });
 
   it("submits argv verbatim in array mode with custom cwd and env", async () => {
-    const harness = createHarness();
+    const harness = createHarness({ homeDir: "/tmp/wizard-home" });
     harness.session.updateCommandOptions({
       argsMode: "array",
       cwd: "sub/dir",
@@ -457,8 +460,9 @@ describe("wizard session", () => {
       "weird arg with  spaces",
       "--x=1",
     ]);
-    // cwd resolves against the wizard cwd; env overlay drops empty keys.
-    expect(harness.lastRunOptions()?.cwd).toBe("/tmp/wizard-cwd/sub/dir");
+    // cwd default is USER_HOME (owner law); relative paths resolve from home;
+    // env overlay drops empty keys.
+    expect(harness.lastRunOptions()?.cwd).toBe("/tmp/wizard-home/sub/dir");
     expect(harness.lastRunOptions()?.env).toEqual({ FOO: "bar", BAZ: "qux" });
     // The command display joins for presentation only.
     const display = harness.events.find(
@@ -466,6 +470,24 @@ describe("wizard session", () => {
         event.type === "command-display",
     );
     expect(display?.command).toBe("npx weird arg with  spaces --x=1");
+  });
+
+  it("defaults the command cwd to USER_HOME and publishes it", async () => {
+    const harness = createHarness({ homeDir: "/tmp/wizard-home" });
+    // The initial snapshot carries the resolved default for the UI.
+    const snapshot = harness.events.find(
+      (event): event is Extract<WizardEvent, { type: "command-options" }> =>
+        event.type === "command-options",
+    );
+    expect(snapshot?.defaultCwd).toBe("/tmp/wizard-home");
+    expect(snapshot?.options.cwd).toBe("");
+    // Empty cwd = home; no explicit resolution against the wizard cwd.
+    await harness.session.submitCommand("npx homebased serve");
+    expect(harness.lastRunOptions()?.cwd).toBe("/tmp/wizard-home");
+    // An absolute override passes through unchanged.
+    harness.session.updateCommandOptions({ cwd: "/var/abs" });
+    await harness.session.submitCommand("npx homebased serve");
+    expect(harness.lastRunOptions()?.cwd).toBe("/var/abs");
   });
 
   it("keeps the env overlay on the frozen launch vector", async () => {

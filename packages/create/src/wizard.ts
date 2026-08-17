@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { deriveDefaultAppId, deriveDefaultAppName, toProjectDirectoryName } from "./app-id";
@@ -90,7 +90,11 @@ export type WizardEvent =
   | { readonly type: "term-mode"; readonly interactive: boolean; readonly message?: string }
   | { readonly type: "run-status"; readonly running: boolean; readonly code?: number | null }
   | { readonly type: "command-display"; readonly command: string }
-  | { readonly type: "command-options"; readonly options: WizardCommandOptions }
+  | {
+      readonly type: "command-options";
+      readonly options: WizardCommandOptions;
+      readonly defaultCwd: string;
+    }
   | {
       readonly type: "services";
       readonly services: readonly DiscoveredService[];
@@ -114,6 +118,8 @@ export type WizardEvent =
 
 export interface WizardOptions {
   readonly cwd: string;
+  /** Command-execution default working directory (default: USER_HOME). */
+  readonly homeDir?: string;
   readonly skipInstall: boolean;
   readonly force: boolean;
   readonly packageManager?: "npm" | "pnpm" | "bun";
@@ -344,10 +350,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     }, options.pollIntervalMs ?? 1_000);
   };
 
-  /** Resolve the command cwd: empty = the wizard's working directory. */
+  /** Default command cwd is the USER_HOME directory (owner round-10 law):
+   *  empty input means home, and relative paths resolve against home. */
+  const homeDir = options.homeDir ?? homedir();
   const effectiveCwd = (): string => {
     const custom = commandOptions.cwd.trim();
-    return custom.length > 0 ? resolve(options.cwd, custom) : options.cwd;
+    return custom.length > 0 ? resolve(homeDir, custom) : homeDir;
   };
 
   /** Build the env overlay from configured entries (empty keys skipped). */
@@ -362,7 +370,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   };
 
   const publishCommandOptions = (): void => {
-    emit({ type: "command-options", options: commandOptions });
+    emit({ type: "command-options", options: commandOptions, defaultCwd: homeDir });
   };
 
   const session: WizardSession = {
@@ -788,6 +796,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       }
     },
   };
+
+  publishCommandOptions();
 
   return session;
 };
