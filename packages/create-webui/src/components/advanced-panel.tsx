@@ -16,6 +16,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type {
   IconCandidate,
@@ -190,7 +197,7 @@ export function AdvancedPanel({
         </AccordionContent>
       </AccordionItem>
 
-      <AccordionItem value="app" className="border-b-0">
+      <AccordionItem value="app">
         <AccordionTrigger>应用选项</AccordionTrigger>
         <AccordionContent className="space-y-4">
           <div>
@@ -246,6 +253,33 @@ export function AdvancedPanel({
                 </p>
               </div>
             </div>
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+      <AccordionItem value="misc" className="border-b-0">
+        <AccordionTrigger>高级</AccordionTrigger>
+        <AccordionContent>
+          <div>
+            <Label htmlFor="pm">包管理器</Label>
+            <p className="mt-0.5 mb-1.5 text-[11px] leading-relaxed text-muted-foreground">
+              仅为生成的应用安装依赖时使用的工具（决定 install
+              命令与锁文件形态），不影响应用本身的运行方式——生成的应用始终以
+              Node 启动。默认自动跟随你启动向导所用的包管理器，一般无需修改。
+            </p>
+            <Select
+              value={values.pm}
+              disabled={frozen}
+              onValueChange={(pm) => onPatch({ pm: pm as WizardFormValues["pm"] })}
+            >
+              <SelectTrigger id="pm" className="mt-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="npm">npm</SelectItem>
+                <SelectItem value="pnpm">pnpm</SelectItem>
+                <SelectItem value="bun">bun</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </AccordionContent>
       </AccordionItem>
