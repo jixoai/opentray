@@ -1,5 +1,13 @@
-/** create-opentray wizard page: command bar + tabs panel + identity form. */
+/**
+ * create-opentray workbench (openspec change redesign-create-opentray-webui):
+ * persistent shell with Add / Applications / Help routes; Add hosts the
+ * wizard page (command bar + tabs panel + identity form) unchanged.
+ */
 import * as React from "react";
+
+import { WorkbenchShell, useWorkbenchNavigation } from "@/workbench-shell";
+import { ApplicationsRoute } from "@/routes/applications";
+import { HelpRoute } from "@/routes/help";
 
 import { AppConfigCard } from "@/components/app-config-card";
 import { CommandCard } from "@/components/command-card";
@@ -47,7 +55,7 @@ const EMPTY_VALUES: WizardFormValues = {
 };
 const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "", iconPath: "" };
 
-export function App(): React.JSX.Element {
+function WizardPage(): React.JSX.Element {
   const [command, setCommand] = React.useState("");
   const [argv, setArgv] = React.useState<string[]>([]);
   const [commandOptions, setCommandOptions] = React.useState<WizardCommandOptions>(
@@ -643,7 +651,7 @@ const selectedIconRefStale = (
 
   return (
     <div
-      className="grid h-screen w-full overflow-hidden"
+      className="grid h-full w-full overflow-hidden"
       style={{
         // --list-w caps the centered list at the mobile width (with page
         // padding) and drives the closed-state middle column.
@@ -656,7 +664,7 @@ const selectedIconRefStale = (
           scrollable; the detail pane appearing never shifts it. */}
       <div
         className={
-          "flex w-full flex-col gap-4 overflow-y-auto p-5 max-md:min-h-screen " +
+          "flex w-full flex-col gap-4 overflow-y-auto p-5 max-md:min-h-full " +
           (panelOpen ? "md:border-r md:border-border" : "")
         }
         style={{
@@ -863,5 +871,14 @@ const selectedIconRefStale = (
         onClose={() => setDialogOpen(false)}
       />
     </div>
+  );
+}
+
+export function App(): React.JSX.Element {
+  const { route } = useWorkbenchNavigation();
+  return (
+    <WorkbenchShell>
+      {route === "add" ? <WizardPage /> : route === "applications" ? <ApplicationsRoute /> : <HelpRoute />}
+    </WorkbenchShell>
   );
 }

@@ -116,7 +116,7 @@ export function AppConfigCard({
       />
 
       {/* Merged 高级选项: window modes + tray icon + package manager */}
-      <Accordion type="multiple" className="mt-4 border-t border-border pt-1">
+      <Accordion className="mt-4 border-t border-border pt-1">
         <AccordionItem value="advanced" className="border-b-0">
           <AccordionTrigger>高级选项</AccordionTrigger>
           <AccordionContent className="space-y-4">

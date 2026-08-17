@@ -24,6 +24,7 @@ import type {
   WizardSession,
 } from "./wizard";
 import { openMaterializedApp } from "@create-opentray/core";
+import { handleWorkbenchApi } from "./workbench-api";
 
 export interface WizardServerHandle {
   readonly url: string;
@@ -187,7 +188,18 @@ export const createWizardServer = async (
         respond(response, 403, "application/json", '{"error":"forbidden host"}\n');
         return;
       }
-      await handleApi(url.pathname, request, response, session);
+      // Workbench routes (apps/skill/export) are Core projections with
+      // their own body contract; fall through to the wizard API otherwise.
+      let body: Record<string, unknown> = {};
+      if (request.method === "POST") {
+        body = await readJsonBody(request);
+      }
+      const workbench = await handleWorkbenchApi({ method: request.method ?? "GET", pathname: url.pathname, query: url.searchParams, body });
+      if (workbench !== undefined) {
+        respond(response, workbench.status, "application/json", `${JSON.stringify(workbench.body)}\n`);
+        return;
+      }
+      await handleApi(url.pathname, request, response, session, request.method === "POST" ? body : undefined);
       return;
     }
 
@@ -356,6 +368,7 @@ const handleApi = async (
   request: IncomingMessage,
   response: ServerResponse,
   session: WizardSession,
+  preReadBody?: Record<string, unknown>,
 ): Promise<void> => {
   if (request.method !== "POST") {
     respond(response, 405, "application/json", '{"error":"method not allowed"}\n');
@@ -377,7 +390,7 @@ const handleApi = async (
     respond(response, 200, "application/json", JSON.stringify({ path }) + "\n");
     return;
   }
-  const body = await readJsonBody(request);
+  const body = preReadBody ?? (await readJsonBody(request));
   switch (pathname) {
     case "/api/command": {
       // Array form: argv elements used verbatim (array input mode).

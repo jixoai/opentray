@@ -111,6 +111,12 @@ The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `sk
 
 ## Window Shell Mode Law
 
+### WebView polling cost diagnosis (2026-08-18)
+
+- The native `winit` tray/broker loop uses `ControlFlow::Wait`; an idle broker is not itself a busy loop.
+- `@opentray/ext-webview` currently starts a `setInterval(..., 16ms)` `drainWindowEvents` loop after every shown WebView on an eventful tray, because warm-Darwin-reopen MRU tracking subscribes to `focus` and `stylechange`. This is approximately 60 native extension commands per second per shown window even when the page is static, and is a first-class CPU regression suspect.
+- Future app-reopen/activity tracking must use push events or a bounded/low-frequency fallback; it must not create a hidden 60Hz poll per retained window. CPU acceptance must count native drain requests separately from WebView page/compositor work.
+
 The public WebView window contract uses `style.appMode`, not a platform behavior name such as
 `showInSwitchers`. The old Windows-only field has been removed; native adapters project the common
 mode directly:

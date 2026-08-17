@@ -143,7 +143,7 @@ export function TabsPanel({
             <>
               <Button
                 variant="ghost"
-                size="iconSm"
+                size="icon-sm"
                 disabled={!canBack}
                 onClick={() => onIframeHistoryMove(activeIframe.port, -1)}
                 aria-label="后退"
@@ -152,7 +152,7 @@ export function TabsPanel({
               </Button>
               <Button
                 variant="ghost"
-                size="iconSm"
+                size="icon-sm"
                 disabled={!canForward}
                 onClick={() => onIframeHistoryMove(activeIframe.port, 1)}
                 aria-label="前进"
@@ -161,7 +161,7 @@ export function TabsPanel({
               </Button>
               <Button
                 variant="ghost"
-                size="iconSm"
+                size="icon-sm"
                 onClick={() => onIframeNavigate(activeIframe.port, activeIframe.url, "replace")}
                 aria-label="重新加载"
               >
@@ -187,7 +187,6 @@ export function TabsPanel({
 
         <TabsContent
           value="terminal"
-          forceMount
           className="mt-0 min-h-0 flex-1"
           style={{ display: activeTab === "terminal" ? "flex" : "none", flexDirection: "column" }}
         >
@@ -204,7 +203,6 @@ export function TabsPanel({
           <TabsContent
             key={tab.port}
             value={`svc-${tab.port}`}
-            forceMount
             className="mt-0 min-h-0 flex-1"
             style={{ display: activeTab === `svc-${tab.port}` ? "flex" : "none", flexDirection: "column" }}
           >

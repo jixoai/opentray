@@ -153,15 +153,15 @@ export function BrowsePage(): React.JSX.Element {
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Address bar (Web Navigation API managed) */}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
-        <Button variant="ghost" size="iconSm" disabled={!canBack} onClick={back} aria-label="后退">
+        <Button variant="ghost" size="icon-sm" disabled={!canBack} onClick={back} aria-label="后退">
           <ArrowLeft />
         </Button>
-        <Button variant="ghost" size="iconSm" disabled={!canForward} onClick={forward} aria-label="前进">
+        <Button variant="ghost" size="icon-sm" disabled={!canForward} onClick={forward} aria-label="前进">
           <ArrowRight />
         </Button>
         <Button
           variant="ghost"
-          size="iconSm"
+          size="icon-sm"
           onClick={() => {
             if (frameRef.current !== null) {
               frameRef.current.src = frameSrc;

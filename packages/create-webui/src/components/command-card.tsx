@@ -93,7 +93,6 @@ export function CommandCard({
 
       {/* 命令选项 accordion lives inside this card */}
       <Accordion
-        type="multiple"
         defaultValue={["command"]}
         className="mt-3 border-t border-border pt-1"
       >
@@ -113,7 +112,6 @@ export function CommandCard({
                 </p>
                 <div className="flex gap-1.5">
                   <Button
-                    type="button"
                     size="sm"
                     variant={commandOptions.argsMode === "string" ? "default" : "outline"}
                     disabled={frozen}
@@ -122,7 +120,6 @@ export function CommandCard({
                     字符串
                   </Button>
                   <Button
-                    type="button"
                     size="sm"
                     variant={commandOptions.argsMode === "array" ? "default" : "outline"}
                     disabled={frozen}
@@ -189,9 +186,8 @@ export function CommandCard({
                         }}
                       />
                       <Button
-                        type="button"
                         variant="ghost"
-                        size="iconSm"
+                        size="icon-sm"
                         disabled={frozen}
                         aria-label="删除环境变量"
                         onClick={() => {
@@ -206,7 +202,6 @@ export function CommandCard({
                   ))
                 )}
                 <Button
-                  type="button"
                   variant="outline"
                   size="sm"
                   disabled={frozen}
