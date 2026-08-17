@@ -237,6 +237,8 @@ export const composeAppIcon = async (options: {
   readonly foregroundPath: string;
   readonly background: IconBackground;
   readonly scale?: number;
+  /** v1 sampling intent: false keeps pixel-art edges discrete (nearest kernel). */
+  readonly imageSmoothingEnabled?: boolean;
   readonly outputDir: string;
 }): Promise<{
   readonly compositePath: string;
@@ -244,6 +246,8 @@ export const composeAppIcon = async (options: {
   readonly background: IconBackground;
 }> => {
   const scale = options.scale ?? FOREGROUND_SCALE_DEFAULT;
+  const smoothing = options.imageSmoothingEnabled !== false; // v1 default: true
+  const kernel = smoothing ? undefined : sharp.kernel.nearest;
   const outputDir = options.outputDir;
   await mkdir(outputDir, { recursive: true });
 
@@ -253,6 +257,7 @@ export const composeAppIcon = async (options: {
     foregroundPath: options.foregroundPath,
     background: options.background,
     scale,
+    imageSmoothingEnabled: smoothing,
   });
   const compositionDir = join(outputDir, key);
   await mkdir(compositionDir, { recursive: true });
@@ -269,7 +274,11 @@ export const composeAppIcon = async (options: {
       limitInputPixels: false,
     })
       .rotate()
-      .resize(fgSize, fgSize, { fit: "contain", background: TRANSPARENT })
+      .resize(fgSize, fgSize, {
+        fit: "contain",
+        background: TRANSPARENT,
+        ...(kernel === undefined ? {} : { kernel }),
+      })
       .png()
       .toBuffer();
 
@@ -306,7 +315,11 @@ export const composeAppIcon = async (options: {
   const full = await buildComposite();
   const macOSMargin = Math.round((APP_ICON_CANVAS - MACOS_CONTENT_SIZE) / 2);
   const macOSBytes = await sharp(full)
-    .resize(MACOS_CONTENT_SIZE, MACOS_CONTENT_SIZE, { kernel: sharp.kernel.lanczos3 })
+    .resize(MACOS_CONTENT_SIZE, MACOS_CONTENT_SIZE, {
+      // Sampling intent governs the macOS downscale as well: pixel art must
+      // keep hard edges in the 824-variant, not just the full-size tile.
+      ...(smoothing ? { kernel: sharp.kernel.lanczos3 } : { kernel: sharp.kernel.nearest }),
+    })
     .extend({
       top: macOSMargin,
       bottom: macOSMargin,
@@ -327,8 +340,11 @@ export const compositionCacheKey = (options: {
   readonly foregroundPath: string;
   readonly background: IconBackground;
   readonly scale: number;
+  readonly imageSmoothingEnabled?: boolean;
 }): string =>
   createHash("sha256")
-    .update(`${options.foregroundPath}|${options.background}|${options.scale}`)
+    .update(
+      `${options.foregroundPath}|${options.background}|${options.scale}|${options.imageSmoothingEnabled !== false ? "smooth" : "nearest"}`,
+    )
     .digest("hex")
     .slice(0, 16);

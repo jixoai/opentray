@@ -7,9 +7,9 @@
 //    generated entry's ready marker plus the stable Darwin bundle.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   resolveDefaultDarwinAppBundlePath,
@@ -18,30 +18,6 @@ import {
 import { generateOpenTrayAppIcon } from "@opentray/vite-plugin";
 
 import { tcpProbe } from "./port-scan";
-import { fileURLToPath } from "node:url";
-import { access } from "node:fs/promises";
-
-const moduleDirectory = dirname(fileURLToPath(import.meta.url));
-
-/** Prebuilt shell UI: prefer the packaged copy (dist/shell), else the
- *  workspace build next to this package. */
-const resolveShellAssetsDir = async (): Promise<string | undefined> => {
-  const candidates = [
-    join(moduleDirectory, "shell"),
-    // Source checkout: moduleDirectory is packages/create/src → ../dist/shell.
-    join(moduleDirectory, "..", "dist", "shell"),
-    // tsdown chunk layout: moduleDirectory is packages/create/dist → ./shell
-    // (covered above) — plus a direct workspace fallback.
-    join(moduleDirectory, "..", "create-webui", "dist"),
-  ];
-  for (const candidate of candidates) {
-    if (await access(join(candidate, "index.html")).then(() => true, () => false)) {
-      return candidate;
-    }
-  }
-  return undefined;
-};
-const shellAssetsDir = await resolveShellAssetsDir();
 import { composeAppIcon } from "./icon-compose";
 import type { IconBackground } from "./icon-compose";
 import { writeGlyphIconTemp } from "./scrape";
@@ -65,10 +41,14 @@ export interface MaterializeInput {
   /** Icon composition (owner round-12): background + foreground scale. */
   readonly iconBackground?: IconBackground;
   readonly iconScale?: number;
+  /** Nearest-neighbor sampling for pixel-art sources (v1 imageSmoothingEnabled). */
+  readonly imageSmoothingEnabled?: boolean;
   /** Tray icon source; defaults to the app icon source when omitted. */
   readonly trayIconSourcePath?: string;
   /** Generated-app shell options (startup terminal / address bar). */
   readonly shell?: { showTerminal: boolean; showAddressBar: boolean };
+  /** Adapter-owned prebuilt shell UI directory (copied to app-shell/). */
+  readonly shellAssetsDir?: string;
   readonly packageManager: "npm" | "pnpm" | "bun";
   readonly skipInstall: boolean;
   readonly force: boolean;
@@ -143,16 +123,25 @@ export const expectedDarwinBundlePath = (config: {
     appName: sanitizeAppBundleName(config.appName),
   });
 
-export const materialize = async (
+export interface PayloadPhaseResult {
+  readonly scaffold: ScaffoldResult;
+  readonly projectDir: string;
+}
+
+/**
+ * Payload phase: guard → tray icon → composed app icon → scaffold → icon
+ * catalog → dependency install. Stopping here leaves a complete, unlaunched
+ * project, which Core apply swaps into place transactionally before launch.
+ */
+export const materializePayload = async (
   input: MaterializeInput,
   context: MaterializeContext,
-): Promise<MaterializeResult> => {
+): Promise<PayloadPhaseResult> => {
   const step = (name: string, message: string): void =>
     context.log({ type: "step", step: name, message });
-  const waitMs =
-    context.waitMs ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
   const targetDir = resolve(input.targetDir);
+  const smoothing = input.imageSmoothingEnabled !== false; // v1 default: true
   step("scaffold", `checking target directory ${targetDir}`);
   if (await isDirectoryOccupied(targetDir)) {
     if (input.force !== true) {
@@ -179,7 +168,13 @@ export const materialize = async (
     try {
       const sharpModule = await import("sharp");
       await sharpModule.default(traySource, { failOn: "none" })
-        .resize(128, 128, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .resize(128, 128, {
+          fit: "contain",
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+          // v1 imageSmoothingEnabled=false keeps pixel-art edges discrete on
+          // the tray projection too, not just the app-icon foreground.
+          ...(smoothing ? {} : { kernel: sharpModule.default.kernel.nearest }),
+        })
         .png()
         .toFile(trayPath);
       // Solid-silhouette sources are single-color art: darwin templates let
@@ -188,7 +183,7 @@ export const materialize = async (
       trayIconConfig = { path: "app-icon/tray-icon.png", template };
       context.log({
         type: "log",
-        message: `tray icon: app-icon/tray-icon.png${template ? " (template)" : ""}`,
+        message: `tray icon: app-icon/tray-icon.png${template ? " (template)" : ""}${smoothing ? "" : " (nearest-neighbor)"}`,
       });
     } catch (error) {
       context.log({
@@ -210,11 +205,12 @@ export const materialize = async (
         foregroundPath: input.iconSourcePath,
         background: input.iconBackground ?? "transparent",
         scale: input.iconScale ?? 0.8,
+        imageSmoothingEnabled: smoothing,
         outputDir: join(targetDir, "app-icon"),
       });
       context.log({
         type: "log",
-        message: `composed app icon (${composedIcon.background} background, macOS 824 / windows 1024)`,
+        message: `composed app icon (${composedIcon.background} background, macOS 824 / windows 1024${smoothing ? "" : ", nearest-neighbor"})`,
       });
     } catch (error) {
       context.log({
@@ -235,7 +231,7 @@ export const materialize = async (
     targetDir,
     dependencyRange: input.dependencyRange,
     skipInstall: input.skipInstall,
-    ...(shellAssetsDir === undefined ? {} : { shellAssetsDir }),
+    ...(input.shellAssetsDir === undefined ? {} : { shellAssetsDir: input.shellAssetsDir }),
   });
   context.log({ type: "log", message: `wrote ${scaffold.writtenFiles.join(", ")}` });
 
@@ -301,6 +297,25 @@ export const materialize = async (
     step("install", "skipping dependency install (--skip-install)");
   }
 
+  return { scaffold, projectDir: scaffold.projectDir };
+};
+
+/**
+ * Launch phase: first launch of the (already swapped-in) generated app and,
+ * on macOS, verification of the stable Darwin bundle. Separated from the
+ * payload phase so apply can launch from the FINAL payload location.
+ */
+export const launchGeneratedApp = async (
+  input: MaterializeInput,
+  context: MaterializeContext,
+  payload: PayloadPhaseResult,
+): Promise<MaterializeResult> => {
+  const step = (name: string, message: string): void =>
+    context.log({ type: "step", step: name, message });
+  const waitMs =
+    context.waitMs ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const { scaffold, projectDir } = payload;
+
   if (input.skipInstall) {
     // No node_modules → the entry's `import "opentray"` cannot resolve, so a
     // first launch would only fail the whole creation. The project is
@@ -310,12 +325,12 @@ export const materialize = async (
       type: "log",
       message: "install dependencies and run `node main.mjs` to launch",
     });
-    return { scaffold, projectDir: scaffold.projectDir, bundlePath: undefined };
+    return { scaffold, projectDir, bundlePath: undefined };
   }
 
   step("launch", "first launch of the generated app");
   const launch = context.firstLaunchEntry ?? firstLaunchEntry;
-  const launched = await launch(scaffold.projectDir);
+  const launched = await launch(projectDir);
   context.log({ type: "log", message: `app entry spawned (pid ${launched.pid})` });
 
   step("launch", "waiting for app ready marker");
@@ -335,7 +350,16 @@ export const materialize = async (
     context.log({ type: "log", message: `stable bundle: ${bundlePath}` });
   }
 
-  return { scaffold, projectDir: scaffold.projectDir, bundlePath, firstLaunch: launched };
+  return { scaffold, projectDir, bundlePath, firstLaunch: launched };
+};
+
+/** Backward-compatible composition used by the wizard adapter. */
+export const materialize = async (
+  input: MaterializeInput,
+  context: MaterializeContext,
+): Promise<MaterializeResult> => {
+  const payload = await materializePayload(input, context);
+  return launchGeneratedApp(input, context, payload);
 };
 
 export const runPackageManagerInstall = async (options: RunInstallOptions): Promise<void> => {

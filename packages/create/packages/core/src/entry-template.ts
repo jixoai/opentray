@@ -246,6 +246,9 @@ const tray = await createTray({
 
 const baseTitle = config.appName;
 const showAddressBar = shellOptions !== null && shellOptions.showAddressBar === true;
+// v1 developerMode maps ONLY to per-window DevTools admission. When false it
+// must not request devtools at all — default windows are not inspectable.
+const devtools = config.developerMode === true ? { devtools: true } : {};
 
 // Dedicated windows (round 9b): one terminal window when enabled, one window
 // per listened port — an address-bar wrapper page when enabled, the direct
@@ -268,6 +271,7 @@ const ensureServiceWindow = async (port) => {
     height: config.window.height,
     title: baseTitle,
     style: { appMode: true, autoHide: false, keepOnTop: false },
+    ...devtools,
     ...(showAddressBar ? {} : { titleSync: { documentToWindow: true, windowToDocument: true } }),
     ...(showAddressBar ? {} : { iconSync: { faviconToWindow: true, windowToFavicon: true } }),
   });
@@ -282,6 +286,7 @@ if (showTerminal && shellPort !== null) {
     height: 560,
     title: \`\${baseTitle} — Terminal\`,
     style: { appMode: true, autoHide: false, keepOnTop: false },
+    ...devtools,
   });
   await terminalWindow.show().catch(() => {});
 }

@@ -23,7 +23,7 @@ import type {
   WizardFormValues,
   WizardSession,
 } from "./wizard";
-import { openMaterializedApp } from "./open-app";
+import { openMaterializedApp } from "@create-opentray/core";
 
 export interface WizardServerHandle {
   readonly url: string;

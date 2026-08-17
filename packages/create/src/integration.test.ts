@@ -8,12 +8,12 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { deriveDefaultAppId } from "./app-id";
-import { startCommandRun } from "./command-run";
-import { createPortDiscovery, listListeningPorts } from "./port-scan";
-import { scrapeService } from "./scrape";
-import { writeScaffold } from "./scaffold";
-import { tokenizeCommandLine } from "./tokenize";
+import { deriveDefaultAppId } from "@create-opentray/core";
+import { startCommandRun } from "@create-opentray/core";
+import { createPortDiscovery, listListeningPorts } from "@create-opentray/core";
+import { scrapeService } from "@create-opentray/core";
+import { writeScaffold } from "@create-opentray/core";
+import { tokenizeCommandLine } from "@create-opentray/core";
 
 const serverScript = `const http = require("node:http");
 const server = http.createServer((req, res) => {

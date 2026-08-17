@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readFile, mkdir, writeFile, stat } from "node:fs/promises";
 import { createWizardSession, type WizardEvent, type WizardOptions } from "./wizard";
-import type { CommandRun, CommandRunEvent, CommandRunOptions } from "./command-run";
-import type { DiscoveredService } from "./port-scan";
-import type { ScrapeResult } from "./scrape";
-import type { MaterializeContext } from "./materialize";
+import type { CommandRun, CommandRunEvent, CommandRunOptions } from "@create-opentray/core";
+import type { DiscoveredService } from "@create-opentray/core";
+import type { ScrapeResult } from "@create-opentray/core";
+import type { MaterializeContext } from "@create-opentray/core";
 
 const neverResolve = (): Promise<{ code: number | null }> =>
   new Promise<{ code: number | null }>(() => {});

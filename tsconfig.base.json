@@ -7,6 +7,7 @@
     "paths": {
       "@opentray/spec": ["packages/spec/src/index.ts"],
       "@opentray/packaging": ["packages/packaging/src/index.ts"],
+      "@create-opentray/core": ["packages/create/packages/core/src/index.ts"],
       "@opentray/vite-plugin": ["packages/vite-plugin/src/index.ts"],
       "@opentray/tsdown-plugin": ["packages/tsdown-plugin/src/index.ts"],
       "@opentray/esbuild-plugin": ["packages/esbuild-plugin/src/index.ts"],

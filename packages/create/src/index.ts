@@ -7,13 +7,13 @@
 
 export { createWizardSession, type WizardSession, type WizardEvent, type WizardFormValues, type WizardState } from "./wizard";
 export { createWizardServer, isAuthorized, isLoopbackHost, type WizardServerHandle } from "./server";
-export { tokenizeCommandLine, type TokenizeResult } from "./tokenize";
+export { tokenizeCommandLine, type TokenizeResult } from "@create-opentray/core";
 export {
   deriveDefaultAppId,
   deriveDefaultAppName,
   isValidAppId,
   toProjectDirectoryName,
-} from "./app-id";
+} from "@create-opentray/core";
 export {
   createPortDiscovery,
   parseLsofPorts,
@@ -23,7 +23,7 @@ export {
   verifyHttpService,
   waitForTcpPort,
   type DiscoveredService,
-} from "./port-scan";
+} from "@create-opentray/core";
 export {
   extractFaviconCandidates,
   extractTitle,
@@ -33,8 +33,8 @@ export {
   scrapeService,
   type FaviconCandidate,
   type ScrapeResult,
-} from "./scrape";
-export { resolveLaunchVector, resolveOnPath, parseShebangInterpreter, type LaunchVector } from "./launch-vector";
+} from "@create-opentray/core";
+export { resolveLaunchVector, resolveOnPath, parseShebangInterpreter, type LaunchVector } from "@create-opentray/core";
 export {
   detectPackageManager,
   expectedDarwinBundlePath,
@@ -44,12 +44,12 @@ export {
   type MaterializeInput,
   type MaterializeLogEvent,
   type MaterializeResult,
-} from "./materialize";
-export { openMaterializedApp, pinningHint } from "./open-app";
+} from "@create-opentray/core";
+export { openMaterializedApp, pinningHint } from "@create-opentray/core";
 export {
   writeScaffold,
   type ScaffoldAppConfig,
   type ScaffoldOptions,
   type ScaffoldResult,
-} from "./scaffold";
+} from "@create-opentray/core";
 export { parseWizardCli, main as runWizardMain, type WizardCliOptions } from "./bin";

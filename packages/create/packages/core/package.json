@@ -1,13 +1,10 @@
 {
-  "name": "create-opentray",
-  "version": "0.19.1",
-  "description": "Turn any start command that serves HTTP locally into an OpenTray-hosted desktop app.",
+  "name": "@create-opentray/core",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
+  "description": "Adapter-neutral create-opentray Core: v1 configuration authority, registration layout, deterministic plan/apply, process ownership, observation capabilities, icon sampling, and export planning.",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/jixoai/opentray"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -15,21 +12,12 @@
     },
     "./package.json": "./package.json"
   },
-  "bin": {
-    "create-opentray": "./dist/bin.mjs"
-  },
-  "files": [
-    "README.md",
-    "dist"
-  ],
-  "sideEffects": false,
   "scripts": {
-    "build": "pnpm --filter @create-opentray/core build && pnpm --filter @opentray/create-webui build && tsdown src/index.ts src/bin.ts --format esm --dts && node scripts/copy-webui.mjs && node scripts/copy-core-assets.mjs",
+    "build": "tsdown src/index.ts --format esm --dts && node scripts/copy-assets.mjs",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@create-opentray/core": "workspace:*",
     "@opentray/packaging": "workspace:*",
     "@opentray/spec": "workspace:*",
     "@opentray/vite-plugin": "workspace:*",
@@ -39,7 +27,6 @@
     "@lydell/node-pty": "^1.1.0"
   },
   "devDependencies": {
-    "ghostty-web": "^0.4.0",
     "tsdown": "^0.22.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"

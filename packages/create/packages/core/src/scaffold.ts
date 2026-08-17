@@ -28,6 +28,8 @@ export interface ScaffoldAppConfig {
     readonly showTerminal: boolean;
     readonly showAddressBar: boolean;
   };
+  /** v1 developerMode: only WebView DevTools admission; default false. */
+  readonly developerMode?: boolean;
 }
 
 export interface ScaffoldOptions {

@@ -11,35 +11,35 @@ import { mkdtemp, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { deriveDefaultAppId, deriveDefaultAppName, toProjectDirectoryName } from "./app-id";
+import { deriveDefaultAppId, deriveDefaultAppName, toProjectDirectoryName } from "@create-opentray/core";
 import {
   startCommandRun,
   type CommandRun,
   type CommandRunEvent,
-} from "./command-run";
+} from "@create-opentray/core";
 import {
   collectProcessTreePids,
   createPortDiscovery,
   listListeningPorts,
   type DiscoveredService,
-} from "./port-scan";
+} from "@create-opentray/core";
 import {
   autoBackground,
   compositionCacheKey,
   composeAppIcon,
   foregroundStats,
-} from "./icon-compose";
-import { scrapeService, writeGlyphIconTemp, type ScrapedIcon } from "./scrape";
-import { tokenizeCommandLine } from "./tokenize";
+} from "@create-opentray/core";
+import { scrapeService, writeGlyphIconTemp, type ScrapedIcon } from "@create-opentray/core";
+import { tokenizeCommandLine } from "@create-opentray/core";
 import {
   detectPackageManager,
   materialize,
   type MaterializeContext,
   type MaterializeResult,
-} from "./materialize";
-import type { LaunchVector } from "./launch-vector";
-import { resolveLaunchVector } from "./launch-vector";
-import { pinningHint } from "./open-app";
+} from "@create-opentray/core";
+import type { LaunchVector } from "@create-opentray/core";
+import { resolveLaunchVector } from "@create-opentray/core";
+import { pinningHint } from "@create-opentray/core";
 
 export interface WizardEnvEntry {
   readonly key: string;
@@ -174,7 +174,7 @@ export interface WizardOptions {
   readonly listListeners?: () => Promise<ReadonlySet<number>>;
   readonly verifyHttp?: (port: number) => Promise<boolean>;
   /** Test/embedding seam for listener ownership. */
-  readonly listPortOwners?: () => Promise<import("./port-scan").ListenerOwners>;
+  readonly listPortOwners?: () => Promise<import("@create-opentray/core").ListenerOwners>;
   readonly scrape?: typeof scrapeService;
   readonly resolveVector?: typeof resolveLaunchVector;
   /** Test/embedding seam for the materialize pipeline. */

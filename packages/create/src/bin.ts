@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { createWizardServer } from "./server";
 import { createWizardSession } from "./wizard";
-import { ensureLoopbackNoProxy } from "./port-scan";
+import { ensureLoopbackNoProxy } from "@create-opentray/core";
 
 export interface WizardCliOptions {
   readonly open: boolean;

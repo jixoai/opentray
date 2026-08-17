@@ -115,6 +115,9 @@ importers:
 
   packages/create:
     dependencies:
+      '@create-opentray/core':
+        specifier: workspace:*
+        version: link:packages/core
       '@opentray/packaging':
         specifier: workspace:*
         version: link:../packaging
@@ -211,6 +214,35 @@ importers:
       vite:
         specifier: ^7.2.7
         version: 7.3.6(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0)
+
+  packages/create/packages/core:
+    dependencies:
+      '@opentray/packaging':
+        specifier: workspace:*
+        version: link:../../../packaging
+      '@opentray/spec':
+        specifier: workspace:*
+        version: link:../../../spec
+      '@opentray/vite-plugin':
+        specifier: workspace:*
+        version: link:../../../vite-plugin
+      sharp:
+        specifier: ^0.33.5
+        version: 0.33.5
+    devDependencies:
+      tsdown:
+        specifier: ^0.22.1
+        version: 0.22.1(tsx@4.23.12)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@types/node@25.9.1)(vite@8.1.4(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0))
+    optionalDependencies:
+      '@lydell/node-pty':
+        specifier: ^1.1.0
+        version: 1.1.0
 
   packages/darwin-arm64: {}
 
