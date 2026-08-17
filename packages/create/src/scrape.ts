@@ -430,7 +430,7 @@ const prepareIconBytes = async (
   contentType: string,
 ): Promise<{ bytes: Buffer; format: string } | undefined> => {
   if (looksLikeSvg(bytes, contentType)) {
-    return { bytes, format: "svg" };
+    return { bytes: await densifySvg(bytes), format: "svg" };
   }
   // ICO first: its magic overlaps the generic raster check, but sharp cannot
   // read ICO — crack the container to its largest frame.
@@ -446,6 +446,45 @@ const prepareIconBytes = async (
     return format === undefined ? undefined : { bytes, format };
   }
   return undefined;
+};
+
+/**
+ * Rewrite an SVG so it rasterizes at high resolution. sharp (librsvg) pays
+ * no attention to a density attribute; it renders at the declared
+ * width/height. Scraped favicons declare small intrinsic sizes (often just
+ * 16–50px), so the rasterized base bitmap is tiny and every later upscale
+ * (icon catalog, tray, candidates) is blurry. Rewriting the root <svg>
+ * width/height to a large target — viewBox untouched, so vector geometry
+ * scales cleanly — gives every downstream consumer a crisp base.
+ */
+export const SVG_RASTER_TARGET = 1024;
+
+const densifySvg = async (bytes: Buffer): Promise<Buffer> => {
+  const text = bytes.toString("utf8");
+  const svgOpen = text.indexOf("<svg");
+  if (svgOpen === -1) {
+    return bytes;
+  }
+  const tagEnd = text.indexOf(">", svgOpen);
+  if (tagEnd === -1) {
+    return bytes;
+  }
+  const openTag = text.slice(svgOpen, tagEnd + 1);
+  let next = openTag;
+  if (/\swidth=/u.test(next)) {
+    next = next.replace(/\swidth="[^"]*"/u, ` width="${SVG_RASTER_TARGET}"`);
+  } else {
+    next = next.replace("<svg", `<svg width="${SVG_RASTER_TARGET}"`);
+  }
+  if (/\sheight=/u.test(next)) {
+    next = next.replace(/\sheight="[^"]*"/u, ` height="${SVG_RASTER_TARGET}"`);
+  } else {
+    next = next.replace("<svg", `<svg height="${SVG_RASTER_TARGET}"`);
+  }
+  if (next === openTag) {
+    return bytes;
+  }
+  return Buffer.from(text.slice(0, svgOpen) + next + text.slice(tagEnd + 1), "utf8");
 };
 
 const looksLikeSvg = (bytes: Buffer, contentType: string): boolean => {

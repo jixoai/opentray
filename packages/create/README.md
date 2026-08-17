@@ -79,7 +79,7 @@ wizard-owned and regenerable).
                         serves app-shell/ + SSE state + terminal input
   app-shell/            prebuilt shell UI pages (terminal.html, browse.html)
   app-icon/             generated ICNS/ICO/Linux PNGs + app-icon.json manifest
-                        (+ tray-icon.png when a tray icon is configured)
+                        + tray-icon.png (always, when any icon source exists)
   README.md
 ```
 

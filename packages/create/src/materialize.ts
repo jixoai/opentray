@@ -211,11 +211,14 @@ export const materialize = async (
   });
 
   step("icon", "writing tray icon asset");
-  // The tray icon defaults to the app icon source; solid variants already
-  // carry tray-appropriate sizing and transparency from the scraper.
+  // Tray icon asset — ALWAYS generated when there is any icon source: the
+  // tray defaults to the app icon choice (owner law) and only falls back to
+  // the text projection when no source exists at all. Solid-variant sources
+  // are single-color silhouettes: mark them darwin templates so macOS can
+  // tint them for light/dark menu bars.
   const traySource = input.trayIconSourcePath ?? iconSource;
   let trayAsset: { path: string; template: boolean } | undefined;
-  if (traySource === input.trayIconSourcePath || traySource !== input.iconSourcePath) {
+  if (traySource !== undefined) {
     const trayPath = join(scaffold.appIconDir, "tray-icon.png");
     try {
       const sharpModule = await import("sharp");
@@ -223,8 +226,12 @@ export const materialize = async (
         .resize(128, 128, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
         .png()
         .toFile(trayPath);
-      trayAsset = { path: "app-icon/tray-icon.png", template: false };
-      context.log({ type: "log", message: "tray icon: app-icon/tray-icon.png" });
+      const template = traySource.includes("-solid-");
+      trayAsset = { path: "app-icon/tray-icon.png", template };
+      context.log({
+        type: "log",
+        message: `tray icon: app-icon/tray-icon.png${template ? " (template)" : ""}`,
+      });
     } catch (error) {
       context.log({
         type: "log",

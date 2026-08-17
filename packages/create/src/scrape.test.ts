@@ -12,6 +12,7 @@ import {
   faviconCandidateSize,
   rankFaviconCandidates,
   resolveFaviconUrl,
+  SVG_RASTER_TARGET,
   scrapeService,
   writeGlyphIconTemp,
   type ScrapeFetch,
@@ -251,8 +252,9 @@ describe("icon candidate collection", () => {
     const originals = result.icons.filter((i) => i.variant === "original");
     expect(originals).toHaveLength(1);
     expect(originals[0]?.format).toBe("svg");
-    // viewBox-driven clarity ranks it as a large scalable source.
-    expect(originals[0]?.width).toBe(24);
+    // Densified: the root <svg> carries a large width/height so the
+    // rasterized base is crisp (viewBox geometry untouched).
+    expect(originals[0]?.width).toBe(SVG_RASTER_TARGET);
     expect(result.iconPath).toBe(originals[0]?.path);
     // Solid silhouettes derived from the SVG join the candidate list.
     const solids = result.icons.filter((i) => i.variant !== "original");
