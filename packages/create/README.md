@@ -7,6 +7,8 @@ desktop app — through a browser wizard, without writing OpenTray code.
 npx create-opentray
 ```
 
+Requires Node >= 20 (native `sharp` icon pipeline).
+
 ## What it does
 
 1. Starts a token-guarded WebUI (React + shadcn/ui) on `127.0.0.1` and opens
@@ -157,5 +159,5 @@ URL. Quit lives in the tray menu.
 import { createWizardSession, deriveDefaultAppId } from "create-opentray";
 ```
 
-See `src/index.ts` exports for the full surface (wizard session, server,
+See the package's TypeScript definitions (dist/index.d.mts) for the full surface (wizard session, server,
 discovery, scraping, launch-vector resolution, scaffold, materialize).

@@ -20,9 +20,7 @@
   },
   "files": [
     "README.md",
-    "assets/",
-    "dist",
-    "dist/"
+    "dist"
   ],
   "sideEffects": false,
   "scripts": {
@@ -44,5 +42,8 @@
     "tsdown": "^0.22.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
