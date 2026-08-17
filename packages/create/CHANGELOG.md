@@ -1,5 +1,20 @@
 # create-opentray
 
+## 0.19.1
+
+### Patch Changes
+
+- Fix `npx create-opentray` exiting silently with no output. The bin's
+  isMainModule() check compared argv[1] against the module path with
+  resolve() only — npx/npm invoke the bin through a node_modules/.bin
+  SYMLINK, so argv[1] kept the link path, never matched the real file, and
+  main() silently never ran (exit 0, zero output). Path comparisons now
+  resolve through realpathSync with a resolve() fallback, so the wizard
+  starts identically via direct node, .bin shims, npx, and npm create.
+  - @opentray/spec@0.19.1
+  - @opentray/packaging@0.19.1
+  - @opentray/vite-plugin@0.19.1
+
 ## 0.19.0
 
 ### Patch-type additions (folded pre-release)

@@ -1,5 +1,11 @@
 # @opentray/packaging
 
+## 0.19.1
+
+### Patch Changes
+
+- @opentray/spec@0.19.1
+
 ## 0.19.0
 
 ### Patch Changes

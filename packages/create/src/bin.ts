@@ -7,6 +7,7 @@
 // 3. Tear down the preview process tree on exit signals.
 
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -178,11 +179,22 @@ const isMainModule = (): boolean => {
   // tsdown bundles this file into the bin chunk, and argv[1] points at the
   // bin.mjs re-export, so also accept that adjacency: when this module is
   // imported through the bin entry rather than the library entry.
+  // Path comparisons use realpath: npx/npm invoke the bin through a
+  // node_modules/.bin SYMLINK, and resolve() alone keeps the link path —
+  // argv[1] would never equal the real module file and main() silently
+  // never ran (npx create-opentray exited 0 with no output).
   const entryPath = process.argv[1];
   if (entryPath === undefined) return false;
+  const sameFile = (a: string, b: string): boolean => {
+    try {
+      return realpathSync(resolve(a)) === realpathSync(resolve(b));
+    } catch {
+      return resolve(a) === resolve(b);
+    }
+  };
   const modulePath = fileURLToPath(import.meta.url);
-  if (resolve(entryPath) === resolve(modulePath)) return true;
-  return resolve(entryPath) === resolve(modulePath.replace(/bin-[^/]*\.mjs$/u, "bin.mjs"));
+  if (sameFile(entryPath, modulePath)) return true;
+  return sameFile(entryPath, modulePath.replace(/bin-[^/]*\.mjs$/u, "bin.mjs"));
 };
 
 if (isMainModule()) {
