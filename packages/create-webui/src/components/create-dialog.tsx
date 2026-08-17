@@ -33,6 +33,9 @@ export interface CreateDialogProps {
   onBack(): void;
   onCreate(): void;
   onOpenApp(): void;
+  /** Dialog dismissal (X / Esc / overlay / 完成). */
+  onClose(): void;
+  onOpenChange(open: boolean): void;
 }
 
 export function CreateDialog({
@@ -51,6 +54,8 @@ export function CreateDialog({
   onBack,
   onCreate,
   onOpenApp,
+  onClose,
+  onOpenChange,
 }: CreateDialogProps): React.JSX.Element {
   const logRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -69,7 +74,7 @@ export function CreateDialog({
   };
 
   return (
-    <Dialog open={open}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         {phase === "confirm" ? (
           <>
@@ -175,7 +180,10 @@ export function CreateDialog({
                 </>
               ) : null}
             </dl>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={onClose}>
+                完成
+              </Button>
               <Button onClick={onOpenApp}>
                 <ExternalLink />
                 打开应用

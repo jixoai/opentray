@@ -817,6 +817,7 @@ const selectedIconRefStale = (
 
       <CreateDialog
         open={dialogOpen}
+        onOpenChange={setDialogOpen}
         phase={dialogPhase}
         frozenValues={frozenValues}
         iconSrc={dialogIconSrc}
@@ -831,6 +832,7 @@ const selectedIconRefStale = (
         onBack={() => setDialogOpen(false)}
         onCreate={() => void createApp()}
         onOpenApp={() => void api("/api/open-app", {})}
+        onClose={() => setDialogOpen(false)}
       />
     </div>
   );

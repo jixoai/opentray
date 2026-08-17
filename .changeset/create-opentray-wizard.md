@@ -88,3 +88,9 @@ input pinned to its old value — the slider would not move under the
 pointer even though requests fired. Local state (slider position, label,
 background selection) now updates instantly; only the server pipeline
 (form patch + 1024² recompose) waits for the debounce settle.
+
+生成结果 dialog dismissal repair: the dialog was fully controlled
+(open={dialogOpen}) without onOpenChange, so every Radix dismissal signal
+(X, Esc, overlay click) was silently swallowed and the success phase had
+no close action at all — only 打开应用. onOpenChange is now wired and the
+success phase gains a 完成 button; all four dismissal paths verified.
