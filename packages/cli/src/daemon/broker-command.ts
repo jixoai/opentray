@@ -116,13 +116,18 @@ export const resolveBrokerCommand = async (
   options: ResolveBrokerCommandOptions = {},
 ): Promise<BrokerCommand> => {
   const env = options.env ?? process.env;
-  const explicit = env.OPENTRAY_BROKER_BIN;
-  if (explicit !== undefined && explicit.length > 0) {
-    return commandForBinary(explicit, paths);
-  }
-
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
+  const explicit = env.OPENTRAY_BROKER_BIN;
+  if (explicit !== undefined && explicit.length > 0) {
+    if (platform !== "darwin" || options.appBundle === undefined) {
+      return commandForBinary(explicit, paths);
+    }
+    const templatePath = await resolveExplicitDarwinCarrierTemplate(paths, options, platform, arch);
+    const binary = await ensureDarwinBundle(options, paths, explicit, templatePath);
+    return commandForBinary(binary, paths);
+  }
+
   const target = resolveBrokerNativeTarget(platform, arch);
   const installed = await (options.resolveInstalledBrokerBinary ?? resolveInstalledBrokerBinary)(
     target,
@@ -172,6 +177,31 @@ export const resolveBrokerCommand = async (
       ...(installed.binaryPath === undefined ? {} : { binaryPath: installed.binaryPath }),
     },
   );
+};
+
+const resolveExplicitDarwinCarrierTemplate = async (
+  paths: DaemonPaths,
+  options: ResolveBrokerCommandOptions,
+  platform: NodeJS.Platform,
+  arch: string,
+): Promise<string> => {
+  const sourceDir = options.sourceDir ?? dirname(fileURLToPath(sourceUrl));
+  const workspaceRoot = await (options.findWorkspaceRoot ?? findWorkspaceRoot)(sourceDir);
+  if (workspaceRoot !== undefined) {
+    return (
+      options.ensureDevDarwinCarrierTemplate ?? ensureDevDarwinCarrierTemplate
+    )(workspaceRoot, paths);
+  }
+
+  const target = resolveBrokerNativeTarget(platform, arch);
+  const installed = await (options.resolveInstalledBrokerBinary ?? resolveInstalledBrokerBinary)(
+    target,
+    { platform },
+  );
+  if (installed.carrierTemplate !== undefined) {
+    return installed.carrierTemplate;
+  }
+  throw missingDarwinCarrierError(target, installed, arch);
 };
 
 export const resolveInstalledBrokerBinary = async (

@@ -212,6 +212,10 @@ mode directly:
 - A normal package-manager install must yield a coherent broker-plus-carrier artifact graph. A
   consumer must not copy a helper bundle manually or install `ext-badge` merely to obtain normal
   app-mode behavior.
+- `OPENTRAY_BROKER_BIN` selects the exact broker bytes, but it does not opt out of Darwin carrier
+  materialization when `appBundle` is active. The resolver must wrap that broker with the matching
+  carrier template before lifecycle ownership is written; otherwise source examples can fail with
+  `ENOENT` while creating the bundle owner marker.
 - Darwin runtime packages publish one broker executable plus a minimal `app/Info.plist` template;
   they must not publish a second broker copy embedded in a compressed carrier artifact. The Node runtime owns the
   caller-specific bundle at `~/.opentray/apps/<encoded-package>/<app-name>.app` or an explicit
