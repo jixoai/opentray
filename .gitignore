@@ -30,3 +30,4 @@ packages/ext-lynx-*/lib/*.dylib
 packages/ext-lynx-*/runtime/*.zip
 
 *.tsbuildinfo
+.agents/images/

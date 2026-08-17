@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   api,
+  composedIconUrl,
   hostnameOf,
   iconDataUrl,
   openEventStream,
@@ -433,21 +434,60 @@ const selectedIconRefStale = (
   // Resolved icon for the confirm/success dialog.
   const selectedCandidateIndex =
     selectedIconRef === undefined ? undefined : Number.parseInt(selectedIconRef.split(":")[1] ?? "", 10);
+  // Objective app icon: the composed result when the pipeline has one (it
+  // IS the final form), else the raw chosen/default source.
   const dialogIconSrc =
-    uploadedIconUrl !== undefined
-      ? uploadedIconUrl
-      : iconCandidatesPort !== undefined && selectedCandidateIndex !== undefined && iconCandidates.some((c) => c.index === selectedCandidateIndex)
-        ? iconDataUrl(iconCandidatesPort, selectedCandidateIndex)
-        : iconCandidatesPort !== undefined && iconCandidates[0] !== undefined && selectedIconRef === undefined
-          ? iconDataUrl(iconCandidatesPort, iconCandidates[0].index)
-          : undefined;
+    iconComposition !== undefined
+      ? composedIconUrl(iconComposition.key)
+      : uploadedIconUrl !== undefined
+        ? uploadedIconUrl
+        : iconCandidatesPort !== undefined && selectedCandidateIndex !== undefined && iconCandidates.some((c) => c.index === selectedCandidateIndex)
+          ? iconDataUrl(iconCandidatesPort, selectedCandidateIndex)
+          : iconCandidatesPort !== undefined && iconCandidates[0] !== undefined && selectedIconRef === undefined
+            ? iconDataUrl(iconCandidatesPort, iconCandidates[0].index)
+            : undefined;
   const dialogIconLabel =
-    uploadedIconUrl !== undefined
+    iconComposition !== undefined
+      ? `合成 ${iconComposition.background === "transparent" ? "透明底" : iconComposition.background === "black" ? "黑底" : "白底"}`
+      : uploadedIconUrl !== undefined
+        ? "本地图片"
+        : iconCandidates[0] !== undefined
+          ? `${iconCandidates[0].width}×${iconCandidates[0].height} ${iconCandidates[0].format.toUpperCase()}`
+          : "首字母图标";
+  // Tray icon: the raw source (never the composite) or the text fallback.
+  // The selection ref is port-scoped and can go stale across runs; the
+  // SERVER form's trayIconPath is the authority — resolve it back to a
+  // serving candidate when possible.
+  const dialogTraySrc = (() => {
+    if (uploadedTrayUrl !== undefined) return uploadedTrayUrl;
+    const trayPath = frozenValues.trayIconPath.trim();
+    if (trayPath.length === 0 && values.trayIconPath.trim().length > 0) {
+      // Follow-the-app default with no explicit pick: mirror the app preview.
+      return undefined;
+    }
+    const match = /^([^:]+):(\d+)$/.exec(selectedTrayRef ?? "");
+    if (match !== null) {
+      const port = Number(match[1]);
+      const index = Number(match[2]);
+      if (Number.isInteger(port) && Number.isInteger(index)) {
+        return iconDataUrl(port, index);
+      }
+    }
+    // No live ref (stale across runs): find the candidate whose path matches
+    // the authoritative server value.
+    const authoritative = values.trayIconPath.trim();
+    if (authoritative.length > 0 && iconCandidatesPort !== undefined) {
+      const hit = iconCandidates.find((c) => c.path === authoritative);
+      if (hit !== undefined) return iconDataUrl(iconCandidatesPort, hit.index);
+    }
+    return undefined;
+  })();
+  const dialogTrayLabel =
+    uploadedTrayUrl !== undefined
       ? "本地图片"
-      : iconCandidates[0] !== undefined
-        ? `${iconCandidates[0].width}×${iconCandidates[0].height} ${iconCandidates[0].format.toUpperCase()}`
-        : "首字母图标";
-
+      : dialogTraySrc !== undefined
+        ? "跟随源图"
+        : "跟随应用图标";
   // ---- actions ----
   const running = wizardState === "running" || wizardState === "discovered";
   // The form is the core flow: usable from idle, before any command runs.
@@ -522,6 +562,11 @@ const selectedIconRefStale = (
   };
 
   const confirmCreate = async (): Promise<void> => {
+    // Re-confirming after 返回修改 must reopen the dialog: the frozen state
+    // event only fires on the FIRST freeze, so the button alone would leave
+    // the wizard stuck with no visible confirm UI.
+    setDialogPhase("confirm");
+    setDialogOpen(true);
     try {
       await api("/api/confirm", {});
     } catch {
@@ -766,6 +811,8 @@ const selectedIconRefStale = (
         frozenValues={frozenValues}
         iconSrc={dialogIconSrc}
         iconLabel={dialogIconLabel}
+        traySrc={dialogTraySrc}
+        trayLabel={dialogTrayLabel}
         selectedPort={selectedPort}
         currentStep={currentStep}
         logs={dialogLogs}

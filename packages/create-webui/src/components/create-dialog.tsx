@@ -19,9 +19,12 @@ export interface CreateDialogProps {
   open: boolean;
   phase: "confirm" | "pending" | "success" | "failed";
   frozenValues: WizardFormValues;
-  /** Resolved icon thumbnail (chosen candidate/upload), when any. */
+  /** Resolved app-icon thumbnail (chosen candidate/upload), when any. */
   iconSrc: string | undefined;
   iconLabel: string;
+  /** Tray icon thumbnail (raw source — the tray never uses the composite). */
+  traySrc: string | undefined;
+  trayLabel: string;
   selectedPort: number | undefined;
   currentStep: string;
   logs: readonly string[];
@@ -38,6 +41,8 @@ export function CreateDialog({
   frozenValues,
   iconSrc,
   iconLabel,
+  traySrc,
+  trayLabel,
   selectedPort,
   currentStep,
   logs,
@@ -80,11 +85,39 @@ export function CreateDialog({
               <dt className="text-muted-foreground">应用名称</dt>
               <dd className="break-all">{frozenValues.appName}</dd>
               <dt className="text-muted-foreground">图标</dt>
-              <dd className="flex items-center gap-2 break-all">
-                {iconSrc !== undefined ? (
-                  <img src={iconSrc} alt="应用图标" className="icon-checker size-6 rounded object-contain" />
-                ) : null}
-                <span className="font-mono">{iconLabel}</span>
+              <dd className="flex flex-wrap items-center gap-4">
+                <span className="flex items-center gap-2">
+                  <span
+                    className="icon-checker flex size-10 items-center justify-center overflow-hidden rounded-md"
+                    aria-label="应用图标预览"
+                  >
+                    {iconSrc !== undefined ? (
+                      <img src={iconSrc} alt="应用图标" className="size-full object-contain" />
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">无</span>
+                    )}
+                  </span>
+                  <span className="flex flex-col">
+                    <span className="text-xs leading-tight">应用图标</span>
+                    <span className="font-mono text-[10px] leading-tight text-muted-foreground">{iconLabel}</span>
+                  </span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <span
+                    className="icon-checker flex size-10 items-center justify-center overflow-hidden rounded-md"
+                    aria-label="托盘图标预览"
+                  >
+                    {traySrc !== undefined ? (
+                      <img src={traySrc} alt="托盘图标" className="size-full object-contain" />
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">文字</span>
+                    )}
+                  </span>
+                  <span className="flex flex-col">
+                    <span className="text-xs leading-tight">托盘图标</span>
+                    <span className="font-mono text-[10px] leading-tight text-muted-foreground">{trayLabel}</span>
+                  </span>
+                </span>
               </dd>
               <dt className="text-muted-foreground">服务端口</dt>
               <dd className="font-mono">

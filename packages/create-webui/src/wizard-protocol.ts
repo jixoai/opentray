@@ -48,6 +48,8 @@ export const composedIconUrl = (key: string): string =>
 export interface IconCandidate {
   index: number;
   url: string;
+  /** Server-side temp path (identity for authoritatively matching picks). */
+  path: string;
   width: number;
   height: number;
   format: string;

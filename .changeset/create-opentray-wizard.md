@@ -66,3 +66,11 @@ Composition controls are debounced: the scale slider (250ms) and background
 toggles (120ms) fire the form patch + recompose pipeline once on commit with
 the latest parameters, instead of per input event — a full slider sweep
 previously issued a /api/form and a real 1024² sharp render per step.
+
+确认应用信息 now shows both icons objectively: the app icon renders the
+COMPOSED result (the actual final form) and the tray icon the raw source,
+each on a transparency checkerboard with its descriptive label. Tray
+resolution falls back to the authoritative server trayIconPath when the
+port-scoped selection ref goes stale across runs, and re-confirming after
+返回修改 reopens the dialog (the frozen event only fired on first freeze,
+leaving the wizard with no visible confirm UI).
