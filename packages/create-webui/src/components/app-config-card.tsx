@@ -44,6 +44,7 @@ export interface AppConfigCardProps {
   /** Icon composition state (owner round-12). */
   iconAnalysis: IconAnalysis | undefined;
   iconComposition: IconComposition | undefined;
+  iconComposeError: string | undefined;
   iconBackground: IconBackground;
   iconScale: number;
   onIconBackgroundChange(background: IconBackground): void;
@@ -73,6 +74,7 @@ export function AppConfigCard({
   uploadedIconUrl,
   iconAnalysis,
   iconComposition,
+  iconComposeError,
   iconBackground,
   iconScale,
   onIconBackgroundChange,
@@ -102,6 +104,7 @@ export function AppConfigCard({
         selectedIconRef={selectedIconRef}
         iconAnalysis={iconAnalysis}
         iconComposition={iconComposition}
+        iconComposeError={iconComposeError}
         iconBackground={iconBackground}
         iconScale={iconScale}
         onIconBackgroundChange={onIconBackgroundChange}

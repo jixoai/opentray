@@ -115,6 +115,12 @@ export interface WizardFormDefaults {
   readonly appName: string;
   /** Resolved project directory the app will be generated into. */
   readonly targetDir: string;
+  /**
+   * Effective default icon source (the clearest scraped candidate). The form
+   * value stays empty until the user picks/upload; composition must follow
+   * this default too, or the preview would never appear without a click.
+   */
+  readonly iconPath: string;
 }
 
 export type WizardEvent =
@@ -325,6 +331,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     return {
       appId: deriveDefaultAppId(currentTokens),
       appName: scrapedTitle ?? deriveDefaultAppName(currentTokens),
+      iconPath: currentIconPath ?? "",
       // Projects land under the OpenTray home by default (stable, idempotent
       // per app, never pollutes the invocation directory); the CLI positional
       // provides an explicit override.

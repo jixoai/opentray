@@ -43,7 +43,7 @@ const EMPTY_VALUES: WizardFormValues = {
   showStartupTerminal: false,
   showAddressBar: false,
 };
-const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "" };
+const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "", iconPath: "" };
 
 export function App(): React.JSX.Element {
   const [command, setCommand] = React.useState("");
@@ -71,6 +71,8 @@ export function App(): React.JSX.Element {
   const [selectedIconRef, setSelectedIconRef] = React.useState<string | undefined>();
   // Icon composition (owner round-12): foreground analysis + composed preview.
   const [iconAnalysis, setIconAnalysis] = React.useState<IconAnalysis | undefined>();
+  /** Composition pipeline failure shown inline (never silently blank). */
+  const [iconComposeError, setIconComposeError] = React.useState<string | undefined>();
   const [iconComposition, setIconComposition] = React.useState<IconComposition | undefined>();
   const [iconBackground, setIconBackground] = React.useState<IconBackground>("transparent");
   const [iconScale, setIconScale] = React.useState<number>(0.8);
@@ -124,22 +126,36 @@ const selectedIconRefStale = (
 };
 
   // ---- ghostty prewarm: module + WASM load at page load, before any Run ----
+  /** Latest effective foreground; guards async results against reordering. */
+  const effectiveForegroundRef = React.useRef<string | undefined>(undefined);
+
   // Foreground changes: analyze, auto-select the background, then compose.
   React.useEffect(() => {
-    const foreground = values.iconPath.trim().length > 0 ? values.iconPath.trim() : undefined;
-    if (foreground === undefined || foreground === composedForRef.current) {
-      if (foreground === undefined) {
-        setIconAnalysis(undefined);
-        setIconComposition(undefined);
-        composedForRef.current = undefined;
-      }
+    // The effective foreground: an explicit pick/upload wins; otherwise the
+    // scraped default (candidate 0) — the preview must work without a click.
+    const foreground =
+      values.iconPath.trim().length > 0
+        ? values.iconPath.trim()
+        : defaults.iconPath.trim().length > 0
+          ? defaults.iconPath.trim()
+          : undefined;
+    effectiveForegroundRef.current = foreground;
+    if (foreground === undefined) {
+      setIconAnalysis(undefined);
+      setIconComposition(undefined);
+      composedForRef.current = undefined;
       return;
+    }
+    if (foreground === composedForRef.current) {
+      return; // already composed with this exact foreground
     }
     void (async () => {
       try {
+        setIconComposeError(undefined);
         const response = await api("/api/icon-analyze", { path: foreground });
         if (!response.ok) throw new Error("analyze failed");
         const analysis = (await response.json()) as IconAnalysis;
+        if (effectiveForegroundRef.current !== foreground) return; // superseded
         setIconAnalysis(analysis);
         // Owner law: light art → black bg, dark art → white bg, fully
         // opaque art → transparent. A manual pick survives only until the
@@ -156,16 +172,18 @@ const selectedIconRefStale = (
         });
         if (!composeResponse.ok) throw new Error("compose failed");
         const composed = (await composeResponse.json()) as IconComposition;
+        if (effectiveForegroundRef.current !== foreground) return; // superseded
         setIconComposition(composed);
         composedForRef.current = foreground;
       } catch {
         setIconAnalysis(undefined);
         setIconComposition(undefined);
+        setIconComposeError("图标分析或合成失败，预览不可用");
       }
     })();
     // iconScale deliberately excluded: scale changes recompose through the
     // explicit handler without re-running analysis.
-  }, [values.iconPath]);
+  }, [values.iconPath, defaults.iconPath]);
 
   /** Re-analyze + re-compose whenever the effective foreground changes. */
   const recomposeIcon = React.useCallback(
@@ -191,8 +209,8 @@ const selectedIconRefStale = (
         setIconComposition(composed);
         composedForRef.current = foregroundPath;
       } catch {
-        setIconAnalysis(undefined);
         setIconComposition(undefined);
+        setIconComposeError("图标合成失败，预览未更新");
       }
     },
     [],
@@ -581,6 +599,7 @@ const selectedIconRefStale = (
         uploadedIconUrl={uploadedIconUrl}
         iconAnalysis={iconAnalysis}
         iconComposition={iconComposition}
+        iconComposeError={iconComposeError}
         iconBackground={iconBackground}
         iconScale={iconScale}
         onIconBackgroundChange={(background) => {
@@ -588,14 +607,22 @@ const selectedIconRefStale = (
           setIconBackground(background);
           void api("/api/form", { iconBackground: background });
           const foreground =
-            values.iconPath.trim().length > 0 ? values.iconPath.trim() : undefined;
+            values.iconPath.trim().length > 0
+              ? values.iconPath.trim()
+              : defaults.iconPath.trim().length > 0
+                ? defaults.iconPath.trim()
+                : undefined;
           void recomposeIcon(foreground, background, iconScale);
         }}
         onIconScaleChange={(scale) => {
           setIconScale(scale);
           void api("/api/form", { iconScale: scale });
           const foreground =
-            values.iconPath.trim().length > 0 ? values.iconPath.trim() : undefined;
+            values.iconPath.trim().length > 0
+              ? values.iconPath.trim()
+              : defaults.iconPath.trim().length > 0
+                ? defaults.iconPath.trim()
+                : undefined;
           void recomposeIcon(foreground, iconBackground, scale);
         }}
         selectedTrayRef={selectedTrayRef}
@@ -628,6 +655,9 @@ const selectedIconRefStale = (
               .then(({ path }) => {
                 if (path === undefined || path.length === 0) return;
                 setValues((previous) => ({ ...previous, iconPath: path }));
+                // The upload is authoritative form state, not just preview
+                // state: patch the server so confirm/materialize use it.
+                void api("/api/form", { iconPath: path });
               })
               .catch(() => undefined);
           });

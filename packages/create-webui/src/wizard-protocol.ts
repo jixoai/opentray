@@ -60,6 +60,8 @@ export interface WizardFormDefaults {
   appName: string;
   /** Resolved project directory the app will be generated into. */
   targetDir: string;
+  /** Effective default icon source (clearest scraped candidate). */
+  iconPath: string;
 }
 
 export interface WizardEnvEntry {

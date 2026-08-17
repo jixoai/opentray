@@ -36,6 +36,7 @@ interface AppFormProps {
   /** Icon composition (owner round-12): analysis, preview, background, scale. */
   iconAnalysis: IconAnalysis | undefined;
   iconComposition: IconComposition | undefined;
+  iconComposeError: string | undefined;
   iconBackground: IconBackground;
   iconScale: number;
   onIconBackgroundChange(background: IconBackground): void;
@@ -56,6 +57,7 @@ export function AppForm({
   selectedIconRef,
   iconAnalysis,
   iconComposition,
+  iconComposeError,
   iconBackground,
   iconScale,
   onIconBackgroundChange,
@@ -233,6 +235,9 @@ export function AppForm({
                   aria-label="前景图标缩放"
                 />
               </div>
+              {iconComposeError !== undefined ? (
+                <p className="mt-1.5 text-[11px] font-medium text-red-400">{iconComposeError}</p>
+              ) : null}
               {iconAnalysis !== undefined ? (
                 <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
                   {iconBackground === "transparent"
