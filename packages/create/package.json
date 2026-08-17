@@ -20,11 +20,13 @@
   },
   "files": [
     "README.md",
-    "dist"
+    "assets",
+    "dist",
+    "skill"
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "pnpm --filter @create-opentray/core build && pnpm --filter @opentray/create-webui build && tsdown src/index.ts src/bin.ts --format esm --dts && node scripts/copy-webui.mjs && node scripts/copy-core-assets.mjs",
+    "build": "pnpm --filter @create-opentray/core build && pnpm --filter @create-opentray/cli build && pnpm --filter @opentray/create-webui build && tsdown src/index.ts src/bin.ts --format esm --dts && node scripts/copy-webui.mjs && node scripts/copy-core-assets.mjs && node scripts/copy-skill.mjs",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -33,12 +35,15 @@
     "@opentray/packaging": "workspace:*",
     "@opentray/spec": "workspace:*",
     "@opentray/vite-plugin": "workspace:*",
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "yargs": "^18.0.0",
+    "@create-opentray/cli": "workspace:*"
   },
   "optionalDependencies": {
     "@lydell/node-pty": "^1.1.0"
   },
   "devDependencies": {
+    "@types/yargs": "^17.0.33",
     "ghostty-web": "^0.4.0",
     "tsdown": "^0.22.1",
     "typescript": "^6.0.3",

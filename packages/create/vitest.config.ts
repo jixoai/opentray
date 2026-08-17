@@ -17,6 +17,8 @@ export default defineConfig({
       "@opentray/spec": resolve(__dirname, "../spec/src/index.ts"),
       "@opentray/packaging": resolve(__dirname, "../packaging/src/index.ts"),
       "@opentray/vite-plugin": resolve(__dirname, "../vite-plugin/src/index.ts"),
+      "@create-opentray/core": resolve(__dirname, "packages/core/src/index.ts"),
+      "@create-opentray/cli": resolve(__dirname, "packages/cli/src/index.ts"),
     },
   },
 });

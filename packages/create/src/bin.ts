@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Orthogonal intents (maintained 2026-07-22; original user request: `npx
-// create-opentray` opens a WebUI wizard that packages a start command into an
-// OpenTray-hosted app):
-// 1. Parse wizard flags and resolve the working directory.
-// 2. Serve the wizard on loopback and open the default browser unless disabled.
+// Orthogonal intents (maintained 2026-08-18; original user requests: the
+// original `npx create-opentray` WebUI wizard; the add-create-opentray-cli
+// yargs command tree with non-interactive create, app management, and the
+// packaged AI skill):
+// 1. Dispatch every invocation through the yargs CLI adapter.
+// 2. Keep the bare root dispatching to the WebUI adapter for compatibility.
 // 3. Tear down the preview process tree on exit signals.
 
 import { spawn } from "node:child_process";
@@ -12,6 +13,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { dispatchCli, consoleStreams } from "@create-opentray/cli";
 import { createWizardServer } from "./server";
 import { createWizardSession } from "./wizard";
 import { ensureLoopbackNoProxy } from "@create-opentray/core";
@@ -79,20 +81,6 @@ export const parseWizardCli = (argv: readonly string[]): WizardCliOptions => {
   };
 };
 
-const WIZARD_HELP = [
-  "create-opentray — turn a start command into an OpenTray-hosted desktop app",
-  "",
-  "Usage: create-opentray [targetDir] [options]",
-  "",
-  "Options:",
-  "  --no-open        do not open the default browser",
-  "  --port <n>       bind the wizard server to a specific loopback port",
-  "  --pm <name>      package manager for the generated app (npm | pnpm | bun)",
-  "  --skip-install   scaffold without installing dependencies",
-  "  --force          allow materializing into a non-empty directory",
-  "  -h, --help       show this help",
-].join("\n");
-
 const readDependencyRange = async (): Promise<string> => {
   const packageJsonUrl = new URL("../package.json", import.meta.url);
   try {
@@ -119,32 +107,23 @@ export const openBrowser = async (url: string): Promise<void> => {
   child.unref();
 };
 
-export const main = async (argv: readonly string[]): Promise<number> => {
-  const options = parseWizardCli(argv);
-  if (argv.includes("--help") || argv.includes("-h")) {
-    console.log(WIZARD_HELP);
-    return 0;
-  }
+const runWebAdapter = async (options: {
+  readonly port?: number;
+  readonly open: boolean;
+}): Promise<number> => {
   ensureLoopbackNoProxy();
 
   // pnpm/npm run scripts execute with the package directory as cwd; INIT_CWD
   // preserves the directory the user actually invoked the command from.
-  // The positional argument selects the project directory explicitly; without
-  // it, projects default to ~/.opentray/create/<name> (stable per app).
   const invocationDir = process.env.INIT_CWD || process.cwd();
-  const cwd = invocationDir;
   const dependencyRange = await readDependencyRange();
 
   const server = await createWizardServer(
     (emit) =>
       createWizardSession({
-        cwd,
-        skipInstall: options.skipInstall,
-        force: options.force,
-        ...(options.targetDir === undefined
-          ? {}
-          : { targetDir: resolve(invocationDir, options.targetDir) }),
-        ...(options.pm === undefined ? {} : { packageManager: options.pm }),
+        cwd: invocationDir,
+        skipInstall: false,
+        force: false,
         dependencyRange,
         emit,
       }),
@@ -152,7 +131,7 @@ export const main = async (argv: readonly string[]): Promise<number> => {
   );
 
   console.log(`create-opentray wizard: ${server.url}`);
-  console.log(`working directory: ${cwd}`);
+  console.log(`working directory: ${invocationDir}`);
 
   if (options.open) {
     await openBrowser(server.url);
@@ -168,10 +147,23 @@ export const main = async (argv: readonly string[]): Promise<number> => {
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
 
-  // Keep the process alive until the wizard is closed or both the server
-  // socket and the preview run are gone.
+  // Keep the process alive until the wizard is closed.
   await new Promise<void>(() => {});
   return 0;
+};
+
+export const main = async (argv: readonly string[]): Promise<number> => {
+  // Legacy wizard flags (bare root) keep working through the same parser.
+  const legacy = parseWizardCli(argv.filter((arg) => !arg.startsWith("--") || ["--no-open","--port","--pm","--skip-install","--force","--help","-h"].includes(arg)));
+  return dispatchCli(argv, {
+    streams: consoleStreams,
+    runWeb: async (webOptions) =>
+      runWebAdapter({
+        ...webOptions,
+        ...(webOptions.port === undefined && legacy.port !== undefined ? { port: legacy.port } : {}),
+        open: webOptions.open && legacy.open,
+      }),
+  });
 };
 
 const isMainModule = (): boolean => {

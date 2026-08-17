@@ -9,6 +9,8 @@ decisions to the public skills/opentray guide):
 
 # OpenTray
 
+<p align="center"><img src="./docs/opentray-logo.png" alt="OpenTray logo" width="180"></p>
+
 OpenTray is a desktop status runtime for Node/Deno/Bun CLI and AI-skill ecosystems.
 
 The current platform model is tray-first:
@@ -21,7 +23,10 @@ The current platform model is tray-first:
 OpenTray no longer exposes `Space`, `Surface`, `createSpace()`, `createSurface()`, or `resolveDefaultSpace()` as public ontology. Application code calls `createTray()` directly and owns foreground/background lifetime itself.
 
 Already have a command that serves HTTP locally? `npx create-opentray` wraps it
-into an OpenTray-hosted app through a browser wizard — see the
+into an OpenTray-hosted app — interactively through the browser wizard
+(`create-opentray web`), fully non-interactively
+(`create-opentray create --app-id … --app-name … --exec …`), or read the
+built-in AI skill (`npx create-opentray skill`). See the
 [create-app guide](./skills/opentray/references/create-app.md).
 
 For the first app, call `createTray()` directly. The default runtime starts the local broker automatically:

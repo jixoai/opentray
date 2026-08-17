@@ -5,15 +5,36 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "@opentray/spec": ["packages/spec/src/index.ts"],
-      "@opentray/packaging": ["packages/packaging/src/index.ts"],
-      "@create-opentray/core": ["packages/create/packages/core/src/index.ts"],
-      "@opentray/vite-plugin": ["packages/vite-plugin/src/index.ts"],
-      "@opentray/tsdown-plugin": ["packages/tsdown-plugin/src/index.ts"],
-      "@opentray/esbuild-plugin": ["packages/esbuild-plugin/src/index.ts"],
-      "@opentray/webpack-plugin": ["packages/webpack-plugin/src/index.ts"],
-      "opentray": ["packages/cli/src/index.ts"],
-      "@opentray/ext-webview": ["packages/ext-webview/src/index.ts"]
+      "@opentray/spec": [
+        "packages/spec/src/index.ts"
+      ],
+      "@opentray/packaging": [
+        "packages/packaging/src/index.ts"
+      ],
+      "@create-opentray/core": [
+        "packages/create/packages/core/src/index.ts"
+      ],
+      "@opentray/vite-plugin": [
+        "packages/vite-plugin/src/index.ts"
+      ],
+      "@opentray/tsdown-plugin": [
+        "packages/tsdown-plugin/src/index.ts"
+      ],
+      "@opentray/esbuild-plugin": [
+        "packages/esbuild-plugin/src/index.ts"
+      ],
+      "@opentray/webpack-plugin": [
+        "packages/webpack-plugin/src/index.ts"
+      ],
+      "opentray": [
+        "packages/cli/src/index.ts"
+      ],
+      "@opentray/ext-webview": [
+        "packages/ext-webview/src/index.ts"
+      ],
+      "@create-opentray/cli": [
+        "packages/create/packages/cli/src/index.ts"
+      ]
     },
     "ignoreDeprecations": "6.0",
     "strict": true,
