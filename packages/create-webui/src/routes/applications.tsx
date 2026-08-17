@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCwIcon } from "lucide-react";
 
 import { fetchApps, uninstallApp, type AppRecord } from "../api";
+import { ExportDialog } from "./export";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Checkbox } from "../components/ui/checkbox";
@@ -52,6 +53,7 @@ export const ApplicationsRoute = (): React.JSX.Element => {
   const [confirmTarget, setConfirmTarget] = useState<AppRecord | null>(null);
   const [purge, setPurge] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [exportTarget, setExportTarget] = useState<AppRecord | null>(null);
 
   const refresh = useCallback(async () => {
     setState((prev) => (prev === "ready" ? "stale" : "loading"));
@@ -145,6 +147,9 @@ export const ApplicationsRoute = (): React.JSX.Element => {
                 >
                   {messages.applications.edit}
                 </Button>
+                <Button variant="outline" size="sm" onClick={() => setExportTarget(app)}>
+                  {messages.export.title}
+                </Button>
                 <Button variant="destructive" size="sm" onClick={() => setConfirmTarget(app)}>
                   {messages.applications.uninstall}
                 </Button>
@@ -191,6 +196,11 @@ export const ApplicationsRoute = (): React.JSX.Element => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <ExportDialog
+        appId={exportTarget?.appId ?? null}
+        hasEnv={exportTarget?.hasEnv === true}
+        onClose={() => setExportTarget(null)}
+      />
     </section>
   );
 };

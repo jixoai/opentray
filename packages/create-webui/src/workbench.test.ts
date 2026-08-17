@@ -59,3 +59,20 @@ describe("markdown renderer", () => {
     expect(html).toContain("npx create-opentray skill");
   });
 });
+
+describe("markdown tables", () => {
+  it("renders pipe tables as real table elements", () => {
+    const html = renderMarkdown(
+      "| Option | Meaning |\n| ------ | ------- |\n| `--pm` | package manager |\n| `--exec` | executable |",
+    );
+    expect(html).toContain("<table>");
+    expect(html).toContain("<th>Option</th>");
+    expect(html).toContain("<code>--pm</code>");
+    expect(html).not.toContain("| ------ |");
+  });
+
+  it("keeps non-table content intact", () => {
+    const html = renderMarkdown("# T\n\nplain | pipe in text is fine\n\n- item");
+    expect(html).toContain("<h1>T</h1>");
+  });
+});

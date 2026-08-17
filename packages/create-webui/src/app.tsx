@@ -876,11 +876,33 @@ const selectedIconRefStale = (
   );
 }
 
-export function App(): React.JSX.Element {
+/**
+ * Route switcher rendered INSIDE the shell so the navigation context exists.
+ * All routes stay MOUNTED with hidden/visible projection: switching routes
+ * must never unmount the wizard — the terminal stream, buffered output, form
+ * state, and live Core session state survive every route round-trip.
+ */
+function WorkbenchRoutes(): React.JSX.Element {
   const { route } = useWorkbenchNavigation();
   return (
+    <>
+      <div hidden={route !== "add"} className="h-full">
+        <WizardPage />
+      </div>
+      <div hidden={route !== "applications"} className="h-full">
+        <ApplicationsRoute />
+      </div>
+      <div hidden={route !== "help"} className="h-full">
+        <HelpRoute />
+      </div>
+    </>
+  );
+}
+
+export function App(): React.JSX.Element {
+  return (
     <WorkbenchShell>
-      {route === "add" ? <WizardPage /> : route === "applications" ? <ApplicationsRoute /> : <HelpRoute />}
+      <WorkbenchRoutes />
     </WorkbenchShell>
   );
 }

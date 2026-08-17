@@ -40,20 +40,54 @@ const renderInline = (text: string): Inline => {
   return { html };
 };
 
-/** Render a strict Markdown subset to sanitized HTML (no raw HTML passes). */
+/** Markdown table row: `| a | b |`. */
+const isTableRow = (line: string): boolean => /^\s*\|.*\|\s*$/u.test(line);
+const isTableSeparator = (line: string): boolean => /^\s*\|[\s:|-]+\|\s*$/u.test(line);
+const splitRow = (line: string): string[] =>
+  line.trim().replace(/^\|/u, "").replace(/\|$/u, "").split("|").map((cell) => cell.trim());
+
+/**
+ * Render a strict Markdown subset to sanitized HTML. Raw HTML is escaped
+ * before any inline formatting; pipe tables render as real table elements;
+ * link schemes outside the safe set stay inert.
+ */
 export const renderMarkdown = (source: string): string => {
   const lines = source.split("\n");
   const out: string[] = [];
   let inCode = false;
   let listType: "ul" | "ol" | null = null;
+
   const closeList = (): void => {
     if (listType !== null) {
       out.push(`</${listType}>`);
       listType = null;
     }
   };
+
+  const flushTable = (header: string[], rows: string[][]): void => {
+    const head = header.map((cell) => `<th>${renderInline(cell).html}</th>`).join("");
+    const body = rows
+      .map((row) => `<tr>${row.map((cell) => `<td>${renderInline(cell).html}</td>`).join("")}</tr>`)
+      .join("");
+    out.push(`<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`);
+  };
+
+  let tableHeader: string[] | null = null;
+  let tableRows: string[][] = [];
+  let tableAwaitSeparator = false;
+
+  const endTable = (): void => {
+    if (tableHeader !== null) {
+      flushTable(tableHeader, tableRows);
+      tableHeader = null;
+      tableRows = [];
+      tableAwaitSeparator = false;
+    }
+  };
+
   for (const line of lines) {
     if (line.trimStart().startsWith("```")) {
+      if (tableHeader !== null) endTable();
       if (inCode) {
         out.push("</code></pre>");
         inCode = false;
@@ -68,6 +102,27 @@ export const renderMarkdown = (source: string): string => {
       out.push(escapeHtml(line));
       continue;
     }
+
+    // Table block consumption.
+    if (tableHeader !== null) {
+      if (tableAwaitSeparator && isTableSeparator(line)) {
+        tableAwaitSeparator = false;
+        continue;
+      }
+      tableAwaitSeparator = false;
+      if (isTableRow(line)) {
+        tableRows.push(splitRow(line));
+        continue;
+      }
+      endTable(); // non-table line closes the block
+    } else if (isTableRow(line) && !isTableSeparator(line)) {
+      closeList();
+      tableHeader = splitRow(line);
+      tableRows = [];
+      tableAwaitSeparator = true;
+      continue;
+    }
+
     const heading = /^(#{1,6})\s+(.*)$/u.exec(line);
     if (heading !== null) {
       closeList();
@@ -106,12 +161,21 @@ export const renderMarkdown = (source: string): string => {
     // Front-matter fences render inertly as text.
     out.push(`<p>${renderInline(line).html}</p>`);
   }
+  endTable();
   closeList();
   if (inCode) {
     out.push("</code></pre>");
   }
   return out.join("\n");
 };
+
+/** Minimal table typography inside the help article. */
+const helpTableStyles = `
+.prose-help table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.75rem; }
+.prose-help th, .prose-help td { border: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: start; }
+.prose-help th { background: var(--muted); font-weight: 600; }
+.prose-help td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; }
+`;
 
 export const HelpRoute = (): React.JSX.Element => {
   const { messages } = usePreferences();
@@ -186,6 +250,8 @@ export const HelpRoute = (): React.JSX.Element => {
         )}
       </nav>
       <article className="min-w-0 flex-1 overflow-auto p-6" aria-live="polite">
+        {/* Driven by paired semantic tokens; table cells are technical LTR. */}
+        <style>{helpTableStyles}</style>
         {loadingDoc ? (
           <div className="space-y-2">
             <Skeleton className="h-6 w-1/2" />

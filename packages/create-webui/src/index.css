@@ -146,6 +146,13 @@ body {
 /* ---------------------------------------------------------------------------
  * Base-UI component layer (cn-*): the official shadcn Base registry ships
  * components referencing these utilities; the paired tokens above drive them.
+ * Wrapped in @layer components so Tailwind UTILITIES (w-9, h-*, p-*, text-*)
+ * applied on the same elements always win — unlayered CSS would otherwise
+ * override every utility.
+ * ------------------------------------------------------------------------- */
+@layer components {
+ * Base-UI component layer (cn-*): the official shadcn Base registry ships
+ * components referencing these utilities; the paired tokens above drive them.
  * ------------------------------------------------------------------------- */
 .cn-button-variant-default {
   background: var(--primary);
@@ -371,6 +378,7 @@ html[dir="rtl"] .cn-sheet-content { border-inline-end: none; border-inline-start
   background: var(--card); color: var(--card-foreground);
 }
 .cn-toggle-group-item[data-pressed] { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+}
 
 /* Workbench shell primitives. */
 .wb-nav {

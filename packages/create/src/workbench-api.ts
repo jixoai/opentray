@@ -14,6 +14,7 @@ import {
   buildScriptExport,
   listRegistrations,
   loadRegistration,
+  quotePosix,
   readResourceBytes,
   registrationKey,
   stopRunningApp,
@@ -179,7 +180,12 @@ export const handleWorkbenchApi = async (
       if (plan.value.directCommand === null) {
         return { status: 409, body: { code: "export_unsafe", message: plan.value.directCommandBlockedReason ?? "direct copy requires force-copy" } };
       }
-      return { status: 200, body: { command: plan.value.directCommand.command.join(" ") } };
+      // Shell-safe display: quote any element containing spaces or shell
+      // metacharacters so copy-paste reproduces the EXACT argv.
+      const command = plan.value.directCommand.command
+        .map((element) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(element) ? element : quotePosix(element)))
+        .join(" ");
+      return { status: 200, body: { command } };
     }
     const script = buildScriptExport(
       { config, embeddedResources: embedded },
