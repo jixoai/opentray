@@ -17,8 +17,8 @@
 - [x] 2.7 Scenario: Given Edit When v1 config loads Then every field round-trips, appId is read-only, and force is enabled only for verified managed payload replacement (spec: create-workbench-applications / edit).
 - [x] 2.8 Scenario: Given linked uninstall When confirmed without purge Then UI states target retention and manual OS pin cleanup before and after completion (spec: create-workbench-applications / uninstall).
 - [x] 2.9 Scenario: Given Help without selection When opened Then localized human `SKILL.md` renders beside/after a read-only logical tree; malicious Markdown/path escape is inert (spec: create-workbench-help).
-- [ ] 2.10 Scenario: Given uploaded pixel art and smoothing disabled When preview/apply runs Then app/tray previews preserve hard pixels and layout remains stable (spec: create-workbench-form / icon controls).
-- [ ] 2.11 Scenario: Given developer mode toggled When plan diff is reviewed Then only DevTools admission changes (spec: create-workbench-form / developer mode).
+- [x] 2.10 Scenario: Given uploaded pixel art and smoothing disabled When preview/apply runs Then app/tray previews preserve hard pixels and layout remains stable (spec: create-workbench-form / icon controls).
+- [x] 2.11 Scenario: Given developer mode toggled When plan diff is reviewed Then only DevTools admission changes (spec: create-workbench-form / developer mode).
 - [x] 2.12 Scenario: Given an uploaded resource When Export opens Then script is default and direct copy requires long-content override (spec: create-workbench-export / uploads).
 - [x] 2.13 Scenario: Given any env entries When Export opens Then editable review plus an unchecked disclaimer blocks complete copy/download until acknowledged, with no secret heuristics (spec: create-workbench-export / env).
 - [x] 2.14 Confirm each task checkbox is updated only by the agent that completed and verified that task in the current working context.
@@ -35,8 +35,8 @@
 - [ ] 3.8 Split the current monolithic page into route/workflow-owned modules while preserving terminal/service preview lifetime, buffered output, async supersession, and live Core session state.
 - [ ] 3.9 Implement Applications lifecycle states, Core-backed refresh/list/edit/copy/export/uninstall, immutable identity, plan review, explicit stop/restart, link retention, purge, focus restoration, and exact result text.
 - [x] 3.10 Implement contained localized human Markdown list-detail Help with default `SKILL.md`, responsive list/detail navigation, sanitization, route selection, safe links, skeleton/stale/error states, and CLI/Core factual alignment.
-- [ ] 3.11 Refactor Add/Edit form to round-trip the full v1 model; add image-smoothing and default-off developer-mode controls using appropriate shadcn components and Core-backed previews.
-- [ ] 3.12 Implement Core-backed direct command/`.sh`/`.ps1` export, uploaded-resource script default, force-copy override, clipboard/download states, and LTR accessible previews.
+- [x] 3.11 Refactor Add/Edit form to round-trip the full v1 model; add image-smoothing and default-off developer-mode controls using appropriate shadcn components and Core-backed previews.
+- [x] 3.12 Implement Core-backed direct command/`.sh`/`.ps1` export, uploaded-resource script default, force-copy override, clipboard/download states, and LTR accessible previews.
 - [x] 3.13 Implement uniform env-bearing export review with editable values and a non-preselected disclaimer checkbox; remove any attempt to infer secret/safe values.
 - [x] 3.14 Promote the supplied create-opentray logo into stable WebUI/package assets and verify every locale/theme/background projection remains legible.
 - [ ] 3.15 Add purposeful route/list state transitions with reduced-motion behavior; do not add decorative page-load choreography.

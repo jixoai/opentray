@@ -179,11 +179,13 @@ describe("export", () => {
   });
 
   it("builds a runnable sh script with embedded bytes and quoted argv", () => {
-    const c = config("export.example");
-    c.command = {
-      executable: "/usr/bin/node",
-      args: ["serve", "--greeting", "hello world && goodbye"],
-      cwd: "/tmp/my project",
+    const c = {
+      ...config("export.example"),
+      command: {
+        executable: "/usr/bin/node",
+        args: ["serve", "--greeting", "hello world && goodbye"],
+        cwd: "/tmp/my project",
+      },
     };
     const script = buildScriptExport(
       {
@@ -212,8 +214,8 @@ describe("export", () => {
   });
 
   it("flags env acknowledgement for ANY non-empty env without heuristics", () => {
-    const withEnv = config("env.example");
-    withEnv.command = { ...withEnv.command, env: { RANDOM_NAME_XYZ: "1" } };
+    const baseEnv = config("env.example");
+    const withEnv = { ...baseEnv, command: { ...baseEnv.command, env: { RANDOM_NAME_XYZ: "1" } } };
     const review = reviewEnvironment(withEnv);
     expect(review.requiresAcknowledgement).toBe(true);
     expect(review.envEntries).toEqual([{ key: "RANDOM_NAME_XYZ", value: "1" }]);

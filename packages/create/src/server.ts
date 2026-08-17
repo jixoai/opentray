@@ -189,17 +189,30 @@ export const createWizardServer = async (
         return;
       }
       // Workbench routes (apps/skill/export) are Core projections with
-      // their own body contract; fall through to the wizard API otherwise.
-      let body: Record<string, unknown> = {};
-      if (request.method === "POST") {
-        body = await readJsonBody(request);
+      // their own body contract. The raw-bytes icon-upload route must NOT
+      // have its stream consumed here, so only workbench paths pre-read.
+      const isWorkbenchPath =
+        url.pathname === "/api/apps" ||
+        url.pathname.startsWith("/api/apps/") ||
+        url.pathname === "/api/skill" ||
+        url.pathname === "/api/skill/list";
+      if (isWorkbenchPath) {
+        let body: Record<string, unknown> = {};
+        if (request.method === "POST") {
+          body = await readJsonBody(request);
+        }
+        const workbench = await handleWorkbenchApi({
+          method: request.method ?? "GET",
+          pathname: url.pathname,
+          query: url.searchParams,
+          body,
+        });
+        if (workbench !== undefined) {
+          respond(response, workbench.status, "application/json", `${JSON.stringify(workbench.body)}\n`);
+          return;
+        }
       }
-      const workbench = await handleWorkbenchApi({ method: request.method ?? "GET", pathname: url.pathname, query: url.searchParams, body });
-      if (workbench !== undefined) {
-        respond(response, workbench.status, "application/json", `${JSON.stringify(workbench.body)}\n`);
-        return;
-      }
-      await handleApi(url.pathname, request, response, session, request.method === "POST" ? body : undefined);
+      await handleApi(url.pathname, request, response, session);
       return;
     }
 
@@ -480,7 +493,7 @@ const handleApi = async (
       if (typeof body.iconScale === "number" && body.iconScale >= 0.5 && body.iconScale <= 0.95) {
         patch.iconScale = body.iconScale;
       }
-      for (const key of ["showStartupTerminal", "showAddressBar", "force"] as const) {
+      for (const key of ["showStartupTerminal", "showAddressBar", "imageSmoothingEnabled", "developerMode", "force"] as const) {
         const value = body[key];
         if (typeof value === "boolean") {
           patch[key] = value;

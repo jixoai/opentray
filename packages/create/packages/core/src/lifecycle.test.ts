@@ -128,8 +128,7 @@ describe("plan/apply", () => {
   });
 
   it("requires env acknowledgement flag on the plan when env is non-empty", async () => {
-    const withEnv = config("env.example");
-    withEnv.command = { ...withEnv.command, env: { API_TOKEN: "hunter2" } };
+    const withEnv = { ...config("env.example"), command: { ...config("env.example").command, env: { API_TOKEN: "hunter2" } } };
     const plan = await planCreate({
       desired: desired(withEnv),
       skipInstall: true,

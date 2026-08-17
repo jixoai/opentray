@@ -52,6 +52,8 @@ const EMPTY_VALUES: WizardFormValues = {
   pm: "npm",
   showStartupTerminal: false,
   showAddressBar: false,
+  imageSmoothingEnabled: true,
+  developerMode: false,
 };
 const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "", iconPath: "" };
 

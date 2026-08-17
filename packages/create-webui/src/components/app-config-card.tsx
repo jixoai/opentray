@@ -154,6 +154,38 @@ export function AppConfigCard({
                   </p>
                 </div>
               </div>
+              <div className="flex items-start gap-3 rounded-lg border border-border p-3">
+                <Switch
+                  id="imageSmoothingEnabled"
+                  checked={values.imageSmoothingEnabled}
+                  disabled={frozen}
+                  onCheckedChange={(checked) => onPatch({ imageSmoothingEnabled: checked })}
+                />
+                <div>
+                  <Label htmlFor="imageSmoothingEnabled" className="text-foreground">
+                    平滑缩放（imageSmoothingEnabled）
+                  </Label>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    默认开启高质量缩放；上传低分辨率像素风图标时关闭可保留硬边锯齿（等比放大应用到应用图标前景与托盘图标）。
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 rounded-lg border border-border p-3">
+                <Switch
+                  id="developerMode"
+                  checked={values.developerMode}
+                  disabled={frozen}
+                  onCheckedChange={(checked) => onPatch({ developerMode: checked })}
+                />
+                <div>
+                  <Label htmlFor="developerMode" className="text-foreground">
+                    允许开发者模式
+                  </Label>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    仅表示生成应用内的 WebView DevTools 准入；不改变其它行为。
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div>

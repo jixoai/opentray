@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -44,6 +44,40 @@ describe("broker command resolver", () => {
     expect(command.args).toContain(paths.appId);
     expect(command.args).toContain("--app-name");
     expect(command.args).toContain(paths.appName);
+  });
+
+  it("wraps an explicit Darwin broker in the caller app bundle when appBundle is enabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-broker-explicit-darwin-"));
+    tempDirs.push(root);
+    const brokerPath = join(root, "target/debug/opentray");
+    const templatePath = join(root, "packages/darwin-app-carrier/Info.plist");
+    await mkdir(dirname(brokerPath), { recursive: true });
+    await mkdir(dirname(templatePath), { recursive: true });
+    await writeFile(brokerPath, "source-broker", "utf8");
+    await writeFile(templatePath, template(), "utf8");
+    const paths = resolveDaemonPaths({
+      homeDir: join(root, "home"),
+      packageVersion: "0.1.0",
+    });
+
+    const command = await resolveBrokerCommand(paths, {
+      env: { OPENTRAY_BROKER_BIN: brokerPath },
+      platform: "darwin",
+      arch: "arm64",
+      findWorkspaceRoot: async () => root,
+      ensureDevDarwinCarrierTemplate: async () => templatePath,
+      appBundle: { path: join(root, "home/.opentray/apps/opentray/Test.app") },
+    });
+
+    // mkdtemp returns the /var symlink form while parts of the resolver
+    // canonicalize through realpath on macOS (/private/var) — compare both
+    // sides canonically.
+    const expected = join(
+      root,
+      "home/.opentray/apps/opentray/Test.app/Contents/MacOS/opentray",
+    );
+    expect(await realpath(command.command)).toBe(await realpath(expected));
+    expect(await readFile(command.command, "utf8")).toBe("source-broker");
   });
 
   it("hashes one exact resolved broker executable into its launch identity", async () => {

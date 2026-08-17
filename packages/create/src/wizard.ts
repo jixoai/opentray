@@ -106,6 +106,10 @@ export interface WizardFormValues {
   readonly showStartupTerminal: boolean;
   /** Advanced: address-bar service tabs in the generated app (default false). */
   readonly showAddressBar: boolean;
+  /** Advanced v1 sampling intent: false keeps pixel-art edges (default true). */
+  readonly imageSmoothingEnabled: boolean;
+  /** Advanced v1 developer mode: only WebView DevTools admission (default false). */
+  readonly developerMode: boolean;
 }
 
 /** Placeholder suggestions shown in the form; empty fields resolve to these. */
@@ -245,6 +249,8 @@ interface FieldTouched {
   pm: boolean;
   showStartupTerminal: boolean;
   showAddressBar: boolean;
+  imageSmoothingEnabled: boolean;
+  developerMode: boolean;
 }
 
 export const createWizardSession = (options: WizardOptions): WizardSession => {
@@ -283,7 +289,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   const iconCompositions = new Map<string, WizardIconComposition>();
   let iconBackground: WizardIconBackground | undefined;
   let iconScale: number | undefined;
-  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, force: false, showStartupTerminal: false, showAddressBar: false };
+  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, force: false, showStartupTerminal: false, showAddressBar: false, imageSmoothingEnabled: false, developerMode: false };
   let form: WizardFormValues = {
     appId: "",
     appName: "",
@@ -294,6 +300,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     force: options.force === true,
     showStartupTerminal: false,
     showAddressBar: false,
+    imageSmoothingEnabled: true,
+    developerMode: false,
     pm:
       options.packageManager ??
       detectPackageManager([], process.env.npm_config_user_agent),
@@ -612,6 +620,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         ...(touched.trayIconPath ? { trayIconPath: form.trayIconPath } : { trayIconPath: "" }),
         ...(touched.showStartupTerminal ? { showStartupTerminal: form.showStartupTerminal } : { showStartupTerminal: false }),
         ...(touched.showAddressBar ? { showAddressBar: form.showAddressBar } : { showAddressBar: false }),
+        ...(touched.imageSmoothingEnabled ? { imageSmoothingEnabled: form.imageSmoothingEnabled } : { imageSmoothingEnabled: true }),
+        ...(touched.developerMode ? { developerMode: form.developerMode } : { developerMode: false }),
         pm:
           options.packageManager ??
           detectPackageManager([], process.env.npm_config_user_agent),
@@ -956,6 +966,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               command: resolvedVector,
               service: { port: resolvedServicePort ?? 0 },
               window: { width: 1_200, height: 800 },
+              ...(frozen.developerMode === true ? { developerMode: true } : {}),
             },
             targetDir: resolvedTargetDir ?? currentDefaults().targetDir,
             dependencyRange: options.dependencyRange,
@@ -974,6 +985,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               showTerminal: frozen.showStartupTerminal,
               showAddressBar: frozen.showAddressBar,
             },
+            ...(frozen.imageSmoothingEnabled === false ? { imageSmoothingEnabled: false } : {}),
+            ...(frozen.developerMode === true ? { developerMode: true } : {}),
             packageManager: frozen.pm,
             skipInstall: options.skipInstall,
             force: frozen.force,
@@ -1027,5 +1040,5 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
 /** Exposed for tests: the touched-field bookkeeping semantics. */
 export const createFieldTouchedTracker = (): { touched: FieldTouched } => ({
-  touched: { force: false, appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false },
+  touched: { force: false, appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false, imageSmoothingEnabled: false, developerMode: false },
 });

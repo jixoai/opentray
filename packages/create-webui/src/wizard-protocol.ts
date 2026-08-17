@@ -21,6 +21,8 @@ export interface WizardFormValues {
   force: boolean;
   showStartupTerminal: boolean;
   showAddressBar: boolean;
+  imageSmoothingEnabled: boolean;
+  developerMode: boolean;
 }
 
 /** One scraped icon candidate (ranked by clarity, deduplicated). */
