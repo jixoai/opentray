@@ -57,13 +57,17 @@ export const listListeningPortOwners = async (
 };
 
 const listLsofListeningPorts = async (): Promise<ReadonlySet<number>> => {
+  // lsof exits non-zero when NO listener matches ("no process found") —
+  // an empty result, not an error. The sibling owner-scan above already
+  // treats it that way; this call site rejected and killed whole test
+  // suites on quiet machines (CI runners).
   const stdout = await runCapture("lsof", [
     "-nP",
     "-iTCP",
     "-sTCP:LISTEN",
     "-F",
     "Pn",
-  ]);
+  ]).catch(() => "");
   return parseLsofPorts(stdout);
 };
 
