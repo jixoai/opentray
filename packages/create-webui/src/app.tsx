@@ -1,11 +1,8 @@
 /** create-opentray wizard page: command bar + tabs panel + identity form. */
-import { Play, Settings2, Square } from "lucide-react";
 import * as React from "react";
 
-import { AdvancedPanel } from "@/components/advanced-panel";
-import { TagInput } from "@/components/tag-input";
-import { AppForm } from "@/components/app-form";
-import { IconPicker } from "@/components/icon-picker";
+import { AppConfigCard } from "@/components/app-config-card";
+import { CommandCard } from "@/components/command-card";
 import { CreateDialog } from "@/components/create-dialog";
 import { TabsPanel, type IframeTab, type TerminalStatusBarState } from "@/components/tabs-panel";
 import {
@@ -49,7 +46,6 @@ export function App(): React.JSX.Element {
     DEFAULT_COMMAND_OPTIONS,
   );
   const [defaultCwd, setDefaultCwd] = React.useState("");
-  const advancedRef = React.useRef<HTMLDivElement>(null);
   const [panelOpen, setPanelOpen] = React.useState(false);
   const [runAlive, setRunAlive] = React.useState(false);
   const [wizardState, setWizardState] = React.useState<WizardState>("idle");
@@ -67,7 +63,6 @@ export function App(): React.JSX.Element {
   const [iconCandidatesPort, setIconCandidatesPort] = React.useState<number | undefined>();
   const [selectedIconRef, setSelectedIconRef] = React.useState<string | undefined>();
   const [uploadedIconUrl, setUploadedIconUrl] = React.useState<string | undefined>();
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [selectedTrayRef, setSelectedTrayRef] = React.useState<string | undefined>();
   const [uploadedTrayUrl, setUploadedTrayUrl] = React.useState<string | undefined>();
   const [activeTab, setActiveTab] = React.useState("terminal");
@@ -444,223 +439,120 @@ const selectedIconRefStale = (
         </Badge>
       </header>
 
-      {/* Command bar: settings button opens the advanced accordion */}
-      <div className="flex gap-2">
-        {commandOptions.argsMode === "array" ? (
-          <TagInput
-            tags={argv}
-            onTagsChange={(tags) => setArgv([...tags])}
-            disabled={runAlive}
-            aria-label="命令参数（argv）"
-            className="focus:outline-none"
-          />
-        ) : (
-          <Input
-            className="font-mono"
-            placeholder="npx somecommand start --xx"
-            value={command}
-            disabled={runAlive}
-            onChange={(event) => setCommand(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !runAlive) void runCommand();
-            }}
-          />
-        )}
-        {/* Toggle: clicking again hides the advanced panel */}
-        <Button
-          variant="outline"
-          size="icon"
-          aria-label="命令高级选项"
-          title="命令高级选项"
-          aria-pressed={advancedOpen}
-          data-state={advancedOpen ? "on" : "off"}
-          disabled={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
-          onClick={() => {
-            setAdvancedOpen((previous) => {
-              const next = !previous;
-              if (next) {
-                // Let the panel mount, then bring it into view.
-                window.setTimeout(() => {
-                  advancedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, 50);
-              }
-              return next;
-            });
-          }}
-          className={advancedOpen ? "border-primary text-primary" : undefined}
-        >
-          <Settings2 />
-        </Button>
-        {runAlive ? (
-          <Button
-            variant="destructive"
-            onClick={() => void api("/api/stop", {})}
-            aria-label="中断命令"
-          >
-            <Square />
-            中断
-          </Button>
-        ) : (
-          <Button
-            disabled={
-              wizardState === "materializing" ||
-              wizardState === "frozen" ||
-              wizardState === "success"
-            }
-            onClick={() => void runCommand()}
-            aria-label="运行命令"
-          >
-            <Play />
-            运行
-          </Button>
-        )}
-      </div>
-      {wizardState === "failed" && failReason !== undefined ? (
-        <p className="font-mono text-xs text-red-400">{failReason}</p>
-      ) : null}
-
-      {/* Advanced options — the wrapper animates height:auto via grid
-          template rows (0fr ↔ 1fr), the same interpolation the page layout
-          uses; content stays mounted so both directions animate. */}
-      <div
-        ref={advancedRef}
-        className="grid"
-        style={{
-          gridTemplateRows: advancedOpen ? "1fr" : "0fr",
-          transition: "grid-template-rows 450ms cubic-bezier(0.4, 0, 0.2, 1)",
+      {/* Card 1 — command + 命令选项 accordion inside */}
+      <CommandCard
+        command={command}
+        onCommandChange={setCommand}
+        argv={argv}
+        onArgvChange={(tags) => setArgv([...tags])}
+        runAlive={runAlive}
+        frozen={wizardState === "materializing" || wizardState === "frozen" || wizardState === "success"}
+        failedReason={wizardState === "failed" ? failReason : undefined}
+        commandOptions={commandOptions}
+        defaultCwd={defaultCwd}
+        onCommandOptionsChange={(next) => {
+          setCommandOptions(next);
+          void api("/api/command-options", {
+            cwd: next.cwd,
+            env: next.env,
+            argsMode: next.argsMode,
+          });
         }}
-      >
-        <div
-          className="min-h-0 overflow-hidden"
-          style={{
-            visibility: advancedOpen ? "visible" : "hidden",
-            transition: `visibility 0s linear ${advancedOpen ? "0s" : "450ms"}`,
-          }}
-        >
-          <AdvancedPanel
-            frozen={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
-            values={values}
-            commandOptions={commandOptions}
-            defaultCwd={defaultCwd}
-            onCommandOptionsChange={(next) => {
-              setCommandOptions(next);
-              void api("/api/command-options", {
-                cwd: next.cwd,
-                env: next.env,
-                argsMode: next.argsMode,
-              });
-            }}
-            candidates={iconCandidates}
-            candidatesPort={iconCandidatesPort}
-            selectedTrayRef={selectedTrayRef}
-            uploadedTrayUrl={uploadedTrayUrl}
-            onPickTray={(candidate) => {
-              if (iconCandidatesPort === undefined) return;
-              setSelectedTrayRef(`${iconCandidatesPort}:${candidate.index}`);
-              setUploadedTrayUrl(undefined);
-              void api("/api/tray-icon-select", {
-                port: iconCandidatesPort,
-                index: candidate.index,
-              });
-            }}
-            onUploadTray={(file) => {
-              const preview = URL.createObjectURL(file);
-              setUploadedTrayUrl(preview);
-              setSelectedTrayRef(undefined);
-              void file.arrayBuffer().then((buffer) => {
-                void fetch("/api/icon-upload", {
-                  method: "POST",
-                  headers: {
-                    "content-type": file.type || "application/octet-stream",
-                    authorization: `Bearer ${new URLSearchParams(location.search).get("token") ?? ""}`,
-                  },
-                  body: buffer,
-                })
-                  .then((response) => response.json() as Promise<{ path?: string }>)
-                  .then(({ path }) => {
-                    if (path === undefined || path.length === 0) return;
-                    setValues((previous) => ({ ...previous, trayIconPath: path }));
-                    void api("/api/form", { trayIconPath: path });
-                  })
-                  .catch(() => undefined);
-              });
-            }}
-            onClearTray={() => {
-              setSelectedTrayRef(undefined);
-              setUploadedTrayUrl(undefined);
-              setValues((previous) => ({ ...previous, trayIconPath: "" }));
-              void api("/api/form", { trayIconPath: "" });
-            }}
-            onPatch={(patch) => {
-              setValues((previous) => ({ ...previous, ...patch }));
-              void api("/api/form", patch);
-            }}
-          />
-        </div>
-      </div>
+        onRun={() => void runCommand()}
+        onStop={() => void api("/api/stop", {})}
+      />
 
-      {/* Identity form */}
-      {showForm ? (
-        <section className="rounded-xl border border-border bg-card p-4">
-          <AppForm
-            values={values}
-            defaults={defaults}
-            frozen={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
-            iconCandidates={iconCandidates}
-            iconCandidatesPort={iconCandidatesPort}
-            uploadedIconUrl={uploadedIconUrl}
-            selectedIconRef={selectedIconRef}
-            onPickIconCandidate={(candidate) => {
-              if (iconCandidatesPort === undefined) return;
-              setSelectedIconRef(`${iconCandidatesPort}:${candidate.index}`);
-              setUploadedIconUrl(undefined);
-              void api("/api/icon-select", {
-                port: iconCandidatesPort,
-                index: candidate.index,
-              });
-            }}
-            onUploadIcon={(file) => {
-              const preview = URL.createObjectURL(file);
-              setUploadedIconUrl(preview);
-              setSelectedIconRef(undefined);
-              void file.arrayBuffer().then((buffer) => {
-                void fetch("/api/icon-upload", {
-                  method: "POST",
-                  headers: {
-                    "content-type": file.type || "application/octet-stream",
-                    authorization: `Bearer ${new URLSearchParams(location.search).get("token") ?? ""}`,
-                  },
-                  body: buffer,
-                })
-                  .then((response) => response.json() as Promise<{ path?: string }>)
-                  .then(({ path }) => {
-                    if (path === undefined || path.length === 0) return;
-                    setValues((previous) => ({ ...previous, iconPath: path }));
-                  })
-                  .catch(() => undefined);
-              });
-            }}
-            onClearIcon={() => {
-              setSelectedIconRef(undefined);
-              setUploadedIconUrl(undefined);
-              setValues((previous) => ({ ...previous, iconPath: "" }));
-              void api("/api/form", { iconPath: "" });
-            }}
-            onPatch={(patch) => {
-              setValues((previous) => ({ ...previous, ...patch }));
-              void api("/api/form", patch);
-            }}
-          />
-          <div className="mt-4 flex items-center gap-3">
-            <Button onClick={() => void confirmCreate()}>确定创建应用</Button>
-            <span className="text-xs text-muted-foreground">
-              {selectedPort !== undefined
-                ? `已选服务 :${selectedPort}（点击状态栏服务可切换）`
-                : "未运行也不影响：应用启动时会自行嗅探命令的监听端口"}
-            </span>
-          </div>
-        </section>
-      ) : null}
+      {/* Card 2 — 应用配置: identity form + merged 高级选项 */}
+      <AppConfigCard
+        frozen={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
+        values={values}
+        defaults={defaults}
+        candidates={iconCandidates}
+        candidatesPort={iconCandidatesPort}
+        selectedIconRef={selectedIconRef}
+        uploadedIconUrl={uploadedIconUrl}
+        selectedTrayRef={selectedTrayRef}
+        uploadedTrayUrl={uploadedTrayUrl}
+        selectedPort={selectedPort}
+        onPickIconCandidate={(candidate) => {
+          if (iconCandidatesPort === undefined) return;
+          setSelectedIconRef(`${iconCandidatesPort}:${candidate.index}`);
+          setUploadedIconUrl(undefined);
+          void api("/api/icon-select", {
+            port: iconCandidatesPort,
+            index: candidate.index,
+          });
+        }}
+        onUploadIcon={(file) => {
+          const preview = URL.createObjectURL(file);
+          setUploadedIconUrl(preview);
+          setSelectedIconRef(undefined);
+          void file.arrayBuffer().then((buffer) => {
+            void fetch("/api/icon-upload", {
+              method: "POST",
+              headers: {
+                "content-type": file.type || "application/octet-stream",
+                authorization: `Bearer ${new URLSearchParams(location.search).get("token") ?? ""}`,
+              },
+              body: buffer,
+            })
+              .then((response) => response.json() as Promise<{ path?: string }>)
+              .then(({ path }) => {
+                if (path === undefined || path.length === 0) return;
+                setValues((previous) => ({ ...previous, iconPath: path }));
+              })
+              .catch(() => undefined);
+          });
+        }}
+        onClearIcon={() => {
+          setSelectedIconRef(undefined);
+          setUploadedIconUrl(undefined);
+          setValues((previous) => ({ ...previous, iconPath: "" }));
+          void api("/api/form", { iconPath: "" });
+        }}
+        onPickTray={(candidate) => {
+          if (iconCandidatesPort === undefined) return;
+          setSelectedTrayRef(`${iconCandidatesPort}:${candidate.index}`);
+          setUploadedTrayUrl(undefined);
+          void api("/api/tray-icon-select", {
+            port: iconCandidatesPort,
+            index: candidate.index,
+          });
+        }}
+        onUploadTray={(file) => {
+          const preview = URL.createObjectURL(file);
+          setUploadedTrayUrl(preview);
+          setSelectedTrayRef(undefined);
+          void file.arrayBuffer().then((buffer) => {
+            void fetch("/api/icon-upload", {
+              method: "POST",
+              headers: {
+                "content-type": file.type || "application/octet-stream",
+                authorization: `Bearer ${new URLSearchParams(location.search).get("token") ?? ""}`,
+              },
+              body: buffer,
+            })
+              .then((response) => response.json() as Promise<{ path?: string }>)
+              .then(({ path }) => {
+                if (path === undefined || path.length === 0) return;
+                setValues((previous) => ({ ...previous, trayIconPath: path }));
+                void api("/api/form", { trayIconPath: path });
+              })
+              .catch(() => undefined);
+          });
+        }}
+        onClearTray={() => {
+          setSelectedTrayRef(undefined);
+          setUploadedTrayUrl(undefined);
+          setValues((previous) => ({ ...previous, trayIconPath: "" }));
+          void api("/api/form", { trayIconPath: "" });
+        }}
+        onPatch={(patch) => {
+          setValues((previous) => ({ ...previous, ...patch }));
+          void api("/api/form", patch);
+        }}
+        onConfirm={() => void confirmCreate()}
+      />
       </div>
 
       {/* Detail pane: lives in the second grid column. The column itself
