@@ -60,6 +60,14 @@ create-opentray [targetDir] [--no-open] [--port <n>] [--pm npm|pnpm|bun]
 
 ## Generated project
 
+Projects default to `~/.opentray/create/<name>/` (stable per app — re-running
+the wizard for the same command regenerates the same location and never
+pollutes the invocation directory). Pass a positional argument to place the
+project elsewhere. When the target directory already exists, the wizard
+warns in 高级选项 and offers 强制覆盖, which CLEARS the directory and
+regenerates it (equivalent to `--force`; the generated tree is fully
+wizard-owned and regenerable).
+
 ```
 <project>/
   package.json          deps: opentray, @opentray/ext-webview (+ @lydell/node-pty

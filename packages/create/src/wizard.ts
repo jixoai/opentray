@@ -7,7 +7,7 @@
 // 3. Coordinate preview run, discovery polling, scrape polling, and teardown.
 
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -72,6 +72,8 @@ export interface WizardFormValues {
   /** Empty = follow the app icon choice (default). */
   readonly trayIconPath: string;
   readonly pm: "npm" | "pnpm" | "bun";
+  /** Wipe an existing non-empty target directory before materializing. */
+  readonly force: boolean;
   /** Advanced: render the command PTY in the generated app (default false). */
   readonly showStartupTerminal: boolean;
   /** Advanced: address-bar service tabs in the generated app (default false). */
@@ -82,6 +84,8 @@ export interface WizardFormValues {
 export interface WizardFormDefaults {
   readonly appId: string;
   readonly appName: string;
+  /** Resolved project directory the app will be generated into. */
+  readonly targetDir: string;
 }
 
 export type WizardEvent =
@@ -106,6 +110,7 @@ export type WizardEvent =
       readonly type: "form";
       readonly values: WizardFormValues;
       readonly defaults: WizardFormDefaults;
+      readonly targetDirExists: boolean;
     }
   | { readonly type: "materialize-log"; readonly message: string }
   | { readonly type: "materialize-step"; readonly step: string; readonly message: string }
@@ -118,10 +123,16 @@ export type WizardEvent =
 
 export interface WizardOptions {
   readonly cwd: string;
-  /** Command-execution default working directory (default: USER_HOME). */
+  /**
+   * USER_HOME anchor: the command-execution default cwd AND the root of the
+   * default generated-project location (~/.opentray/create/<name>).
+   */
   readonly homeDir?: string;
+  /** Explicit project directory (CLI positional); default: the create root. */
+  readonly targetDir?: string | undefined;
   readonly skipInstall: boolean;
-  readonly force: boolean;
+  /** Seed the 强制覆盖 toggle (CLI --force); the form owns the live value. */
+  readonly force?: boolean | undefined;
   readonly packageManager?: "npm" | "pnpm" | "bun";
   readonly dependencyRange: string;
   readonly emit: (event: WizardEvent) => void;
@@ -176,6 +187,7 @@ export interface WizardSession {
 }
 
 interface FieldTouched {
+  force: boolean;
   appId: boolean;
   appName: boolean;
   iconPath: boolean;
@@ -211,14 +223,16 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let resolvedVector: LaunchVector | undefined;
   let frozenForm: WizardFormValues | undefined;
   let resolvedServicePort: number | undefined;
+  let resolvedTargetDir: string | undefined;
   let runAlive = false;
   let commandOptions: WizardCommandOptions = { ...DEFAULT_COMMAND_OPTIONS };
-  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false };
+  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, trayIconPath: false, pm: false, force: false, showStartupTerminal: false, showAddressBar: false };
   let form: WizardFormValues = {
     appId: "",
     appName: "",
     iconPath: "",
     trayIconPath: "",
+    force: options.force === true,
     showStartupTerminal: false,
     showAddressBar: false,
     pm:
@@ -262,11 +276,40 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     return {
       appId: deriveDefaultAppId(currentTokens),
       appName: scrapedTitle ?? deriveDefaultAppName(currentTokens),
+      // Projects land under the OpenTray home by default (stable, idempotent
+      // per app, never pollutes the invocation directory); the CLI positional
+      // provides an explicit override.
+      targetDir:
+        options.targetDir ??
+        join(homeDir, ".opentray", "create", toProjectDirectoryName(effectiveAppId)),
     };
   };
 
   const publishForm = (): void => {
-    emit({ type: "form", values: form, defaults: currentDefaults() });
+    emit({ type: "form", values: form, defaults: currentDefaults(), targetDirExists });
+  };
+
+  /** Track whether the resolved target directory is already occupied so the
+   *  UI can warn and offer the force toggle. */
+  let targetDirExists = false;
+  let targetDirProbe = 0;
+  const refreshTargetDirExists = (): void => {
+    const probe = ++targetDirProbe;
+    const target = currentDefaults().targetDir;
+    void (async () => {
+      let occupied = false;
+      try {
+        const info = await stat(target);
+        occupied = info.isDirectory();
+      } catch {
+        occupied = false;
+      }
+      if (probe !== targetDirProbe) return; // a newer probe owns the state
+      if (occupied !== targetDirExists) {
+        targetDirExists = occupied;
+        publishForm();
+      }
+    })();
   };
 
   const scrapeOnce = async (): Promise<void> => {
@@ -466,7 +509,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       services = [];
       selectedPort = undefined;
       currentTokens = tokens ?? tokenized!.tokens;
-      currentIconPath = undefined;
+      refreshTargetDirExists();
+      currentIconPath = undefined
       currentTrayIconPath = undefined;
       iconCandidates = [];
       touched.appId = false;
@@ -476,6 +520,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         appId: "",
         appName: "",
         iconPath: "",
+        ...(touched.force ? { force: form.force } : { force: options.force === true }),
         ...(touched.trayIconPath ? { trayIconPath: form.trayIconPath } : { trayIconPath: "" }),
         ...(touched.showStartupTerminal ? { showStartupTerminal: form.showStartupTerminal } : { showStartupTerminal: false }),
         ...(touched.showAddressBar ? { showAddressBar: form.showAddressBar } : { showAddressBar: false }),
@@ -592,6 +637,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         currentTokens = command;
         currentCommand = command.join(" ");
         emit({ type: "command-display", command: currentCommand });
+        refreshTargetDirExists();
         publishForm();
         return;
       }
@@ -602,6 +648,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       currentTokens = tokenized.tokens;
       currentCommand = command;
       emit({ type: "command-display", command });
+      refreshTargetDirExists();
       publishForm();
     },
 
@@ -678,6 +725,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       // generated app resolves the real address by scanning its own command
       // tree. A manual port input must not exist.
       resolvedServicePort = selectedPort ?? 0;
+      // Freeze the SAME default the UI displayed (explicit override wins).
+      resolvedTargetDir = currentDefaults().targetDir;
       // Empty fields resolve to their placeholder defaults.
       const defaults = currentDefaults();
       let resolvedForm: WizardFormValues = {
@@ -748,7 +797,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               service: { port: resolvedServicePort ?? 0 },
               window: { width: 1_200, height: 800 },
             },
-            targetDir: join(options.cwd, toProjectDirectoryName(frozen.appId)),
+            targetDir: resolvedTargetDir ?? currentDefaults().targetDir,
             dependencyRange: options.dependencyRange,
             iconSourcePath: currentIconPath,
             ...(currentTrayIconPath === undefined
@@ -760,7 +809,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             },
             packageManager: frozen.pm,
             skipInstall: options.skipInstall,
-            force: options.force,
+            force: frozen.force,
           },
           {
             log: (event) => {
@@ -782,7 +831,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           pinHint: pinningHint(),
         });
       } catch (error) {
-        setState("failed", error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        const occupied = message.includes("target directory is not empty");
+        setState(
+          "failed",
+          occupied
+            ? `${message}；可在「高级选项」中开启 强制覆盖 后重试`
+            : message,
+        );
       }
     },
 
@@ -804,5 +860,5 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
 /** Exposed for tests: the touched-field bookkeeping semantics. */
 export const createFieldTouchedTracker = (): { touched: FieldTouched } => ({
-  touched: { appId: false, appName: false, iconPath: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false },
+  touched: { force: false, appId: false, appName: false, iconPath: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false },
 });

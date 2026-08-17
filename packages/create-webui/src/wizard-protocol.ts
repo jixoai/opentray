@@ -13,6 +13,8 @@ export interface WizardFormValues {
   iconPath: string;
   trayIconPath: string;
   pm: "npm" | "pnpm" | "bun";
+  /** Wipe an existing non-empty target directory before materializing. */
+  force: boolean;
   showStartupTerminal: boolean;
   showAddressBar: boolean;
 }
@@ -33,6 +35,8 @@ export interface IconCandidate {
 export interface WizardFormDefaults {
   appId: string;
   appName: string;
+  /** Resolved project directory the app will be generated into. */
+  targetDir: string;
 }
 
 export interface WizardEnvEntry {
@@ -80,7 +84,12 @@ export type WizardEvent =
     }
   | { type: "scrape"; port: number; title?: string; hasIcon: boolean }
   | { type: "icons"; port: number; icons: IconCandidate[] }
-  | { type: "form"; values: WizardFormValues; defaults: WizardFormDefaults }
+  | {
+      type: "form";
+      values: WizardFormValues;
+      defaults: WizardFormDefaults;
+      targetDirExists: boolean;
+    }
   | { type: "materialize-log"; message: string }
   | { type: "materialize-step"; step: string; message: string }
   | {

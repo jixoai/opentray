@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { readFile } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { readFile, mkdir, writeFile, stat } from "node:fs/promises";
 import { createWizardSession, type WizardEvent, type WizardOptions } from "./wizard";
 import type { CommandRun, CommandRunEvent, CommandRunOptions } from "./command-run";
 import type { DiscoveredService } from "./port-scan";
@@ -11,6 +14,7 @@ const neverResolve = (): Promise<{ code: number | null }> =>
   new Promise<{ code: number | null }>(() => {});
 
 interface Harness {
+  homeDir(): string;
   lastRunOptions(): CommandRunOptions | undefined;
   events: WizardEvent[];
   session: ReturnType<typeof createWizardSession>;
@@ -31,6 +35,13 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
   let listeners = new Set<number>();
   let verified: readonly number[] = [];
   let scrapeState: MutableScrapeState = {};
+  // Generated projects default into ~/.opentray/create — tests must anchor
+  // that root in a throwaway home so they never touch the real one.
+  const homeDir = overrides.homeDir ?? mkdtempSync(join(tmpdir(), "wizard-home-"));
+  // exactOptionalPropertyTypes: never spread explicit undefined into options.
+  const overridesDefined = Object.fromEntries(
+    Object.entries(overrides).filter((entry) => entry[1] !== undefined),
+  ) as Partial<WizardOptions>;
 
   let runOnEvent: ((event: CommandRunEvent) => void) | undefined;
   let lastRunOptions: CommandRunOptions | undefined;
@@ -52,7 +63,6 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
   const session = createWizardSession({
     cwd: "/tmp/wizard-cwd",
     skipInstall: true,
-    force: true,
     dependencyRange: "^0.0.0-test",
     emit: (event) => events.push(event),
     spawnRun: fakeRun,
@@ -60,6 +70,7 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
     verifyHttp: async (port) => verified.includes(port),
     listPortOwners: async () =>
       new Map([...listeners].map((port) => [port, new Set<number>([4321])])),
+    homeDir,
     pollIntervalMs: 1,
     scrapeIntervalMs: 1,
     scrape: async (port): Promise<ScrapeResult> => ({
@@ -87,12 +98,13 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
       args: tokens.slice(1),
       cwd,
     }),
-    ...overrides,
+    ...overridesDefined,
   });
 
   return {
     events,
     session,
+    homeDir: () => homeDir,
     lastRunOptions: () => lastRunOptions,
     setListeners(next) {
       listeners = new Set(next);
@@ -360,6 +372,7 @@ describe("wizard session", () => {
     let materializePort = -1;
     const session = createWizardSession({
       cwd: "/tmp/wizard-cwd",
+      homeDir: mkdtempSync(join(tmpdir(), "wizard-home-")),
       skipInstall: true,
       force: true,
       dependencyRange: "^0.0.0-test",
@@ -490,6 +503,74 @@ describe("wizard session", () => {
     expect(harness.lastRunOptions()?.cwd).toBe("/var/abs");
   });
 
+  it("defaults the project directory into the OpenTray create root", async () => {
+    const harness = createHarness();
+    harness.session.prime("npx homed-tool serve");
+    const defaults = lastFormDefaults(harness.events);
+    // Stable per-app home under ~/.opentray/create — never the invocation dir.
+    expect(defaults?.targetDir).toBe(
+      join(harness.homeDir(), ".opentray", "create", "serve-homed-tool-npx"),
+    );
+  });
+
+  it("force wipes an occupied target directory before regenerating", async () => {
+    const harness = createHarness({
+      materializeContext: {
+        generateIcon: (async () => ({
+          schemaVersion: 1,
+          sourceSha256: "",
+          sourceImplementationSha256: null,
+          implementationSha256: "",
+          recipeVersion: "",
+          sharpVersion: "",
+          iconEncoderVersion: "",
+          figmaSquircleVersion: "",
+          outputPath: "",
+          icnsOutputPath: "",
+          icoOutputPath: "",
+          linuxPngOutputPaths: [],
+          manifestOutputPath: "",
+          appIcon: [],
+        })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
+        firstLaunchEntry: async () => ({ pid: 999, ready: Promise.resolve() }),
+        waitMs: async () => {},
+        runInstall: async () => {},
+        platform: "linux",
+      },
+    });
+    // Simulate a stale previous generation BEFORE priming, so the existence
+    // probe (fired by prime) observes the occupied directory.
+    const target = join(harness.homeDir(), ".opentray", "create", "serve-wipe-tool-npx");
+    await mkdir(join(target, "node_modules", "stale"), { recursive: true });
+    await writeFile(join(target, "node_modules", "stale", "junk.txt"), "old", "utf8");
+    harness.session.prime("npx wipe-tool serve");
+    expect(lastFormDefaults(harness.events)?.targetDir).toBe(target);
+    // The form event flags the occupied directory for the UI warning.
+    await waitFor(() =>
+      harness.events.some((event) => event.type === "form" && event.targetDirExists === true),
+    );
+    // Without force, confirm+create fails with guidance toward the toggle.
+    harness.session.confirm();
+    await harness.session.create();
+    expect(harness.session.state).toBe("failed");
+    const failReason = harness.events.find(
+      (event): event is Extract<WizardEvent, { type: "state" }> =>
+        event.type === "state" && event.state === "failed",
+    )?.reason;
+    expect(failReason).toContain("强制覆盖");
+    // With force: the stale tree is wiped and generation succeeds.
+    harness.session.updateForm({ force: true });
+    harness.session.confirm();
+    await harness.session.create();
+    expect(harness.session.state).toBe("success");
+    const staleExists = await stat(join(target as string, "node_modules", "stale", "junk.txt"))
+      .then(
+        () => true,
+        () => false,
+      );
+    expect(staleExists).toBe(false);
+  }, 20_000);
+
   it("keeps the env overlay on the frozen launch vector", async () => {
     const harness = createHarness({
       materializeContext: {
@@ -540,6 +621,7 @@ describe("wizard session", () => {
     let listeners = new Set<number>();
     const session = createWizardSession({
       cwd: "/tmp/wizard-cwd",
+      homeDir: mkdtempSync(join(tmpdir(), "wizard-home-")),
       skipInstall: true,
       force: true,
       dependencyRange: "^0.0.0-test",

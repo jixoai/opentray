@@ -41,6 +41,8 @@ export interface AppConfigCardProps {
   selectedTrayRef: string | undefined;
   uploadedTrayUrl: string | undefined;
   selectedPort: number | undefined;
+  /** The resolved target directory is already occupied. */
+  targetDirExists: boolean;
   onPickIconCandidate(candidate: IconCandidate): void;
   onUploadIcon(file: File): void;
   onClearIcon(): void;
@@ -62,6 +64,7 @@ export function AppConfigCard({
   selectedTrayRef,
   uploadedTrayUrl,
   selectedPort,
+  targetDirExists,
   onPickIconCandidate,
   onUploadIcon,
   onClearIcon,
@@ -168,6 +171,39 @@ export function AppConfigCard({
                   <SelectItem value="bun">bun</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="rounded-lg border border-border p-3">
+              <Label>生成位置</Label>
+              <p className="mt-1 font-mono text-[11px] break-all text-muted-foreground">
+                {defaults.targetDir || "~/.opentray/create/<应用名>"}
+              </p>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                生成的项目默认落在 OpenTray 主目录下，同一命令重复创建会落到同一位置；
+                也可在启动向导时通过位置参数指定其他目录。
+              </p>
+              {targetDirExists ? (
+                <p className="mt-2 text-[11px] font-medium text-amber-400">
+                  目标目录已存在且非空——继续生成会失败，或开启下方强制覆盖。
+                </p>
+              ) : null}
+              <div className="mt-3 flex items-start gap-3">
+                <Switch
+                  id="force-overwrite"
+                  checked={values.force}
+                  disabled={frozen}
+                  onCheckedChange={(checked) => onPatch({ force: checked })}
+                />
+                <div>
+                  <Label htmlFor="force-overwrite" className="text-foreground">
+                    强制覆盖已存在的目录
+                  </Label>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    开启后将清空目标目录内的现有内容并重新生成（等同
+                    --force）。请确认目录中没有你需要的文件。
+                  </p>
+                </div>
+              </div>
             </div>
           </AccordionContent>
         </AccordionItem>

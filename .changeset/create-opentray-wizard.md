@@ -32,3 +32,14 @@ listening marks its window title `(detached)` and recovers when it returns.
 Generated entries always launch with Node (a native PTY requires it even when
 the wizard itself runs under Bun), and generated apps ship the prebuilt shell
 UI plus `@lydell/node-pty` only when the terminal window is enabled.
+
+Round 11: generated projects default to `~/.opentray/create/<name>/`
+(stable per app, never pollutes the invocation directory; CLI positional
+overrides), the advanced panel shows the resolved location and warns when
+it is already occupied, and a 强制覆盖 toggle (plus `--force`) now CLEARS
+the existing tree before regenerating instead of layering over stale
+files. The list pane reorganizes into two cards (command + 命令选项;
+应用配置 with a merged 高级选项), the page animates list→detail through
+grid-template interpolation, scrollbars are thin with transparent tracks
+and stable gutters, the tabs panel fills the pane with its status bar at
+panel level, and icon previews sit on transparency checkerboards.

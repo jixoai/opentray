@@ -127,12 +127,11 @@ export const main = async (argv: readonly string[]): Promise<number> => {
   ensureLoopbackNoProxy();
 
   // pnpm/npm run scripts execute with the package directory as cwd; INIT_CWD
-  // preserves the directory the user actually invoked the command from, which
-  // is the intuitive default for where the generated project should land.
+  // preserves the directory the user actually invoked the command from.
+  // The positional argument selects the project directory explicitly; without
+  // it, projects default to ~/.opentray/create/<name> (stable per app).
   const invocationDir = process.env.INIT_CWD || process.cwd();
-  const cwd = resolve(
-    options.targetDir === undefined ? invocationDir : resolve(invocationDir, options.targetDir),
-  );
+  const cwd = invocationDir;
   const dependencyRange = await readDependencyRange();
 
   const server = await createWizardServer(
@@ -141,6 +140,9 @@ export const main = async (argv: readonly string[]): Promise<number> => {
         cwd,
         skipInstall: options.skipInstall,
         force: options.force,
+        ...(options.targetDir === undefined
+          ? {}
+          : { targetDir: resolve(invocationDir, options.targetDir) }),
         ...(options.pm === undefined ? {} : { packageManager: options.pm }),
         dependencyRange,
         emit,

@@ -59,7 +59,11 @@ Useful flags: `--pm npm|pnpm|bun`, `--skip-install`, `--force`,
 
 ## What gets generated
 
-A self-contained project (public packages only):
+A self-contained project (public packages only). It lands in
+`~/.opentray/create/<name>/` by default — stable per app, never polluting the
+directory you launched the wizard from; a positional argument places it
+explicitly. If the target directory already exists, 高级选项 shows a warning
+and a 强制覆盖 switch that clears and regenerates it (`--force`).
 
 - `opentray.app.json` — frozen identity + the resolved launch vector
   (absolute executable; shell-free; no environment map persisted).

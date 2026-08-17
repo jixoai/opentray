@@ -33,11 +33,12 @@ const EMPTY_VALUES: WizardFormValues = {
   appName: "",
   iconPath: "",
   trayIconPath: "",
+  force: false,
   pm: "npm",
   showStartupTerminal: false,
   showAddressBar: false,
 };
-const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "" };
+const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "" };
 
 export function App(): React.JSX.Element {
   const [command, setCommand] = React.useState("");
@@ -46,6 +47,7 @@ export function App(): React.JSX.Element {
     DEFAULT_COMMAND_OPTIONS,
   );
   const [defaultCwd, setDefaultCwd] = React.useState("");
+  const [targetDirExists, setTargetDirExists] = React.useState(false);
   const [panelOpen, setPanelOpen] = React.useState(false);
   const [runAlive, setRunAlive] = React.useState(false);
   const [wizardState, setWizardState] = React.useState<WizardState>("idle");
@@ -254,6 +256,7 @@ const selectedIconRefStale = (
         case "form":
           setValues(payload.values);
           setDefaults(payload.defaults);
+          setTargetDirExists(payload.targetDirExists);
           break;
         case "materialize-step":
           setCurrentStep(payload.step);
@@ -481,6 +484,7 @@ const selectedIconRefStale = (
         selectedTrayRef={selectedTrayRef}
         uploadedTrayUrl={uploadedTrayUrl}
         selectedPort={selectedPort}
+        targetDirExists={targetDirExists}
         onPickIconCandidate={(candidate) => {
           if (iconCandidatesPort === undefined) return;
           setSelectedIconRef(`${iconCandidatesPort}:${candidate.index}`);

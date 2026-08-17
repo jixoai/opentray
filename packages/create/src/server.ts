@@ -418,7 +418,7 @@ const handleApi = async (
       if (body.pm === "npm" || body.pm === "pnpm" || body.pm === "bun") {
         patch.pm = body.pm;
       }
-      for (const key of ["showStartupTerminal", "showAddressBar"] as const) {
+      for (const key of ["showStartupTerminal", "showAddressBar", "force"] as const) {
         const value = body[key];
         if (typeof value === "boolean") {
           patch[key] = value;

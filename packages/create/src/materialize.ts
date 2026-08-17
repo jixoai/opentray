@@ -7,7 +7,7 @@
 //    generated entry's ready marker plus the stable Darwin bundle.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { readdir, stat, readFile, writeFile } from "node:fs/promises";
+import { readdir, stat, readFile, writeFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -146,10 +146,16 @@ export const materialize = async (
 
   const targetDir = resolve(input.targetDir);
   step("scaffold", `checking target directory ${targetDir}`);
-  if (input.force !== true && (await isDirectoryOccupied(targetDir))) {
-    throw new Error(
-      `target directory is not empty: ${targetDir} (pass --force or choose another directory)`,
-    );
+  if (await isDirectoryOccupied(targetDir)) {
+    if (input.force !== true) {
+      throw new Error(
+        `target directory is not empty: ${targetDir} (pass --force or choose another directory)`,
+      );
+    }
+    // Force is a TRUE overwrite: the generated project is fully wizard-owned
+    // and regenerable, so clear the stale tree instead of layering over it.
+    step("scaffold", "force: clearing existing target directory");
+    await rm(targetDir, { recursive: true, force: true });
   }
 
   step("scaffold", "writing project files");
