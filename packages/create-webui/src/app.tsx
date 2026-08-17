@@ -4,6 +4,7 @@ import * as React from "react";
 import { AppConfigCard } from "@/components/app-config-card";
 import { CommandCard } from "@/components/command-card";
 import { CreateDialog } from "@/components/create-dialog";
+import { useDebouncedCallback } from "@/use-debounced-callback";
 import { TabsPanel, type IframeTab, type TerminalStatusBarState } from "@/components/tabs-panel";
 import {
   createGhosttyTerminal,
@@ -184,6 +185,33 @@ const selectedIconRefStale = (
     // iconScale deliberately excluded: scale changes recompose through the
     // explicit handler without re-running analysis.
   }, [values.iconPath, defaults.iconPath]);
+
+  /**
+   * Composition is heavyweight (form patch + real 1024² sharp render): the
+   * continuous scale control fires it on commit, not per input event, with
+   * the latest parameters only. Background switches are discrete taps but
+   * share the pipeline for consistency.
+   */
+  const onIconScaleChangeDebounced = useDebouncedCallback((scale: number) => {
+    void api("/api/form", { iconScale: scale });
+    const foreground = effectiveIconForeground();
+    void recomposeIcon(foreground, iconBackground, scale);
+  }, 250);
+
+  const onIconBackgroundChange = useDebouncedCallback((background: IconBackground) => {
+    iconBackgroundManualRef.current = true;
+    void api("/api/form", { iconBackground: background });
+    const foreground = effectiveIconForeground();
+    void recomposeIcon(foreground, background, iconScale);
+  }, 120);
+
+  /** Effective foreground for composition: pick/upload wins, else scraped default. */
+  const effectiveIconForeground = (): string | undefined =>
+    values.iconPath.trim().length > 0
+      ? values.iconPath.trim()
+      : defaults.iconPath.trim().length > 0
+        ? defaults.iconPath.trim()
+        : undefined;
 
   /** Re-analyze + re-compose whenever the effective foreground changes. */
   const recomposeIcon = React.useCallback(
@@ -602,29 +630,8 @@ const selectedIconRefStale = (
         iconComposeError={iconComposeError}
         iconBackground={iconBackground}
         iconScale={iconScale}
-        onIconBackgroundChange={(background) => {
-          iconBackgroundManualRef.current = true;
-          setIconBackground(background);
-          void api("/api/form", { iconBackground: background });
-          const foreground =
-            values.iconPath.trim().length > 0
-              ? values.iconPath.trim()
-              : defaults.iconPath.trim().length > 0
-                ? defaults.iconPath.trim()
-                : undefined;
-          void recomposeIcon(foreground, background, iconScale);
-        }}
-        onIconScaleChange={(scale) => {
-          setIconScale(scale);
-          void api("/api/form", { iconScale: scale });
-          const foreground =
-            values.iconPath.trim().length > 0
-              ? values.iconPath.trim()
-              : defaults.iconPath.trim().length > 0
-                ? defaults.iconPath.trim()
-                : undefined;
-          void recomposeIcon(foreground, iconBackground, scale);
-        }}
+        onIconBackgroundChange={onIconBackgroundChange}
+        onIconScaleChange={onIconScaleChangeDebounced}
         selectedTrayRef={selectedTrayRef}
         uploadedTrayUrl={uploadedTrayUrl}
         selectedPort={selectedPort}

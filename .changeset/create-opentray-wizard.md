@@ -61,3 +61,8 @@ preserved on every background (the silhouette-tint pass painted white icons
 black), and every composition — including the transparent background — is
 clipped to the bundled squircle alpha via a dest-in mask so macOS gets
 rounded corners.
+
+Composition controls are debounced: the scale slider (250ms) and background
+toggles (120ms) fire the form patch + recompose pipeline once on commit with
+the latest parameters, instead of per input event — a full slider sweep
+previously issued a /api/form and a real 1024² sharp render per step.
