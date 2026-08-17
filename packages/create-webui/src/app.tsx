@@ -439,19 +439,28 @@ const selectedIconRefStale = (
             }}
           />
         )}
+        {/* Toggle: clicking again hides the advanced panel */}
         <Button
           variant="outline"
           size="icon"
           aria-label="命令高级选项"
           title="命令高级选项"
+          aria-pressed={advancedOpen}
+          data-state={advancedOpen ? "on" : "off"}
           disabled={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
           onClick={() => {
-            setAdvancedOpen(true);
-            // Let the panel mount, then bring it into view.
-            window.setTimeout(() => {
-              advancedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 50);
+            setAdvancedOpen((previous) => {
+              const next = !previous;
+              if (next) {
+                // Let the panel mount, then bring it into view.
+                window.setTimeout(() => {
+                  advancedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, 50);
+              }
+              return next;
+            });
           }}
+          className={advancedOpen ? "border-primary text-primary" : undefined}
         >
           <Settings2 />
         </Button>
