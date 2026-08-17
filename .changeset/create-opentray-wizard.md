@@ -43,3 +43,12 @@ files. The list pane reorganizes into two cards (command + 命令选项;
 grid-template interpolation, scrollbars are thin with transparent tracks
 and stable gutters, the tabs panel fills the pane with its status bar at
 panel level, and icon previews sit on transparency checkerboards.
+
+Round 12: icon composition. The wizard analyzes the chosen foreground
+(alpha-weighted luminance + opaque coverage) and composites it over one of
+three backgrounds — light art → black, dark art → white, fully-opaque art →
+transparent — with live preview, an auto/manual toggle, and a 50–95%
+foreground scale control. The bundled squircle-masked backgrounds round the
+composite's corners; macOS ICNS encodes from the best-practice 824-in-1024
+variant while Windows/Linux keep the full 1024. The tray icon stays on the
+raw source (never the composed image).

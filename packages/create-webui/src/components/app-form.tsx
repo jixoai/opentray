@@ -11,8 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
+  composedIconUrl,
   iconDataUrl,
+  type IconAnalysis,
+  type IconBackground,
   type IconCandidate,
+  type IconComposition,
   type WizardFormDefaults,
   type WizardFormValues,
 } from "@/wizard-protocol";
@@ -29,6 +33,13 @@ interface AppFormProps {
   uploadedIconUrl: string | undefined;
   /** Selection reference: `port:index` when a candidate is picked. */
   selectedIconRef: string | undefined;
+  /** Icon composition (owner round-12): analysis, preview, background, scale. */
+  iconAnalysis: IconAnalysis | undefined;
+  iconComposition: IconComposition | undefined;
+  iconBackground: IconBackground;
+  iconScale: number;
+  onIconBackgroundChange(background: IconBackground): void;
+  onIconScaleChange(scale: number): void;
   onPickIconCandidate(candidate: IconCandidate): void;
   onUploadIcon(file: File): void;
   onClearIcon(): void;
@@ -43,6 +54,12 @@ export function AppForm({
   iconCandidatesPort,
   uploadedIconUrl,
   selectedIconRef,
+  iconAnalysis,
+  iconComposition,
+  iconBackground,
+  iconScale,
+  onIconBackgroundChange,
+  onIconScaleChange,
   onPickIconCandidate,
   onUploadIcon,
   onClearIcon,
@@ -155,16 +172,83 @@ export function AppForm({
             </button>
           ) : null}
         </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          {uploadedIconUrl !== undefined
-            ? "已上传本地图片作为图标"
-            : selectedIconRef !== undefined
-              ? "已选择候选图标"
-              : iconCandidates.length > 0
-                ? "未选择时使用最清晰的候选图标（第一个）"
-                : "未选择时使用首字母图标"}
-        </p>
+        {/* Icon composition (owner round-12): background + scale + preview. */}
+        <div className="mt-3 rounded-lg border border-border p-3">
+          <div className="flex items-start gap-3">
+            <div
+              className="icon-checker size-14 shrink-0 overflow-hidden rounded-[10px]"
+              aria-label="图标合成预览"
+            >
+              {iconComposition !== undefined ? (
+                <img
+                  src={composedIconUrl(iconComposition.key)}
+                  alt="图标合成预览"
+                  className="size-full object-contain"
+                />
+              ) : (
+                <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">
+                  预览
+                </span>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <Label>图标背景</Label>
+              <div className="mt-1.5 flex gap-1.5">
+                {(["black", "white", "transparent"] as const).map((bg) => (
+                  <button
+                    key={bg}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onIconBackgroundChange(bg)}
+                    className={cn(
+                      "flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] transition-colors",
+                      iconBackground === bg
+                        ? "border-foreground bg-secondary text-secondary-foreground"
+                        : "border-border text-muted-foreground hover:border-foreground/40",
+                    )}
+                  >
+                    {bg === "black" ? "黑色" : bg === "white" ? "白色" : "透明"}
+                    {iconAnalysis !== undefined && iconAnalysis.suggested === bg ? (
+                      <span className="text-[10px] text-muted-foreground/70">自动</span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[11px]">前景缩放</Label>
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {Math.round(iconScale * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={95}
+                  step={5}
+                  value={Math.round(iconScale * 100)}
+                  disabled={disabled}
+                  onChange={(event) => onIconScaleChange(Number(event.target.value) / 100)}
+                  className="mt-1 w-full accent-foreground"
+                  aria-label="前景图标缩放"
+                />
+              </div>
+              {iconAnalysis !== undefined ? (
+                <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                  {iconBackground === "transparent"
+                    ? "透明背景：原始像素直接透出。"
+                    : `已按明暗自动选择${iconAnalysis.suggested === iconBackground ? "" : "（已手动覆盖）"}：${
+                        iconAnalysis.luminance === undefined
+                          ? "无法分析明暗"
+                          : `前景明度 ${iconAnalysis.luminance.toFixed(2)}、覆盖率 ${(iconAnalysis.coverage * 100).toFixed(0)}%`
+                      }。`}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
       </div>
+
       <div>
         <Label htmlFor="appId">App ID</Label>
         <Input

@@ -25,7 +25,10 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type {
+  IconAnalysis,
+  IconBackground,
   IconCandidate,
+  IconComposition,
   WizardFormDefaults,
   WizardFormValues,
 } from "@/wizard-protocol";
@@ -38,6 +41,13 @@ export interface AppConfigCardProps {
   candidatesPort: number | undefined;
   selectedIconRef: string | undefined;
   uploadedIconUrl: string | undefined;
+  /** Icon composition state (owner round-12). */
+  iconAnalysis: IconAnalysis | undefined;
+  iconComposition: IconComposition | undefined;
+  iconBackground: IconBackground;
+  iconScale: number;
+  onIconBackgroundChange(background: IconBackground): void;
+  onIconScaleChange(scale: number): void;
   selectedTrayRef: string | undefined;
   uploadedTrayUrl: string | undefined;
   selectedPort: number | undefined;
@@ -61,6 +71,12 @@ export function AppConfigCard({
   candidatesPort,
   selectedIconRef,
   uploadedIconUrl,
+  iconAnalysis,
+  iconComposition,
+  iconBackground,
+  iconScale,
+  onIconBackgroundChange,
+  onIconScaleChange,
   selectedTrayRef,
   uploadedTrayUrl,
   selectedPort,
@@ -84,6 +100,12 @@ export function AppConfigCard({
         iconCandidatesPort={candidatesPort}
         uploadedIconUrl={uploadedIconUrl}
         selectedIconRef={selectedIconRef}
+        iconAnalysis={iconAnalysis}
+        iconComposition={iconComposition}
+        iconBackground={iconBackground}
+        iconScale={iconScale}
+        onIconBackgroundChange={onIconBackgroundChange}
+        onIconScaleChange={onIconScaleChange}
         onPickIconCandidate={onPickIconCandidate}
         onUploadIcon={onUploadIcon}
         onClearIcon={onClearIcon}

@@ -61,6 +61,15 @@ export interface OpenTrayAppIconOptions {
   readonly implementationPath?: string;
   /** Advanced: override the source file whose bytes identify the generator implementation. */
   readonly implementationSourcePath?: string;
+  /**
+   * Pre-composed source: skip glyph re-tiling; pass pixels through verbatim.
+   */
+  readonly composed?: boolean;
+  /**
+   * Separate macOS content source; ICNS encodes from this while ICO/Linux
+   * use sourcePath.
+   */
+  readonly macosSourcePath?: string;
 }
 
 export interface OpenTrayAppIconCacheMetadata {
@@ -93,6 +102,17 @@ export interface OpenTrayAppIconManifest {
 export interface OpenTrayAppIconPluginOptions {
   /** Brand source image. This is intentionally explicit so the plugin is app-agnostic. */
   readonly sourcePath: string;
+  /**
+   * Pre-composed source: the image already carries its background and
+   * squircle mask, so glyph re-tiling (trim → symbol → white tile) is
+   * skipped and the pixels pass through verbatim.
+   */
+  readonly composed?: boolean;
+  /**
+   * Separate macOS content source (e.g. the best-practice 824-in-1024
+   * variant): ICNS encodes from this while ICO/Linux use sourcePath.
+   */
+  readonly macosSourcePath?: string;
   readonly outputPath?: string;
   readonly icnsOutputPath?: string;
   readonly icoOutputPath?: string;
@@ -140,13 +160,17 @@ export async function generateOpenTrayAppIcon(
 
   if (await cacheMatches(cachePath, metadata)) return metadata;
 
-  const rendered = await renderAppIcon(options.sourcePath);
+  const rendered = await renderAppIcon(options.sourcePath, options.composed === true);
+  const macosRendered =
+    options.macosSourcePath === undefined || options.macosSourcePath === options.sourcePath
+      ? rendered
+      : await renderAppIcon(options.macosSourcePath, options.composed === true);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.mkdir(path.dirname(icnsOutputPath), { recursive: true });
   await fs.mkdir(path.dirname(icoOutputPath), { recursive: true });
   await fs.mkdir(path.dirname(cachePath), { recursive: true });
   await fs.writeFile(outputPath, rendered);
-  await encodeNativeIcons(rendered, icnsOutputPath, icoOutputPath);
+  await encodeNativeIcons(rendered, macosRendered, icnsOutputPath, icoOutputPath);
   await writeLinuxIcons(rendered, metadata.linuxPngOutputPaths);
   await writeManifest(metadata);
   await fs.writeFile(
@@ -260,7 +284,16 @@ async function createCacheMetadata(options: {
   };
 }
 
-async function renderAppIcon(sourcePath: string): Promise<Buffer> {
+async function renderAppIcon(sourcePath: string, composed = false): Promise<Buffer> {
+  if (composed) {
+    // Pre-composed art: normalize to the 1024 canvas and pass through —
+    // the background and squircle mask are already baked in.
+    return sharp(sourcePath, { failOn: "none" })
+      .resize(ICON_SIZE, ICON_SIZE, { fit: "contain", kernel: sharp.kernel.lanczos3 })
+      .withMetadata({ density: APP_ICON_DENSITY })
+      .png({ compressionLevel: 9 })
+      .toBuffer();
+  }
   const symbol = await sharp(sourcePath)
     .trim({ threshold: 0 })
     .resize(SYMBOL_SIZE, SYMBOL_SIZE, {
@@ -300,32 +333,41 @@ async function renderAppIcon(sourcePath: string): Promise<Buffer> {
 
 async function encodeNativeIcons(
   rendered: Buffer,
+  macosRendered: Buffer,
   icnsOutputPath: string,
   icoOutputPath: string
 ): Promise<void> {
-  const pngBySize = new Map<number, Buffer>();
-  const pngAt = async (size: number): Promise<Buffer> => {
-    const cached = pngBySize.get(size);
-    if (cached !== undefined) return cached;
-    const png = await sharp(rendered)
-      .resize(size, size, { fit: "contain" })
-      .withMetadata({ density: APP_ICON_DENSITY })
-      .png({ compressionLevel: 9 })
-      .toBuffer();
-    pngBySize.set(size, png);
-    return png;
+  const cacheFor = (source: Buffer): {
+    pngAt(size: number): Promise<Buffer>;
+  } => {
+    const bySize = new Map<number, Buffer>();
+    return {
+      async pngAt(size: number): Promise<Buffer> {
+        const cached = bySize.get(size);
+        if (cached !== undefined) return cached;
+        const png = await sharp(source)
+          .resize(size, size, { fit: "contain" })
+          .withMetadata({ density: APP_ICON_DENSITY })
+          .png({ compressionLevel: 9 })
+          .toBuffer();
+        bySize.set(size, png);
+        return png;
+      },
+    };
   };
+  const windows = cacheFor(rendered);
+  const macos = cacheFor(macosRendered);
 
   const icns = new IconIcns();
   icns.toc = true;
   for (const { tag, size } of ICNS_REPRESENTATIONS) {
-    await icns.addFromPng(await pngAt(size), [tag], false);
+    await icns.addFromPng(await macos.pngAt(size), [tag], false);
   }
   await fs.writeFile(icnsOutputPath, icns.encode());
 
   const ico = new IconIco();
   for (const size of ICO_SIZES) {
-    await ico.addFromPng(await pngAt(size), null, false);
+    await ico.addFromPng(await windows.pngAt(size), null, false);
   }
   await fs.writeFile(icoOutputPath, ico.encode());
 }

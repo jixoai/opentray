@@ -59,7 +59,11 @@ Useful flags: `--pm npm|pnpm|bun`, `--skip-install`, `--force`,
 
 ## What gets generated
 
-A self-contained project (public packages only). It lands in
+A self-contained project (public packages only). The wizard composes the
+app icon: the chosen foreground is analyzed for luminance/coverage and placed
+over a black, white, or transparent background (auto-selected; manually
+overridable with a foreground scale control). macOS ICNS encodes from the
+824-in-1024 best-practice variant; Windows/Linux use the full 1024. It lands in
 `~/.opentray/create/<name>/` by default — stable per app, never polluting the
 directory you launched the wizard from; a positional argument places it
 explicitly. If the target directory already exists, 高级选项 shows a warning

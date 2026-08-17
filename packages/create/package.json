@@ -19,12 +19,14 @@
     "create-opentray": "./dist/bin.mjs"
   },
   "files": [
+    "README.md",
+    "assets/",
     "dist",
-    "README.md"
+    "dist/"
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "pnpm --filter @opentray/create-webui build && tsdown src/index.ts src/bin.ts --format esm --dts && node scripts/copy-webui.mjs",
+    "build": "pnpm --filter @opentray/create-webui build && tsdown src/index.ts src/bin.ts --format esm --dts && node scripts/copy-webui.mjs && node scripts/copy-assets.mjs",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },

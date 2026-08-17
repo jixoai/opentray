@@ -19,7 +19,10 @@ import {
   iconDataUrl,
   openEventStream,
   type DiscoveredService,
+  type IconAnalysis,
+  type IconBackground,
   type IconCandidate,
+  type IconComposition,
   type WizardEvent,
   type WizardFormDefaults,
   type WizardFormValues,
@@ -32,6 +35,8 @@ const EMPTY_VALUES: WizardFormValues = {
   appId: "",
   appName: "",
   iconPath: "",
+  iconBackground: "transparent",
+  iconScale: 0.8,
   trayIconPath: "",
   force: false,
   pm: "npm",
@@ -64,6 +69,17 @@ export function App(): React.JSX.Element {
   const [iconCandidates, setIconCandidates] = React.useState<IconCandidate[]>([]);
   const [iconCandidatesPort, setIconCandidatesPort] = React.useState<number | undefined>();
   const [selectedIconRef, setSelectedIconRef] = React.useState<string | undefined>();
+  // Icon composition (owner round-12): foreground analysis + composed preview.
+  const [iconAnalysis, setIconAnalysis] = React.useState<IconAnalysis | undefined>();
+  const [iconComposition, setIconComposition] = React.useState<IconComposition | undefined>();
+  const [iconBackground, setIconBackground] = React.useState<IconBackground>("transparent");
+  const [iconScale, setIconScale] = React.useState<number>(0.8);
+  /** The foreground path the current composition was built from. */
+  const composedForRef = React.useRef<string | undefined>(undefined);
+  /** True once the user manually picked a background for the current foreground. */
+  const iconBackgroundManualRef = React.useRef(false);
+  /** True after the first form event adopted the server composition state. */
+  const formCompositionSyncedRef = React.useRef(false);
   const [uploadedIconUrl, setUploadedIconUrl] = React.useState<string | undefined>();
   const [selectedTrayRef, setSelectedTrayRef] = React.useState<string | undefined>();
   const [uploadedTrayUrl, setUploadedTrayUrl] = React.useState<string | undefined>();
@@ -108,6 +124,80 @@ const selectedIconRefStale = (
 };
 
   // ---- ghostty prewarm: module + WASM load at page load, before any Run ----
+  // Foreground changes: analyze, auto-select the background, then compose.
+  React.useEffect(() => {
+    const foreground = values.iconPath.trim().length > 0 ? values.iconPath.trim() : undefined;
+    if (foreground === undefined || foreground === composedForRef.current) {
+      if (foreground === undefined) {
+        setIconAnalysis(undefined);
+        setIconComposition(undefined);
+        composedForRef.current = undefined;
+      }
+      return;
+    }
+    void (async () => {
+      try {
+        const response = await api("/api/icon-analyze", { path: foreground });
+        if (!response.ok) throw new Error("analyze failed");
+        const analysis = (await response.json()) as IconAnalysis;
+        setIconAnalysis(analysis);
+        // Owner law: light art → black bg, dark art → white bg, fully
+        // opaque art → transparent. A manual pick survives only until the
+        // next foreground change.
+        iconBackgroundManualRef.current = false;
+        setIconBackground(analysis.suggested);
+        // The auto suggestion is part of the frozen form too — sync it so
+        // materialize composes with the same background the preview showed.
+        void api("/api/form", { iconBackground: analysis.suggested });
+        const composeResponse = await api("/api/icon-compose", {
+          foregroundPath: foreground,
+          background: analysis.suggested,
+          scale: iconScale,
+        });
+        if (!composeResponse.ok) throw new Error("compose failed");
+        const composed = (await composeResponse.json()) as IconComposition;
+        setIconComposition(composed);
+        composedForRef.current = foreground;
+      } catch {
+        setIconAnalysis(undefined);
+        setIconComposition(undefined);
+      }
+    })();
+    // iconScale deliberately excluded: scale changes recompose through the
+    // explicit handler without re-running analysis.
+  }, [values.iconPath]);
+
+  /** Re-analyze + re-compose whenever the effective foreground changes. */
+  const recomposeIcon = React.useCallback(
+    async (foregroundPath: string | undefined, background: IconBackground, scale: number) => {
+      if (foregroundPath === undefined) {
+        setIconAnalysis(undefined);
+        setIconComposition(undefined);
+        composedForRef.current = undefined;
+        return;
+      }
+      try {
+        const analysisResponse = await api("/api/icon-analyze", { path: foregroundPath });
+        if (!analysisResponse.ok) throw new Error("analyze failed");
+        const analysis = (await analysisResponse.json()) as IconAnalysis;
+        setIconAnalysis(analysis);
+        const composeResponse = await api("/api/icon-compose", {
+          foregroundPath,
+          background,
+          scale,
+        });
+        if (!composeResponse.ok) throw new Error("compose failed");
+        const composed = (await composeResponse.json()) as IconComposition;
+        setIconComposition(composed);
+        composedForRef.current = foregroundPath;
+      } catch {
+        setIconAnalysis(undefined);
+        setIconComposition(undefined);
+      }
+    },
+    [],
+  );
+
   React.useEffect(() => {
     prewarmGhostty();
   }, []);
@@ -257,6 +347,14 @@ const selectedIconRefStale = (
           setValues(payload.values);
           setDefaults(payload.defaults);
           setTargetDirExists(payload.targetDirExists);
+          // First form event after load: adopt the server-side composition
+          // state (survives reconnects; later events only change it through
+          // the explicit handlers).
+          if (!formCompositionSyncedRef.current) {
+            formCompositionSyncedRef.current = true;
+            setIconBackground(payload.values.iconBackground);
+            setIconScale(payload.values.iconScale);
+          }
           break;
         case "materialize-step":
           setCurrentStep(payload.step);
@@ -481,6 +579,25 @@ const selectedIconRefStale = (
         candidatesPort={iconCandidatesPort}
         selectedIconRef={selectedIconRef}
         uploadedIconUrl={uploadedIconUrl}
+        iconAnalysis={iconAnalysis}
+        iconComposition={iconComposition}
+        iconBackground={iconBackground}
+        iconScale={iconScale}
+        onIconBackgroundChange={(background) => {
+          iconBackgroundManualRef.current = true;
+          setIconBackground(background);
+          void api("/api/form", { iconBackground: background });
+          const foreground =
+            values.iconPath.trim().length > 0 ? values.iconPath.trim() : undefined;
+          void recomposeIcon(foreground, background, iconScale);
+        }}
+        onIconScaleChange={(scale) => {
+          setIconScale(scale);
+          void api("/api/form", { iconScale: scale });
+          const foreground =
+            values.iconPath.trim().length > 0 ? values.iconPath.trim() : undefined;
+          void recomposeIcon(foreground, iconBackground, scale);
+        }}
         selectedTrayRef={selectedTrayRef}
         uploadedTrayUrl={uploadedTrayUrl}
         selectedPort={selectedPort}

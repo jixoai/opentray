@@ -42,6 +42,8 @@ const resolveShellAssetsDir = async (): Promise<string | undefined> => {
   return undefined;
 };
 const shellAssetsDir = await resolveShellAssetsDir();
+import { composeAppIcon } from "./icon-compose";
+import type { IconBackground } from "./icon-compose";
 import { writeGlyphIconTemp } from "./scrape";
 
 const errorMessage = (error: unknown): string =>
@@ -58,6 +60,9 @@ export interface MaterializeInput {
   readonly targetDir: string;
   readonly dependencyRange: string;
   readonly iconSourcePath: string | undefined;
+  /** Icon composition (owner round-12): background + foreground scale. */
+  readonly iconBackground?: IconBackground;
+  readonly iconScale?: number;
   /** Tray icon source; defaults to the app icon source when omitted. */
   readonly trayIconSourcePath?: string;
   /** Generated-app shell options (startup terminal / address bar). */
@@ -190,6 +195,32 @@ export const materialize = async (
     }
   }
 
+  // Owner round-12: compose the app icon (foreground over the chosen
+  // background) BEFORE the catalog so ICNS encodes from the best-practice
+  // 824-in-1024 variant while Windows/Linux use the full 1024 composite.
+  let composedIcon:
+    | { compositePath: string; macOSPath: string; background: IconBackground }
+    | undefined;
+  if (input.iconSourcePath !== undefined) {
+    try {
+      composedIcon = await composeAppIcon({
+        foregroundPath: input.iconSourcePath,
+        background: input.iconBackground ?? "transparent",
+        scale: input.iconScale ?? 0.8,
+        outputDir: join(targetDir, "app-icon"),
+      });
+      context.log({
+        type: "log",
+        message: `composed app icon (${composedIcon.background} background, macOS 824 / windows 1024)`,
+      });
+    } catch (error) {
+      context.log({
+        type: "log",
+        message: `icon composition unavailable (${errorMessage(error)}); using source directly`,
+      });
+    }
+  }
+
   step("scaffold", "writing project files");
   const shell = input.shell;
   const scaffold = await writeScaffold({
@@ -213,6 +244,14 @@ export const materialize = async (
   const generateIntoScaffold = async (sourcePath: string) =>
     generate({
       sourcePath,
+      // Composed art carries its own background + squircle mask: pass
+      // through instead of glyph re-tiling, and give macOS its 824 variant.
+      ...(composedIcon === undefined
+        ? {}
+        : {
+            composed: true,
+            macosSourcePath: composedIcon.macOSPath,
+          }),
       icnsOutputPath: join(scaffold.appIconDir, "app-icon.icns"),
       icoOutputPath: join(scaffold.appIconDir, "app-icon.ico"),
       linuxOutputDirectory: join(scaffold.appIconDir, "linux"),
@@ -220,11 +259,18 @@ export const materialize = async (
       outputPath: join(scaffold.appIconDir, "app-icon.png"),
       cachePath: join(scaffold.appIconDir, ".cache.json"),
     });
+
+  const catalogSource =
+    composedIcon !== undefined && composedIcon.compositePath !== undefined
+      ? composedIcon.compositePath
+      : input.iconSourcePath;
   let iconMetadata;
   try {
-    iconMetadata = await generateIntoScaffold(iconSource);
+    iconMetadata = await generateIntoScaffold(
+      catalogSource !== undefined ? catalogSource : iconSource,
+    );
   } catch (error) {
-    if (iconSource === input.iconSourcePath) {
+    if (catalogSource === undefined || catalogSource === input.iconSourcePath) {
       // A user/scraped icon that cannot be decoded must never fail the whole
       // materialization: fall back to the first-letter glyph.
       context.log({

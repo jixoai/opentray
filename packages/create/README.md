@@ -80,6 +80,15 @@ wizard-owned and regenerable).
   app-shell/            prebuilt shell UI pages (terminal.html, browse.html)
   app-icon/             generated ICNS/ICO/Linux PNGs + app-icon.json manifest
                         + tray-icon.png (always, when any icon source exists)
+
+Icon composition: the wizard analyzes the chosen foreground (alpha-weighted
+luminance + opaque coverage) and composites it over one of three backgrounds
+— light art → black, dark art → white, fully-opaque art → transparent (the
+user's pixels pass through verbatim) — with live preview, auto/manual
+selection, and a 50–95% foreground scale control. The bundled backgrounds
+carry the squircle alpha mask, which rounds the composite's corners on macOS;
+macOS ICNS encodes from the best-practice 824-in-1024 variant while
+Windows/Linux use the full 1024. The tray icon stays on the raw source.
   README.md
 ```
 

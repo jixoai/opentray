@@ -121,7 +121,35 @@ export const createWizardServer = async (
       return;
     }
 
-    // Icon bytes for candidate thumbnails: <img> tags cannot send headers, so
+    // Composed app-icon preview bytes (wizard compose cache), token-scoped.
+  const composedMatch = /^\/api\/icon-composed\/([a-f0-9]+)$/.exec(url.pathname);
+  if (composedMatch !== null) {
+    if (!isAuthorized(request, url, token)) {
+      respond(response, 401, "text/plain", "unauthorized\n");
+      return;
+    }
+    const key = composedMatch[1] as string;
+    const composed = session.iconComposition(key);
+    if (composed === undefined) {
+      respond(response, 404, "text/plain", "not found\n");
+      return;
+    }
+    try {
+      const bytes = await readFile(composed.compositePath);
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "cache-control": "no-store",
+        "content-length": bytes.byteLength,
+      });
+      response.end(bytes);
+      return;
+    } catch {
+      respond(response, 404, "text/plain", "not found\n");
+      return;
+    }
+  }
+
+  // Icon bytes for candidate thumbnails: <img> tags cannot send headers, so
   // auth accepts the same ?token= query the SSE stream uses.
   const iconDataMatch = /^\/api\/icon-data\/(\d+)\/(\d+)$/.exec(url.pathname);
   if (iconDataMatch !== null) {
@@ -418,6 +446,16 @@ const handleApi = async (
       if (body.pm === "npm" || body.pm === "pnpm" || body.pm === "bun") {
         patch.pm = body.pm;
       }
+      if (
+        body.iconBackground === "black" ||
+        body.iconBackground === "white" ||
+        body.iconBackground === "transparent"
+      ) {
+        patch.iconBackground = body.iconBackground;
+      }
+      if (typeof body.iconScale === "number" && body.iconScale >= 0.5 && body.iconScale <= 0.95) {
+        patch.iconScale = body.iconScale;
+      }
       for (const key of ["showStartupTerminal", "showAddressBar", "force"] as const) {
         const value = body[key];
         if (typeof value === "boolean") {
@@ -464,6 +502,46 @@ const handleApi = async (
       }
       session.terminalInput(data);
       respond(response, 200, "application/json", '{"ok":true}\n');
+      return;
+    }
+    case "/api/icon-analyze": {
+      const path = typeof body.path === "string" ? body.path.trim() : "";
+      if (path.length === 0) {
+        respond(response, 400, "application/json", '{"error":"path is required"}\n');
+        return;
+      }
+      try {
+        const analysis = await session.analyzeIconForeground(path);
+        respond(response, 200, "application/json", JSON.stringify(analysis) + "\n");
+      } catch (error) {
+        respond(response, 500, "application/json", JSON.stringify({ error: String(error) }) + "\n");
+      }
+      return;
+    }
+    case "/api/icon-compose": {
+      const foregroundPath = typeof body.foregroundPath === "string" ? body.foregroundPath.trim() : "";
+      if (foregroundPath.length === 0) {
+        respond(response, 400, "application/json", '{"error":"foregroundPath is required"}\n');
+        return;
+      }
+      const background =
+        body.background === "black" || body.background === "white" || body.background === "transparent"
+          ? body.background
+          : undefined;
+      const scale =
+        typeof body.scale === "number" && body.scale >= 0.5 && body.scale <= 0.95
+          ? body.scale
+          : undefined;
+      try {
+        const composed = await session.composeIcon({
+          foregroundPath,
+          ...(background === undefined ? {} : { background }),
+          ...(scale === undefined ? {} : { scale }),
+        });
+        respond(response, 200, "application/json", JSON.stringify(composed) + "\n");
+      } catch (error) {
+        respond(response, 500, "application/json", JSON.stringify({ error: String(error) }) + "\n");
+      }
       return;
     }
     case "/api/tray-icon-select": {

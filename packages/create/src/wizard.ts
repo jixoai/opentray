@@ -23,7 +23,14 @@ import {
   listListeningPorts,
   type DiscoveredService,
 } from "./port-scan";
-import { scrapeService, type ScrapedIcon } from "./scrape";
+import {
+  autoBackground,
+  compositionCacheKey,
+  composeAppIcon,
+  foregroundCoverage,
+  foregroundLuminance,
+} from "./icon-compose";
+import { scrapeService, writeGlyphIconTemp, type ScrapedIcon } from "./scrape";
 import { tokenizeCommandLine } from "./tokenize";
 import {
   detectPackageManager,
@@ -38,6 +45,25 @@ import { pinningHint } from "./open-app";
 export interface WizardEnvEntry {
   readonly key: string;
   readonly value: string;
+}
+
+/** App-icon composition (owner round-12): foreground over black/white/
+ *  transparent background; the wizard derives the auto suggestion. */
+export type WizardIconBackground = "black" | "white" | "transparent";
+
+export const DEFAULT_ICON_SCALE = 0.8;
+
+export interface WizardIconComposition {
+  readonly key: string;
+  readonly compositePath: string;
+  readonly macOSPath: string;
+  readonly background: WizardIconBackground;
+}
+
+export interface WizardIconAnalysis {
+  readonly luminance: number | undefined;
+  readonly coverage: number;
+  readonly suggested: WizardIconBackground;
 }
 
 /** Command execution options (advanced): working directory, custom env, and
@@ -69,6 +95,9 @@ export interface WizardFormValues {
   readonly appId: string;
   readonly appName: string;
   readonly iconPath: string;
+  /** Icon composition (owner round-12). */
+  readonly iconBackground: WizardIconBackground;
+  readonly iconScale: number;
   /** Empty = follow the app icon choice (default). */
   readonly trayIconPath: string;
   readonly pm: "npm" | "pnpm" | "bun";
@@ -168,6 +197,18 @@ export interface WizardSession {
   selectTrayIconCandidate(port: number, index: number): boolean;
   /** Test/extension seam: replace the scraped candidate set for a port. */
   replaceIconCandidates(port: number, icons: readonly ScrapedIcon[]): void;
+  /** Compose the app icon preview/asset for the current foreground. */
+  composeIcon(options: {
+    foregroundPath: string;
+    background?: WizardIconBackground;
+    scale?: number;
+  }): Promise<WizardIconComposition>;
+  /** Register a composition for token-scoped byte serving (server seam). */
+  trackIconComposition(composition: WizardIconComposition): void;
+  /** Look up a registered composition by cache key. */
+  iconComposition(key: string): WizardIconComposition | undefined;
+  /** Auto-suggestion for the foreground (background + reason). */
+  analyzeIconForeground(foregroundPath: string): Promise<WizardIconAnalysis>;
   readonly form: WizardFormValues;
   readonly result: MaterializeResult | undefined;
   /** String form is tokenized; array form is taken as argv verbatim (array
@@ -191,6 +232,8 @@ interface FieldTouched {
   appId: boolean;
   appName: boolean;
   iconPath: boolean;
+  iconBackground: boolean;
+  iconScale: boolean;
   trayIconPath: boolean;
   pm: boolean;
   showStartupTerminal: boolean;
@@ -226,11 +269,17 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let resolvedTargetDir: string | undefined;
   let runAlive = false;
   let commandOptions: WizardCommandOptions = { ...DEFAULT_COMMAND_OPTIONS };
-  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, trayIconPath: false, pm: false, force: false, showStartupTerminal: false, showAddressBar: false };
+  let composeIconDir: string | undefined;
+  const iconCompositions = new Map<string, WizardIconComposition>();
+  let iconBackground: WizardIconBackground | undefined;
+  let iconScale: number | undefined;
+  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, force: false, showStartupTerminal: false, showAddressBar: false };
   let form: WizardFormValues = {
     appId: "",
     appName: "",
     iconPath: "",
+    iconBackground: "transparent",
+    iconScale: DEFAULT_ICON_SCALE,
     trayIconPath: "",
     force: options.force === true,
     showStartupTerminal: false,
@@ -416,6 +465,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     emit({ type: "command-options", options: commandOptions, defaultCwd: homeDir });
   };
 
+  /** Stable dir for composed preview assets, created on demand. */
+  const ensureIconComposeDir = async (): Promise<string> => {
+    if (composeIconDir === undefined) {
+      composeIconDir = await mkdtemp(join(tmpdir(), "create-opentray-compose-"));
+    }
+    return composeIconDir;
+  };
+
   const session: WizardSession = {
     get state() {
       return state;
@@ -520,6 +577,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         appId: "",
         appName: "",
         iconPath: "",
+        iconBackground: iconBackground ?? "transparent",
+        iconScale: iconScale ?? DEFAULT_ICON_SCALE,
         ...(touched.force ? { force: form.force } : { force: options.force === true }),
         ...(touched.trayIconPath ? { trayIconPath: form.trayIconPath } : { trayIconPath: "" }),
         ...(touched.showStartupTerminal ? { showStartupTerminal: form.showStartupTerminal } : { showStartupTerminal: false }),
@@ -664,6 +723,47 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       publishCommandOptions();
     },
 
+    async analyzeIconForeground(foregroundPath) {
+      const [luminance, coverage] = await Promise.all([
+        foregroundLuminance(foregroundPath).catch(() => undefined),
+        foregroundCoverage(foregroundPath).catch(() => 1),
+      ]);
+      return {
+        luminance,
+        coverage,
+        suggested: autoBackground({ luminance, coverage }),
+      };
+    },
+
+    async composeIcon(options) {
+      const background = options.background ?? iconBackground ?? "transparent";
+      const scale = options.scale ?? iconScale ?? DEFAULT_ICON_SCALE;
+      const composed = await composeAppIcon({
+        foregroundPath: options.foregroundPath,
+        background,
+        scale,
+        outputDir: await ensureIconComposeDir(),
+      });
+      const composition: WizardIconComposition = {
+        key: compositionCacheKey({
+          foregroundPath: options.foregroundPath,
+          background,
+          scale,
+        }),
+        ...composed,
+      };
+      iconCompositions.set(composition.key, composition);
+      return composition;
+    },
+
+    trackIconComposition(composition) {
+      iconCompositions.set(composition.key, composition);
+    },
+
+    iconComposition(key) {
+      return iconCompositions.get(key);
+    },
+
     async saveIconUpload(bytes) {
       const dir = tempIconDir ?? (tempIconDir = await mkdtemp(join(tmpdir(), "create-opentray-")));
       const name = `upload-${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.bin`;
@@ -688,6 +788,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
 
     updateForm(patch) {
+      if (patch.iconBackground !== undefined) {
+        iconBackground = patch.iconBackground;
+      }
+      if (patch.iconScale !== undefined) {
+        iconScale = patch.iconScale;
+      }
       if (state !== "idle" && state !== "running" && state !== "discovered" && state !== "failed") {
         return;
       }
@@ -800,6 +906,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             targetDir: resolvedTargetDir ?? currentDefaults().targetDir,
             dependencyRange: options.dependencyRange,
             iconSourcePath: currentIconPath,
+            ...(frozen.iconBackground === undefined
+              ? {}
+              : { iconBackground: frozen.iconBackground }),
+            ...(frozen.iconScale === undefined
+              ? {}
+              : { iconScale: frozen.iconScale }),
             ...(currentTrayIconPath === undefined
               ? {}
               : { trayIconSourcePath: currentTrayIconPath }),
@@ -860,5 +972,5 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
 /** Exposed for tests: the touched-field bookkeeping semantics. */
 export const createFieldTouchedTracker = (): { touched: FieldTouched } => ({
-  touched: { force: false, appId: false, appName: false, iconPath: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false },
+  touched: { force: false, appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false },
 });

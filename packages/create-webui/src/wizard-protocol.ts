@@ -7,10 +7,14 @@ export interface DiscoveredService {
   title?: string;
 }
 
+export type IconBackground = "black" | "white" | "transparent";
+
 export interface WizardFormValues {
   appId: string;
   appName: string;
   iconPath: string;
+  iconBackground: IconBackground;
+  iconScale: number;
   trayIconPath: string;
   pm: "npm" | "pnpm" | "bun";
   /** Wipe an existing non-empty target directory before materializing. */
@@ -21,6 +25,25 @@ export interface WizardFormValues {
 
 /** One scraped icon candidate (ranked by clarity, deduplicated). */
 export type IconVariant = "original" | "solid-black" | "solid-white";
+
+
+export interface IconAnalysis {
+  luminance: number | undefined;
+  coverage: number;
+  suggested: IconBackground;
+}
+
+export interface IconComposition {
+  key: string;
+  compositePath: string;
+  macOSPath: string;
+  background: IconBackground;
+}
+
+export const composedIconUrl = (key: string): string =>
+  `/api/icon-composed/${key}?token=${encodeURIComponent(
+    new URLSearchParams(location.search).get("token") ?? "",
+  )}`;
 
 export interface IconCandidate {
   index: number;
