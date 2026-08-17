@@ -414,7 +414,7 @@ const selectedIconRefStale = (
   // animates track WIDTHS between the two states — the modern grid-template
   // interpolation the owner asked for.
   const gridTemplate = panelOpen
-    ? "minmax(0, 430px) minmax(0, 1fr) minmax(0, 0fr)"
+    ? "minmax(0, 520px) minmax(0, 1fr) minmax(0, 0fr)"
     : "minmax(0, 1fr) minmax(0, var(--list-w)) minmax(0, 1fr)";
 
   return (
@@ -423,7 +423,7 @@ const selectedIconRefStale = (
       style={{
         // --list-w caps the centered list at the mobile width (with page
         // padding) and drives the closed-state middle column.
-        ["--list-w" as string]: "min(430px, 100vw - 40px)",
+        ["--list-w" as string]: "min(520px, 100vw - 40px)",
         gridTemplateColumns: gridTemplate,
         transition: "grid-template-columns 450ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}
@@ -519,11 +519,25 @@ const selectedIconRefStale = (
         <p className="font-mono text-xs text-red-400">{failReason}</p>
       ) : null}
 
-      {/* Advanced options (accordion: 命令选项 + 应用选项) */}
-      {advancedOpen ? (
-        <div ref={advancedRef}>
+      {/* Advanced options — the wrapper animates height:auto via grid
+          template rows (0fr ↔ 1fr), the same interpolation the page layout
+          uses; content stays mounted so both directions animate. */}
+      <div
+        ref={advancedRef}
+        className="grid"
+        style={{
+          gridTemplateRows: advancedOpen ? "1fr" : "0fr",
+          transition: "grid-template-rows 450ms cubic-bezier(0.4, 0, 0.2, 1)",
+        }}
+      >
+        <div
+          className="min-h-0 overflow-hidden"
+          style={{
+            visibility: advancedOpen ? "visible" : "hidden",
+            transition: `visibility 0s linear ${advancedOpen ? "0s" : "450ms"}`,
+          }}
+        >
           <AdvancedPanel
-            open
             frozen={wizardState === "frozen" || wizardState === "materializing" || wizardState === "success"}
             values={values}
             commandOptions={commandOptions}
@@ -583,7 +597,7 @@ const selectedIconRefStale = (
             }}
           />
         </div>
-      ) : null}
+      </div>
 
       {/* Identity form */}
       {showForm ? (

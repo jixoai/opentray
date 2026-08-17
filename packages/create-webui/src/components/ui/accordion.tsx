@@ -43,11 +43,18 @@ const AccordionContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
   <AccordionPrimitive.Content
-    className="overflow-hidden text-sm data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+    // Height:auto animation via grid-template-rows interpolation (0fr ↔ 1fr):
+    // forceMount keeps the element alive so CLOSING animates too. The direct
+    // grid child must be padding-free (padding would floor the collapsed
+    // height); spacing lives one level deeper.
+    forceMount
+    className="grid overflow-hidden text-sm transition-[grid-template-rows] duration-300 ease-out data-[state=closed]:grid-rows-[0fr] data-[state=open]:grid-rows-[1fr]"
     {...props}
     ref={ref}
   >
-    <div className={cn("pb-4 pt-0", className)}>{children}</div>
+    <div className="min-h-0 overflow-hidden">
+      <div className={cn("pb-4 pt-0", className)}>{children}</div>
+    </div>
   </AccordionPrimitive.Content>
 ));
 AccordionContent.displayName = AccordionPrimitive.Content.displayName;

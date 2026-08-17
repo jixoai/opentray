@@ -24,7 +24,6 @@ import type {
 } from "@/wizard-protocol";
 
 export interface AdvancedPanelProps {
-  open: boolean;
   frozen: boolean;
   values: WizardFormValues;
   commandOptions: WizardCommandOptions;
@@ -42,7 +41,6 @@ export interface AdvancedPanelProps {
 }
 
 export function AdvancedPanel({
-  open,
   frozen,
   values,
   commandOptions,
@@ -56,9 +54,7 @@ export function AdvancedPanel({
   onUploadTray,
   onClearTray,
   onPatch,
-}: AdvancedPanelProps): React.JSX.Element | null {
-  if (!open) return null;
-
+}: AdvancedPanelProps): React.JSX.Element {
   const patchCommand = (patch: Partial<WizardCommandOptions>): void => {
     onCommandOptionsChange({ ...commandOptions, ...patch });
   };
