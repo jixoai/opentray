@@ -1,5 +1,8 @@
-// Orthogonal intents (maintained 2026-07-22; original user request: the default
-// appId is the command segment before the first Option, reversed and dot-joined):
+// Orthogonal intents (maintained 2026-08-19; original user request: the default
+// appId is the command segment before the first Option, reversed and dot-joined;
+// 2026-08-19 scoped-package commands must derive like the user reads them —
+// `npx @deepseek-ai/dsh@latest web` → `web.dsh.npx`: the `@scope` segment is
+// dropped and `name@version` keeps only `name`):
 // 1. Derive the default appId from the pre-option tokens of the command.
 // 2. Keep the derivation pure so it is testable against the user's example.
 // 3. Provide a display-name and directory-safe projection for scaffolding.
@@ -8,9 +11,27 @@
 const isOptionToken = (token: string): boolean => token.startsWith("-") && token.length > 1;
 
 /**
+ * Normalize one command token into an appId segment (or nothing).
+ * - Scoped packages `@scope/name` split on `/` and DROP the `@scope` lead.
+ * - A bare `@scope`-looking segment carries no identity and is dropped.
+ * - `name@version` keeps only the name (a version pin is not identity).
+ * - Plain paths keep only their last segment.
+ */
+const tokenToSegment = (token: string): string => {
+  const segments = token.split(/[/\\]/).filter((segment) => segment.length > 0);
+  if (segments.some((segment) => segment.startsWith("@"))) {
+    const unscoped = segments.filter((segment) => !segment.startsWith("@"));
+    return (unscoped[unscoped.length - 1] ?? "").split("@")[0] ?? "";
+  }
+  const last = segments[segments.length - 1] ?? token;
+  return last.split("@")[0] ?? "";
+};
+
+/**
  * Default appId derivation. `npx somecommand start --xx` keeps the pre-option
  * tokens `["npx", "somecommand", "start"]`, reverses them, and dot-joins:
- * `start.somecommand.npx`.
+ * `start.somecommand.npx`. Scoped commands like `npx @deepseek-ai/dsh@latest
+ * web` derive `web.dsh.npx`.
  */
 export const deriveDefaultAppId = (tokens: readonly string[]): string => {
   const preOption: string[] = [];
@@ -21,7 +42,7 @@ export const deriveDefaultAppId = (tokens: readonly string[]): string => {
     preOption.push(token);
   }
   const segments = preOption
-    .map((token) => token.split(/[/\\]/).pop() ?? token)
+    .map(tokenToSegment)
     .filter((segment) => segment.length > 0)
     .reverse();
   if (segments.length === 0) {
