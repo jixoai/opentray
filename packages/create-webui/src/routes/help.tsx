@@ -10,6 +10,8 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchSkillFile, fetchSkillList, type SkillEntry } from "../api";
 import { Skeleton } from "../components/ui/skeleton";
 import { Tree, TreeItem, TreeItemLabel } from "../components/reui/tree";
+import MarkdownIt from "markdown-it";
+import type { MarkdownIt as MarkdownItType, Token } from "markdown-it";
 import { hotkeysCoreFeature, selectionFeature, syncDataLoaderFeature } from "@headless-tree/core";
 import { useTree } from "@headless-tree/react";
 import { FileTextIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
@@ -18,7 +20,7 @@ import { usePreferences } from "../preferences";
 /** Safe link schemes; everything else renders as plain text. */
 const SAFE_LINK = /^(https?:|mailto:|#|\.\/|#\/)/iu;
 
-/** Escape ALL HTML before any inline formatting is applied. */
+/** Escape ALL HTML (used for fence language labels). */
 const escapeHtml = (text: string): string =>
   text
     .replaceAll("&", "&amp;")
@@ -26,152 +28,44 @@ const escapeHtml = (text: string): string =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
-interface Inline {
-  readonly html: string;
-}
-
-const renderInline = (text: string): Inline => {
-  const escaped = escapeHtml(text);
-  // Code spans, then bold, then links (safe schemes only).
-  let html = escaped.replace(/`([^`]+)`/gu, "<code>$1</code>");
-  html = html.replace(/\*\*([^*]+)\*\*/gu, "<strong>$1</strong>");
-  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/gu, (match, label: string, href: string) => {
-    if (!SAFE_LINK.test(href)) {
-      return label;
-    }
-    return `<a href="${href}" rel="noreferrer noopener" target="_blank">${label}</a>`;
-  });
-  return { html };
-};
-
-/** Markdown table row: `| a | b |`. */
-const isTableRow = (line: string): boolean => /^\s*\|.*\|\s*$/u.test(line);
-const isTableSeparator = (line: string): boolean => /^\s*\|[\s:|-]+\|\s*$/u.test(line);
-const splitRow = (line: string): string[] =>
-  line.trim().replace(/^\|/u, "").replace(/\|$/u, "").split("|").map((cell) => cell.trim());
-
 /**
- * Render a strict Markdown subset to sanitized HTML. Raw HTML is escaped
- * before any inline formatting; pipe tables render as real table elements;
- * link schemes outside the safe set stay inert.
+ * markdown-it instance for the help center. Security posture matches the
+ * previous hand-written renderer:
+ *  - html:false — ALL raw HTML in the source is escaped (never passes through)
+ *  - linkify — bare URLs become links
+ *  - validateLink override — only the safe schemes above resolve
  */
-export const renderMarkdown = (source: string): string => {
-  const lines = source.split("\n");
-  const out: string[] = [];
-  let inCode = false;
-  let listType: "ul" | "ol" | null = null;
-
-  const closeList = (): void => {
-    if (listType !== null) {
-      out.push(`</${listType}>`);
-      listType = null;
+const md: MarkdownItType = MarkdownIt({
+  html: false,
+  linkify: true,
+  typographer: false,
+  breaks: false,
+});
+// Scheme allowlist: reject anything outside http/https/mailto/anchor/relative.
+md.validateLink = (url: string): boolean => SAFE_LINK.test(url.trim());
+// Every link opens externally and never leaks the referrer/token URL.
+const addLinkAttrs = (tokens: readonly Token[]): void => {
+  for (const token of tokens) {
+    if (token.type === "link_open") {
+      token.attrSet("rel", "noreferrer noopener");
+      token.attrSet("target", "_blank");
     }
-  };
-
-  const flushTable = (header: string[], rows: string[][]): void => {
-    const head = header.map((cell) => `<th>${renderInline(cell).html}</th>`).join("");
-    const body = rows
-      .map((row) => `<tr>${row.map((cell) => `<td>${renderInline(cell).html}</td>`).join("")}</tr>`)
-      .join("");
-    out.push(`<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`);
-  };
-
-  let tableHeader: string[] | null = null;
-  let tableRows: string[][] = [];
-  let tableAwaitSeparator = false;
-
-  const endTable = (): void => {
-    if (tableHeader !== null) {
-      flushTable(tableHeader, tableRows);
-      tableHeader = null;
-      tableRows = [];
-      tableAwaitSeparator = false;
-    }
-  };
-
-  for (const line of lines) {
-    if (line.trimStart().startsWith("```")) {
-      if (tableHeader !== null) endTable();
-      if (inCode) {
-        out.push("</code></pre>");
-        inCode = false;
-      } else {
-        closeList();
-        out.push('<pre class="tech-ltr"><code>');
-        inCode = true;
-      }
-      continue;
-    }
-    if (inCode) {
-      out.push(escapeHtml(line));
-      continue;
-    }
-
-    // Table block consumption.
-    if (tableHeader !== null) {
-      if (tableAwaitSeparator && isTableSeparator(line)) {
-        tableAwaitSeparator = false;
-        continue;
-      }
-      tableAwaitSeparator = false;
-      if (isTableRow(line)) {
-        tableRows.push(splitRow(line));
-        continue;
-      }
-      endTable(); // non-table line closes the block
-    } else if (isTableRow(line) && !isTableSeparator(line)) {
-      closeList();
-      tableHeader = splitRow(line);
-      tableRows = [];
-      tableAwaitSeparator = true;
-      continue;
-    }
-
-    const heading = /^(#{1,6})\s+(.*)$/u.exec(line);
-    if (heading !== null) {
-      closeList();
-      const level = heading[1]!.length;
-      out.push(`<h${level}>${renderInline(heading[2]!).html}</h${level}>`);
-      continue;
-    }
-    const unordered = /^\s*[-*]\s+(.*)$/u.exec(line);
-    if (unordered !== null) {
-      if (listType !== "ul") {
-        closeList();
-        out.push("<ul>");
-        listType = "ul";
-      }
-      out.push(`<li>${renderInline(unordered[1]!).html}</li>`);
-      continue;
-    }
-    const ordered = /^\s*\d+\.\s+(.*)$/u.exec(line);
-    if (ordered !== null) {
-      if (listType !== "ol") {
-        closeList();
-        out.push("<ol>");
-        listType = "ol";
-      }
-      out.push(`<li>${renderInline(ordered[1]!).html}</li>`);
-      continue;
-    }
-    closeList();
-    if (line.trim().length === 0) {
-      continue;
-    }
-    if (line.startsWith("---")) {
-      out.push("<hr />");
-      continue;
-    }
-    // Front-matter fences render inertly as text.
-    out.push(`<p>${renderInline(line).html}</p>`);
+    if (token.children !== null) addLinkAttrs(token.children);
   }
-  endTable();
-  closeList();
-  if (inCode) {
-    out.push("</code></pre>");
-  }
-  return out.join("\n");
 };
+md.core.ruler.push("external_links", (state) => {
+  addLinkAttrs(state.tokens);
+  return true;
+});
+// Fenced code stays an explicit LTR technical island (matches the CSS layer).
+md.renderer.rules.fence = (tokens, idx): string => {
+  const token = tokens[idx]!;
+  const lang = token.info.trim().length > 0 ? ` class="language-${escapeHtml(token.info.trim())}"` : "";
+  return `<pre class="tech-ltr"><code${lang}>${md.utils.escapeHtml(token.content)}</code></pre>\n`;
+};
+
+/** Render help markdown to sanitized HTML (raw HTML escaped, safe links only). */
+export const renderMarkdown = (source: string): string => md.render(source);
 
 /**
  * Help markdown rendering uses the tailwindcss-typography `prose` engine.
