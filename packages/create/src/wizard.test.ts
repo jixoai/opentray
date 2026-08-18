@@ -698,3 +698,33 @@ describe("wizard session", () => {
     expect(session.result?.projectDir).toContain("start-somecommand-npx");
   }, 20_000);
 });
+
+describe("cancel thaws a frozen confirmation", () => {
+  it("returns to editable after cancel and allows re-confirm", async () => {
+    const harness = createHarness();
+    await harness.session.submitCommand("npx somecommand start --xx");
+    harness.setListeners(new Set([19080]));
+    await waitFor(() => harness.session.state === "discovered");
+
+    harness.session.confirm();
+    expect(harness.session.state).toBe("frozen");
+    // Frozen gate: form edits are ignored while frozen.
+    harness.session.updateForm({ appName: "Ignored While Frozen" });
+    expect(harness.session.form.appName).not.toBe("Ignored While Frozen");
+
+    harness.session.cancel();
+    expect(["discovered", "running"]).toContain(harness.session.state);
+
+    // Thawed: edits land again, and a second confirm-refreeze works.
+    harness.session.updateForm({ appName: "Edited after thaw" });
+    expect(harness.session.form.appName).toBe("Edited after thaw");
+    harness.session.confirm();
+    expect(harness.session.state).toBe("frozen");
+    expect(harness.session.form.appName).toBe("Edited after thaw");
+  });
+
+  it("rejects cancel outside frozen", () => {
+    const harness = createHarness();
+    expect(() => harness.session.cancel()).toThrow(/cannot cancel while idle/);
+  });
+});

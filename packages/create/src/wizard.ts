@@ -234,6 +234,8 @@ export interface WizardSession {
   terminalInput(data: string): void;
   terminalResize(size: { cols: number; rows: number }): void;
   confirm(): void;
+  /** Abort a frozen confirmation and return to the editable pre-freeze state. */
+  cancel(): void;
   create(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -922,6 +924,30 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       frozenForm = { ...form };
       setState("frozen");
       publishForm();
+    },
+
+    cancel() {
+      if (state !== "frozen") {
+        throw new Error(`cannot cancel while ${state}`);
+      }
+      // Thaw the pre-confirmation state: the frozen snapshot and resolved
+      // values are discarded; editing, scrapes, and re-confirmation resume
+      // from the live form. The preview process and its services were never
+      // stopped by confirm(), so discovery simply continues.
+      frozenForm = undefined;
+      frozenIconPath = undefined;
+      resolvedServicePort = undefined;
+      resolvedTargetDir = undefined;
+      setState(selectedPort === undefined ? "running" : "discovered");
+      publishForm();
+      // Resume the discovery/scrape polling that confirm() stopped. When no
+      // preview is alive (confirm from idle/failed), timers stay stopped —
+      // the editable idle form is the correct landing state there, but the
+      // state machine requires one of running/discovered; running with no
+      // process is the pre-run idle equivalent for UI gating.
+      if (runAlive && discovery !== undefined) {
+        startDiscoveryPolling();
+      }
     },
 
     async create() {

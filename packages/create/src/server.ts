@@ -507,6 +507,20 @@ const handleApi = async (
       respond(response, 200, "application/json", '{"ok":true}\n');
       return;
     }
+    case "/api/cancel": {
+      try {
+        session.cancel();
+        respond(response, 200, "application/json", '{"ok":true}\n');
+      } catch (error) {
+        respond(
+          response,
+          409,
+          "application/json",
+          `${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`,
+        );
+      }
+      return;
+    }
     case "/api/confirm": {
       try {
         session.confirm();

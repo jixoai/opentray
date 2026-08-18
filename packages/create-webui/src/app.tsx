@@ -708,6 +708,18 @@ const selectedIconRefStale = (
     await api("/api/create", {});
   };
 
+  /** Cancel the frozen confirmation: thaw the form back to editable. The
+   *  server emits the resumed state over SSE, which clears every frozen gate. */
+  const cancelConfirm = async (): Promise<void> => {
+    setDialogOpen(false);
+    const response = await api("/api/cancel", {});
+    if (!response.ok) {
+      // The session was not frozen (double-cancel race): thaw locally anyway
+      // so the UI never stays locked on a stale state event.
+      setWizardState((prev) => (prev === "frozen" ? "discovered" : prev));
+    }
+  };
+
   // Grid-driven list→detail transition (owner round-11): the page is ONE
   // grid whose template columns animate from a centered single column to
   // "list + detail" — the browser interpolates the column sizes, so the list
@@ -928,7 +940,7 @@ const selectedIconRefStale = (
         logs={dialogLogs}
         error={dialogError ?? failReason}
         result={result}
-        onBack={() => setDialogOpen(false)}
+        onBack={() => void cancelConfirm()}
         onCreate={() => void createApp()}
         onOpenApp={() => void api("/api/open-app", {})}
         confirmError={confirmError}
