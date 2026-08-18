@@ -266,8 +266,8 @@ export const HelpRoute = (): React.JSX.Element => {
   const html = useMemo(() => (content === null ? "" : renderMarkdown(content)), [content]);
 
   return (
-    <section className="flex h-full overflow-hidden" aria-label={messages.help.title}>
-      <nav className="w-64 shrink-0 overflow-auto border-e border-border p-2" aria-label={messages.help.listTitle}>
+    <section className="flex h-full min-h-0 overflow-hidden" aria-label={messages.help.title}>
+      <nav className="w-64 shrink-0 overflow-y-auto border-e border-border p-2" aria-label={messages.help.listTitle}>
         {loadingList ? (
           <div className="space-y-2">
             <Skeleton className="h-5 w-full" />
@@ -280,7 +280,7 @@ export const HelpRoute = (): React.JSX.Element => {
           <HelpSkillTree entries={entries} selected={selected} onSelect={setSelected} />
         )}
       </nav>
-      <article className="min-w-0 flex-1 overflow-auto p-6" aria-live="polite">
+      <article className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6" aria-live="polite">
         {loadingDoc ? (
           <div className="space-y-2">
             <Skeleton className="h-6 w-1/2" />

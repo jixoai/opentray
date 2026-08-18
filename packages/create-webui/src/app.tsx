@@ -948,13 +948,13 @@ function WorkbenchRoutes(): React.JSX.Element {
   const { route } = useWorkbenchNavigation();
   return (
     <>
-      <div hidden={route !== "add"} className="h-full">
+      <div hidden={route !== "add"} className="min-h-0 flex-1">
         <WizardPage />
       </div>
-      <div hidden={route !== "applications"} className="h-full">
+      <div hidden={route !== "applications"} className="min-h-0 flex-1">
         <ApplicationsRoute />
       </div>
-      <div hidden={route !== "help"} className="h-full">
+      <div hidden={route !== "help"} className="min-h-0 flex-1">
         <HelpRoute />
       </div>
     </>
