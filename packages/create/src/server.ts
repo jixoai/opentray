@@ -12,7 +12,8 @@ import {
 } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,8 +45,49 @@ export const createWizardServer = async (
   const clients = new Set<ServerResponse>();
   const eventLog: WizardEvent[] = [];
 
+  // Bounded incremental log: snapshots carry full state, so replaying more
+  // than recent increments (terminal output) would only duplicate payloads.
+  const EVENT_LOG_LIMIT = 200;
+  // Real-time draft persistence (owner requirement): every form/command
+  // update writes the wizard draft to disk under the OS temp home keyed by
+  // the server port, so a browser close+reopen (not just a refresh) lands
+  // back on the same in-progress draft. The live session stays authoritative
+  // while it runs; the draft only seeds NEW sessions.
+  const draftPath = join(tmpdir(), `create-opentray-draft-${options.port ?? 0}.json`);
+  const writeDraft = (event: WizardEvent): void => {
+    if (event.type !== "form" && event.type !== "command-display" && event.type !== "command-options") {
+      return;
+    }
+    void (async () => {
+      try {
+        const current = await readFile(draftPath, "utf8")
+          .then((raw) => JSON.parse(raw) as Record<string, unknown>)
+          .catch(() => ({}) as Record<string, unknown>);
+        const next = {
+          ...current,
+          ...(event.type === "form"
+            ? { form: event.values, defaults: event.defaults }
+            : {}),
+          ...(event.type === "command-display" ? { command: event.command } : {}),
+          ...(event.type === "command-options" ? { commandOptions: event.options } : {}),
+          savedAt: Date.now(),
+        };
+        await writeFile(draftPath, JSON.stringify(next), "utf8");
+      } catch {
+        // best-effort persistence
+      }
+    })();
+  };
+
+
   const emit = (event: WizardEvent): void => {
-    eventLog.push(event);
+    if (event.type !== "log") {
+      eventLog.push(event);
+      if (eventLog.length > EVENT_LOG_LIMIT) {
+        eventLog.splice(0, eventLog.length - EVENT_LOG_LIMIT);
+      }
+    }
+    writeDraft(event);
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const client of clients) {
       client.write(frame);
@@ -53,6 +95,8 @@ export const createWizardServer = async (
   };
 
   const session = createSession(emit);
+
+
 
   const indexHtml = await readWebUiIndex();
 
@@ -96,6 +140,9 @@ export const createWizardServer = async (
         connection: "keep-alive",
       });
       response.write(": connected\n\n");
+      // Authoritative whole-session state FIRST (page-refresh recovery),
+      // then bounded recent increments (terminal tail).
+      response.write(`data: ${JSON.stringify(session.snapshot())}\n\n`);
       for (const event of eventLog) {
         response.write(`data: ${JSON.stringify(event)}\n\n`);
       }

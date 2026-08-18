@@ -14,8 +14,11 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { dispatchCli, consoleStreams } from "@create-opentray/cli";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { createWizardServer } from "./server";
-import { createWizardSession } from "./wizard";
+import { createWizardSession, type WizardFormValues } from "./wizard";
 import { ensureLoopbackNoProxy } from "@create-opentray/core";
 
 export interface WizardCliOptions {
@@ -116,17 +119,44 @@ const runWebAdapter = async (options: {
   // pnpm/npm run scripts execute with the package directory as cwd; INIT_CWD
   // preserves the directory the user actually invoked the command from.
   const invocationDir = process.env.INIT_CWD || process.cwd();
+
+/** Read a persisted wizard draft for a port (best-effort). */
+const readDraft = async (
+  port: number | undefined,
+): Promise<{ form: WizardFormValues; command: string | undefined } | undefined> => {
+  try {
+    const path = join(tmpdir(), `create-opentray-draft-${port ?? 0}.json`);
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as { form?: WizardFormValues; command?: string };
+    if (parsed.form === undefined) return undefined;
+    return { form: parsed.form, command: parsed.command };
+  } catch {
+    return undefined;
+  }
+};
   const dependencyRange = await readDependencyRange();
 
+  // Draft seed: when the wizard restarts on the same port, a previous
+  // in-progress draft (form values + command) is restored so a browser
+  // close/reopen loses nothing.
+  const draftSeed = await readDraft(options.port);
   const server = await createWizardServer(
-    (emit) =>
-      createWizardSession({
+    (emit) => {
+      const session = createWizardSession({
         cwd: invocationDir,
         skipInstall: false,
         force: false,
         dependencyRange,
         emit,
-      }),
+      });
+      if (draftSeed !== undefined) {
+        session.updateForm(draftSeed.form);
+        if (draftSeed.command !== undefined && draftSeed.command.length > 0) {
+          session.prime(draftSeed.command);
+        }
+      }
+      return session;
+    },
     options.port === undefined ? {} : { port: options.port },
   );
 

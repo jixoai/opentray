@@ -157,6 +157,22 @@ export type WizardEvent =
       readonly projectDir: string;
       readonly bundlePath?: string;
       readonly pinHint: string;
+    }
+  /** Authoritative whole-session state; sent to every NEW SSE client first. */
+  | {
+      readonly type: "snapshot";
+      readonly state: WizardState;
+      readonly runAlive: boolean;
+      readonly command: string;
+      readonly commandOptions: WizardCommandOptions;
+      readonly form: WizardFormValues;
+      readonly defaults: WizardFormDefaults;
+      readonly targetDirExists: boolean;
+      readonly services: readonly DiscoveredService[];
+      readonly selectedPort?: number | undefined;
+      readonly iconCandidates: readonly ScrapedIcon[];
+      readonly iconsPort?: number | undefined;
+      readonly interactive: boolean;
     };
 
 export interface WizardOptions {
@@ -222,6 +238,8 @@ export interface WizardSession {
   analyzeIconForeground(foregroundPath: string): Promise<WizardIconAnalysis>;
   readonly form: WizardFormValues;
   readonly result: MaterializeResult | undefined;
+  /** Whole-session state for reconnecting clients (page refresh recovery). */
+  snapshot(): WizardEvent;
   /** String form is tokenized; array form is taken as argv verbatim (array
    *  input mode — no string splitting is ever applied to it). */
   submitCommand(command: string | readonly string[]): Promise<void>;
@@ -279,6 +297,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let currentTokens: readonly string[] = [];
   let currentCommand = "";
   let scrapedTitle: string | undefined;
+  let interactive = true; // optimistic until the PTY reports otherwise
   let resolvedVector: LaunchVector | undefined;
   let frozenForm: WizardFormValues | undefined;
   let resolvedServicePort: number | undefined;
@@ -502,6 +521,24 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     get state() {
       return state;
     },
+
+    snapshot(): WizardEvent {
+      return {
+        type: "snapshot",
+        state,
+        runAlive,
+        command: currentCommand,
+        commandOptions: { ...commandOptions, env: [...commandOptions.env] },
+        form: { ...form },
+        defaults: currentDefaults(),
+        targetDirExists,
+        services: [...services],
+        ...(selectedPort === undefined ? {} : { selectedPort }),
+        iconCandidates: [...iconCandidates],
+        ...(iconPort === undefined ? {} : { iconsPort: iconPort }),
+        interactive,
+      };
+    },
     get services() {
       return services;
     },
@@ -658,10 +695,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             return;
           }
           if (event.type === "pty-ready") {
+            interactive = true;
             emit({ type: "term-mode", interactive: true });
             return;
           }
           if (event.type === "pty-unavailable") {
+            interactive = false;
             emit({
               type: "term-mode",
               interactive: false,

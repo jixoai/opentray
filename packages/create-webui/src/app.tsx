@@ -398,6 +398,38 @@ const selectedIconRefStale = (
     source.onmessage = (event: MessageEvent<string>) => {
       const payload = JSON.parse(event.data) as WizardEvent;
       switch (payload.type) {
+        case "snapshot": {
+          // Page-refresh recovery: the session is authoritative. Restore the
+          // whole surface in one pass — including the detail pane, whose
+          // visibility follows the COMMAND state (a live preview process or
+          // discovered services reopens the tabs).
+          setWizardState(payload.state);
+          setRunAlive(payload.runAlive);
+          setCommand(payload.command);
+          setDisplayCommand(payload.command);
+          setCommandOptions(payload.commandOptions);
+          setInteractive(payload.interactive);
+          setValues(payload.form);
+          setDefaults(payload.defaults);
+          setTargetDirExists(payload.targetDirExists);
+          setServices(payload.services);
+          setSelectedPort(payload.selectedPort);
+          // Server field is iconCandidates (snapshot); keep undefined-safe.
+          setIconCandidates(payload.icons ?? []);
+          setIconCandidatesPort(payload.iconsPort);
+          setIframeTabs(
+            payload.services.map((service) => ({
+              port: service.port,
+              url: service.url,
+              history: [service.url],
+              historyIndex: 0,
+            })),
+          );
+          const commandActive = payload.runAlive || payload.services.length > 0;
+          setPanelOpen(commandActive);
+          setActiveTab(commandActive && payload.services.length > 0 ? `svc-${payload.services[0]!.port}` : "terminal");
+          break;
+        }
         case "state":
           setWizardState(payload.state);
           if (payload.state === "failed") setFailReason(payload.reason);
@@ -553,8 +585,8 @@ const selectedIconRefStale = (
         ? uploadedIconUrl
         : iconCandidatesPort !== undefined && selectedCandidateIndex !== undefined && iconCandidates.some((c) => c.index === selectedCandidateIndex)
           ? iconDataUrl(iconCandidatesPort, selectedCandidateIndex)
-          : iconCandidatesPort !== undefined && iconCandidates[0] !== undefined && selectedIconRef === undefined
-            ? iconDataUrl(iconCandidatesPort, iconCandidates[0].index)
+          : iconCandidatesPort !== undefined && iconCandidates !== undefined && iconCandidates[0] !== undefined && selectedIconRef === undefined
+            ? iconDataUrl(iconCandidatesPort, iconCandidates[0]!.index)
             : undefined;
   const dialogIconLabel =
     iconComposition !== undefined

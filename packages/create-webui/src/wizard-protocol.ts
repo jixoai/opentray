@@ -126,6 +126,23 @@ export type WizardEvent =
       projectDir: string;
       bundlePath?: string;
       pinHint: string;
+    }
+  | {
+      /** Authoritative whole-session state (sent first on every connect). */
+      type: "snapshot";
+      state: WizardState;
+      runAlive: boolean;
+      command: string;
+      commandOptions: WizardCommandOptions;
+      form: WizardFormValues;
+      defaults: WizardFormDefaults;
+      targetDirExists: boolean;
+      services: DiscoveredService[];
+      selectedPort: number | undefined;
+      /** Server emits this as `iconCandidates`; alias tolerated on read. */
+      icons?: IconCandidate[];
+      iconsPort?: number | undefined;
+      interactive: boolean;
     };
 
 const WIZARD_TOKEN = new URLSearchParams(location.search).get("token") ?? "";
