@@ -16,6 +16,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useHashLocation } from "wouter/use-hash-location";
 import { CircleHelpIcon, ListIcon, MonitorIcon, MoonIcon, PanelLeftIcon, PlusIcon, SunIcon } from "lucide-react";
 
 import {
@@ -44,13 +45,14 @@ import { usePreferences, type ThemeMode } from "./preferences";
 
 export type WorkbenchRoute = "add" | "applications" | "help";
 
-const routeFromHash = (hash: string): WorkbenchRoute => {
-  const clean = hash.replace(/^#\/?/u, "").split("?")[0] ?? "";
-  if (clean === "applications" || clean === "help" || clean === "add") {
-    return clean;
-  }
-  return "add"; // default route: the actual creation workflow
-};
+/**
+ * Routes (wouter hash history):
+ *   /add                default: the creation workflow (edit param optional)
+ *   /applications       registration list
+ *   /help               help center
+ * Unknown paths fall back to /add — the default route is the workflow.
+ */
+export const WORKBENCH_ROUTES = ["/add", "/applications", "/help"] as const;
 
 interface NavigationValue {
   readonly route: WorkbenchRoute;
@@ -58,6 +60,16 @@ interface NavigationValue {
 }
 
 const NavigationContext = createContext<NavigationValue | undefined>(undefined);
+
+/** Route hooks co-located with the shell (single wouter instance). */
+export const useWorkbenchRoute = (): { readonly route: WorkbenchRoute; readonly query: URLSearchParams } => {
+  const [location] = useHashLocation();
+  const query = useMemo(() => new URLSearchParams(location.split("?")[1] ?? ""), [location]);
+  const route = (location.split("?")[0] ?? "/add").replace(/^\/?/u, "");
+  const resolved: WorkbenchRoute =
+    route === "applications" || route === "help" ? route : "add";
+  return { route: resolved, query };
+};
 
 export const useWorkbenchNavigation = (): NavigationValue => {
   const value = useContext(NavigationContext);
@@ -153,19 +165,10 @@ export const WorkbenchShell = ({
   panelOpen?: boolean;
 }): React.JSX.Element => {
   const { locale, messages, setLocale, theme, setTheme } = usePreferences();
-  const [route, setRoute] = useState<WorkbenchRoute>(() => routeFromHash(window.location.hash));
-
-  useEffect(() => {
-    const onHashChange = (): void => {
-      setRoute(routeFromHash(window.location.hash));
-    };
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+  const { route } = useWorkbenchRoute();
 
   const navigate = useCallback((next: WorkbenchRoute) => {
     window.location.hash = `#/${next}`;
-    setRoute(next);
   }, []);
 
   // Auto expand/collapse:

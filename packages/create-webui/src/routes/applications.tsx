@@ -141,8 +141,9 @@ export const ApplicationsRoute = (): React.JSX.Element => {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    window.location.hash = `#/add?edit=${encodeURIComponent(app.appId ?? app.key)}`;
-                    navigate("add");
+                    // The config endpoint addresses the REGISTRY KEY
+                    // (encoded directory name), not the raw dotted appId.
+                    window.location.hash = `#/add?edit=${encodeURIComponent(app.key)}`;
                   }}
                 >
                   {messages.applications.edit}

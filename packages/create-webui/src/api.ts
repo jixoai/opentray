@@ -40,6 +40,14 @@ export interface AppRecord {
 export const fetchApps = (): Promise<{ readonly status: number; readonly data: AppRecord[] }> =>
   request<AppRecord[]>("/api/apps");
 
+/** Raw v1 create-opentray.json of a registration (edit-mode source of truth). */
+export const fetchAppConfig = (
+  appId: string,
+): Promise<{ readonly status: number; readonly data: Record<string, unknown> | { readonly code: string; readonly message: string } }> =>
+  request<Record<string, unknown> | { code: string; message: string }>(
+    `/api/apps/${encodeURIComponent(appId)}/config`,
+  );
+
 export interface UninstallResult {
   readonly registrationPath: string;
   readonly payloadPath: string;

@@ -5,7 +5,8 @@
  */
 import * as React from "react";
 
-import { WorkbenchShell, useWorkbenchNavigation } from "@/workbench-shell";
+import { WorkbenchShell, useWorkbenchNavigation, useWorkbenchRoute } from "@/workbench-shell";
+import { fetchAppConfig } from "@/api";
 import { ApplicationsRoute } from "@/routes/applications";
 import { HelpRoute } from "@/routes/help";
 
@@ -40,6 +41,7 @@ import {
   DEFAULT_COMMAND_OPTIONS,
   type WizardCommandOptions,
   type WizardState,
+  type WizardEnvEntry,
 } from "@/wizard-protocol";
 
 const EMPTY_VALUES: WizardFormValues = {
@@ -59,6 +61,10 @@ const EMPTY_VALUES: WizardFormValues = {
 const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "", iconPath: "" };
 
 function WizardPage(): React.JSX.Element {
+  const { query } = useWorkbenchRoute();
+  const editAppId = query.get("edit");
+  const [editLoaded, setEditLoaded] = React.useState<string | undefined>(undefined);
+
   const [command, setCommand] = React.useState("");
   const [argv, setArgv] = React.useState<string[]>([]);
   const [commandOptions, setCommandOptions] = React.useState<WizardCommandOptions>(
@@ -285,6 +291,61 @@ const selectedIconRefStale = (
     prewarmGhostty();
   }, []);
 
+  /** True once the edit prefill has been applied to the rendered form. */
+  const editAppliedRef = React.useRef(false);
+
+  // Edit mode (Applications -> 编辑): pull the registration's v1 config and
+  // prefill the form; the create call runs with --force (overwrite mode).
+  // The patch is applied on top of the first form event because that event
+  // resets `values` to server defaults — applying earlier would be lost.
+  React.useEffect(() => {
+    if (editAppId === null || editLoaded === editAppId) return;
+    setEditLoaded(editAppId);
+    void (async () => {
+      const response = await fetchAppConfig(editAppId);
+      if (response.status !== 200 || "code" in response.data) return;
+      const config = response.data as {
+        appId?: string;
+        appName?: string;
+        command?: { executable?: string; args?: string[]; cwd?: string; env?: Record<string, string> };
+        icons?: { imageSmoothingEnabled?: boolean };
+        developerMode?: boolean;
+      };
+      // v1 schema: command.executable (NOT command.command). A v1 vector is
+      // argv-shaped, so edit mode enters array mode and the elements
+      // round-trip EXACTLY (never joined/split into a shell string).
+      if (config.command?.executable !== undefined) setCommand(config.command.executable);
+      if (config.command?.args !== undefined) setArgv([...config.command.args]);
+      if (config.command?.executable !== undefined) {
+        setCommandOptions((prev) => ({ ...prev, argsMode: "array" }));
+      }
+      // Apply directly on top of whatever the form has rendered so far.
+      // The form event below merges instead of replacing in edit mode, so
+      // either race order converges to the same prefilled state.
+      if (config.appName !== undefined) {
+        const appName = config.appName;
+        setValues((prev) => ({ ...prev, appName }));
+      }
+      if (config.icons?.imageSmoothingEnabled !== undefined) {
+        const imageSmoothingEnabled = config.icons.imageSmoothingEnabled;
+        setValues((prev) => ({ ...prev, imageSmoothingEnabled }));
+      }
+      if (config.developerMode !== undefined) {
+        const developerMode = config.developerMode;
+        setValues((prev) => ({ ...prev, developerMode, force: true }));
+      }
+      if (config.command?.cwd !== undefined) {
+        const cwd = config.command.cwd;
+        setCommandOptions((prev) => ({ ...prev, cwd }));
+      }
+      if (config.command?.env !== undefined) {
+        const env = Object.entries(config.command.env).map(([key, value]) => ({ key, value }));
+        setCommandOptions((prev) => ({ ...prev, env }));
+      }
+      editAppliedRef.current = true;
+    })();
+  }, [editAppId, editLoaded]);
+
   // ---- ghostty terminal mount (host element exists once the panel opens) ----
   React.useEffect(() => {
     if (!panelOpen) return;
@@ -431,8 +492,16 @@ const selectedIconRefStale = (
         case "scrape":
           setHasScrapedIcon(payload.hasIcon);
           break;
-        case "form":
-          setValues(payload.values);
+        case "form": {
+          // Edit mode: the first form event resets to server defaults, then
+          // the config fetch overlays the v1 prefill (either race order
+          // converges — merge here instead of replace so prefills survive
+          // a form event that arrives after the fetch resolves).
+          // Edit mode: form events NEVER replace values wholesale (the
+          // config prefill would be lost to any later form event); they
+          // only refresh defaults/dir state.
+          const inEditMode = editAppId !== null;
+          setValues(inEditMode ? (prev) => prev : payload.values);
           setDefaults(payload.defaults);
           setTargetDirExists(payload.targetDirExists);
           // First form event after load: adopt the server-side composition
@@ -444,6 +513,7 @@ const selectedIconRefStale = (
             setIconScale(payload.values.iconScale);
           }
           break;
+        }
         case "materialize-step":
           setCurrentStep(payload.step);
           setDialogLogs((prev) => [...prev, `[${payload.step}] ${payload.message}`]);
