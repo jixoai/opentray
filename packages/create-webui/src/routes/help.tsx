@@ -11,7 +11,10 @@ import { fetchSkillFile, fetchSkillList, type SkillEntry } from "../api";
 import { Skeleton } from "../components/ui/skeleton";
 import { Tree, TreeItem, TreeItemLabel } from "../components/reui/tree";
 import MarkdownIt from "markdown-it";
+// Typing-only ambient declaration for the plugin (it ships plain JS).
+
 import type { MarkdownIt as MarkdownItType, Token } from "markdown-it";
+import markdownItFrontMatter from "markdown-it-front-matter";
 import { hotkeysCoreFeature, selectionFeature, syncDataLoaderFeature } from "@headless-tree/core";
 import { useTree } from "@headless-tree/react";
 import { FileTextIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
@@ -41,6 +44,27 @@ const md: MarkdownItType = MarkdownIt({
   typographer: false,
   breaks: false,
 });
+// YAML front matter: the plugin (a BLOCK rule) consumes the --- block and
+// emits a `front_matter` token; raw markdown-it would otherwise render the
+// delimiters as <hr> and each `key: value` line as a heading. This core
+// rule rewrites the token into a yaml code fence so the metadata renders
+// as highlighted code at the top of the document.
+void markdownItFrontMatter(md, () => {
+  // meta is also carried on the token; nothing to stash here.
+});
+md.core.ruler.push("render_front_matter", (state) => {
+  for (const token of state.tokens) {
+    if (token.type === "front_matter") {
+      token.type = "fence";
+      token.tag = "code";
+      token.info = "yaml";
+      token.content = String(token.meta ?? "").replace(/\n$/, "");
+      token.block = true;
+    }
+  }
+  return true;
+});
+
 // Scheme allowlist: reject anything outside http/https/mailto/anchor/relative.
 md.validateLink = (url: string): boolean => SAFE_LINK.test(url.trim());
 // Every link opens externally and never leaks the referrer/token URL.

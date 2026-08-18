@@ -747,7 +747,7 @@ const selectedIconRefStale = (
           scrollable; the detail pane appearing never shifts it. */}
       <div
         className={
-          "flex w-full flex-col gap-4 overflow-y-auto p-5 pr-3 max-md:min-h-full " +
+          "flex w-full flex-col gap-4 overflow-y-auto p-5 pr-2 max-md:min-h-full " +
           (panelOpen ? "md:border-r md:border-border" : "")
         }
         style={{
@@ -890,7 +890,7 @@ const selectedIconRefStale = (
           animates from 0fr; content mounts only once a command starts so the
           terminal/iframe state still resets between runs. */}
       <div
-        className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto p-4 max-md:hidden"
+        className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto p-4 pr-1 max-md:hidden"
         style={{
           scrollbarGutter: "stable",
           gridColumn: panelOpen ? "2" : "3",

@@ -107,3 +107,27 @@ describe("markdown parser correctness", () => {
     expect(html).toContain('target="_blank"');
   });
 });
+
+describe("yaml front matter", () => {
+  it("renders --- metadata as a yaml code fence, never as hr/headings", () => {
+    const html = renderMarkdown("---\nname: my-skill\ndescription: some guide\n---\n\n# Title\n\nbody");
+    expect(html).toContain('<code class="language-yaml">');
+    expect(html).toContain("name: my-skill");
+    // the raw failure modes are gone
+    expect(html).not.toContain("<hr>");
+    expect(html).not.toContain("<h2>name:");
+    // body still renders after the block
+    expect(html).toContain("<h1>Title</h1>");
+  });
+
+  it("leaves documents without front matter untouched", () => {
+    const html = renderMarkdown("# Just a title\n\nbody");
+    expect(html).toContain("<h1>Just a title</h1>");
+    expect(html).not.toContain("language-yaml");
+  });
+
+  it("keeps horizontal rules elsewhere working", () => {
+    const html = renderMarkdown("a\n\n---\n\nb");
+    expect(html).toContain("<hr>");
+  });
+});
