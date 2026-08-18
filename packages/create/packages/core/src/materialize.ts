@@ -1,13 +1,16 @@
-// Orthogonal intents (maintained 2026-07-22; original user request: after the
+// Orthogonal intents (maintained 2026-08-19; original user requests: after the
 // frozen dialog confirms generation, run a pending pipeline with live logs and
-// end in a success state that can open the app):
+// end in a success state that can open the app; 2026-08-19 the wizard panel's
+// own command preview already validates commands, so generation must NOT
+// re-run the command — decision D1 in
+// openspec/changes/create-no-first-launch-force-terminal/plans/plan.md):
 // 1. Guard the target directory before writing anything.
 // 2. Generate the strict AppIcon catalog through the sanctioned vite-plugin generator.
-// 3. Install, first-launch with an absolute runtime vector, and gate on the
-//    generated entry's ready marker plus the stable Darwin bundle.
+// 3. Install dependencies. Install completion IS generation success; the
+//    command's first real run happens when the user opens the app.
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -17,7 +20,6 @@ import {
 } from "@opentray/packaging";
 import { generateOpenTrayAppIcon } from "@opentray/vite-plugin";
 
-import { tcpProbe } from "./port-scan";
 import { composeAppIcon } from "./icon-compose";
 import type { IconBackground } from "./icon-compose";
 import { writeGlyphIconTemp } from "./scrape";
@@ -57,19 +59,12 @@ export interface MaterializeInput {
 export interface MaterializeResult {
   readonly scaffold: ScaffoldResult;
   readonly projectDir: string;
-  readonly bundlePath: string | undefined;
-  /** Absent under --skip-install (no node_modules → no first launch). */
-  readonly firstLaunch?: { readonly pid: number };
 }
 
 export interface MaterializeContext {
   readonly log: (event: MaterializeLogEvent) => void;
   readonly generateIcon?: typeof generateOpenTrayAppIcon;
   readonly runInstall?: (options: RunInstallOptions) => Promise<void>;
-  readonly firstLaunchEntry?: (projectDir: string) => Promise<FirstLaunchHandle> | FirstLaunchHandle;
-  readonly platform?: NodeJS.Platform;
-  readonly waitMs?: (ms: number) => Promise<void>;
-  readonly bundleTimeoutMs?: number;
 }
 
 export interface RunInstallOptions {
@@ -77,14 +72,6 @@ export interface RunInstallOptions {
   readonly packageManager: "npm" | "pnpm" | "bun";
   readonly log: (message: string) => void;
 }
-
-export interface FirstLaunchHandle {
-  readonly pid: number;
-  /** Resolves when the entry prints its ready marker; rejects on early exit. */
-  readonly ready: Promise<void>;
-}
-
-export const READY_MARKER_PREFIX = "opentray: ready";
 
 /** True when the directory exists and contains anything beyond ignorable files. */
 export const isDirectoryOccupied = async (dir: string): Promise<boolean> => {
@@ -130,8 +117,10 @@ export interface PayloadPhaseResult {
 
 /**
  * Payload phase: guard → tray icon → composed app icon → scaffold → icon
- * catalog → dependency install. Stopping here leaves a complete, unlaunched
- * project, which Core apply swaps into place transactionally before launch.
+ * catalog → dependency install. This is the WHOLE pipeline: install completion
+ * is generation success. Core apply swaps the payload into place
+ * transactionally; the command's first real run belongs to the user's first
+ * open of the generated app.
  */
 export const materializePayload = async (
   input: MaterializeInput,
@@ -301,66 +290,14 @@ export const materializePayload = async (
 };
 
 /**
- * Launch phase: first launch of the (already swapped-in) generated app and,
- * on macOS, verification of the stable Darwin bundle. Separated from the
- * payload phase so apply can launch from the FINAL payload location.
+ * Backward-compatible composition used by the wizard adapter: generation is
+ * the payload phase. There is no first-launch validation — the wizard panel's
+ * command preview is the validator (decision D1).
  */
-export const launchGeneratedApp = async (
-  input: MaterializeInput,
-  context: MaterializeContext,
-  payload: PayloadPhaseResult,
-): Promise<MaterializeResult> => {
-  const step = (name: string, message: string): void =>
-    context.log({ type: "step", step: name, message });
-  const waitMs =
-    context.waitMs ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const { scaffold, projectDir } = payload;
-
-  if (input.skipInstall) {
-    // No node_modules → the entry's `import "opentray"` cannot resolve, so a
-    // first launch would only fail the whole creation. The project is
-    // complete; launching is the user's step after installing.
-    step("launch", "skipping first launch (--skip-install)");
-    context.log({
-      type: "log",
-      message: "install dependencies and run `node main.mjs` to launch",
-    });
-    return { scaffold, projectDir, bundlePath: undefined };
-  }
-
-  step("launch", "first launch of the generated app");
-  const launch = context.firstLaunchEntry ?? firstLaunchEntry;
-  const launched = await launch(projectDir);
-  context.log({ type: "log", message: `app entry spawned (pid ${launched.pid})` });
-
-  step("launch", "waiting for app ready marker");
-  await launched.ready;
-  context.log({ type: "log", message: `${READY_MARKER_PREFIX} received` });
-
-  const platform = context.platform ?? process.platform;
-  let bundlePath: string | undefined;
-  if (platform === "darwin") {
-    step("bundle", "verifying stable Darwin app bundle");
-    const expected = expectedDarwinBundlePath(input.config);
-    bundlePath = await waitForDirectory(
-      expected,
-      context.bundleTimeoutMs ?? 60_000,
-      waitMs,
-    );
-    context.log({ type: "log", message: `stable bundle: ${bundlePath}` });
-  }
-
-  return { scaffold, projectDir, bundlePath, firstLaunch: launched };
-};
-
-/** Backward-compatible composition used by the wizard adapter. */
 export const materialize = async (
   input: MaterializeInput,
   context: MaterializeContext,
-): Promise<MaterializeResult> => {
-  const payload = await materializePayload(input, context);
-  return launchGeneratedApp(input, context, payload);
-};
+): Promise<MaterializeResult> => materializePayload(input, context);
 
 export const runPackageManagerInstall = async (options: RunInstallOptions): Promise<void> => {
   const commands: Record<"npm" | "pnpm" | "bun", { cmd: string; args: readonly string[] }> = {
@@ -396,102 +333,4 @@ export const runPackageManagerInstall = async (options: RunInstallOptions): Prom
       rejectPromise(new Error(`${cmd} ${args.join(" ")} exited with ${code ?? "signal"}`));
     });
   });
-};
-
-/**
- * Spawn the generated entry detached with piped stdout, resolving when the
- * entry prints its ready marker. The child is unref'd so the wizard can exit
- * without taking the generated app down.
- */
-/**
- * The generated app may embed a native PTY (@lydell/node-pty), which requires
- * a Node host (Bun loads it but never delivers output). Always launch the
- * generated entry with Node: prefer the Node currently executing the wizard,
- * else resolve `node` from PATH.
- */
-const nodeExecutable = (): string =>
-  process.versions.bun === undefined && process.execPath.includes("node")
-    ? process.execPath
-    : "node";
-
-export const firstLaunchEntry = async (projectDir: string): Promise<FirstLaunchHandle> => {
-  const child: ChildProcess = spawn(nodeExecutable(), [join(projectDir, "main.mjs")], {
-    cwd: projectDir,
-    stdio: ["ignore", "pipe", "inherit"],
-    detached: true,
-    windowsHide: true,
-  });
-  const pid = child.pid;
-  if (pid === undefined) {
-    throw new Error(`failed to spawn generated app entry in ${projectDir}`);
-  }
-  child.unref();
-
-  let buffer = "";
-  const ready = new Promise<void>((resolvePromise, rejectPromise) => {
-    const finish = (error: Error | undefined): void => {
-      child.stdout?.removeListener("data", onData);
-      if (error !== undefined) {
-        rejectPromise(error);
-        return;
-      }
-      resolvePromise();
-    };
-    const onData = (chunk: string): void => {
-      buffer += chunk;
-      const newline = buffer.indexOf("\n");
-      if (newline < 0) {
-        return;
-      }
-      const line = buffer.slice(0, newline);
-      buffer = buffer.slice(newline + 1);
-      if (line.startsWith(READY_MARKER_PREFIX)) {
-        finish(undefined);
-      }
-    };
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", onData);
-    child.once("error", (error) => finish(error));
-    child.once("exit", (code) => {
-      finish(new Error(`generated app entry exited early with ${code ?? "signal"}`));
-    });
-  });
-
-  return { pid, ready };
-};
-
-const waitForDirectory = async (
-  path: string,
-  timeoutMs: number,
-  waitMs: (ms: number) => Promise<void>,
-): Promise<string> => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const info = await stat(path);
-      if (info.isDirectory()) {
-        return path;
-      }
-    } catch {
-      // Not materialized yet.
-    }
-    await waitMs(500);
-  }
-  throw new Error(`stable Darwin app bundle did not appear within ${timeoutMs}ms: ${path}`);
-};
-
-/** TCP readiness helper reused by tests for the supervised service port. */
-export const waitForServicePort = async (
-  port: number,
-  timeoutMs: number,
-  probe: (port: number) => Promise<boolean> = (value) => tcpProbe("127.0.0.1", value),
-): Promise<boolean> => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await probe(port)) {
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  return false;
 };

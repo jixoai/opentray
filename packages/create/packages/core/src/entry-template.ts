@@ -1,13 +1,24 @@
-// Orthogonal intents (2026-08-16; owner round-9 demands: startup terminal
-// PTY streaming, shell window, tray icon wiring, multi-port monitor with
-// (detached) title marking):
+// Orthogonal intents (2026-08-16, updated 2026-08-19; owner round-9 demands:
+// startup terminal PTY streaming, shell window, tray icon wiring, multi-port
+// monitor with (detached) title marking; 2026-08-19 decisions D1–D6 in
+// openspec/changes/create-no-first-launch-force-terminal/plans/plan.md made
+// the PTY unconditional, removed the blocking service-port gate, made service
+// discovery an unbounded adaptive monitor, and turned the terminal window
+// into the abnormal-exit surface):
 // 1. Render the generated app entry from the frozen config as one real TS
 //    template literal (compile-checked here; no string surgery at build time).
-// 2. Shell mode: window opens immediately, command runs through a PTY, ports
-//    are monitored and detaches mark the window title.
-// 3. Plain mode: wait-for-service window with favicon/title sync.
-// 4. Tray icon: config asset → platform icon candidates (darwin template
-//    variant for solid art), text-only fallback otherwise.
+// 2. The command ALWAYS runs through a PTY (preview-parity TTY environment);
+//    a failed PTY load degrades to pipes and logs the degradation.
+// 3. Service windows are driven exclusively by the continuous adaptive port
+//    monitor — one window per HTTP-verified port, no startup gate, no
+//    deadline; polling cost is bounded by cadence (≈1s active, ≤5s quiet or
+//    under load), never by a time limit.
+// 4. Terminal window: `showTerminal` controls initial visibility only; an
+//    abnormal command exit (non-zero/signal code, or exit before any verified
+//    service) force-reveals it with the retained output replay.
+// 5. Command teardown sweeps the whole process tree (group signal + PPid
+//    walk, SIGTERM → bounded grace → SIGKILL).
+// 6. Any startup failure persists its stack to app.log before exit(1).
 import type { ScaffoldAppConfig } from "./scaffold";
 
 /** The generated app entry: supervises the command, owns tray + window. */
@@ -17,6 +28,7 @@ export const createEntrySource = (config: ScaffoldAppConfig): string => `#!/usr/
 import { spawn, execFile, spawnSync } from "node:child_process";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import http from "node:http";
+import { cpus, loadavg } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,99 +48,20 @@ const nodeRuntime = () => {
   } catch { /* fall through */ }
   return "node";
 };
-const READY_MARK_PREFIX = "opentray: ready";
 
 const config = ${JSON.stringify(config, null, 2)};
 
 const appLogPath = resolve(PROJECT_DIR, "app.log");
 await mkdir(dirname(appLogPath), { recursive: true });
 const logSink = appendFile.bind(undefined, appLogPath);
+const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 
 const shellOptions = ${JSON.stringify(config.shell ?? null)};
-const hasShell = shellOptions !== null && (shellOptions.showTerminal || shellOptions.showAddressBar);
 const showTerminal = shellOptions !== null && shellOptions.showTerminal === true;
-const shellApi = hasShell ? await import("./app-shell-server.mjs") : null;
+const showAddressBar = shellOptions !== null && shellOptions.showAddressBar === true;
 
 // Configured env overlay (advanced command options); empty by default.
 const commandEnv = ${JSON.stringify(config.command.env ?? {})};
-
-let command;
-let commandExited = false;
-if (showTerminal) {
-  // Startup terminal (advanced option): run the command through a PTY and
-  // stream its bytes to the shell UI — the same tab experience the wizard has.
-  let ptyModule;
-  try {
-    ptyModule = await import("@lydell/node-pty");
-  } catch {
-    ptyModule = null;
-  }
-  const cwd = resolve(PROJECT_DIR, config.command.cwd);
-  if (ptyModule !== null) {
-    const pty = ptyModule.spawn(config.command.command, [...config.command.args], {
-      name: "xterm-256color",
-      cols: 100,
-      rows: 30,
-      cwd,
-      env: { ...process.env, ...commandEnv, TERM: "xterm-256color" },
-    });
-    shellApi?.registerPty(pty);
-    pty.onData((chunk) => {
-      void logSink(chunk, "utf8");
-      shellApi?.pushOutput(chunk);
-    });
-    const exited = new Promise((resolvePromise) => {
-      pty.onExit(({ exitCode }) => {
-        commandExited = true;
-        void logSink(\`[command exited \${exitCode}]\n\`, "utf8");
-        resolvePromise(exitCode);
-      });
-    });
-    command = { pid: pty.pid, exited, kill: async () => { try { pty.kill(); } catch {} await exited; } };
-  } else {
-    await logSink("[create-opentray] @lydell/node-pty unavailable; startup terminal degraded to pipes\\n", "utf8");
-  }
-}
-if (command === undefined) {
-  const child = spawn(config.command.command, [...config.command.args], {
-    cwd: resolve(PROJECT_DIR, config.command.cwd),
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...commandEnv },
-    windowsHide: true,
-  });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => { void logSink(chunk, "utf8"); shellApi?.pushOutput(chunk); });
-  child.stderr.on("data", (chunk) => { void logSink(chunk, "utf8"); shellApi?.pushOutput(chunk); });
-  child.once("exit", (code) => {
-    commandExited = true;
-    void logSink(\`[command exited \${code ?? "signal"}]\n\`, "utf8");
-  });
-  command = child;
-}
-
-const killCommand = async () => {
-  if (commandExited) return;
-  // command.kill is always a function here: the PTY wrapper (shell mode) or
-  // the ChildProcess (plain mode). The PTY wrapper tears down the session
-  // tree; plain spawns SIGTERM the direct child.
-  await command.kill();
-};
-
-let appIcon;
-try {
-  const manifest = JSON.parse(await readFile(resolve(PROJECT_DIR, "app-icon", "app-icon.json"), "utf8"));
-  // The manifest stores project-relative source paths; OpenTray validates file
-  // sources against the caller's cwd, so canonicalize them to absolute paths
-  // before dispatch (a reused broker cwd must never reinterpret App identity).
-  appIcon = manifest.appIcon.map((asset) => (
-    asset.source?.type === "file" && !asset.source.path.startsWith("/")
-      ? { ...asset, source: { ...asset.source, path: resolve(PROJECT_DIR, "app-icon", asset.source.path) } }
-      : asset
-  ));
-} catch {
-  appIcon = undefined;
-}
 
 const httpAnswers = (port) => new Promise((resolvePromise) => {
   const request = http.get({ host: "127.0.0.1", port, path: "/", timeout: 1500 }, (response) => {
@@ -180,148 +113,258 @@ const listOwnedListeningPorts = async (rootPid) => {
   return [...ports];
 };
 
-// PORTS COME EXCLUSIVELY FROM SNIFFING (owner law): scan the command's
-// process tree for listening ports and HTTP-verify each candidate. The
-// recorded preview port is informational only and is never addressed
-// without verification; dynamic-port commands (listen(0)) therefore behave
-// identically to fixed-port ones.
-const sniffServicePort = async (timeoutMs) => {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const owned = await listOwnedListeningPorts(command.pid).catch(() => []);
-    for (const port of owned.filter((p) => p > 0)) {
-      if (await httpAnswers(port)) return port;
-    }
-    if (Date.now() > deadline) {
-      throw new Error("no HTTP service found among the command's listening ports within " + timeoutMs + "ms");
-    }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+const main = async () => {
+  let appIcon;
+  try {
+    const manifest = JSON.parse(await readFile(resolve(PROJECT_DIR, "app-icon", "app-icon.json"), "utf8"));
+    // The manifest stores project-relative source paths; OpenTray validates file
+    // sources against the caller's cwd, so canonicalize them to absolute paths
+    // before dispatch (a reused broker cwd must never reinterpret App identity).
+    appIcon = manifest.appIcon.map((asset) => (
+      asset.source?.type === "file" && !asset.source.path.startsWith("/")
+        ? { ...asset, source: { ...asset.source, path: resolve(PROJECT_DIR, "app-icon", asset.source.path) } }
+        : asset
+    ));
+  } catch {
+    appIcon = undefined;
   }
-};
 
-// Shell mode: start the local shell server first so windows can open
-// immediately; the monitor below sniffs services continuously.
-const shellPort = hasShell ? await shellApi.listenShell() : null;
+  // Shell host (D2): unconditional — the terminal window is every app's
+  // abnormal-exit surface, and the address bar consumes it too.
+  const shellApi = await import("./app-shell-server.mjs");
+  const shellPort = await shellApi.listenShell();
 
-// Plain mode needs one verified address before opening its single window;
-// shell mode defers entirely to the continuous monitor.
-const servicePort = hasShell
-  ? null
-  : await sniffServicePort(30_000).catch(async (error) => {
-      await logSink(\`[create-opentray] \${error.message}\\n\`, "utf8");
-      await killCommand();
-      throw error;
+  // Command supervision state shared by the exit note and teardown.
+  let commandExited = false;
+  let sawVerifiedService = false;
+
+  // D4: the command ALWAYS runs through a PTY — the same TTY environment the
+  // wizard preview used. A failed native-PTY load degrades to pipes.
+  let ptyModule;
+  try {
+    ptyModule = await import("@lydell/node-pty");
+  } catch {
+    ptyModule = null;
+  }
+  const cwd = resolve(PROJECT_DIR, config.command.cwd);
+  let command;
+  if (ptyModule !== null) {
+    const pty = ptyModule.spawn(config.command.command, [...config.command.args], {
+      name: "xterm-256color",
+      cols: 100,
+      rows: 30,
+      cwd,
+      env: { ...process.env, ...commandEnv, TERM: "xterm-256color" },
     });
+    shellApi.registerPty(pty);
+    pty.onData((chunk) => {
+      void logSink(chunk, "utf8");
+      shellApi.pushOutput(chunk);
+    });
+    const exited = new Promise((resolvePromise) => {
+      pty.onExit(({ exitCode, signal }) => resolvePromise({ code: exitCode, signal }));
+    });
+    command = {
+      pid: pty.pid,
+      exited,
+      killDirect: () => { try { pty.kill(); } catch { /* already dead */ } },
+    };
+  } else {
+    await logSink("[create-opentray] @lydell/node-pty unavailable; command degraded to pipes (no TTY)\\n", "utf8");
+    const child = spawn(config.command.command, [...config.command.args], {
+      cwd,
+      // stdin stays an unwritten pipe: interactive commands must not see EOF.
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...commandEnv },
+      windowsHide: true,
+      detached: process.platform !== "win32", // own process group → group teardown
+    });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { void logSink(chunk, "utf8"); shellApi.pushOutput(chunk); });
+    child.stderr.on("data", (chunk) => { void logSink(chunk, "utf8"); shellApi.pushOutput(chunk); });
+    const exited = new Promise((resolvePromise) => {
+      child.once("exit", (code, signal) => resolvePromise({ code, signal }));
+    });
+    command = {
+      pid: child.pid,
+      exited,
+      killDirect: () => { try { child.kill("SIGTERM"); } catch { /* already dead */ } },
+    };
+  }
 
-const trayIcon = ${JSON.stringify(config.trayIcon ?? null)};
-const trayIconCandidates = trayIcon === null
-  ? {}
-  : trayIcon.template && process.platform === "darwin"
-    ? { "darwin-icon-only": { type: "file", path: resolve(PROJECT_DIR, trayIcon.path), isTemplate: true } }
-    : { "icon-only": { type: "file", path: resolve(PROJECT_DIR, trayIcon.path) } };
+  const trayIcon = ${JSON.stringify(config.trayIcon ?? null)};
+  const trayIconCandidates = trayIcon === null
+    ? {}
+    : trayIcon.template && process.platform === "darwin"
+      ? { "darwin-icon-only": { type: "file", path: resolve(PROJECT_DIR, trayIcon.path), isTemplate: true } }
+      : { "icon-only": { type: "file", path: resolve(PROJECT_DIR, trayIcon.path) } };
 
-const tray = await createTray({
-  id: config.appId,
-  tooltip: { title: config.appName, description: \`\${config.appName} (OpenTray)\` },
-  icon: Object.keys(trayIconCandidates).length > 0
-    ? trayIconCandidates
-    : { "text-only": "${config.appName.replace(/['"\\]/gu, "").slice(0, 2) || "A"}" },
-  menu: { items: [
-    { type: "item", id: 1, title: \`Show \${config.appName}\`, primaryEvent: true },
-    { type: "separator" },
-    { type: "item", id: 2, title: "Quit" },
-  ] },
-}, {
-  appId: config.appId,
-  appName: config.appName,
-  ...(appIcon === undefined ? {} : { appIcon }),
-  appLaunch: {
-    // The generated entry may embed a native PTY (@lydell/node-pty), which
-    // requires a Node host — cold launches must not inherit a Bun execPath.
-    command: nodeRuntime(),
-    args: [resolve(PROJECT_DIR, "main.mjs")],
-    cwd: PROJECT_DIR,
-  },
-});
-
-const baseTitle = config.appName;
-const showAddressBar = shellOptions !== null && shellOptions.showAddressBar === true;
-// v1 developerMode maps ONLY to per-window DevTools admission. When false it
-// must not request devtools at all — default windows are not inspectable.
-const devtools = config.developerMode === true ? { devtools: true } : {};
-
-// Dedicated windows (round 9b): one terminal window when enabled, one window
-// per listened port — an address-bar wrapper page when enabled, the direct
-// service URL otherwise. No embedded tabs panel.
-// Each window gets its OWN extension mount (tray.extend per window): one
-// mount owns exactly one native webview slot, so dedicated windows never
-// collide on content.
-const serviceWindows = new Map();
-let terminalWindow = null;
-
-const ensureServiceWindow = async (port) => {
-  if (serviceWindows.has(port)) return;
-  const direct = \`http://127.0.0.1:\${port}\`;
-  const url = showAddressBar && shellPort !== null
-    ? \`http://127.0.0.1:\${shellPort}/browse.html?url=\${encodeURIComponent(direct)}\`
-    : direct;
-  const win = tray.extend(WebviewExt).createWebviewWindow({
-    url,
-    width: config.window.width,
-    height: config.window.height,
-    title: baseTitle,
-    style: { appMode: true, autoHide: false, keepOnTop: false },
-    ...devtools,
-    ...(showAddressBar ? {} : { titleSync: { documentToWindow: true, windowToDocument: true } }),
-    ...(showAddressBar ? {} : { iconSync: { faviconToWindow: true, windowToFavicon: true } }),
+  const tray = await createTray({
+    id: config.appId,
+    tooltip: { title: config.appName, description: \`\${config.appName} (OpenTray)\` },
+    icon: Object.keys(trayIconCandidates).length > 0
+      ? trayIconCandidates
+      : { "text-only": "${config.appName.replace(/['"\\]/gu, "").slice(0, 2) || "A"}" },
+    menu: { items: [
+      { type: "item", id: 1, title: \`Show \${config.appName}\`, primaryEvent: true },
+      { type: "separator" },
+      { type: "item", id: 2, title: "Quit" },
+    ] },
+  }, {
+    appId: config.appId,
+    appName: config.appName,
+    ...(appIcon === undefined ? {} : { appIcon }),
+    appLaunch: {
+      // The generated entry embeds a native PTY (@lydell/node-pty), which
+      // requires a Node host — cold launches must not inherit a Bun execPath.
+      command: nodeRuntime(),
+      args: [resolve(PROJECT_DIR, "main.mjs")],
+      cwd: PROJECT_DIR,
+    },
   });
-  serviceWindows.set(port, { win, detached: false });
-  await win.show().catch(() => {});
-};
 
-if (showTerminal && shellPort !== null) {
-  terminalWindow = tray.extend(WebviewExt).createWebviewWindow({
-    url: \`http://127.0.0.1:\${shellPort}/terminal.html\`,
-    width: 900,
-    height: 560,
-    title: \`\${baseTitle} — Terminal\`,
-    style: { appMode: true, autoHide: false, keepOnTop: false },
-    ...devtools,
+  const baseTitle = config.appName;
+  // v1 developerMode maps ONLY to per-window DevTools admission. When false it
+  // must not request devtools at all — default windows are not inspectable.
+  const devtools = config.developerMode === true ? { devtools: true } : {};
+
+  // Dedicated windows: one terminal window (always available; initially
+  // visible only under showTerminal), one window per listened port — an
+  // address-bar wrapper page when enabled, the direct service URL otherwise.
+  // Each window gets its OWN extension mount (tray.extend per window): one
+  // mount owns exactly one native webview slot, so dedicated windows never
+  // collide on content.
+  const serviceWindows = new Map();
+  let terminalWindow = null;
+
+  const ensureTerminalWindow = async () => {
+    if (terminalWindow !== null || shellPort === null) return terminalWindow;
+    terminalWindow = tray.extend(WebviewExt).createWebviewWindow({
+      url: \`http://127.0.0.1:\${shellPort}/terminal.html\`,
+      width: 900,
+      height: 560,
+      title: \`\${baseTitle} — Terminal\`,
+      style: { appMode: true, autoHide: false, keepOnTop: false },
+      ...devtools,
+    });
+    await terminalWindow.show().catch(() => {});
+    return terminalWindow;
+  };
+
+  // D2: abnormal exit force-reveals the terminal window regardless of the
+  // showTerminal config. The shell host's output ring replays the full
+  // history to a window opened here for the first time.
+  const revealTerminalWindow = async () => {
+    if (terminalWindow === null) {
+      await ensureTerminalWindow();
+      return;
+    }
+    await terminalWindow.toVisible().catch(() => {});
+    await terminalWindow.focus().catch(() => {});
+  };
+
+  const ensureServiceWindow = async (port) => {
+    if (serviceWindows.has(port)) return;
+    const direct = \`http://127.0.0.1:\${port}\`;
+    const url = showAddressBar && shellPort !== null
+      ? \`http://127.0.0.1:\${shellPort}/browse.html?url=\${encodeURIComponent(direct)}\`
+      : direct;
+    const win = tray.extend(WebviewExt).createWebviewWindow({
+      url,
+      width: config.window.width,
+      height: config.window.height,
+      title: baseTitle,
+      style: { appMode: true, autoHide: false, keepOnTop: false },
+      ...devtools,
+      ...(showAddressBar ? {} : { titleSync: { documentToWindow: true, windowToDocument: true } }),
+      ...(showAddressBar ? {} : { iconSync: { faviconToWindow: true, windowToFavicon: true } }),
+    });
+    serviceWindows.set(port, { win, detached: false });
+    await win.show().catch(() => {});
+  };
+
+  if (showTerminal) {
+    await ensureTerminalWindow();
+  }
+
+  // D5: teardown sweeps the WHOLE process tree. POSIX pipe fallbacks run in
+  // an owned process group (detached spawn) so the group signal reaches
+  // children that ignored the direct one; setsid escapees fall to the PPid
+  // walk. Escalation: SIGTERM (direct + group + tree) → 3s grace → SIGKILL.
+  const killCommand = async () => {
+    if (process.platform === "win32") {
+      await new Promise((resolvePromise) => {
+        execFile("taskkill", ["/PID", String(command.pid), "/T", "/F"], () => resolvePromise());
+      });
+      return;
+    }
+    const tree = await listProcessTreePids(command.pid).catch(() => [command.pid]);
+    if (!commandExited) command.killDirect();
+    try { process.kill(-command.pid, "SIGTERM"); } catch { /* group gone */ }
+    for (const pid of tree) { try { process.kill(pid, "SIGTERM"); } catch { /* raced exit */ } }
+    if (!commandExited) await Promise.race([command.exited, sleep(3000)]);
+    const survivors = [];
+    for (const pid of tree) {
+      try { process.kill(pid, 0); survivors.push(pid); } catch { /* dead */ }
+    }
+    if (survivors.length > 0 || !commandExited) {
+      try { process.kill(-command.pid, "SIGKILL"); } catch { /* group gone */ }
+      for (const pid of survivors) { try { process.kill(pid, "SIGKILL"); } catch { /* raced exit */ } }
+    }
+    await Promise.race([command.exited, sleep(1000)]);
+  };
+
+  // Abnormal-exit detection (D2): non-zero/signal code, or exit before ANY
+  // verified service. The note enters app.log AND the shell output ring so a
+  // force-revealed terminal window shows why it appeared.
+  void command.exited.then(async ({ code, signal }) => {
+    commandExited = true;
+    // @lydell/node-pty reports signal 0 (not undefined) on normal exits.
+    const hadSignal = signal !== undefined && signal !== null && signal !== 0;
+    const detail = hadSignal ? \`signal \${signal}\` : \`code \${code}\`;
+    const abnormal = code !== 0 || hadSignal || !sawVerifiedService;
+    const why = abnormal ? (code === 0 && !hadSignal ? " before any service appeared" : "") : "";
+    const note = \`[create-opentray] command exited (\${detail})\${why}\${abnormal ? " — revealing terminal" : ""}\\n\`;
+    await logSink(note, "utf8");
+    shellApi.pushOutput(note);
+    if (abnormal) await revealTerminalWindow();
   });
-  await terminalWindow.show().catch(() => {});
-}
 
-// Plain mode: the first verified port opens immediately through the SAME
-// per-port window machinery the monitor uses (no duplicate window object);
-// additional ports get their own windows as the monitor verifies them.
-if (!hasShell && servicePort !== null) {
-  await ensureServiceWindow(servicePort);
-}
-
-{
-  // Continuous owned-port monitor (BOTH modes): every HTTP-verified listening
-  // port gets its own window, and a port that stops listening marks THAT
-  // window's title (detached). Spec: one window per listened port, never
-  // gated on shell mode.
-  const seenPorts = new Set();
-  const verifiedPorts = new Set();
-  const monitor = setInterval(async () => {
-    try {
+  {
+    // D3: unbounded adaptive service monitor. Polling cost law: ≈1s while
+    // anything changes, backing off to ≤5s when quiet or when 1-min load
+    // exceeds the core count — 0.2–1Hz, never a hidden high-frequency loop,
+    // never a deadline. Ports come EXCLUSIVELY from owned-tree sniffing plus
+    // HTTP verification (dynamic ports behave like fixed ones).
+    const FAST_INTERVAL_MS = 1000;
+    const SLOW_INTERVAL_MS = 5000;
+    const QUIET_TICKS_BEFORE_BACKOFF = 8;
+    const cpuCount = cpus().length;
+    const seenPorts = new Set();
+    const verifiedPorts = new Set();
+    let lastSignature = "";
+    let quietTicks = 0;
+    let stopped = false;
+    const nextIntervalMs = () => {
+      const loadBusy = (loadavg()[0] ?? 0) > cpuCount;
+      return quietTicks >= QUIET_TICKS_BEFORE_BACKOFF || loadBusy ? SLOW_INTERVAL_MS : FAST_INTERVAL_MS;
+    };
+    const monitorTick = async () => {
       const owned = await listOwnedListeningPorts(command.pid).catch(() => []);
       const listening = owned.filter((port) => port > 0);
-      // Spec: owned-listener scan PLUS HTTP verification before a port is
-      // ever addressed — the monitor never adopts a non-HTTP listener.
       for (const port of listening) {
         if (!verifiedPorts.has(port) && (await httpAnswers(port))) {
           verifiedPorts.add(port);
         }
       }
+      if (verifiedPorts.size > 0) sawVerifiedService = true;
       for (const port of verifiedPorts) seenPorts.add(port);
       const services = [...seenPorts].map((port) => ({
         port,
         detached: !listening.includes(port),
       }));
-      shellApi?.setServices(services);
+      shellApi.setServices(services);
       for (const service of services) {
         if (!service.detached) await ensureServiceWindow(service.port);
         const entry = serviceWindows.get(service.port);
@@ -331,46 +374,68 @@ if (!hasShell && servicePort !== null) {
           await entry.win.setTitle(title).catch(() => {});
         }
       }
-    } catch {
-      /* monitor tick */
-    }
-  }, 1500);
-  const stopMonitor = () => clearInterval(monitor);
-  process.once("exit", stopMonitor);
-}
+      const signature = JSON.stringify([services, listening]);
+      const changed = signature !== lastSignature;
+      lastSignature = signature;
+      return changed;
+    };
+    const runMonitor = async () => {
+      while (!stopped) {
+        let changed = false;
+        try {
+          changed = await monitorTick();
+        } catch {
+          /* monitor tick */
+        }
+        quietTicks = changed ? 0 : quietTicks + 1;
+        await sleep(nextIntervalMs());
+      }
+    };
+    void runMonitor();
+    process.once("exit", () => { stopped = true; });
+  }
 
-const quit = async () => {
-  for (const { win } of serviceWindows.values()) {
-    try { await win.destroy(); } catch {}
-  }
-  serviceWindows.clear();
-  if (terminalWindow !== null) {
-    try { await terminalWindow.destroy(); } catch {}
-  }
-  await tray.destroy();
-  await killCommand();
-  process.exit(0);
+  const quit = async () => {
+    for (const { win } of serviceWindows.values()) {
+      try { await win.destroy(); } catch {}
+    }
+    serviceWindows.clear();
+    if (terminalWindow !== null) {
+      try { await terminalWindow.destroy(); } catch {}
+    }
+    await tray.destroy();
+    await killCommand();
+    process.exit(0);
+  };
+
+  tray.onMenuClick(({ itemId }) => {
+    if (itemId === 1) {
+      const target = terminalWindow !== null
+        ? terminalWindow
+        : serviceWindows.size > 0
+          ? [...serviceWindows.values()][0].win
+          : null;
+      if (target === null) return;
+      void target.isVisible().then(async (visible) => {
+        if (visible) { await target.close(); } else { await target.toVisible(); }
+      }).catch(() => {});
+      return;
+    }
+    if (itemId === 2) void quit();
+  });
+
+  process.on("SIGINT", () => void quit());
+  process.on("SIGTERM", () => void quit());
 };
 
-tray.onMenuClick(({ itemId }) => {
-  if (itemId === 1) {
-    const target = terminalWindow !== null
-      ? terminalWindow
-      : serviceWindows.size > 0
-        ? [...serviceWindows.values()][0].win
-        : null;
-    if (target === null) return;
-    void target.isVisible().then(async (visible) => {
-      if (visible) { await target.close(); } else { await target.toVisible(); }
-    }).catch(() => {});
-    return;
-  }
-  if (itemId === 2) void quit();
+// D6: no startup failure is silent — the stack lands in app.log (the entry's
+// only durable surface when the tray itself never came up) before exit(1).
+main().catch(async (error) => {
+  try {
+    await logSink(\`[create-opentray] startup failed: \${error instanceof Error ? error.stack ?? error.message : String(error)}\\n\`, "utf8");
+  } catch { /* app.log unwritable; stderr below is the remaining surface */ }
+  console.error(error);
+  process.exit(1);
 });
-
-process.on("SIGINT", () => void quit());
-process.on("SIGTERM", () => void quit());
-
-console.log(\`\${READY_MARK_PREFIX} \${JSON.stringify({ appId: config.appId, ...(servicePort === null ? {} : { port: servicePort }) })}\`);
 
 `;

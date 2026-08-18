@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import type { WizardFormValues } from "@/wizard-protocol";
 
-const PIPELINE_STEPS = ["scaffold", "icon", "install", "launch", "bundle"] as const;
+// 生成 = scaffold → icon → install；命令的首次运行属于「打开应用」（用户决策 D1）。
+const PIPELINE_STEPS = ["scaffold", "icon", "install"] as const;
 
 export interface CreateDialogProps {
   open: boolean;

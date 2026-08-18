@@ -411,8 +411,6 @@ describe("wizard session", () => {
           manifestOutputPath: "",
           appIcon: [],
         })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
-        firstLaunchEntry: async () => ({ pid: 999, ready: Promise.resolve() }),
-        waitMs: async () => {},
         runInstall: async ({ log }) => {
           void log;
         },
@@ -535,10 +533,7 @@ describe("wizard session", () => {
           manifestOutputPath: "",
           appIcon: [],
         })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
-        firstLaunchEntry: async () => ({ pid: 999, ready: Promise.resolve() }),
-        waitMs: async () => {},
         runInstall: async () => {},
-        platform: "linux",
       },
     });
     // Simulate a stale previous generation BEFORE priming, so the existence
@@ -593,10 +588,7 @@ describe("wizard session", () => {
           manifestOutputPath: "",
           appIcon: [],
         })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
-        firstLaunchEntry: async () => ({ pid: 999, ready: Promise.resolve() }),
-        waitMs: async () => {},
         runInstall: async () => {},
-        platform: "linux",
       },
     });
     harness.session.updateCommandOptions({
@@ -675,8 +667,6 @@ describe("wizard session", () => {
           manifestOutputPath: "",
           appIcon: [],
         })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
-        firstLaunchEntry: async () => ({ pid: 999, ready: Promise.resolve() }),
-        waitMs: async () => {},
       },
     });
 

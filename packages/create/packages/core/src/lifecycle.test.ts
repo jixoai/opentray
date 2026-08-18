@@ -25,11 +25,6 @@ vi.mock("./materialize", async (importOriginal) => {
       await writeFile(join(input.targetDir, "package.json"), "{}\n", "utf8");
       return { scaffold: { projectDir: input.targetDir } as never, projectDir: input.targetDir };
     }),
-    launchGeneratedApp: vi.fn(async (input, _context, payload) => ({
-      scaffold: payload.scaffold,
-      projectDir: payload.projectDir,
-      bundlePath: undefined,
-    })),
   };
 });
 

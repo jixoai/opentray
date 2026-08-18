@@ -999,7 +999,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       }
       setState("materializing");
 
-      // Free the service port: the generated app will spawn the command itself.
+      // Stop the wizard's preview run: generation itself no longer re-runs the
+      // command (decision D1), but the preview must not keep holding ports or
+      // terminal sessions once creation is underway.
       if (run !== undefined) {
         await run.kill();
         run = undefined;
@@ -1072,7 +1074,6 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         emit({
           type: "success",
           projectDir: result.projectDir,
-          ...(result.bundlePath === undefined ? {} : { bundlePath: result.bundlePath }),
           pinHint: pinningHint(),
         });
       } catch (error) {

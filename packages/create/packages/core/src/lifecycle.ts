@@ -20,7 +20,6 @@ import {
 } from "./config";
 import { err, ok, type Result } from "./errors";
 import {
-  launchGeneratedApp,
   materializePayload,
   type MaterializeContext,
   type MaterializeInput,
@@ -40,7 +39,6 @@ import {
   inspectProcess,
   killProcessTree,
   readRuntimeRecord,
-  writeRuntimeRecord,
 } from "./runtime-record";
 
 export interface DesiredIconInput {
@@ -85,7 +83,6 @@ export type PlanEffect =
   | { readonly type: "replace-payload"; readonly dir: string; readonly retainedPaths: readonly string[] }
   | { readonly type: "link-payload"; readonly link: string; readonly target: string }
   | { readonly type: "install-dependencies" }
-  | { readonly type: "launch-app" }
   | { readonly type: "stop-running"; readonly pid: number }
   | { readonly type: "warning"; readonly message: string };
 
@@ -254,7 +251,6 @@ export const planCreate = async (options: PlanOptions): Promise<Result<Lifecycle
   }
   if (options.skipInstall !== true) {
     effects.push({ type: "install-dependencies" });
-    effects.push({ type: "launch-app" });
   }
 
   const envCount = Object.keys(desired.config.command.env ?? {}).length;
@@ -461,33 +457,10 @@ export const applyCreate = async (options: ApplyOptions): Promise<Result<ApplyRe
     }
     await rm(oldDir, { recursive: true, force: true });
     log(`payload regenerated at ${paths.appDir}`);
-
-    // ---- Phase 5: install + launch from the FINAL payload location. ----
-    if (options.skipInstall !== true) {
-      materializeResult = await launchGeneratedApp(
-        { ...input, targetDir: paths.appDir },
-        context,
-        payload,
-      );
-      // Record runtime ownership (PID + token) for future stop/restart.
-      const pid = materializeResult.firstLaunch?.pid;
-      if (pid !== undefined) {
-        const { readProcessStartEpochMs, newRuntimeToken } = await import("./runtime-record");
-        const startedAt = (await readProcessStartEpochMs(pid)) ?? null;
-        await writeRuntimeRecord(paths.dir, {
-          pid,
-          token: newRuntimeToken(),
-          startedAt,
-          launchedAt: Date.now(),
-        });
-      }
-    } else {
-      materializeResult = await launchGeneratedApp(
-        { ...input, targetDir: paths.appDir },
-        context,
-        payload,
-      );
-    }
+    // Install already ran inside the staging payload; generation is complete.
+    // The command's first real run belongs to the user's first open
+    // (decision D1 — no first-launch validation during apply).
+    materializeResult = { scaffold: payload.scaffold, projectDir: paths.appDir };
   }
 
   return ok({

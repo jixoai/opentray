@@ -323,7 +323,8 @@ describe("plan visibility", () => {
     expect(text).toContain("+ registration");
     expect(text).toContain("~ config");
     expect(text).toContain("install dependencies");
-    expect(text).toContain("launch app");
+    // D1: apply never launches the app — install is the final planned effect.
+    expect(text).not.toContain("launch app");
     expect(text).toContain("env entries present: export requires acknowledgement");
     await expect(readFile(configPath("plan.effects"), "utf8")).rejects.toThrow();
   });

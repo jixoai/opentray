@@ -710,7 +710,9 @@ const handleApi = async (
       }
       const opened = await openMaterializedApp({
         projectDir: result.projectDir,
-        bundlePath: result.bundlePath,
+        // No bundle is verified during generation anymore; open-app derives
+        // the expected path and cold-starts the entry when it does not exist.
+        bundlePath: undefined,
       });
       respond(
         response,

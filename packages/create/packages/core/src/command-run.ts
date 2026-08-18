@@ -249,7 +249,19 @@ export const startBunTerminalRun = (
         } catch {
           // already closed
         }
-        await exited.catch(() => undefined);
+        // D5 (create-no-first-launch-force-terminal): the direct signals miss
+        // descendants that escaped the session — sweep the PPid tree so a
+        // stopped preview can never leave a server holding the service port.
+        await sweepDescendants(proc.pid, "SIGTERM").catch(() => undefined);
+        const exitedInGrace = await Promise.race([
+          exited.then(() => true),
+          new Promise<boolean>((resolve) => {
+            setTimeout(() => resolve(false), 3000);
+          }),
+        ]);
+        if (!exitedInGrace) {
+          await sweepDescendants(proc.pid, "SIGKILL").catch(() => undefined);
+        }
       })();
       return killPromise;
     },
@@ -363,6 +375,24 @@ const startPtyRun = (options: CommandRunOptions, ptyModule: PtyModule): CommandR
           ptyProcess.kill();
         } catch {
           // Best-effort teardown: a dead process is the goal state.
+        }
+        // D5: PTY kill only signals the direct child. Sweep the PPid tree
+        // (bounded grace → SIGKILL) so preview stop never leaks a server that
+        // keeps holding the service port the generated app will need.
+        await sweepDescendants(ptyProcess.pid, "SIGTERM").catch(() => undefined);
+        const exitedInGrace = await Promise.race([
+          exited.then(() => true),
+          new Promise<boolean>((resolve) => {
+            setTimeout(() => resolve(false), 3000);
+          }),
+        ]);
+        if (!exitedInGrace) {
+          try {
+            ptyProcess.kill();
+          } catch {
+            // already dead
+          }
+          await sweepDescendants(ptyProcess.pid, "SIGKILL").catch(() => undefined);
         }
       })();
       return killPromise;

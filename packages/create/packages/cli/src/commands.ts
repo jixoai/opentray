@@ -105,13 +105,18 @@ const registrationDir = (config: CreateConfigV1, context: CliContext): string =>
   join(context.homeDir ?? homedir(), ".opentray", "create", registrationKey(config.appId));
 
 const readDependencyRange = async (): Promise<string> => {
-  try {
-    const raw = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as { version?: string };
-    if (typeof raw.version === "string" && /^\d/u.test(raw.version)) {
-      return `^${raw.version}`;
+  // Generated apps must stay on the create-opentray release line, not this
+  // private CLI package's own version (0.1.0 resolved ancient SDKs).
+  for (const pkgUrl of [new URL("../../../package.json", import.meta.url), new URL("../package.json", import.meta.url)]) {
+    try {
+      const raw = JSON.parse(await readFile(pkgUrl, "utf8")) as { name?: string; version?: string };
+      // Only trust the create-opentray manifest; the CLI manifest is private.
+      if (raw.name === "create-opentray" && typeof raw.version === "string" && /^\d/u.test(raw.version)) {
+        return `^${raw.version}`;
+      }
+    } catch {
+      // try the next candidate
     }
-  } catch {
-    // fall through
   }
   return "latest";
 };
@@ -191,7 +196,6 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
             case "replace-payload": return `  ~ payload ${effect.dir}`;
             case "link-payload": return `  + link ${effect.link} → ${effect.target}`;
             case "install-dependencies": return "  + install dependencies";
-            case "launch-app": return "  + launch app";
             case "stop-running": return `  ! stop running pid ${effect.pid}`;
             case "warning": return `  w ${effect.message}`;
           }
@@ -205,16 +209,12 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
   }
 
   const applied = await applyCreate(applyOptions);
-  finish(context, asResourceResult(applied), args.json === true, (value) => {
-    const lines = [
+  finish(context, asResourceResult(applied), args.json === true, (value) =>
+    [
       `created ${value.registrationDir}`,
       `payload: ${value.payloadDir}${value.isLink ? " (linked)" : ""}`,
-    ];
-    if (value.materialize?.firstLaunch !== undefined) {
-      lines.push(`running (pid ${value.materialize.firstLaunch.pid})`);
-    }
-    return lines.join("\n");
-  });
+    ].join("\n"),
+  );
 };
 
 const createCommand = (context: CliContext): CommandModule => ({
