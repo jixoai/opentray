@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Self-Review — create-no-first-launch-force-terminal</title>
+<style>
+  body { font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; margin: 2rem auto; max-width: 880px; color: #1c2330; }
+  h1 { font-size: 1.35rem; } h2 { font-size: 1.05rem; margin-top: 1.6em; border-bottom: 1px solid #d8dee9; padding-bottom: .3em; }
+  table { border-collapse: collapse; width: 100%; margin: .6em 0; }
+  th, td { border: 1px solid #d8dee9; padding: .45em .6em; text-align: left; vertical-align: top; font-size: .92em; }
+  th { background: #f4f6fa; }
+  code { background: #f1f3f7; padding: .1em .35em; border-radius: 4px; font-size: .88em; }
+  .ok { color: #0a7d38; font-weight: 600; } .warn { color: #b37400; font-weight: 600; } .blocked { color: #b3261e; font-weight: 600; }
+  .timeline { list-style: none; padding-left: 0; }
+  .timeline li { padding: .3em 0 .3em 1.2em; position: relative; }
+  .timeline li::before { content: "▸"; position: absolute; left: 0; color: #5b7bb5; }
+</style>
+</head>
+<body>
+<h1>Self-Review — create-no-first-launch-force-terminal</h1>
+<p>2026-08-19 · 迭代 1 · ZCode (GLM)</p>
+
+<h2>决策落地</h2>
+<table>
+  <tr><th>决策</th><th>状态</th><th>验收证据</th></tr>
+  <tr><td>D1 生成期不重跑命令</td><td class="ok">✔</td><td>CLI 三步生成即成功；dry-run 无 launch 效果</td></tr>
+  <tr><td>D2 异常退出强制弹终端窗</td><td class="ok">✔</td><td><code>exit 3</code> 命令 → 弹窗；app.log 含「command exited (code 3) — revealing terminal」注记</td></tr>
+  <tr><td>D3 无上限自适应嗅探</td><td class="ok">✔</td><td>dsh ~3min 后 3080 被发现并自动开服务窗；越过旧 30s 死线全程存活</td></tr>
+  <tr><td>D4 恒 PTY</td><td class="ok">✔</td><td>app.log 出现 npx TTY spinner（旧 pipes 模式零输出）；PTY interactive=true</td></tr>
+  <tr><td>D5 进程树清理</td><td class="ok">✔</td><td>SIGTERM 后 entry/npm exec/dsh 全灭，3080 释放（原始毒化路径已消除）</td></tr>
+  <tr><td>D6 启动失败落盘</td><td class="ok">✔</td><td>顶层 catch → app.log 堆栈 + exit(1)</td></tr>
+</table>
+
+<h2>事故时间线（取证）</h2>
+<ul class="timeline">
+  <li>8-18 16:49 向导预览泄漏孤儿 <code>npm exec</code>（PPID=1）→ dsh 占端口</li>
+  <li>8-19 02:32 用户首启成功物化 bundle（<code>__CFBundleIdentifier</code> 佐证）</li>
+  <li>02:40 / 02:43 两次生成：pipes 非交互环境 + 30s 硬门 → <code>app.log</code> 单行超时 → exit 1 → UI「waiting for app ready marker」35s 后报错</li>
+  <li>取证清理：三组残留进程全灭；dsh 确证默认 3080、被占退避随机端口</li>
+</ul>
+
+<h2>偏差与遗留</h2>
+<ul>
+  <li class="warn">顺带修复：CLI 依赖范围误读私有包版本（0.1.0 → 装远古 SDK）</li>
+  <li class="warn">顺带恢复：f38da35 核心提取时丢失的 shell 资产接线（D2 前提）</li>
+  <li>待用户确认：终端窗「重启命令」增强；服务等待页窗口；两个失败残留项目目录是否删除</li>
+</ul>
+
+<h2>复核闭环</h2>
+<p><span class="blocked">环境阻塞</span>：<code>HERDR_ENV != 1</code>，按全局规则不得自行启动外部 Codex（gpt-5.6-terra / xhigh）。归档推迟至用户验收 + Codex 复核通过。</p>
+
+<h2>证据</h2>
+<p>测试 core 130 / create 188 / webui 15 / vision-driven 16 全绿；提交 <code>b7a3cd7</code>（spec）+ <code>898be55</code>（实现）。</p>
+</body>
+</html>
