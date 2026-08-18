@@ -53,10 +53,10 @@ export const detectImageFormat = (bytes: Uint8Array): ImageFormat | undefined =>
     .decode(bytes.slice(0, 512))
     .trimStart()
     .toLowerCase();
-  if (head.startsWith("<?xml") || head.startsWith("<svg") || head.startsWith("<!doctype svg")) {
-    if (head.includes("<svg")) {
-      return "svg";
-    }
+  // Allow an XML declaration, doctype, or leading comments before the root
+  // <svg> (favicon SVGs in the wild carry license comments up front).
+  if (head.startsWith("<") && head.includes("<svg")) {
+    return "svg";
   }
   return undefined;
 };

@@ -340,3 +340,39 @@ describe("icon candidate collection", () => {
     expect(originals[0]?.width).toBe(256);
   });
 });
+
+describe("tolerant HTML parsing (node-html-parser)", () => {
+  it("extracts unquoted-attribute favicon links the regex dropped", () => {
+    const html = '<head><LINK REL=icon HREF=/favicon.ico TYPE=image/x-icon></head>';
+    const candidates = extractFaviconCandidates(html);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.href).toBe("/favicon.ico");
+    expect(candidates[0]?.rel).toBe("icon");
+  });
+
+  it("decodes numeric and named entities in titles", () => {
+    expect(extractTitle("<title>Caf&#233; &amp; Bar &#8212; D&#233;mo</title>")).toBe(
+      "Café & Bar — Démo",
+    );
+  });
+
+  it("survives realistic malformed markup elsewhere in the document", () => {
+    const html =
+      "<html><head><title>Real Site</title><meta content=unquoted></head><body><p>hi</body></html>";
+    expect(extractTitle(html)).toBe("Real Site");
+  });
+
+  it("matches uppercase TITLE tags", () => {
+    expect(extractTitle("<TITLE>Weird Case</TITLE>")).toBe("Weird Case");
+  });
+
+  it("keeps mask icons excluded and sizes captured", () => {
+    const html = [
+      '<link rel="mask-icon" href="/safari.svg" color="black">',
+      '<link rel="apple-touch-icon" sizes="180x180" href="/apple.png">',
+    ].join("");
+    const candidates = extractFaviconCandidates(html);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.sizes).toBe("180x180");
+  });
+});

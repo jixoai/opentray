@@ -5,6 +5,7 @@ import {
   createPortDiscovery,
   parseLsofPortOwners,
   parseLsofPorts,
+  parseNetTcpConnectionJson,
   parseNetstatPortOwners,
   parseNetstatPorts,
   parsePowerShellPorts,
@@ -181,5 +182,71 @@ describe("collectProcessTreePids", () => {
 describe("serviceUrl", () => {
   it("formats the loopback service URL", () => {
     expect(serviceUrl(19080)).toBe("http://127.0.0.1:19080");
+  });
+});
+
+describe("locale-independent netstat parsing", () => {
+  it("keeps listeners on localized (non-English) state words", () => {
+    // German Windows prints ABHÖREN; the discriminator is the remote port 0.
+    const german = [
+      "Aktive Verbindungen",
+      "",
+      "  Proto  Lokale Adresse         Remoteadresse          Status",
+      "  TCP    127.0.0.1:19080        0.0.0.0:0              ABHÖREN         1234",
+      "  TCP    127.0.0.1:19081        10.0.0.1:443           HERGESTELLT     1234",
+    ].join("\n");
+    expect(parseNetstatPorts(german)).toEqual(new Set([19080]));
+  });
+
+  it("handles IPv6 [::]:port locals and unspecified remotes", () => {
+    const ipv6 = [
+      "  TCP    [::]:3000              [::]:0                 LISTENING       900",
+      "  TCP    [::1]:3001             [::]:0                 LISTENING       901",
+    ].join("\n");
+    expect(parseNetstatPorts(ipv6)).toEqual(new Set([3000, 3001]));
+  });
+});
+
+describe("parseNetTcpConnectionJson (Get-NetTCPConnection)", () => {
+  it("parses a single object row", () => {
+    const json = JSON.stringify({ LocalPort: 4173, OwningProcess: 4242 });
+    const owners = parseNetTcpConnectionJson(json);
+    expect(owners.get(4173)).toEqual(new Set([4242]));
+  });
+
+  it("parses an array and merges multiple owners per port", () => {
+    const json = JSON.stringify([
+      { LocalPort: 80, OwningProcess: 4 },
+      { LocalPort: 8080, OwningProcess: 900 },
+      { LocalPort: 8080, OwningProcess: 901 },
+    ]);
+    const owners = parseNetTcpConnectionJson(json);
+    expect(owners.get(80)).toEqual(new Set([4]));
+    expect(owners.get(8080)).toEqual(new Set([900, 901]));
+  });
+
+  it("returns empty on malformed output", () => {
+    expect(parseNetTcpConnectionJson("not json").size).toBe(0);
+    expect(parseNetTcpConnectionJson("").size).toBe(0);
+  });
+});
+
+describe("collectProcessTreePids on Windows", () => {
+  it("walks the Win32_Process PPid BFS output (cmd.exe -> npm -> node)", () => {
+    const fakePowershell = async (
+      _cmd: string,
+      args: readonly string[],
+    ): Promise<string> => {
+      const script = args.join(" ");
+      if (script.includes("Win32_Process")) {
+        return "700 701 702"; // cmd.exe -> npm -> node descendants
+      }
+      throw new Error("unexpected call");
+    };
+    void collectProcessTreePids(700, "win32", { runCapture: fakePowershell }).then(
+      (tree) => {
+        expect(tree).toEqual(new Set([700, 701, 702]));
+      },
+    );
   });
 });

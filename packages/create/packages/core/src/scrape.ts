@@ -15,7 +15,12 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { parse } from "node-html-parser";
+
 import { ensureLoopbackNoProxy, serviceUrl } from "./port-scan";
+
+/** Tolerant HTML parsing (node-html-parser): unquoted attrs, case, malformation. */
+const parseHtml = (html: string) => parse(html, { blockTextElements: { script: true, style: true } });
 
 /** Variant tag: the original art, or a solid-color silhouette derived from it. */
 export type IconVariant = "original" | "solid-black" | "solid-white";
@@ -58,46 +63,37 @@ export interface FaviconCandidate {
 
 /** Extract `<title>` text from HTML. */
 export const extractTitle = (html: string): string | undefined => {
-  const match = /<title[^>]*>([\s\S]*?)<\/title>/iu.exec(html);
-  if (match === null || match[1] === undefined) {
+  const root = parseHtml(html);
+  const title = root.querySelector("title")?.text;
+  if (title === undefined) {
     return undefined;
   }
-  const decoded = match[1]
-    .replace(/&amp;/gu, "&")
-    .replace(/&lt;/gu, "<")
-    .replace(/&gt;/gu, ">")
-    .replace(/&quot;/gu, '"')
-    .replace(/&#39;/gu, "'");
-  const trimmed = decoded.replace(/\s+/gu, " ").trim();
+  // node-html-parser decodes entities fully (numeric + named).
+  const trimmed = title.replace(/\s+/gu, " ").trim();
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
 /** Extract `<link rel=... href=...>` favicon candidates from HTML head. */
 export const extractFaviconCandidates = (html: string): readonly FaviconCandidate[] => {
+  const root = parseHtml(html);
   const candidates: FaviconCandidate[] = [];
-  const pattern = /<link\b[^>]*>/giu;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(html)) !== null) {
-    const tag = match[0];
-    const rel = /rel\s*=\s*("([^"]*)"|'([^']*)')/iu.exec(tag);
-    const href = /href\s*=\s*("([^"]*)"|'([^']*)')/iu.exec(tag);
-    if (rel === null || href === null) {
+  for (const link of root.querySelectorAll("link")) {
+    const rel = (link.getAttribute("rel") ?? "").trim().toLowerCase();
+    // A tolerant HTML parser handles unquoted attributes (REL=icon
+    // HREF=/favicon.ico), uppercase tags, and malformed markup — a regex
+    // over quoted-attribute forms silently dropped all of those.
+    if (!rel.includes("icon") || rel.includes("mask")) {
       continue;
     }
-    const relValue = (rel[2] ?? rel[3] ?? "").trim().toLowerCase();
-    if (!relValue.includes("icon") || relValue.includes("mask")) {
+    const href = (link.getAttribute("href") ?? "").trim();
+    if (href.length === 0) {
       continue;
     }
-    const hrefValue = (href[2] ?? href[3] ?? "").trim();
-    if (hrefValue.length === 0) {
-      continue;
-    }
-    const sizesMatch = /sizes\s*=\s*("([^"]*)"|'([^']*)')/iu.exec(tag);
-    const sizesValue = sizesMatch?.[2] ?? sizesMatch?.[3];
+    const sizes = link.getAttribute("sizes");
     candidates.push({
-      href: hrefValue,
-      rel: relValue,
-      ...(sizesValue === undefined ? {} : { sizes: sizesValue }),
+      href,
+      rel,
+      ...(sizes === undefined || sizes.length === 0 ? {} : { sizes }),
     });
   }
   return candidates;
@@ -500,6 +496,9 @@ const rasterFormatOf = (bytes: Buffer): string | undefined => {
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return "jpeg";
   if (bytes[0] === 0x47 && bytes[1] === 0x49) return "gif";
   if (bytes.subarray(0, 4).toString("latin1") === "RIFF") return "webp";
+  // BM magic: accepted by the signature gate (line ~408) but previously
+  // missing here — BMP candidates were recognized then silently dropped.
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) return "bmp";
   return undefined;
 };
 
@@ -508,80 +507,37 @@ const isIcoContainer = (bytes: Buffer): boolean =>
   bytes[0] === 0x00 && bytes[1] === 0x00 &&
   bytes[2] === 0x01 && bytes[3] === 0x00;
 
-/** Crack an ICO open: pick the largest frame; PNG payloads return verbatim, DIB rows become PNG. */
+/**
+ * Crack an ICO open with decode-ico (palette/row-alignment/AND-mask/
+ * BITFIELDS coverage the hand-rolled DIB reader lacked): pick the largest
+ * frame by area; PNG frames pass through verbatim, BMP frames re-encode
+ * from the decoder's RGBA through sharp.
+ */
 const extractLargestIcoFrame = async (ico: Buffer): Promise<Buffer | undefined> => {
-  const count = ico.readUInt16LE(4);
-  if (count === 0 || count > 64) {
-    return undefined;
-  }
-  let best: { offset: number; size: number; width: number; height: number } | undefined;
-  for (let i = 0; i < count; i += 1) {
-    const base = 6 + i * 16;
-    if (base + 16 > ico.length) {
-      break;
-    }
-    const rawWidth = ico[base] ?? 0;
-    const rawHeight = ico[base + 1] ?? 0;
-    const width = rawWidth === 0 ? 256 : rawWidth;
-    const height = rawHeight === 0 ? 256 : rawHeight;
-    const size = ico.readUInt32LE(base + 8);
-    const offset = ico.readUInt32LE(base + 12);
-    if (offset + size > ico.length) {
+  const decodeIco = (await import("decode-ico")).default;
+  const { toPngBuffer } = await import("./icon-codec.js");
+  let best:
+    | { width: number; height: number; data: Uint8Array; png: boolean }
+    | undefined;
+  for (const frame of decodeIco(ico)) {
+    const width = frame.width;
+    const height = frame.height;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
       continue;
     }
     if (best === undefined || width * height > best.width * best.height) {
-      best = { offset, size, width, height };
+      const isPng = frame.type === "png";
+      const data: Uint8Array = frame.type === "png" ? frame.data : new Uint8Array(frame.data);
+      best = { width, height, data, png: isPng };
     }
   }
   if (best === undefined) {
     return undefined;
   }
-  const frame = ico.subarray(best.offset, best.offset + best.size);
-  const b0 = frame[0];
-  const b1 = frame[1];
-  if (b0 === 0x89 && b1 === 0x50) {
-    return frame; // PNG-compressed entry (modern 256px icons)
+  if (best.png) {
+    return Buffer.from(best.data);
   }
-  return dibToPng(frame, best.width, best.height);
-};
-
-/** Convert a bottom-up BGRA/BGR DIB (BITMAPINFOHEADER) frame to PNG bytes. */
-const dibToPng = async (dib: Buffer, width: number, height: number): Promise<Buffer | undefined> => {
-  if (dib.length < 40) {
-    return undefined;
-  }
-  const declaredHeight = dib.readInt32LE(8);
-  const bitCount = dib.readUInt16LE(14);
-  const pixels = dib.subarray(40);
-  const rowBytes = Math.ceil((width * bitCount) / 8);
-  const rows = Math.abs(declaredHeight) / 2;
-  if (rows === 0 || pixels.length < rowBytes * rows) {
-    return undefined;
-  }
-  const channels = bitCount === 32 ? 4 : 3;
-  const rgba = Buffer.alloc(width * rows * channels);
-  for (let y = 0; y < rows; y += 1) {
-    const src = pixels.subarray(y * rowBytes, (y + 1) * rowBytes);
-    const flipped = rows - 1 - y;
-    for (let x = 0; x < width; x += 1) {
-      const srcIdx = x * channels;
-      const dstIdx = (flipped * width + x) * channels;
-      const b = src[srcIdx];
-      const g = src[srcIdx + 1];
-      const r = src[srcIdx + 2];
-      if (b === undefined || g === undefined || r === undefined) {
-        continue;
-      }
-      rgba[dstIdx] = r;
-      rgba[dstIdx + 1] = g;
-      rgba[dstIdx + 2] = b;
-      if (channels === 4) {
-        rgba[dstIdx + 3] = src[srcIdx + 3] ?? 255;
-      }
-    }
-  }
-  const { toPngBuffer } = await import("./icon-codec.js");
-  return toPngBuffer(rgba, width, rows, channels);
+  return toPngBuffer(Buffer.from(best.data), best.width, best.height, 4);
 };
 
 /** True pixel dimensions; SVG uses intrinsic attrs, else viewBox, else 512. */

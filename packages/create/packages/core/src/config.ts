@@ -6,6 +6,8 @@
 
 import { isAbsolute, join, normalize, sep } from "node:path";
 
+import { z } from "zod";
+
 import { isValidAppId } from "./app-id";
 import { err, ok, type Result } from "./errors";
 
@@ -133,166 +135,129 @@ const parseResourceSource = (value: unknown): ResourceSource | { message: string
   return { kind, ref };
 };
 
-const parseIconResourceRef = (
-  value: unknown,
-  field: string,
-): IconResourceRef | { message: string } => {
-  if (!isRecord(value)) {
-    return { message: `${field} must be an object` };
-  }
-  const pathCheck = validateRelativeResourcePath(value.path);
-  if (!pathCheck.ok) {
-    return { message: `${field}: ${pathCheck.message}` };
-  }
-  if (typeof value.format !== "string" || !IMAGE_FORMATS.includes(value.format as ImageFormat)) {
-    return { message: `${field}: format must be one of ${IMAGE_FORMATS.join(", ")}` };
-  }
-  if (typeof value.sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(value.sha256)) {
-    return { message: `${field}: sha256 must be a 64-char hex digest` };
-  }
-  const source = parseResourceSource(value.source);
-  if ("message" in source) {
-    return { message: `${field}: ${source.message}` };
-  }
-  return {
-    path: pathCheck.path,
-    format: value.format as ImageFormat,
-    sha256: value.sha256,
-    source,
-  };
-};
+// ─── zod schema (declarative v1 authority) ─────────────────────────────────
+// The imperative field-by-field parser is replaced by a zod@v4 schema with
+// refinements for the v1 laws: exact schema version (futures surface as
+// incompatible_version, never invalid_config), contained resource paths,
+// reverse-dotted appId, absolute cwd, and per-field error paths.
 
-const parseCommand = (value: unknown): CommandConfig | { message: string } => {
-  if (!isRecord(value)) {
-    return { message: "command must be an object" };
-  }
-  if (typeof value.executable !== "string" || value.executable.trim().length === 0) {
-    return { message: "command.executable must be a non-empty string" };
-  }
-  if (!isStringArray(value.args)) {
-    return { message: "command.args must be an array of strings" };
-  }
-  if (typeof value.cwd !== "string" || value.cwd.length === 0 || !isAbsolute(value.cwd)) {
-    return { message: "command.cwd must be an absolute path" };
-  }
-  if (value.env !== undefined) {
-    if (!isRecord(value.env)) {
-      return { message: "command.env must be an object" };
-    }
-    for (const [key, entry] of Object.entries(value.env)) {
-      if (key.trim().length === 0) {
-        return { message: "command.env keys must be non-empty" };
+const sha256Field = z
+  .string()
+  .regex(/^[0-9a-f]{64}$/u, "sha256 must be a 64-char hex digest");
+
+const resourceSourceSchema = z.object({
+  kind: z.union([z.literal("file"), z.literal("http"), z.literal("data")]),
+  ref: z.string().min(1),
+});
+
+const iconResourceRefSchema = z
+  .object({
+    path: z.string().superRefine((value, ctx) => {
+      const check = validateRelativeResourcePath(value);
+      if (!check.ok) {
+        ctx.addIssue({ code: "custom", message: check.message });
       }
-      if (typeof entry !== "string") {
-        return { message: `command.env["${key}"] must be a string` };
-      }
-    }
-  }
-  return {
-    executable: value.executable,
-    args: value.args,
-    cwd: value.cwd,
-    ...(value.env === undefined ? {} : { env: value.env as Record<string, string> }),
-  };
-};
+    }),
+    format: z.enum(["png", "jpeg", "webp", "gif", "svg"]),
+    sha256: sha256Field,
+    source: resourceSourceSchema,
+  })
+  .strict();
+
+const commandSchema = z
+  .object({
+    executable: z.string().trim().min(1, "command.executable must be a non-empty string"),
+    args: z.array(z.string()),
+    cwd: z.string().refine((value) => value.length > 0 && isAbsolute(value), {
+      message: "command.cwd must be an absolute path",
+    }),
+    env: z.record(z.string().min(1, "command.env keys must be non-empty"), z.string()).optional(),
+  })
+  .strict();
+
+const iconsSchema = z
+  .object({
+    appIcon: iconResourceRefSchema.optional(),
+    trayIcon: iconResourceRefSchema.optional(),
+    imageSmoothingEnabled: z.boolean().default(true),
+    background: z.enum(["black", "white", "transparent"]).default("transparent"),
+    scale: z
+      .number()
+      .refine(
+        (value) =>
+          Number.isFinite(value) && value >= ICON_SCALE_MIN && value <= ICON_SCALE_MAX,
+        { message: `icons.scale must be a number between ${ICON_SCALE_MIN} and ${ICON_SCALE_MAX}` },
+      )
+      .default(DEFAULT_ICON_SCALE),
+    trayTemplate: z.boolean().optional(),
+  })
+  .strict();
+
+const windowSchema = z
+  .object({
+    width: z.number().int().positive().default(DEFAULT_WINDOW.width),
+    height: z.number().int().positive().default(DEFAULT_WINDOW.height),
+  })
+  .strict()
+  .default(DEFAULT_WINDOW);
+
+const createConfigShape = z.object({
+  schemaVersion: z.number().int(),
+  appId: z.string().refine((value) => isValidAppId(value), {
+    message: "appId must be a reverse-dotted identity",
+  }),
+  appName: z.string().trim().min(1, "appName must be a non-empty string"),
+  command: commandSchema,
+  packageManager: z.enum(["npm", "pnpm", "bun"]),
+  icons: iconsSchema.optional(),
+  window: windowSchema,
+  developerMode: z.boolean().default(false),
+});
 
 /**
  * Strict v1 parse. Unknown future schema versions are reported as
  * `incompatible_version` read-only evidence; every other structural problem
- * is an `invalid_config` typed failure. No mutation ever results from parse.
+ * is an `invalid_config` typed failure with the offending field path in
+ * details. No mutation ever results from parse.
  */
 export const parseCreateConfig = (raw: unknown): Result<CreateConfigV1> => {
-  if (!isRecord(raw)) {
-    return err("invalid_config", "configuration must be a JSON object");
-  }
-  if (typeof raw.schemaVersion !== "number" || !Number.isInteger(raw.schemaVersion)) {
+  // schemaVersion negotiation happens BEFORE the schema so a future document
+  // gets the typed incompatible_version error, not a field-level one.
+  const versionProbe = z.object({ schemaVersion: z.number().int() }).loose().safeParse(raw);
+  if (!versionProbe.success) {
     return err("invalid_config", "schemaVersion must be an integer");
   }
-  if (raw.schemaVersion > CONFIG_SCHEMA_VERSION) {
+  const found = versionProbe.data.schemaVersion;
+  if (found > CONFIG_SCHEMA_VERSION) {
     return err(
       "incompatible_version",
-      `configuration schema version ${raw.schemaVersion} is newer than supported version ${CONFIG_SCHEMA_VERSION}; refusing to modify or apply it`,
-      { found: raw.schemaVersion, supported: CONFIG_SCHEMA_VERSION },
+      `configuration schema version ${found} is newer than supported version ${CONFIG_SCHEMA_VERSION}; refusing to modify or apply it`,
+      { found, supported: CONFIG_SCHEMA_VERSION },
     );
   }
-  if (raw.schemaVersion !== CONFIG_SCHEMA_VERSION) {
-    return err("invalid_config", `unsupported schemaVersion ${String(raw.schemaVersion)}`);
+  if (found !== CONFIG_SCHEMA_VERSION) {
+    return err("invalid_config", `unsupported schemaVersion ${String(found)}`);
   }
-  if (typeof raw.appId !== "string" || !isValidAppId(raw.appId)) {
-    return err("invalid_config", `appId must be a reverse-dotted identity, got: ${String(raw.appId)}`);
+  const parsed = createConfigShape.loose().safeParse(raw);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    const path = first === undefined ? "" : first.path.join(".");
+    return err(
+      "invalid_config",
+      first?.message ?? "configuration is structurally invalid",
+      path.length > 0 ? { field: path } : undefined,
+    );
   }
-  if (typeof raw.appName !== "string" || raw.appName.trim().length === 0) {
-    return err("invalid_config", "appName must be a non-empty string");
-  }
-  const command = parseCommand(raw.command);
-  if ("message" in command) {
-    return err("invalid_config", command.message, { field: "command" });
-  }
-  if (typeof raw.packageManager !== "string" || !PACKAGE_MANAGERS.includes(raw.packageManager as PackageManagerName)) {
-    return err("invalid_config", `packageManager must be one of ${PACKAGE_MANAGERS.join(", ")}`);
-  }
-  const iconsRaw = raw.icons === undefined ? {} : raw.icons;
-  if (!isRecord(iconsRaw)) {
-    return err("invalid_config", "icons must be an object when present");
-  }
-  const appIcon =
-    iconsRaw.appIcon === undefined ? undefined : parseIconResourceRef(iconsRaw.appIcon, "icons.appIcon");
-  if (appIcon !== undefined && "message" in appIcon) {
-    return err("invalid_config", appIcon.message, { field: "icons.appIcon" });
-  }
-  const trayIcon =
-    iconsRaw.trayIcon === undefined ? undefined : parseIconResourceRef(iconsRaw.trayIcon, "icons.trayIcon");
-  if (trayIcon !== undefined && "message" in trayIcon) {
-    return err("invalid_config", trayIcon.message, { field: "icons.trayIcon" });
-  }
-  const smoothing =
-    iconsRaw.imageSmoothingEnabled === undefined ? true : iconsRaw.imageSmoothingEnabled;
-  if (typeof smoothing !== "boolean") {
-    return err("invalid_config", "icons.imageSmoothingEnabled must be a boolean");
-  }
-  const background = iconsRaw.background === undefined ? "transparent" : iconsRaw.background;
-  if (typeof background !== "string" || !BACKGROUNDS.includes(background as IconBackgroundName)) {
-    return err("invalid_config", `icons.background must be one of ${BACKGROUNDS.join(", ")}`);
-  }
-  const scale = iconsRaw.scale === undefined ? DEFAULT_ICON_SCALE : iconsRaw.scale;
-  if (typeof scale !== "number" || !Number.isFinite(scale) || scale < ICON_SCALE_MIN || scale > ICON_SCALE_MAX) {
-    return err("invalid_config", `icons.scale must be a number between ${ICON_SCALE_MIN} and ${ICON_SCALE_MAX}`);
-  }
-  if (iconsRaw.trayTemplate !== undefined && typeof iconsRaw.trayTemplate !== "boolean") {
-    return err("invalid_config", "icons.trayTemplate must be a boolean");
-  }
-  const windowRaw = raw.window === undefined ? DEFAULT_WINDOW : raw.window;
-  if (!isRecord(windowRaw)) {
-    return err("invalid_config", "window must be an object when present");
-  }
-  const width = windowRaw.width === undefined ? DEFAULT_WINDOW.width : windowRaw.width;
-  const height = windowRaw.height === undefined ? DEFAULT_WINDOW.height : windowRaw.height;
-  if (typeof width !== "number" || !Number.isInteger(width) || width <= 0) {
-    return err("invalid_config", "window.width must be a positive integer");
-  }
-  if (typeof height !== "number" || !Number.isInteger(height) || height <= 0) {
-    return err("invalid_config", "window.height must be a positive integer");
-  }
-  const developerMode = raw.developerMode === undefined ? false : raw.developerMode;
-  if (typeof developerMode !== "boolean") {
-    return err("invalid_config", "developerMode must be a boolean");
-  }
+  const value = parsed.data as CreateConfigV1;
   return ok({
     schemaVersion: CONFIG_SCHEMA_VERSION,
-    appId: raw.appId,
-    appName: raw.appName,
-    command,
-    packageManager: raw.packageManager as PackageManagerName,
-    icons: {
-      ...(appIcon === undefined || "message" in appIcon ? {} : { appIcon }),
-      ...(trayIcon === undefined || "message" in trayIcon ? {} : { trayIcon }),
-      imageSmoothingEnabled: smoothing,
-      background: background as IconBackgroundName,
-      scale,
-      ...(iconsRaw.trayTemplate === undefined ? {} : { trayTemplate: iconsRaw.trayTemplate as boolean }),
-    },
-    window: { width, height },
-    developerMode,
+    appId: value.appId,
+    appName: value.appName,
+    command: value.command,
+    packageManager: value.packageManager,
+    icons: value.icons ?? iconsSchema.parse({}),
+    window: value.window,
+    developerMode: value.developerMode,
   });
 };
 

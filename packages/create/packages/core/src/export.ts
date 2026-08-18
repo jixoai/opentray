@@ -56,7 +56,9 @@ export const quotePowerShell = (value: string): string => {
   if (value.length === 0) {
     return "''";
   }
-  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) {
+  // `@` is deliberately NOT bare-word safe: a leading @name is PowerShell
+  // splatting syntax and changes the argument's meaning entirely.
+  if (/^[A-Za-z0-9_%+=:,./-]+$/.test(value)) {
     return value;
   }
   return `'${value.replaceAll("'", "''")}'`;

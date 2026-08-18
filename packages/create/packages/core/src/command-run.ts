@@ -475,7 +475,23 @@ export const killProcessTree = async (child: ChildProcess): Promise<void> => {
   }
   try {
     if (process.platform === "win32") {
-      await runExecFile("taskkill", ["/PID", String(pid), "/T", "/F"]);
+      // taskkill /T walks the PPid tree natively. One bounded retry covers
+      // transient ACCESS_DENIED during the child's own teardown (tree-kill
+      // has no retry at all).
+      let ok = false;
+      for (let attempt = 0; attempt < 2 && !ok; attempt += 1) {
+        try {
+          await runExecFile("taskkill", ["/PID", String(pid), "/T", "/F"]);
+          ok = true;
+        } catch (error) {
+          if (attempt === 1) {
+            throw error;
+          }
+          await new Promise((resolve) => {
+            setTimeout(resolve, 200);
+          });
+        }
+      }
     } else {
       // POSIX: signal the whole group (spawned detached) so children that
       // ignored the direct signal still terminate.
@@ -484,6 +500,11 @@ export const killProcessTree = async (child: ChildProcess): Promise<void> => {
       } catch {
         child.kill("SIGTERM");
       }
+      // Group signals miss descendants that escaped the group (setsid) —
+      // sweep the PPid tree and signal stragglers individually (the
+      // enumeration primitive tree-kill uses, applied AFTER the group
+      // signal so the common path stays one syscall).
+      await sweepDescendants(pid, "SIGTERM");
       await waitForExit(child, 3_000).then((exited) => {
         if (!exited) {
           try {
@@ -491,6 +512,7 @@ export const killProcessTree = async (child: ChildProcess): Promise<void> => {
           } catch {
             child.kill("SIGKILL");
           }
+          void sweepDescendants(pid, "SIGKILL");
         }
       });
     }
@@ -499,6 +521,37 @@ export const killProcessTree = async (child: ChildProcess): Promise<void> => {
   }
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
+  }
+};
+
+/**
+ * Signal every living descendant of `pid` (PPid BFS via pgrep -P), skipping
+ * processes that already exited. Best-effort: ESRCH races are expected while
+ * the tree is tearing down.
+ */
+const sweepDescendants = async (pid: number, signal: NodeJS.Signals): Promise<void> => {
+  const frontier = [pid];
+  const seen = new Set<number>([pid]);
+  while (frontier.length > 0) {
+    const current = frontier.shift();
+    if (current === undefined) {
+      break;
+    }
+    const stdout = await runExecFileCapture("pgrep", ["-P", String(current)]).then(
+      (result) => result.stdout,
+    ).catch(() => "");
+    for (const line of stdout.split("\n")) {
+      const childPid = Number.parseInt(line.trim(), 10);
+      if (Number.isInteger(childPid) && childPid > 0 && !seen.has(childPid)) {
+        seen.add(childPid);
+        frontier.push(childPid);
+        try {
+          process.kill(childPid, signal);
+        } catch {
+          // raced with exit — the goal state is already reached
+        }
+      }
+    }
   }
 };
 
@@ -516,12 +569,15 @@ const waitForExit = (child: ChildProcess, timeoutMs: number): Promise<boolean> =
   });
 
 const runExecFile = (command: string, args: readonly string[]): Promise<void> =>
+  runExecFileCapture(command, args).then(() => undefined);
+
+const runExecFileCapture = (command: string, args: readonly string[]): Promise<{ stdout: string }> =>
   new Promise((resolve, reject) => {
-    execFile(command, [...args], { timeout: 5_000, windowsHide: true }, (error) => {
+    execFile(command, [...args], { timeout: 5_000, windowsHide: true }, (error, stdout) => {
       if (error !== null) {
         reject(error);
         return;
       }
-      resolve();
+      resolve({ stdout: String(stdout) });
     });
   });
