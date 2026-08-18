@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Self-Review — wizard-share-and-list-scan</title>
+<style>
+  body { font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; margin: 2rem auto; max-width: 880px; color: #1c2330; }
+  h1 { font-size: 1.35rem; } h2 { font-size: 1.05rem; margin-top: 1.6em; border-bottom: 1px solid #d8dee9; padding-bottom: .3em; }
+  table { border-collapse: collapse; width: 100%; margin: .6em 0; }
+  th, td { border: 1px solid #d8dee9; padding: .45em .6em; text-align: left; vertical-align: top; font-size: .92em; }
+  th { background: #f4f6fa; }
+  code { background: #f1f3f7; padding: .1em .35em; border-radius: 4px; font-size: .88em; }
+  .ok { color: #0a7d38; font-weight: 600; } .warn { color: #b37400; font-weight: 600; } .blocked { color: #b3261e; font-weight: 600; }
+  .timeline { list-style: none; padding-left: 0; }
+  .timeline li { padding: .3em 0 .3em 1.2em; position: relative; }
+  .timeline li::before { content: "▸"; position: absolute; left: 0; color: #5b7bb5; }
+</style>
+</head>
+<body>
+<h1>Self-Review — wizard-share-and-list-scan</h1>
+<p>2026-08-19 · 迭代 1 · ZCode (GLM)</p>
+
+<h2>决策落地</h2>
+<table>
+  <tr><th>决策</th><th>状态</th><th>验收证据</th></tr>
+  <tr><td>D1 分享=命令行+sh/ps1（复用 export 内核）</td><td class="ok">✔</td><td>行内分享输出内嵌 PNG base64 的自包含脚本</td></tr>
+  <tr><td>D2 扫描 create root 双布局</td><td class="ok">✔</td><td>scan.test 6/6；web-dsh-npx 以 source=wizard 上列表</td></tr>
+  <tr><td>D3 确认面板分享（未生成）</td><td class="ok">✔</td><td>prime→confirm→export 出脚本；create root 零变化</td></tr>
+  <tr><td>D4 列表行 详情/编辑/打开/分享</td><td class="ok">✔</td><td>手风琴详情（env 仅键名）；/open 唤醒物化 bundle</td></tr>
+  <tr><td>D5 env 值不回显</td><td class="ok">✔</td><td>409 拒绝不携值；已确认导出含值（契约明示）</td></tr>
+</table>
+
+<h2>端到端验收</h2>
+<ul class="timeline">
+  <li>列表发现 web-dsh-npx（source=wizard, healthy）——用户核心痛点解决</li>
+  <li>config 投影：向量/pm(pnpm)/devMode 正确</li>
+  <li>行内分享 sh：内嵌图标 base64 + 精确 argv</li>
+  <li>冻结分享（未生成）：脚本含推导 appId web.dsh.npx；零物化</li>
+  <li>/open 唤醒 ~/.opentray/apps/web-dsh-npx/DeepSeek Harness.app</li>
+  <li>退出：entry/npm exec/dsh 整树清杀，3080 释放</li>
+</ul>
+
+<h2>偏差与遗留</h2>
+<ul>
+  <li class="warn">顺带修复：CLI 依赖范围误读私有包版本（0.1.0 → 装远古 SDK）</li>
+  <li class="warn">顺带恢复：f38da35 核心提取时丢失的 shell 资产接线（D2 前提）</li>
+  <li>待用户确认：终端窗「重启命令」增强；服务等待页窗口；两个失败残留项目目录是否删除</li>
+</ul>
+
+<h2>复核闭环</h2>
+<p><span class="blocked">环境阻塞</span>：<code>HERDR_ENV != 1</code>，按全局规则不得自行启动外部 Codex（gpt-5.6-terra / xhigh）。归档推迟至用户验收 + Codex 复核通过。</p>
+
+<h2>证据</h2>
+<p>测试 core 130 / create 188 / webui 15 / vision-driven 16 全绿；提交 <code>b7a3cd7</code>（spec）+ <code>898be55</code>（实现）。</p>
+</body>
+</html>
