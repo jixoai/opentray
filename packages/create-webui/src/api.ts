@@ -100,14 +100,17 @@ export interface ExportResponse {
   readonly content?: string;
   /** 核心调用行（不含注释/脚手架）——复制命令用。 */
   readonly commandLine?: string;
-  /** How the app icon traveled in a script share (drives the inline toggle). */
-  readonly iconSharedAs?: "url" | "embedded" | "none";
+  /** How the app icon actually traveled in this artifact. */
+  readonly iconSharedAs?: "url" | "embedded" | "local" | "none";
+  /** What the icon source CAN be shared as — drives the inline toggle. */
+  readonly iconReference?: "url" | "local" | "none";
 }
 
 export interface ExportRunnerOptions {
   readonly format: "sh" | "ps1";
   readonly acknowledgeEnv: boolean;
-  readonly inlineIcon: boolean;
+  /** true=内嵌字节；false=按引用；缺省=按来源默认（URL 引用/本地内嵌）。 */
+  readonly inlineIcon?: boolean;
 }
 
 /** Key-addressed share/export — works for wizard AND registered entries. */
@@ -157,7 +160,7 @@ export const shareFrozen = (
     }
     const data = response.data as
       | { ok: true; kind: "command"; command: string }
-      | { ok: true; kind: "script"; filename: string; content: string; commandLine?: string; iconSharedAs?: "url" | "embedded" | "none" }
+      | { ok: true; kind: "script"; filename: string; content: string; commandLine?: string; iconSharedAs?: string; iconReference?: string }
       | { ok: false; code: string; message: string };
     if (data.ok !== true) {
       return { status: 409, data: { code: data.code, message: data.message } };
@@ -170,7 +173,8 @@ export const shareFrozen = (
             filename: data.filename,
             content: data.content,
             ...(data.commandLine === undefined ? {} : { commandLine: data.commandLine }),
-            ...(data.iconSharedAs === undefined ? {} : { iconSharedAs: data.iconSharedAs }),
+            ...(data.iconSharedAs === undefined ? {} : { iconSharedAs: data.iconSharedAs as "url" | "embedded" | "local" | "none" }),
+            ...(data.iconReference === undefined ? {} : { iconReference: data.iconReference as "url" | "local" | "none" }),
           },
     };
   });

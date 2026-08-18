@@ -765,6 +765,32 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
     }
   });
 
+  it("defaults local uploads to embedded bytes and shares by path when inline is off", async () => {
+    const harness = createHarness();
+    const { writeFile } = await import("node:fs/promises");
+    const upload = await harness.session.saveIconUpload(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]),
+    );
+    harness.session.updateForm({ iconPath: upload });
+    harness.session.prime("npx tool serve");
+    harness.session.confirm();
+
+    const embeddedShare = await harness.session.exportFrozen({ format: "sh" });
+    expect(embeddedShare.ok).toBe(true);
+    if (!embeddedShare.ok || embeddedShare.kind !== "script") return;
+    expect(embeddedShare.iconReference).toBe("local");
+    expect(embeddedShare.iconSharedAs).toBe("embedded");
+    expect(embeddedShare.content).toContain("app_icon_tmp");
+
+    const referenceShare = await harness.session.exportFrozen({ format: "sh", inlineIcon: false });
+    expect(referenceShare.ok).toBe(true);
+    if (!referenceShare.ok || referenceShare.kind !== "script") return;
+    expect(referenceShare.iconSharedAs).toBe("local");
+    expect(referenceShare.content).toContain("--app-icon");
+    expect(referenceShare.content).toContain(upload);
+    expect(referenceShare.content).not.toContain("base64");
+  });
+
   it("state-gates sharing to a frozen parameter set", async () => {
     const harness = createHarness();
     const result = await harness.session.exportFrozen({ format: "sh" });

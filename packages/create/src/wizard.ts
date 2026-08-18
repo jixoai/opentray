@@ -274,6 +274,7 @@ export interface WizardSession {
     readonly format: "command" | "sh" | "ps1";
     readonly acknowledgeEnv?: boolean;
     readonly forceCopy?: boolean;
+    /** true=内嵌字节；false=按引用分享（URL/本地路径）；缺省=按来源默认。 */
     readonly inlineIcon?: boolean;
   }): Promise<WizardExportResult>;
   create(): Promise<void>;
@@ -290,8 +291,10 @@ export type WizardExportResult =
       /** 核心调用行（不含注释/脚手架），复制命令用。 */
       readonly commandLine: string;
       readonly requiresEnvAcknowledgement: boolean;
-      /** How the app icon traveled: web URL / embedded bytes / not set. */
-      readonly iconSharedAs: "url" | "embedded" | "none";
+      /** How the app icon actually traveled in this artifact. */
+      readonly iconSharedAs: "url" | "embedded" | "local" | "none";
+      /** What the icon source CAN be shared as: url / local path / none. */
+      readonly iconReference: "url" | "local" | "none";
     }
   | {
       readonly ok: false;
@@ -1082,19 +1085,33 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         path: string | undefined,
         url: string | undefined,
         flag: "app-icon" | "tray-icon",
-      ): Promise<{ ref?: IconResourceRef; mode: "url" | "embedded" | "none" }> => {
+      ): Promise<{ ref?: IconResourceRef; mode: "url" | "embedded" | "local" | "none" }> => {
         if (path === undefined || path.trim().length === 0) {
           return { mode: "none" };
         }
-        if (url !== undefined && /^https?:\/\//u.test(url) && exportOptions.inlineIcon !== true) {
+        const hasUrl = url !== undefined && /^https?:\/\//u.test(url);
+        // 三态：显式 true 内嵌；显式 false 按引用；缺省按来源（URL 引用、本地内嵌）。
+        const inline = exportOptions.inlineIcon ?? !hasUrl;
+        if (!inline) {
+          if (hasUrl) {
+            return {
+              ref: {
+                path: "icon.png",
+                format: "png",
+                sha256: "",
+                source: { kind: "http", ref: url },
+              },
+              mode: "url",
+            };
+          }
           return {
             ref: {
-              path: "icon.png",
+              path: basename(path),
               format: "png",
               sha256: "",
-              source: { kind: "http", ref: url },
+              source: { kind: "file", ref: path },
             },
-            mode: "url",
+            mode: "local",
           };
         }
         try {
@@ -1188,6 +1205,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (!script.ok) {
         return { ok: false, code: "export_unsafe", message: script.error.message };
       }
+      const iconReference: "url" | "local" | "none" =
+        appIconUrl !== undefined && /^https?:\/\//u.test(appIconUrl)
+          ? "url"
+          : appIconSource !== undefined && appIconSource.trim().length > 0
+            ? "local"
+            : "none";
       return {
         ok: true,
         kind: "script",
@@ -1196,6 +1219,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         commandLine: script.value.commandLine,
         requiresEnvAcknowledgement: script.value.requiresEnvAcknowledgement,
         iconSharedAs: appIconRef.mode,
+        iconReference,
       };
     },
 

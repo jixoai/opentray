@@ -34,7 +34,8 @@ import { usePreferences } from "../preferences";
 export interface ExportRunnerOptions {
   readonly format: "sh" | "ps1";
   readonly acknowledgeEnv: boolean;
-  readonly inlineIcon: boolean;
+  /** true=内嵌字节；false=按引用；缺省=按来源默认（URL 引用/本地内嵌）。 */
+  readonly inlineIcon?: boolean;
 }
 
 /** Artifact runner: list rows call the key-addressed export; the wizard
@@ -114,7 +115,7 @@ interface ScriptArtifact {
   readonly filename: string;
   readonly content: string;
   readonly commandLine?: string;
-  readonly iconSharedAs?: string;
+  readonly iconReference?: "url" | "local" | "none";
 }
 
 export const ExportDialog = ({
@@ -128,14 +129,12 @@ export const ExportDialog = ({
   const { messages } = usePreferences();
   const [format, setFormat] = useState<"sh" | "ps1">("sh");
   const [ackEnv, setAckEnv] = useState(false);
-  const [inlineIcon, setInlineIcon] = useState(false);
+  // 三态：null=未定（首建按来源默认，不发 inlineIcon）；true/false=用户选择。
+  const [inlineIcon, setInlineIcon] = useState<boolean | null>(null);
   const [script, setScript] = useState<ScriptArtifact | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [copied, setCopied] = useState(false);
-  // URL 可用性是「图标来源」的属性（sticky）：内联重建后 iconSharedAs 变为
-  // embedded，但开关必须保留以便取消勾选——修复勾选后开关消失的 BUG。
-  const [iconUrlAvailable, setIconUrlAvailable] = useState(false);
 
   // runner 走 ref：外层箭头函数每渲染都是新引用，进依赖会无限重发请求。
   const runnerRef = useRef(runner);
@@ -143,8 +142,7 @@ export const ExportDialog = ({
 
   useEffect(() => {
     setAckEnv(false);
-    setInlineIcon(false);
-    setIconUrlAvailable(false);
+    setInlineIcon(null);
   }, [open]);
 
   // 打开即自动生成；格式 / 环境确认 / 内联切换才触发生成。
@@ -165,20 +163,25 @@ export const ExportDialog = ({
     setCopied(false);
     setBlocked(null);
     void (async () => {
-      const response = await runnerRef.current({ format, acknowledgeEnv: ackEnv, inlineIcon });
+      const response = await runnerRef.current({
+        format,
+        acknowledgeEnv: ackEnv,
+        ...(inlineIcon === null ? {} : { inlineIcon }),
+      });
       if (cancelled) return;
       setBuilding(false);
       if (response.status === 200) {
         const data = response.data;
         if ("content" in data && data.content !== undefined) {
-          if (data.iconSharedAs === "url") {
-            setIconUrlAvailable(true);
+          // 首建后同步开关默认态：实际是内嵌 → 勾选；按引用 → 不勾选。
+          if (inlineIcon === null && data.iconSharedAs !== undefined) {
+            setInlineIcon(data.iconSharedAs === "embedded");
           }
           setScript({
             filename: data.filename ?? "create-opentray.sh",
             content: data.content,
             ...(data.commandLine === undefined ? {} : { commandLine: data.commandLine }),
-            ...(data.iconSharedAs === undefined ? {} : { iconSharedAs: data.iconSharedAs }),
+            ...(data.iconReference === undefined ? {} : { iconReference: data.iconReference }),
           });
         }
         return;
@@ -263,11 +266,11 @@ export const ExportDialog = ({
           </div>
         )}
 
-        {iconUrlAvailable && (
+        {script?.iconReference !== undefined && script.iconReference !== "none" && (
           <div className="flex items-start gap-2">
             <Checkbox
               id="export-inline-icon"
-              checked={inlineIcon}
+              checked={inlineIcon === true}
               onCheckedChange={(checked) => setInlineIcon(checked === true)}
             />
             <Label htmlFor="export-inline-icon" className="text-xs leading-snug">

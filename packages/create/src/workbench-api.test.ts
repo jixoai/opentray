@@ -114,6 +114,21 @@ describe("workbench /api/apps dual-layout discovery", () => {
     expect(body.content).toContain("API_TOKEN=");
   });
 
+  it("shares a wizard project by local path reference when inline is off", async () => {
+    const response = await post("/api/apps/web-dsh-npx/export", {
+      format: "sh",
+      acknowledgeEnv: true,
+      inlineIcon: false,
+    });
+    expect(response?.status).toBe(200);
+    const body = response!.body as { content: string; iconSharedAs: string; iconReference: string };
+    expect(body.iconReference).toBe("local");
+    expect(body.iconSharedAs).toBe("local");
+    expect(body.content).toContain("--app-icon");
+    expect(body.content).toContain(join(root, "web-dsh-npx", "app-icon", "app-icon.png"));
+    expect(body.content).not.toContain("base64");
+  });
+
   it("refuses export until env is acknowledged", async () => {
     const response = await post("/api/apps/web-dsh-npx/export", { format: "sh" });
     expect(response?.status).toBe(409);

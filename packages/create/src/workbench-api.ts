@@ -265,8 +265,10 @@ export const handleWorkbenchApi = async (
     }
     let config: CreateConfigV1;
     const embedded: EmbeddedResource[] = [];
-    let iconSharedAs: "url" | "embedded" | "none" = "none";
-    const inlineIcon = request.body.inlineIcon === true;
+    let iconSharedAs: "url" | "embedded" | "local" | "none" = "none";
+    let iconReference: "url" | "local" | "none" = "none";
+    // 三态：true 内嵌；false 按引用（URL/本地路径）；缺省按来源默认。
+    const inlineIcon = request.body.inlineIcon;
     if (entry.source === "wizard") {
       if (entry.config === undefined) {
         return { status: 500, body: { code: "invalid_config", message: "unreadable wizard project config" } };
@@ -304,33 +306,52 @@ export const handleWorkbenchApi = async (
         developerMode: entry.config.developerMode,
       };
       if (icon !== undefined) {
-        embedded.push({ flag: "app-icon", filename: "app-icon.png", bytes: icon.bytes });
-        iconSharedAs = "embedded"; // 项目内合成资产没有外部 URL，只能内联
+        iconReference = "local";
+        if (inlineIcon === false) {
+          // 按引用分享：项目内合成资产的绝对路径（同机重建有效）。
+          config = {
+            ...config,
+            icons: {
+              ...config.icons,
+              appIcon: {
+                path: "app-icon.png",
+                format: "png" as const,
+                sha256: "",
+                source: { kind: "file" as const, ref: icon.path },
+              },
+            },
+          };
+          iconSharedAs = "local";
+        } else {
+          embedded.push({ flag: "app-icon", filename: "app-icon.png", bytes: icon.bytes });
+          iconSharedAs = "embedded"; // 项目内合成资产默认内嵌（自包含）
+        }
       }
     } else {
       if (entry.record.config === undefined) {
         return { status: 500, body: { code: "invalid_config", message: "unreadable registration" } };
       }
       config = entry.record.config;
-      // 图标分享法则：http 来源默认保留 URL（inlineIcon 可选内联为字节）；
-      // file 来源（上传快照）保持内联——它们没有稳定的外部引用。
+      // 图标分享法则：http 来源默认保留 URL、file 来源（上传快照）默认内嵌；
+      // inlineIcon 三态覆盖默认（false=按引用，包括本地提交路径）。
       for (const ref of [config.icons.appIcon, config.icons.trayIcon]) {
         if (ref === undefined) continue;
         const isHttp = ref.source.kind === "http";
-        if (isHttp && !inlineIcon) {
-          if (ref === config.icons.appIcon) iconSharedAs = "url";
+        const isApp = ref === config.icons.appIcon;
+        if (isApp) iconReference = isHttp ? "url" : "local";
+        const inline = inlineIcon ?? !isHttp;
+        if (!inline) {
+          if (isApp) iconSharedAs = isHttp ? "url" : "local";
           continue;
         }
-        if (!isHttp || inlineIcon) {
-          const bytes = await readResourceBytes(entry.record.dir, ref);
-          if (bytes.ok) {
-            embedded.push({
-              flag: ref === config.icons.appIcon ? "app-icon" : "tray-icon",
-              filename: ref.path.split("/").pop() ?? "icon.png",
-              bytes: bytes.value,
-            });
-            if (ref === config.icons.appIcon) iconSharedAs = "embedded";
-          }
+        const bytes = await readResourceBytes(entry.record.dir, ref);
+        if (bytes.ok) {
+          embedded.push({
+            flag: isApp ? "app-icon" : "tray-icon",
+            filename: ref.path.split("/").pop() ?? "icon.png",
+            bytes: bytes.value,
+          });
+          if (isApp) iconSharedAs = "embedded";
         }
       }
     }
@@ -379,6 +400,7 @@ export const handleWorkbenchApi = async (
         commandLine: script.value.commandLine,
         requiresEnvAcknowledgement: script.value.requiresEnvAcknowledgement,
         iconSharedAs,
+        iconReference,
       },
     };
   }

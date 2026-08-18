@@ -746,7 +746,7 @@ const selectedIconRefStale = (
   const shareRunner = (options: {
     readonly format: "sh" | "ps1";
     readonly acknowledgeEnv: boolean;
-    readonly inlineIcon: boolean;
+    readonly inlineIcon?: boolean;
   }) => shareFrozen(options);
 
   /** Cancel the frozen confirmation: thaw the form back to editable. The
