@@ -126,4 +126,14 @@ describe("workbench /api/apps dual-layout discovery", () => {
     const response = await get("/api/apps/no-such-key/config");
     expect(response?.status).toBe(404);
   });
+
+  it("serves the row icon as a data URL", async () => {
+    const list = await get("/api/apps");
+    const body = list!.body as { key: string; hasIcon?: boolean }[];
+    expect(body.find((entry) => entry.key === "web-dsh-npx")?.hasIcon).toBe(true);
+    const response = await get("/api/apps/web-dsh-npx/icon");
+    expect(response?.status).toBe(200);
+    const data = response!.body as { dataUrl?: string };
+    expect(data.dataUrl).toMatch(/^data:image\/png;base64,/u);
+  });
 });

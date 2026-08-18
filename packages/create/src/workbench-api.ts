@@ -5,7 +5,7 @@
 // links, kills processes, or generates application files itself. Env values
 // are never echoed into ordinary output.
 
-import { readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,15 @@ import {
   type CreateConfigV1,
   type EmbeddedResource,
 } from "@create-opentray/core";
+
+const exists = async (path: string): Promise<boolean> => {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 
@@ -85,45 +94,75 @@ export const handleWorkbenchApi = async (
     const entries = await listCreateEntries();
     return {
       status: 200,
-      body: entries.map((entry) => {
-        if (entry.source === "wizard") {
+      body: await Promise.all(
+        entries.map(async (entry) => {
+          if (entry.source === "wizard") {
+            const projectDir = entry.dir;
+            return {
+              key: entry.key,
+              source: "wizard",
+              appId: entry.config?.appId,
+              appName: entry.config?.appName,
+              status: "healthy",
+              registrationDir: entry.dir,
+              payloadPath: entry.dir,
+              projectDir,
+              isLink: false,
+              hasEnv:
+                entry.config !== undefined &&
+                Object.keys(entry.config.command.env ?? {}).length > 0,
+              hasIcon: await exists(join(projectDir, "app-icon", "app-icon.png")),
+              ...(entry.config === undefined
+                ? { error: { code: "invalid_config", message: "unreadable wizard project config" } }
+                : {}),
+            };
+          }
+          const projectDir = entry.record.payloadPath ?? entry.record.appDir;
           return {
             key: entry.key,
-            source: "wizard",
-            appId: entry.config?.appId,
-            appName: entry.config?.appName,
-            status: "healthy",
-            registrationDir: entry.dir,
-            payloadPath: entry.dir,
-            projectDir: entry.dir,
-            isLink: false,
+            source: "registered",
+            appId: entry.record.config?.appId,
+            appName: entry.record.config?.appName,
+            status: entry.record.status,
+            registrationDir: entry.record.dir,
+            payloadPath: entry.record.payloadPath,
+            projectDir,
+            isLink: entry.record.isLink,
             hasEnv:
-              entry.config !== undefined &&
-              Object.keys(entry.config.command.env ?? {}).length > 0,
-            ...(entry.config === undefined
-              ? { error: { code: "invalid_config", message: "unreadable wizard project config" } }
-              : {}),
+              entry.record.config !== undefined &&
+              Object.keys(entry.record.config.command.env ?? {}).length > 0,
+            hasIcon: await exists(join(projectDir, "app-icon", "app-icon.png")),
+            ...(entry.record.error === undefined
+              ? {}
+              : { error: { code: entry.record.error.code, message: entry.record.error.message } }),
           };
-        }
-        return {
-          key: entry.key,
-          source: "registered",
-          appId: entry.record.config?.appId,
-          appName: entry.record.config?.appName,
-          status: entry.record.status,
-          registrationDir: entry.record.dir,
-          payloadPath: entry.record.payloadPath,
-          projectDir: entry.record.payloadPath ?? entry.record.appDir,
-          isLink: entry.record.isLink,
-          hasEnv:
-            entry.record.config !== undefined &&
-            Object.keys(entry.record.config.command.env ?? {}).length > 0,
-          ...(entry.record.error === undefined
-            ? {}
-            : { error: { code: entry.record.error.code, message: entry.record.error.message } }),
-        };
-      }),
+        }),
+      ),
     };
+  }
+
+  const iconMatch = /^\/api\/apps\/([^/]+)\/icon$/.exec(pathname);
+  if (iconMatch !== null && request.method === "GET") {
+    // Row icon: the project's stable composed app icon as a data URL (list
+    // rows render <img src>; the workbench channel stays JSON-only).
+    const key = decodeURIComponent(iconMatch[1]!);
+    const entry = await findCreateEntry(key);
+    if (entry === undefined) {
+      return { status: 404, body: { code: "not_found", message: `no application at key ${key}` } };
+    }
+    const projectDir = entry.source === "wizard" ? entry.dir : entry.record.payloadPath;
+    if (projectDir === undefined) {
+      return { status: 404, body: { code: "missing_payload", message: "application payload is unavailable" } };
+    }
+    try {
+      const bytes = new Uint8Array(await readFile(join(projectDir, "app-icon", "app-icon.png")));
+      return {
+        status: 200,
+        body: { dataUrl: `data:image/png;base64,${Buffer.from(bytes).toString("base64")}` },
+      };
+    } catch {
+      return { status: 404, body: { code: "not_found", message: "no app icon asset" } };
+    }
   }
 
   const readMatch = /^\/api\/apps\/([^/]+)\/config$/.exec(pathname);

@@ -79,6 +79,7 @@ export interface Messages {
     readonly open: string;
     readonly share: string;
     readonly details: string;
+    readonly source: string;
     readonly sourceWizard: string;
     readonly sourceRegistered: string;
     readonly detailsCommand: string;
@@ -158,6 +159,7 @@ const en: Messages = {
     open: "Open",
     share: "Share",
     details: "Details",
+    source: "Source",
     sourceWizard: "Wizard",
     sourceRegistered: "Registered",
     detailsCommand: "Command",
@@ -244,7 +246,7 @@ const zhCN: DeepPartial<Messages> = {
     statusHealthy: "正常", statusInvalidConfig: "配置无效", statusIncompatible: "版本不兼容",
     statusMissingPayload: "负载缺失", statusBrokenLink: "链接失效", statusRunning: "运行中",
     edit: "编辑", open: "打开应用", share: "分享", details: "详情",
-    sourceWizard: "向导", sourceRegistered: "注册",
+    source: "来源", sourceWizard: "向导", sourceRegistered: "注册",
     detailsCommand: "命令", detailsCwd: "工作目录", detailsEnv: "环境变量键",
     detailsPm: "包管理器", detailsWindow: "窗口", detailsDevMode: "开发者模式",
     detailsProjectDir: "项目目录", detailsServiceHint: "服务端口提示",

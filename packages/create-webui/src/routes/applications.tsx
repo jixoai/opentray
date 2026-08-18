@@ -8,11 +8,20 @@
 // visible with a stale/error state.
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDownIcon, ChevronUpIcon, RefreshCwIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ExternalLinkIcon,
+  PencilIcon,
+  RefreshCwIcon,
+  Share2Icon,
+  Trash2Icon,
+} from "lucide-react";
 
 import {
   exportApp,
   fetchAppConfig,
+  fetchAppIcon,
   fetchApps,
   openApp,
   uninstallApp,
@@ -23,6 +32,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Skeleton } from "../components/ui/skeleton";
 import { Checkbox } from "../components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -91,6 +101,23 @@ const DetailRow = ({ label, value }: { label: string; value: string }): React.JS
   </div>
 );
 
+/** Row icon tile: the project's composed app icon, else the app's initial. */
+const AppIconTile = ({ app, dataUrl }: { app: AppRecord; dataUrl: string | undefined }): React.JSX.Element => {
+  const initial = (app.appName ?? app.key).trim().charAt(0).toUpperCase() || "A";
+  return (
+    <span
+      className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md text-sm font-semibold"
+      aria-hidden
+    >
+      {dataUrl !== undefined ? (
+        <img src={dataUrl} alt="" className="size-full object-contain" />
+      ) : (
+        initial
+      )}
+    </span>
+  );
+};
+
 export const ApplicationsRoute = (): React.JSX.Element => {
   const { messages } = usePreferences();
   const { navigate } = useWorkbenchNavigation();
@@ -103,6 +130,8 @@ export const ApplicationsRoute = (): React.JSX.Element => {
   // 手风琴：同一时刻只展开一行；详情在首次展开时按 key 拉取。
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, AppDetail | "error">>({});
+  // 行图标：每个应用的合成 app icon（data URL），按 key 懒加载。
+  const [icons, setIcons] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     setState((prev) => (prev === "ready" ? "stale" : "loading"));
@@ -112,6 +141,17 @@ export const ApplicationsRoute = (): React.JSX.Element => {
       // 详情随列表刷新失效：展开中的行会在下次 toggle 时重新拉取。
       setDetails({});
       setState("ready");
+      await Promise.all(
+        response.data
+          .filter((app) => app.hasIcon === true)
+          .map(async (app) => {
+            const icon = await fetchAppIcon(app.key);
+            const data = icon.data;
+            if (icon.status === 200 && "dataUrl" in data && data.dataUrl !== undefined) {
+              setIcons((prev) => ({ ...prev, [app.key]: data.dataUrl! }));
+            }
+          }),
+      );
     } else {
       setState("stale"); // keep known apps visible with the stale state
     }
@@ -205,34 +245,35 @@ export const ApplicationsRoute = (): React.JSX.Element => {
             {apps.map((app) => {
               const expanded = expandedKey === app.key;
               const detail = details[app.key];
+              const unhealthy = app.status !== "healthy";
               return (
                 <li
                   key={app.key}
                   className="border-border bg-card text-card-foreground rounded-lg border px-3 py-2"
                 >
                   <div className="flex items-center gap-3">
+                    <AppIconTile app={app} dataUrl={icons[app.key]} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-sm font-medium">{app.appName ?? app.key}</span>
-                        <Badge variant={app.status === "healthy" ? "default" : "destructive"}>
-                          {statusLabels(messages)[STATUS_LABEL_KEYS[app.status]]}
-                        </Badge>
-                        <Badge variant="outline">
-                          {app.source === "wizard"
-                            ? messages.applications.sourceWizard
-                            : messages.applications.sourceRegistered}
-                        </Badge>
+                        {/* 只有异常才占视觉：健康态零徽章；异常时 tooltip 给出原因。 */}
+                        {unhealthy && (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={(props) => (
+                                <Badge variant="destructive" {...props}>
+                                  {statusLabels(messages)[STATUS_LABEL_KEYS[app.status]]}
+                                </Badge>
+                              )}
+                            />
+                            <TooltipContent>
+                              {app.error?.message ?? statusLabels(messages)[STATUS_LABEL_KEYS[app.status]]}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                         {app.isLink && <Badge variant="outline">{messages.applications.linked}</Badge>}
                       </div>
-                      <div className="tech-ltr text-muted-foreground truncate text-xs" title={app.registrationDir}>
-                        {app.appId ?? app.key}
-                      </div>
-                      <div
-                        className="tech-ltr text-muted-foreground truncate text-xs"
-                        title={app.projectDir ?? app.payloadPath ?? app.registrationDir}
-                      >
-                        {app.projectDir ?? app.payloadPath ?? app.registrationDir}
-                      </div>
+                      <div className="tech-ltr text-muted-foreground truncate text-xs">{app.appId ?? app.key}</div>
                     </div>
                     <Button
                       variant="ghost"
@@ -250,16 +291,20 @@ export const ApplicationsRoute = (): React.JSX.Element => {
                         window.location.hash = `#/add?edit=${encodeURIComponent(app.key)}`;
                       }}
                     >
+                      <PencilIcon width={14} height={14} aria-hidden />
                       {messages.applications.edit}
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => void open(app)}>
+                      <ExternalLinkIcon width={14} height={14} aria-hidden />
                       {messages.applications.open}
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => setExportTarget(app)}>
+                      <Share2Icon width={14} height={14} aria-hidden />
                       {messages.applications.share}
                     </Button>
                     {app.source !== "wizard" && (
                       <Button variant="destructive" size="sm" onClick={() => setConfirmTarget(app)}>
+                        <Trash2Icon width={14} height={14} aria-hidden />
                         {messages.applications.uninstall}
                       </Button>
                     )}
@@ -275,6 +320,12 @@ export const ApplicationsRoute = (): React.JSX.Element => {
                       )}
                       {detail !== undefined && detail !== "error" && (
                         <>
+                          <DetailRow
+                            label={messages.applications.source}
+                            value={app.source === "wizard"
+                              ? messages.applications.sourceWizard
+                              : messages.applications.sourceRegistered}
+                          />
                           <DetailRow label={messages.applications.detailsCommand} value={detail.command} />
                           <DetailRow label={messages.applications.detailsCwd} value={detail.cwd} />
                           <DetailRow

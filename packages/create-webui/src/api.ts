@@ -37,6 +37,8 @@ export interface AppRecord {
   readonly projectDir?: string;
   readonly isLink: boolean;
   readonly hasEnv?: boolean;
+  /** True when the project carries a composed app-icon asset. */
+  readonly hasIcon?: boolean;
   readonly error?: { readonly code: string; readonly message: string };
 }
 
@@ -49,6 +51,14 @@ export const fetchAppConfig = (
 ): Promise<{ readonly status: number; readonly data: Record<string, unknown> | { readonly code: string; readonly message: string } }> =>
   request<Record<string, unknown> | { code: string; message: string }>(
     `/api/apps/${encodeURIComponent(appId)}/config`,
+  );
+
+/** Row icon: the project's composed app icon as a data URL. */
+export const fetchAppIcon = (
+  key: string,
+): Promise<{ readonly status: number; readonly data: { readonly dataUrl?: string } | { readonly code: string; readonly message: string } }> =>
+  request<{ dataUrl?: string } | { code: string; message: string }>(
+    `/api/apps/${encodeURIComponent(key)}/icon`,
   );
 
 export interface UninstallResult {
