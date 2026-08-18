@@ -83,32 +83,63 @@ const LOCALE_SHORT: Record<Locale, string> = {
  * Header row: [logo] [title] ... [toggle] when expanded; when collapsed
  * only the logo shows and hovering it swaps in the toggle button.
  */
+/**
+ * Sidebar header row.
+ *  - expanded: [logo] [title] ······················· [toggle button]
+ *    (the button is a persistent right-aligned element, always visible)
+ *  - collapsed: only [logo]; hovering the logo swaps in the toggle button
+ */
 const SidebarBrandRow = ({ product }: { product: string }): React.JSX.Element => {
   const { state, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
   const label = `${product} · ${collapsed ? "展开" : "收起"}`;
+
+  if (collapsed) {
+    return (
+      <SidebarMenuButton size="lg" className="group/brand relative justify-center">
+        {/* Logo fades out on hover; the absolutely-positioned toggle fades in. */}
+        <span className="relative grid size-8 shrink-0 place-items-center">
+          <img
+            src="/logo.png"
+            alt={product}
+            width={24}
+            height={24}
+            className="size-6 rounded-md transition-opacity group-hover/brand:opacity-0 focus-visible-within:opacity-0"
+          />
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={label}
+            title={label}
+            className="absolute inset-0 grid place-items-center rounded-md opacity-0 transition-opacity hover:bg-sidebar-accent focus-visible:opacity-100 group-hover/brand:opacity-100"
+          >
+            <PanelLeftIcon aria-hidden className="size-4" />
+          </button>
+        </span>
+      </SidebarMenuButton>
+    );
+  }
+
   return (
-    <SidebarMenuButton size="lg" className="group/brand relative justify-start">
-      {/* Always mounted; opacity/width transitions keep the layout stable. */}
-      <span className="relative grid size-8 shrink-0 place-items-center">
-        <img
-          src="/logo.png"
-          alt={product}
-          width={24}
-          height={24}
-          className="size-6 rounded-md transition-opacity group-hover/brand:opacity-0 data-[state=collapsed]:opacity-100"
-        />
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          aria-label={label}
-          title={label}
-          className="absolute inset-0 grid place-items-center rounded-md opacity-0 transition-opacity hover:bg-sidebar-accent focus-visible:opacity-100 group-hover/brand:opacity-100"
-        >
-          <PanelLeftIcon aria-hidden className="size-4" />
-        </button>
-      </span>
-      {!collapsed ? <span className="text-sm font-semibold">{product}</span> : null}
+    <SidebarMenuButton size="lg" className="justify-start pr-1">
+      <img
+        src="/logo.png"
+        alt={product}
+        width={24}
+        height={24}
+        className="size-6 shrink-0 rounded-md"
+      />
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{product}</span>
+      {/* Persistent right-aligned collapse control. */}
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        aria-label={label}
+        title={label}
+        className="grid size-6 shrink-0 place-items-center rounded-md hover:bg-sidebar-accent"
+      >
+        <PanelLeftIcon aria-hidden className="size-4" />
+      </button>
     </SidebarMenuButton>
   );
 };
