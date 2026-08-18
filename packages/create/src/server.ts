@@ -110,8 +110,8 @@ export const createWizardServer = async (
       await handleAssetFile(url.pathname, response);
       return;
     }
-    if (url.pathname === "/logo.png") {
-      await handleAssetFile("/logo.png", response);
+    if (url.pathname === "/logo.png" || FAVICON_PATHS.has(url.pathname)) {
+      await handleAssetFile(url.pathname, response);
       return;
     }
 
@@ -741,6 +741,13 @@ const readWebUiIndex = async (): Promise<string | undefined> => {
   }
   return undefined;
 };
+
+/** Favicon variants served from the webui root (see create-webui/public). */
+const FAVICON_PATHS: ReadonlySet<string> = new Set<string>([
+  "/favicon-64.png",
+  "/favicon-32.png",
+  "/favicon-16.png",
+]);
 
 /** Token fingerprint helper used in tests and diagnostics. */
 export const fingerprintToken = (token: string): string =>
