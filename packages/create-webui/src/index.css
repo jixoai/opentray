@@ -2,6 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Help-center markdown rendering (prose). */
+@plugin "@tailwindcss/typography";
+
 /*
  * Canonical shadcn base-nova theme (installed via the shadcn CLI's generated
  * CSS: oklch tokens, .dark variant, tw-animate-css). The workbench theme
@@ -192,6 +195,21 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+/* Help-center prose: technical descendants stay LTR under RTL shells.
+   (The prose element modifiers cannot carry custom classes; descendant
+   selectors here keep tables/code authoritative-LTR in every locale.) */
+.prose td,
+.prose th,
+.prose code,
+.prose pre {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.prose th,
+.prose td {
+  text-align: left;
 }
 
 /* Technical islands stay LTR + bidi-isolated under Arabic RTL shells

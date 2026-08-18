@@ -173,13 +173,34 @@ export const renderMarkdown = (source: string): string => {
   return out.join("\n");
 };
 
-/** Minimal table typography inside the help article. */
-const helpTableStyles = `
-.prose-help table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.75rem; }
-.prose-help th, .prose-help td { border: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: start; }
-.prose-help th { background: var(--muted); font-weight: 600; }
-.prose-help td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; }
-`;
+/**
+ * Help markdown rendering uses the tailwindcss-typography `prose` engine.
+ * Element modifiers keep technical content technical: tables and code stay
+ * LTR monospace; inline code stays neutral (no inverted pill); headings
+ * inherit the theme tokens so light/dark both read correctly.
+ */
+const HELP_PROSE_CLASS = [
+  "prose prose-sm",
+  "dark:prose-invert",
+  "max-w-[75ch]",
+  // Compact vertical rhythm for a reference-style reading pane.
+  "prose-headings:font-semibold prose-headings:tracking-tight",
+  "prose-h1:text-xl prose-h2:text-lg prose-h3:text-base",
+  "prose-p:my-2 prose-li:my-0.5",
+  // Code: LTR isolated, no pill inversion (theme tokens only).
+  "prose-code:before:content-none prose-code:after:content-none",
+  "prose-code:font-mono prose-code:text-[0.85em]",
+  "prose-pre:bg-muted prose-pre:text-foreground prose-pre:rounded-lg",
+  // Links keep the primary accent and never shift layout on hover.
+  "prose-a:text-primary prose-a:decoration-primary/40 hover:prose-a:decoration-primary",
+  // Tables: bordered, compact, technical LTR cells with a muted header row.
+  "prose-table:border-collapse prose-table:text-xs",
+  "prose-th:border prose-th:border-border prose-th:bg-muted prose-th:px-2 prose-th:py-1 prose-th:text-start prose-th:font-semibold",
+  "prose-td:border prose-td:border-border prose-td:px-2 prose-td:py-1 prose-td:align-top",
+  "prose-td:font-mono",
+  // Horizontal rules and blockquote from the theme palette.
+  "prose-hr:border-border prose-blockquote:border-primary/40",
+].join(" ");
 
 /** Per-item data for the help file tree (paths from the packaged skill). */
 interface HelpTreeItem {
@@ -366,8 +387,6 @@ export const HelpRoute = (): React.JSX.Element => {
         )}
       </nav>
       <article className="min-w-0 flex-1 overflow-auto p-6" aria-live="polite">
-        {/* Driven by paired semantic tokens; table cells are technical LTR. */}
-        <style>{helpTableStyles}</style>
         {loadingDoc ? (
           <div className="space-y-2">
             <Skeleton className="h-6 w-1/2" />
@@ -377,9 +396,10 @@ export const HelpRoute = (): React.JSX.Element => {
         ) : error !== null ? (
           <p className="text-destructive text-sm">{error}</p>
         ) : (
+          // Strict subset renderer; raw HTML is escaped before insertion.
+          // Typography comes from tailwindcss-typography (HELP_PROSE_CLASS).
           <div
-            className="prose-help max-w-[70ch] text-sm leading-relaxed"
-            // Strict subset renderer; raw HTML is escaped before insertion.
+            className={HELP_PROSE_CLASS}
             dangerouslySetInnerHTML={{ __html: html }}
           />
         )}
