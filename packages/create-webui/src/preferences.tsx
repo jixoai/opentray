@@ -20,12 +20,41 @@ import {
   resolveSystemLocale,
   type Locale,
   type Messages,
+  LOCALES,
 } from "./i18n";
 
 export type ThemeMode = "system" | "light" | "dark";
 
-const LOCALE_KEY = "create-opentray.locale";
+const LOCALE_KEY = "create-opentray.locale"; // legacy fallback (pre-URL persistence)
 const THEME_KEY = "create-opentray.theme";
+const LOCALE_PARAM = "lang";
+
+const SUPPORTED_LOCALES = new Set<string>(LOCALES);
+
+/** Read ?lang= from the URL (shared by initial resolution and switching). */
+const readLocaleFromUrl = (): string | null => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get(LOCALE_PARAM);
+    return value !== null && SUPPORTED_LOCALES.has(value) ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Write ?lang=<locale> into the URL (replaceState: no history pollution).
+ * The token query parameter and the hash route are preserved verbatim.
+ */
+const writeLocaleToUrl = (locale: Locale): void => {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set(LOCALE_PARAM, locale);
+    window.history.replaceState(null, "", url);
+  } catch {
+    // history API unavailable; the choice still applies for this session
+  }
+};
 
 const readStored = (key: string): string | null => {
   try {
@@ -60,10 +89,16 @@ export const applyDocumentChrome = (locale: Locale, mode: ThemeMode): void => {
 
 /** Pre-paint resolution: runs in main.tsx before React renders. */
 export const readInitialPreferences = (): { locale: Locale; theme: ThemeMode } => {
+  // Priority: explicit ?lang= in the URL (shareable/deep-linkable) > the
+  // previously chosen locale (localStorage) > the OS/browser preference.
+  const urlLocaleRaw = readLocaleFromUrl();
+  const urlLocale = urlLocaleRaw !== null ? (urlLocaleRaw as Locale) : null;
   const storedLocale = readStored(LOCALE_KEY);
-  const locale = storedLocale !== null && (storedLocale === "zh-CN" || storedLocale === "ja" || storedLocale === "ko" || storedLocale === "en" || storedLocale === "ar" || storedLocale === "fr" || storedLocale === "es" || storedLocale === "de" || storedLocale === "ru")
-    ? storedLocale
-    : resolveSystemLocale(navigator.languages ?? [navigator.language]);
+  const locale = urlLocale !== null
+    ? urlLocale
+    : storedLocale !== null && SUPPORTED_LOCALES.has(storedLocale)
+      ? (storedLocale as Locale)
+      : resolveSystemLocale(navigator.languages ?? [navigator.language]);
   const storedTheme = readStored(THEME_KEY);
   const theme: ThemeMode =
     storedTheme === "light" || storedTheme === "dark" || storedTheme === "system"
@@ -113,7 +148,8 @@ export const PreferencesProvider = ({
   }, [theme, locale]);
 
   const setLocale = useCallback((next: Locale) => {
-    writeStored(LOCALE_KEY, next);
+    writeLocaleToUrl(next);
+    writeStored(LOCALE_KEY, next); // legacy echo: survives a manual ?lang= strip
     setLocaleState(next);
   }, []);
 
