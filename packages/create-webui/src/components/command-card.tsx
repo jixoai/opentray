@@ -13,7 +13,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { WizardCommandOptions } from "@/wizard-protocol";
@@ -110,24 +111,24 @@ export function CommandCard({
                 <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
                   数组模式逐个输入参数（回车添加），原样传递、绝不拆分。
                 </p>
-                <div className="flex gap-1.5">
-                  <Button
-                    size="sm"
-                    variant={commandOptions.argsMode === "string" ? "default" : "outline"}
-                    disabled={frozen}
-                    onClick={() => patchCommand({ argsMode: "string" })}
-                  >
-                    字符串
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={commandOptions.argsMode === "array" ? "default" : "outline"}
-                    disabled={frozen}
-                    onClick={() => patchCommand({ argsMode: "array" })}
-                  >
-                    数组 (argv)
-                  </Button>
-                </div>
+                {/* 单选 toggle 组：字符串 vs 数组 (argv)。空选（全不选）被忽略，
+                    保证任意时刻恰有一种输入模式。 */}
+                <ToggleGroup
+                  variant="outline"
+                  size="sm"
+                  spacing={0}
+                  value={[commandOptions.argsMode]}
+                  onValueChange={(group: string[]) => {
+                    const next = group[0];
+                    if (next === "string" || next === "array") {
+                      patchCommand({ argsMode: next });
+                    }
+                  }}
+                  disabled={frozen}
+                >
+                  <ToggleGroupItem value="string">字符串</ToggleGroupItem>
+                  <ToggleGroupItem value="array">数组 (argv)</ToggleGroupItem>
+                </ToggleGroup>
               </div>
               <div>
                 <Label htmlFor="cmd-cwd">工作目录 (cwd)</Label>
