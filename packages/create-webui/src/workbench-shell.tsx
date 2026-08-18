@@ -16,7 +16,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { CircleHelpIcon, ListIcon, MonitorIcon, MoonIcon, PlusIcon, SunIcon } from "lucide-react";
+import { CircleHelpIcon, ListIcon, MonitorIcon, MoonIcon, PanelLeftIcon, PlusIcon, SunIcon } from "lucide-react";
 
 import {
   Sidebar,
@@ -30,7 +30,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
-  SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -79,7 +79,48 @@ const LOCALE_SHORT: Record<Locale, string> = {
   ru: "RU",
 };
 
-export const WorkbenchShell = ({ children }: { children: ReactNode }): React.JSX.Element => {
+/**
+ * Header row: [logo] [title] ... [toggle] when expanded; when collapsed
+ * only the logo shows and hovering it swaps in the toggle button.
+ */
+const SidebarBrandRow = ({ product }: { product: string }): React.JSX.Element => {
+  const { state, toggleSidebar } = useSidebar();
+  const collapsed = state === "collapsed";
+  const label = `${product} · ${collapsed ? "展开" : "收起"}`;
+  return (
+    <SidebarMenuButton size="lg" className="group/brand relative justify-start">
+      {/* Always mounted; opacity/width transitions keep the layout stable. */}
+      <span className="relative grid size-8 shrink-0 place-items-center">
+        <img
+          src="/logo.png"
+          alt={product}
+          width={24}
+          height={24}
+          className="size-6 rounded-md transition-opacity group-hover/brand:opacity-0 data-[state=collapsed]:opacity-100"
+        />
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-label={label}
+          title={label}
+          className="absolute inset-0 grid place-items-center rounded-md opacity-0 transition-opacity hover:bg-sidebar-accent focus-visible:opacity-100 group-hover/brand:opacity-100"
+        >
+          <PanelLeftIcon aria-hidden className="size-4" />
+        </button>
+      </span>
+      {!collapsed ? <span className="text-sm font-semibold">{product}</span> : null}
+    </SidebarMenuButton>
+  );
+};
+
+export const WorkbenchShell = ({
+  children,
+  panelOpen,
+}: {
+  children: ReactNode;
+  /** Detail pane visibility: when the detail opens the sidebar collapses. */
+  panelOpen?: boolean;
+}): React.JSX.Element => {
   const { locale, messages, setLocale, theme, setTheme } = usePreferences();
   const [route, setRoute] = useState<WorkbenchRoute>(() => routeFromHash(window.location.hash));
 
@@ -96,6 +137,23 @@ export const WorkbenchShell = ({ children }: { children: ReactNode }): React.JSX
     setRoute(next);
   }, []);
 
+  // Auto expand/collapse:
+  //  - non-mobile width → expanded, mobile width → collapsed
+  //  - the detail pane being open forces collapsed (it needs the room)
+  // The user's explicit toggle still wins until one of these facts change.
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => window.innerWidth >= 768);
+  const detailOpen = panelOpen === true;
+
+  useEffect(() => {
+    const nonMobile = window.matchMedia("(min-width: 768px)");
+    const apply = (): void => {
+      setSidebarOpen(nonMobile.matches && !detailOpen);
+    };
+    apply();
+    nonMobile.addEventListener("change", apply);
+    return () => nonMobile.removeEventListener("change", apply);
+  }, [detailOpen]);
+
   const navigation = useMemo<NavigationValue>(() => ({ route, navigate }), [route, navigate]);
 
   const navItems: readonly { route: WorkbenchRoute; icon: ReactNode; label: string }[] = [
@@ -109,21 +167,12 @@ export const WorkbenchShell = ({ children }: { children: ReactNode }): React.JSX
 
   return (
     <NavigationContext.Provider value={navigation}>
-      <SidebarProvider>
+      <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
         <Sidebar collapsible="icon">
           <SidebarHeader>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton size="lg">
-                  <img
-                    src="/logo.png"
-                    alt="create-opentray"
-                    width={24}
-                    height={24}
-                    className="size-6 shrink-0 rounded-md"
-                  />
-                  <span className="text-sm font-semibold">{messages.shell.product}</span>
-                </SidebarMenuButton>
+                <SidebarBrandRow product={messages.shell.product} />
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarHeader>
@@ -229,7 +278,6 @@ export const WorkbenchShell = ({ children }: { children: ReactNode }): React.JSX
           <SidebarRail aria-label={messages.shell.toggleSidebar} />
         </Sidebar>
         <main className="relative flex min-h-svh min-w-0 flex-1 flex-col overflow-hidden">
-          <SidebarTrigger className="absolute start-2 top-2 z-10" />
           {children}
         </main>
       </SidebarProvider>

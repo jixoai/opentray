@@ -19,6 +19,7 @@ import {
   prewarmGhostty,
   type TerminalHandle,
 } from "@/components/terminal-pane";
+import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,7 +66,15 @@ function WizardPage(): React.JSX.Element {
   );
   const [defaultCwd, setDefaultCwd] = React.useState("");
   const [targetDirExists, setTargetDirExists] = React.useState(false);
-  const [panelOpen, setPanelOpen] = React.useState(false);
+  const [panelOpen, setPanelOpenState] = React.useState(false);
+  const setPanelOpen = React.useCallback((next: boolean) => {
+    setPanelOpenState(next);
+    detailPane.set(next);
+  }, []);
+  React.useEffect(() => {
+    detailPane.set(panelOpen);
+    return () => detailPane.set(false);
+  }, [panelOpen]);
   const [runAlive, setRunAlive] = React.useState(false);
   const [wizardState, setWizardState] = React.useState<WizardState>("idle");
   const [failReason, setFailReason] = React.useState<string | undefined>();
@@ -678,9 +687,10 @@ const selectedIconRefStale = (
           scrollbarGutter: "stable",
         }}
       >
-      <header className="flex items-center gap-3">
-        <h1 className="text-lg font-bold">create-opentray</h1>
-        <Badge variant={stateBadge} className="ml-auto shrink-0">
+      {/* The sidebar carries the product identity; the pane header shows
+          only the live wizard state. */}
+      <header className="flex items-center justify-end">
+        <Badge variant={stateBadge} className="shrink-0">
           {wizardState}
         </Badge>
       </header>
@@ -828,6 +838,19 @@ const selectedIconRefStale = (
       >
         {panelOpen ? (
           <>
+            {/* Close the detail pane (re-expands the sidebar via the shell). */}
+            <div className="flex items-center justify-end">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="关闭预览面板"
+                onClick={() => {
+                  setPanelOpen(false);
+                }}
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
             <TabsPanel
               command={displayCommand}
               terminalHostRef={terminalHostRef}
@@ -899,9 +922,34 @@ function WorkbenchRoutes(): React.JSX.Element {
   );
 }
 
+/**
+ * The detail-pane flag lives with the wizard, but the shell needs it to
+ * auto-collapse the sidebar. A tiny subscription store avoids re-rendering
+ * the whole tree on every wizard state change.
+ */
+const detailPane = {
+  open: false,
+  listeners: new Set<() => void>(),
+  set(next: boolean): void {
+    if (this.open === next) return;
+    this.open = next;
+    for (const listener of this.listeners) listener();
+  },
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  },
+};
+
+const useDetailPaneOpen = (): boolean => {
+  const [open, setOpen] = React.useState(detailPane.open);
+  React.useEffect(() => detailPane.subscribe(() => setOpen(detailPane.open)), []);
+  return open;
+};
+
 export function App(): React.JSX.Element {
   return (
-    <WorkbenchShell>
+    <WorkbenchShell panelOpen={useDetailPaneOpen()}>
       <WorkbenchRoutes />
     </WorkbenchShell>
   );
