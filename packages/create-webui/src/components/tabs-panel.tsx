@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { hostnameOf, type DiscoveredService } from "@/wizard-protocol";
 import { cn } from "@/lib/utils";
 
@@ -53,25 +54,6 @@ interface TabsPanelProps {
   className?: string;
 }
 
-/** Web Navigation API guard: the address bar is managed through
- * window.navigation (currentEntry + navigate events) when available;
- * history API is never used for the address bar. */
-const navigationApi = (): Navigation | undefined =>
-  typeof window !== "undefined" && "navigation" in window
-    ? (window as { navigation?: Navigation }).navigation
-    : undefined;
-
-const navigateViaApi = (url: string): boolean => {
-  const nav = navigationApi();
-  if (nav === undefined) return false;
-  try {
-    nav.navigate(url);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const normalizeUrl = (raw: string): string | undefined => {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return undefined;
@@ -81,6 +63,49 @@ const normalizeUrl = (raw: string): string | undefined => {
     return undefined;
   }
 };
+
+/** Per-tab footer: terminal telemetry + service jump chips. */
+const StatusBar = ({
+  status,
+  services,
+  activeTab,
+  onJumpToService,
+}: {
+  status: TerminalStatusBarState;
+  services: readonly DiscoveredService[];
+  activeTab: string;
+  onJumpToService(port: number): void;
+}): React.JSX.Element => (
+  <CardFooter className="h-8 shrink-0 gap-3 overflow-x-auto px-3 py-0 text-[11px] text-muted-foreground">
+    <span className="font-mono whitespace-nowrap">
+      光标 {status.cursorY}:{status.cursorX}
+    </span>
+    <span className="font-mono whitespace-nowrap">
+      {status.cols}×{status.rows}
+    </span>
+    <span className="font-mono whitespace-nowrap">
+      {status.selection === undefined
+        ? "无选区"
+        : `选区 ${status.selection.start.y}:${status.selection.start.x} – ${status.selection.end.y}:${status.selection.end.x}`}
+    </span>
+    <span className="h-3 w-px bg-border" />
+    {services.length === 0 ? (
+      <span>嗅探 HTTP 服务中…（未发现不影响创建应用）</span>
+    ) : (
+      services.map((service) => (
+        <Badge
+          key={service.port}
+          variant={activeTab === `svc-${service.port}` ? "default" : "secondary"}
+          className="cursor-pointer font-mono whitespace-nowrap"
+          onClick={() => onJumpToService(service.port)}
+        >
+          :{service.port}
+          {service.title ? ` · ${service.title}` : ""}
+        </Badge>
+      ))
+    )}
+  </CardFooter>
+);
 
 export function TabsPanel({
   command,
@@ -97,22 +122,9 @@ export function TabsPanel({
   onJumpToService,
   className,
 }: TabsPanelProps): React.JSX.Element {
-  const activeIframe = iframeTabs.find((tab) => `svc-${tab.port}` === activeTab);
-  const [navDraft, setNavDraft] = React.useState("");
-
-  React.useEffect(() => {
-    setNavDraft(activeIframe?.url ?? "");
-  }, [activeIframe?.url, activeTab]);
-
-  const canBack =
-    activeIframe !== undefined && activeIframe.historyIndex > 0;
-  const canForward =
-    activeIframe !== undefined &&
-    activeIframe.historyIndex < activeIframe.history.length - 1;
-
   return (
-    <div className={cn("flex flex-col rounded-xl border border-border bg-card overflow-hidden", className)}>
-      <Tabs value={activeTab} onValueChange={onActiveTabChange} className="flex min-h-0 flex-1 flex-col">
+    <div className={cn("flex min-h-0 flex-col", className)}>
+      <Tabs value={activeTab} onValueChange={onActiveTabChange} className="flex min-h-0 flex-1 flex-col gap-0">
         {/* Tabs strip first (browser convention), then the context toolbar. */}
         {/* Lifted browser-style tab strip (shadcn tabs-13 pattern on the
             official base-nova `line` variant): borderless row sitting on the
@@ -134,73 +146,36 @@ export function TabsPanel({
           ))}
         </TabsList>
 
-        {/* Context navigation bar */}
-        <div className="flex h-11 items-center gap-2 border-y border-border px-3">
-          {activeIframe === undefined ? (
-            <>
-              <TerminalIcon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="truncate font-mono text-xs text-muted-foreground">
-                {command || "尚未运行命令"}
-              </span>
-            </>
-          ) : (
-            <>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                disabled={!canBack}
-                onClick={() => onIframeHistoryMove(activeIframe.port, -1)}
-                aria-label="后退"
-              >
-                <ArrowLeft />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                disabled={!canForward}
-                onClick={() => onIframeHistoryMove(activeIframe.port, 1)}
-                aria-label="前进"
-              >
-                <ArrowRight />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => onIframeNavigate(activeIframe.port, activeIframe.url, "replace")}
-                aria-label="重新加载"
-              >
-                <RotateCw />
-              </Button>
-              <Globe className="size-4 shrink-0 text-muted-foreground" />
-              <Input
-                className="h-7 font-mono text-xs"
-                value={navDraft}
-                placeholder="输入 URL 跳转"
-                onChange={(event) => setNavDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") return;
-                  const next = normalizeUrl(navDraft);
-                  if (next !== undefined) {
-                    onIframeNavigate(activeIframe.port, next, "push");
-                  }
-                }}
-              />
-            </>
-          )}
-        </div>
-
         <TabsContent
           value="terminal"
           className="mt-0 min-h-0 flex-1"
           style={{ display: activeTab === "terminal" ? "flex" : "none", flexDirection: "column" }}
         >
-          <div
-            ref={terminalHostRef}
-            className="min-h-0 min-w-0 flex-1 bg-[#05070b] px-1"
-          />
-          {!terminalReady ? (
-            <div className="p-3 text-xs text-muted-foreground">正在加载终端渲染器…</div>
-          ) : null}
+          <Card size="sm" className="min-h-0 flex-1 gap-0">
+            {/* CardHeader: the command this terminal is running. */}
+            <CardHeader className="border-b [.border-b]:pb-2">
+              <span className="tech-ltr flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground">
+                <TerminalIcon className="size-4 shrink-0" />
+                <span className="truncate">{command || "尚未运行命令"}</span>
+              </span>
+            </CardHeader>
+            {/* CardBody (CardContent): the terminal surface itself. */}
+            <CardContent className="min-h-0 flex-1 p-0">
+              <div
+                ref={terminalHostRef}
+                className="min-h-0 min-w-0 h-full bg-[#05070b] px-1"
+              />
+              {!terminalReady ? (
+                <div className="p-3 text-xs text-muted-foreground">正在加载终端渲染器…</div>
+              ) : null}
+            </CardContent>
+            <StatusBar
+              status={status}
+              services={services}
+              activeTab={activeTab}
+              onJumpToService={onJumpToService}
+            />
+          </Card>
         </TabsContent>
 
         {iframeTabs.map((tab) => (
@@ -210,48 +185,73 @@ export function TabsPanel({
             className="mt-0 min-h-0 flex-1"
             style={{ display: activeTab === `svc-${tab.port}` ? "flex" : "none", flexDirection: "column" }}
           >
-            <iframe
-              title={`service-${tab.port}`}
-              src={tab.url}
-              className="min-h-0 w-full flex-1 border-0 bg-white"
-              sandbox="allow-same-origin allow-scripts allow-forms"
-            />
+            <Card size="sm" className="min-h-0 flex-1 gap-0">
+              {/* CardHeader: the browser address bar for this service tab. */}
+              <CardHeader className="border-b [.border-b]:pb-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={tab.historyIndex === 0}
+                    onClick={() => onIframeHistoryMove(tab.port, -1)}
+                    aria-label="后退"
+                  >
+                    <ArrowLeft />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={tab.historyIndex >= tab.history.length - 1}
+                    onClick={() => onIframeHistoryMove(tab.port, 1)}
+                    aria-label="前进"
+                  >
+                    <ArrowRight />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => onIframeNavigate(tab.port, tab.url, "replace")}
+                    aria-label="重新加载"
+                  >
+                    <RotateCw />
+                  </Button>
+                  <Globe className="size-4 shrink-0 text-muted-foreground" />
+                  <Input
+                    className="tech-ltr h-7 font-mono text-xs"
+                    defaultValue={tab.url}
+                    key={`${tab.port}:${tab.historyIndex}:${tab.url}`}
+                    placeholder="输入 URL 跳转"
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      const raw = (event.target as HTMLInputElement).value;
+                      const next = normalizeUrl(raw);
+                      if (next !== undefined) {
+                        onIframeNavigate(tab.port, next, "push");
+                      }
+                    }}
+                  />
+                </div>
+              </CardHeader>
+              {/* CardBody (CardContent): the service page. */}
+              <CardContent className="min-h-0 flex-1 p-0">
+                <iframe
+                  title={`service-${tab.port}`}
+                  src={tab.url}
+                  className="min-h-0 h-full w-full border-0 bg-white"
+                  sandbox="allow-same-origin allow-scripts allow-forms"
+                />
+              </CardContent>
+              <StatusBar
+                status={status}
+                services={services}
+                activeTab={activeTab}
+                onJumpToService={onJumpToService}
+              />
+            </Card>
           </TabsContent>
         ))}
       </Tabs>
 
-      {/* Status bar lives at the PANEL level: it belongs to the whole panel
-          (terminal cursor/size/selection + service jumps), never inside the
-          terminal tab content — that put it under iframe address bars. */}
-      <div className="flex h-8 shrink-0 items-center gap-3 overflow-x-auto border-t border-border px-3 text-[11px] text-muted-foreground">
-        <span className="font-mono whitespace-nowrap">
-          光标 {status.cursorY}:{status.cursorX}
-        </span>
-        <span className="font-mono whitespace-nowrap">
-          {status.cols}×{status.rows}
-        </span>
-        <span className="font-mono whitespace-nowrap">
-          {status.selection === undefined
-            ? "无选区"
-            : `选区 ${status.selection.start.y}:${status.selection.start.x} – ${status.selection.end.y}:${status.selection.end.x}`}
-        </span>
-        <span className="h-3 w-px bg-border" />
-        {services.length === 0 ? (
-          <span>嗅探 HTTP 服务中…（未发现不影响创建应用）</span>
-        ) : (
-          services.map((service) => (
-            <Badge
-              key={service.port}
-              variant={activeTab === `svc-${service.port}` ? "default" : "secondary"}
-              className="cursor-pointer font-mono whitespace-nowrap"
-              onClick={() => onJumpToService(service.port)}
-            >
-              :{service.port}
-              {service.title ? ` · ${service.title}` : ""}
-            </Badge>
-          ))
-        )}
-      </div>
-    </div>
+</div>
   );
 }
