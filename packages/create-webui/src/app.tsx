@@ -632,9 +632,9 @@ const selectedIconRefStale = (
 
   const stateBadge =
     wizardState === "discovered" || wizardState === "success"
-      ? "success"
+      ? "default"
       : wizardState === "running" || wizardState === "materializing"
-        ? "warning"
+        ? "secondary"
         : wizardState === "failed"
           ? "destructive"
           : "secondary";

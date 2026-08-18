@@ -163,7 +163,7 @@ export function CreateDialog({
               {PIPELINE_STEPS.map((step) => (
                 <Badge
                   key={step}
-                  variant={stepState(step) === "done" ? "success" : stepState(step) === "active" ? "warning" : "secondary"}
+                  variant={stepState(step) === "done" ? "default" : "secondary"}
                 >
                   {step}
                 </Badge>

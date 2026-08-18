@@ -46,6 +46,7 @@ export const resolveSystemLocale = (system: readonly string[]): Locale => {
 
 export interface Messages {
   readonly nav: { readonly add: string; readonly applications: string; readonly help: string };
+  readonly shell: { readonly product: string; readonly toggleSidebar: string };
   readonly common: {
     readonly loading: string;
     readonly error: string;
@@ -114,6 +115,7 @@ export interface Messages {
 // missing translation falls back rather than rendering an empty string.
 const en: Messages = {
   nav: { add: "Add", applications: "Applications", help: "Help Center" },
+  shell: { product: "create-opentray", toggleSidebar: "Toggle Sidebar" },
   common: {
     loading: "Loading…",
     error: "Something went wrong.",
@@ -199,6 +201,7 @@ type DeepPartial<T> = {
 };
 
 const zhCN: DeepPartial<Messages> = {
+  shell: { product: "create-opentray", toggleSidebar: "切换侧边栏" },
   nav: { add: "新增", applications: "应用列表", help: "帮助中心" },
   common: {
     loading: "加载中…", error: "出错了。", retry: "重试", cancel: "取消", confirm: "确认",
@@ -235,6 +238,7 @@ const zhCN: DeepPartial<Messages> = {
 };
 
 const ja: DeepPartial<Messages> = {
+  shell: { product: "create-opentray", toggleSidebar: "サイドバー切替" },
   nav: { add: "追加", applications: "アプリ一覧", help: "ヘルプセンター" },
   common: {
     loading: "読み込み中…", error: "エラーが発生しました。", retry: "再試行", cancel: "キャンセル",
@@ -272,6 +276,7 @@ const ja: DeepPartial<Messages> = {
 };
 
 const ko: DeepPartial<Messages> = {
+  shell: { product: "create-opentray", toggleSidebar: "사이드바 전환" },
   nav: { add: "추가", applications: "앱 목록", help: "도움말 센터" },
   common: {
     loading: "불러오는 중…", error: "문제가 발생했습니다.", retry: "재시도", cancel: "취소",
@@ -309,6 +314,7 @@ const ko: DeepPartial<Messages> = {
 };
 
 const ar: DeepPartial<Messages> = {
+  shell: { product: "create-opentray", toggleSidebar: "تبديل الشريط الجانبي" },
   nav: { add: "إضافة", applications: "التطبيقات", help: "مركز المساعدة" },
   common: {
     loading: "جارٍ التحميل…", error: "حدث خطأ.", retry: "إعادة المحاولة", cancel: "إلغاء",
@@ -346,6 +352,7 @@ const ar: DeepPartial<Messages> = {
 };
 
 const fr: DeepPartial<Messages> = {
+  shell: { product: "create-opentray", toggleSidebar: "Basculer la barre latérale" },
   nav: { add: "Ajouter", applications: "Applications", help: "Centre d'aide" },
   common: {
     loading: "Chargement…", error: "Une erreur est survenue.", retry: "Réessayer", cancel: "Annuler",
@@ -383,6 +390,7 @@ const fr: DeepPartial<Messages> = {
 };
 
 const es: DeepPartial<Messages> = {
+  shell: { product: "create-opentray", toggleSidebar: "Alternar barra lateral" },
   nav: { add: "Añadir", applications: "Aplicaciones", help: "Centro de ayuda" },
   common: {
     loading: "Cargando…", error: "Algo salió mal.", retry: "Reintentar", cancel: "Cancelar",
@@ -420,6 +428,7 @@ const es: DeepPartial<Messages> = {
 };
 
 const de: DeepPartial<Messages> = {
+  shell: { product: "create-opentray", toggleSidebar: "Seitenleiste umschalten" },
   nav: { add: "Hinzufügen", applications: "Anwendungen", help: "Hilfecenter" },
   common: {
     loading: "Lädt…", error: "Etwas ist schiefgelaufen.", retry: "Erneut versuchen", cancel: "Abbrechen",
@@ -457,6 +466,7 @@ const de: DeepPartial<Messages> = {
 };
 
 const ru: DeepPartial<Messages> = {
+  shell: { product: "create-opentray", toggleSidebar: "Показать/скрыть боковую панель" },
   nav: { add: "Добавить", applications: "Приложения", help: "Центр справки" },
   common: {
     loading: "Загрузка…", error: "Что-то пошло не так.", retry: "Повторить", cancel: "Отмена",

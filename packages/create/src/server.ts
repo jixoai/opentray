@@ -110,6 +110,10 @@ export const createWizardServer = async (
       await handleAssetFile(url.pathname, response);
       return;
     }
+    if (url.pathname === "/logo.png") {
+      await handleAssetFile("/logo.png", response);
+      return;
+    }
 
     // ghostty-web resolves its WASM document-relative: /ghostty-vt.wasm.
     if (url.pathname === "/ghostty-vt.wasm") {

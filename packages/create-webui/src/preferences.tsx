@@ -46,18 +46,16 @@ const writeStored = (key: string, value: string): void => {
 const systemPrefersDark = (): boolean =>
   window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-export const resolveThemeClass = (mode: ThemeMode): "theme-light" | "theme-dark" =>
-  mode === "system" ? (systemPrefersDark() ? "theme-dark" : "theme-light") : mode === "dark" ? "theme-dark" : "theme-light";
+export const resolveThemeClass = (mode: ThemeMode): "dark" | "light" =>
+  mode === "system" ? (systemPrefersDark() ? "dark" : "light") : mode;
 
-/** Apply locale direction + theme class to <html> (idempotent). */
+/** Apply locale direction + the canonical .dark class to <html> (idempotent). */
 export const applyDocumentChrome = (locale: Locale, mode: ThemeMode): void => {
   const root = document.documentElement;
   root.lang = locale;
   root.dir = localeDirection(locale);
-  const themeClass = resolveThemeClass(mode);
-  root.classList.remove("theme-light", "theme-dark");
-  root.classList.add(themeClass);
-  root.style.colorScheme = themeClass === "theme-dark" ? "dark" : "light";
+  root.classList.toggle("dark", resolveThemeClass(mode) === "dark");
+  root.style.colorScheme = resolveThemeClass(mode);
 };
 
 /** Pre-paint resolution: runs in main.tsx before React renders. */
