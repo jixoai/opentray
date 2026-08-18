@@ -1,4 +1,7 @@
-// Export dialog (openspec change redesign-create-opentray-webui).
+// Export/Share dialog (openspec change redesign-create-opentray-webui;
+// generalized by wizard-share-and-list-scan: the same artifact flow serves
+// listed applications (key-addressed export) and the wizard's frozen
+// parameters (pre-create share)).
 //
 // Script export is the DEFAULT for uploaded resources; direct copy requires
 // the explicit force-copy override. Env-bearing exports show an editable
@@ -8,10 +11,9 @@
 import { useEffect, useState } from "react";
 import { CopyIcon, DownloadIcon } from "lucide-react";
 
-import { exportApp } from "../api";
+import { type ExportResponse } from "../api";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
-import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import {
   Dialog,
@@ -23,13 +25,39 @@ import {
 } from "../components/ui/dialog";
 import { usePreferences } from "../preferences";
 
+export interface ExportRunnerOptions {
+  readonly format: "command" | "sh" | "ps1";
+  readonly acknowledgeEnv: boolean;
+  readonly forceCopy: boolean;
+}
+
+/** Artifact runner: list rows call the key-addressed export; the wizard
+ * confirm panel calls the frozen-parameter share endpoint. */
+export type ExportRunner = (
+  options: ExportRunnerOptions,
+) => Promise<{
+  readonly status: number;
+  readonly data: ExportResponse | { readonly code: string; readonly message?: string };
+}>;
+
 export interface ExportDialogProps {
-  readonly appId: string | null;
+  readonly open: boolean;
+  readonly subtitle: string;
   readonly hasEnv: boolean;
+  /** Share mode titles the dialog 分享应用 and notes that nothing runs. */
+  readonly share?: boolean;
+  readonly runner: ExportRunner;
   readonly onClose: () => void;
 }
 
-export const ExportDialog = ({ appId, hasEnv, onClose }: ExportDialogProps): React.JSX.Element => {
+export const ExportDialog = ({
+  open,
+  subtitle,
+  hasEnv,
+  share = false,
+  runner,
+  onClose,
+}: ExportDialogProps): React.JSX.Element => {
   const { messages } = usePreferences();
   const [format, setFormat] = useState<"command" | "sh" | "ps1">("sh");
   const [forceCopy, setForceCopy] = useState(false);
@@ -45,15 +73,15 @@ export const ExportDialog = ({ appId, hasEnv, onClose }: ExportDialogProps): Rea
     setBlocked(null);
     setCopied(false);
     setAckEnv(false);
-  }, [appId, format]);
+  }, [open, format]);
 
   const build = async (): Promise<void> => {
-    if (appId === null) return;
+    if (!open) return;
     setCopied(false);
     setCommand(null);
     setScript(null);
     setBlocked(null);
-    const response = await exportApp(appId, {
+    const response = await runner({
       format,
       acknowledgeEnv: ackEnv,
       forceCopy,
@@ -95,12 +123,15 @@ export const ExportDialog = ({ appId, hasEnv, onClose }: ExportDialogProps): Rea
   };
 
   return (
-    <Dialog open={appId !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={open} onOpenChange={(open_) => { if (!open_) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{messages.export.title}</DialogTitle>
+          <DialogTitle>{share ? messages.export.shareTitle : messages.export.title}</DialogTitle>
           <DialogDescription>
-            <span className="tech-ltr block truncate">{appId}</span>
+            <span className="tech-ltr block truncate">{subtitle}</span>
+            {share && (
+              <span className="text-muted-foreground mt-1 block text-xs">{messages.export.shareSubtitle}</span>
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -162,7 +193,7 @@ export const ExportDialog = ({ appId, hasEnv, onClose }: ExportDialogProps): Rea
             {messages.common.close}
           </Button>
           <Button disabled={!canEmit} onClick={() => void build()}>
-            {messages.export.title}
+            {share ? messages.export.shareTitle : messages.export.title}
           </Button>
         </DialogFooter>
 

@@ -6,9 +6,10 @@
 import * as React from "react";
 
 import { WorkbenchShell, useWorkbenchNavigation, useWorkbenchRoute } from "@/workbench-shell";
-import { fetchAppConfig } from "@/api";
+import { fetchAppConfig, shareFrozen } from "@/api";
 import { ApplicationsRoute } from "@/routes/applications";
 import { HelpRoute } from "@/routes/help";
+import { ExportDialog } from "@/routes/export";
 
 import { AppConfigCard } from "@/components/app-config-card";
 import { CommandCard } from "@/components/command-card";
@@ -740,6 +741,14 @@ const selectedIconRefStale = (
     await api("/api/create", {});
   };
 
+  // 冻结参数分享（wizard-share-and-list-scan D3）：确认面板「分享」入口。
+  const [shareOpen, setShareOpen] = React.useState(false);
+  const shareRunner = (options: {
+    readonly format: "command" | "sh" | "ps1";
+    readonly acknowledgeEnv: boolean;
+    readonly forceCopy: boolean;
+  }) => shareFrozen(options);
+
   /** Cancel the frozen confirmation: thaw the form back to editable. The
    *  server emits the resumed state over SSE, which clears every frozen gate. */
   const cancelConfirm = async (): Promise<void> => {
@@ -974,9 +983,19 @@ const selectedIconRefStale = (
         result={result}
         onBack={() => void cancelConfirm()}
         onCreate={() => void createApp()}
+        onShare={() => setShareOpen(true)}
         onOpenApp={() => void api("/api/open-app", {})}
         confirmError={confirmError}
         onClose={() => setDialogOpen(false)}
+      />
+
+      <ExportDialog
+        open={shareOpen}
+        subtitle={frozenValues?.appId ?? displayCommand}
+        hasEnv={commandOptions.env.some((entry) => entry.key.trim().length > 0)}
+        share
+        runner={shareRunner}
+        onClose={() => setShareOpen(false)}
       />
     </div>
   );

@@ -1,17 +1,27 @@
-// Applications route (openspec change redesign-create-opentray-webui).
+// Applications route (openspec change redesign-create-opentray-webui;
+// wizard-share-and-list-scan added dual-layout discovery rows with accordion
+// details, open, and share actions).
 //
-// Core-backed list/edit/uninstall with explicit destructive confirmation,
-// exact retained/deleted path reporting, and the manual OS-pin caveat shown
-// before AND after completion. Refresh failures keep known apps visible with
-// a stale/error state.
+// Core-backed list/edit/open/share/uninstall with explicit destructive
+// confirmation, exact retained/deleted path reporting, and the manual OS-pin
+// caveat shown before AND after completion. Refresh failures keep known apps
+// visible with a stale/error state.
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCwIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, RefreshCwIcon } from "lucide-react";
 
-import { fetchApps, uninstallApp, type AppRecord } from "../api";
-import { ExportDialog } from "./export";
+import {
+  exportApp,
+  fetchAppConfig,
+  fetchApps,
+  openApp,
+  uninstallApp,
+  type AppRecord,
+} from "../api";
+import { ExportDialog, type ExportRunner } from "./export";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { Skeleton } from "../components/ui/skeleton";
 import { Checkbox } from "../components/ui/checkbox";
 import {
   AlertDialog,
@@ -23,7 +33,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
-import { Skeleton } from "../components/ui/skeleton";
 import { usePreferences } from "../preferences";
 import { useWorkbenchNavigation } from "../workbench-shell";
 
@@ -45,6 +54,43 @@ const statusLabels = (messages: ReturnType<typeof usePreferences>["messages"]) =
   statusRunning: messages.applications.statusRunning,
 });
 
+interface AppDetail {
+  readonly command: string;
+  readonly cwd: string;
+  readonly envKeys: readonly string[];
+  readonly packageManager: string;
+  readonly window: string;
+  readonly developerMode: boolean;
+}
+
+/** Project the v1-shaped config document into the accordion detail view.
+ * Env VALUES never land here — only key names (values live in the edit form). */
+const toDetail = (config: Record<string, unknown>): AppDetail => {
+  const command = (config.command ?? {}) as {
+    executable?: string;
+    args?: string[];
+    cwd?: string;
+    env?: Record<string, string>;
+  };
+  const window = (config.window ?? {}) as { width?: number; height?: number };
+  return {
+    command: [command.executable ?? "", ...(command.args ?? [])].filter(Boolean).join(" "),
+    cwd: command.cwd ?? "",
+    envKeys: Object.keys(command.env ?? {}),
+    packageManager: typeof config.packageManager === "string" ? config.packageManager : "",
+    window: `${window.width ?? "—"}×${window.height ?? "—"}`
+      .replace(/—×—/u, "—"),
+    developerMode: config.developerMode === true,
+  };
+};
+
+const DetailRow = ({ label, value }: { label: string; value: string }): React.JSX.Element => (
+  <div className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-xs">
+    <span className="text-muted-foreground">{label}</span>
+    <span className="tech-ltr break-all">{value}</span>
+  </div>
+);
+
 export const ApplicationsRoute = (): React.JSX.Element => {
   const { messages } = usePreferences();
   const { navigate } = useWorkbenchNavigation();
@@ -54,6 +100,9 @@ export const ApplicationsRoute = (): React.JSX.Element => {
   const [purge, setPurge] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [exportTarget, setExportTarget] = useState<AppRecord | null>(null);
+  // 手风琴：同一时刻只展开一行；详情在首次展开时按 key 拉取。
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, AppDetail | "error">>({});
 
   const refresh = useCallback(async () => {
     setState((prev) => (prev === "ready" ? "stale" : "loading"));
@@ -69,6 +118,31 @@ export const ApplicationsRoute = (): React.JSX.Element => {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const toggleDetail = async (app: AppRecord): Promise<void> => {
+    if (expandedKey === app.key) {
+      setExpandedKey(null);
+      return;
+    }
+    setExpandedKey(app.key);
+    if (details[app.key] === undefined) {
+      const response = await fetchAppConfig(app.key);
+      setDetails((prev) => ({
+        ...prev,
+        [app.key]: response.status === 200 ? toDetail(response.data as Record<string, unknown>) : "error",
+      }));
+    }
+  };
+
+  const open = async (app: AppRecord): Promise<void> => {
+    const response = await openApp(app.key);
+    const data = response.data;
+    setResult(
+      response.status === 200 && "ok" in data && data.ok === true
+        ? data.detail
+        : ("message" in data ? data.message : messages.common.error),
+    );
+  };
 
   const confirmUninstall = async (): Promise<void> => {
     const target = confirmTarget;
@@ -91,6 +165,15 @@ export const ApplicationsRoute = (): React.JSX.Element => {
       setResult(data.message ?? messages.common.error);
     }
     await refresh();
+  };
+
+  const exportRunner: ExportRunner = (options) => {
+    if (exportTarget === null) {
+      return Promise.resolve({ status: 400, data: { code: "state_error", message: "no target" } });
+    }
+    // The config/export endpoints address the REGISTRY KEY (encoded directory
+    // name), not the raw dotted appId.
+    return exportApp(exportTarget.key, options);
   };
 
   return (
@@ -117,45 +200,102 @@ export const ApplicationsRoute = (): React.JSX.Element => {
 
         {apps.length > 0 && (
           <ul className="space-y-2">
-            {apps.map((app) => (
-              <li
-                key={app.key}
-                className="border-border bg-card text-card-foreground flex items-center gap-3 rounded-lg border px-3 py-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium">{app.appName ?? app.key}</span>
-                    <Badge variant={app.status === "healthy" ? "default" : "destructive"}>
-                      {statusLabels(messages)[STATUS_LABEL_KEYS[app.status]]}
-                    </Badge>
-                    {app.isLink && <Badge variant="outline">{messages.applications.linked}</Badge>}
-                  </div>
-                  <div className="tech-ltr text-muted-foreground truncate text-xs" title={app.registrationDir}>
-                    {app.appId ?? app.key}
-                  </div>
-                  <div className="tech-ltr text-muted-foreground truncate text-xs" title={app.payloadPath ?? app.registrationDir}>
-                    {app.payloadPath ?? app.registrationDir}
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    // The config endpoint addresses the REGISTRY KEY
-                    // (encoded directory name), not the raw dotted appId.
-                    window.location.hash = `#/add?edit=${encodeURIComponent(app.key)}`;
-                  }}
+            {apps.map((app) => {
+              const expanded = expandedKey === app.key;
+              const detail = details[app.key];
+              return (
+                <li
+                  key={app.key}
+                  className="border-border bg-card text-card-foreground rounded-lg border px-3 py-2"
                 >
-                  {messages.applications.edit}
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setExportTarget(app)}>
-                  {messages.export.title}
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => setConfirmTarget(app)}>
-                  {messages.applications.uninstall}
-                </Button>
-              </li>
-            ))}
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium">{app.appName ?? app.key}</span>
+                        <Badge variant={app.status === "healthy" ? "default" : "destructive"}>
+                          {statusLabels(messages)[STATUS_LABEL_KEYS[app.status]]}
+                        </Badge>
+                        <Badge variant="outline">
+                          {app.source === "wizard"
+                            ? messages.applications.sourceWizard
+                            : messages.applications.sourceRegistered}
+                        </Badge>
+                        {app.isLink && <Badge variant="outline">{messages.applications.linked}</Badge>}
+                      </div>
+                      <div className="tech-ltr text-muted-foreground truncate text-xs" title={app.registrationDir}>
+                        {app.appId ?? app.key}
+                      </div>
+                      <div
+                        className="tech-ltr text-muted-foreground truncate text-xs"
+                        title={app.projectDir ?? app.payloadPath ?? app.registrationDir}
+                      >
+                        {app.projectDir ?? app.payloadPath ?? app.registrationDir}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-expanded={expanded}
+                      onClick={() => void toggleDetail(app)}
+                    >
+                      {expanded ? <ChevronUpIcon width={14} height={14} aria-hidden /> : <ChevronDownIcon width={14} height={14} aria-hidden />}
+                      {messages.applications.details}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        window.location.hash = `#/add?edit=${encodeURIComponent(app.key)}`;
+                      }}
+                    >
+                      {messages.applications.edit}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => void open(app)}>
+                      {messages.applications.open}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setExportTarget(app)}>
+                      {messages.applications.share}
+                    </Button>
+                    {app.source !== "wizard" && (
+                      <Button variant="destructive" size="sm" onClick={() => setConfirmTarget(app)}>
+                        {messages.applications.uninstall}
+                      </Button>
+                    )}
+                  </div>
+
+                  {expanded && (
+                    <div className="border-border mt-2 space-y-1 rounded-md border bg-muted/40 p-3">
+                      {detail === undefined && (
+                        <p className="text-muted-foreground text-xs">{messages.common.loading}</p>
+                      )}
+                      {detail === "error" && (
+                        <p className="text-destructive text-xs" role="alert">{messages.common.error}</p>
+                      )}
+                      {detail !== undefined && detail !== "error" && (
+                        <>
+                          <DetailRow label={messages.applications.detailsCommand} value={detail.command} />
+                          <DetailRow label={messages.applications.detailsCwd} value={detail.cwd} />
+                          <DetailRow
+                            label={messages.applications.detailsEnv}
+                            value={detail.envKeys.length > 0 ? detail.envKeys.join(", ") : "—"}
+                          />
+                          <DetailRow label={messages.applications.detailsPm} value={detail.packageManager} />
+                          <DetailRow label={messages.applications.detailsWindow} value={detail.window} />
+                          <DetailRow
+                            label={messages.applications.detailsDevMode}
+                            value={detail.developerMode ? "ON" : "OFF"}
+                          />
+                          <DetailRow
+                            label={messages.applications.detailsProjectDir}
+                            value={app.projectDir ?? app.payloadPath ?? app.registrationDir}
+                          />
+                        </>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
 
@@ -198,8 +338,10 @@ export const ApplicationsRoute = (): React.JSX.Element => {
         </AlertDialogContent>
       </AlertDialog>
       <ExportDialog
-        appId={exportTarget?.appId ?? null}
+        open={exportTarget !== null}
+        subtitle={exportTarget?.appId ?? exportTarget?.key ?? ""}
         hasEnv={exportTarget?.hasEnv === true}
+        runner={exportRunner}
         onClose={() => setExportTarget(null)}
       />
     </section>

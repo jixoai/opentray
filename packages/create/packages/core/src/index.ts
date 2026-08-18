@@ -122,6 +122,15 @@ export {
   type RegistrationRecord,
   type RegistrationStatus,
 } from "./registry";
+export {
+  findCreateEntry,
+  listCreateEntries,
+  readWizardProjectConfig,
+  readWizardProjectIcon,
+  type CreateRootEntry,
+  type WizardProjectConfig,
+  type WizardProjectIcon,
+} from "./scan";
 export { createDirectoryLink, linkCapabilities, type LinkCapabilities } from "./links";
 export {
   detectImageFormat,

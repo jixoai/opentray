@@ -76,6 +76,19 @@ export interface Messages {
     readonly statusBrokenLink: string;
     readonly statusRunning: string;
     readonly edit: string;
+    readonly open: string;
+    readonly share: string;
+    readonly details: string;
+    readonly sourceWizard: string;
+    readonly sourceRegistered: string;
+    readonly detailsCommand: string;
+    readonly detailsCwd: string;
+    readonly detailsEnv: string;
+    readonly detailsPm: string;
+    readonly detailsWindow: string;
+    readonly detailsDevMode: string;
+    readonly detailsProjectDir: string;
+    readonly detailsServiceHint: string;
     readonly uninstall: string;
     readonly uninstallTitle: string;
     readonly uninstallDescription: string;
@@ -97,6 +110,8 @@ export interface Messages {
   };
   readonly export: {
     readonly title: string;
+    readonly shareTitle: string;
+    readonly shareSubtitle: string;
     readonly command: string;
     readonly scriptSh: string;
     readonly scriptPs1: string;
@@ -140,6 +155,19 @@ const en: Messages = {
     statusBrokenLink: "Broken link",
     statusRunning: "Running",
     edit: "Edit",
+    open: "Open",
+    share: "Share",
+    details: "Details",
+    sourceWizard: "Wizard",
+    sourceRegistered: "Registered",
+    detailsCommand: "Command",
+    detailsCwd: "Working directory",
+    detailsEnv: "Environment keys",
+    detailsPm: "Package manager",
+    detailsWindow: "Window",
+    detailsDevMode: "Developer mode",
+    detailsProjectDir: "Project directory",
+    detailsServiceHint: "Service port hint",
     uninstall: "Uninstall",
     uninstallTitle: "Uninstall application?",
     uninstallDescription:
@@ -149,7 +177,7 @@ const en: Messages = {
       "Deletes the external directory itself after identity revalidation. This cannot be undone.",
     uninstallPinHint:
       "macOS Dock pins and Windows taskbar pins are user-managed; remove them manually if present.",
-    emptyHint: "No registered applications yet — create one from Add.",
+    emptyHint: "No applications yet — create one from Add.",
     payload: "Payload",
     registration: "Registration",
     linked: "Linked",
@@ -164,6 +192,8 @@ const en: Messages = {
   },
   export: {
     title: "Export",
+    shareTitle: "Share application",
+    shareSubtitle: "Built from the current wizard parameters — nothing runs, nothing is written.",
     command: "Direct command",
     scriptSh: "Shell script (.sh)",
     scriptPs1: "PowerShell script (.ps1)",
@@ -213,19 +243,26 @@ const zhCN: DeepPartial<Messages> = {
     title: "应用列表",
     statusHealthy: "正常", statusInvalidConfig: "配置无效", statusIncompatible: "版本不兼容",
     statusMissingPayload: "负载缺失", statusBrokenLink: "链接失效", statusRunning: "运行中",
-    edit: "编辑", uninstall: "卸载",
+    edit: "编辑", open: "打开应用", share: "分享", details: "详情",
+    sourceWizard: "向导", sourceRegistered: "注册",
+    detailsCommand: "命令", detailsCwd: "工作目录", detailsEnv: "环境变量键",
+    detailsPm: "包管理器", detailsWindow: "窗口", detailsDevMode: "开发者模式",
+    detailsProjectDir: "项目目录", detailsServiceHint: "服务端口提示",
+    uninstall: "卸载",
     uninstallTitle: "卸载应用？",
     uninstallDescription: "将删除注册信息与负载链接。Dock/任务栏图标需手动移除。",
     uninstallPurge: "同时删除链接的外部目录",
     uninstallPurgeHint: "重新校验身份后删除外部目录本身，此操作不可撤销。",
     uninstallPinHint: "macOS Dock 与 Windows 任务栏图标由系统管理，请手动移除。",
-    emptyHint: "还没有已注册的应用——去「新增」创建一个。",
+    emptyHint: "还没有应用——去「新增」创建一个。",
     payload: "负载", registration: "注册", linked: "链接",
     uninstallRetained: "外部目录已保留：", uninstallDeleted: "外部目录已删除：",
   },
   help: { title: "帮助中心", listTitle: "文档", empty: "暂无文档。", readError: "无法读取该文档。" },
   export: {
     title: "导出",
+    shareTitle: "分享应用",
+    shareSubtitle: "基于当前向导参数构建——不运行命令、不写入任何内容。",
     command: "直接命令", scriptSh: "Shell 脚本（.sh）", scriptPs1: "PowerShell 脚本（.ps1）",
     copyCommand: "复制命令", downloadScript: "下载脚本",
     forceCopy: "强制直接复制（内嵌图标）",

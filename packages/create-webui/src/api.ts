@@ -21,6 +21,8 @@ const request = async <T>(
 
 export interface AppRecord {
   readonly key: string;
+  /** Discovery source: wizard scaffold project or v1 registration envelope. */
+  readonly source?: "registered" | "wizard";
   readonly appId?: string;
   readonly appName?: string;
   readonly status:
@@ -32,6 +34,7 @@ export interface AppRecord {
     | "running";
   readonly registrationDir: string;
   readonly payloadPath?: string;
+  readonly projectDir?: string;
   readonly isLink: boolean;
   readonly hasEnv?: boolean;
   readonly error?: { readonly code: string; readonly message: string };
@@ -87,14 +90,60 @@ export interface ExportResponse {
   readonly content?: string;
 }
 
+/** Key-addressed share/export — works for wizard AND registered entries. */
 export const exportApp = (
-  appId: string,
+  key: string,
   options: { readonly format: "command" | "sh" | "ps1"; readonly acknowledgeEnv: boolean; readonly forceCopy: boolean },
 ): Promise<{
   readonly status: number;
   readonly data: ExportResponse | { readonly code: string; readonly message: string; readonly envCount?: number };
 }> =>
   request<ExportResponse | { code: string; message: string; envCount?: number }>(
-    `/api/apps/${encodeURIComponent(appId)}/export`,
-    { method: "POST", body: { appId, ...options } },
+    `/api/apps/${encodeURIComponent(key)}/export`,
+    { method: "POST", body: { ...options } },
   );
+
+export interface OpenAppResult {
+  readonly ok: boolean;
+  readonly detail: string;
+}
+
+/** Open a listed application (bundle launcher or detached cold start). */
+export const openApp = (
+  key: string,
+): Promise<{ readonly status: number; readonly data: OpenAppResult | { readonly code: string; readonly message: string } }> =>
+  request<OpenAppResult | { code: string; message: string }>(
+    `/api/apps/${encodeURIComponent(key)}/open`,
+    { method: "POST", body: {} },
+  );
+
+/**
+ * Share the wizard's FROZEN parameters (pre-create): command line or
+ * self-contained script built without running anything. The result maps onto
+ * the export dialog's shared response shape.
+ */
+export const shareFrozen = (
+  options: { readonly format: "command" | "sh" | "ps1"; readonly acknowledgeEnv: boolean; readonly forceCopy: boolean },
+): Promise<{
+  readonly status: number;
+  readonly data: ExportResponse | { readonly code: string; readonly message: string };
+}> =>
+  request<ExportResponse | { code: string; message: string }>("/api/export", {
+    method: "POST",
+    body: { ...options },
+  }).then((response) => {
+    if (response.status !== 200) {
+      return response as { status: number; data: ExportResponse | { code: string; message: string } };
+    }
+    const data = response.data as
+      | { ok: true; kind: "command"; command: string }
+      | { ok: true; kind: "script"; filename: string; content: string }
+      | { ok: false; code: string; message: string };
+    if (data.ok !== true) {
+      return { status: 409, data: { code: data.code, message: data.message } };
+    }
+    return {
+      status: 200,
+      data: data.kind === "command" ? { command: data.command } : { filename: data.filename, content: data.content },
+    };
+  });

@@ -582,6 +582,34 @@ const handleApi = async (
       }
       return;
     }
+    case "/api/export": {
+      // 冻结参数分享（wizard-share-and-list-scan D3）：未生成即可导出。
+      const format =
+        body.format === "sh" || body.format === "ps1" || body.format === "command"
+          ? body.format
+          : undefined;
+      if (format === undefined) {
+        respond(response, 400, "application/json", '{"error":"format must be command, sh, or ps1"}\n');
+        return;
+      }
+      const result = await session.exportFrozen({
+        format,
+        acknowledgeEnv: body.acknowledgeEnv === true,
+        forceCopy: body.forceCopy === true,
+      });
+      if (!result.ok) {
+        const status = result.code === "env_ack_required" || result.code === "export_unsafe" ? 409 : 400;
+        respond(
+          response,
+          status,
+          "application/json",
+          `${JSON.stringify({ code: result.code, message: result.message })}\n`,
+        );
+        return;
+      }
+      respond(response, 200, "application/json", `${JSON.stringify(result)}\n`);
+      return;
+    }
     case "/api/create": {
       try {
         await session.create();

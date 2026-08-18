@@ -12,13 +12,16 @@ import { fileURLToPath } from "node:url";
 import {
   buildExportPlan,
   buildScriptExport,
-  listRegistrations,
-  loadRegistration,
+  findCreateEntry,
+  listCreateEntries,
+  openMaterializedApp,
   quotePosix,
   readResourceBytes,
-  registrationKey,
+  readWizardProjectIcon,
   stopRunningApp,
   uninstallApp,
+  type CreateConfigV1,
+  type EmbeddedResource,
 } from "@create-opentray/core";
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
@@ -77,30 +80,107 @@ export const handleWorkbenchApi = async (
   const { pathname } = request;
 
   if (pathname === "/api/apps" && request.method === "GET") {
-    const records = await listRegistrations();
+    // Dual-layout discovery (wizard-share-and-list-scan D2): envelope
+    // registrations AND wizard scaffold projects, unified read-only projection.
+    const entries = await listCreateEntries();
     return {
       status: 200,
-      body: records.map((record) => ({
-        key: record.key,
-        appId: record.config?.appId,
-        appName: record.config?.appName,
-        status: record.status,
-        registrationDir: record.dir,
-        payloadPath: record.payloadPath,
-        isLink: record.isLink,
-        hasEnv: record.config !== undefined && Object.keys(record.config.command.env ?? {}).length > 0,
-        ...(record.error === undefined ? {} : { error: { code: record.error.code, message: record.error.message } }),
-      })),
+      body: entries.map((entry) => {
+        if (entry.source === "wizard") {
+          return {
+            key: entry.key,
+            source: "wizard",
+            appId: entry.config?.appId,
+            appName: entry.config?.appName,
+            status: "healthy",
+            registrationDir: entry.dir,
+            payloadPath: entry.dir,
+            projectDir: entry.dir,
+            isLink: false,
+            hasEnv:
+              entry.config !== undefined &&
+              Object.keys(entry.config.command.env ?? {}).length > 0,
+            ...(entry.config === undefined
+              ? { error: { code: "invalid_config", message: "unreadable wizard project config" } }
+              : {}),
+          };
+        }
+        return {
+          key: entry.key,
+          source: "registered",
+          appId: entry.record.config?.appId,
+          appName: entry.record.config?.appName,
+          status: entry.record.status,
+          registrationDir: entry.record.dir,
+          payloadPath: entry.record.payloadPath,
+          projectDir: entry.record.payloadPath ?? entry.record.appDir,
+          isLink: entry.record.isLink,
+          hasEnv:
+            entry.record.config !== undefined &&
+            Object.keys(entry.record.config.command.env ?? {}).length > 0,
+          ...(entry.record.error === undefined
+            ? {}
+            : { error: { code: entry.record.error.code, message: entry.record.error.message } }),
+        };
+      }),
     };
   }
 
   const readMatch = /^\/api\/apps\/([^/]+)\/config$/.exec(pathname);
   if (readMatch !== null && request.method === "GET") {
-    const record = await loadRegistration(decodeURIComponent(readMatch[1]!));
-    if (!record.ok) {
-      return { status: record.error.code === "not_found" ? 404 : 500, body: record.error };
+    const key = decodeURIComponent(readMatch[1]!);
+    const entry = await findCreateEntry(key);
+    if (entry === undefined) {
+      return { status: 404, body: { code: "not_found", message: `no application at key ${key}` } };
     }
-    return { status: 200, body: record.value.config };
+    if (entry.source === "wizard") {
+      if (entry.config === undefined) {
+        return { status: 500, body: { code: "invalid_config", message: "unreadable wizard project config" } };
+      }
+      // Same v1-shaped document the edit flow consumes, projected read-only
+      // from the wizard project's frozen opentray.app.json.
+      const config: CreateConfigV1 = {
+        schemaVersion: 1,
+        appId: entry.config.appId,
+        appName: entry.config.appName,
+        command: {
+          executable: entry.config.command.executable,
+          args: [...entry.config.command.args],
+          cwd: entry.config.command.cwd,
+          ...(entry.config.command.env === undefined
+            ? {}
+            : { env: { ...entry.config.command.env } }),
+        },
+        packageManager: entry.config.packageManager,
+        icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
+        window: entry.config.window,
+        developerMode: entry.config.developerMode,
+      };
+      return { status: 200, body: config };
+    }
+    if (entry.record.config === undefined) {
+      return { status: 500, body: { code: "invalid_config", message: "unreadable registration" } };
+    }
+    return { status: 200, body: entry.record.config };
+  }
+
+  const openMatch = /^\/api\/apps\/([^/]+)\/open$/.exec(pathname);
+  if (openMatch !== null && request.method === "POST") {
+    // Open works for BOTH layouts (wizard-share-and-list-scan D4): the shared
+    // launcher needs only the project directory — bundle present → platform
+    // launcher, else detached cold start. No registration envelope required.
+    const key = decodeURIComponent(openMatch[1]!);
+    const entry = await findCreateEntry(key);
+    if (entry === undefined) {
+      return { status: 404, body: { code: "not_found", message: `no application at key ${key}` } };
+    }
+    const projectDir =
+      entry.source === "wizard" ? entry.dir : entry.record.payloadPath;
+    if (projectDir === undefined) {
+      return { status: 409, body: { code: "missing_payload", message: "application payload is unavailable" } };
+    }
+    const opened = await openMaterializedApp({ projectDir, bundlePath: undefined });
+    return { status: opened.ok ? 200 : 500, body: opened };
   }
 
   const uninstallMatch = /^\/api\/apps\/([^/]+)\/uninstall$/.exec(pathname);
@@ -135,15 +215,74 @@ export const handleWorkbenchApi = async (
 
   const exportMatch = /^\/api\/apps\/([^/]+)\/export$/.exec(pathname);
   if (exportMatch !== null && request.method === "POST") {
-    const appId = typeof request.body.appId === "string" ? request.body.appId : undefined;
-    if (appId === undefined) {
-      return { status: 400, body: { code: "invalid_config", message: "appId is required" } };
+    // Key-addressed share/export for BOTH layouts (wizard-share-and-list-scan
+    // D1/D4): wizard projects derive the config from the scaffold projection
+    // and embed the stable in-project icon asset; registrations keep the
+    // committed-snapshot flow.
+    const key = decodeURIComponent(exportMatch[1]!);
+    const entry = await findCreateEntry(key);
+    if (entry === undefined) {
+      return { status: 404, body: { code: "not_found", message: `no application at key ${key}` } };
     }
-    const record = await loadRegistration(registrationKey(appId));
-    if (!record.ok || record.value.config === undefined) {
-      return { status: record.ok ? 500 : 404, body: record.ok ? { code: "invalid_config", message: "unreadable registration" } : record.error };
+    let config: CreateConfigV1;
+    const embedded: EmbeddedResource[] = [];
+    if (entry.source === "wizard") {
+      if (entry.config === undefined) {
+        return { status: 500, body: { code: "invalid_config", message: "unreadable wizard project config" } };
+      }
+      const icon = await readWizardProjectIcon(entry.dir);
+      config = {
+        schemaVersion: 1,
+        appId: entry.config.appId,
+        appName: entry.config.appName,
+        command: {
+          executable: entry.config.command.executable,
+          args: [...entry.config.command.args],
+          cwd: entry.config.command.cwd,
+          ...(entry.config.command.env === undefined
+            ? {}
+            : { env: { ...entry.config.command.env } }),
+        },
+        packageManager: entry.config.packageManager,
+        icons: {
+          imageSmoothingEnabled: true,
+          background: "transparent",
+          scale: 0.8,
+          ...(icon === undefined
+            ? {}
+            : {
+                appIcon: {
+                  path: "app-icon.png",
+                  format: "png" as const,
+                  sha256: icon.sha256,
+                  source: { kind: "file" as const, ref: icon.path },
+                },
+              }),
+        },
+        window: entry.config.window,
+        developerMode: entry.config.developerMode,
+      };
+      if (icon !== undefined) {
+        embedded.push({ flag: "app-icon", filename: "app-icon.png", bytes: icon.bytes });
+      }
+    } else {
+      if (entry.record.config === undefined) {
+        return { status: 500, body: { code: "invalid_config", message: "unreadable registration" } };
+      }
+      config = entry.record.config;
+      // Embedded uploads: file-provenance sources carry their committed bytes.
+      for (const ref of [config.icons.appIcon, config.icons.trayIcon]) {
+        if (ref === undefined || ref.source.kind === "http") continue;
+        const bytes = await readResourceBytes(entry.record.dir, ref);
+        if (bytes.ok) {
+          embedded.push({
+            flag: ref === config.icons.appIcon ? "app-icon" : "tray-icon",
+            filename: ref.path.split("/").pop() ?? "icon.png",
+            bytes: bytes.value,
+          });
+        }
+      }
     }
-    const config = record.value.config;
     const envCount = Object.keys(config.command.env ?? {}).length;
     if (envCount > 0 && request.body.acknowledgeEnv !== true) {
       // Env guard WITHOUT heuristics and WITHOUT echoing values.
@@ -151,19 +290,6 @@ export const handleWorkbenchApi = async (
         status: 409,
         body: { code: "env_ack_required", message: "environment entries present; acknowledgement required", envCount },
       };
-    }
-    // Embedded uploads: file-provenance sources carry their committed bytes.
-    const embedded: { flag: string; filename: string; bytes: Uint8Array }[] = [];
-    for (const ref of [config.icons.appIcon, config.icons.trayIcon]) {
-      if (ref === undefined || ref.source.kind === "http") continue;
-      const bytes = await readResourceBytes(record.value.dir, ref);
-      if (bytes.ok) {
-        embedded.push({
-          flag: ref === config.icons.appIcon ? "app-icon" : "tray-icon",
-          filename: ref.path.split("/").pop() ?? "icon.png",
-          bytes: bytes.value,
-        });
-      }
     }
     const format = request.body.format === "sh" || request.body.format === "ps1" || request.body.format === "command"
       ? (request.body.format as "sh" | "ps1" | "command")

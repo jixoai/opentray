@@ -7,9 +7,9 @@
 // 3. Coordinate preview run, discovery polling, scrape polling, and teardown.
 
 import { createHash } from "node:crypto";
-import { mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import { deriveDefaultAppId, deriveDefaultAppName, toProjectDirectoryName } from "@create-opentray/core";
 import {
@@ -31,6 +31,15 @@ import {
 } from "@create-opentray/core";
 import { scrapeService, writeGlyphIconTemp, type ScrapedIcon } from "@create-opentray/core";
 import { tokenizeCommandLine } from "@create-opentray/core";
+import {
+  buildExportPlan,
+  buildScriptExport,
+  detectImageFormat,
+  quotePosix,
+  type CreateConfigV1,
+  type EmbeddedResource,
+  type IconResourceRef,
+} from "@create-opentray/core";
 import {
   detectPackageManager,
   materialize,
@@ -254,9 +263,34 @@ export interface WizardSession {
   confirm(): void;
   /** Abort a frozen confirmation and return to the editable pre-freeze state. */
   cancel(): void;
+  /**
+   * Share the FROZEN parameters (wizard-share-and-list-scan D3): build an
+   * export artifact from the confirmation state WITHOUT running the command
+   * or materializing anything. Works pre-create.
+   */
+  exportFrozen(options: {
+    readonly format: "command" | "sh" | "ps1";
+    readonly acknowledgeEnv?: boolean;
+    readonly forceCopy?: boolean;
+  }): Promise<WizardExportResult>;
   create(): Promise<void>;
   stop(): Promise<void>;
 }
+
+export type WizardExportResult =
+  | { readonly ok: true; readonly kind: "command"; readonly command: string }
+  | {
+      readonly ok: true;
+      readonly kind: "script";
+      readonly filename: string;
+      readonly content: string;
+      readonly requiresEnvAcknowledgement: boolean;
+    }
+  | {
+      readonly ok: false;
+      readonly code: "state_error" | "resolve_failed" | "env_ack_required" | "export_unsafe";
+      readonly message: string;
+    };
 
 interface FieldTouched {
   force: boolean;
@@ -987,6 +1021,135 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (runAlive && discovery !== undefined) {
         startDiscoveryPolling();
       }
+    },
+
+    async exportFrozen(exportOptions) {
+      // 分享基于冻结参数（D3）：不跑命令、不物化任何东西。
+      const frozen = frozenForm;
+      if (frozen === undefined) {
+        return {
+          ok: false,
+          code: "state_error",
+          message: "share requires a confirmed (frozen) parameter set",
+        };
+      }
+      if (currentTokens.length === 0) {
+        return { ok: false, code: "state_error", message: "no command recorded" };
+      }
+      let vector: LaunchVector;
+      try {
+        vector = await (options.resolveVector ?? resolveLaunchVector)({
+          tokens: currentTokens,
+          cwd: effectiveCwd(),
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          code: "resolve_failed",
+          message: `failed to resolve the launch vector: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      const envOverlay = commandEnv();
+      const env = Object.keys(envOverlay).length > 0 ? envOverlay : vector.env;
+      const embedded: EmbeddedResource[] = [];
+      const iconRef = async (
+        path: string | undefined,
+        flag: "app-icon" | "tray-icon",
+      ): Promise<IconResourceRef | undefined> => {
+        if (path === undefined || path.trim().length === 0) {
+          return undefined;
+        }
+        try {
+          const bytes = new Uint8Array(await readFile(path));
+          const format = detectImageFormat(bytes);
+          if (format === undefined) {
+            return undefined;
+          }
+          embedded.push({ flag, filename: basename(path), bytes });
+          return {
+            path: basename(path),
+            format,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            source: { kind: "file", ref: path },
+          };
+        } catch {
+          return undefined; // unreadable icon source degrades to the glyph default
+        }
+      };
+      const appIconSource = frozenIconPath ?? currentIconPath;
+      const trayIconSource = currentTrayIconPath;
+      const appIcon = await iconRef(appIconSource, "app-icon");
+      // 托盘默认跟随应用图标：同源托盘不重复内嵌（CLI 语义：省略即跟随）。
+      const trayIcon =
+        trayIconSource !== undefined && trayIconSource !== appIconSource
+          ? await iconRef(trayIconSource, "tray-icon")
+          : undefined;
+      const config: CreateConfigV1 = {
+        schemaVersion: 1,
+        appId: frozen.appId,
+        appName: frozen.appName,
+        command: {
+          executable: vector.command,
+          args: [...vector.args],
+          cwd: vector.cwd,
+          ...(env === undefined ? {} : { env }),
+        },
+        packageManager: frozen.pm,
+        icons: {
+          imageSmoothingEnabled: frozen.imageSmoothingEnabled !== false,
+          background: frozen.iconBackground ?? "transparent",
+          scale: frozen.iconScale ?? DEFAULT_ICON_SCALE,
+          ...(trayIconIsSolid === true ? { trayTemplate: true } : {}),
+          ...(appIcon === undefined ? {} : { appIcon }),
+          ...(trayIcon === undefined ? {} : { trayIcon }),
+        },
+        window: { width: 1_200, height: 800 },
+        developerMode: frozen.developerMode === true,
+      };
+      const envCount = Object.keys(config.command.env ?? {}).length;
+      if (envCount > 0 && exportOptions.acknowledgeEnv !== true) {
+        // 与注册导出同一条无启发式守卫，且永不回显值。
+        return {
+          ok: false,
+          code: "env_ack_required",
+          message: "environment entries present; acknowledgement required",
+        };
+      }
+      if (exportOptions.format === "command") {
+        const plan = buildExportPlan({
+          config,
+          embeddedResources: embedded,
+          forceCopy: exportOptions.forceCopy === true,
+        });
+        if (!plan.ok) {
+          return { ok: false, code: "export_unsafe", message: plan.error.message };
+        }
+        if (plan.value.directCommand === null) {
+          return {
+            ok: false,
+            code: "export_unsafe",
+            message: plan.value.directCommandBlockedReason ?? "direct copy requires force-copy",
+          };
+        }
+        const command = plan.value.directCommand.command
+          .map((element) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(element) ? element : quotePosix(element)))
+          .join(" ");
+        return { ok: true, kind: "command", command };
+      }
+      const script = buildScriptExport(
+        { config, embeddedResources: embedded },
+        exportOptions.format === "sh" ? "sh" : "powershell",
+      );
+      if (!script.ok) {
+        return { ok: false, code: "export_unsafe", message: script.error.message };
+      }
+      return {
+        ok: true,
+        kind: "script",
+        filename: script.value.filename,
+        content: script.value.content,
+        requiresEnvAcknowledgement: script.value.requiresEnvAcknowledgement,
+      };
     },
 
     async create() {

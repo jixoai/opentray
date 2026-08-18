@@ -718,3 +718,59 @@ describe("cancel thaws a frozen confirmation", () => {
     expect(() => harness.session.cancel()).toThrow(/cannot cancel while idle/);
   });
 });
+
+// 冻结参数分享（wizard-share-and-list-scan D3）：未生成即可导出。
+describe("frozen-parameter sharing (exportFrozen)", () => {
+  it("exports a sh script from the frozen state without creating anything", async () => {
+    const harness = createHarness();
+    harness.session.prime("npx @deepseek-ai/dsh@latest web");
+    harness.session.confirm();
+    expect(harness.session.state).toBe("frozen");
+
+    const result = await harness.session.exportFrozen({ format: "sh" });
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.kind !== "script") return;
+    expect(result.filename).toBe("create-opentray.sh");
+    // appId 由 prime 默认推导（scoped 包新规则）。
+    expect(result.content).toContain("web.dsh.npx");
+    // 向量在分享时现算（resolveVector seam）。
+    expect(result.content).toContain("/resolved/npx");
+    expect(result.content).toContain("@deepseek-ai/dsh@latest");
+    expect(result.content).toContain("--pm");
+
+    // 分享绝不物化：create root 仍为空。
+    const { readdir } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const createRoot = join(harness.homeDir(), ".opentray", "create");
+    await expect(readdir(createRoot)).rejects.toThrow();
+  });
+
+  it("refuses until env acknowledged, then includes the entries", async () => {
+    const harness = createHarness();
+    harness.session.updateCommandOptions({ env: [{ key: "API_TOKEN", value: "secret" }] });
+    harness.session.prime("npx tool serve");
+    harness.session.confirm();
+
+    const refused = await harness.session.exportFrozen({ format: "sh" });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.code).toBe("env_ack_required");
+      expect(refused.message).not.toContain("secret");
+    }
+
+    const allowed = await harness.session.exportFrozen({ format: "sh", acknowledgeEnv: true });
+    expect(allowed.ok).toBe(true);
+    if (allowed.ok && allowed.kind === "script") {
+      expect(allowed.content).toContain("API_TOKEN=secret"); // 已确认的完整导出含值
+    }
+  });
+
+  it("state-gates sharing to a frozen parameter set", async () => {
+    const harness = createHarness();
+    const result = await harness.session.exportFrozen({ format: "sh" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("state_error");
+    }
+  });
+});

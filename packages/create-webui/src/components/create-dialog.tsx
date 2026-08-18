@@ -33,6 +33,8 @@ export interface CreateDialogProps {
   result: { projectDir: string; bundlePath?: string; pinHint: string } | undefined;
   onBack(): void;
   onCreate(): void;
+  /** 分享冻结参数（未生成即可分享）——wizard-share-and-list-scan D3。 */
+  onShare(): void;
   onOpenApp(): void;
   /** Dialog dismissal (X / Esc / overlay / 完成). */
   onClose(): void;
@@ -56,6 +58,7 @@ export function CreateDialog({
   result,
   onBack,
   onCreate,
+  onShare,
   onOpenApp,
   onClose,
   confirmError,
@@ -151,6 +154,9 @@ export function CreateDialog({
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onBack}>
                 返回修改
+              </Button>
+              <Button variant="outline" onClick={onShare}>
+                分享
               </Button>
               <Button onClick={onCreate}>确认生成</Button>
             </div>
