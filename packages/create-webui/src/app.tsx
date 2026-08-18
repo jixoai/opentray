@@ -20,8 +20,7 @@ import {
   prewarmGhostty,
   type TerminalHandle,
 } from "@/components/terminal-pane";
-import { X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -709,15 +708,6 @@ const selectedIconRefStale = (
     await api("/api/create", {});
   };
 
-  const stateBadge =
-    wizardState === "discovered" || wizardState === "success"
-      ? "default"
-      : wizardState === "running" || wizardState === "materializing"
-        ? "secondary"
-        : wizardState === "failed"
-          ? "destructive"
-          : "secondary";
-
   // Grid-driven list→detail transition (owner round-11): the page is ONE
   // grid whose template columns animate from a centered single column to
   // "list + detail" — the browser interpolates the column sizes, so the list
@@ -757,14 +747,6 @@ const selectedIconRefStale = (
           scrollbarGutter: "stable",
         }}
       >
-      {/* The sidebar carries the product identity; the pane header shows
-          only the live wizard state. */}
-      <header className="flex items-center justify-end">
-        <Badge variant={stateBadge} className="shrink-0">
-          {wizardState}
-        </Badge>
-      </header>
-
       {/* Card 1 — command + 命令选项 accordion inside */}
       <CommandCard
         command={command}
@@ -908,19 +890,6 @@ const selectedIconRefStale = (
       >
         {panelOpen ? (
           <>
-            {/* Close the detail pane (re-expands the sidebar via the shell). */}
-            <div className="flex items-center justify-end">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="关闭预览面板"
-                onClick={() => {
-                  setPanelOpen(false);
-                }}
-              >
-                <X className="size-4" />
-              </Button>
-            </div>
             <TabsPanel
               command={displayCommand}
               terminalHostRef={terminalHostRef}

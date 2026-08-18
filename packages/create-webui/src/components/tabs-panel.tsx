@@ -114,7 +114,11 @@ export function TabsPanel({
     <div className={cn("flex flex-col rounded-xl border border-border bg-card overflow-hidden", className)}>
       <Tabs value={activeTab} onValueChange={onActiveTabChange} className="flex min-h-0 flex-1 flex-col">
         {/* Tabs strip first (browser convention), then the context toolbar. */}
-        <TabsList>
+        {/* Lifted browser-style tab strip (shadcn tabs-13 pattern on the
+            official base-nova `line` variant): borderless row sitting on the
+            panel border; the active tab is transparent with an underline that
+            meets the strip border — the browser-chrome convention. */}
+        <TabsList variant="line" className="w-full justify-start border-b px-2">
           <TabsTrigger value="terminal">
             <TerminalIcon className="size-3.5" />
             终端
