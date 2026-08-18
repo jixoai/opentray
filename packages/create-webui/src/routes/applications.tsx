@@ -109,6 +109,8 @@ export const ApplicationsRoute = (): React.JSX.Element => {
     const response = await fetchApps();
     if (response.status === 200) {
       setApps(response.data);
+      // 详情随列表刷新失效：展开中的行会在下次 toggle 时重新拉取。
+      setDetails({});
       setState("ready");
     } else {
       setState("stale"); // keep known apps visible with the stale state
