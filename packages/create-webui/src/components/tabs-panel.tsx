@@ -15,8 +15,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { StableIframe } from "@/components/stable-iframe";
 import { hostnameOf, type DiscoveredService } from "@/wizard-protocol";
 import { cn } from "@/lib/utils";
 
@@ -123,13 +124,14 @@ export function TabsPanel({
   className,
 }: TabsPanelProps): React.JSX.Element {
   return (
-    <div className={cn("flex min-h-0 flex-col", className)}>
-      <Tabs value={activeTab} onValueChange={onActiveTabChange} className="flex min-h-0 flex-1 flex-col gap-0">
-        {/* Tabs strip first (browser convention), then the context toolbar. */}
-        {/* Lifted browser-style tab strip (shadcn tabs-13 pattern on the
-            official base-nova `line` variant): borderless row sitting on the
-            panel border; the active tab is transparent with an underline that
-            meets the strip border — the browser-chrome convention. */}
+    <div className={cn("flex min-h-0 flex-col gap-2", className)}>
+      {/* The tab strip. Panels are kept mounted OUTSIDE TabsContent on
+          purpose: Base UI unmounts inactive panels, which reloaded every
+          service iframe on each switch. The Tabs root still drives
+          keyboard nav and active styling; only this strip is its DOM. */}
+      <Tabs value={activeTab} onValueChange={onActiveTabChange}>
+        {/* Lifted browser-style strip (shadcn tabs-13 pattern on the
+            official base-nova `line` variant). */}
         <TabsList variant="line" className="w-full justify-start border-b px-2">
           <TabsTrigger value="terminal">
             <TerminalIcon className="size-3.5" />
@@ -145,29 +147,100 @@ export function TabsPanel({
             </TabsTrigger>
           ))}
         </TabsList>
+      </Tabs>
 
-        <TabsContent
-          value="terminal"
-          className="mt-0 min-h-0 flex-1"
-          style={{ display: activeTab === "terminal" ? "flex" : "none", flexDirection: "column" }}
+      {/* Persistent pages: every tab's card stays mounted; visibility is
+          CSS only. Switching tabs cannot reload iframes or reset the
+          terminal renderer. */}
+      <div className="flex min-h-0 flex-1 flex-col" hidden={activeTab !== "terminal"}>
+        <Card size="sm" className="min-h-0 flex-1 gap-0">
+          {/* CardHeader: the command this terminal is running. */}
+          <CardHeader className="border-b [.border-b]:pb-2">
+            <span className="tech-ltr flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground">
+              <TerminalIcon className="size-4 shrink-0" />
+              <span className="truncate">{command || "尚未运行命令"}</span>
+            </span>
+          </CardHeader>
+          {/* CardBody: the terminal surface. */}
+          <CardContent className="min-h-0 flex-1 p-0">
+            <div
+              ref={terminalHostRef}
+              className="min-h-0 min-w-0 h-full bg-[#05070b] px-1"
+            />
+            {!terminalReady ? (
+              <div className="p-3 text-xs text-muted-foreground">正在加载终端渲染器…</div>
+            ) : null}
+          </CardContent>
+          <StatusBar
+            status={status}
+            services={services}
+            activeTab={activeTab}
+            onJumpToService={onJumpToService}
+          />
+        </Card>
+      </div>
+
+      {iframeTabs.map((tab) => (
+        <div
+          key={tab.port}
+          className="flex min-h-0 flex-1 flex-col"
+          hidden={activeTab !== `svc-${tab.port}`}
         >
           <Card size="sm" className="min-h-0 flex-1 gap-0">
-            {/* CardHeader: the command this terminal is running. */}
+            {/* CardHeader: the browser address bar for this service tab. */}
             <CardHeader className="border-b [.border-b]:pb-2">
-              <span className="tech-ltr flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground">
-                <TerminalIcon className="size-4 shrink-0" />
-                <span className="truncate">{command || "尚未运行命令"}</span>
-              </span>
+              <div className="flex min-w-0 items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={tab.historyIndex === 0}
+                  onClick={() => onIframeHistoryMove(tab.port, -1)}
+                  aria-label="后退"
+                >
+                  <ArrowLeft />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={tab.historyIndex >= tab.history.length - 1}
+                  onClick={() => onIframeHistoryMove(tab.port, 1)}
+                  aria-label="前进"
+                >
+                  <ArrowRight />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => onIframeNavigate(tab.port, tab.url, "replace")}
+                  aria-label="重新加载"
+                >
+                  <RotateCw />
+                </Button>
+                <Globe className="size-4 shrink-0 text-muted-foreground" />
+                <Input
+                  className="tech-ltr h-7 font-mono text-xs"
+                  defaultValue={tab.url}
+                  key={`${tab.port}:${tab.historyIndex}:${tab.url}`}
+                  placeholder="输入 URL 跳转"
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    const raw = (event.target as HTMLInputElement).value;
+                    const next = normalizeUrl(raw);
+                    if (next !== undefined) {
+                      onIframeNavigate(tab.port, next, "push");
+                    }
+                  }}
+                />
+              </div>
             </CardHeader>
-            {/* CardBody (CardContent): the terminal surface itself. */}
+            {/* CardBody: the service page. StableIframe navigates only on a
+                REAL url change — visibility flips never reload it. */}
             <CardContent className="min-h-0 flex-1 p-0">
-              <div
-                ref={terminalHostRef}
-                className="min-h-0 min-w-0 h-full bg-[#05070b] px-1"
+              <StableIframe
+                port={tab.port}
+                url={tab.url}
+                visible={activeTab === `svc-${tab.port}`}
               />
-              {!terminalReady ? (
-                <div className="p-3 text-xs text-muted-foreground">正在加载终端渲染器…</div>
-              ) : null}
             </CardContent>
             <StatusBar
               status={status}
@@ -176,82 +249,8 @@ export function TabsPanel({
               onJumpToService={onJumpToService}
             />
           </Card>
-        </TabsContent>
-
-        {iframeTabs.map((tab) => (
-          <TabsContent
-            key={tab.port}
-            value={`svc-${tab.port}`}
-            className="mt-0 min-h-0 flex-1"
-            style={{ display: activeTab === `svc-${tab.port}` ? "flex" : "none", flexDirection: "column" }}
-          >
-            <Card size="sm" className="min-h-0 flex-1 gap-0">
-              {/* CardHeader: the browser address bar for this service tab. */}
-              <CardHeader className="border-b [.border-b]:pb-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={tab.historyIndex === 0}
-                    onClick={() => onIframeHistoryMove(tab.port, -1)}
-                    aria-label="后退"
-                  >
-                    <ArrowLeft />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={tab.historyIndex >= tab.history.length - 1}
-                    onClick={() => onIframeHistoryMove(tab.port, 1)}
-                    aria-label="前进"
-                  >
-                    <ArrowRight />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => onIframeNavigate(tab.port, tab.url, "replace")}
-                    aria-label="重新加载"
-                  >
-                    <RotateCw />
-                  </Button>
-                  <Globe className="size-4 shrink-0 text-muted-foreground" />
-                  <Input
-                    className="tech-ltr h-7 font-mono text-xs"
-                    defaultValue={tab.url}
-                    key={`${tab.port}:${tab.historyIndex}:${tab.url}`}
-                    placeholder="输入 URL 跳转"
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      const raw = (event.target as HTMLInputElement).value;
-                      const next = normalizeUrl(raw);
-                      if (next !== undefined) {
-                        onIframeNavigate(tab.port, next, "push");
-                      }
-                    }}
-                  />
-                </div>
-              </CardHeader>
-              {/* CardBody (CardContent): the service page. */}
-              <CardContent className="min-h-0 flex-1 p-0">
-                <iframe
-                  title={`service-${tab.port}`}
-                  src={tab.url}
-                  className="min-h-0 h-full w-full border-0 bg-white"
-                  sandbox="allow-same-origin allow-scripts allow-forms"
-                />
-              </CardContent>
-              <StatusBar
-                status={status}
-                services={services}
-                activeTab={activeTab}
-                onJumpToService={onJumpToService}
-              />
-            </Card>
-          </TabsContent>
-        ))}
-      </Tabs>
-
-</div>
+        </div>
+      ))}
+    </div>
   );
 }

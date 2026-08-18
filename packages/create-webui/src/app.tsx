@@ -747,7 +747,7 @@ const selectedIconRefStale = (
           scrollable; the detail pane appearing never shifts it. */}
       <div
         className={
-          "flex w-full flex-col gap-4 overflow-y-auto p-5 max-md:min-h-full " +
+          "flex w-full flex-col gap-4 overflow-y-auto p-5 pr-3 max-md:min-h-full " +
           (panelOpen ? "md:border-r md:border-border" : "")
         }
         style={{
