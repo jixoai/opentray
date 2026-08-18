@@ -1,12 +1,12 @@
 // Export/Share dialog (openspec change redesign-create-opentray-webui;
-// generalized by wizard-share-and-list-scan: the same artifact flow serves
-// listed applications (key-addressed export) and the wizard's frozen
-// parameters (pre-create share)).
+// generalized by wizard-share-and-list-scan and reshaped by owner review:
+// script formats only — no direct-command mode; the full artifact lives in
+// an expandable accordion with wrapped text; the footer is 复制命令/下载文件).
 //
-// Script export is the DEFAULT for uploaded resources; direct copy requires
-// the explicit force-copy override. Env-bearing exports show an editable
-// review plus a NON-preselected disclaimer checkbox that blocks complete
-// copy/download until acknowledged — with no secret heuristics.
+// Scraped web icons default to sharing their http source URL plus the
+// icon-generation flags; the inline toggle (shown only when a URL share is
+// active) opts into embedding the bytes. Env-bearing shares keep the
+// NON-preselected acknowledgement checkbox that blocks copy/download.
 
 import { useEffect, useState } from "react";
 import { CopyIcon, DownloadIcon } from "lucide-react";
@@ -15,6 +15,13 @@ import { type ExportResponse } from "../api";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
 import { Label } from "../components/ui/label";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "../components/ui/accordion";
+import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import {
   Dialog,
   DialogContent,
@@ -26,9 +33,9 @@ import {
 import { usePreferences } from "../preferences";
 
 export interface ExportRunnerOptions {
-  readonly format: "command" | "sh" | "ps1";
+  readonly format: "sh" | "ps1";
   readonly acknowledgeEnv: boolean;
-  readonly forceCopy: boolean;
+  readonly inlineIcon: boolean;
 }
 
 /** Artifact runner: list rows call the key-addressed export; the wizard
@@ -59,47 +66,63 @@ export const ExportDialog = ({
   onClose,
 }: ExportDialogProps): React.JSX.Element => {
   const { messages } = usePreferences();
-  const [format, setFormat] = useState<"command" | "sh" | "ps1">("sh");
-  const [forceCopy, setForceCopy] = useState(false);
+  const [format, setFormat] = useState<"sh" | "ps1">("sh");
   const [ackEnv, setAckEnv] = useState(false);
-  const [command, setCommand] = useState<string | null>(null);
-  const [script, setScript] = useState<{ filename: string; content: string } | null>(null);
+  const [inlineIcon, setInlineIcon] = useState(false);
+  const [script, setScript] = useState<{ filename: string; content: string; iconSharedAs?: string } | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
+  const [building, setBuilding] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    setCommand(null);
-    setScript(null);
-    setBlocked(null);
-    setCopied(false);
     setAckEnv(false);
-  }, [open, format]);
+    setInlineIcon(false);
+  }, [open]);
 
-  const build = async (): Promise<void> => {
-    if (!open) return;
-    setCopied(false);
-    setCommand(null);
-    setScript(null);
-    setBlocked(null);
-    const response = await runner({
-      format,
-      acknowledgeEnv: ackEnv,
-      forceCopy,
-    });
-    if (response.status === 200) {
-      const data = response.data;
-      if ("command" in data && data.command !== undefined) {
-        setCommand(data.command);
-      } else if ("content" in data && data.content !== undefined) {
-        setScript({ filename: data.filename ?? "create-opentray.sh", content: data.content });
-      }
+  // 打开即自动生成；格式 / 环境确认 / 内联切换都触发生成。
+  useEffect(() => {
+    if (!open) {
+      setScript(null);
+      setBlocked(null);
       return;
     }
-    const data = response.data;
-    if ("code" in data) {
-      setBlocked(`${data.message ?? data.code}`);
-    }
-  };
+    let cancelled = false;
+    setBuilding(true);
+    setCopied(false);
+    setBlocked(null);
+    void (async () => {
+      // 未确认 env 时服务端会拒绝：本地同样压住生成，勾选后自动重建。
+      if (hasEnv && !ackEnv) {
+        if (!cancelled) {
+          setScript(null);
+          setBuilding(false);
+        }
+        return;
+      }
+      const response = await runner({ format, acknowledgeEnv: ackEnv, inlineIcon });
+      if (cancelled) return;
+      setBuilding(false);
+      if (response.status === 200) {
+        const data = response.data;
+        if ("content" in data && data.content !== undefined) {
+          setScript({
+            filename: data.filename ?? "create-opentray.sh",
+            content: data.content,
+            ...(data.iconSharedAs === undefined ? {} : { iconSharedAs: data.iconSharedAs }),
+          });
+        }
+        return;
+      }
+      setScript(null);
+      const data = response.data;
+      if ("code" in data) {
+        setBlocked(`${data.message ?? data.code}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, format, ackEnv, inlineIcon, hasEnv, runner]);
 
   const canEmit = !hasEnv || ackEnv;
   const download = (): void => {
@@ -116,9 +139,8 @@ export const ExportDialog = ({
   };
 
   const copy = async (): Promise<void> => {
-    const text = command ?? script?.content ?? null;
-    if (text === null) return;
-    await navigator.clipboard.writeText(text);
+    if (script === null) return;
+    await navigator.clipboard.writeText(script.content);
     setCopied(true);
   };
 
@@ -135,42 +157,24 @@ export const ExportDialog = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div role="radiogroup" aria-label={messages.export.title} className="flex gap-2">
-          {(
-            [
-              ["command", messages.export.command],
-              ["sh", messages.export.scriptSh],
-              ["ps1", messages.export.scriptPs1],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={format === value}
-              className={`flex-1 rounded-md border px-3 py-2 text-xs ${
-                format === value ? "border-primary bg-primary text-primary-foreground" : "border-border"
-              }`}
-              onClick={() => {
-                setFormat(value);
-              }}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex gap-2">
+          <ToggleGroup
+            variant="outline"
+            size="sm"
+            spacing={0}
+            value={[format]}
+            onValueChange={(group: string[]) => {
+              const next = group[0];
+              if (next === "sh" || next === "ps1") {
+                setFormat(next);
+              }
+            }}
+          >
+            <ToggleGroupItem value="sh">{messages.export.scriptSh}</ToggleGroupItem>
+            <ToggleGroupItem value="ps1">{messages.export.scriptPs1}</ToggleGroupItem>
+          </ToggleGroup>
+          {building && <span className="text-muted-foreground self-center text-xs">{messages.export.building}</span>}
         </div>
-
-        {format === "command" && (
-          <div className="space-y-1">
-            <div className="flex items-start gap-2">
-              <Checkbox id="export-force-copy" checked={forceCopy} onCheckedChange={(checked) => setForceCopy(checked === true)} />
-              <Label htmlFor="export-force-copy" className="text-xs leading-snug">
-                {messages.export.forceCopy}
-                <span className="text-muted-foreground block">{messages.export.forceCopyHint}</span>
-              </Label>
-            </div>
-          </div>
-        )}
 
         {hasEnv && (
           <div className="border-warning rounded-md border p-3">
@@ -188,14 +192,19 @@ export const ExportDialog = ({
           </div>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            {messages.common.close}
-          </Button>
-          <Button disabled={!canEmit} onClick={() => void build()}>
-            {share ? messages.export.shareTitle : messages.export.title}
-          </Button>
-        </DialogFooter>
+        {script?.iconSharedAs === "url" && (
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="export-inline-icon"
+              checked={inlineIcon}
+              onCheckedChange={(checked) => setInlineIcon(checked === true)}
+            />
+            <Label htmlFor="export-inline-icon" className="text-xs leading-snug">
+              {messages.export.inlineIcon}
+              <span className="text-muted-foreground block">{messages.export.inlineIconHint}</span>
+            </Label>
+          </div>
+        )}
 
         {blocked !== null && (
           <p className="text-destructive text-xs" role="alert">
@@ -203,31 +212,32 @@ export const ExportDialog = ({
           </p>
         )}
 
-        {command !== null && (
-          <div className="space-y-2">
-            <pre className="tech-ltr bg-muted max-h-40 overflow-auto rounded-md p-2 text-xs">{command}</pre>
-            <Button size="sm" onClick={() => void copy()}>
-              <CopyIcon width={14} height={14} aria-hidden />
-              {copied ? messages.common.copied : messages.export.copyCommand}
-            </Button>
-          </div>
+        {script !== null && (
+          <Accordion>
+            <AccordionItem value="content">
+              <AccordionTrigger className="text-xs">{messages.export.viewFull}</AccordionTrigger>
+              <AccordionContent>
+                <pre className="tech-ltr bg-muted max-h-72 overflow-auto rounded-md p-2 text-xs whitespace-pre-wrap break-all">
+                  {script.content}
+                </pre>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         )}
 
-        {script !== null && (
-          <div className="space-y-2">
-            <pre className="tech-ltr bg-muted max-h-40 overflow-auto rounded-md p-2 text-xs">{script.content.slice(0, 2_000)}</pre>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={download}>
-                <DownloadIcon width={14} height={14} aria-hidden />
-                {messages.export.downloadScript}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => void copy()}>
-                <CopyIcon width={14} height={14} aria-hidden />
-                {copied ? messages.common.copied : messages.common.copy}
-              </Button>
-            </div>
-          </div>
-        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {messages.common.close}
+          </Button>
+          <Button size="sm" variant="outline" disabled={!canEmit || script === null} onClick={() => void copy()}>
+            <CopyIcon width={14} height={14} aria-hidden />
+            {copied ? messages.common.copied : messages.export.copyCommand}
+          </Button>
+          <Button size="sm" disabled={!canEmit || script === null} onClick={download}>
+            <DownloadIcon width={14} height={14} aria-hidden />
+            {messages.export.downloadFile}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -774,3 +774,40 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
     }
   });
 });
+
+  it("shares scraped icons as their http URL plus generation flags by default", async () => {
+    const harness = createHarness();
+    const { writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    // PNG magic 足够 detectImageFormat 识别（内联分支需要可读文件）。
+    const iconPath = join(harness.homeDir(), "favicon.png");
+    await writeFile(iconPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+
+    harness.setScrape({ title: "Titled Service", iconPath });
+    harness.session.updateForm({ iconBackground: "black", iconScale: 0.72 });
+    await harness.session.submitCommand("npx tool serve");
+    harness.setListeners(new Set([19080]));
+    await waitFor(() => harness.session.state === "discovered");
+    harness.session.confirm();
+
+    const urlShare = await harness.session.exportFrozen({ format: "sh" });
+    expect(urlShare.ok).toBe(true);
+    if (!urlShare.ok || urlShare.kind !== "script") return;
+    expect(urlShare.iconSharedAs).toBe("url");
+    // 原始网页图标以 http 链接分享，并携带生成参数。
+    expect(urlShare.content).toContain("http://127.0.0.1:19080/x.png");
+    expect(urlShare.content).toContain("--icon-background");
+    expect(urlShare.content).toContain("black");
+    expect(urlShare.content).toContain("--icon-scale");
+    expect(urlShare.content).toContain("0.72");
+    expect(urlShare.content).not.toContain("base64");
+
+    // inlineIcon 显式开启才内联字节。
+    const inlineShare = await harness.session.exportFrozen({ format: "sh", inlineIcon: true });
+    expect(inlineShare.ok).toBe(true);
+    if (!inlineShare.ok || inlineShare.kind !== "script") return;
+    expect(inlineShare.iconSharedAs).toBe("embedded");
+    expect(inlineShare.content).toContain("app_icon_tmp");
+    expect(inlineShare.content).toContain("base64");
+    expect(inlineShare.content).not.toContain("http://127.0.0.1:19080/x.png");
+  });

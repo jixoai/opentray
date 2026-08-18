@@ -744,9 +744,9 @@ const selectedIconRefStale = (
   // 冻结参数分享（wizard-share-and-list-scan D3）：确认面板「分享」入口。
   const [shareOpen, setShareOpen] = React.useState(false);
   const shareRunner = (options: {
-    readonly format: "command" | "sh" | "ps1";
+    readonly format: "sh" | "ps1";
     readonly acknowledgeEnv: boolean;
-    readonly forceCopy: boolean;
+    readonly inlineIcon: boolean;
   }) => shareFrozen(options);
 
   /** Cancel the frozen confirmation: thaw the form back to editable. The
@@ -969,7 +969,19 @@ const selectedIconRefStale = (
 
       <CreateDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(next) => {
+          if (next) {
+            setDialogOpen(true);
+            return;
+          }
+          // 确认阶段的关闭（X/Esc/遮罩，onOpenChange 与 onClose 同路）等价于
+          // 「返回修改」：解冻服务端表单，而不是把向导留在冻结态。
+          if (dialogPhase === "confirm") {
+            void cancelConfirm();
+            return;
+          }
+          setDialogOpen(false);
+        }}
         phase={dialogPhase}
         frozenValues={frozenValues}
         iconSrc={dialogIconSrc}
@@ -986,7 +998,15 @@ const selectedIconRefStale = (
         onShare={() => setShareOpen(true)}
         onOpenApp={() => void api("/api/open-app", {})}
         confirmError={confirmError}
-        onClose={() => setDialogOpen(false)}
+        onClose={() => {
+          // 确认阶段的关闭（X/Esc/遮罩）等价于「返回修改」：解冻服务端表单，
+          // 而不是把向导留在冻结态。
+          if (dialogPhase === "confirm") {
+            void cancelConfirm();
+            return;
+          }
+          setDialogOpen(false);
+        }}
       />
 
       <ExportDialog

@@ -118,6 +118,11 @@ export interface Messages {
     readonly scriptPs1: string;
     readonly copyCommand: string;
     readonly downloadScript: string;
+    readonly downloadFile: string;
+    readonly viewFull: string;
+    readonly building: string;
+    readonly inlineIcon: string;
+    readonly inlineIconHint: string;
     readonly forceCopy: string;
     readonly forceCopyHint: string;
     readonly envAck: string;
@@ -201,6 +206,12 @@ const en: Messages = {
     scriptPs1: "PowerShell script (.ps1)",
     copyCommand: "Copy command",
     downloadScript: "Download script",
+    downloadFile: "Download file",
+    viewFull: "View full content",
+    building: "Building…",
+    inlineIcon: "Inline icon bytes",
+    inlineIconHint:
+      "Scraped web icons share as their original URL plus generation flags by default; check this to embed the bytes instead (self-contained but longer).",
     forceCopy: "Force direct copy with embedded icon",
     forceCopyHint:
       "Uploaded icons embed as very long data URLs. Scripts are the default; check this only if you accept the length.",
@@ -266,7 +277,10 @@ const zhCN: DeepPartial<Messages> = {
     shareTitle: "分享应用",
     shareSubtitle: "基于当前向导参数构建——不运行命令、不写入任何内容。",
     command: "直接命令", scriptSh: "Shell 脚本（.sh）", scriptPs1: "PowerShell 脚本（.ps1）",
-    copyCommand: "复制命令", downloadScript: "下载脚本",
+    copyCommand: "复制命令", downloadScript: "下载脚本", downloadFile: "下载文件",
+    viewFull: "查看完整内容", building: "生成中…",
+    inlineIcon: "内联图标字节",
+    inlineIconHint: "网页抓取的图标默认以原始链接 + 生成参数分享；勾选后改为内嵌字节（自包含但更长）。",
     forceCopy: "强制直接复制（内嵌图标）",
     forceCopyHint: "上传的图标会以很长的 data URL 内嵌，默认导出脚本；仅在你接受长度时勾选。",
     envAck: "我已检查环境变量并接受导出",

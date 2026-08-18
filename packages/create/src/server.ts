@@ -596,6 +596,7 @@ const handleApi = async (
         format,
         acknowledgeEnv: body.acknowledgeEnv === true,
         forceCopy: body.forceCopy === true,
+        inlineIcon: body.inlineIcon === true,
       });
       if (!result.ok) {
         const status = result.code === "env_ack_required" || result.code === "export_unsafe" ? 409 : 400;

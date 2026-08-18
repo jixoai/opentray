@@ -266,12 +266,15 @@ export interface WizardSession {
   /**
    * Share the FROZEN parameters (wizard-share-and-list-scan D3): build an
    * export artifact from the confirmation state WITHOUT running the command
-   * or materializing anything. Works pre-create.
+   * or materializing anything. Works pre-create. Scraped web icons keep
+   * their http source URL plus the icon-generation flags by default;
+   * `inlineIcon` opts into embedding the bytes instead.
    */
   exportFrozen(options: {
     readonly format: "command" | "sh" | "ps1";
     readonly acknowledgeEnv?: boolean;
     readonly forceCopy?: boolean;
+    readonly inlineIcon?: boolean;
   }): Promise<WizardExportResult>;
   create(): Promise<void>;
   stop(): Promise<void>;
@@ -285,6 +288,8 @@ export type WizardExportResult =
       readonly filename: string;
       readonly content: string;
       readonly requiresEnvAcknowledgement: boolean;
+      /** How the app icon traveled: web URL / embedded bytes / not set. */
+      readonly iconSharedAs: "url" | "embedded" | "none";
     }
   | {
       readonly ok: false;
@@ -324,7 +329,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let scraping = false;
   let tempIconDir: string | undefined;
   let currentIconPath: string | undefined;
+  let currentIconUrl: string | undefined;
   let currentTrayIconPath: string | undefined;
+  let currentTrayIconUrl: string | undefined;
   let trayIconIsSolid = false;
   let iconCandidates: readonly ScrapedIcon[] = [];
   let iconPort: number | undefined;
@@ -337,6 +344,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let resolvedServicePort: number | undefined;
   let resolvedTargetDir: string | undefined;
   let frozenIconPath: string | undefined;
+  let frozenIconUrl: string | undefined;
+  let frozenTrayIconUrl: string | undefined;
   let submitting = false;
   let runAlive = false;
   let commandOptions: WizardCommandOptions = { ...DEFAULT_COMMAND_OPTIONS };
@@ -458,6 +467,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       iconCandidates = scraped.icons;
       iconPort = port;
       currentIconPath = scraped.icons[0]?.path;
+      currentIconUrl = scraped.icons[0]?.url;
       if (scraped.title !== undefined) {
         scrapedTitle = scraped.title;
       }
@@ -606,6 +616,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       }
       touched.trayIconPath = true;
       currentTrayIconPath = candidate.path;
+      currentTrayIconUrl = candidate.url;
       trayIconIsSolid = candidate.variant !== "original";
       form = { ...form, trayIconPath: candidate.path };
       publishForm();
@@ -622,9 +633,11 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       }
       touched.iconPath = true;
       currentIconPath = candidate.path;
+      currentIconUrl = candidate.url;
       if (!touched.trayIconPath) {
         // Default coupling: the tray follows the app icon until overridden.
         currentTrayIconPath = candidate.path;
+        currentTrayIconUrl = candidate.url;
         trayIconIsSolid = candidate.variant !== "original";
         form = { ...form, iconPath: candidate.path, trayIconPath: candidate.path };
       } else {
@@ -673,8 +686,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       selectedPort = undefined;
       currentTokens = tokens ?? tokenized!.tokens;
       refreshTargetDirExists();
-      currentIconPath = undefined
+      currentIconPath = undefined;
+      currentIconUrl = undefined;
       currentTrayIconPath = undefined;
+      currentTrayIconUrl = undefined;
       trayIconIsSolid = false;
       iconCandidates = [];
       touched.appId = false;
@@ -909,6 +924,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       }
       selectedPort = port;
       currentIconPath = undefined;
+      currentIconUrl = undefined;
       publishServices();
       if (state === "discovered") {
         startScrapePolling();
@@ -976,12 +992,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       // A user-entered icon path wins over the scraped favicon.
       if (resolvedForm.iconPath.trim().length > 0) {
         currentIconPath = resolvedForm.iconPath.trim();
+        currentIconUrl = undefined; // 上传/合成/本地路径没有网页来源
       }
       // The icon source materialize uses is FROZEN at confirm: the user's
       // explicit value when set, else the scraped default captured here.
       // Never the live currentIconPath, which an in-flight scrape could
       // still swap (review round: post-freeze overwrite race).
       frozenIconPath = currentIconPath;
+      frozenIconUrl = currentIconUrl;
 
       // The tray icon defaults to the resolved app icon choice.
       const resolvedTrayIconPath =
@@ -1009,6 +1027,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       // stopped by confirm(), so discovery simply continues.
       frozenForm = undefined;
       frozenIconPath = undefined;
+      frozenIconUrl = undefined;
+      frozenTrayIconUrl = undefined;
       resolvedServicePort = undefined;
       resolvedTargetDir = undefined;
       setState(selectedPort === undefined ? "running" : "discovered");
@@ -1052,38 +1072,61 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       const envOverlay = commandEnv();
       const env = Object.keys(envOverlay).length > 0 ? envOverlay : vector.env;
       const embedded: EmbeddedResource[] = [];
+      // 图标分享法则：网页抓取的图标默认保留原始 http 链接 + 生成参数
+      // （--icon-background/--icon-scale/--tray-template），inlineIcon 显式
+      // 开启才把字节内联为 data URI；上传/合成/本地路径没有稳定外部引用，
+      // 只能内联（脚本自包含是这类来源的既定默认）。
       const iconRef = async (
         path: string | undefined,
+        url: string | undefined,
         flag: "app-icon" | "tray-icon",
-      ): Promise<IconResourceRef | undefined> => {
+      ): Promise<{ ref?: IconResourceRef; mode: "url" | "embedded" | "none" }> => {
         if (path === undefined || path.trim().length === 0) {
-          return undefined;
+          return { mode: "none" };
+        }
+        if (url !== undefined && /^https?:\/\//u.test(url) && exportOptions.inlineIcon !== true) {
+          return {
+            ref: {
+              path: "icon.png",
+              format: "png",
+              sha256: "",
+              source: { kind: "http", ref: url },
+            },
+            mode: "url",
+          };
         }
         try {
           const bytes = new Uint8Array(await readFile(path));
           const format = detectImageFormat(bytes);
           if (format === undefined) {
-            return undefined;
+            return { mode: "none" };
           }
           embedded.push({ flag, filename: basename(path), bytes });
           return {
-            path: basename(path),
-            format,
-            sha256: createHash("sha256").update(bytes).digest("hex"),
-            source: { kind: "file", ref: path },
+            ref: {
+              path: basename(path),
+              format,
+              sha256: createHash("sha256").update(bytes).digest("hex"),
+              source: { kind: "file", ref: path },
+            },
+            mode: "embedded",
           };
         } catch {
-          return undefined; // unreadable icon source degrades to the glyph default
+          return { mode: "none" }; // unreadable icon source degrades to the glyph default
         }
       };
       const appIconSource = frozenIconPath ?? currentIconPath;
+      const appIconUrl = frozenIconUrl ?? currentIconUrl;
       const trayIconSource = currentTrayIconPath;
-      const appIcon = await iconRef(appIconSource, "app-icon");
-      // 托盘默认跟随应用图标：同源托盘不重复内嵌（CLI 语义：省略即跟随）。
-      const trayIcon =
+      const trayIconUrl = currentTrayIconUrl;
+      const appIconRef = await iconRef(appIconSource, appIconUrl, "app-icon");
+      const appIcon = appIconRef.ref;
+      // 托盘默认跟随应用图标：同源托盘不重复携带（CLI 语义：省略即跟随）。
+      const trayIconRef =
         trayIconSource !== undefined && trayIconSource !== appIconSource
-          ? await iconRef(trayIconSource, "tray-icon")
-          : undefined;
+          ? await iconRef(trayIconSource, trayIconUrl, "tray-icon")
+          : { ref: undefined, mode: "none" as const };
+      const trayIcon = trayIconRef.ref;
       const config: CreateConfigV1 = {
         schemaVersion: 1,
         appId: frozen.appId,
@@ -1149,6 +1192,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         filename: script.value.filename,
         content: script.value.content,
         requiresEnvAcknowledgement: script.value.requiresEnvAcknowledgement,
+        iconSharedAs: appIconRef.mode,
       };
     },
 

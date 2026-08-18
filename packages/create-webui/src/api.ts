@@ -98,12 +98,20 @@ export interface ExportResponse {
   readonly command?: string;
   readonly filename?: string;
   readonly content?: string;
+  /** How the app icon traveled in a script share (drives the inline toggle). */
+  readonly iconSharedAs?: "url" | "embedded" | "none";
+}
+
+export interface ExportRunnerOptions {
+  readonly format: "sh" | "ps1";
+  readonly acknowledgeEnv: boolean;
+  readonly inlineIcon: boolean;
 }
 
 /** Key-addressed share/export — works for wizard AND registered entries. */
 export const exportApp = (
   key: string,
-  options: { readonly format: "command" | "sh" | "ps1"; readonly acknowledgeEnv: boolean; readonly forceCopy: boolean },
+  options: ExportRunnerOptions,
 ): Promise<{
   readonly status: number;
   readonly data: ExportResponse | { readonly code: string; readonly message: string; readonly envCount?: number };
@@ -128,12 +136,12 @@ export const openApp = (
   );
 
 /**
- * Share the wizard's FROZEN parameters (pre-create): command line or
- * self-contained script built without running anything. The result maps onto
- * the export dialog's shared response shape.
+ * Share the wizard's FROZEN parameters (pre-create): self-contained script
+ * built without running anything. The result maps onto the export dialog's
+ * shared response shape.
  */
 export const shareFrozen = (
-  options: { readonly format: "command" | "sh" | "ps1"; readonly acknowledgeEnv: boolean; readonly forceCopy: boolean },
+  options: ExportRunnerOptions,
 ): Promise<{
   readonly status: number;
   readonly data: ExportResponse | { readonly code: string; readonly message: string };
@@ -147,13 +155,19 @@ export const shareFrozen = (
     }
     const data = response.data as
       | { ok: true; kind: "command"; command: string }
-      | { ok: true; kind: "script"; filename: string; content: string }
+      | { ok: true; kind: "script"; filename: string; content: string; iconSharedAs?: "url" | "embedded" | "none" }
       | { ok: false; code: string; message: string };
     if (data.ok !== true) {
       return { status: 409, data: { code: data.code, message: data.message } };
     }
     return {
       status: 200,
-      data: data.kind === "command" ? { command: data.command } : { filename: data.filename, content: data.content },
+      data: data.kind === "command"
+        ? { command: data.command }
+        : {
+            filename: data.filename,
+            content: data.content,
+            ...(data.iconSharedAs === undefined ? {} : { iconSharedAs: data.iconSharedAs }),
+          },
     };
   });

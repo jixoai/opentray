@@ -265,6 +265,8 @@ export const handleWorkbenchApi = async (
     }
     let config: CreateConfigV1;
     const embedded: EmbeddedResource[] = [];
+    let iconSharedAs: "url" | "embedded" | "none" = "none";
+    const inlineIcon = request.body.inlineIcon === true;
     if (entry.source === "wizard") {
       if (entry.config === undefined) {
         return { status: 500, body: { code: "invalid_config", message: "unreadable wizard project config" } };
@@ -303,22 +305,32 @@ export const handleWorkbenchApi = async (
       };
       if (icon !== undefined) {
         embedded.push({ flag: "app-icon", filename: "app-icon.png", bytes: icon.bytes });
+        iconSharedAs = "embedded"; // 项目内合成资产没有外部 URL，只能内联
       }
     } else {
       if (entry.record.config === undefined) {
         return { status: 500, body: { code: "invalid_config", message: "unreadable registration" } };
       }
       config = entry.record.config;
-      // Embedded uploads: file-provenance sources carry their committed bytes.
+      // 图标分享法则：http 来源默认保留 URL（inlineIcon 可选内联为字节）；
+      // file 来源（上传快照）保持内联——它们没有稳定的外部引用。
       for (const ref of [config.icons.appIcon, config.icons.trayIcon]) {
-        if (ref === undefined || ref.source.kind === "http") continue;
-        const bytes = await readResourceBytes(entry.record.dir, ref);
-        if (bytes.ok) {
-          embedded.push({
-            flag: ref === config.icons.appIcon ? "app-icon" : "tray-icon",
-            filename: ref.path.split("/").pop() ?? "icon.png",
-            bytes: bytes.value,
-          });
+        if (ref === undefined) continue;
+        const isHttp = ref.source.kind === "http";
+        if (isHttp && !inlineIcon) {
+          if (ref === config.icons.appIcon) iconSharedAs = "url";
+          continue;
+        }
+        if (!isHttp || inlineIcon) {
+          const bytes = await readResourceBytes(entry.record.dir, ref);
+          if (bytes.ok) {
+            embedded.push({
+              flag: ref === config.icons.appIcon ? "app-icon" : "tray-icon",
+              filename: ref.path.split("/").pop() ?? "icon.png",
+              bytes: bytes.value,
+            });
+            if (ref === config.icons.appIcon) iconSharedAs = "embedded";
+          }
         }
       }
     }
@@ -365,6 +377,7 @@ export const handleWorkbenchApi = async (
         filename: script.value.filename,
         content: script.value.content,
         requiresEnvAcknowledgement: script.value.requiresEnvAcknowledgement,
+        iconSharedAs,
       },
     };
   }
