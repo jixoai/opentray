@@ -1,14 +1,14 @@
 // Export/Share dialog (openspec change redesign-create-opentray-webui;
-// generalized by wizard-share-and-list-scan and reshaped by owner review:
-// script formats only — no direct-command mode; the full artifact lives in
-// an expandable accordion with wrapped text; the footer is 复制命令/下载文件).
+// generalized by wizard-share-and-list-scan and reshaped by owner reviews:
+// script formats only, auto-build, expandable highlighted artifact, footer
+// 复制命令/下载文件 — the top-right X is the only close affordance).
 //
 // Scraped web icons default to sharing their http source URL plus the
-// icon-generation flags; the inline toggle (shown only when a URL share is
-// active) opts into embedding the bytes. Env-bearing shares keep the
-// NON-preselected acknowledgement checkbox that blocks copy/download.
+// icon-generation flags; the inline toggle (sticky once a URL share is seen,
+// so unchecking always works) opts into embedding the bytes. Env-bearing
+// shares keep the NON-preselected acknowledgement that blocks copy/download.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CopyIcon, DownloadIcon } from "lucide-react";
 
 import { type ExportResponse } from "../api";
@@ -26,7 +26,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
@@ -55,6 +54,67 @@ export interface ExportDialogProps {
   readonly share?: boolean;
   readonly runner: ExportRunner;
   readonly onClose: () => void;
+};
+
+// ─── 轻量 sh/ps1 高亮（自产脚本结构已知，不引高亮库） ─────────────────────
+const KEYWORDS = new Set(["npx", "create-opentray", "create", "set"]);
+
+const classNames = {
+  comment: "text-muted-foreground italic",
+  keyword: "text-emerald-600 dark:text-emerald-400 font-medium",
+  flag: "text-sky-600 dark:text-sky-400",
+  string: "text-amber-700 dark:text-amber-300 break-all",
+  env: "text-violet-600 dark:text-violet-400",
+  variable: "text-rose-600 dark:text-rose-400",
+} as const;
+
+const renderUnquoted = (text: string, keyPrefix: string): React.ReactNode[] => {
+  const parts = text.split(/(\$[A-Za-z_][A-Za-z0-9_]*)/g);
+  return parts.map((part, index) =>
+    part.startsWith("$")
+      ? <span key={`${keyPrefix}-v${index}`} className={classNames.variable}>{part}</span>
+      : <span key={`${keyPrefix}-p${index}`}>{part}</span>,
+  );
+};
+
+const renderLine = (line: string, key: number): React.ReactNode => {
+  if (line.startsWith("#")) {
+    return <span className={classNames.comment}>{line}</span>;
+  }
+  // 逐个引号段分类；未引用部分只挑 $变量着色。
+  const segments = line.split(/('(?:[^']|'\\'')*')/g);
+  return segments.map((segment, index) => {
+    const segmentKey = `${key}-s${index}`;
+    if (!segment.startsWith("'")) {
+      return <span key={segmentKey}>{renderUnquoted(segment, segmentKey)}</span>;
+    }
+    const inner = segment.slice(1, -1);
+    if (KEYWORDS.has(inner)) {
+      return <span key={segmentKey} className={classNames.keyword}>{segment}</span>;
+    }
+    if (inner.startsWith("--")) {
+      return <span key={segmentKey} className={classNames.flag}>{segment}</span>;
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(inner)) {
+      return <span key={segmentKey} className={classNames.env}>{segment}</span>;
+    }
+    return <span key={segmentKey} className={classNames.string}>{segment}</span>;
+  });
+};
+
+const HighlightedScript = ({ content }: { content: string }): React.JSX.Element => (
+  <pre className="tech-ltr bg-muted max-h-72 overflow-auto rounded-md p-2 text-xs whitespace-pre-wrap break-words">
+    {content.split("\n").map((line, index) => (
+      <div key={index}>{line.length === 0 ? "\u00a0" : renderLine(line, index)}</div>
+    ))}
+  </pre>
+);
+
+interface ScriptArtifact {
+  readonly filename: string;
+  readonly content: string;
+  readonly commandLine?: string;
+  readonly iconSharedAs?: string;
 }
 
 export const ExportDialog = ({
@@ -69,21 +129,35 @@ export const ExportDialog = ({
   const [format, setFormat] = useState<"sh" | "ps1">("sh");
   const [ackEnv, setAckEnv] = useState(false);
   const [inlineIcon, setInlineIcon] = useState(false);
-  const [script, setScript] = useState<{ filename: string; content: string; iconSharedAs?: string } | null>(null);
+  const [script, setScript] = useState<ScriptArtifact | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [copied, setCopied] = useState(false);
+  // URL 可用性是「图标来源」的属性（sticky）：内联重建后 iconSharedAs 变为
+  // embedded，但开关必须保留以便取消勾选——修复勾选后开关消失的 BUG。
+  const [iconUrlAvailable, setIconUrlAvailable] = useState(false);
+
+  // runner 走 ref：外层箭头函数每渲染都是新引用，进依赖会无限重发请求。
+  const runnerRef = useRef(runner);
+  runnerRef.current = runner;
 
   useEffect(() => {
     setAckEnv(false);
     setInlineIcon(false);
+    setIconUrlAvailable(false);
   }, [open]);
 
-  // 打开即自动生成；格式 / 环境确认 / 内联切换都触发生成。
+  // 打开即自动生成；格式 / 环境确认 / 内联切换才触发生成。
   useEffect(() => {
     if (!open) {
       setScript(null);
       setBlocked(null);
+      return;
+    }
+    // 未确认 env 时服务端会拒绝：本地同样压住生成，勾选后自动重建。
+    if (hasEnv && !ackEnv) {
+      setScript(null);
+      setBuilding(false);
       return;
     }
     let cancelled = false;
@@ -91,23 +165,19 @@ export const ExportDialog = ({
     setCopied(false);
     setBlocked(null);
     void (async () => {
-      // 未确认 env 时服务端会拒绝：本地同样压住生成，勾选后自动重建。
-      if (hasEnv && !ackEnv) {
-        if (!cancelled) {
-          setScript(null);
-          setBuilding(false);
-        }
-        return;
-      }
-      const response = await runner({ format, acknowledgeEnv: ackEnv, inlineIcon });
+      const response = await runnerRef.current({ format, acknowledgeEnv: ackEnv, inlineIcon });
       if (cancelled) return;
       setBuilding(false);
       if (response.status === 200) {
         const data = response.data;
         if ("content" in data && data.content !== undefined) {
+          if (data.iconSharedAs === "url") {
+            setIconUrlAvailable(true);
+          }
           setScript({
             filename: data.filename ?? "create-opentray.sh",
             content: data.content,
+            ...(data.commandLine === undefined ? {} : { commandLine: data.commandLine }),
             ...(data.iconSharedAs === undefined ? {} : { iconSharedAs: data.iconSharedAs }),
           });
         }
@@ -122,7 +192,7 @@ export const ExportDialog = ({
     return () => {
       cancelled = true;
     };
-  }, [open, format, ackEnv, inlineIcon, hasEnv, runner]);
+  }, [open, format, ackEnv, inlineIcon, hasEnv]);
 
   const canEmit = !hasEnv || ackEnv;
   const download = (): void => {
@@ -140,7 +210,8 @@ export const ExportDialog = ({
 
   const copy = async (): Promise<void> => {
     if (script === null) return;
-    await navigator.clipboard.writeText(script.content);
+    // 复制命令 = 核心调用行（跳过注释与内联图标的临时文件脚手架）。
+    await navigator.clipboard.writeText(script.commandLine ?? script.content);
     setCopied(true);
   };
 
@@ -192,7 +263,7 @@ export const ExportDialog = ({
           </div>
         )}
 
-        {script?.iconSharedAs === "url" && (
+        {iconUrlAvailable && (
           <div className="flex items-start gap-2">
             <Checkbox
               id="export-inline-icon"
@@ -217,18 +288,13 @@ export const ExportDialog = ({
             <AccordionItem value="content">
               <AccordionTrigger className="text-xs">{messages.export.viewFull}</AccordionTrigger>
               <AccordionContent>
-                <pre className="tech-ltr bg-muted max-h-72 overflow-auto rounded-md p-2 text-xs whitespace-pre-wrap break-all">
-                  {script.content}
-                </pre>
+                <HighlightedScript content={script.content} />
               </AccordionContent>
             </AccordionItem>
           </Accordion>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            {messages.common.close}
-          </Button>
+        <div className="flex justify-end gap-2">
           <Button size="sm" variant="outline" disabled={!canEmit || script === null} onClick={() => void copy()}>
             <CopyIcon width={14} height={14} aria-hidden />
             {copied ? messages.common.copied : messages.export.copyCommand}
@@ -237,7 +303,7 @@ export const ExportDialog = ({
             <DownloadIcon width={14} height={14} aria-hidden />
             {messages.export.downloadFile}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

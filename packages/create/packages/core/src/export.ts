@@ -43,6 +43,9 @@ export interface ExportPlan {
   readonly requiresEnvAcknowledgement: boolean;
 }
 
+/** Invocation prefix: npx makes the shared command runnable everywhere. */
+export const EXPORT_COMMAND_PREFIX = ["npx", "create-opentray", "create"] as const;
+
 /** POSIX single-quote escaping: '…' → '\'' inside a single-quoted string. */
 export const quotePosix = (value: string): string =>
   `'${value.replaceAll("'", `'\\''`)}'`;
@@ -126,7 +129,7 @@ export const buildExportPlan = (input: ExportPlanInput): Result<ExportPlan> => {
   }
 
   // Direct command copy: exact argv vector, embedded bytes as data URLs.
-  const command: string[] = ["create-opentray", "create", ...toCliFlags(input.config)];
+  const command: string[] = [...EXPORT_COMMAND_PREFIX, ...toCliFlags(input.config)];
   for (const resource of input.embeddedResources ?? []) {
     command.push(`--${resource.flag}`, `data:image/png;base64,${base64(resource.bytes)}`);
   }
@@ -169,7 +172,13 @@ const safeName = (name: string): string => name.replace(/[^\w.-]/gu, "_");
 export const buildScriptExport = (
   input: ExportPlanInput,
   shell: ExportShell,
-): Result<{ readonly filename: string; readonly content: string; readonly requiresEnvAcknowledgement: boolean }> => {
+): Result<{
+  readonly filename: string;
+  readonly content: string;
+  /** The core invocation line alone (no comments/scaffolding) for copy actions. */
+  readonly commandLine: string;
+  readonly requiresEnvAcknowledgement: boolean;
+}> => {
   const envEntries = Object.entries(input.config.command.env ?? {});
   const requiresEnvAcknowledgement = envEntries.length > 0;
   const lines: string[] = [scriptHeader(shell)];
@@ -190,7 +199,7 @@ export const buildScriptExport = (
 
   // Token-level command assembly. Boolean flags carry no value; embedded
   // icon sources substitute their temp-path token BEFORE quoting.
-  const tokens: string[] = ["create-opentray", "create"];
+  const tokens: string[] = ["npx", "create-opentray", "create"];
   const flags = toCliFlags(input.config);
   for (let i = 0; i < flags.length; i += 1) {
     const flag = flags[i]!;
@@ -217,7 +226,8 @@ export const buildScriptExport = (
   }
 
   const quote = shell === "sh" ? quotePosix : quotePowerShell;
-  lines.push(tokens.map(quote).join(" "));
+  const commandLine = tokens.map(quote).join(" ");
+  lines.push(commandLine);
   lines.push("");
 
   // POSIX scripts use LF; PowerShell scripts use CRLF deterministically.
@@ -230,6 +240,7 @@ export const buildScriptExport = (
   return ok({
     filename: shell === "sh" ? "create-opentray.sh" : "create-opentray.ps1",
     content,
+    commandLine,
     requiresEnvAcknowledgement,
   });
 };

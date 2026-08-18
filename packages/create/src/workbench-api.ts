@@ -376,6 +376,7 @@ export const handleWorkbenchApi = async (
       body: {
         filename: script.value.filename,
         content: script.value.content,
+        commandLine: script.value.commandLine,
         requiresEnvAcknowledgement: script.value.requiresEnvAcknowledgement,
         iconSharedAs,
       },

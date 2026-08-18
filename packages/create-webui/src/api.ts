@@ -98,6 +98,8 @@ export interface ExportResponse {
   readonly command?: string;
   readonly filename?: string;
   readonly content?: string;
+  /** 核心调用行（不含注释/脚手架）——复制命令用。 */
+  readonly commandLine?: string;
   /** How the app icon traveled in a script share (drives the inline toggle). */
   readonly iconSharedAs?: "url" | "embedded" | "none";
 }
@@ -155,7 +157,7 @@ export const shareFrozen = (
     }
     const data = response.data as
       | { ok: true; kind: "command"; command: string }
-      | { ok: true; kind: "script"; filename: string; content: string; iconSharedAs?: "url" | "embedded" | "none" }
+      | { ok: true; kind: "script"; filename: string; content: string; commandLine?: string; iconSharedAs?: "url" | "embedded" | "none" }
       | { ok: false; code: string; message: string };
     if (data.ok !== true) {
       return { status: 409, data: { code: data.code, message: data.message } };
@@ -167,6 +169,7 @@ export const shareFrozen = (
         : {
             filename: data.filename,
             content: data.content,
+            ...(data.commandLine === undefined ? {} : { commandLine: data.commandLine }),
             ...(data.iconSharedAs === undefined ? {} : { iconSharedAs: data.iconSharedAs }),
           },
     };

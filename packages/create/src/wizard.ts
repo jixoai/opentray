@@ -287,6 +287,8 @@ export type WizardExportResult =
       readonly kind: "script";
       readonly filename: string;
       readonly content: string;
+      /** 核心调用行（不含注释/脚手架），复制命令用。 */
+      readonly commandLine: string;
       readonly requiresEnvAcknowledgement: boolean;
       /** How the app icon traveled: web URL / embedded bytes / not set. */
       readonly iconSharedAs: "url" | "embedded" | "none";
@@ -1191,6 +1193,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         kind: "script",
         filename: script.value.filename,
         content: script.value.content,
+        commandLine: script.value.commandLine,
         requiresEnvAcknowledgement: script.value.requiresEnvAcknowledgement,
         iconSharedAs: appIconRef.mode,
       };
