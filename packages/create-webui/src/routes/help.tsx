@@ -9,6 +9,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchSkillFile, fetchSkillList, type SkillEntry } from "../api";
 import { Skeleton } from "../components/ui/skeleton";
+import { Tree, TreeItem, TreeItemLabel } from "../components/reui/tree";
+import { hotkeysCoreFeature, selectionFeature, syncDataLoaderFeature } from "@headless-tree/core";
+import { useTree } from "@headless-tree/react";
+import { FileTextIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { usePreferences } from "../preferences";
 
 /** Safe link schemes; everything else renders as plain text. */
@@ -177,6 +181,137 @@ const helpTableStyles = `
 .prose-help td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; }
 `;
 
+/** Per-item data for the help file tree (paths from the packaged skill). */
+interface HelpTreeItem {
+  readonly name: string;
+  readonly path: string;
+  children?: string[];
+}
+
+/** Icon per node kind; markdown leaf gets the document glyph. */
+const helpTreeIcon = (item: HelpTreeItem, expanded: boolean): React.JSX.Element => {
+  if (item.children !== undefined) {
+    return expanded ? (
+      <FolderOpenIcon aria-hidden className="pointer-events-none size-4 text-amber-500" />
+    ) : (
+      <FolderIcon aria-hidden className="pointer-events-none size-4 text-amber-500" />
+    );
+  }
+  return <FileTextIcon aria-hidden className="pointer-events-none size-4 text-muted-foreground" />;
+};
+
+const INDENT = 16;
+
+/**
+ * The skill file list as a reui Tree (c-tree-5 pattern on @headless-tree):
+ * folders expand in place, keyboard navigation works, selecting a markdown
+ * leaf opens the detail pane. Paths are technical — labels stay LTR.
+ */
+const HelpSkillTree = ({
+  entries,
+  selected,
+  onSelect,
+}: {
+  readonly entries: readonly SkillEntry[];
+  readonly selected: string;
+  readonly onSelect: (path: string) => void;
+}): React.JSX.Element => {
+  const items = useMemo(() => {
+    const map = new Map<string, HelpTreeItem>();
+    for (const entry of entries) {
+      const segments = entry.path.split("/");
+      const name = segments[segments.length - 1] ?? entry.path;
+      if (entry.type === "directory") {
+        map.set(entry.path, { name, path: entry.path, children: [] });
+      } else {
+        map.set(entry.path, { name, path: entry.path });
+      }
+    }
+    // Parent chains: derive folders for every prefix of every path.
+    for (const entry of entries) {
+      const segments = entry.path.split("/");
+      for (let i = 1; i < segments.length; i += 1) {
+        const parent = segments.slice(0, i).join("/");
+        if (!map.has(parent)) {
+          map.set(parent, { name: segments[i - 1] ?? parent, path: parent, children: [] });
+        }
+      }
+    }
+    // Direct children only.
+    for (const item of map.values()) {
+      if (item.children === undefined) continue;
+      item.children = [...map.values()]
+        .filter((child) => child.path !== "" && child.path.split("/").slice(0, -1).join("/") === item.path)
+        .map((child) => child.path);
+    }
+    const root: HelpTreeItem = { name: "skill", path: "", children: [] };
+    root.children = [...map.values()]
+      .filter((item) => item.path !== "" && item.path.split("/").length === 1)
+      .map((item) => item.path);
+    map.set("root", root);
+    return Object.fromEntries(map);
+  }, [entries]);
+
+  // The packaged skill tree is tiny — keep every folder open.
+  const expandedFolders = useMemo(
+    () => Object.values(items).filter((i) => i.children !== undefined && i.path !== "").map((i) => i.path),
+    [items],
+  );
+
+  // Controlled selection: the tree's own click/hotkey selection flows back
+  // into the detail pane; programmatic selection (e.g. initial SKILL.md)
+  // flows in through `selected`.
+  const [selectedInTree, setSelectedInTree] = useState<string[]>([selected]);
+  const tree = useTree<HelpTreeItem>({
+    initialState: { selectedItems: [selected], expandedItems: expandedFolders },
+    setSelectedItems: (updater) => {
+      setSelectedInTree((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        const first = next[0];
+        // Only markdown leaves open documents; folder selections are visual.
+        if (first !== undefined && items[first]?.children === undefined && first !== "root") {
+          onSelect(first);
+        }
+        return next;
+      });
+    },
+    indent: INDENT,
+    rootItemId: "root",
+    getItemName: (item) => item.getItemData().name,
+    isItemFolder: (item) => (item.getItemData()?.children?.length ?? 0) > 0,
+    dataLoader: {
+      getItem: (itemId) => items[itemId] ?? { name: itemId, path: "" },
+      getChildren: (itemId) => items[itemId]?.children ?? [],
+    },
+    features: [syncDataLoaderFeature, selectionFeature, hotkeysCoreFeature],
+  });
+
+  return (
+    <Tree indent={INDENT} tree={tree}>
+      {tree.getItems().map((item) => {
+        const data = item.getItemData();
+        const isSelectableFile = data.children === undefined && data.path !== "";
+        return (
+          <TreeItem
+            key={item.getId()}
+            item={item}
+            onClick={() => {
+              if (isSelectableFile) onSelect(data.path);
+            }}
+          >
+            <TreeItemLabel className="tech-ltr relative before:bg-background before:absolute before:inset-x-0 before:-inset-y-0.5 before:-z-10">
+              <span className="flex items-center gap-2">
+                {helpTreeIcon(data, item.isExpanded())}
+                {item.getItemName()}
+              </span>
+            </TreeItemLabel>
+          </TreeItem>
+        );
+      })}
+    </Tree>
+  );
+};
+
 export const HelpRoute = (): React.JSX.Element => {
   const { messages } = usePreferences();
   const [entries, setEntries] = useState<SkillEntry[]>([]);
@@ -217,7 +352,7 @@ export const HelpRoute = (): React.JSX.Element => {
 
   return (
     <section className="flex h-full overflow-hidden" aria-label={messages.help.title}>
-      <nav className="w-56 shrink-0 overflow-auto border-e border-border p-2" aria-label={messages.help.listTitle}>
+      <nav className="w-64 shrink-0 overflow-auto border-e border-border p-2" aria-label={messages.help.listTitle}>
         {loadingList ? (
           <div className="space-y-2">
             <Skeleton className="h-5 w-full" />
@@ -227,26 +362,7 @@ export const HelpRoute = (): React.JSX.Element => {
         ) : entries.length === 0 ? (
           <p className="text-muted-foreground px-2 text-xs">{messages.help.empty}</p>
         ) : (
-          <ul className="space-y-0.5">
-            {entries
-              .filter((entry) => entry.type === "file")
-              .map((entry) => (
-                <li key={entry.path}>
-                  <button
-                    type="button"
-                    aria-current={selected === entry.path ? "page" : undefined}
-                    className={`tech-ltr w-full truncate rounded-md px-2 py-1 text-left text-xs ${
-                      selected === entry.path ? "bg-primary text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground"
-                    }`}
-                    onClick={() => {
-                      setSelected(entry.path);
-                    }}
-                  >
-                    {entry.path}
-                  </button>
-                </li>
-              ))}
-          </ul>
+          <HelpSkillTree entries={entries} selected={selected} onSelect={setSelected} />
         )}
       </nav>
       <article className="min-w-0 flex-1 overflow-auto p-6" aria-live="polite">
