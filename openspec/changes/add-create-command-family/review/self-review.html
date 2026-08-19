@@ -17,7 +17,7 @@
 </head>
 <body>
 <main>
-<h1>add-create-command-family — Self-Review（Round 2）</h1>
+<h1>add-create-command-family — Self-Review（Round 4）</h1>
 
 <h2>复核闭环</h2>
 <table>
@@ -25,7 +25,11 @@
   <tr><td>R1</td><td>实现 + 提交（e4cf887）</td><td>—</td><td>—</td></tr>
   <tr><td>Codex R1</td><td>独立复核（gpt-5.6-terra / xhigh，herdr）</td><td class="bad">3.5 / 10</td><td>B1–B5（5 项）</td></tr>
   <tr><td>R2</td><td>意图修订（b992caa）+ 修复（aad8947）+ E2E 复验</td><td>—</td><td>B1–B5 全部关闭</td></tr>
-  <tr><td>Codex R2</td><td>进行中</td><td>—</td><td>—</td></tr>
+  <tr><td>Codex R2</td><td>独立复核</td><td class="warn">5.5 / 10</td><td>恢复链 + 带值 flag（2 项）</td></tr>
+  <tr><td>R3</td><td>修复（05b2211 + 6bbbaa1）+ 恢复 E2E + 草稿串行化</td><td>—</td><td>两项关闭</td></tr>
+  <tr><td>Codex R3</td><td>独立复核（结论经终端缓冲还原）</td><td class="warn">6.0 / 10</td><td>cargo 路径绕过 + tokenizer 近似（2 项）</td></tr>
+  <tr><td>R4</td><td>修复（d39e81c）+ 选择器箭头（含用户微调）</td><td>—</td><td>两项关闭；core 32 / create 248 / webui 49 全绿</td></tr>
+  <tr><td>Codex R4</td><td>待用户恢复 Codex 环境后补跑</td><td>—</td><td>—</td></tr>
 </table>
 
 <h2>阻塞修复对照</h2>
