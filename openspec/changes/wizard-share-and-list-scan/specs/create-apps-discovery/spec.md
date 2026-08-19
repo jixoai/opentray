@@ -66,3 +66,10 @@ The applications list SHALL offer uninstall for BOTH layouts (user requirement #
 - **GIVEN** a directory under the create root without wizard scaffold markers
 - **WHEN** the wizard-uninstall path is invoked for its key
 - **THEN** removal SHALL be refused without touching the directory
+
+#### Scenario: Running refusal offers an explicit force-stop confirmation
+
+- **GIVEN** an uninstall request refused with the running state and matched pids
+- **WHEN** the refusal surfaces in the applications list
+- **THEN** the UI SHALL offer a dedicated confirmation dialog that shows the matched pids and states that continuing terminates the process tree before removal
+- **AND** only an explicit confirmation in that dialog SHALL retry the uninstall with stop authorization
