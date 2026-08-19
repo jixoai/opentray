@@ -935,7 +935,6 @@ describe("@opentray/ext-webview", () => {
   });
 
   it("stops shared window event polling after one transport failure", async () => {
-    vi.useFakeTimers();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const transport = new DeferredWindowEventTransport();
@@ -950,9 +949,20 @@ describe("@opentray/ext-webview", () => {
 
       const unlistenFocus = webviewWindow.listen("focus", () => undefined);
       const unlistenBlur = webviewWindow.listen("blur", () => undefined);
-      await vi.advanceTimersByTimeAsync(160);
-
+      // 首个 drain 前置链路包含真实 artifact 解析（fs I/O 宏任务），假计时器
+      // 驱动不了它——曾在 CI 负载下间歇性拿到 0 个请求。真实计时器下有界
+      // 等待首个请求到达（inFlight 单飞保证期间不会产生第二个）。
+      const firstDrainDeadline = Date.now() + 5_000;
+      while (
+        transport.windowEventRequests === 0 &&
+        Date.now() < firstDrainDeadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
       expect(transport.windowEventRequests).toBe(1);
+
+      // 冻结时间，断言本测试的主语义：一次传输失败即停止共享轮询。
+      vi.useFakeTimers();
       transport.rejectWindowEventDrain(new Error("broker connection closed"));
       await vi.advanceTimersByTimeAsync(0);
       await flushMicrotasks();
@@ -965,6 +975,8 @@ describe("@opentray/ext-webview", () => {
       await vi.advanceTimersByTimeAsync(160);
       expect(transport.windowEventRequests).toBe(1);
 
+      // 先恢复真实计时器再解除监听，clearInterval 才能清掉真实 interval。
+      vi.useRealTimers();
       unlistenFocus();
       unlistenBlur();
     } finally {
