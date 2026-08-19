@@ -75,6 +75,8 @@ export interface FamilyFormDialogProps {
   onEnvPresetChange(action: "enable" | "disable"): void;
   /** 草稿每次字段变化即回调（CommandFamilyInput 写 per-series 前端缓存）。 */
   onDraftChange?(state: FamilyFormState): void;
+  /** 取消/关闭（非确定）：丢弃本次未确认编辑，缓存回滚到打开时初值。 */
+  onCancel?(): void;
   onOpenChange(open: boolean): void;
   /** 确定：回写命令串。 */
   onApply(state: FamilyFormState): void;
@@ -86,17 +88,28 @@ export function FamilyFormDialog({
   envPreset,
   onEnvPresetChange,
   onDraftChange,
+  onCancel,
   onOpenChange,
   onApply,
 }: FamilyFormDialogProps): React.JSX.Element {
   const [draft, setDraft] = React.useState(initial);
+  const committedRef = React.useRef(true);
 
   // 草稿只在打开瞬间从已提交状态重建（initial 仅作初值，不追踪后续变化）。
   React.useEffect(() => {
     if (open) {
       setDraft(initial);
+      committedRef.current = false;
     }
   }, [open, initial]);
+
+  const handleOpenChange = (next: boolean): void => {
+    if (!next && !committedRef.current) {
+      // 取消丢弃（Codex R6-B2）：本次打开期间的编辑不落地。
+      onCancel?.();
+    }
+    onOpenChange(next);
+  };
 
   const patch = (part: Partial<FamilyFormState>): void =>
     setDraft((prev) => {
@@ -111,7 +124,7 @@ export function FamilyFormDialog({
   const FamilyIcon = FAMILY_ICON[draft.family];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -435,7 +448,12 @@ export function FamilyFormDialog({
 
         <DialogFooter>
           <DialogClose render={<Button variant="outline" />}>取消</DialogClose>
-          <Button onClick={() => onApply(draft)}>
+          <Button
+            onClick={() => {
+              committedRef.current = true;
+              onApply(draft);
+            }}
+          >
             <Check />
             确定
           </Button>

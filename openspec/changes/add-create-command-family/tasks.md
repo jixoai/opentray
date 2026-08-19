@@ -70,3 +70,11 @@
 - [x] 9.3 B3（重复 env 键投影不一致）：lib 新增 explicitEnvValue（last-wins，与服务端顺序写入语义一致），图标/Dialog/Tooltip 投影统一取最后同名条目；重复键金样本进 webui 测试。
 - [x] 9.4 tokenizer 差分金样本（非阻塞采纳）：未闭合引号/重定向/命令替换 → custom 回落，webui 镜像与 core 同源断言。
 - [x] 9.5 回归：create 249 / webui 51 / core 32 全绿；typecheck 绿；生产资产重建。jsdom 组件交互测试记录为后续（webui 现无组件测试环境）。
+
+## 10. Round 7（Codex R6 复核 6.5/10 → B2 生命周期闭合）
+
+- [x] 10.1 取消丢弃：FamilyFormDialog 以 committedRef 区分确定/取消，取消（含 DialogClose/遮罩/ESC 关闭）回调 onCancel → CommandFamilyInput 把 per-series 缓存回滚到本次打开时初值；「编辑→取消→重开」不再看到已取消的值。
+- [x] 10.2 投影播种：serverFamily 首次到达且该系列无本地缓存时写入 authoringRef——「恢复 npm（pkg cowsay）→ 切 Go → 切回 npm」不再退化为空模板。
+- [x] 10.3 组件交互测试（Codex 连续两轮点名）：webui 引入 jsdom + @testing-library/react（devDeps；vitest include 扩到 .tsx），新增 command-family-input.test.tsx 三序列——播种切回保留 / 编辑取消重开丢弃 / 确定回写命令与作者投影。
+- [x] 10.4 误拒边界入法：plan D7 R6 修订 + spec delta 明确 cargo 保守判定（realpath 归一/小写/剥 .exe + argv 含独立 install 即拒，禁止收窄回首子命令解析）。
+- [x] 10.5 回归：create 249 / webui 54（+3 组件）/ core 32 全绿；typecheck 绿；validate 通过；生产资产重建。

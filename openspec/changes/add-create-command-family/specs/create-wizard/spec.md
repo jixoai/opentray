@@ -110,11 +110,16 @@ only execution/persistence vector. On page reload, reconnect, or draft restart,
 the UI SHALL derive the family selector and the form dialog's initial fields
 from that projection — for the rust family the crate and run binary SHALL
 survive even though the command string is only the run line. Commands whose
-runner head is `cargo install` SHALL be refused before any preview is stopped
-or anything is spawned. Runner flag sections that cannot be mapped without
-ambiguity (any option outside a conservative known value-less flag set, such
-as `deno run --config <path>`) SHALL fall back verbatim to the custom family
-instead of reinterpreting the flag's value as the package name.
+resolved executable (realpath-normalized, case-insensitive, .exe-stripped
+basename) is `cargo` and whose argv contains a standalone `install` token SHALL
+be refused before any preview is stopped or anything is spawned; this
+conservative rule deliberately over-refuses rare non-install cargo invocations
+carrying an `install` argument instead of parsing cargo's option grammar, and
+SHALL NOT be narrowed back to first-subcommand matching. Runner flag sections
+that cannot be mapped without ambiguity (any option outside a conservative
+known value-less flag set, such as `deno run --config <path>`) SHALL fall back
+verbatim to the custom family instead of reinterpreting the flag's value as
+the package name.
 
 #### Scenario: Rust authoring projection survives reload
 

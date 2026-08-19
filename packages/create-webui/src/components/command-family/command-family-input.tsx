@@ -69,8 +69,13 @@ export function CommandFamilyInput({
       setSelection((current) =>
         current === serverFamily.family ? current : serverFamily.family,
       );
+      // 服务端投影播种（Codex R6-B2）：重连/草稿恢复的作者状态写入本地
+      // 缓存，使「恢复 → 切走 → 切回」不会退化为空模板。
+      if (authoringRef.current[serverFamily.family] === undefined) {
+        authoringRef.current[serverFamily.family] = serverFamily;
+      }
     }
-  }, [serverFamily?.family]);
+  }, [serverFamily]);
   const family = selection ?? parsed.family;
 
   // 各系列最近一次作者草稿（Codex B1）：Rust 的 crate/binary 从命令串恢复
@@ -279,6 +284,10 @@ export function CommandFamilyInput({
         onEnvPresetChange={applyEnvPresetChange}
         onDraftChange={(draft) => {
           authoringRef.current[draft.family] = draft;
+        }}
+        onCancel={() => {
+          // 取消丢弃（Codex R6-B2）：缓存回滚到本次打开时的初值。
+          authoringRef.current[family] = dialogInitial;
         }}
         onOpenChange={setDialogOpen}
         onApply={(next) => {
