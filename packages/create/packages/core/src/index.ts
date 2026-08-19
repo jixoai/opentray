@@ -15,6 +15,24 @@ export {
   toProjectDirectoryName,
 } from "./app-id";
 export {
+  buildCommand,
+  buildRustCommands,
+  deriveFamily,
+  EMPTY_FAMILY_STATE,
+  envPresetsFor,
+  FAMILY_LABEL,
+  FAMILY_ORDER,
+  FAMILY_TAIL,
+  NPM_RUNNERS,
+  parseCommand,
+  parseCommandTokens,
+  PYTHON_RUNNERS,
+  type EnvPreset,
+  type Family,
+  type FamilyDerivation,
+  type FamilyFormState,
+} from "./command-family";
+export {
   resolveLaunchVector,
   resolveOnPath,
   parseShebangInterpreter,

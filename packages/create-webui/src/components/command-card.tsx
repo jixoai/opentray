@@ -2,10 +2,16 @@
  * Command card (first card): the command input row plus the 命令选项
  * accordion living INSIDE the card. No external toggle — the accordion
  * sections expand/collapse on their own.
+ *
+ * String mode renders the series input group (add-create-command-family D1):
+ * family selector prefix + free input (custom) / read-only body that opens
+ * the family form dialog (npm/Go/Rust/Python/.NET). Array mode keeps the
+ * verbatim argv TagInput (?edit= prefill relies on it).
  */
 import { Play, Settings2, Square, Terminal as TerminalIcon } from "lucide-react";
 import * as React from "react";
 
+import { CommandFamilyInput } from "@/components/command-family/command-family-input";
 import { TagInput } from "@/components/tag-input";
 import {
   Accordion,
@@ -65,15 +71,13 @@ export function CommandCard({
             aria-label="命令参数（argv）"
           />
         ) : (
-          <Input
-            className="font-mono"
-            placeholder="npx somecommand start --xx"
-            value={command}
-            disabled={runAlive}
-            onChange={(event) => onCommandChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !runAlive) onRun();
-            }}
+          <CommandFamilyInput
+            command={command}
+            onCommandChange={onCommandChange}
+            commandOptions={commandOptions}
+            onCommandOptionsChange={onCommandOptionsChange}
+            disabled={runAlive || frozen}
+            onRun={onRun}
           />
         )}
         {runAlive ? (

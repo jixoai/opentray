@@ -78,12 +78,15 @@ export interface WizardCommandOptions {
   cwd: string;
   env: WizardEnvEntry[];
   argsMode: "string" | "array";
+  /** True = 不注入系列环境变量预设（npx/pnpx 的 npm_config_yes=true）。 */
+  envPresetDisabled: boolean;
 }
 
 export const DEFAULT_COMMAND_OPTIONS: WizardCommandOptions = {
   cwd: "",
   env: [],
   argsMode: "string",
+  envPresetDisabled: false,
 };
 
 export type WizardState =

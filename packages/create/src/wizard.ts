@@ -11,7 +11,12 @@ import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
-import { deriveDefaultAppId, deriveDefaultAppName, toProjectDirectoryName } from "@create-opentray/core";
+import { toProjectDirectoryName } from "@create-opentray/core";
+import {
+  deriveFamily,
+  envPresetsFor,
+  parseCommandTokens,
+} from "@create-opentray/core";
 import {
   startCommandRun,
   type CommandRun,
@@ -82,12 +87,15 @@ export interface WizardCommandOptions {
   readonly cwd: string;
   readonly env: readonly WizardEnvEntry[];
   readonly argsMode: "string" | "array";
+  /** True = 不注入系列环境变量预设（npx/pnpx 的 npm_config_yes=true）。 */
+  readonly envPresetDisabled: boolean;
 }
 
 export const DEFAULT_COMMAND_OPTIONS: WizardCommandOptions = {
   cwd: "",
   env: [],
   argsMode: "string",
+  envPresetDisabled: false,
 };
 
 export type WizardState =
@@ -408,10 +416,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
    * never the user's values. Empty values mean "use the default".
    */
   const currentDefaults = (): WizardFormDefaults => {
-    const effectiveAppId = form.appId.trim().length > 0 ? form.appId : deriveDefaultAppId(currentTokens);
+    // 分系列默认 appId（add-create-command-family D3）：系列命令推导 runner
+    // 归一身份段 + 生态尾段；custom 命令的 deriveFamily 结果恒等于现行
+    // deriveDefaultAppId 规则 —— 单一路径，旧行为对 custom 零改变。
+    const family = deriveFamily(parseCommandTokens(currentTokens));
+    const effectiveAppId = form.appId.trim().length > 0 ? form.appId : family.appId;
     return {
-      appId: deriveDefaultAppId(currentTokens),
-      appName: scrapedTitle ?? deriveDefaultAppName(currentTokens),
+      appId: family.appId,
+      appName: scrapedTitle ?? family.appName,
       iconPath: currentIconPath ?? "",
       // Projects land under the OpenTray home by default (stable, idempotent
       // per app, never pollutes the invocation directory); the CLI positional
@@ -549,6 +561,16 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     for (const entry of commandOptions.env) {
       if (entry.key.trim().length > 0) {
         env[entry.key.trim()] = entry.value;
+      }
+    }
+    // 系列环境变量预设（add-create-command-family D4）：npx/pnpx 命令注入
+    // npm_config_yes=true 消除首跑安装确认；用户显式配置的同名条目优先，
+    // 预设永不覆盖，且可经 envPresetDisabled 整体关闭。
+    if (!commandOptions.envPresetDisabled) {
+      for (const preset of envPresetsFor(parseCommandTokens(currentTokens))) {
+        if (!(preset.key in env)) {
+          env[preset.key] = preset.value;
+        }
       }
     }
     return env;

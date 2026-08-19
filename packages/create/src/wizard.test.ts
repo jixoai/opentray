@@ -169,7 +169,7 @@ describe("wizard session", () => {
     // Values stay empty (placeholders carry the suggestions).
     expect(harness.session.form.appName).toBe("");
     expect(harness.session.form.appId).toBe("");
-    expect(lastFormDefaults(harness.events)?.appId).toBe("start.somecommand.npx");
+    expect(lastFormDefaults(harness.events)?.appId).toBe("start.somecommand.npmjs");
     expect(harness.session.selectedPort).toBe(19080);
     // The nav bar learns the raw command.
     expect(
@@ -223,7 +223,7 @@ describe("wizard session", () => {
     harness.session.confirm();
     expect(harness.session.state).toBe("frozen");
     expect(harness.session.form.appName).toBe("Frozen Title");
-    expect(harness.session.form.appId).toBe("start.somecommand.npx");
+    expect(harness.session.form.appId).toBe("start.somecommand.npmjs");
 
     harness.setScrape({ title: "Post-freeze Title" });
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -367,7 +367,7 @@ describe("wizard session", () => {
     expect(spawned).toBe(0);
     expect(session.state).toBe("idle");
     const defaults = lastFormDefaults(events);
-    expect(defaults?.appId).toBe("start.primed-tool.npx");
+    expect(defaults?.appId).toBe("start.primed-tool.npmjs");
   });
 
   it("confirms and materializes from idle without any run", async () => {
@@ -421,7 +421,7 @@ describe("wizard session", () => {
     session.prime("npx manual-port-tool serve");
     session.confirm();
     expect(session.state).toBe("frozen");
-    expect(session.form.appId).toBe("serve.manual-port-tool.npx");
+    expect(session.form.appId).toBe("serve.manual-port-tool.npmjs");
     await session.create();
     expect(session.state).toBe("success");
     const success = events.find(
@@ -475,15 +475,41 @@ describe("wizard session", () => {
       "--x=1",
     ]);
     // cwd default is USER_HOME (owner law); relative paths resolve from home;
-    // env overlay drops empty keys.
+    // env overlay drops empty keys; the npx env preset injects npm_config_yes.
     expect(harness.lastRunOptions()?.cwd).toBe("/tmp/wizard-home/sub/dir");
-    expect(harness.lastRunOptions()?.env).toEqual({ FOO: "bar", BAZ: "qux" });
+    expect(harness.lastRunOptions()?.env).toEqual({
+      FOO: "bar",
+      BAZ: "qux",
+      npm_config_yes: "true",
+    });
     // The command display joins for presentation only.
     const display = harness.events.find(
       (event): event is Extract<WizardEvent, { type: "command-display" }> =>
         event.type === "command-display",
     );
     expect(display?.command).toBe("npx weird arg with  spaces --x=1");
+  });
+
+  it("injects the npm-series env preset, honors explicit entries, and disables cleanly", async () => {
+    const harness = createHarness({ homeDir: "/tmp/wizard-home" });
+    // npx 命令自动注入 npm_config_yes=true（add-create-command-family D4）。
+    await harness.session.submitCommand("npx tool serve");
+    expect(harness.lastRunOptions()?.env).toEqual({ npm_config_yes: "true" });
+    // 用户显式配置的同名条目优先，预设永不覆盖。
+    harness.session.updateCommandOptions({ env: [{ key: "npm_config_yes", value: "false" }] });
+    await harness.session.submitCommand("npx tool serve");
+    expect(harness.lastRunOptions()?.env).toEqual({ npm_config_yes: "false" });
+    // envPresetDisabled 整体关闭注入（清掉上面的显式条目再验证）；
+    // 空 overlay 时向导不传 env 键（既有 spawn 接缝契约）。
+    harness.session.updateCommandOptions({ env: [], envPresetDisabled: true });
+    await harness.session.submitCommand("npx tool serve");
+    expect(harness.lastRunOptions()?.env).toBeUndefined();
+    // 非 npx/pnpx runner 与其它系列不注入。
+    harness.session.updateCommandOptions({ env: [] });
+    await harness.session.submitCommand("bunx tool serve");
+    expect(harness.lastRunOptions()?.env).toBeUndefined();
+    await harness.session.submitCommand("go run rsc.io/fortune@latest");
+    expect(harness.lastRunOptions()?.env).toBeUndefined();
   });
 
   it("defaults the command cwd to USER_HOME and publishes it", async () => {
@@ -510,7 +536,7 @@ describe("wizard session", () => {
     const defaults = lastFormDefaults(harness.events);
     // Stable per-app home under ~/.opentray/create — never the invocation dir.
     expect(defaults?.targetDir).toBe(
-      join(harness.homeDir(), ".opentray", "create", "serve-homed-tool-npx"),
+      join(harness.homeDir(), ".opentray", "create", "serve-homed-tool-npmjs"),
     );
   });
 
@@ -538,7 +564,7 @@ describe("wizard session", () => {
     });
     // Simulate a stale previous generation BEFORE priming, so the existence
     // probe (fired by prime) observes the occupied directory.
-    const target = join(harness.homeDir(), ".opentray", "create", "serve-wipe-tool-npx");
+    const target = join(harness.homeDir(), ".opentray", "create", "serve-wipe-tool-npmjs");
     await mkdir(join(target, "node_modules", "stale"), { recursive: true });
     await writeFile(join(target, "node_modules", "stale", "junk.txt"), "old", "utf8");
     harness.session.prime("npx wipe-tool serve");
@@ -607,7 +633,7 @@ describe("wizard session", () => {
     const frozenConfig = JSON.parse(
       await readFile(configPath as string, "utf8"),
     ) as { command: { env?: Record<string, string> } };
-    expect(frozenConfig.command.env).toEqual({ TOKEN: "sekret" });
+    expect(frozenConfig.command.env).toEqual({ TOKEN: "sekret", npm_config_yes: "true" });
   }, 20_000);
 
   it("materializes through the frozen form and reaches success", async () => {
@@ -683,9 +709,9 @@ describe("wizard session", () => {
     const success = events.find(
       (event): event is Extract<WizardEvent, { type: "success" }> => event.type === "success",
     );
-    expect(success?.projectDir).toContain("start-somecommand-npx");
+    expect(success?.projectDir).toContain("start-somecommand-npmjs");
     expect(success?.pinHint).toBeTruthy();
-    expect(session.result?.projectDir).toContain("start-somecommand-npx");
+    expect(session.result?.projectDir).toContain("start-somecommand-npmjs");
   }, 20_000);
 });
 
@@ -727,12 +753,14 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
     harness.session.confirm();
     expect(harness.session.state).toBe("frozen");
 
-    const result = await harness.session.exportFrozen({ format: "sh" });
+    const result = await harness.session.exportFrozen({ format: "sh", acknowledgeEnv: true });
     expect(result.ok).toBe(true);
     if (!result.ok || result.kind !== "script") return;
     expect(result.filename).toBe("create-opentray.sh");
-    // appId 由 prime 默认推导（scoped 包新规则）。
-    expect(result.content).toContain("web.dsh.npx");
+    // appId 由 prime 默认推导（npm 系列尾段 npmjs）。
+    expect(result.content).toContain("web.dsh.npmjs");
+    // npx 环境变量预设随冻结参数进入分享脚本。
+    expect(result.content).toContain("npm_config_yes=true");
     // 向量在分享时现算（resolveVector seam）。
     expect(result.content).toContain("/resolved/npx");
     expect(result.content).toContain("@deepseek-ai/dsh@latest");
@@ -775,14 +803,14 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
     harness.session.prime("npx tool serve");
     harness.session.confirm();
 
-    const embeddedShare = await harness.session.exportFrozen({ format: "sh" });
+    const embeddedShare = await harness.session.exportFrozen({ format: "sh", acknowledgeEnv: true });
     expect(embeddedShare.ok).toBe(true);
     if (!embeddedShare.ok || embeddedShare.kind !== "script") return;
     expect(embeddedShare.iconReference).toBe("local");
     expect(embeddedShare.iconSharedAs).toBe("embedded");
     expect(embeddedShare.content).toContain("app_icon_tmp");
 
-    const referenceShare = await harness.session.exportFrozen({ format: "sh", inlineIcon: false });
+    const referenceShare = await harness.session.exportFrozen({ format: "sh", inlineIcon: false, acknowledgeEnv: true });
     expect(referenceShare.ok).toBe(true);
     if (!referenceShare.ok || referenceShare.kind !== "script") return;
     expect(referenceShare.iconSharedAs).toBe("local");
@@ -816,7 +844,7 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
     await waitFor(() => harness.session.state === "discovered");
     harness.session.confirm();
 
-    const urlShare = await harness.session.exportFrozen({ format: "sh" });
+    const urlShare = await harness.session.exportFrozen({ format: "sh", acknowledgeEnv: true });
     expect(urlShare.ok).toBe(true);
     if (!urlShare.ok || urlShare.kind !== "script") return;
     expect(urlShare.iconSharedAs).toBe("url");
@@ -829,7 +857,7 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
     expect(urlShare.content).not.toContain("base64");
 
     // inlineIcon 显式开启才内联字节。
-    const inlineShare = await harness.session.exportFrozen({ format: "sh", inlineIcon: true });
+    const inlineShare = await harness.session.exportFrozen({ format: "sh", inlineIcon: true, acknowledgeEnv: true });
     expect(inlineShare.ok).toBe(true);
     if (!inlineShare.ok || inlineShare.kind !== "script") return;
     expect(inlineShare.iconSharedAs).toBe("embedded");

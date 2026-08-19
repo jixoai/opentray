@@ -499,6 +499,9 @@ const handleApi = async (
         }
         patch.env = entries;
       }
+      if (typeof body.envPresetDisabled === "boolean") {
+        patch.envPresetDisabled = body.envPresetDisabled;
+      }
       session.updateCommandOptions(patch);
       respond(response, 200, "application/json", '{"ok":true}\n');
       return;
