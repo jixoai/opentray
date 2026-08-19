@@ -1,6 +1,6 @@
 {
   "name": "@opentray/tsdown-plugin",
-  "version": "0.19.1",
+  "version": "0.20.0",
   "description": "tsdown adapter for the OpenTray runtime artifact packaging contract.",
   "type": "module",
   "license": "MIT",
