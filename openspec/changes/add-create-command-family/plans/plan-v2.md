@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 5（用户拍板遗留项：跨系列切换无需确认/撤销——表单独立前端缓存已做实；env 预设改为用户 env 配置行的双向投影，唯一可信源 = 外层 env 配置）
+- Round: 2（Codex 首轮复核 3.5/10，5 项阻塞 B1–B5 全部采纳，修订 D9 并新增 D11/D12/D13）
 - Status: apply 修订中
-- Previous plan backup: plans/plan-v2.md
+- Previous plan backup: plans/plan-v1.md
 
 ## Workflow Command Surface
 
@@ -53,14 +53,14 @@
 | D1 | UI 形态 = 单行 InputGroup：前缀域选择器（官方品牌 SVG 图标；自定义 = edit 图标）+ 主体。自定义系列 → 自由输入 Input（现状行为）；其它系列 → 只读命令区（点击弹表单 Dialog：Runner/包名/版本/参数、Rust 二进制与两步预览、env 预设行；草稿「确定」回写命令串、「取消」丢弃）。页面保持单 input 高度 | 用户 2026-08-19 原型拍板 + 逐轮修正 |
 | D2 | 系列 = npm（npx/pnpx/bunx/yarn dlx/nubx/deno run/vpx，`X [flags] <pkg>[@version] [args]`）、go（`go run <module>[@version]`）、rust（`cargo install <crate>` → 运行二进制）、python（uvx / pipx run）、dotnet（`dnx <tool>[@version]`）、custom | 用户原始需求 |
 | D3 | 默认 appId 新规则：丢弃 runner 机制段（同一包换 runner 推导不变）→ 身份段（选项前子命令段 + 归一化包名；Rust 以运行二进制为身份，缺省同 crate 名；Python 包名 `.`/`_` 归一 `-`；去 `@scope`/`@version`/`npm:` 前缀/路径末段）+ **全名生态尾段 npmjs/golang/rust/python/dotnet**；无身份段回落 `app.opentray`；appName 不含生态尾段；custom 系列保持现行规则不变 | 用户尾段方案拍板；原型测试实证 |
-| D4 | env 预设（R5 修订）：**用户显式配置的 env 行是唯一可信源**，npm 系列预设（npx/pnpx 的 `npm_config_yes=true`）是它的双向投影——Dialog 内启用 = 在 env 行写入 `npm_config_yes=true`；外面手动配置同名条目 → Dialog 立即显示「已配置（用户值）」；删除条目 → 回到默认注入。服务端法则不变：显式条目优先，无显式条目且未关闭时对 npx/pnpx 命令默认注入 `true`（`envPresetDisabled` 语义收敛为「关闭默认注入」，移除预设 = 删条目 + 关默认注入，杜绝「移除后又被默认注入」）。输入行 Terminal 图标 = 「该命令将携带 npm_config_yes」：显式条目或默认注入均点亮，Tooltip 区分来源。分享/导出与持久化沿 env 行既有法律 | 用户 2026-08-19 拍板「以外面用户配置为唯一可信源，npmjs 里的改动本质是投影，两边同步」 |
+| D4 | env 预设为服务端权威：命令解析为 npm 系列且 runner ∈ {npx, pnpx} 时自动注入 `npm_config_yes=true`（跳过安装确认，等效 -y），合并进运行 env overlay 与冻结导出的 `command.env`；用户可在 Dialog 显式移除/恢复（`WizardCommandOptions` 新增 `envPresetDisabled` 布尔，随草稿持久化）；既有 env 导出 ack 法律不变（预设亦触发 ack）；UI = 输入行内 Terminal 图标 + Tooltip（hover 显示 + click 钉住），有预设才出现 | 用户原始需求 + env 展示三轮反馈 |
 | D5 | 品牌图标 = simple-icons 官方单色 SVG vendor 进 create-webui（currentColor 渲染，明暗主题安全）；自定义 = lucide Pencil；不引入图标位图与图标库近似品 | 用户图标要求（svg > webp > png；官方） |
 | D6 | **预设命令 chips 不进生产**（仅原型测试用）；生产 Dialog 无预设行；原型文件保留为 dev-only 参考（不在 vite build inputs，不随包分发） | 用户 2026-08-19 明确声明 |
 | D7 | Rust 两段式仅表单展示：Dialog 呈现 `cargo install <crate>` 安装行（可复制）+ 运行向量；向导试运行与持久化仍只执行运行向量，不代执行 cargo install | 用户认知（Rust 不能直跑）+ 运行向量法律 |
 | D8 | 系列 UI 仅作用于 string 模式；argv 模式与 `?edit=` 编辑流保持现状（向量往返精确）。选择非 custom 系列时若处于 argv 模式则切回 string；argv 模式下系列选择器回落 custom | 既有向量精确法律；编辑流不破坏 |
 | D9 | 单一解析权威：客户端 Dialog 串行化为命令字符串（build），服务端 prime/submit/export 用同一 core 解析器重析（parse）推导系列、appId 与 env 预设；除 env 预设开关与系列作者状态（R2 修订，见 D11）外不新增命令族 API 字段；create-webui 以手工镜像模块复用 core 纯函数（仓内 wizard-protocol.ts 既有模式）+ 少量金样本防漂移测试 | 包边界法律（webui 无 workspace 依赖）+ 双权威风险规避 |
 | D10 | CLI（`--exec` 等flags）与 v1 config schema 本变更不动：系列是向导期创作关注点，持久化产物仍是向量；CLI 分系列提效另立变更 | 范围控制；schema `.strict()` 版本化成本 |
-| D11 | 系列作者状态进 `WizardCommandOptions.family`（可空 FamilyFormState 投影，R2 修订）：向导会话区分「作者状态」与「执行向量」——显式 family 投影是系列/appId/env 预设的服务端权威；命令串仍是执行/持久化向量（Rust 的命令串 = 运行行，如 `rg --json .`）。`cargo install` 头的命令解析为 rust 系列但提交运行必须被拒绝（指引到 Dialog 填写运行二进制），向导绝不代执行安装（D7 收紧）。选择器为显式状态源（不再从命令串派生 UI 系列）：同系列重复点击 no-op；custom 自由输入不因输入了 runner 头而翻转。**跨系列切换无需确认/撤销（R5 用户拍板）**：每个系列的表单草稿独立缓存在前端（Dialog 编辑即写缓存，未确定切走再切回不丢） | Codex B1/B4 + 用户 R5：切换无破坏性，表单各系列独立缓存 |
+| D11 | 系列作者状态进 `WizardCommandOptions.family`（可空 FamilyFormState 投影，R2 修订）：向导会话区分「作者状态」与「执行向量」——显式 family 投影是系列/appId/env 预设的服务端权威；命令串仍是执行/持久化向量（Rust 的命令串 = 运行行，如 `rg --json .`）。`cargo install` 头的命令解析为 rust 系列但提交运行必须被拒绝（指引到 Dialog 填写运行二进制），向导绝不代执行安装（D7 收紧）。选择器为显式状态源（不再从命令串派生 UI 系列）：同系列重复点击 no-op；custom 自由输入不因输入了 runner 头而翻转 | Codex B1/B4：纯命令串无法表达 Rust 两段式；派生式系列选择造成输入锁死与误清空 |
 | D12 | 参数保真（R2 修订）：FamilyFormState.args 保存「序列化后的参数串」——parse 侧对剩余 tokens 做对称 POSIX 引号序列化（含空白/引号/元字符的 token 加引号），build 直接拼接，保证 tokenize(build(parse(cmd))) === tokens 往返无损；Dialog 的参数输入即该串（所见即所写）。保证域 = tokenizeCommandLine 的接受域（其既有引号配平法则本就拒绝含奇数单引号的 token，先于本变更；序列化仍按 POSIX 规范实现）。无法无损映射的命令回落 custom 而非静默重写 | Codex B5：`npx tool "hello world"` 曾被改义 |
 | D13 | 分享确认投影（R2 修订）：客户端 `hasEnv` 与服务端同规则——显式 env 非空 或 激活预设（parse 命令 ∈ npm 系列 npx/pnpx 且未 envPresetDisabled 且无显式同名条目）；预设 env 触发的分享必须出现 ack 入口 | Codex B3：预设导致 env_ack_required 而 UI 无入口 |
 

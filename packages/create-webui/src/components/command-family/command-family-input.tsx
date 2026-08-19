@@ -29,7 +29,7 @@ import {
 } from "@/lib/command-family";
 import type { WizardCommandOptions } from "@/wizard-protocol";
 import { FAMILY_ICON } from "./brand-icons";
-import { FamilyFormDialog } from "./family-form-dialog";
+import { FamilyFormDialog, type EnvPresetProjection } from "./family-form-dialog";
 
 export interface CommandFamilyInputProps {
   command: string;
@@ -82,14 +82,49 @@ export function CommandFamilyInput({
   const [envFocused, setEnvFocused] = React.useState(false);
   const [envPinned, setEnvPinned] = React.useState(false);
 
-  // 与服务端同判（D13）：显式作者状态优先，预设生效 = 命中预设 && 未整体
-  // 关闭 && 用户未显式同名配置。
+  // env 预设投影（D4 R5）：env 配置行是唯一可信源，预设是它的双向投影。
+  // 图标 = 「该命令将携带 npm_config_yes」：显式条目（用户值任意）或默认
+  // 注入均点亮；Tooltip 区分来源。
   const famState = commandOptions.family ?? parsed;
-  const activePresets = envPresetsFor(famState).filter(
-    (preset) =>
-      !commandOptions.envPresetDisabled &&
-      !commandOptions.env.some((entry) => entry.key.trim() === preset.key),
-  );
+  const presetDefinition = envPresetsFor(famState)[0];
+  const explicitEntry =
+    presetDefinition === undefined
+      ? undefined
+      : commandOptions.env.find((entry) => entry.key.trim() === presetDefinition.key);
+  const presetProjection: EnvPresetProjection | null =
+    presetDefinition === undefined
+      ? null
+      : {
+          key: presetDefinition.key,
+          defaultNote: presetDefinition.note,
+          state:
+            explicitEntry !== undefined
+              ? "explicit"
+              : commandOptions.envPresetDisabled
+                ? "off"
+                : "default",
+          ...(explicitEntry !== undefined ? { explicitValue: explicitEntry.value } : {}),
+        };
+  const carriesPreset =
+    presetDefinition !== undefined &&
+    (explicitEntry !== undefined || !commandOptions.envPresetDisabled);
+
+  /** 启用 = 在 env 行写入条目（投影到唯一可信源）；移除 = 删条目 + 关默认注入。 */
+  const applyEnvPresetChange = (action: "enable" | "disable"): void => {
+    const key = presetDefinition?.key ?? "npm_config_yes";
+    const env =
+      action === "enable"
+        ? [
+            ...commandOptions.env.filter((entry) => entry.key.trim() !== key),
+            { key, value: "true" },
+          ]
+        : commandOptions.env.filter((entry) => entry.key.trim() !== key);
+    onCommandOptionsChange({
+      ...commandOptions,
+      env,
+      envPresetDisabled: action === "disable",
+    });
+  };
 
   const switchFamily = (next: Family): void => {
     if (next === family) {
@@ -189,7 +224,7 @@ export function CommandFamilyInput({
           </button>
         )}
 
-        {activePresets.length > 0 ? (
+        {carriesPreset && presetDefinition !== undefined ? (
           <Tooltip
             open={envHovered || envFocused || envPinned}
             onOpenChange={(next: boolean) => {
@@ -203,7 +238,7 @@ export function CommandFamilyInput({
                 <span
                   tabIndex={0}
                   className="mr-1 flex size-6 shrink-0 self-center cursor-help items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  aria-label={`已注入 ${activePresets.length} 个环境变量预设，悬停或点击查看`}
+                  aria-label="命令将携带 npm_config_yes 环境变量，悬停或点击查看"
                   onPointerEnter={() => setEnvHovered(true)}
                   onPointerLeave={() => setEnvHovered(false)}
                   onFocus={() => setEnvFocused(true)}
@@ -217,14 +252,14 @@ export function CommandFamilyInput({
             <TooltipContent side="top">
               <div className="space-y-1 text-left">
                 <p className="text-[11px] opacity-70">环境变量预设</p>
-                {activePresets.map((preset) => (
-                  <div key={preset.key}>
-                    <p className="font-mono text-xs">
-                      {preset.key}={preset.value}
-                    </p>
-                    <p className="text-[11px] opacity-70">{preset.note}</p>
-                  </div>
-                ))}
+                <p className="font-mono text-xs">
+                  {presetDefinition.key}={explicitEntry?.value ?? "true"}
+                </p>
+                <p className="text-[11px] opacity-70">
+                  {explicitEntry !== undefined
+                    ? "来自「命令选项 → 环境变量」配置（唯一可信源，两侧同步）"
+                    : presetDefinition.note}
+                </p>
               </div>
             </TooltipContent>
           </Tooltip>
@@ -234,17 +269,20 @@ export function CommandFamilyInput({
       <FamilyFormDialog
         open={dialogOpen}
         initial={dialogInitial}
-        initialEnvPresetDisabled={commandOptions.envPresetDisabled}
+        envPreset={presetProjection}
+        onEnvPresetChange={applyEnvPresetChange}
+        onDraftChange={(draft) => {
+          authoringRef.current[draft.family] = draft;
+        }}
         onOpenChange={setDialogOpen}
-        onApply={(next, envPresetDisabled) => {
+        onApply={(next) => {
           authoringRef.current[next.family] = next;
           setSelection(next.family);
           onCommandChange(buildCommand(next));
-          // 作者状态投影上传（B1）：envPresetDisabled 与 family 一并持久化。
+          // 作者状态投影上传（B1）；env 预设已即时投影到 env 行，不走确定。
           onCommandOptionsChange({
             ...commandOptions,
             ...(commandOptions.argsMode === "array" ? { argsMode: "string" as const } : {}),
-            envPresetDisabled,
             family: next.family === "custom" ? null : next,
           });
           setDialogOpen(false);

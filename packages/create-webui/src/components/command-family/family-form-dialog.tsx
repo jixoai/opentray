@@ -24,7 +24,6 @@ import {
   buildCommand,
   buildRustCommands,
   deriveFamily,
-  envPresetsFor,
   FAMILY_LABEL,
   NPM_RUNNERS,
   PYTHON_RUNNERS,
@@ -58,42 +57,56 @@ const runnerChips = (
   </ToggleGroup>
 );
 
+/** env 预设在外层 env 配置行上的投影状态（D4 R5：env 行是唯一可信源）。 */
+export interface EnvPresetProjection {
+  readonly key: string;
+  readonly defaultNote: string;
+  /** explicit = env 行已有用户/投影写入的同名条目（value 为用户值）。 */
+  readonly state: "explicit" | "default" | "off";
+  readonly explicitValue?: string;
+}
+
 export interface FamilyFormDialogProps {
   open: boolean;
   /** 打开瞬间从当前命令解析出的系列状态（草稿初值）。 */
   initial: FamilyFormState;
-  initialEnvPresetDisabled: boolean;
+  /** env 预设投影（null = 此系列/runner 无预设）；即时生效，不属 Dialog 草稿。 */
+  envPreset: EnvPresetProjection | null;
+  onEnvPresetChange(action: "enable" | "disable"): void;
+  /** 草稿每次字段变化即回调（CommandFamilyInput 写 per-series 前端缓存）。 */
+  onDraftChange?(state: FamilyFormState): void;
   onOpenChange(open: boolean): void;
-  /** 确定：回写命令串 + env 预设开关。 */
-  onApply(state: FamilyFormState, envPresetDisabled: boolean): void;
+  /** 确定：回写命令串。 */
+  onApply(state: FamilyFormState): void;
 }
 
 export function FamilyFormDialog({
   open,
   initial,
-  initialEnvPresetDisabled,
+  envPreset,
+  onEnvPresetChange,
+  onDraftChange,
   onOpenChange,
   onApply,
 }: FamilyFormDialogProps): React.JSX.Element {
   const [draft, setDraft] = React.useState(initial);
-  const [envPresetDisabled, setEnvPresetDisabled] = React.useState(
-    initialEnvPresetDisabled,
-  );
 
   // 草稿只在打开瞬间从已提交状态重建（initial 仅作初值，不追踪后续变化）。
   React.useEffect(() => {
     if (open) {
       setDraft(initial);
-      setEnvPresetDisabled(initialEnvPresetDisabled);
     }
-  }, [open, initial, initialEnvPresetDisabled]);
+  }, [open, initial]);
 
   const patch = (part: Partial<FamilyFormState>): void =>
-    setDraft((prev) => ({ ...prev, ...part }));
+    setDraft((prev) => {
+      const next = { ...prev, ...part };
+      onDraftChange?.(next);
+      return next;
+    });
 
   const preview = deriveFamily(draft);
   const command = buildCommand(draft);
-  const envPresets = envPresetsFor(draft);
   const rust = draft.family === "rust" ? buildRustCommands(draft) : null;
   const FamilyIcon = FAMILY_ICON[draft.family];
 
@@ -356,37 +369,50 @@ export function FamilyFormDialog({
           </code>
         </div>
 
-        {envPresets.length > 0 ? (
+        {envPreset !== null ? (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">环境变量预设</span>
-            {envPresetDisabled ? (
+            {envPreset.state === "off" ? (
               <button
                 type="button"
                 className="rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:bg-accent hover:text-foreground hover:underline"
-                onClick={() => setEnvPresetDisabled(false)}
+                title="在环境变量配置中写入该条目"
+                onClick={() => onEnvPresetChange("enable")}
               >
-                + npm_config_yes=true（恢复预设）
+                + {envPreset.key}=true（启用）
               </button>
             ) : (
               <span
                 className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/60 py-0.5 pr-1 pl-1.5 font-mono text-[11px]"
-                title={envPresets[0]?.note}
+                title={
+                  envPreset.state === "explicit"
+                    ? "来自下方「环境变量」配置（唯一可信源），两侧同步"
+                    : envPreset.defaultNote
+                }
               >
-                npm_config_yes=true
+                {envPreset.key}=
+                {envPreset.state === "explicit"
+                  ? (envPreset.explicitValue ?? "")
+                  : "true"}
+                {envPreset.state === "explicit" ? (
+                  <span className="font-sans text-[10px] text-muted-foreground">env 已配置</span>
+                ) : null}
                 <button
                   type="button"
                   aria-label="移除环境变量预设"
-                  title={envPresets[0]?.note}
+                  title="从环境变量配置中移除该条目，并关闭默认注入"
                   className="rounded px-1 text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => setEnvPresetDisabled(true)}
+                  onClick={() => onEnvPresetChange("disable")}
                 >
                   ×
                 </button>
               </span>
             )}
-            <span className="text-[11px] text-muted-foreground" title={envPresets[0]?.note}>
-              {envPresets[0]?.note}
-            </span>
+            {envPreset.state === "default" ? (
+              <span className="text-[11px] text-muted-foreground" title={envPreset.defaultNote}>
+                {envPreset.defaultNote}
+              </span>
+            ) : null}
           </div>
         ) : (
           <p className="text-[11px] text-muted-foreground">
@@ -409,7 +435,7 @@ export function FamilyFormDialog({
 
         <DialogFooter>
           <DialogClose render={<Button variant="outline" />}>取消</DialogClose>
-          <Button onClick={() => onApply(draft, envPresetDisabled)}>
+          <Button onClick={() => onApply(draft)}>
             <Check />
             确定
           </Button>

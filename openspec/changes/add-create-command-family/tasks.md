@@ -55,3 +55,10 @@
 - [x] 7.2 R3-B2（客户端 tokenizer 近似）：create-webui 依赖 shell-quote（与 core 同版本 ^1.10.0），镜像 tokenizeCommand 重写为与 core tokenizeCommandLine 逐行对齐的 shell-quote 适配（配平检查 + op 拒绝，!ok → 空数组走 custom 回落）——消除轻量近似差异域，客户端投影不再基于错误解析；转义金样本（`npx tool a\ b` → 单 token `a b` 往返相等）进 core 与 webui 两份测试。
 - [x] 7.3 UI 可供性：系列选择器前缀加下拉箭头（品牌图标 + ChevronDown，w-11）；含用户手动微调的两端布局（justify-between + ms-2/me-0.75），生产与原型同步。
 - [x] 7.4 回归：core 32 / create 248 / webui 49 全绿；三包 typecheck 绿；webui 生产资产已重建。R4 复核待用户恢复 Codex 环境后进行（本轮 codex 会话异常由用户接手处理）。
+
+## 8. Round 5（用户拍板遗留项落地）
+
+- [x] 8.1 跨系列切换：确认/撤销不做（用户拍板）——表单独立前端缓存做实：Dialog `onDraftChange` 字段级写 per-series authoringRef，未确定切走再切回不丢（plan D11 修订）。
+- [x] 8.2 env 唯一可信源（plan D4 R5 修订 + spec delta「single source of truth」场景）：Dialog 预设控件改为 env 配置行的双向投影——启用 = env 行写 `npm_config_yes=true`；移除 = 删条目 + `envPresetDisabled=true`（杜绝移除后被默认注入复活）；三态展示（explicit 显用户值 / default 默认注入 / off）；外面手动改动经 SSE 即时回灌 Dialog。输入行图标改为「将携带即点亮」，Tooltip 区分来源（显式条目显示用户值 + 唯一可信源说明）。
+- [x] 8.3 E2E（HOME=/tmp/ot-e2e-home-5，子进程落盘取证）：env 行显式 true → 子进程 true；显式 false → 子进程 false（用户值优先）；删条目 + disabled → undefined。服务端法则（显式优先/默认注入）不变，create 248 既有用例零改动通过。
+- [x] 8.4 回归：webui typecheck + 49 测试绿；生产资产重建。GUI 图标联动留用户浏览器自查（IAB 面板当时不可用）。

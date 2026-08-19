@@ -142,11 +142,16 @@ The wizard SHALL automatically add the environment preset
 `-y`) whenever the submitted command parses as the npm family with runner
 `npx` or `pnpx`, merging it into the run environment overlay and into the
 persisted/frozen command env of generated apps and exports, unless the user
-explicitly disabled the preset. The preset SHALL be visible in the command row
-as an indicator icon whose tooltip (hover and click-to-pin) lists the injected
-entries, and removable or restorable from the form dialog; disabling state
-SHALL persist with the wizard draft. The existing env-export acknowledgement
-law SHALL apply unchanged to the injected entries.
+explicitly disabled the preset. The user-configured environment entry list is
+the single source of truth for this variable: an explicit `npm_config_yes`
+entry always wins over the injected default, the form dialog's preset control
+is a live projection of that entry list (enabling writes the entry, removing
+deletes it and disables the default injection), and manual edits outside the
+dialog are reflected back into the dialog immediately. The preset SHALL be
+visible in the command row as an indicator icon whose tooltip (hover and
+click-to-pin) discloses that the variable will be carried (user-configured
+value or default), and the existing env-export acknowledgement law SHALL apply
+unchanged to the injected entries.
 
 #### Scenario: Preset is injected on run and in the generated app
 
@@ -155,12 +160,15 @@ law SHALL apply unchanged to the injected entries.
 - **THEN** the spawned process env SHALL include `npm_config_yes=true`
 - **AND** the generated app config command env SHALL include the same entry
 
-#### Scenario: Preset is visible and removable
+#### Scenario: The user env list is the single source of truth
 
 - **GIVEN** an npm-series npx command primed
-- **THEN** the command row SHALL show the env indicator icon whose tooltip names `npm_config_yes=true`
-- **WHEN** the user removes the preset in the form dialog and re-runs
-- **THEN** the spawned env SHALL NOT include the entry and the indicator SHALL disappear
+- **WHEN** the user manually sets `npm_config_yes=false` in the command-options env list
+- **THEN** the spawned env SHALL carry `false` and the dialog SHALL show the entry as user-configured
+- **WHEN** the user enables the preset from the dialog
+- **THEN** the env list SHALL contain `npm_config_yes=true`
+- **WHEN** the user removes the preset from the dialog
+- **THEN** the env entry SHALL be deleted and the default injection SHALL stay off across drafts and reloads
 
 #### Scenario: Other runners and families inject nothing
 
