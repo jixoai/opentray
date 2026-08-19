@@ -60,6 +60,15 @@ describe("command-family 镜像金样本（与 core 同源）", () => {
     expect(parseCommand('npx tool "" x').args).toBe("'' x");
   });
 
+  it("带值/未知 runner flag 保守回落 custom（与 core 同源）", () => {
+    expect(parseCommand("deno run --config 'path with spaces' npm:cowsay").family).toBe(
+      "custom",
+    );
+    expect(parseCommand("npx -c 'echo hi'").family).toBe("custom");
+    expect(parseCommand("deno run -A npm:cowsay@latest hello").family).toBe("npm");
+    expect(parseCommand("npx -y create-vite").family).toBe("npm");
+  });
+
   it("名称/目录投影与 env 预设边界", () => {
     const family = deriveFamily(parseCommand("npx @deepseek-ai/dsh@latest web"));
     expect(family.appName).toBe("Web Dsh");

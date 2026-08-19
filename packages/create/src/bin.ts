@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { createWizardServer } from "./server";
 import {
   createWizardSession,
+  normalizeFamilyProjection,
   type WizardCommandOptions,
   type WizardFormValues,
 } from "./wizard";
@@ -154,37 +155,22 @@ const normalizeDraftCommandOptions = (
     );
     patch.env = entries;
   }
-  if (source.family === null) {
-    patch.family = null;
-  } else if (typeof source.family === "object" && source.family !== null) {
-    const projection = source.family as Record<string, unknown>;
-    const familyValue = projection.family;
-    if (
-      familyValue === "npm" || familyValue === "go" || familyValue === "rust" ||
-      familyValue === "python" || familyValue === "dotnet" || familyValue === "custom"
-    ) {
-      const str = (value: unknown): string =>
-        typeof value === "string" ? value : "";
-      patch.family = {
-        family: familyValue,
-        runner: str(projection.runner),
-        runnerFlags: str(projection.runnerFlags),
-        pkg: str(projection.pkg),
-        version: str(projection.version),
-        args: str(projection.args),
-        binary: str(projection.binary),
-        raw: str(projection.raw),
-      };
+  if (source.family !== undefined) {
+    const normalized = normalizeFamilyProjection(source.family);
+    if (normalized !== undefined) {
+      patch.family = normalized;
     }
   }
   return Object.keys(patch).length > 0 ? patch : undefined;
 };
 
-/** Read a persisted wizard draft for a port (best-effort). */
+/** Read a persisted wizard draft for a port (best-effort). 任一键存在即部分
+ *  恢复（form/command/commandOptions 独立；Codex R2-B1：作者状态与命令可
+ *  先于 form 落盘）。 */
 const readDraft = async (
   port: number | undefined,
 ): Promise<{
-  form: WizardFormValues;
+  form: WizardFormValues | undefined;
   command: string | undefined;
   commandOptions: Partial<WizardCommandOptions> | undefined;
 } | undefined> => {
@@ -196,11 +182,18 @@ const readDraft = async (
       command?: string;
       commandOptions?: unknown;
     };
-    if (parsed.form === undefined) return undefined;
+    const commandOptions = normalizeDraftCommandOptions(parsed.commandOptions);
+    if (
+      parsed.form === undefined &&
+      parsed.command === undefined &&
+      commandOptions === undefined
+    ) {
+      return undefined;
+    }
     return {
       form: parsed.form,
       command: parsed.command,
-      commandOptions: normalizeDraftCommandOptions(parsed.commandOptions),
+      commandOptions,
     };
   } catch {
     return undefined;
@@ -222,7 +215,9 @@ const readDraft = async (
         emit,
       });
       if (draftSeed !== undefined) {
-        session.updateForm(draftSeed.form);
+        if (draftSeed.form !== undefined) {
+          session.updateForm(draftSeed.form);
+        }
         if (draftSeed.commandOptions !== undefined) {
           session.updateCommandOptions(draftSeed.commandOptions);
         }

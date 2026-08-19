@@ -163,6 +163,25 @@ describe("parseCommand ↔ buildCommand 往返", () => {
     // tokenizer 接受域；POSIX 序列化仍按规范实现。
   });
 
+  it("带值/未知 runner flag 保守回落 custom，绝不改义（D12 / Codex R2-B2）", () => {
+    const command = "deno run --config 'path with spaces' npm:cowsay";
+    const state = parseCommand(command);
+    expect(state.family).toBe("custom");
+    // custom raw 保留引号：重建后再分词逐项等于原 tokens。
+    const result = tokenizeCommandLine(command);
+    expect(result.ok).toBe(true);
+    const rebuilt = tokenizeCommandLine(buildCommand(state));
+    expect(rebuilt.ok).toBe(true);
+    if (result.ok && rebuilt.ok) {
+      expect(rebuilt.tokens).toEqual(result.tokens);
+    }
+    expect(parseCommand("npx -c 'echo hi'").family).toBe("custom");
+    // 白名单内的无值 flag 仍正常识别为系列命令。
+    expect(parseCommand("deno run -A npm:cowsay@latest hello").family).toBe("npm");
+    expect(parseCommand("deno run --allow-net --quiet npm:cowsay").family).toBe("npm");
+    expect(parseCommand("npx -y create-vite").family).toBe("npm");
+  });
+
   it("cargo install 谓词（D11：向导绝不代执行安装）", () => {
     expect(isRustInstallCommand(["cargo", "install", "ripgrep"])).toBe(true);
     expect(isRustInstallCommand(["cargo", "build"])).toBe(false);

@@ -56,13 +56,24 @@ export function CommandFamilyInput({
 }: CommandFamilyInputProps): React.JSX.Element {
   const parsed = React.useMemo(() => parseCommand(command), [command]);
 
-  // 显式选择（Codex B4）：初值从命令派生；一旦用户选择即保持用户意图，
-  // custom 自由输入 runner 头不会翻转 UI，同系列重复点击为 no-op。
-  const [selection, setSelection] = React.useState<Family | null>(null);
+  // 显式选择（Codex B4 + R2-B1）：初值与外部注入（快照/草稿恢复/SSE）都来自
+  // 服务端作者状态投影；一旦用户在本地选择即保持用户意图，custom 自由输入
+  // runner 头不会翻转 UI，同系列重复点击为 no-op。
+  const serverFamily = commandOptions.family;
+  const [selection, setSelection] = React.useState<Family | null>(
+    serverFamily?.family ?? null,
+  );
+  React.useEffect(() => {
+    if (serverFamily !== null) {
+      setSelection((current) =>
+        current === serverFamily.family ? current : serverFamily.family,
+      );
+    }
+  }, [serverFamily?.family]);
   const family = selection ?? parsed.family;
 
   // 各系列最近一次作者草稿（Codex B1）：Rust 的 crate/binary 从命令串恢复
-  // 不出来，Dialog 初值优先取这里。
+  // 不出来，Dialog 初值优先级 = 服务端投影 > 本地草稿 > 命令解析 > 空模板。
   const authoringRef = React.useRef<Partial<Record<Family, FamilyFormState>>>({});
   const [dialogOpen, setDialogOpen] = React.useState(false);
 
@@ -106,11 +117,13 @@ export function CommandFamilyInput({
   };
 
   const dialogInitial: FamilyFormState =
-    authoringRef.current[family] !== undefined
-      ? (authoringRef.current[family] as FamilyFormState)
-      : parsed.family === family
-        ? parsed
-        : familyTemplate(family);
+    serverFamily !== null && serverFamily.family === family
+      ? serverFamily
+      : authoringRef.current[family] !== undefined
+        ? (authoringRef.current[family] as FamilyFormState)
+        : parsed.family === family
+          ? parsed
+          : familyTemplate(family);
 
   const FamilyIcon = FAMILY_ICON[family];
   const isCustom = family === "custom";

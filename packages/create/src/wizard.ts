@@ -107,6 +107,42 @@ export const DEFAULT_COMMAND_OPTIONS: WizardCommandOptions = {
   family: null,
 };
 
+/**
+ * 外部输入（HTTP body / 草稿 JSON）的系列作者状态归一（D11）：显式 null =
+ * 清空投影回到命令派生；合法投影返回 FamilyFormState；缺失/畸形返回
+ * undefined（不产生 patch）。server 白名单与 bin 草稿恢复共用，保证两个
+ * 入口接受/拒绝同一集合（Codex R2 非阻塞 2）。
+ */
+export const normalizeFamilyProjection = (
+  raw: unknown,
+): FamilyFormState | null | undefined => {
+  if (raw === null) {
+    return null;
+  }
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+  const projection = raw as Record<string, unknown>;
+  const familyValue = projection.family;
+  if (
+    familyValue !== "npm" && familyValue !== "go" && familyValue !== "rust" &&
+    familyValue !== "python" && familyValue !== "dotnet" && familyValue !== "custom"
+  ) {
+    return undefined;
+  }
+  const str = (value: unknown): string => (typeof value === "string" ? value : "");
+  return {
+    family: familyValue,
+    runner: str(projection.runner),
+    runnerFlags: str(projection.runnerFlags),
+    pkg: str(projection.pkg),
+    version: str(projection.version),
+    args: str(projection.args),
+    binary: str(projection.binary),
+    raw: str(projection.raw),
+  };
+};
+
 export type WizardState =
   | "idle"
   | "running"
@@ -727,23 +763,22 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         setState("failed", "数组模式至少需要程序元素（第一个参数）");
         return;
       }
-      await session.stop();
-      runAlive = false;
-      stopped = false;
-      services = [];
-      selectedPort = undefined;
-      currentTokens = tokens ?? tokenized!.tokens;
-      // Rust 安装头禁跑（D7/D11 / Codex B1）：`cargo install …` 绝不被向导
-      // 代执行；指引到 Rust 表单填写要运行的二进制。
-      if (isRustInstallCommand(currentTokens)) {
+      // Rust 安装头禁跑（D7/D11 / Codex B1 + R2 非阻塞 1）：`cargo install …`
+      // 绝不被向导代执行；拒绝前移到 stop() 之前，不中断仍在存活的预览。
+      if (isRustInstallCommand(tokens ?? tokenized!.tokens)) {
         submitting = false;
-        currentTokens = [];
         setState(
           "failed",
           "cargo install 不会被执行：Rust crate 需先安装，请在命令系列的 Rust 表单中填写要运行的二进制",
         );
         return;
       }
+      await session.stop();
+      runAlive = false;
+      stopped = false;
+      services = [];
+      selectedPort = undefined;
+      currentTokens = tokens ?? tokenized!.tokens;
       refreshTargetDirExists();
       currentIconPath = undefined;
       currentIconUrl = undefined;

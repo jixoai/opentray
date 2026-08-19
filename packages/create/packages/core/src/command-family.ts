@@ -147,6 +147,44 @@ const splitLeadingFlags = (
   return { flags, rest: tokens.slice(index) };
 };
 
+// 带值 flag 保真（plan.md D12 / Codex R2-B2）：runner 与包名之间的选项区只
+// 接受一个保守的「已知无值 flag」白名单（deno 的 -A/--allow-*/--no-* 等、
+// npx 的 -y/--yes）。白名单之外出现任何 option token（如 deno --config
+// <path>、npx -c <cmd>，其值会被误当包名），整条命令保守回落 custom，
+// 绝不静默改义；带 `=` 的长选项一律视为带值。
+const VALUELESS_RUNNER_FLAGS: readonly Set<string>[] = [
+  new Set([
+    "-A",
+    "--allow-all",
+    "--allow-read",
+    "--allow-write",
+    "--allow-net",
+    "--allow-env",
+    "--allow-run",
+    "--allow-sys",
+    "--allow-ffi",
+    "--allow-hrtime",
+    "--no-check",
+    "--no-remote",
+    "--quiet",
+    "-q",
+    "--cached-only",
+  ]),
+  new Set(["-y", "--yes"]),
+];
+
+const isKnownValuelessFlag = (token: string): boolean => {
+  if (token.includes("=")) {
+    return false;
+  }
+  return VALUELESS_RUNNER_FLAGS.some((set) => set.has(token));
+};
+
+/** runner 选项区是否可无歧义解析（全为已知无值 flag）。 */
+export const runnerFlagsAreUnambiguous = (
+  flags: readonly string[],
+): boolean => flags.every((flag) => isKnownValuelessFlag(flag));
+
 const matchHead = (tokens: readonly string[], head: string): number => {
   const parts = head.split(" ");
   if (tokens.length < parts.length) {
@@ -165,6 +203,11 @@ const familyState = (patch: Partial<FamilyFormState>): FamilyFormState => ({
   ...patch,
 });
 
+// 带值/未知 runner flag 无法无歧义映射到结构化字段（其值会被误当包名）：
+// 保守回落 custom，绝不静默改义（plan.md D12 / Codex R2-B2）。
+const ambiguousToCustom = (tokens: readonly string[]): FamilyFormState =>
+  familyState({ family: "custom", raw: serializeArgs(tokens) });
+
 /** 已有 token 流 → 系列表单状态（wizard prime/submit 的服务端入口）。 */
 export const parseCommandTokens = (
   tokens: readonly string[],
@@ -176,6 +219,9 @@ export const parseCommandTokens = (
     const consumed = matchHead(tokens, runner);
     if (consumed > 0) {
       const { flags, rest } = splitLeadingFlags(tokens.slice(consumed));
+      if (!runnerFlagsAreUnambiguous(flags)) {
+        return ambiguousToCustom(tokens);
+      }
       const pkgToken = rest[0] ?? "";
       const { base, version } =
         pkgToken.length > 0
@@ -195,6 +241,9 @@ export const parseCommandTokens = (
 
   if (first === "go" && second === "run") {
     const { flags, rest } = splitLeadingFlags(tokens.slice(2));
+    if (!runnerFlagsAreUnambiguous(flags)) {
+      return ambiguousToCustom(tokens);
+    }
     const moduleToken = rest[0] ?? "";
     const { base, version } =
       moduleToken.length > 0
@@ -213,6 +262,9 @@ export const parseCommandTokens = (
 
   if (first === "cargo" && second === "install") {
     const { flags, rest } = splitLeadingFlags(tokens.slice(2));
+    if (!runnerFlagsAreUnambiguous(flags)) {
+      return ambiguousToCustom(tokens);
+    }
     const crateToken = rest[0] ?? "";
     const base =
       crateToken.length > 0 ? splitPackageVersion(crateToken).base : "";
@@ -229,6 +281,9 @@ export const parseCommandTokens = (
   if (first === "uvx" || (first === "pipx" && second === "run")) {
     const consumed = first === "uvx" ? 1 : 2;
     const { flags, rest } = splitLeadingFlags(tokens.slice(consumed));
+    if (!runnerFlagsAreUnambiguous(flags)) {
+      return ambiguousToCustom(tokens);
+    }
     const pkgToken = rest[0] ?? "";
     const { base, version } =
       pkgToken.length > 0
@@ -247,6 +302,9 @@ export const parseCommandTokens = (
 
   if (first === "dnx") {
     const { flags, rest } = splitLeadingFlags(tokens.slice(1));
+    if (!runnerFlagsAreUnambiguous(flags)) {
+      return ambiguousToCustom(tokens);
+    }
     const toolToken = rest[0] ?? "";
     const { base, version } =
       toolToken.length > 0
@@ -263,7 +321,7 @@ export const parseCommandTokens = (
     });
   }
 
-  return familyState({ family: "custom", raw: tokens.join(" ") });
+  return familyState({ family: "custom", raw: serializeArgs(tokens) });
 };
 
 /** 自由命令文本 → 系列表单状态；未识别任何系列头回落 custom（D9）。 */

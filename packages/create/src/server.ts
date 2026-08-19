@@ -24,6 +24,7 @@ import type {
   WizardFormValues,
   WizardSession,
 } from "./wizard";
+import { normalizeFamilyProjection } from "./wizard";
 import { openMaterializedApp } from "@create-opentray/core";
 import { handleWorkbenchApi } from "./workbench-api";
 
@@ -54,12 +55,16 @@ export const createWizardServer = async (
   // back on the same in-progress draft. The live session stays authoritative
   // while it runs; the draft only seeds NEW sessions.
   const draftPath = join(tmpdir(), `create-opentray-draft-${options.port ?? 0}.json`);
+  // 写入串行化：事件可能背靠背触发（如 prime 的 command-display + form +
+  // command-options），并发的 read-modify-write 会互相丢更新，重启后草稿缺键
+  // （Codex R2-B1 恢复链依赖）。promise 链保证逐次合并。
+  let draftWriteChain: Promise<void> = Promise.resolve();
   const writeDraft = (event: WizardEvent): void => {
     if (event.type !== "form" && event.type !== "command-display" && event.type !== "command-options") {
       return;
     }
-    void (async () => {
-      try {
+    draftWriteChain = draftWriteChain
+      .then(async () => {
         const current = await readFile(draftPath, "utf8")
           .then((raw) => JSON.parse(raw) as Record<string, unknown>)
           .catch(() => ({}) as Record<string, unknown>);
@@ -73,10 +78,10 @@ export const createWizardServer = async (
           savedAt: Date.now(),
         };
         await writeFile(draftPath, JSON.stringify(next), "utf8");
-      } catch {
+      })
+      .catch(() => {
         // best-effort persistence
-      }
-    })();
+      });
   };
 
 
@@ -502,28 +507,11 @@ const handleApi = async (
       if (typeof body.envPresetDisabled === "boolean") {
         patch.envPresetDisabled = body.envPresetDisabled;
       }
-      // 系列作者状态（D11）：完整 FamilyFormState 投影或显式 null（回到派生）。
-      if (body.family === null) {
-        patch.family = null;
-      } else if (typeof body.family === "object" && body.family !== null) {
-        const projection = body.family as Record<string, unknown>;
-        const familyValue = projection.family;
-        if (
-          familyValue === "npm" || familyValue === "go" || familyValue === "rust" ||
-          familyValue === "python" || familyValue === "dotnet" || familyValue === "custom"
-        ) {
-          const str = (value: unknown): string =>
-            typeof value === "string" ? value : "";
-          patch.family = {
-            family: familyValue,
-            runner: str(projection.runner),
-            runnerFlags: str(projection.runnerFlags),
-            pkg: str(projection.pkg),
-            version: str(projection.version),
-            args: str(projection.args),
-            binary: str(projection.binary),
-            raw: str(projection.raw),
-          };
+      // 系列作者状态（D11）：共享归一器（与草稿恢复同一接受集合）。
+      {
+        const normalized = normalizeFamilyProjection(body.family);
+        if (normalized !== undefined) {
+          patch.family = normalized;
         }
       }
       session.updateCommandOptions(patch);

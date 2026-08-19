@@ -164,6 +164,40 @@ const splitLeadingFlags = (
   return { flags, rest: tokens.slice(index) };
 };
 
+// 与 core 同源：runner 选项区仅接受已知无值 flag 白名单；带值/未知 flag
+// 保守回落 custom（D12 / Codex R2-B2）。
+const VALUELESS_RUNNER_FLAGS: readonly Set<string>[] = [
+  new Set([
+    "-A",
+    "--allow-all",
+    "--allow-read",
+    "--allow-write",
+    "--allow-net",
+    "--allow-env",
+    "--allow-run",
+    "--allow-sys",
+    "--allow-ffi",
+    "--allow-hrtime",
+    "--no-check",
+    "--no-remote",
+    "--quiet",
+    "-q",
+    "--cached-only",
+  ]),
+  new Set(["-y", "--yes"]),
+];
+
+const isKnownValuelessFlag = (token: string): boolean => {
+  if (token.includes("=")) {
+    return false;
+  }
+  return VALUELESS_RUNNER_FLAGS.some((set) => set.has(token));
+};
+
+export const runnerFlagsAreUnambiguous = (
+  flags: readonly string[],
+): boolean => flags.every((flag) => isKnownValuelessFlag(flag));
+
 const matchHead = (tokens: readonly string[], head: string): number => {
   const parts = head.split(" ");
   if (tokens.length < parts.length) {
@@ -182,6 +216,10 @@ const familyState = (patch: Partial<FamilyFormState>): FamilyFormState => ({
   ...patch,
 });
 
+// 带值/未知 runner flag 保守回落 custom，raw 用序列化保真（与 core 同源）。
+const ambiguousToCustom = (tokens: readonly string[]): FamilyFormState =>
+  familyState({ family: 'custom', raw: serializeArgs(tokens) });
+
 export const parseCommandTokens = (
   tokens: readonly string[],
 ): FamilyFormState => {
@@ -192,6 +230,9 @@ export const parseCommandTokens = (
     const consumed = matchHead(tokens, runner);
     if (consumed > 0) {
       const { flags, rest } = splitLeadingFlags(tokens.slice(consumed));
+            if (!runnerFlagsAreUnambiguous(flags)) {
+              return ambiguousToCustom(tokens);
+            }
       const pkgToken = rest[0] ?? "";
       const { base, version } =
         pkgToken.length > 0
@@ -211,6 +252,9 @@ export const parseCommandTokens = (
 
   if (first === "go" && second === "run") {
     const { flags, rest } = splitLeadingFlags(tokens.slice(2));
+          if (!runnerFlagsAreUnambiguous(flags)) {
+            return ambiguousToCustom(tokens);
+          }
     const moduleToken = rest[0] ?? "";
     const { base, version } =
       moduleToken.length > 0
@@ -229,6 +273,9 @@ export const parseCommandTokens = (
 
   if (first === "cargo" && second === "install") {
     const { flags, rest } = splitLeadingFlags(tokens.slice(2));
+          if (!runnerFlagsAreUnambiguous(flags)) {
+            return ambiguousToCustom(tokens);
+          }
     const crateToken = rest[0] ?? "";
     const base =
       crateToken.length > 0 ? splitPackageVersion(crateToken).base : "";
@@ -245,6 +292,9 @@ export const parseCommandTokens = (
   if (first === "uvx" || (first === "pipx" && second === "run")) {
     const consumed = first === "uvx" ? 1 : 2;
     const { flags, rest } = splitLeadingFlags(tokens.slice(consumed));
+          if (!runnerFlagsAreUnambiguous(flags)) {
+            return ambiguousToCustom(tokens);
+          }
     const pkgToken = rest[0] ?? "";
     const { base, version } =
       pkgToken.length > 0
@@ -263,6 +313,9 @@ export const parseCommandTokens = (
 
   if (first === "dnx") {
     const { flags, rest } = splitLeadingFlags(tokens.slice(1));
+          if (!runnerFlagsAreUnambiguous(flags)) {
+            return ambiguousToCustom(tokens);
+          }
     const toolToken = rest[0] ?? "";
     const { base, version } =
       toolToken.length > 0
@@ -279,7 +332,7 @@ export const parseCommandTokens = (
     });
   }
 
-  return familyState({ family: "custom", raw: tokens.join(" ") });
+  return familyState({ family: "custom", raw: serializeArgs(tokens) });
 };
 
 export const parseCommand = (text: string): FamilyFormState => {
