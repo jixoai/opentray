@@ -48,3 +48,10 @@
 - [x] 6.4 非阻塞采纳：cargo install 拒绝前移到 `session.stop()` 之前（不中断存活预览）；server/bin 共用 `normalizeFamilyProjection`（同一接受集合）。
 - [x] 6.5 spec delta 跟进 R2 行为：新增「Family Authoring State SHALL Survive Reloads And Never Execute Installs」需求（恢复/禁跑/带值 flag 三场景）。
 - [x] 6.6 回归：core 31 / create 246 / webui 49 全绿；三包 typecheck 绿；validate 通过。
+
+## 7. Round 4（Codex R3 复核 6.0/10 → 剩余两阻塞闭合）
+
+- [x] 7.1 R3-B1（cargo 路径绕过）：submitCommand 禁跑升级为两级判定——字面头快路径之外，按「解析后的可执行文件名」（resolveOnPath，新增 WizardOptions seam）basename 判 cargo 且首个非选项子命令为 install 即拒绝（覆盖 `/opt/homebrew/bin/cargo install`、`cargo --offline install` 等路径/别名/全局 flag 形式）；wizard.test 新增路径形式 + seam 解析 + 非 cargo 不受影响三用例。
+- [x] 7.2 R3-B2（客户端 tokenizer 近似）：create-webui 依赖 shell-quote（与 core 同版本 ^1.10.0），镜像 tokenizeCommand 重写为与 core tokenizeCommandLine 逐行对齐的 shell-quote 适配（配平检查 + op 拒绝，!ok → 空数组走 custom 回落）——消除轻量近似差异域，客户端投影不再基于错误解析；转义金样本（`npx tool a\ b` → 单 token `a b` 往返相等）进 core 与 webui 两份测试。
+- [x] 7.3 UI 可供性：系列选择器前缀加下拉箭头（品牌图标 + ChevronDown，w-11）；含用户手动微调的两端布局（justify-between + ms-2/me-0.75），生产与原型同步。
+- [x] 7.4 回归：core 32 / create 248 / webui 49 全绿；三包 typecheck 绿；webui 生产资产已重建。R4 复核待用户恢复 Codex 环境后进行（本轮 codex 会话异常由用户接手处理）。

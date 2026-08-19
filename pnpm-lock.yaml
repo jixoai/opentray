@@ -181,7 +181,7 @@ importers:
         specifier: ^15.0.0
         version: 15.0.0
       markdown-it-front-matter:
-        specifier: ^0.2.4
+        specifier: ^0.2.3
         version: 0.2.4
       react:
         specifier: ^19.1.1
@@ -192,6 +192,9 @@ importers:
       shadcn:
         specifier: ^4.18.0
         version: 4.18.0(typescript@6.0.3)
+      shell-quote:
+        specifier: ^1.10.0
+        version: 1.10.0
       tailwind-merge:
         specifier: ^3.6.0
         version: 3.6.0

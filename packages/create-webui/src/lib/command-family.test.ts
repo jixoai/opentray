@@ -50,7 +50,7 @@ describe("command-family 镜像金样本（与 core 同源）", () => {
     );
   });
 
-  it("引号参数往返逐项无损（D12 / Codex B5，与 core 同规则）", () => {
+  it("引号/转义参数往返逐项无损（D12 / Codex R3-B2，shell-quote 同源）", () => {
     const command = 'npx tool "hello world" x';
     const parsed = parseCommand(command);
     expect(parsed.args).toBe("'hello world' x");
@@ -58,6 +58,10 @@ describe("command-family 镜像金样本（与 core 同源）", () => {
     const rebuilt = buildCommand(parsed);
     expect(parseCommand(rebuilt).args).toBe("'hello world' x");
     expect(parseCommand('npx tool "" x').args).toBe("'' x");
+    // 反斜杠转义空格：shell-quote 解析为单 token，往返不拆不丢。
+    const escaped = parseCommand("npx tool a\\ b");
+    expect(escaped.args).toBe("'a b'");
+    expect(buildCommand(escaped)).toBe("npx tool 'a b'");
   });
 
   it("带值/未知 runner flag 保守回落 custom（与 core 同源）", () => {

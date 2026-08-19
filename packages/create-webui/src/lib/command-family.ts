@@ -1,8 +1,11 @@
 // 镜像 @create-opentray/core 的 src/command-family.ts（add-create-command-family
 // D9：webui 不引 workspace 依赖，沿用 wizard-protocol.ts 手工镜像模式）。
 // 权威在 core；此处修改必须与 core 同步，金样本测试 command-family.test.ts
-// 防漂移。差异声明：core 的 tokenize 用 shell-quote，镜像用轻量引号分词 ——
-// 金样本不覆盖 shell 转义边角，Dialog 编辑会整串回写命令，不会失真。
+// 防漂移。tokenizer 与 core 同源使用 shell-quote（Codex R3-B2：命令向量是
+// 执行合同，客户端不容轻量近似；配平/op 拒绝逻辑与 core tokenizeCommandLine
+// 逐行对齐，仅返回形状不同——!ok 一律返回空数组走 custom 回落）。
+
+import { parse as shellQuoteParse } from "shell-quote";
 
 export type Family = "npm" | "go" | "rust" | "python" | "dotnet" | "custom";
 
@@ -68,40 +71,26 @@ export const EMPTY_FAMILY_STATE: FamilyFormState = {
   raw: "",
 };
 
-/** 轻量引号分词（与 core shell-quote 在金样本域等价）。 */
+/** 与 core tokenizeCommandLine 同源的 shell-quote 分词（!ok → 空数组）。 */
 export const tokenizeCommand = (input: string): string[] => {
-  const tokens: string[] = [];
-  let current = "";
-  let quote: '"' | "'" | null = null;
-  let started = false;
-  for (const char of input) {
-    if (quote !== null) {
-      if (char === quote) {
-        quote = null;
-      } else {
-        current += char;
-      }
-    } else if (char === '"' || char === "'") {
-      quote = char;
-      started = true;
-    } else if (/\s/.test(char)) {
-      if (started || current.length > 0) {
-        tokens.push(current);
-        current = "";
-        started = false;
-      }
-    } else {
-      current += char;
-      started = true;
+  // 配平检查（与 core 逐行对齐）：未闭合引号视为 mid-edit，保守回落。
+  if (/["']/.test(input)) {
+    const single = (input.match(/'/gu) ?? []).length;
+    const double = (input.match(/"/gu) ?? []).length;
+    if (single % 2 === 1 || double % 2 === 1) {
+      return [];
     }
   }
-  if (quote !== null) {
-    return []; // 未闭合引号：交给 custom 路径保守处理
+  const parsed = shellQuoteParse(input);
+  const tokens: string[] = [];
+  for (const node of parsed) {
+    if (typeof node !== "string") {
+      // 命令替换/重定向运算符：对 spawn 向量无意义且危险，拒绝整条。
+      return [];
+    }
+    tokens.push(node);
   }
-  if (started || current.length > 0) {
-    tokens.push(current);
-  }
-  return tokens;
+  return tokens.length === 0 ? [] : tokens;
 };
 
 const isOptionToken = (token: string): boolean =>

@@ -7,7 +7,7 @@
  *   预设、系列字段、env 预设、appId 新旧对照；确定提交草稿，取消丢弃）。
  * - `?dialog=1` 深链直接打开 Dialog（演示与验证用）。
  */
-import { Check, Pencil, Terminal } from "lucide-react";
+import { Check, ChevronDown, Pencil, Terminal } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -486,11 +486,13 @@ export function FamilyCommandPage(): React.JSX.Element {
           <div className="flex h-9 items-stretch">
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="flex w-10 items-center justify-center rounded-tl-lg border-r border-input transition-colors outline-none hover:bg-accent focus-visible:z-10 focus-visible:border-ring"
+                className="flex w-11 items-center justify-center gap-0.5 rounded-tl-lg border-r border-input transition-colors outline-none hover:bg-accent focus-visible:z-10 focus-visible:border-ring"
                 aria-label={`命令系列：${FAMILY_LABEL[state.family]}，点击切换`}
                 title={`命令系列：${FAMILY_LABEL[state.family]}`}
               >
                 <FamilyIcon className="size-4 text-muted-foreground" />
+                {/* 下拉箭头：明示此处可切换系列 */}
+                <ChevronDown className="size-3 text-muted-foreground/70" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-36">
                 {FAMILY_ORDER.map((family) => {

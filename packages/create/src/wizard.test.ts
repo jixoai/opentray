@@ -562,6 +562,28 @@ describe("wizard session", () => {
     expect(harness.lastRunOptions()).toBeUndefined();
   });
 
+  it("refuses cargo install via absolute path by resolved executable (Codex R3-B1)", async () => {
+    const harness = createHarness();
+    // 路径形式的 cargo：字面头判定不命中，必须按解析后可执行文件名拒绝。
+    await harness.session.submitCommand(["/opt/homebrew/bin/cargo", "install", "ripgrep"]);
+    expect(harness.session.state).toBe("failed");
+    expect(harness.lastRunOptions()).toBeUndefined();
+    // 裸名 + seam 解析到 cargo 同样拒绝。
+    const seam = createHarness({
+      resolveOnPath: async () => "/usr/local/bin/cargo",
+    });
+    await seam.session.submitCommand(["cargo", "--offline", "install", "ripgrep"]);
+    expect(seam.session.state).toBe("failed");
+    expect(seam.lastRunOptions()).toBeUndefined();
+    // 非 cargo 的普通命令不受影响。
+    const normal = createHarness({
+      resolveOnPath: async () => "/usr/local/bin/node",
+    });
+    await normal.session.submitCommand("node server.js");
+    expect(normal.session.state).not.toBe("failed");
+    expect(normal.lastRunOptions()?.tokens).toEqual(["node", "server.js"]);
+  });
+
   it("defaults the command cwd to USER_HOME and publishes it", async () => {
     const harness = createHarness({ homeDir: "/tmp/wizard-home" });
     // The initial snapshot carries the resolved default for the UI.

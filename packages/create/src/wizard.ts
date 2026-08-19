@@ -10,7 +10,6 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-
 import { toProjectDirectoryName } from "@create-opentray/core";
 import type { FamilyFormState } from "@create-opentray/core";
 import {
@@ -55,6 +54,7 @@ import {
 } from "@create-opentray/core";
 import type { LaunchVector } from "@create-opentray/core";
 import { resolveLaunchVector } from "@create-opentray/core";
+import { resolveOnPath } from "@create-opentray/core";
 import { pinningHint } from "@create-opentray/core";
 
 export interface WizardEnvEntry {
@@ -259,6 +259,8 @@ export interface WizardOptions {
   readonly listPortOwners?: () => Promise<import("@create-opentray/core").ListenerOwners>;
   readonly scrape?: typeof scrapeService;
   readonly resolveVector?: typeof resolveLaunchVector;
+  /** Test/embedding seam for PATH resolution of the cargo-install guard. */
+  readonly resolveOnPath?: typeof resolveOnPath;
   /** Test/embedding seam for the materialize pipeline. */
   readonly materializeContext?: Partial<MaterializeContext>;
   readonly platform?: NodeJS.Platform;
@@ -763,9 +765,34 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         setState("failed", "数组模式至少需要程序元素（第一个参数）");
         return;
       }
-      // Rust 安装头禁跑（D7/D11 / Codex B1 + R2 非阻塞 1）：`cargo install …`
-      // 绝不被向导代执行；拒绝前移到 stop() 之前，不中断仍在存活的预览。
-      if (isRustInstallCommand(tokens ?? tokenized!.tokens)) {
+      // Rust 安装禁跑（D7/D11 / Codex R3-B1）：`cargo install …` 绝不被向导代
+      // 执行。字面头快路径之外，再按「解析后的可执行文件名」判定——路径/别名
+      // 形式的 cargo（如 /opt/homebrew/bin/cargo install）同样拒绝；拒绝前移到
+      // stop() 之前，不中断仍在存活的预览。
+      const pendingTokens = tokens ?? tokenized!.tokens;
+      const refuseCargoInstall = async (): Promise<boolean> => {
+        if (isRustInstallCommand(pendingTokens)) {
+          return true;
+        }
+        const head = pendingTokens[0] ?? "";
+        const resolved =
+          head.includes("/") || head.includes("\\")
+            ? head
+            : await (options.resolveOnPath ?? resolveOnPath)(head, {
+                platform: options.platform ?? process.platform,
+              });
+        if (resolved === undefined) {
+          return false; // 解析失败交给 spawn 自身的错误路径
+        }
+        if (basename(resolved).replace(/\.exe$/u, "") !== "cargo") {
+          return false;
+        }
+        const subcommand = pendingTokens
+          .slice(1)
+          .find((token) => !(token.startsWith("-") && token.length > 1));
+        return subcommand === "install";
+      };
+      if (await refuseCargoInstall()) {
         submitting = false;
         setState(
           "failed",

@@ -7,7 +7,7 @@
  * 无法从命令串恢复），命令串（运行行）仍是执行/持久化向量。npm 系列
  * （npx/pnpx）env 预设以行内 Terminal 图标披露（Tooltip：hover + click 钉住）。
  */
-import { Terminal } from "lucide-react";
+import { ChevronDown, Terminal } from "lucide-react";
 import * as React from "react";
 
 import {
@@ -134,11 +134,13 @@ export function CommandFamilyInput({
         <DropdownMenu>
           <DropdownMenuTrigger
             disabled={disabled}
-            className="flex w-9 items-center justify-center rounded-l-lg border-r border-input transition-colors outline-none hover:bg-accent focus-visible:z-10 focus-visible:border-ring"
+            className="flex w-11 items-center justify-between gap-1 rounded-l-lg border-r border-input transition-colors outline-none hover:bg-accent focus-visible:z-10 focus-visible:border-ring"
             aria-label={`命令系列：${FAMILY_LABEL[family]}，点击切换`}
             title={`命令系列：${FAMILY_LABEL[family]}`}
           >
-            <FamilyIcon className="size-4 text-muted-foreground" />
+            <FamilyIcon className="size-4 text-muted-foreground ms-2" />
+            {/* 下拉箭头：明示此处可切换系列，而非纯装饰图标 */}
+            <ChevronDown className="size-3 text-muted-foreground/70 me-0.75" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-36">
             {FAMILY_ORDER.map((item) => {

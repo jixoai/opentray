@@ -182,6 +182,17 @@ describe("parseCommand ↔ buildCommand 往返", () => {
     expect(parseCommand("npx -y create-vite").family).toBe("npm");
   });
 
+  it("反斜杠转义参数往返逐项无损（D12 / Codex R3-B2）", () => {
+    const state = parseCommand("npx tool a\\ b");
+    expect(state.args).toBe("'a b'");
+    expect(buildCommand(state)).toBe("npx tool 'a b'");
+    const roundTrip = tokenizeCommandLine("npx tool a\\ b");
+    const rebuilt = tokenizeCommandLine(buildCommand(state));
+    expect(roundTrip.ok && rebuilt.ok ? rebuilt.tokens : []).toEqual(
+      roundTrip.ok ? roundTrip.tokens : [],
+    );
+  });
+
   it("cargo install 谓词（D11：向导绝不代执行安装）", () => {
     expect(isRustInstallCommand(["cargo", "install", "ripgrep"])).toBe(true);
     expect(isRustInstallCommand(["cargo", "build"])).toBe(false);
