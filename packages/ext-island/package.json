@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-island",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "Roadmap OpenTray dynamic island and live activity extension.",
   "type": "module",
   "license": "MIT",

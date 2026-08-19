@@ -1,6 +1,6 @@
 {
   "name": "@create-opentray/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Adapter-neutral create-opentray Core: v1 configuration authority, registration layout, deterministic plan/apply, process ownership, observation capabilities, icon sampling, and export planning.",
