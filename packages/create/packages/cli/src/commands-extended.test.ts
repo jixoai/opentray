@@ -340,7 +340,7 @@ describe("export regressions", () => {
     expect(outLines.join("\n")).toContain(`wrote ${scriptPath}`);
     const content = await readFile(scriptPath, "utf8");
     expect(content).toContain("#!/bin/sh");
-    expect(content).toContain("'--app-id' 'alias.out'");
+    expect(content).toContain("--app-id alias.out");
   });
 
   it("rejects web flags on export that only exist on web", async () => {

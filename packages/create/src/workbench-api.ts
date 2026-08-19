@@ -13,9 +13,9 @@ import {
   buildExportPlan,
   buildScriptExport,
   findCreateEntry,
+  formatPosixCommandLine,
   listCreateEntries,
   openMaterializedApp,
-  quotePosix,
   readResourceBytes,
   readWizardProjectIcon,
   stopRunningApp,
@@ -378,11 +378,8 @@ export const handleWorkbenchApi = async (
       if (plan.value.directCommand === null) {
         return { status: 409, body: { code: "export_unsafe", message: plan.value.directCommandBlockedReason ?? "direct copy requires force-copy" } };
       }
-      // Shell-safe display: quote any element containing spaces or shell
-      // metacharacters so copy-paste reproduces the EXACT argv.
-      const command = plan.value.directCommand.command
-        .map((element) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(element) ? element : quotePosix(element)))
-        .join(" ");
+      // On-demand quoting: bare-safe words stay unquoted, the rest quoted.
+      const command = formatPosixCommandLine(plan.value.directCommand.command);
       return { status: 200, body: { command } };
     }
     const script = buildScriptExport(

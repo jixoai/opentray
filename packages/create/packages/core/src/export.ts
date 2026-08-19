@@ -51,6 +51,20 @@ export const quotePosix = (value: string): string =>
   `'${value.replaceAll("'", `'\\''`)}'`;
 
 /**
+ * Words that need NO quoting in POSIX sh: no globbing (`*?[`), field
+ * splitting (whitespace), or expansion (`$`/backtick) metacharacters.
+ */
+const POSIX_BARE_TOKEN = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+/** On-demand POSIX quoting: bare-safe words stay unquoted. */
+export const bareOrQuotePosix = (value: string): string =>
+  POSIX_BARE_TOKEN.test(value) ? value : quotePosix(value);
+
+/** Render an argv vector as a copy-paste-safe POSIX command line. */
+export const formatPosixCommandLine = (tokens: readonly string[]): string =>
+  tokens.map(bareOrQuotePosix).join(" ");
+
+/**
  * PowerShell native quoting. A bare word needs no quotes; anything else uses
  * single quotes with doubled internal quotes (the only escape PowerShell
  * single-quoted strings support).
@@ -197,9 +211,15 @@ export const buildScriptExport = (
     }
   }
 
-  // Token-level command assembly. Boolean flags carry no value; embedded
-  // icon sources substitute their temp-path token BEFORE quoting.
-  const tokens: string[] = ["npx", "create-opentray", "create"];
+  // Token-level command assembly with ON-DEMAND quoting: bare-safe words
+  // (npx, flags, plain paths, KEY=VALUE) stay unquoted; only tokens with
+  // shell metacharacters get quoted. Dynamic temp-var tokens are emitted
+  // AS-IS so the shell expands them — blanket quoting previously froze
+  // "$app_icon_tmp" into a literal string and broke embedded icons.
+  const rendered: string[] = [];
+  const quoteToken = (value: string): string =>
+    shell === "sh" ? bareOrQuotePosix(value) : quotePowerShell(value);
+  rendered.push(...["npx", "create-opentray", "create"].map(quoteToken));
   const flags = toCliFlags(input.config);
   for (let i = 0; i < flags.length; i += 1) {
     const flag = flags[i]!;
@@ -209,24 +229,23 @@ export const buildScriptExport = (
       "--developer-mode",
     ]);
     if (booleanFlags.has(flag)) {
-      tokens.push(flag);
+      rendered.push(flag);
       continue;
     }
     const value = flags[i + 1] ?? "";
     i += 1;
     if (flag === "--app-icon" && flagValues.has("app-icon")) {
-      tokens.push(flag, flagValues.get("app-icon")!);
+      rendered.push(flag, flagValues.get("app-icon")!); // dynamic var token
       continue;
     }
     if (flag === "--tray-icon" && flagValues.has("tray-icon")) {
-      tokens.push(flag, flagValues.get("tray-icon")!);
+      rendered.push(flag, flagValues.get("tray-icon")!); // dynamic var token
       continue;
     }
-    tokens.push(flag, value);
+    rendered.push(quoteToken(flag), quoteToken(value));
   }
 
-  const quote = shell === "sh" ? quotePosix : quotePowerShell;
-  const commandLine = tokens.map(quote).join(" ");
+  const commandLine = rendered.join(" ");
   lines.push(commandLine);
   lines.push("");
 

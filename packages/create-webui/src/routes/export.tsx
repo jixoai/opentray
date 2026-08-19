@@ -70,12 +70,24 @@ const classNames = {
 } as const;
 
 const renderUnquoted = (text: string, keyPrefix: string): React.ReactNode[] => {
-  const parts = text.split(/(\$[A-Za-z_][A-Za-z0-9_]*)/g);
-  return parts.map((part, index) =>
-    part.startsWith("$")
-      ? <span key={`${keyPrefix}-v${index}`} className={classNames.variable}>{part}</span>
-      : <span key={`${keyPrefix}-p${index}`}>{part}</span>,
-  );
+  // 按引号段外的裸词分类：$变量、关键字、--旗标、KEY=VALUE，其余原样。
+  const parts = text.split(/(\s+|\$[A-Za-z_][A-Za-z0-9_]*)/g);
+  return parts.map((part, index) => {
+    const key = `${keyPrefix}-u${index}`;
+    if (part.startsWith("$")) {
+      return <span key={key} className={classNames.variable}>{part}</span>;
+    }
+    if (KEYWORDS.has(part)) {
+      return <span key={key} className={classNames.keyword}>{part}</span>;
+    }
+    if (part.startsWith("--")) {
+      return <span key={key} className={classNames.flag}>{part}</span>;
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(part)) {
+      return <span key={key} className={classNames.env}>{part}</span>;
+    }
+    return <span key={key}>{part}</span>;
+  });
 };
 
 const renderLine = (line: string, key: number): React.ReactNode => {

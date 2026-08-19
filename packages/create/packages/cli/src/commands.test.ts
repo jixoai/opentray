@@ -204,8 +204,8 @@ describe("app export", () => {
     expect(sh).toBe(0);
     const script = outLines.join("\n");
     expect(script).toContain("#!/bin/sh");
-    expect(script).toContain("'npx' 'create-opentray' 'create'");
-    expect(script).toContain("'--app-id' 'shy.example'");
+    expect(script).toContain("npx create-opentray create");
+    expect(script).toContain("--app-id shy.example");
     expect(script).not.toContain("\r");
     outLines.length = 0;
     const ps1 = await run(["app", "export", "shy.example", "--format", "ps1"]);

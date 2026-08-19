@@ -18,6 +18,7 @@ import {
   buildExportPlan,
   buildScriptExport,
   err,
+  formatPosixCommandLine,
   listRegistrations,
   loadRegistration,
   ok,
@@ -532,7 +533,12 @@ const appExportCommand = (context: CliContext): CommandModule => ({
         return;
       }
       const command = plan.value.directCommand.command;
-      finish(context, { ok: true, result: { command: command.join(" ") } }, json, (value) => value.command);
+      finish(
+        context,
+        { ok: true, result: { command: formatPosixCommandLine(command) } },
+        json,
+        (value) => value.command,
+      );
       return;
     }
     const script = buildScriptExport({ config, embeddedResources: embedded }, format === "sh" ? "sh" : "powershell");

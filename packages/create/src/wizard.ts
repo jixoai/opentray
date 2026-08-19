@@ -35,7 +35,7 @@ import {
   buildExportPlan,
   buildScriptExport,
   detectImageFormat,
-  quotePosix,
+  formatPosixCommandLine,
   type CreateConfigV1,
   type EmbeddedResource,
   type IconResourceRef,
@@ -1193,9 +1193,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
             message: plan.value.directCommandBlockedReason ?? "direct copy requires force-copy",
           };
         }
-        const command = plan.value.directCommand.command
-          .map((element) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(element) ? element : quotePosix(element)))
-          .join(" ");
+        const command = formatPosixCommandLine(plan.value.directCommand.command);
         return { ok: true, kind: "command", command };
       }
       const script = buildScriptExport(

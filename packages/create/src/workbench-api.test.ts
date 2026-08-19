@@ -108,6 +108,11 @@ describe("workbench /api/apps dual-layout discovery", () => {
     expect(body.content).toContain("@deepseek-ai/dsh@latest");
     // The stable in-project icon asset travels as embedded base64 bytes.
     expect(body.content).toContain("app_icon_tmp");
+    // 按需引用 + 动态变量原样输出：变量必须可展开（回归：曾被单引号冻结）。
+    expect(body.content).toContain('--app-icon "$app_icon_tmp"');
+    expect(body.content).not.toContain(`'"$app_icon_tmp"'`);
+    // 裸词不加引号。
+    expect(body.content).toContain("npx create-opentray create");
     // Acknowledged complete export includes env values BY CONTRACT; the
     // never-echo law guards the UNacknowledged refusal path (tested below).
     expect(body.content).toContain("--env");

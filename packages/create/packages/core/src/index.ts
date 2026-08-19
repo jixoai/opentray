@@ -171,9 +171,11 @@ export {
   type UninstallResult,
 } from "./lifecycle";
 export {
+  bareOrQuotePosix,
   buildExportPlan,
   buildScriptExport,
   embeddedFromRef,
+  formatPosixCommandLine,
   quotePosix,
   quotePowerShell,
   reviewEnvironment,
