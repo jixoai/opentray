@@ -519,6 +519,24 @@ export interface EnvPreset {
   readonly note: string;
 }
 
+/**
+ * env 行中某键的生效值（Codex R4-B3）：env 行允许重复键，服务端按顺序
+ * 写入对象 → last-wins。投影（图标/Dialog/Tooltip）必须取「最后一个」
+ * 同名条目，与 spawn/导出的实际值一致。
+ */
+export const explicitEnvValue = (
+  env: readonly { key: string; value: string }[],
+  key: string,
+): string | undefined => {
+  let found: string | undefined;
+  for (const entry of env) {
+    if (entry.key.trim() === key) {
+      found = entry.value;
+    }
+  }
+  return found;
+};
+
 export const envPresetsFor = (state: FamilyFormState): readonly EnvPreset[] => {
   if (state.family === "npm" && (state.runner === "npx" || state.runner === "pnpx")) {
     return [

@@ -7,7 +7,7 @@
 // 3. Coordinate preview run, discovery polling, scrape polling, and teardown.
 
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { toProjectDirectoryName } from "@create-opentray/core";
@@ -15,7 +15,6 @@ import type { FamilyFormState } from "@create-opentray/core";
 import {
   deriveFamily,
   envPresetsFor,
-  isRustInstallCommand,
   parseCommandTokens,
 } from "@create-opentray/core";
 import {
@@ -765,16 +764,20 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         setState("failed", "数组模式至少需要程序元素（第一个参数）");
         return;
       }
-      // Rust 安装禁跑（D7/D11 / Codex R3-B1）：`cargo install …` 绝不被向导代
-      // 执行。字面头快路径之外，再按「解析后的可执行文件名」判定——路径/别名
-      // 形式的 cargo（如 /opt/homebrew/bin/cargo install）同样拒绝；拒绝前移到
-      // stop() 之前，不中断仍在存活的预览。
+      // Rust 安装禁跑（D7/D11 / Codex R4-B1）：`cargo install …` 绝不被向导代
+      // 执行。判定取保守完备语义——只要「解析后的可执行文件」是 cargo
+      // （realpath 归一、大小写不敏感、剥 .exe，覆盖 PATH 软链接别名与
+      // CARGO.EXE），且 argv 中出现独立的 "install" token，即拒绝。Cargo 的
+      // 全局带值选项（--color/--config/-C）与 rustup `+toolchain` 前缀都会
+      // 推移子命令位置，逐语法解析必被绕过；宁可误拒罕见含 "install" 参数
+      // 的其它 cargo 子命令（failed 提示指引到 Rust 表单），绝不放过安装。
+      // 拒绝前移到 stop() 之前，不中断仍在存活的预览。
       const pendingTokens = tokens ?? tokenized!.tokens;
-      const refuseCargoInstall = async (): Promise<boolean> => {
-        if (isRustInstallCommand(pendingTokens)) {
+      const executableIsCargo = async (): Promise<boolean> => {
+        const head = pendingTokens[0] ?? "";
+        if (head.toLowerCase().replace(/\.exe$/u, "") === "cargo") {
           return true;
         }
-        const head = pendingTokens[0] ?? "";
         const resolved =
           head.includes("/") || head.includes("\\")
             ? head
@@ -784,15 +787,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         if (resolved === undefined) {
           return false; // 解析失败交给 spawn 自身的错误路径
         }
-        if (basename(resolved).replace(/\.exe$/u, "") !== "cargo") {
-          return false;
-        }
-        const subcommand = pendingTokens
-          .slice(1)
-          .find((token) => !(token.startsWith("-") && token.length > 1));
-        return subcommand === "install";
+        // realpath 归一：PATH 中指向 cargo 的软链接别名（ci -> cargo）。
+        const real = await realpath(resolved).catch(() => resolved);
+        return basename(real).toLowerCase().replace(/\.exe$/u, "") === "cargo";
       };
-      if (await refuseCargoInstall()) {
+      const cargoInstallRefused =
+        (await executableIsCargo()) &&
+        pendingTokens.slice(1).some((token) => token === "install");
+      if (cargoInstallRefused) {
         submitting = false;
         setState(
           "failed",

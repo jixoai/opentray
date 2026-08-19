@@ -21,6 +21,7 @@ import {
   buildCommand,
   EMPTY_FAMILY_STATE,
   envPresetsFor,
+  explicitEnvValue,
   FAMILY_LABEL,
   FAMILY_ORDER,
   parseCommand,
@@ -84,13 +85,13 @@ export function CommandFamilyInput({
 
   // env 预设投影（D4 R5）：env 配置行是唯一可信源，预设是它的双向投影。
   // 图标 = 「该命令将携带 npm_config_yes」：显式条目（用户值任意）或默认
-  // 注入均点亮；Tooltip 区分来源。
+  // 注入均点亮；Tooltip 区分来源。重复键取最后一项（与服务端 last-wins 一致）。
   const famState = commandOptions.family ?? parsed;
   const presetDefinition = envPresetsFor(famState)[0];
-  const explicitEntry =
+  const explicitValue =
     presetDefinition === undefined
       ? undefined
-      : commandOptions.env.find((entry) => entry.key.trim() === presetDefinition.key);
+      : explicitEnvValue(commandOptions.env, presetDefinition.key);
   const presetProjection: EnvPresetProjection | null =
     presetDefinition === undefined
       ? null
@@ -98,16 +99,16 @@ export function CommandFamilyInput({
           key: presetDefinition.key,
           defaultNote: presetDefinition.note,
           state:
-            explicitEntry !== undefined
+            explicitValue !== undefined
               ? "explicit"
               : commandOptions.envPresetDisabled
                 ? "off"
                 : "default",
-          ...(explicitEntry !== undefined ? { explicitValue: explicitEntry.value } : {}),
+          ...(explicitValue !== undefined ? { explicitValue } : {}),
         };
   const carriesPreset =
     presetDefinition !== undefined &&
-    (explicitEntry !== undefined || !commandOptions.envPresetDisabled);
+    (explicitValue !== undefined || !commandOptions.envPresetDisabled);
 
   /** 启用 = 在 env 行写入条目（投影到唯一可信源）；移除 = 删条目 + 关默认注入。 */
   const applyEnvPresetChange = (action: "enable" | "disable"): void => {
@@ -136,15 +137,20 @@ export function CommandFamilyInput({
       ...commandOptions,
       ...(commandOptions.argsMode === "array" ? { argsMode: "string" as const } : {}),
     };
-    const template = familyTemplate(next);
-    authoringRef.current[next] = template;
-    // 非 custom 模板作为作者状态上传（rust 空模板的命令行为空，只读区引导
-    // 进入 Dialog；custom 不上传投影，保持按命令派生）。
+    // 草稿保留（Codex R4-B2）：该系列已有前端缓存（含未确定的编辑）则直接
+    // 恢复，只有首次进入才落空模板——切走再切回，表单不丢。
+    const cached = authoringRef.current[next];
+    const state = cached !== undefined ? cached : familyTemplate(next);
+    if (cached === undefined) {
+      authoringRef.current[next] = state;
+    }
+    // 非 custom 的作者状态上传（rust 空模板的命令行为空，只读区引导进入
+    // Dialog；custom 不上传投影，保持按命令派生）。
     onCommandOptionsChange({
       ...options,
-      family: next === "custom" ? null : template,
+      family: next === "custom" ? null : state,
     });
-    onCommandChange(buildCommand(template));
+    onCommandChange(buildCommand(state));
   };
 
   const openDialog = (): void => {
@@ -253,10 +259,10 @@ export function CommandFamilyInput({
               <div className="space-y-1 text-left">
                 <p className="text-[11px] opacity-70">环境变量预设</p>
                 <p className="font-mono text-xs">
-                  {presetDefinition.key}={explicitEntry?.value ?? "true"}
+                  {presetDefinition.key}={explicitValue ?? "true"}
                 </p>
                 <p className="text-[11px] opacity-70">
-                  {explicitEntry !== undefined
+                  {explicitValue !== undefined
                     ? "来自「命令选项 → 环境变量」配置（唯一可信源，两侧同步）"
                     : presetDefinition.note}
                 </p>

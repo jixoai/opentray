@@ -62,3 +62,11 @@
 - [x] 8.2 env 唯一可信源（plan D4 R5 修订 + spec delta「single source of truth」场景）：Dialog 预设控件改为 env 配置行的双向投影——启用 = env 行写 `npm_config_yes=true`；移除 = 删条目 + `envPresetDisabled=true`（杜绝移除后被默认注入复活）；三态展示（explicit 显用户值 / default 默认注入 / off）；外面手动改动经 SSE 即时回灌 Dialog。输入行图标改为「将携带即点亮」，Tooltip 区分来源（显式条目显示用户值 + 唯一可信源说明）。
 - [x] 8.3 E2E（HOME=/tmp/ot-e2e-home-5，子进程落盘取证）：env 行显式 true → 子进程 true；显式 false → 子进程 false（用户值优先）；删条目 + disabled → undefined。服务端法则（显式优先/默认注入）不变，create 248 既有用例零改动通过。
 - [x] 8.4 回归：webui typecheck + 49 测试绿；生产资产重建。GUI 图标联动留用户浏览器自查（IAB 面板当时不可用）。
+
+## 9. Round 6（Codex R4/R5 复核 5.0/10 → 三阻塞闭合）
+
+- [x] 9.1 B1（cargo 分类器绕过）：判定重写为保守完备语义——解析后可执行文件经 realpath 归一（覆盖 PATH 软链接别名）、basename 小写比较并剥 .exe（覆盖 CARGO.EXE），命中 cargo 且 argv 含独立 "install" token 即拒（覆盖 --color always/-C <dir>/+nightly 等带值选项与工具链前缀推移子命令的绕过；宁可误拒罕见含 install 参数的其它 cargo 子命令）。wizard.test 新增带值 flag/工具链/大小写/真实 symlink 四类反例。
+- [x] 9.2 B2（切走覆盖草稿）：switchFamily 保留 per-series 前端缓存——已有缓存（含 Dialog onDraftChange 写入的未确定编辑）直接恢复，仅首次进入落空模板；切走再切回表单不丢（D11 R5 承诺成立）。
+- [x] 9.3 B3（重复 env 键投影不一致）：lib 新增 explicitEnvValue（last-wins，与服务端顺序写入语义一致），图标/Dialog/Tooltip 投影统一取最后同名条目；重复键金样本进 webui 测试。
+- [x] 9.4 tokenizer 差分金样本（非阻塞采纳）：未闭合引号/重定向/命令替换 → custom 回落，webui 镜像与 core 同源断言。
+- [x] 9.5 回归：create 249 / webui 51 / core 32 全绿；typecheck 绿；生产资产重建。jsdom 组件交互测试记录为后续（webui 现无组件测试环境）。

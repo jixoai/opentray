@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readFile, mkdir, writeFile, stat } from "node:fs/promises";
+import { readFile, mkdir, symlink, writeFile, stat } from "node:fs/promises";
 import { createWizardSession, type WizardEvent, type WizardOptions } from "./wizard";
 import type { CommandRun, CommandRunEvent, CommandRunOptions } from "@create-opentray/core";
 import type { DiscoveredService } from "@create-opentray/core";
@@ -582,6 +582,38 @@ describe("wizard session", () => {
     await normal.session.submitCommand("node server.js");
     expect(normal.session.state).not.toBe("failed");
     expect(normal.lastRunOptions()?.tokens).toEqual(["node", "server.js"]);
+  });
+
+  it("refuses cargo install behind value-bearing flags, toolchain prefixes, symlinks, and case (Codex R4-B1)", async () => {
+    // 带值全局选项（--color always / -C <dir>）与 rustup `+nightly` 前缀都会
+    // 推移子命令位置；判定改取「argv 含独立 install token」的保守语义。
+    const withFlags = createHarness({
+      resolveOnPath: async () => "/usr/local/bin/cargo",
+    });
+    for (const argv of [
+      ["cargo", "--color", "always", "install", "ripgrep"],
+      ["cargo", "-C", "/tmp", "install", "ripgrep"],
+      ["cargo", "+nightly", "install", "ripgrep"],
+    ]) {
+      await withFlags.session.submitCommand(argv);
+      expect(withFlags.session.state).toBe("failed");
+      expect(withFlags.lastRunOptions()).toBeUndefined();
+    }
+    // Windows 大小写：CARGO.EXE 同样拒绝。
+    await withFlags.session.submitCommand(["CARGO.EXE", "install", "ripgrep"]);
+    expect(withFlags.session.state).toBe("failed");
+    // PATH 软链接别名：ci -> cargo 经 realpath 归一后拒绝。
+    const aliasDir = mkdtempSync(join(tmpdir(), "cargo-alias-"));
+    const cargoPath = join(aliasDir, "cargo");
+    const aliasPath = join(aliasDir, "ci");
+    await writeFile(cargoPath, "#!/bin/sh\n", "utf8");
+    await symlink(cargoPath, aliasPath);
+    const aliased = createHarness({
+      resolveOnPath: async () => aliasPath,
+    });
+    await aliased.session.submitCommand(["ci", "install", "ripgrep"]);
+    expect(aliased.session.state).toBe("failed");
+    expect(aliased.lastRunOptions()).toBeUndefined();
   });
 
   it("defaults the command cwd to USER_HOME and publishes it", async () => {

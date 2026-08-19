@@ -6,6 +6,7 @@ import {
   buildCommand,
   deriveFamily,
   envPresetsFor,
+  explicitEnvValue,
   parseCommand,
   toProjectDirectoryName,
 } from "./command-family";
@@ -71,6 +72,25 @@ describe("command-family 镜像金样本（与 core 同源）", () => {
     expect(parseCommand("npx -c 'echo hi'").family).toBe("custom");
     expect(parseCommand("deno run -A npm:cowsay@latest hello").family).toBe("npm");
     expect(parseCommand("npx -y create-vite").family).toBe("npm");
+  });
+
+  it("重复 env 键取最后一项（last-wins，与服务端一致）", () => {
+    expect(
+      explicitEnvValue(
+        [
+          { key: "npm_config_yes", value: "false" },
+          { key: "npm_config_yes", value: "true" },
+        ],
+        "npm_config_yes",
+      ),
+    ).toBe("true");
+    expect(explicitEnvValue([{ key: "FOO", value: "1" }], "npm_config_yes")).toBeUndefined();
+  });
+
+  it("tokenizer 差分：未闭合引号/重定向/命令替换均回落 custom（与 core 同源）", () => {
+    expect(parseCommand('npx tool "unclosed').family).toBe("custom");
+    expect(parseCommand("npx tool a<b").family).toBe("custom");
+    expect(parseCommand("npx tool $(whoami)").family).toBe("custom");
   });
 
   it("名称/目录投影与 env 预设边界", () => {
