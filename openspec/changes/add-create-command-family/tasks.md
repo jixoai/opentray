@@ -38,4 +38,13 @@
 - [x] 5.5 B3：app.tsx hasEnv 同规则（显式 env 或激活预设 → 分享确认入口）。
 - [x] 5.6 B4：选择器显式状态源（selection 保持用户意图；同系列点击 no-op；custom 输入 runner 头不翻转 UI）；Dialog 确定/切族上传作者状态；rust 作者草稿 per-family 缓存。
 - [x] 5.7 修复后 E2E（真实 server，HOME=/tmp/ot-e2e-home-2）：rust 投影 + 命令串 `rg --json .` → appId `rg.rust`/目录 `rg-rust` 稳定；`cargo install ripgrep` 提交 → failed 指引文案且未 spawn；npm 投影 env true → disabled=true → undefined → family:null 回派生（commandOptions 快照证实）；GUI：选择器/只读区/env 图标渲染无错误浮层。
-- [x] 5.8 测试与已知环境问题：core 172 / create 245 / webui 48 通过，三包 typecheck 绿。create 全量序列运行中既有真实物化用例「force wipes…」「keeps the env overlay…」出现 20s 超时 —— R1 基线（stash R2 后）复现同样失败，单跑/组合跑均绿，判定为环境性漂移而非本变更回归；已如实记录，不在本变更修复。
+- [x] 5.8 测试与已知环境问题：core / create / webui 通过，三包 typecheck 绿。曾出现的全量序列 20s 超时已定因：E2E 残留向导进程抢占资源（`pkill -f "create/src/bin.ts"` 清理后全量 246/246 全绿，单文件多轮全绿）——非代码回归。
+
+## 6. Round 3（Codex R2 复核 5.5/10 → 剩余阻塞闭合）
+
+- [x] 6.1 R2-B1（恢复链）：`CommandFamilyInput` 以 `commandOptions.family` 驱动 selection 初值/SSE 同步与 dialogInitial（优先级：服务端投影 > 本地草稿 > 命令解析 > 空模板）；E2E：rust 投影 + `rg --json .` 重启后快照恢复（command/投影/appId `rg.rust`）且 UI 显示 Rust 选择器 + 只读区 `rg --json .`。
+- [x] 6.2 草稿机制缺陷修复（恢复链依赖）：`writeDraft` 并发 read-modify-write 丢失更新 → promise 链串行化（E2E 复现→修复后草稿三键完整）；`readDraft` form 门槛放宽为 form/command/commandOptions 分键恢复。
+- [x] 6.3 R2-B2（带值 flag）：runner 选项区仅接受已知无值 flag 白名单（deno -A/--allow-*/--no-*/-q…、npx -y/--yes），白名单外/带 = 的 option 保守回落 custom 且 raw 用序列化保真（core+webui 同源）；金样本：`deno run --config 'path with spaces' npm:cowsay` → custom 且往返逐项相等。
+- [x] 6.4 非阻塞采纳：cargo install 拒绝前移到 `session.stop()` 之前（不中断存活预览）；server/bin 共用 `normalizeFamilyProjection`（同一接受集合）。
+- [x] 6.5 spec delta 跟进 R2 行为：新增「Family Authoring State SHALL Survive Reloads And Never Execute Installs」需求（恢复/禁跑/带值 flag 三场景）。
+- [x] 6.6 回归：core 31 / create 246 / webui 49 全绿；三包 typecheck 绿；validate 通过。

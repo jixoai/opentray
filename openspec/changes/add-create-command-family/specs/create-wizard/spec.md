@@ -101,6 +101,40 @@ flow SHALL keep their exact pre-existing behavior.
 - **GIVEN** any non-custom family's form dialog
 - **THEN** it SHALL contain no built-in preset command chips
 
+### Requirement: Family Authoring State SHALL Survive Reloads And Never Execute Installs
+
+The wizard session SHALL keep an explicit family authoring projection
+(`commandOptions.family`) as the authority for family, default appId, and env
+preset derivation whenever one is present; the command string SHALL remain the
+only execution/persistence vector. On page reload, reconnect, or draft restart,
+the UI SHALL derive the family selector and the form dialog's initial fields
+from that projection — for the rust family the crate and run binary SHALL
+survive even though the command string is only the run line. Commands whose
+runner head is `cargo install` SHALL be refused before any preview is stopped
+or anything is spawned. Runner flag sections that cannot be mapped without
+ambiguity (any option outside a conservative known value-less flag set, such
+as `deno run --config <path>`) SHALL fall back verbatim to the custom family
+instead of reinterpreting the flag's value as the package name.
+
+#### Scenario: Rust authoring projection survives reload
+
+- **GIVEN** a session holding command `rg --json .` and family projection `{ family: rust, pkg: ripgrep, binary: rg }`
+- **WHEN** the page reloads and receives the snapshot
+- **THEN** the selector SHALL show the rust family and the dialog SHALL reopen with crate `ripgrep` and binary `rg`
+- **AND** the default appId SHALL remain `rg.rust`
+
+#### Scenario: cargo install is never executed
+
+- **GIVEN** any live preview running in the wizard
+- **WHEN** the user submits `cargo install ripgrep`
+- **THEN** the wizard SHALL reject with guidance toward the rust form without stopping the live preview and without spawning anything
+
+#### Scenario: Value-bearing runner flags stay verbatim
+
+- **GIVEN** the command `deno run --config 'path with spaces' npm:cowsay`
+- **WHEN** it is parsed
+- **THEN** it SHALL fall back to the custom family preserving the argument tokens exactly, never reinterpreting `path with spaces` as a package name
+
 ### Requirement: NPM-Series Commands SHALL Auto-Inject The Confirmation-Skipping Env Preset
 
 The wizard SHALL automatically add the environment preset

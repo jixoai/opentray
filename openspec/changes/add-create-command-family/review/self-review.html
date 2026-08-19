@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>add-create-command-family — Self-Review</title>
+<style>
+  body { font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; margin: 0; padding: 32px; color: #1f2328; background: #fafafa; }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: #fff; }
+  th, td { border: 1px solid #e0e0e0; padding: 6px 10px; text-align: left; font-size: 13px; vertical-align: top; }
+  th { background: #f0f0f0; }
+  .ok { color: #1a7f37; } .warn { color: #9a6700; } .bad { color: #cf222e; }
+  code { background: #eff1f3; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .score { font-size: 28px; font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+<h1>add-create-command-family — Self-Review（Round 2）</h1>
+
+<h2>复核闭环</h2>
+<table>
+  <tr><th>轮次</th><th>动作</th><th>评分</th><th>阻塞</th></tr>
+  <tr><td>R1</td><td>实现 + 提交（e4cf887）</td><td>—</td><td>—</td></tr>
+  <tr><td>Codex R1</td><td>独立复核（gpt-5.6-terra / xhigh，herdr）</td><td class="bad">3.5 / 10</td><td>B1–B5（5 项）</td></tr>
+  <tr><td>R2</td><td>意图修订（b992caa）+ 修复（aad8947）+ E2E 复验</td><td>—</td><td>B1–B5 全部关闭</td></tr>
+  <tr><td>Codex R2</td><td>进行中</td><td>—</td><td>—</td></tr>
+</table>
+
+<h2>阻塞修复对照</h2>
+<table>
+  <tr><th>#</th><th>问题</th><th>修复</th><th>证据</th></tr>
+  <tr><td>B1</td><td>Rust 链路不闭合；可能真跑 cargo install</td><td>D11 作者状态（WizardCommandOptions.family，服务端 familyState() 权威）+ submitCommand 拒绝 cargo install 头</td><td>E2E：rg.rust 稳定 / cargo install failed 未 spawn；wizard.test 2 用例</td></tr>
+  <tr><td>B2</td><td>envPresetDisabled 未上传服务端；草稿不恢复 commandOptions</td><td>app.tsx POST body 补字段；bin.ts 草稿恢复含 family/envPresetDisabled</td><td>E2E：开关翻转 env true↔undefined；投影清空回派生</td></tr>
+  <tr><td>B3</td><td>预设 env 触发分享 ack 但 UI 无入口</td><td>D13 hasEnv 同规则（显式 env 或激活预设）</td><td>代码路径 + 服务端 exportFrozen 用例（ack 拒绝→确认通过）</td></tr>
+  <tr><td>B4</td><td>selector 非状态源（custom 输入锁死/同系列点击清空）</td><td>显式 selection；同系列 no-op；custom 不翻转</td><td>组件逻辑 + typecheck；GUI 冒烟</td></tr>
+  <tr><td>B5</td><td>引号参数往返失真</td><td>D12 对称 POSIX 序列化（core+webui）</td><td>core/webui 往返金样本</td></tr>
+</table>
+
+<h2>测试与验证</h2>
+<table>
+  <tr><th>套件</th><th>结果</th><th>备注</th></tr>
+  <tr><td>core（bun/vitest）</td><td class="ok">172 通过</td><td>含序列化/往返/禁跑谓词新用例</td></tr>
+  <tr><td>create（vitest）</td><td class="ok">245 通过</td><td>2 个既有真实物化用例环境性超时（R1 基线复现，非回归，tasks 5.8）</td></tr>
+  <tr><td>create-webui（vitest）</td><td class="ok">48 通过</td><td>镜像金样本含引号往返</td></tr>
+  <tr><td>typecheck ×3</td><td class="ok">绿</td><td>core / create / create-webui</td></tr>
+  <tr><td>E2E（真实 server）</td><td class="ok">通过</td><td>六系列推导、env 落盘取证、rust 作者状态、禁跑、GUI 冒烟</td></tr>
+</table>
+
+<h2>偏差与待确认</h2>
+<ul>
+  <li>D12 保证域 = tokenizer 接受域（奇数单引号 token 先于本变更被拒）。</li>
+  <li>跨系列切换仍为重置模板（同系列已 no-op）—— 是否需要确认/撤销，待用户定。</li>
+  <li>B3 采用客户端同规则；服务端投影为后续演进项。</li>
+  <li>2 个环境性超时用例是否另行立项，待用户定。</li>
+</ul>
+
+<h2>Git 证据</h2>
+<p><code>6b09564</code> docs(spec) → <code>e4cf887</code> feat R1 → <code>a3a31ec</code> chore 原型 → <code>b992caa</code> docs(spec) R2 → <code>aad8947</code> fix B1–B5。未提交：<code>.zcode/</code>（会话产物）。</p>
+</main>
+</body>
+</html>
