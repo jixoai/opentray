@@ -1,14 +1,16 @@
-/**
- * 系列命令输入组（add-create-command-family D1/D4/D11 / Codex B1+B4）：
- * 单行 InputGroup —— 前缀域选择器（官方品牌图标；自定义 = edit 图标）+ 主体。
- * 选择器是显式状态源（不从命令串派生 UI 系列）：custom → 自由输入（现状
- * 行为，Enter 运行）；其它系列 → 只读命令区，点击弹 FamilyFormDialog。
- * Dialog 确定把「作者状态投影」上传服务端（family 字段，Rust 的 crate/binary
- * 无法从命令串恢复），命令串（运行行）仍是执行/持久化向量。npm 系列
- * （npx/pnpx）env 预设以行内 Terminal 图标披露（Tooltip：hover + click 钉住）。
- * B2（2026-08-19）：未确认字段编辑属于一次 Dialog 会话；会话内可跨系列暂存，
- * 但不会污染服务端投影缓存，取消时整体丢弃。
- */
+// Orthogonal intents (maintained 2026-08-19; original user requests:
+// 2026-08-19 「做成一个 inputgroup…start 部分是一个选择器，可以选择域，
+// 这里都使用图标…自定义模式的图标就是一个 edit-icon…主体部分是一个
+// ReadonlyInput…点击弹出一个 formDialog」；同日 R5 拍板「表单独立缓存在
+// 前端，切回来表单还存在」；R8 复核要求会话生命周期显式建模):
+// 1. 系列选择器/输入行渲染（含 env 预设指示图标与 Tooltip）。
+// 2. DialogSession 会话生命周期：打开快照、会话内跨系列暂存、取消整体丢弃、
+//    确定仅提交当前系列（f2e4f01，codex max 实现）。
+// 3. 服务端作者投影（commandOptions.family）的缓存刷新与 SSE 合流（D11a）。
+// 4. 命令串序列化回写与作者投影上传。
+// 妥协声明：会话 reducer 与 projectionCache 尚未拆分为独立 controller hook
+// （Codex R8-B2 建议的进一步拆分）——刚经历 max 实现与多轮复核，为控制回归
+// 面推迟到本变更归档后的重构轮；正交意图清单如上持续维护。
 import { ChevronDown, Terminal } from "lucide-react";
 import * as React from "react";
 

@@ -228,7 +228,52 @@ describe("CommandFamilyInput 状态机", () => {
       expect(screen.queryByPlaceholderText("@deepseek-ai/dsh")).toBeNull();
     });
 
+    // 确定仅提交当前系列（npm）：命令串含 draft-npm，不含 Go 会话草稿。
+    const readonly = screen.getByRole("button", { name: "配置 npm 系列命令" });
+    expect(readonly.textContent).toContain("draft-npm");
+    expect(readonly.textContent).not.toContain("example.com/draft-go");
+
     openNpmDialog();
     expect((await inputFor("@deepseek-ai/dsh")).value).toBe("draft-npm");
   });
+
+  // Codex R8-B1：跨系列返回后的取消四路径——drafts/bases/currentFamily 均已
+  // 变化的真实回退契约，此前两个用例分别覆盖取消与切换、未覆盖该组合。
+  it.each(cancellationPaths)(
+    "Dialog 内跨系列编辑返回后经 $name 取消：整次会话丢弃且不上传",
+    async ({ close }) => {
+      renderHarness(snapshotFor("npx cowsay hello", npmProjection));
+      openNpmDialog();
+      const npmPackage = await inputFor("@deepseek-ai/dsh");
+      fireEvent.change(npmPackage, { target: { value: "draft-npm" } });
+
+      await switchDialogFamily(/^Go$/u);
+      const goModule = await inputFor("rsc.io/fortune");
+      fireEvent.change(goModule, { target: { value: "example.com/draft-go" } });
+
+      await switchDialogFamily(/^npm$/u);
+      close();
+      await waitFor(() => {
+        expect(screen.queryByPlaceholderText("@deepseek-ai/dsh")).toBeNull();
+      });
+
+      // 编辑与取消都不上传：外层命令串仍是打开前状态。
+      const readonly = screen.getByRole("button", { name: "配置 npm 系列命令" });
+      expect(readonly.textContent).toContain("npx cowsay hello");
+      expect(readonly.textContent).not.toContain("draft-npm");
+
+      // npm 重开 = 打开快照；Go 会话草稿同样不可恢复（回落权威缓存/模板）。
+      openNpmDialog();
+      expect((await inputFor("@deepseek-ai/dsh")).value).toBe("cowsay");
+      fireEvent.click(screen.getByRole("button", { name: "取消" }));
+      await waitFor(() => {
+        expect(screen.queryByPlaceholderText("@deepseek-ai/dsh")).toBeNull();
+      });
+      await switchOuterFamily(/^Go$/u);
+      fireEvent.click(screen.getByRole("button", { name: "配置 Go 系列命令" }));
+      expect((await inputFor("rsc.io/fortune")).value).not.toBe(
+        "example.com/draft-go",
+      );
+    },
+  );
 });

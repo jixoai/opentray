@@ -87,3 +87,9 @@
 - [x] 11.4 投影缓存与会话草稿分离：projectionCache 永远可被新服务端投影刷新（陈旧草稿无法反向上传）；会话内当前系列未编辑时随 SSE 刷新、已编辑保留至确定/取消（合流规则记入 plan D11a）。
 - [x] 11.5 状态化组件测试（rerender 模拟 SSE）：R6 点名的 (a) 编辑中投影更新后取消、(b) 已播种后新投影再切走切回、(c) 编辑中跨系列切换返回 + 取消四路径全覆盖；webui 58 项。
 - [x] 11.6 验证：webui 58 / create 249 / core 32 全绿；typecheck 绿；validate 通过；生产资产重建；GUI 冒烟无错误浮层。
+
+## 12. Round 9（Codex R8 复核 7.8/10 → 剩余两项闭合）
+
+- [x] 12.1 R8-B1（组合测试缺口）：新增 it.each(cancellationPaths)×「Dialog 内 npm 编辑→切 Go 编辑→切回 npm 后取消」组合——断言 npm 重开为打开快照、Go 会话草稿不可恢复、外层命令串未因编辑/取消上传；跨系列确定用例补「命令含 draft-npm 且不含 Go 草稿」payload 断言（确定仅提交当前系列）。webui 62 项。
+- [x] 12.2 R8-B2（意图注释治理）：command-family-input.tsx 与 family-form-dialog.tsx 头部补齐用户原始需求（时间戳）+ 正交意图清单 + 妥协声明（会话 reducer 拆分推迟至归档后重构轮，理由记录）。
+- [x] 12.3 回归：webui 62 / create 249 全绿；typecheck 绿；生产资产重建。core 全量在复核侧环境因宿主进程检查用例失败（lifecycle/resources，非本变更面）；我侧 core 定向 32 绿。

@@ -1,10 +1,14 @@
-/**
- * 系列表单 Dialog（add-create-command-family D1/D7）：结构化字段（runner/包名/
- * 版本/参数；Rust 二进制 + 安装行展示）+ env 预设行 + 轻量 appId 预览。
- * 草稿语义：字段编辑只影响受控 Dialog 会话预览；会话内可暂存并切换系列，
- * 确定才回写命令串，取消丢弃整个会话（B2，2026-08-19）。
- * 生产不含预设命令（用户明确：预设仅测试用）。
- */
+// Orthogonal intents (maintained 2026-08-19; original user requests:
+// 2026-08-19 「其它模式，主体部分是一个 ReadonlyInput，点击不能输入但是会弹出
+// 一个 formDialog…在 Dialog 里面进行详细的操作」；同日 R5 拍板 env「以外面
+// 用户自己配置的 env 信息为唯一可信源…改动本质上就是投影到外面」):
+// 1. 系列结构化字段表单（runner/包名/版本/参数；Rust 二进制 + 安装行展示）。
+// 2. Dialog 内系列切换（「暂存并切换」，custom 不参与）与取消/确定会话语义。
+// 3. env 预设行：用户 env 配置行的双向投影（三态，即时生效，不属会话草稿）。
+// 4. 轻量 appId 预览。
+// 妥协声明：表单字段渲染与会话回调集中在受控组件（父组件持有会话状态），
+// 未再拆分——字段集按系列差异大且组件树浅，拆分收益低于引入的间接层；
+// 正交意图清单如上持续维护。生产不含预设命令（用户明确：预设仅测试用）。
 import { Check, ChevronDown } from "lucide-react";
 import * as React from "react";
 
