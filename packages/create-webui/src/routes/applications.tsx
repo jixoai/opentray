@@ -121,7 +121,7 @@ const AppIconTile = ({ app, dataUrl }: { app: AppRecord; dataUrl: string | undef
 
 export const ApplicationsRoute = (): React.JSX.Element => {
   const { messages } = usePreferences();
-  const { navigate } = useWorkbenchNavigation();
+  const { navigate, route } = useWorkbenchNavigation();
   const [apps, setApps] = useState<AppRecord[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "stale">("loading");
   const [confirmTarget, setConfirmTarget] = useState<AppRecord | null>(null);
@@ -160,8 +160,20 @@ export const ApplicationsRoute = (): React.JSX.Element => {
     }
   }, []);
 
+  // 路由激活即刷新：创建完成后切到本页自然呈现最新列表（本页常驻挂载，
+  // 原先只在进程内首次挂载时拉取一次）。另监听创建成功事件做后台预热。
   useEffect(() => {
-    void refresh();
+    if (route === "applications") {
+      void refresh();
+    }
+  }, [route, refresh]);
+
+  useEffect(() => {
+    const onChanged = (): void => {
+      void refresh();
+    };
+    window.addEventListener("create-opentray:apps-changed", onChanged);
+    return () => window.removeEventListener("create-opentray:apps-changed", onChanged);
   }, [refresh]);
 
   const toggleDetail = async (app: AppRecord): Promise<void> => {

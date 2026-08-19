@@ -559,6 +559,8 @@ const selectedIconRefStale = (
             ...(payload.bundlePath === undefined ? {} : { bundlePath: payload.bundlePath }),
             pinHint: payload.pinHint,
           });
+          // 创建完成：广播给应用列表页（挂载态下预热刷新）。
+          window.dispatchEvent(new Event("create-opentray:apps-changed"));
           break;
       }
     };
