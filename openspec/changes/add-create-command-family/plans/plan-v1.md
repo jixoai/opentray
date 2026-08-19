@@ -2,9 +2,9 @@
 
 ## Current Round
 
-- Round: 2（Codex 首轮复核 3.5/10，5 项阻塞 B1–B5 全部采纳，修订 D9 并新增 D11/D12/D13）
-- Status: apply 修订中
-- Previous plan backup: plans/plan-v1.md
+- Round: 1
+- Status: research-plan locked, entering specs/tasks
+- Previous plan backup: 无（首版）
 
 ## Workflow Command Surface
 
@@ -58,11 +58,8 @@
 | D6 | **预设命令 chips 不进生产**（仅原型测试用）；生产 Dialog 无预设行；原型文件保留为 dev-only 参考（不在 vite build inputs，不随包分发） | 用户 2026-08-19 明确声明 |
 | D7 | Rust 两段式仅表单展示：Dialog 呈现 `cargo install <crate>` 安装行（可复制）+ 运行向量；向导试运行与持久化仍只执行运行向量，不代执行 cargo install | 用户认知（Rust 不能直跑）+ 运行向量法律 |
 | D8 | 系列 UI 仅作用于 string 模式；argv 模式与 `?edit=` 编辑流保持现状（向量往返精确）。选择非 custom 系列时若处于 argv 模式则切回 string；argv 模式下系列选择器回落 custom | 既有向量精确法律；编辑流不破坏 |
-| D9 | 单一解析权威：客户端 Dialog 串行化为命令字符串（build），服务端 prime/submit/export 用同一 core 解析器重析（parse）推导系列、appId 与 env 预设；除 env 预设开关与系列作者状态（R2 修订，见 D11）外不新增命令族 API 字段；create-webui 以手工镜像模块复用 core 纯函数（仓内 wizard-protocol.ts 既有模式）+ 少量金样本防漂移测试 | 包边界法律（webui 无 workspace 依赖）+ 双权威风险规避 |
+| D9 | 单一解析权威：客户端 Dialog 串行化为命令字符串（build），服务端 prime/submit/export 用同一 core 解析器重析（parse）推导系列、appId 与 env 预设；不新增命令族 API 字段（除 D4 的 envPresetDisabled）；create-webui 以手工镜像模块复用 core 纯函数（仓内 wizard-protocol.ts 既有模式）+ 少量金样本防漂移测试 | 包边界法律（webui 无 workspace 依赖）+ 双权威风险规避 |
 | D10 | CLI（`--exec` 等flags）与 v1 config schema 本变更不动：系列是向导期创作关注点，持久化产物仍是向量；CLI 分系列提效另立变更 | 范围控制；schema `.strict()` 版本化成本 |
-| D11 | 系列作者状态进 `WizardCommandOptions.family`（可空 FamilyFormState 投影，R2 修订）：向导会话区分「作者状态」与「执行向量」——显式 family 投影是系列/appId/env 预设的服务端权威；命令串仍是执行/持久化向量（Rust 的命令串 = 运行行，如 `rg --json .`）。`cargo install` 头的命令解析为 rust 系列但提交运行必须被拒绝（指引到 Dialog 填写运行二进制），向导绝不代执行安装（D7 收紧）。选择器为显式状态源（不再从命令串派生 UI 系列）：同系列重复点击 no-op；custom 自由输入不因输入了 runner 头而翻转 | Codex B1/B4：纯命令串无法表达 Rust 两段式；派生式系列选择造成输入锁死与误清空 |
-| D12 | 参数保真（R2 修订）：FamilyFormState.args 保存「序列化后的参数串」——parse 侧对剩余 tokens 做对称 POSIX 引号序列化（含空白/引号/元字符的 token 加引号），build 直接拼接，保证 tokenize(build(parse(cmd))) === tokens 往返无损；Dialog 的参数输入即该串（所见即所写）。保证域 = tokenizeCommandLine 的接受域（其既有引号配平法则本就拒绝含奇数单引号的 token，先于本变更；序列化仍按 POSIX 规范实现）。无法无损映射的命令回落 custom 而非静默重写 | Codex B5：`npx tool "hello world"` 曾被改义 |
-| D13 | 分享确认投影（R2 修订）：客户端 `hasEnv` 与服务端同规则——显式 env 非空 或 激活预设（parse 命令 ∈ npm 系列 npx/pnpx 且未 envPresetDisabled 且无显式同名条目）；预设 env 触发的分享必须出现 ack 入口 | Codex B3：预设导致 env_ack_required 而 UI 无入口 |
 
 ## 拒绝路径
 

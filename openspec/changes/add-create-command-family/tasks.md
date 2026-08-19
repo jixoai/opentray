@@ -26,5 +26,16 @@
 
 - [x] 4.1 core bun test 169 绿（新增 command-family 26 项）；create vitest 240 绿（更新 12 项为新法则 + 新增 env 预设 BDD）；create-webui vitest 47 绿（新增镜像金样本 4 项）+ 三包 typecheck 全绿；vision-driven 基线（16 绿、schema valid）。
 - [x] 4.2 向导端到端（真实 server，HOME=/tmp/ot-e2e-home）：prime 六系列 → snapshot 默认值 `web.dsh.npmjs`/`Web Dsh`/`web-dsh-npmjs`、`fortune.golang`/`fortune-golang`、`hello.cowsay.npmjs`（bunx 归一）、`ripgrep.rust`、`format.ruff.python`、`dotnet-format.dotnet`、custom `up.compose.docker`；env 预设直接证据：`envPresetDisabled=false` 运行 npx 子进程 env `npm_config_yes=true`，`=true→undefined` 随开关翻转（子进程写文件取证）；GUI 冒烟：向导页渲染系列选择器/只读命令区/命令选项折叠区无 error overlay，env 指示图标随开关出现/消失，App ID placeholder 为家族推导值。注：spawn 级断言来自 wizard.test 接缝用例（PTY 输出不走 SSE log 事件，故 env 取证用子进程落盘）。
-- [ ] 4.3 self-review + validate/check + 按 phase 提交。
-- [ ] 4.4 Codex 复核（Herdr，gpt-5.6-terra / xhigh，异步）→ 处理结论 → 复验。
+- [x] 4.3 self-review + validate/check + 按 phase 提交（R2 完成后收口，见 review/self-review.md）。
+- [x] 4.4 Codex 复核（Herdr，gpt-5.6-terra / xhigh）第一轮完成：3.5/10，阻塞 B1–B5 全部采纳并修复（见第 5 节）；结论存 /tmp/codex-review-add-create-command-family.md；二次复核进行中。
+
+## 5. Round 2（Codex 复核 3.5/10 → B1–B5 修复）
+
+- [x] 5.1 backup-plan → plan-v1.md；plan.md Round 2：D9 修订 + 新决策 D11（系列作者状态进 WizardCommandOptions.family，Rust crate/binary 不再依赖命令串；cargo install 禁跑）、D12（args 对称 POSIX 引号序列化，保证域=tokenizer 接受域）、D13（客户端 hasEnv 与服务端同规则）。
+- [x] 5.2 B5：core+webui serializeArg/serializeArgs（空白/元字符加引号、空 token → ''）；往返金样本（core 172 绿 / webui 48 绿）。
+- [x] 5.3 B1：WizardCommandOptions.family 作者状态（服务端 familyState() 权威：currentDefaults/commandEnv 统一走它）；submitCommand 对 cargo install 头 failed 拒绝（绝不 spawn）；server 白名单接受投影/null；bin.ts 草稿恢复 commandOptions（含 family/envPresetDisabled）。
+- [x] 5.4 B2：app.tsx /api/command-options body 补 envPresetDisabled + family。
+- [x] 5.5 B3：app.tsx hasEnv 同规则（显式 env 或激活预设 → 分享确认入口）。
+- [x] 5.6 B4：选择器显式状态源（selection 保持用户意图；同系列点击 no-op；custom 输入 runner 头不翻转 UI）；Dialog 确定/切族上传作者状态；rust 作者草稿 per-family 缓存。
+- [x] 5.7 修复后 E2E（真实 server，HOME=/tmp/ot-e2e-home-2）：rust 投影 + 命令串 `rg --json .` → appId `rg.rust`/目录 `rg-rust` 稳定；`cargo install ripgrep` 提交 → failed 指引文案且未 spawn；npm 投影 env true → disabled=true → undefined → family:null 回派生（commandOptions 快照证实）；GUI：选择器/只读区/env 图标渲染无错误浮层。
+- [x] 5.8 测试与已知环境问题：core 172 / create 245 / webui 48 通过，三包 typecheck 绿。create 全量序列运行中既有真实物化用例「force wipes…」「keeps the env overlay…」出现 20s 超时 —— R1 基线（stash R2 后）复现同样失败，单跑/组合跑均绿，判定为环境性漂移而非本变更回归；已如实记录，不在本变更修复。
