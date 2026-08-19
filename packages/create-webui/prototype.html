@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>create-opentray · 命令系列预设原型</title>
+    <script>
+      // 引导期错误面板：模块加载/运行时错误直接显示在页面上，便于原型调试。
+      window.addEventListener("error", (event) => {
+        const panel = document.createElement("pre");
+        panel.dataset.bootError = "";
+        panel.textContent = `BOOT ERROR: ${event.message}\n${event.filename ?? ""}:${event.lineno ?? 0}`;
+        panel.style.cssText =
+          "position:fixed;top:0;left:0;right:0;z-index:2147483000;margin:0;padding:8px;background:#fee;color:#900;font:12px ui-monospace,monospace;white-space:pre-wrap;";
+        document.body.appendChild(panel);
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        const panel = document.createElement("pre");
+        panel.dataset.bootError = "";
+        panel.textContent = `UNHANDLED REJECTION: ${String(event.reason)}`;
+        panel.style.cssText =
+          "position:fixed;top:0;left:0;right:0;z-index:2147483000;margin:0;padding:8px;background:#fee;color:#900;font:12px ui-monospace,monospace;white-space:pre-wrap;";
+        document.body.appendChild(panel);
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/prototypes/command-family/main.tsx"></script>
+  </body>
+</html>
