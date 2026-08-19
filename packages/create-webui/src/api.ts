@@ -70,11 +70,19 @@ export interface UninstallResult {
   readonly manualPinCleanupHint: string;
 }
 
+export interface UninstallError {
+  readonly code: string;
+  readonly message: string;
+  /** Matched running-entry pids (wizard layout) or single pid (registered). */
+  readonly pids?: readonly number[];
+  readonly pid?: number;
+}
+
 export const uninstallApp = (
   key: string,
   options: { readonly stopRunning: boolean; readonly purgeTarget: boolean },
-): Promise<{ readonly status: number; readonly data: UninstallResult | { readonly code: string; readonly message: string } }> =>
-  request<UninstallResult | { code: string; message: string }>(`/api/apps/${encodeURIComponent(key)}/uninstall`, {
+): Promise<{ readonly status: number; readonly data: UninstallResult | UninstallError }> =>
+  request<UninstallResult | UninstallError>(`/api/apps/${encodeURIComponent(key)}/uninstall`, {
     method: "POST",
     body: { ...options },
   });

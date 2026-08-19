@@ -94,6 +94,10 @@ export interface Messages {
     readonly uninstallTitle: string;
     readonly uninstallDescription: string;
     readonly uninstallWizardDescription: string;
+    readonly stopRunningTitle: string;
+    readonly stopRunningDescription: string;
+    readonly stopRunningConfirm: string;
+    readonly stopRunningPids: string;
     readonly uninstallPurge: string;
     readonly uninstallPurgeHint: string;
     readonly uninstallPinHint: string;
@@ -182,6 +186,11 @@ const en: Messages = {
       "The registration and its payload link are removed. Dock/taskbar pins must be removed manually.",
     uninstallWizardDescription:
       "The wizard project directory and its materialized app bundle are removed after stopping a running entry when authorized. Dock/taskbar pins must be removed manually.",
+    stopRunningTitle: "Force stop and uninstall?",
+    stopRunningDescription:
+      "The application is still running (likely a leftover from an earlier session). Continuing terminates its process tree first, then removes the project.",
+    stopRunningConfirm: "Force stop and uninstall",
+    stopRunningPids: "Running pids",
     uninstallPurge: "Also delete the linked external target",
     uninstallPurgeHint:
       "Deletes the external directory itself after identity revalidation. This cannot be undone.",
@@ -268,6 +277,10 @@ const zhCN: DeepPartial<Messages> = {
     uninstallTitle: "卸载应用？",
     uninstallDescription: "将删除注册信息与负载链接。Dock/任务栏图标需手动移除。",
     uninstallWizardDescription: "将停止运行中的应用（如已授权）并删除项目目录与已物化的应用 Bundle。Dock/任务栏图标需手动移除。",
+    stopRunningTitle: "强制停止并卸载？",
+    stopRunningDescription: "应用仍在运行（可能是上次会话的残留）。继续将先终止其进程树，再删除项目目录与已物化的 Bundle。",
+    stopRunningConfirm: "强制停止并卸载",
+    stopRunningPids: "运行中的进程",
     uninstallPurge: "同时删除链接的外部目录",
     uninstallPurgeHint: "重新校验身份后删除外部目录本身，此操作不可撤销。",
     uninstallPinHint: "macOS Dock 与 Windows 任务栏图标由系统管理，请手动移除。",

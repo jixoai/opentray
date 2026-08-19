@@ -26,6 +26,7 @@ import {
   openApp,
   uninstallApp,
   type AppRecord,
+  type UninstallError,
 } from "../api";
 import { ExportDialog, type ExportRunner } from "./export";
 import { Button } from "../components/ui/button";
@@ -124,6 +125,8 @@ export const ApplicationsRoute = (): React.JSX.Element => {
   const [apps, setApps] = useState<AppRecord[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "stale">("loading");
   const [confirmTarget, setConfirmTarget] = useState<AppRecord | null>(null);
+  // 运行占用（残留进程）：409 后的第二段确认——用户显式授权强制停止。
+  const [stopTarget, setStopTarget] = useState<{ app: AppRecord; pids: readonly number[] } | null>(null);
   const [purge, setPurge] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [exportTarget, setExportTarget] = useState<AppRecord | null>(null);
@@ -186,36 +189,63 @@ export const ApplicationsRoute = (): React.JSX.Element => {
     );
   };
 
+  const reportUninstall = (data: {
+    registrationPath?: string;
+    projectPath?: string;
+    targetRetained?: boolean;
+    targetDeleted?: boolean;
+    payloadPath?: string;
+    manualPinCleanupHint: string;
+  }): void => {
+    setResult(
+      [
+        data.projectPath !== undefined ? data.projectPath : "",
+        data.targetRetained === true ? `${messages.applications.uninstallRetained} ${data.payloadPath ?? ""}` : "",
+        data.targetDeleted === true ? `${messages.applications.uninstallDeleted} ${data.payloadPath ?? ""}` : "",
+        data.manualPinCleanupHint,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  };
+
+  const runUninstall = async (
+    target: AppRecord,
+    options: { readonly stopRunning: boolean },
+  ): Promise<void> => {
+    // 端点按目录 key 寻址：向导与注册两种布局都能卸载（需求 #11）。
+    const response = await uninstallApp(target.key, { ...options, purgeTarget: purge });
+    if (response.status === 200) {
+      reportUninstall(response.data as Parameters<typeof reportUninstall>[0]);
+    } else {
+      const data = response.data as UninstallError;
+      if (
+        response.status === 409 &&
+        data.code === "app_running" &&
+        (data.pids !== undefined || data.pid !== undefined)
+      ) {
+        // 运行占用（常见为上次会话残留）：交由第二段确认弹窗授权强制停止。
+        const pids = data.pids ?? (data.pid !== undefined ? [data.pid] : []);
+        setStopTarget({ app: target, pids });
+        return;
+      }
+      setResult(data.message ?? messages.common.error);
+    }
+    await refresh();
+  };
+
   const confirmUninstall = async (): Promise<void> => {
     const target = confirmTarget;
     setConfirmTarget(null);
     if (target === null) return;
-    // 端点按目录 key 寻址：向导与注册两种布局都能卸载（需求 #11）。
-    const response = await uninstallApp(target.key, { stopRunning: false, purgeTarget: purge });
-    if (response.status === 200) {
-      const data = response.data as {
-        registrationPath?: string;
-        projectPath?: string;
-        targetRetained?: boolean;
-        targetDeleted?: boolean;
-        payloadPath?: string;
-        manualPinCleanupHint: string;
-      };
-      setResult(
-        [
-          data.projectPath !== undefined ? data.projectPath : "",
-          data.targetRetained === true ? `${messages.applications.uninstallRetained} ${data.payloadPath ?? ""}` : "",
-          data.targetDeleted === true ? `${messages.applications.uninstallDeleted} ${data.payloadPath ?? ""}` : "",
-          data.manualPinCleanupHint,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      );
-    } else {
-      const data = response.data as { message?: string };
-      setResult(data.message ?? messages.common.error);
-    }
-    await refresh();
+    await runUninstall(target, { stopRunning: false });
+  };
+
+  const confirmForceStopUninstall = async (): Promise<void> => {
+    const target = stopTarget;
+    setStopTarget(null);
+    if (target === null) return;
+    await runUninstall(target.app, { stopRunning: true });
   };
 
   const exportRunner: ExportRunner = (options) => {
@@ -399,6 +429,29 @@ export const ApplicationsRoute = (): React.JSX.Element => {
           <AlertDialogFooter>
             <AlertDialogCancel>{messages.common.cancel}</AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmUninstall()}>{messages.applications.uninstall}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={stopTarget !== null} onOpenChange={(open) => { if (!open) setStopTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{messages.applications.stopRunningTitle}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {messages.applications.stopRunningDescription}
+              <span className="tech-ltr mt-2 block">
+                {messages.applications.stopRunningPids}: {stopTarget?.pids.join(", ")}
+              </span>
+              <span className="tech-ltr mt-1 block truncate">
+                {stopTarget?.app.appId ?? stopTarget?.app.key}
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <p className="text-muted-foreground text-xs">{messages.applications.uninstallPinHint}</p>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{messages.common.cancel}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmForceStopUninstall()}>
+              {messages.applications.stopRunningConfirm}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
