@@ -14,7 +14,6 @@ import { toProjectDirectoryName } from "@create-opentray/core";
 import type { FamilyFormState } from "@create-opentray/core";
 import {
   deriveFamily,
-  envPresetsFor,
   parseCommandTokens,
 } from "@create-opentray/core";
 import {
@@ -88,12 +87,11 @@ export interface WizardCommandOptions {
   readonly cwd: string;
   readonly env: readonly WizardEnvEntry[];
   readonly argsMode: "string" | "array";
-  /** True = 不注入系列环境变量预设（npx/pnpx 的 npm_config_yes=true）。 */
-  readonly envPresetDisabled: boolean;
   /**
-   * 系列作者状态（plan.md D11 / Codex B1）：显式投影是系列/appId/env 预设的
+   * 系列作者状态（plan.md D11 / Codex B1）：显式投影是系列/appId 推导的
    * 服务端权威（Rust 的 crate/binary 无法从命令串恢复）；null = 按命令串派生。
-   * 命令串始终是执行/持久化向量。
+   * 命令串始终是执行/持久化向量。env 预设（npm_config_yes 等）不再有隐形
+   * 注入开关——env 行是唯一可信源（R10 用户拍板）。
    */
   readonly family: FamilyFormState | null;
 }
@@ -102,7 +100,6 @@ export const DEFAULT_COMMAND_OPTIONS: WizardCommandOptions = {
   cwd: "",
   env: [],
   argsMode: "string",
-  envPresetDisabled: false,
   family: null,
 };
 
@@ -621,16 +618,8 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         env[entry.key.trim()] = entry.value;
       }
     }
-    // 系列环境变量预设（add-create-command-family D4/D11）：npx/pnpx 命令注入
-    // npm_config_yes=true 消除首跑安装确认；用户显式配置的同名条目优先，
-    // 预设永不覆盖，且可经 envPresetDisabled 整体关闭。
-    if (!commandOptions.envPresetDisabled) {
-      for (const preset of envPresetsFor(familyState())) {
-        if (!(preset.key in env)) {
-          env[preset.key] = preset.value;
-        }
-      }
-    }
+    // 系列环境变量预设（D4 R10）：env 行是唯一可信源，无隐形注入——
+    // npx/pnpx 的 npm_config_yes 由 UI 投影为 env 行的显式条目。
     return env;
   };
 

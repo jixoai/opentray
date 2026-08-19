@@ -94,3 +94,10 @@
 - [x] 12.2 R8-B2（意图注释治理）：command-family-input.tsx 与 family-form-dialog.tsx 头部补齐用户原始需求（时间戳）+ 正交意图清单 + 妥协声明（会话 reducer 拆分推迟至归档后重构轮，理由记录）。
 - [x] 12.3 回归：webui 62 / create 249 全绿；typecheck 绿；生产资产重建。core 全量在复核侧环境因宿主进程检查用例失败（lifecycle/resources，非本变更面）；我侧 core 定向 32 绿。
 - [x] 12.4 R9 针对性复核（/tmp/codex-review-add-create-command-family-r8.md）：B1/B2 双双判定闭合、无新阻塞，**综合评分 9.4/10（7.8 → +1.6），通过本轮复核**。评分轨迹：3.5 → 5.5 → 6.0 → 5.0 → 6.5 → 6.0 → 7.8 → 9.4。遗留非阻塞（复核明确不影响闭合）：确定路径 callback recorder 精确断言作者投影、command-display/command-options 分离 SSE 事件乱序测试。
+
+## 13. Round 10（用户浏览器验收：env 投影实时同步缺陷 → 语义终版）
+
+- [x] 13.1 用户验收发现：外部移除 npm_config_yes 后 Dialog 未显示「+ 启用」——根因是「默认注入」隐形状态与 envPresetDisabled 残留开关与「唯一可信源」心智不符。用户拍板：外部移除 = 未启用（+ 启用入口）。
+- [x] 13.2 语义终版（D4 R10）：废除隐形注入与 envPresetDisabled 字段——预设仅以 env 行显式条目生效（wizard commandEnv 移除注入逻辑；server 白名单/bin 草稿归一/protocol/app POST 移除字段）；Dialog 二态（explicit 显值 / off 显示「+ 启用」）；输入行图标 = 条目存在才点亮，Tooltip 统一「来自环境变量配置」；移除 = 纯删条目。
+- [x] 13.3 测试更新：注入类用例改显式（无条目不注入/显式条目生效/删除即关闭/作者状态不驱动 env/冻结导出含显式条目）；spec delta 需求重写为「Explicit Projection Of The User Env List」。
+- [x] 13.4 回归：webui 62 / create 249 全绿；typecheck 绿。

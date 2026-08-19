@@ -76,12 +76,13 @@ const runnerChips = (
   </ToggleGroup>
 );
 
-/** env 预设在外层 env 配置行上的投影状态（D4 R5：env 行是唯一可信源）。 */
+/** env 预设在外层 env 配置行上的投影状态（D4 R10：env 行是唯一可信源，
+ *  无隐形注入——有条目 = 启用并显示用户值；无条目 = 未启用（+ 启用入口）。 */
 export interface EnvPresetProjection {
   readonly key: string;
   readonly defaultNote: string;
-  /** explicit = env 行已有用户/投影写入的同名条目（value 为用户值）。 */
-  readonly state: "explicit" | "default" | "off";
+  /** explicit = env 行已有同名条目（value 为生效值，last-wins）。 */
+  readonly state: "explicit" | "off";
   readonly explicitValue?: string;
 }
 
@@ -416,7 +417,7 @@ export function FamilyFormDialog({
               <button
                 type="button"
                 className="rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:bg-accent hover:text-foreground hover:underline"
-                title="在环境变量配置中写入该条目"
+                title={envPreset.defaultNote}
                 onClick={() => onEnvPresetChange("enable")}
               >
                 + {envPreset.key}=true（启用）
@@ -424,23 +425,14 @@ export function FamilyFormDialog({
             ) : (
               <span
                 className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/60 py-0.5 pr-1 pl-1.5 font-mono text-[11px]"
-                title={
-                  envPreset.state === "explicit"
-                    ? "来自下方「环境变量」配置（唯一可信源），两侧同步"
-                    : envPreset.defaultNote
-                }
+                title="来自下方「命令选项 → 环境变量」配置（唯一可信源），两侧同步"
               >
-                {envPreset.key}=
-                {envPreset.state === "explicit"
-                  ? (envPreset.explicitValue ?? "")
-                  : "true"}
-                {envPreset.state === "explicit" ? (
-                  <span className="font-sans text-[10px] text-muted-foreground">env 已配置</span>
-                ) : null}
+                {envPreset.key}={envPreset.explicitValue ?? ""}
+                <span className="font-sans text-[10px] text-muted-foreground">env 已配置</span>
                 <button
                   type="button"
                   aria-label="移除环境变量预设"
-                  title="从环境变量配置中移除该条目，并关闭默认注入"
+                  title={envPreset.defaultNote}
                   className="rounded px-1 text-muted-foreground transition-colors hover:text-foreground"
                   onClick={() => onEnvPresetChange("disable")}
                 >
@@ -448,11 +440,6 @@ export function FamilyFormDialog({
                 </button>
               </span>
             )}
-            {envPreset.state === "default" ? (
-              <span className="text-[11px] text-muted-foreground" title={envPreset.defaultNote}>
-                {envPreset.defaultNote}
-              </span>
-            ) : null}
           </div>
         ) : (
           <p className="text-[11px] text-muted-foreground">

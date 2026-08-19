@@ -176,25 +176,19 @@ export function CommandFamilyInput({
     presetDefinition === undefined
       ? undefined
       : explicitEnvValue(commandOptions.env, presetDefinition.key);
+  // R10：env 行完全唯一——有条目 = 启用（显用户值），无条目 = 未启用（+ 启用）。
   const presetProjection: EnvPresetProjection | null =
     presetDefinition === undefined
       ? null
       : {
           key: presetDefinition.key,
           defaultNote: presetDefinition.note,
-          state:
-            explicitValue !== undefined
-              ? "explicit"
-              : commandOptions.envPresetDisabled
-                ? "off"
-                : "default",
+          state: explicitValue !== undefined ? "explicit" : "off",
           ...(explicitValue !== undefined ? { explicitValue } : {}),
         };
-  const carriesPreset =
-    presetDefinition !== undefined &&
-    (explicitValue !== undefined || !commandOptions.envPresetDisabled);
+  const carriesPreset = explicitValue !== undefined;
 
-  /** 启用 = 在 env 行写入条目（投影到唯一可信源）；移除 = 删条目 + 关默认注入。 */
+  /** 启用 = 在 env 行写入条目（投影到唯一可信源）；移除 = 删条目。 */
   const applyEnvPresetChange = (action: "enable" | "disable"): void => {
     const key = presetDefinition?.key ?? "npm_config_yes";
     const env =
@@ -204,11 +198,7 @@ export function CommandFamilyInput({
             { key, value: "true" },
           ]
         : commandOptions.env.filter((entry) => entry.key.trim() !== key);
-    onCommandOptionsChange({
-      ...commandOptions,
-      env,
-      envPresetDisabled: action === "disable",
-    });
+    onCommandOptionsChange({ ...commandOptions, env });
   };
 
   const switchFamily = (next: Family): void => {
@@ -407,12 +397,10 @@ export function CommandFamilyInput({
               <div className="space-y-1 text-left">
                 <p className="text-[11px] opacity-70">环境变量预设</p>
                 <p className="font-mono text-xs">
-                  {presetDefinition.key}={explicitValue ?? "true"}
+                  {presetDefinition.key}={explicitValue}
                 </p>
                 <p className="text-[11px] opacity-70">
-                  {explicitValue !== undefined
-                    ? "来自「命令选项 → 环境变量」配置（唯一可信源，两侧同步）"
-                    : presetDefinition.note}
+                  来自「命令选项 → 环境变量」配置（唯一可信源，两侧同步）
                 </p>
               </div>
             </TooltipContent>

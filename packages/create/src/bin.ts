@@ -142,9 +142,6 @@ const normalizeDraftCommandOptions = (
   if (source.argsMode === "string" || source.argsMode === "array") {
     patch.argsMode = source.argsMode;
   }
-  if (typeof source.envPresetDisabled === "boolean") {
-    patch.envPresetDisabled = source.envPresetDisabled;
-  }
   if (Array.isArray(source.env)) {
     const entries = source.env.filter(
       (entry): entry is { key: string; value: string } =>

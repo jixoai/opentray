@@ -43,7 +43,6 @@ import {
   type WizardState,
   type WizardEnvEntry,
 } from "@/wizard-protocol";
-import { envPresetsFor, parseCommand } from "@/lib/command-family";
 
 const EMPTY_VALUES: WizardFormValues = {
   appId: "",
@@ -820,7 +819,6 @@ const selectedIconRefStale = (
             cwd: next.cwd,
             env: next.env,
             argsMode: next.argsMode,
-            envPresetDisabled: next.envPresetDisabled,
             family: next.family,
           });
         }}
@@ -1017,16 +1015,7 @@ const selectedIconRefStale = (
       <ExportDialog
         open={shareOpen}
         subtitle={frozenValues?.appId ?? displayCommand}
-        hasEnv={
-          commandOptions.env.some((entry) => entry.key.trim().length > 0) ||
-          // 服务端同规则（plan.md D13 / Codex B3）：激活的系列 env 预设也
-          // 要求分享确认，否则服务端 env_ack_required 会卡死分享。
-          envPresetsFor(commandOptions.family ?? parseCommand(displayCommand)).some(
-            (preset) =>
-              !commandOptions.envPresetDisabled &&
-              !commandOptions.env.some((entry) => entry.key.trim() === preset.key),
-          )
-        }
+        hasEnv={commandOptions.env.some((entry) => entry.key.trim().length > 0)}
         share
         runner={shareRunner}
         onClose={() => setShareOpen(false)}

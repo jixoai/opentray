@@ -475,13 +475,9 @@ describe("wizard session", () => {
       "--x=1",
     ]);
     // cwd default is USER_HOME (owner law); relative paths resolve from home;
-    // env overlay drops empty keys; the npx env preset injects npm_config_yes.
+    // env overlay drops empty keys (R10: 无隐形预设注入).
     expect(harness.lastRunOptions()?.cwd).toBe("/tmp/wizard-home/sub/dir");
-    expect(harness.lastRunOptions()?.env).toEqual({
-      FOO: "bar",
-      BAZ: "qux",
-      npm_config_yes: "true",
-    });
+    expect(harness.lastRunOptions()?.env).toEqual({ FOO: "bar", BAZ: "qux" });
     // The command display joins for presentation only.
     const display = harness.events.find(
       (event): event is Extract<WizardEvent, { type: "command-display" }> =>
@@ -490,25 +486,19 @@ describe("wizard session", () => {
     expect(display?.command).toBe("npx weird arg with  spaces --x=1");
   });
 
-  it("injects the npm-series env preset, honors explicit entries, and disables cleanly", async () => {
+  it("env preset comes only from explicit entries (D4 R10: env 行唯一可信源)", async () => {
     const harness = createHarness({ homeDir: "/tmp/wizard-home" });
-    // npx 命令自动注入 npm_config_yes=true（add-create-command-family D4）。
+    // 无隐形注入：npx 命令不会自动携带 npm_config_yes，除非 env 行显式配置
+    //（UI 的「+ 启用」即写入该条目）。
     await harness.session.submitCommand("npx tool serve");
-    expect(harness.lastRunOptions()?.env).toEqual({ npm_config_yes: "true" });
-    // 用户显式配置的同名条目优先，预设永不覆盖。
+    expect(harness.lastRunOptions()?.env).toBeUndefined();
+    // 显式条目生效（用户值优先）。
     harness.session.updateCommandOptions({ env: [{ key: "npm_config_yes", value: "false" }] });
     await harness.session.submitCommand("npx tool serve");
     expect(harness.lastRunOptions()?.env).toEqual({ npm_config_yes: "false" });
-    // envPresetDisabled 整体关闭注入（清掉上面的显式条目再验证）；
-    // 空 overlay 时向导不传 env 键（既有 spawn 接缝契约）。
-    harness.session.updateCommandOptions({ env: [], envPresetDisabled: true });
-    await harness.session.submitCommand("npx tool serve");
-    expect(harness.lastRunOptions()?.env).toBeUndefined();
-    // 非 npx/pnpx runner 与其它系列不注入。
+    // 删除条目 = 关闭（外部移除即回到未启用，无残留开关）。
     harness.session.updateCommandOptions({ env: [] });
-    await harness.session.submitCommand("bunx tool serve");
-    expect(harness.lastRunOptions()?.env).toBeUndefined();
-    await harness.session.submitCommand("go run rsc.io/fortune@latest");
+    await harness.session.submitCommand("npx tool serve");
     expect(harness.lastRunOptions()?.env).toBeUndefined();
   });
 
@@ -546,7 +536,8 @@ describe("wizard session", () => {
     await harness.session.submitCommand("cowsay hello");
     expect(lastFormDefaults(harness.events)?.appId).toBe("hello.cowsay.npmjs");
     expect(harness.lastRunOptions()?.tokens).toEqual(["cowsay", "hello"]);
-    expect(harness.lastRunOptions()?.env).toEqual({ npm_config_yes: "true" });
+    // R10：作者状态不再驱动 env 预设——仅 env 行显式条目生效。
+    expect(harness.lastRunOptions()?.env).toBeUndefined();
   });
 
   it("refuses to run cargo install commands (D7/D11 / Codex B1)", async () => {
@@ -723,7 +714,10 @@ describe("wizard session", () => {
     });
     harness.session.updateCommandOptions({
       argsMode: "string",
-      env: [{ key: "TOKEN", value: "sekret" }],
+      env: [
+        { key: "TOKEN", value: "sekret" },
+        { key: "npm_config_yes", value: "true" },
+      ],
     });
     await harness.session.submitCommand("npx somecommand start --xx");
     harness.setListeners(new Set([19080]));
@@ -854,6 +848,10 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
   it("exports a sh script from the frozen state without creating anything", async () => {
     const harness = createHarness();
     harness.session.prime("npx @deepseek-ai/dsh@latest web");
+    // R10：env 行唯一可信源——显式写入预设条目后随冻结参数进入分享脚本。
+    harness.session.updateCommandOptions({
+      env: [{ key: "npm_config_yes", value: "true" }],
+    });
     harness.session.confirm();
     expect(harness.session.state).toBe("frozen");
 
@@ -863,7 +861,6 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
     expect(result.filename).toBe("create-opentray.sh");
     // appId 由 prime 默认推导（npm 系列尾段 npmjs）。
     expect(result.content).toContain("web.dsh.npmjs");
-    // npx 环境变量预设随冻结参数进入分享脚本。
     expect(result.content).toContain("npm_config_yes=true");
     // 向量在分享时现算（resolveVector seam）。
     expect(result.content).toContain("/resolved/npx");

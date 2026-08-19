@@ -504,9 +504,6 @@ const handleApi = async (
         }
         patch.env = entries;
       }
-      if (typeof body.envPresetDisabled === "boolean") {
-        patch.envPresetDisabled = body.envPresetDisabled;
-      }
       // 系列作者状态（D11）：共享归一器（与草稿恢复同一接受集合）。
       {
         const normalized = normalizeFamilyProjection(body.family);

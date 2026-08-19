@@ -140,43 +140,32 @@ the package name.
 - **WHEN** it is parsed
 - **THEN** it SHALL fall back to the custom family preserving the argument tokens exactly, never reinterpreting `path with spaces` as a package name
 
-### Requirement: NPM-Series Commands SHALL Auto-Inject The Confirmation-Skipping Env Preset
+### Requirement: NPM-Series Env Preset SHALL Be An Explicit Projection Of The User Env List
 
-The wizard SHALL automatically add the environment preset
-`npm_config_yes=true` (skip the first-run install confirmation, equivalent to
-`-y`) whenever the submitted command parses as the npm family with runner
-`npx` or `pnpx`, merging it into the run environment overlay and into the
-persisted/frozen command env of generated apps and exports, unless the user
-explicitly disabled the preset. The user-configured environment entry list is
-the single source of truth for this variable: an explicit `npm_config_yes`
-entry always wins over the injected default, the form dialog's preset control
-is a live projection of that entry list (enabling writes the entry, removing
-deletes it and disables the default injection), and manual edits outside the
-dialog are reflected back into the dialog immediately. The preset SHALL be
-visible in the command row as an indicator icon whose tooltip (hover and
-click-to-pin) discloses that the variable will be carried (user-configured
-value or default), and the existing env-export acknowledgement law SHALL apply
-unchanged to the injected entries.
+The user-configured environment entry list SHALL be the single source of truth
+for the npm-series env preset (`npm_config_yes=true`, skip the first-run
+install confirmation): the preset SHALL take effect only as an explicit entry
+in that list, with no implicit injection and no separate enable/disable flag.
+The form dialog's preset control SHALL be a live two-way projection of the
+list — enabling writes the entry, removing deletes it, and manual edits
+outside the dialog are reflected back immediately (the last duplicate entry
+wins, matching the spawn/export overlay). The command row indicator icon SHALL
+light exactly when the entry exists, disclosing the effective value and its
+env-list provenance. Existing env-export acknowledgement law applies unchanged.
 
-#### Scenario: Preset is injected on run and in the generated app
+#### Scenario: Preset is an explicit entry on run and in the generated app
 
-- **GIVEN** the command `npx @deepseek-ai/dsh@latest web` primed
+- **GIVEN** the command `npx @deepseek-ai/dsh@latest web` primed and `npm_config_yes=true` present in the env list
 - **WHEN** the user runs it and later confirms generation
 - **THEN** the spawned process env SHALL include `npm_config_yes=true`
 - **AND** the generated app config command env SHALL include the same entry
 
 #### Scenario: The user env list is the single source of truth
 
-- **GIVEN** an npm-series npx command primed
-- **WHEN** the user manually sets `npm_config_yes=false` in the command-options env list
+- **GIVEN** an npm-series npx command primed without the entry
+- **WHEN** the command runs
+- **THEN** no `npm_config_yes` SHALL be injected implicitly
+- **WHEN** the user sets `npm_config_yes=false` in the command-options env list
 - **THEN** the spawned env SHALL carry `false` and the dialog SHALL show the entry as user-configured
-- **WHEN** the user enables the preset from the dialog
-- **THEN** the env list SHALL contain `npm_config_yes=true`
-- **WHEN** the user removes the preset from the dialog
-- **THEN** the env entry SHALL be deleted and the default injection SHALL stay off across drafts and reloads
-
-#### Scenario: Other runners and families inject nothing
-
-- **GIVEN** commands using `bunx`, `yarn dlx`, `deno run`, `uvx`, `go run`, `dnx`, or a custom command
-- **WHEN** primed and run
-- **THEN** no environment preset SHALL be injected
+- **WHEN** the user removes the entry (from the dialog or the env list)
+- **THEN** the preset SHALL be off — the dialog shows the enable affordance, the indicator icon disappears, and nothing is injected
