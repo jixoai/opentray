@@ -6,6 +6,8 @@
  * Dialog 确定把「作者状态投影」上传服务端（family 字段，Rust 的 crate/binary
  * 无法从命令串恢复），命令串（运行行）仍是执行/持久化向量。npm 系列
  * （npx/pnpx）env 预设以行内 Terminal 图标披露（Tooltip：hover + click 钉住）。
+ * B2（2026-08-19）：未确认字段编辑属于一次 Dialog 会话；会话内可跨系列暂存，
+ * 但不会污染服务端投影缓存，取消时整体丢弃。
  */
 import { ChevronDown, Terminal } from "lucide-react";
 import * as React from "react";
@@ -47,6 +49,34 @@ const familyTemplate = (family: Family): FamilyFormState => ({
   runner: family === "python" ? "uvx" : family === "npm" ? "npx" : "",
 });
 
+type StructuredFamily = Exclude<Family, "custom">;
+
+interface DialogSession {
+  /** 打开时固定的取消锚点；后续 SSE 不得改写它。 */
+  readonly snapshot: {
+    readonly family: StructuredFamily;
+    readonly state: FamilyFormState;
+  };
+  readonly currentFamily: StructuredFamily;
+  /** 同一会话内各系列的草稿；只有确定才会进入投影缓存。 */
+  readonly drafts: Readonly<Partial<Record<StructuredFamily, FamilyFormState>>>;
+  /** 每个会话草稿的最后一个权威基线，用于判定是否已有本地编辑。 */
+  readonly bases: Readonly<Partial<Record<StructuredFamily, FamilyFormState>>>;
+}
+
+const isStructuredFamily = (family: Family): family is StructuredFamily =>
+  family !== "custom";
+
+const sameFamilyState = (left: FamilyFormState, right: FamilyFormState): boolean =>
+  left.family === right.family &&
+  left.runner === right.runner &&
+  left.runnerFlags === right.runnerFlags &&
+  left.pkg === right.pkg &&
+  left.version === right.version &&
+  left.args === right.args &&
+  left.binary === right.binary &&
+  left.raw === right.raw;
+
 export function CommandFamilyInput({
   command,
   onCommandChange,
@@ -56,32 +86,75 @@ export function CommandFamilyInput({
   onRun,
 }: CommandFamilyInputProps): React.JSX.Element {
   const parsed = React.useMemo(() => parseCommand(command), [command]);
+  const serverFamily = commandOptions.family;
+
+  // 已确定状态或 SSE 作者投影的缓存。未确认 Dialog 草稿只存在于 dialogSession，
+  // 所以新投影永远可以刷新这里，且不会在稍后的切换中被陈旧草稿反向上传。
+  const projectionCacheRef = React.useRef<Partial<Record<Family, FamilyFormState>>>({});
+  const [dialogSession, setDialogSession] = React.useState<DialogSession | null>(null);
 
   // 显式选择（Codex B4 + R2-B1）：初值与外部注入（快照/草稿恢复/SSE）都来自
   // 服务端作者状态投影；一旦用户在本地选择即保持用户意图，custom 自由输入
   // runner 头不会翻转 UI，同系列重复点击为 no-op。
-  const serverFamily = commandOptions.family;
   const [selection, setSelection] = React.useState<Family | null>(
     serverFamily?.family ?? null,
   );
   React.useEffect(() => {
-    if (serverFamily !== null) {
+    if (serverFamily === null) {
+      return;
+    }
+
+    projectionCacheRef.current[serverFamily.family] = serverFamily;
+    if (dialogSession === null) {
       setSelection((current) =>
         current === serverFamily.family ? current : serverFamily.family,
       );
-      // 服务端投影播种（Codex R6-B2）：重连/草稿恢复的作者状态写入本地
-      // 缓存，使「恢复 → 切走 → 切回」不会退化为空模板。
-      if (authoringRef.current[serverFamily.family] === undefined) {
-        authoringRef.current[serverFamily.family] = serverFamily;
-      }
+      return;
     }
-  }, [serverFamily]);
+
+    // 合流规则（D11a）：当前 Dialog 系列尚未编辑才随新投影刷新；已经编辑的
+    // 草稿留在会话中，只有用户明确确定才会写回。取消则丢弃它并采用此缓存投影。
+    if (
+      !isStructuredFamily(serverFamily.family) ||
+      dialogSession.currentFamily !== serverFamily.family
+    ) {
+      return;
+    }
+    setDialogSession((current) => {
+      if (
+        current === null ||
+        current.currentFamily !== serverFamily.family
+      ) {
+        return current;
+      }
+      const draft = current.drafts[serverFamily.family];
+      const base = current.bases[serverFamily.family];
+      if (
+        draft === undefined ||
+        base === undefined ||
+        !sameFamilyState(draft, base)
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        drafts: { ...current.drafts, [serverFamily.family]: serverFamily },
+        bases: { ...current.bases, [serverFamily.family]: serverFamily },
+      };
+    });
+  }, [serverFamily, dialogSession === null]);
   const family = selection ?? parsed.family;
 
-  // 各系列最近一次作者草稿（Codex B1）：Rust 的 crate/binary 从命令串恢复
-  // 不出来，Dialog 初值优先级 = 服务端投影 > 本地草稿 > 命令解析 > 空模板。
-  const authoringRef = React.useRef<Partial<Record<Family, FamilyFormState>>>({});
-  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const stateForFamily = (next: Family): FamilyFormState => {
+    if (serverFamily !== null && serverFamily.family === next) {
+      return serverFamily;
+    }
+    const cached = projectionCacheRef.current[next];
+    if (cached !== undefined) {
+      return cached;
+    }
+    return parsed.family === next ? parsed : familyTemplate(next);
+  };
 
   // env 图标 Tooltip：hover/focus 即时显示，click 额外「钉住」。
   const [envHovered, setEnvHovered] = React.useState(false);
@@ -91,7 +164,11 @@ export function CommandFamilyInput({
   // env 预设投影（D4 R5）：env 配置行是唯一可信源，预设是它的双向投影。
   // 图标 = 「该命令将携带 npm_config_yes」：显式条目（用户值任意）或默认
   // 注入均点亮；Tooltip 区分来源。重复键取最后一项（与服务端 last-wins 一致）。
-  const famState = commandOptions.family ?? parsed;
+  const dialogDraft =
+    dialogSession === null
+      ? undefined
+      : dialogSession.drafts[dialogSession.currentFamily];
+  const famState = dialogDraft ?? commandOptions.family ?? parsed;
   const presetDefinition = envPresetsFor(famState)[0];
   const explicitValue =
     presetDefinition === undefined
@@ -142,12 +219,11 @@ export function CommandFamilyInput({
       ...commandOptions,
       ...(commandOptions.argsMode === "array" ? { argsMode: "string" as const } : {}),
     };
-    // 草稿保留（Codex R4-B2）：该系列已有前端缓存（含未确定的编辑）则直接
-    // 恢复，只有首次进入才落空模板——切走再切回，表单不丢。
-    const cached = authoringRef.current[next];
-    const state = cached !== undefined ? cached : familyTemplate(next);
-    if (cached === undefined) {
-      authoringRef.current[next] = state;
+    // 服务端投影优先；没有投影时才用已确定缓存、命令解析或空模板。这里绝不
+    // 读取 Dialog 未确认草稿，避免切换操作把它静默上传覆盖 SSE 的新投影。
+    const state = stateForFamily(next);
+    if (projectionCacheRef.current[next] === undefined) {
+      projectionCacheRef.current[next] = state;
     }
     // 非 custom 的作者状态上传（rust 空模板的命令行为空，只读区引导进入
     // Dialog；custom 不上传投影，保持按命令派生）。
@@ -159,17 +235,82 @@ export function CommandFamilyInput({
   };
 
   const openDialog = (): void => {
-    setDialogOpen(true);
+    if (!isStructuredFamily(family)) {
+      return;
+    }
+    const initial = stateForFamily(family);
+    setDialogSession({
+      snapshot: { family, state: initial },
+      currentFamily: family,
+      drafts: { [family]: initial },
+      bases: { [family]: initial },
+    });
   };
 
-  const dialogInitial: FamilyFormState =
-    serverFamily !== null && serverFamily.family === family
-      ? serverFamily
-      : authoringRef.current[family] !== undefined
-        ? (authoringRef.current[family] as FamilyFormState)
-        : parsed.family === family
-          ? parsed
-          : familyTemplate(family);
+  const updateDialogDraft = (draft: FamilyFormState): void => {
+    setDialogSession((current) => {
+      if (current === null || current.currentFamily !== draft.family) {
+        return current;
+      }
+      return {
+        ...current,
+        drafts: { ...current.drafts, [draft.family]: draft },
+      };
+    });
+  };
+
+  const switchDialogFamily = (next: StructuredFamily): void => {
+    setDialogSession((current) => {
+      if (current === null || current.currentFamily === next) {
+        return current;
+      }
+      const previousDraft = current.drafts[next];
+      const previousBase = current.bases[next];
+      const authoritative = stateForFamily(next);
+      // 离开后没有字段编辑的系列仍是 clean：返回时必须采用期间的新 SSE
+      // 投影。只有 draft 相对 base 已变时，才保留用户明确尚未确定的编辑。
+      const isDirty =
+        previousDraft !== undefined &&
+        previousBase !== undefined &&
+        !sameFamilyState(previousDraft, previousBase);
+      const nextState = isDirty ? previousDraft : authoritative;
+      return {
+        ...current,
+        currentFamily: next,
+        drafts: { ...current.drafts, [next]: nextState },
+        bases: { ...current.bases, [next]: isDirty ? previousBase : authoritative },
+      };
+    });
+  };
+
+  const cancelDialog = (): void => {
+    setDialogSession((current) => {
+      if (current === null) {
+        return current;
+      }
+      // 取消只能回滚打开时的快照，绝不捕获当前渲染系列或后续 initial。若同
+      // 系列已有更新的服务端投影，缓存已被 SSE 刷新且仍应保持权威；快照只用
+      // 于丢弃本次未确认草稿，不会反向覆盖那个更新。
+      const cached = projectionCacheRef.current[current.snapshot.family];
+      if (cached === undefined || sameFamilyState(cached, current.snapshot.state)) {
+        projectionCacheRef.current[current.snapshot.family] = current.snapshot.state;
+      }
+      return null;
+    });
+  };
+
+  const applyDialog = (next: FamilyFormState): void => {
+    projectionCacheRef.current[next.family] = next;
+    setSelection(next.family);
+    onCommandChange(buildCommand(next));
+    // 作者状态投影上传（B1）；env 预设已即时投影到 env 行，不走确定。
+    onCommandOptionsChange({
+      ...commandOptions,
+      ...(commandOptions.argsMode === "array" ? { argsMode: "string" as const } : {}),
+      family: next,
+    });
+    setDialogSession(null);
+  };
 
   const FamilyIcon = FAMILY_ICON[family];
   const isCustom = family === "custom";
@@ -278,30 +419,14 @@ export function CommandFamilyInput({
       </div>
 
       <FamilyFormDialog
-        open={dialogOpen}
-        initial={dialogInitial}
+        open={dialogSession !== null}
+        draft={dialogDraft ?? familyTemplate(family)}
         envPreset={presetProjection}
         onEnvPresetChange={applyEnvPresetChange}
-        onDraftChange={(draft) => {
-          authoringRef.current[draft.family] = draft;
-        }}
-        onCancel={() => {
-          // 取消丢弃（Codex R6-B2）：缓存回滚到本次打开时的初值。
-          authoringRef.current[family] = dialogInitial;
-        }}
-        onOpenChange={setDialogOpen}
-        onApply={(next) => {
-          authoringRef.current[next.family] = next;
-          setSelection(next.family);
-          onCommandChange(buildCommand(next));
-          // 作者状态投影上传（B1）；env 预设已即时投影到 env 行，不走确定。
-          onCommandOptionsChange({
-            ...commandOptions,
-            ...(commandOptions.argsMode === "array" ? { argsMode: "string" as const } : {}),
-            family: next.family === "custom" ? null : next,
-          });
-          setDialogOpen(false);
-        }}
+        onDraftChange={updateDialogDraft}
+        onFamilyChange={switchDialogFamily}
+        onCancel={cancelDialog}
+        onApply={applyDialog}
       />
     </>
   );

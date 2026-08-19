@@ -1,10 +1,11 @@
 /**
  * 系列表单 Dialog（add-create-command-family D1/D7）：结构化字段（runner/包名/
  * 版本/参数；Rust 二进制 + 安装行展示）+ env 预设行 + 轻量 appId 预览。
- * 草稿语义：字段编辑只影响 Dialog 内预览，确定回写命令串，取消丢弃。
+ * 草稿语义：字段编辑只影响受控 Dialog 会话预览；会话内可暂存并切换系列，
+ * 确定才回写命令串，取消丢弃整个会话（B2，2026-08-19）。
  * 生产不含预设命令（用户明确：预设仅测试用）。
  */
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -25,12 +32,20 @@ import {
   buildRustCommands,
   deriveFamily,
   FAMILY_LABEL,
+  FAMILY_ORDER,
   NPM_RUNNERS,
   PYTHON_RUNNERS,
   toProjectDirectoryName,
+  type Family,
   type FamilyFormState,
 } from "@/lib/command-family";
 import { FAMILY_ICON } from "./brand-icons";
+
+type StructuredFamily = Exclude<Family, "custom">;
+
+const STRUCTURED_FAMILY_ORDER: readonly StructuredFamily[] = FAMILY_ORDER.filter(
+  (family): family is StructuredFamily => family !== "custom",
+);
 
 const runnerChips = (
   runners: readonly string[],
@@ -68,55 +83,39 @@ export interface EnvPresetProjection {
 
 export interface FamilyFormDialogProps {
   open: boolean;
-  /** 打开瞬间从当前命令解析出的系列状态（草稿初值）。 */
-  initial: FamilyFormState;
+  /** 父组件会话状态的当前草稿；SSE 初值变化不能重置已编辑的会话。 */
+  draft: FamilyFormState;
   /** env 预设投影（null = 此系列/runner 无预设）；即时生效，不属 Dialog 草稿。 */
   envPreset: EnvPresetProjection | null;
   onEnvPresetChange(action: "enable" | "disable"): void;
-  /** 草稿每次字段变化即回调（CommandFamilyInput 写 per-series 前端缓存）。 */
-  onDraftChange?(state: FamilyFormState): void;
-  /** 取消/关闭（非确定）：丢弃本次未确认编辑，缓存回滚到打开时初值。 */
-  onCancel?(): void;
-  onOpenChange(open: boolean): void;
+  /** 草稿每次字段变化回写当前 Dialog 会话。 */
+  onDraftChange(state: FamilyFormState): void;
+  /** 显式暂存当前草稿并在同一 Dialog 会话中切换系列。 */
+  onFamilyChange(family: StructuredFamily): void;
+  /** 取消/关闭（非确定）：丢弃本次 Dialog 会话。 */
+  onCancel(): void;
   /** 确定：回写命令串。 */
   onApply(state: FamilyFormState): void;
 }
 
 export function FamilyFormDialog({
   open,
-  initial,
+  draft,
   envPreset,
   onEnvPresetChange,
   onDraftChange,
+  onFamilyChange,
   onCancel,
-  onOpenChange,
   onApply,
 }: FamilyFormDialogProps): React.JSX.Element {
-  const [draft, setDraft] = React.useState(initial);
-  const committedRef = React.useRef(true);
-
-  // 草稿只在打开瞬间从已提交状态重建（initial 仅作初值，不追踪后续变化）。
-  React.useEffect(() => {
-    if (open) {
-      setDraft(initial);
-      committedRef.current = false;
-    }
-  }, [open, initial]);
-
   const handleOpenChange = (next: boolean): void => {
-    if (!next && !committedRef.current) {
-      // 取消丢弃（Codex R6-B2）：本次打开期间的编辑不落地。
-      onCancel?.();
+    if (!next) {
+      onCancel();
     }
-    onOpenChange(next);
   };
 
   const patch = (part: Partial<FamilyFormState>): void =>
-    setDraft((prev) => {
-      const next = { ...prev, ...part };
-      onDraftChange?.(next);
-      return next;
-    });
+    onDraftChange({ ...draft, ...part });
 
   const preview = deriveFamily(draft);
   const command = buildCommand(draft);
@@ -128,7 +127,31 @@ export function FamilyFormDialog({
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FamilyIcon className="size-4 text-muted-foreground" />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                aria-label="切换命令系列"
+                title="切换命令系列"
+              >
+                <FamilyIcon className="size-4" />
+                <ChevronDown className="size-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-36">
+                {STRUCTURED_FAMILY_ORDER.map((family) => {
+                  const ItemIcon = FAMILY_ICON[family];
+                  return (
+                    <DropdownMenuItem
+                      key={family}
+                      onClick={() => onFamilyChange(family)}
+                      className={family === draft.family ? "bg-accent/60" : undefined}
+                    >
+                      <ItemIcon className="text-muted-foreground" />
+                      {FAMILY_LABEL[family]}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
             配置 {FAMILY_LABEL[draft.family]} 系列命令
           </DialogTitle>
           <DialogDescription>
@@ -450,7 +473,6 @@ export function FamilyFormDialog({
           <DialogClose render={<Button variant="outline" />}>取消</DialogClose>
           <Button
             onClick={() => {
-              committedRef.current = true;
               onApply(draft);
             }}
           >

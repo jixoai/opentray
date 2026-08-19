@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-// 组件状态机交互测试（Codex R6 点名）：覆盖「编辑→取消→重开丢弃」「服务端
-// 投影播种后切走切回保留」「确定回写命令与作者投影」三条序列（plan D11 R5）。
+// 组件状态机交互测试（B2，2026-08-19）：真实 React state + rerender 模拟命令
+// 回调和 SSE 投影，覆盖会话取消、投影刷新与 Dialog 内跨系列暂存（plan D11a）。
+import * as React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { DEFAULT_COMMAND_OPTIONS, type WizardCommandOptions } from "@/wizard-protocol";
 import { CommandFamilyInput } from "./command-family-input";
@@ -20,103 +21,214 @@ const npmProjection: NonNullable<WizardCommandOptions["family"]> = {
   raw: "",
 };
 
-interface Harness {
-  command: string;
-  options: WizardCommandOptions;
-  onCommandChange: Mock<(command: string) => void>;
-  onCommandOptionsChange: Mock<(options: WizardCommandOptions) => void>;
-}
-
-const renderInput = (harness: Harness): ReturnType<typeof render> =>
-  render(
-    <CommandFamilyInput
-      command={harness.command}
-      onCommandChange={harness.onCommandChange}
-      commandOptions={harness.options}
-      onCommandOptionsChange={(next) => {
-        harness.options = next;
-        harness.onCommandOptionsChange(next);
-      }}
-      disabled={false}
-      onRun={() => {}}
-    />,
-  );
-
-const switchTo = async (container: HTMLElement, label: string): Promise<void> => {
-  fireEvent.click(screen.getByRole("button", { name: /^命令系列/ }));
-  await waitFor(() => {
-    expect(screen.getByRole("menuitem", { name: new RegExp(label) })).toBeTruthy();
-  });
-  fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(label) }));
+const remoteNpmProjection: NonNullable<WizardCommandOptions["family"]> = {
+  ...npmProjection,
+  pkg: "figlet",
+  args: "remote",
 };
 
+const goProjection: NonNullable<WizardCommandOptions["family"]> = {
+  family: "go",
+  runner: "",
+  runnerFlags: "",
+  pkg: "example.com/sse",
+  version: "",
+  args: "",
+  binary: "",
+  raw: "",
+};
+
+interface WizardSnapshot {
+  readonly command: string;
+  readonly options: WizardCommandOptions;
+}
+
+interface StatefulHarnessProps {
+  readonly snapshot: WizardSnapshot;
+}
+
+/** 模拟 App 的 optimistic setState，以及下一条 SSE 快照替换。 */
+function StatefulHarness({ snapshot }: StatefulHarnessProps): React.JSX.Element {
+  const [command, setCommand] = React.useState(snapshot.command);
+  const [commandOptions, setCommandOptions] = React.useState(snapshot.options);
+
+  React.useEffect(() => {
+    setCommand(snapshot.command);
+    setCommandOptions(snapshot.options);
+  }, [snapshot]);
+
+  return (
+    <CommandFamilyInput
+      command={command}
+      onCommandChange={setCommand}
+      commandOptions={commandOptions}
+      onCommandOptionsChange={setCommandOptions}
+      disabled={false}
+      onRun={() => {}}
+    />
+  );
+}
+
+const snapshotFor = (
+  command: string,
+  family: WizardCommandOptions["family"],
+): WizardSnapshot => ({
+  command,
+  options: { ...DEFAULT_COMMAND_OPTIONS, family },
+});
+
+const renderHarness = (snapshot: WizardSnapshot): ReturnType<typeof render> =>
+  render(<StatefulHarness snapshot={snapshot} />);
+
+const rerenderSnapshot = (
+  view: ReturnType<typeof render>,
+  snapshot: WizardSnapshot,
+): void => {
+  view.rerender(<StatefulHarness snapshot={snapshot} />);
+};
+
+const inputFor = async (placeholder: string): Promise<HTMLInputElement> => {
+  const element = await screen.findByPlaceholderText(placeholder);
+  if (!(element instanceof HTMLInputElement)) {
+    throw new TypeError(`Expected input for placeholder ${placeholder}`);
+  }
+  return element;
+};
+
+const openNpmDialog = (): void => {
+  fireEvent.click(screen.getByRole("button", { name: "配置 npm 系列命令" }));
+};
+
+const switchOuterFamily = async (label: RegExp): Promise<void> => {
+  fireEvent.click(screen.getByRole("button", { name: /^命令系列/ }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+};
+
+const switchDialogFamily = async (label: RegExp): Promise<void> => {
+  fireEvent.click(screen.getByRole("button", { name: "切换命令系列" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+};
+
+const cancellationPaths: readonly {
+  readonly name: string;
+  readonly close: () => void;
+}[] = [
+  {
+    name: "取消按钮",
+    close: () => fireEvent.click(screen.getByRole("button", { name: "取消" })),
+  },
+  {
+    name: "右上关闭",
+    close: () => fireEvent.click(screen.getByRole("button", { name: "Close" })),
+  },
+  {
+    name: "遮罩",
+    close: () => {
+      const overlay = document.querySelector<HTMLElement>("[data-slot=dialog-overlay]");
+      if (overlay === null) {
+        throw new Error("Expected dialog overlay");
+      }
+      fireEvent.pointerDown(overlay);
+      fireEvent.pointerUp(overlay);
+      fireEvent.click(overlay);
+    },
+  },
+  {
+    name: "ESC",
+    close: () => fireEvent.keyDown(document, { key: "Escape" }),
+  },
+];
+
 describe("CommandFamilyInput 状态机", () => {
-  it("服务端投影播种：恢复 npm → 切 Go → 切回 npm 不退化为空模板", async () => {
-    const harness: Harness = {
-      command: "npx cowsay hello",
-      options: { ...DEFAULT_COMMAND_OPTIONS, family: npmProjection },
-      onCommandChange: vi.fn(),
-      onCommandOptionsChange: vi.fn(),
-    };
-    const view = renderInput(harness);
-    // 恢复态：npm 选择器 + 只读命令区。
-    expect(
-      screen.getByRole("button", { name: "命令系列：npm，点击切换" }),
-    ).toBeTruthy();
-    // 切到 Go：上传 Go 模板投影。
-    await switchTo(view.container, "^Go$");
-    const goPatch = harness.onCommandOptionsChange.mock.calls.at(-1)?.[0] as WizardCommandOptions;
-    expect(goPatch.family?.family).toBe("go");
-    // 切回 npm：播种缓存生效，投影恢复 cowsay 而非空模板。
-    await switchTo(view.container, "^npm$");
-    const backPatch = harness.onCommandOptionsChange.mock.calls.at(-1)?.[0] as WizardCommandOptions;
-    expect(backPatch.family?.pkg).toBe("cowsay");
-    expect(backPatch.family?.args).toBe("hello");
-  });
+  it.each(cancellationPaths)(
+    "编辑中 SSE 切换系列后经 $name 取消，只丢弃打开时 npm 会话草稿",
+    async ({ close }) => {
+      const view = renderHarness(snapshotFor("npx cowsay hello", npmProjection));
+      openNpmDialog();
+      const pkg = await inputFor("@deepseek-ai/dsh");
+      fireEvent.change(pkg, { target: { value: "local-only" } });
 
-  it("取消丢弃：Dialog 编辑 → 取消 → 重开回到打开时初值", async () => {
-    const harness: Harness = {
-      command: "npx cowsay hello",
-      options: { ...DEFAULT_COMMAND_OPTIONS, family: npmProjection },
-      onCommandChange: vi.fn(),
-      onCommandOptionsChange: vi.fn(),
-    };
-    renderInput(harness);
-    const openDialog = () =>
-      fireEvent.click(screen.getByRole("button", { name: "配置 npm 系列命令" }));
+      rerenderSnapshot(view, snapshotFor("go run example.com/sse", goProjection));
+      await waitFor(() => {
+        expect(pkg.value).toBe("local-only");
+      });
 
-    openDialog();
-    const pkgBox = await screen.findByPlaceholderText("@deepseek-ai/dsh");
-    expect((pkgBox as HTMLInputElement).value).toBe("cowsay");
-    fireEvent.change(pkgBox, { target: { value: "edited-pkg" } });
-    expect((pkgBox as HTMLInputElement).value).toBe("edited-pkg");
-    // 取消：本次编辑不落地。
+      close();
+      await waitFor(() => {
+        expect(screen.queryByPlaceholderText("@deepseek-ai/dsh")).toBeNull();
+        expect(
+          screen.getByRole("button", { name: "命令系列：Go，点击切换" }),
+        ).toBeTruthy();
+      });
+
+      await switchOuterFamily(/^npm$/u);
+      openNpmDialog();
+      expect((await inputFor("@deepseek-ai/dsh")).value).toBe("cowsay");
+    },
+  );
+
+  it("编辑中同系列 SSE 不重置草稿；取消后采用最新服务端投影", async () => {
+    const view = renderHarness(snapshotFor("npx cowsay hello", npmProjection));
+    openNpmDialog();
+    const pkg = await inputFor("@deepseek-ai/dsh");
+    fireEvent.change(pkg, { target: { value: "local-only" } });
+
+    rerenderSnapshot(view, snapshotFor("npx figlet remote", remoteNpmProjection));
+    await waitFor(() => {
+      expect(pkg.value).toBe("local-only");
+    });
+
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     await waitFor(() => {
       expect(screen.queryByPlaceholderText("@deepseek-ai/dsh")).toBeNull();
     });
-    // 重开：回到打开时初值（cowsay），已取消的 edited-pkg 不出现。
-    openDialog();
-    const reopened = await screen.findByPlaceholderText("@deepseek-ai/dsh");
-    expect((reopened as HTMLInputElement).value).toBe("cowsay");
+
+    openNpmDialog();
+    const reopened = await inputFor("@deepseek-ai/dsh");
+    expect(reopened.value).toBe("figlet");
+    expect((await inputFor("web --port 3000")).value).toBe("remote");
   });
 
-  it("确定回写：命令串与作者投影一并上传", async () => {
-    const harness: Harness = {
-      command: "npx cowsay hello",
-      options: { ...DEFAULT_COMMAND_OPTIONS, family: npmProjection },
-      onCommandChange: vi.fn(),
-      onCommandOptionsChange: vi.fn(),
-    };
-    renderInput(harness);
-    fireEvent.click(screen.getByRole("button", { name: "配置 npm 系列命令" }));
-    const pkgBox = await screen.findByPlaceholderText("@deepseek-ai/dsh");
-    fireEvent.change(pkgBox, { target: { value: "ruff" } });
+  it("已播种系列收到新投影后 Go → npm，回到新投影而非旧缓存", async () => {
+    const view = renderHarness(snapshotFor("npx cowsay hello", npmProjection));
+
+    rerenderSnapshot(view, snapshotFor("npx figlet remote", remoteNpmProjection));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "命令系列：npm，点击切换" }),
+      ).toBeTruthy();
+    });
+
+    await switchOuterFamily(/^Go$/u);
+    await switchOuterFamily(/^npm$/u);
+    openNpmDialog();
+    expect((await inputFor("@deepseek-ai/dsh")).value).toBe("figlet");
+    expect((await inputFor("web --port 3000")).value).toBe("remote");
+  });
+
+  it("Dialog 内显式 npm → Go → npm 切换保留未确定草稿", async () => {
+    renderHarness(snapshotFor("npx cowsay hello", npmProjection));
+    openNpmDialog();
+    const npmPackage = await inputFor("@deepseek-ai/dsh");
+    fireEvent.change(npmPackage, { target: { value: "draft-npm" } });
+
+    await switchDialogFamily(/^Go$/u);
+    const goModule = await inputFor("rsc.io/fortune");
+    fireEvent.change(goModule, { target: { value: "example.com/draft-go" } });
+
+    await switchDialogFamily(/^npm$/u);
+    expect((await inputFor("@deepseek-ai/dsh")).value).toBe("draft-npm");
+
+    await switchDialogFamily(/^Go$/u);
+    expect((await inputFor("rsc.io/fortune")).value).toBe("example.com/draft-go");
+
+    await switchDialogFamily(/^npm$/u);
     fireEvent.click(screen.getByRole("button", { name: "确定" }));
     await waitFor(() => {
-      expect(harness.onCommandChange).toHaveBeenCalledWith("npx ruff hello");
+      expect(screen.queryByPlaceholderText("@deepseek-ai/dsh")).toBeNull();
     });
-    const patch = harness.onCommandOptionsChange.mock.calls.at(-1)?.[0] as WizardCommandOptions;
-    expect(patch.family?.pkg).toBe("ruff");
+
+    openNpmDialog();
+    expect((await inputFor("@deepseek-ai/dsh")).value).toBe("draft-npm");
   });
 });

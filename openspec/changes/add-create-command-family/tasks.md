@@ -78,3 +78,12 @@
 - [x] 10.3 组件交互测试（Codex 连续两轮点名）：webui 引入 jsdom + @testing-library/react（devDeps；vitest include 扩到 .tsx），新增 command-family-input.test.tsx 三序列——播种切回保留 / 编辑取消重开丢弃 / 确定回写命令与作者投影。
 - [x] 10.4 误拒边界入法：plan D7 R6 修订 + spec delta 明确 cargo 保守判定（realpath 归一/小写/剥 .exe + argv 含独立 install 即拒，禁止收窄回首子命令解析）。
 - [x] 10.5 回归：create 249 / webui 54（+3 组件）/ core 32 全绿；typecheck 绿；validate 通过；生产资产重建。
+
+## 11. Round 8（算法升级：Codex gpt-5.6-terra/max 接管 B2 实现）
+
+- [x] 11.1 升级依据：评分 6.5→6.0 两轮震荡触发「停止自行实现交给 Codex（max）」规则；Codex 52 分钟完成实现。
+- [x] 11.2 DialogSession 会话模型：打开瞬间冻结 {family, state} 快照（取消四路径——按钮/X/遮罩/ESC——整体丢弃会话）；SSE 不改写快照。
+- [x] 11.3 Dialog 内系列切换入口（「暂存并切换」语义）：未确认编辑在会话内跨系列保留，「npm 编辑→切 Go→切回 npm」不丢；确定仅提交当前系列。
+- [x] 11.4 投影缓存与会话草稿分离：projectionCache 永远可被新服务端投影刷新（陈旧草稿无法反向上传）；会话内当前系列未编辑时随 SSE 刷新、已编辑保留至确定/取消（合流规则记入 plan D11a）。
+- [x] 11.5 状态化组件测试（rerender 模拟 SSE）：R6 点名的 (a) 编辑中投影更新后取消、(b) 已播种后新投影再切走切回、(c) 编辑中跨系列切换返回 + 取消四路径全覆盖；webui 58 项。
+- [x] 11.6 验证：webui 58 / create 249 / core 32 全绿；typecheck 绿；validate 通过；生产资产重建；GUI 冒烟无错误浮层。
