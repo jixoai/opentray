@@ -27,3 +27,4 @@
 - [x] 4.1 core/create/webui 测试 + typecheck 全绿；vision-driven 基线。
 - [x] 4.2 端到端：Applications 出现 web-dsh-npx；展开详情；打开应用；行内分享 sh；向导确认面板（未生成）分享 + 复制/下载；注册路径回归。
 - [x] 4.3 self-review + validate/check + 提交。
+- [x] 4.4 D6 修订（2026-08-19，41d4d43）：向导项目卸载端到端验收——probe 列表可见 → 运行中卸载 409(带 pid) → 授权停止+卸载（项目目录与进程清净、bundle 一并清除）→ 未知 key 404；core scan 新增 3 用例，create 212 绿。
