@@ -18,7 +18,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createWizardServer } from "./server";
-import { createWizardSession, type WizardFormValues } from "./wizard";
+import {
+  createWizardSession,
+  type WizardCommandOptions,
+  type WizardFormValues,
+} from "./wizard";
 import { ensureLoopbackNoProxy } from "@create-opentray/core";
 
 export interface WizardCliOptions {
@@ -120,16 +124,84 @@ const runWebAdapter = async (options: {
   // preserves the directory the user actually invoked the command from.
   const invocationDir = process.env.INIT_CWD || process.cwd();
 
+/** Draft command options carry fields across versions — forward only the
+ *  known-safe, type-checked subset (D4/D11：envPresetDisabled 与 family 作者
+ *  状态随草稿重启恢复，Codex B2）。 */
+const normalizeDraftCommandOptions = (
+  raw: unknown,
+): Partial<WizardCommandOptions> | undefined => {
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+  const source = raw as Record<string, unknown>;
+  const patch: Partial<{ -readonly [K in keyof WizardCommandOptions]: WizardCommandOptions[K] }> = {};
+  if (typeof source.cwd === "string") {
+    patch.cwd = source.cwd;
+  }
+  if (source.argsMode === "string" || source.argsMode === "array") {
+    patch.argsMode = source.argsMode;
+  }
+  if (typeof source.envPresetDisabled === "boolean") {
+    patch.envPresetDisabled = source.envPresetDisabled;
+  }
+  if (Array.isArray(source.env)) {
+    const entries = source.env.filter(
+      (entry): entry is { key: string; value: string } =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as { key?: unknown }).key === "string" &&
+        typeof (entry as { value?: unknown }).value === "string",
+    );
+    patch.env = entries;
+  }
+  if (source.family === null) {
+    patch.family = null;
+  } else if (typeof source.family === "object" && source.family !== null) {
+    const projection = source.family as Record<string, unknown>;
+    const familyValue = projection.family;
+    if (
+      familyValue === "npm" || familyValue === "go" || familyValue === "rust" ||
+      familyValue === "python" || familyValue === "dotnet" || familyValue === "custom"
+    ) {
+      const str = (value: unknown): string =>
+        typeof value === "string" ? value : "";
+      patch.family = {
+        family: familyValue,
+        runner: str(projection.runner),
+        runnerFlags: str(projection.runnerFlags),
+        pkg: str(projection.pkg),
+        version: str(projection.version),
+        args: str(projection.args),
+        binary: str(projection.binary),
+        raw: str(projection.raw),
+      };
+    }
+  }
+  return Object.keys(patch).length > 0 ? patch : undefined;
+};
+
 /** Read a persisted wizard draft for a port (best-effort). */
 const readDraft = async (
   port: number | undefined,
-): Promise<{ form: WizardFormValues; command: string | undefined } | undefined> => {
+): Promise<{
+  form: WizardFormValues;
+  command: string | undefined;
+  commandOptions: Partial<WizardCommandOptions> | undefined;
+} | undefined> => {
   try {
     const path = join(tmpdir(), `create-opentray-draft-${port ?? 0}.json`);
     const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw) as { form?: WizardFormValues; command?: string };
+    const parsed = JSON.parse(raw) as {
+      form?: WizardFormValues;
+      command?: string;
+      commandOptions?: unknown;
+    };
     if (parsed.form === undefined) return undefined;
-    return { form: parsed.form, command: parsed.command };
+    return {
+      form: parsed.form,
+      command: parsed.command,
+      commandOptions: normalizeDraftCommandOptions(parsed.commandOptions),
+    };
   } catch {
     return undefined;
   }
@@ -151,6 +223,9 @@ const readDraft = async (
       });
       if (draftSeed !== undefined) {
         session.updateForm(draftSeed.form);
+        if (draftSeed.commandOptions !== undefined) {
+          session.updateCommandOptions(draftSeed.commandOptions);
+        }
         if (draftSeed.command !== undefined && draftSeed.command.length > 0) {
           session.prime(draftSeed.command);
         }

@@ -115,6 +115,25 @@ const withVersion = (pkg: string, version: string): string => {
 const denoNpmPackage = (pkg: string): string =>
   /^(npm|jsr):/.test(pkg) ? pkg : `npm:${pkg}`;
 
+// 参数保真（plan.md D12 / Codex B5）：FamilyFormState.args 保存「序列化后的
+// 参数串」。serializeArg 与 tokenizeCommandLine 的 POSIX 语义对称——含空白/
+// 引号/元字符的 token 以单引号包裹（内部 ' 转义为 '\''），保证
+// tokenize(build(parse(cmd))) 与原 tokens 逐项相等；空 token 序列化为 ''。
+const ARG_SAFE = /^[A-Za-z0-9@._/:+=-]+$/u;
+const serializeArg = (token: string): string => {
+  if (ARG_SAFE.test(token) && token.length > 0) {
+    return token;
+  }
+  return `'${token.replaceAll("'", `'\\''`)}'`;
+};
+
+export const serializeArgs = (tokens: readonly string[]): string =>
+  tokens.map(serializeArg).join(" ");
+
+/** Rust 安装头命令（cargo install …）：系列可解析，但向导绝不代执行（D7/D11）。 */
+export const isRustInstallCommand = (tokens: readonly string[]): boolean =>
+  (tokens[0] ?? "") === "cargo" && (tokens[1] ?? "") === "install";
+
 /** 跳过前导选项 token，返回 { runner 选项, 其余（首 token 必为非选项）}。 */
 const splitLeadingFlags = (
   tokens: readonly string[],
@@ -168,7 +187,7 @@ export const parseCommandTokens = (
         runnerFlags: flags.join(" "),
         pkg: base,
         version,
-        args: rest.slice(1).join(" "),
+        args: serializeArgs(rest.slice(1)),
         raw: tokens.join(" "),
       });
     }
@@ -187,7 +206,7 @@ export const parseCommandTokens = (
       runnerFlags: flags.join(" "),
       pkg: base,
       version,
-      args: rest.slice(1).join(" "),
+      args: serializeArgs(rest.slice(1)),
       raw: tokens.join(" "),
     });
   }
@@ -202,7 +221,7 @@ export const parseCommandTokens = (
       runner: "",
       runnerFlags: flags.join(" "),
       pkg: base,
-      args: rest.slice(1).join(" "),
+      args: serializeArgs(rest.slice(1)),
       raw: tokens.join(" "),
     });
   }
@@ -221,7 +240,7 @@ export const parseCommandTokens = (
       runnerFlags: flags.join(" "),
       pkg: base,
       version,
-      args: rest.slice(1).join(" "),
+      args: serializeArgs(rest.slice(1)),
       raw: tokens.join(" "),
     });
   }
@@ -239,7 +258,7 @@ export const parseCommandTokens = (
       runnerFlags: flags.join(" "),
       pkg: base,
       version,
-      args: rest.slice(1).join(" "),
+      args: serializeArgs(rest.slice(1)),
       raw: tokens.join(" "),
     });
   }

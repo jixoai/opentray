@@ -12,9 +12,11 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 import { toProjectDirectoryName } from "@create-opentray/core";
+import type { FamilyFormState } from "@create-opentray/core";
 import {
   deriveFamily,
   envPresetsFor,
+  isRustInstallCommand,
   parseCommandTokens,
 } from "@create-opentray/core";
 import {
@@ -89,6 +91,12 @@ export interface WizardCommandOptions {
   readonly argsMode: "string" | "array";
   /** True = 不注入系列环境变量预设（npx/pnpx 的 npm_config_yes=true）。 */
   readonly envPresetDisabled: boolean;
+  /**
+   * 系列作者状态（plan.md D11 / Codex B1）：显式投影是系列/appId/env 预设的
+   * 服务端权威（Rust 的 crate/binary 无法从命令串恢复）；null = 按命令串派生。
+   * 命令串始终是执行/持久化向量。
+   */
+  readonly family: FamilyFormState | null;
 }
 
 export const DEFAULT_COMMAND_OPTIONS: WizardCommandOptions = {
@@ -96,6 +104,7 @@ export const DEFAULT_COMMAND_OPTIONS: WizardCommandOptions = {
   env: [],
   argsMode: "string",
   envPresetDisabled: false,
+  family: null,
 };
 
 export type WizardState =
@@ -416,10 +425,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
    * never the user's values. Empty values mean "use the default".
    */
   const currentDefaults = (): WizardFormDefaults => {
-    // 分系列默认 appId（add-create-command-family D3）：系列命令推导 runner
-    // 归一身份段 + 生态尾段；custom 命令的 deriveFamily 结果恒等于现行
+    // 分系列默认 appId（add-create-command-family D3/D11）：系列作者状态优先，
+    // 否则按命令串派生；custom 命令的 deriveFamily 结果恒等于现行
     // deriveDefaultAppId 规则 —— 单一路径，旧行为对 custom 零改变。
-    const family = deriveFamily(parseCommandTokens(currentTokens));
+    const family = deriveFamily(familyState());
     const effectiveAppId = form.appId.trim().length > 0 ? form.appId : family.appId;
     return {
       appId: family.appId,
@@ -550,6 +559,18 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   /** Default command cwd is the USER_HOME directory (owner round-10 law):
    *  empty input means home, and relative paths resolve against home. */
   const homeDir = options.homeDir ?? homedir();
+
+  /**
+   * 系列作者状态解析（D11）：显式投影优先，否则按命令串派生。appId/env 预设
+   * 统一走这里；执行向量始终是 currentTokens。
+   */
+  const familyState = (): FamilyFormState => {
+    const explicit = commandOptions.family;
+    return explicit !== null && explicit !== undefined
+      ? explicit
+      : parseCommandTokens(currentTokens);
+  };
+
   const effectiveCwd = (): string => {
     const custom = commandOptions.cwd.trim();
     return custom.length > 0 ? resolve(homeDir, custom) : homeDir;
@@ -563,11 +584,11 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         env[entry.key.trim()] = entry.value;
       }
     }
-    // 系列环境变量预设（add-create-command-family D4）：npx/pnpx 命令注入
+    // 系列环境变量预设（add-create-command-family D4/D11）：npx/pnpx 命令注入
     // npm_config_yes=true 消除首跑安装确认；用户显式配置的同名条目优先，
     // 预设永不覆盖，且可经 envPresetDisabled 整体关闭。
     if (!commandOptions.envPresetDisabled) {
-      for (const preset of envPresetsFor(parseCommandTokens(currentTokens))) {
+      for (const preset of envPresetsFor(familyState())) {
         if (!(preset.key in env)) {
           env[preset.key] = preset.value;
         }
@@ -712,6 +733,17 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       services = [];
       selectedPort = undefined;
       currentTokens = tokens ?? tokenized!.tokens;
+      // Rust 安装头禁跑（D7/D11 / Codex B1）：`cargo install …` 绝不被向导
+      // 代执行；指引到 Rust 表单填写要运行的二进制。
+      if (isRustInstallCommand(currentTokens)) {
+        submitting = false;
+        currentTokens = [];
+        setState(
+          "failed",
+          "cargo install 不会被执行：Rust crate 需先安装，请在命令系列的 Rust 表单中填写要运行的二进制",
+        );
+        return;
+      }
       refreshTargetDirExists();
       currentIconPath = undefined;
       currentIconUrl = undefined;

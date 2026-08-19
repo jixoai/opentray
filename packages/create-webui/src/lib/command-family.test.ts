@@ -50,6 +50,16 @@ describe("command-family 镜像金样本（与 core 同源）", () => {
     );
   });
 
+  it("引号参数往返逐项无损（D12 / Codex B5，与 core 同规则）", () => {
+    const command = 'npx tool "hello world" x';
+    const parsed = parseCommand(command);
+    expect(parsed.args).toBe("'hello world' x");
+    // 序列化串再分词与原命令 tokens 一致。
+    const rebuilt = buildCommand(parsed);
+    expect(parseCommand(rebuilt).args).toBe("'hello world' x");
+    expect(parseCommand('npx tool "" x').args).toBe("'' x");
+  });
+
   it("名称/目录投影与 env 预设边界", () => {
     const family = deriveFamily(parseCommand("npx @deepseek-ai/dsh@latest web"));
     expect(family.appName).toBe("Web Dsh");

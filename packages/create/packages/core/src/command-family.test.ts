@@ -12,6 +12,7 @@ import {
   buildRustCommands,
   deriveFamily,
   envPresetsFor,
+  isRustInstallCommand,
   parseCommand,
 } from "./command-family";
 import { tokenizeCommandLine } from "./tokenize";
@@ -132,6 +133,40 @@ describe("parseCommand ↔ buildCommand 往返", () => {
     "dnx dotnet-format --verify-no-changes",
   ])("%s 解析后重建保持不变", (command) => {
     expect(buildCommand(parseCommand(command))).toBe(command);
+  });
+
+  it("含引号/空白参数往返逐项无损（D12 / Codex B5）", () => {
+    for (const command of [
+      'npx tool "hello world"',
+      "npx tool 'it''s'",
+      'go run rsc.io/fortune@latest "multi word" arg',
+      'uvx ruff format "a b" "c"',
+    ]) {
+      const result = tokenizeCommandLine(command);
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      // 序列化串与 build 结果一致，且再分词逐项等于原 tokens。
+      const rebuilt = buildCommand(parseCommand(command));
+      const roundTrip = tokenizeCommandLine(rebuilt);
+      expect(roundTrip.ok).toBe(true);
+      if (roundTrip.ok) {
+        expect(roundTrip.tokens).toEqual(result.tokens);
+      }
+    }
+  });
+
+  it("空串参数与空白参数序列化正确", () => {
+    expect(parseCommand('npx tool "" x').args).toBe("'' x");
+    expect(parseCommand('npx tool "multi word"').args).toBe("'multi word'");
+    // 边界备注：含奇数单引号的 token 被 tokenizeCommandLine 既有配平法则
+    // 拒于门外（直接输入亦不可用，非本变更引入），故序列化保证域 =
+    // tokenizer 接受域；POSIX 序列化仍按规范实现。
+  });
+
+  it("cargo install 谓词（D11：向导绝不代执行安装）", () => {
+    expect(isRustInstallCommand(["cargo", "install", "ripgrep"])).toBe(true);
+    expect(isRustInstallCommand(["cargo", "build"])).toBe(false);
+    expect(isRustInstallCommand(["npx", "install"])).toBe(false);
   });
 
   it("deno run 缺 npm: 前缀时自动补全", () => {

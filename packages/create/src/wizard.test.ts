@@ -512,6 +512,56 @@ describe("wizard session", () => {
     expect(harness.lastRunOptions()?.env).toBeUndefined();
   });
 
+  it("honors the explicit family authoring state over command-derived parsing (D11)", async () => {
+    const harness = createHarness({ homeDir: "/tmp/wizard-home" });
+    // rust 作者状态：命令串只是运行行（rg --json .），crate/binary 无法从
+    // 命令串恢复，必须来自投影（Codex B1）。
+    harness.session.updateCommandOptions({
+      family: {
+        family: "rust",
+        runner: "",
+        runnerFlags: "",
+        pkg: "ripgrep",
+        version: "",
+        args: "--json .",
+        binary: "rg",
+        raw: "",
+      },
+    });
+    await harness.session.submitCommand("rg --json .");
+    expect(lastFormDefaults(harness.events)?.appId).toBe("rg.rust");
+    // npm 作者状态同样优先；执行向量仍是命令串。
+    harness.session.updateCommandOptions({
+      family: {
+        family: "npm",
+        runner: "npx",
+        runnerFlags: "",
+        pkg: "cowsay",
+        version: "",
+        args: "hello",
+        binary: "",
+        raw: "",
+      },
+    });
+    await harness.session.submitCommand("cowsay hello");
+    expect(lastFormDefaults(harness.events)?.appId).toBe("hello.cowsay.npmjs");
+    expect(harness.lastRunOptions()?.tokens).toEqual(["cowsay", "hello"]);
+    expect(harness.lastRunOptions()?.env).toEqual({ npm_config_yes: "true" });
+  });
+
+  it("refuses to run cargo install commands (D7/D11 / Codex B1)", async () => {
+    const harness = createHarness();
+    await harness.session.submitCommand("cargo install ripgrep");
+    expect(harness.session.state).toBe("failed");
+    const failReason = harness.events.find(
+      (event): event is Extract<WizardEvent, { type: "state" }> =>
+        event.type === "state" && event.state === "failed",
+    )?.reason;
+    expect(failReason).toContain("cargo install 不会被执行");
+    // 绝不 spawn：安装命令从未到达执行层。
+    expect(harness.lastRunOptions()).toBeUndefined();
+  });
+
   it("defaults the command cwd to USER_HOME and publishes it", async () => {
     const harness = createHarness({ homeDir: "/tmp/wizard-home" });
     // The initial snapshot carries the resolved default for the UI.

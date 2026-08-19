@@ -135,6 +135,23 @@ const withVersion = (pkg: string, version: string): string => {
 const denoNpmPackage = (pkg: string): string =>
   /^(npm|jsr):/.test(pkg) ? pkg : `npm:${pkg}`;
 
+// 参数保真（plan.md D12 / Codex B5）：args 保存「序列化后的参数串」，与 core
+// 的 POSIX 对称序列化一致；保证域 = tokenizer 接受域。
+const ARG_SAFE = /^[A-Za-z0-9@._/:+=-]+$/u;
+const serializeArg = (token: string): string => {
+  if (ARG_SAFE.test(token) && token.length > 0) {
+    return token;
+  }
+  return `'${token.replaceAll("'", `'\\''`)}'`;
+};
+
+export const serializeArgs = (tokens: readonly string[]): string =>
+  tokens.map(serializeArg).join(" ");
+
+/** Rust 安装头命令（cargo install …）：向导绝不代执行（D7/D11）。 */
+export const isRustInstallCommand = (tokens: readonly string[]): boolean =>
+  (tokens[0] ?? "") === "cargo" && (tokens[1] ?? "") === "install";
+
 const splitLeadingFlags = (
   tokens: readonly string[],
 ): { flags: string[]; rest: string[] } => {
@@ -186,7 +203,7 @@ export const parseCommandTokens = (
         runnerFlags: flags.join(" "),
         pkg: base,
         version,
-        args: rest.slice(1).join(" "),
+        args: serializeArgs(rest.slice(1)),
         raw: tokens.join(" "),
       });
     }
@@ -205,7 +222,7 @@ export const parseCommandTokens = (
       runnerFlags: flags.join(" "),
       pkg: base,
       version,
-      args: rest.slice(1).join(" "),
+      args: serializeArgs(rest.slice(1)),
       raw: tokens.join(" "),
     });
   }
@@ -220,7 +237,7 @@ export const parseCommandTokens = (
       runner: "",
       runnerFlags: flags.join(" "),
       pkg: base,
-      args: rest.slice(1).join(" "),
+      args: serializeArgs(rest.slice(1)),
       raw: tokens.join(" "),
     });
   }
@@ -239,7 +256,7 @@ export const parseCommandTokens = (
       runnerFlags: flags.join(" "),
       pkg: base,
       version,
-      args: rest.slice(1).join(" "),
+      args: serializeArgs(rest.slice(1)),
       raw: tokens.join(" "),
     });
   }
@@ -257,7 +274,7 @@ export const parseCommandTokens = (
       runnerFlags: flags.join(" "),
       pkg: base,
       version,
-      args: rest.slice(1).join(" "),
+      args: serializeArgs(rest.slice(1)),
       raw: tokens.join(" "),
     });
   }

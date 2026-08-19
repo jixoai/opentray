@@ -1,9 +1,11 @@
 /**
- * 系列命令输入组（add-create-command-family D1/D4/D8）：单行 InputGroup 取代
- * 自由命令输入 —— 前缀域选择器（官方品牌图标；自定义 = edit 图标）+ 主体。
- * 自定义系列 → 自由输入（现状行为，Enter 运行）；其它系列 → 只读命令区，
- * 点击弹 FamilyFormDialog 详细配置。npm 系列（npx/pnpx）env 预设以行内
- * Terminal 图标披露（Tooltip：hover 显示 + click 钉住）。
+ * 系列命令输入组（add-create-command-family D1/D4/D11 / Codex B1+B4）：
+ * 单行 InputGroup —— 前缀域选择器（官方品牌图标；自定义 = edit 图标）+ 主体。
+ * 选择器是显式状态源（不从命令串派生 UI 系列）：custom → 自由输入（现状
+ * 行为，Enter 运行）；其它系列 → 只读命令区，点击弹 FamilyFormDialog。
+ * Dialog 确定把「作者状态投影」上传服务端（family 字段，Rust 的 crate/binary
+ * 无法从命令串恢复），命令串（运行行）仍是执行/持久化向量。npm 系列
+ * （npx/pnpx）env 预设以行内 Terminal 图标披露（Tooltip：hover + click 钉住）。
  */
 import { Terminal } from "lucide-react";
 import * as React from "react";
@@ -23,6 +25,7 @@ import {
   FAMILY_ORDER,
   parseCommand,
   type Family,
+  type FamilyFormState,
 } from "@/lib/command-family";
 import type { WizardCommandOptions } from "@/wizard-protocol";
 import { FAMILY_ICON } from "./brand-icons";
@@ -37,6 +40,12 @@ export interface CommandFamilyInputProps {
   onRun(): void;
 }
 
+const familyTemplate = (family: Family): FamilyFormState => ({
+  ...EMPTY_FAMILY_STATE,
+  family,
+  runner: family === "python" ? "uvx" : family === "npm" ? "npx" : "",
+});
+
 export function CommandFamilyInput({
   command,
   onCommandChange,
@@ -45,7 +54,16 @@ export function CommandFamilyInput({
   disabled,
   onRun,
 }: CommandFamilyInputProps): React.JSX.Element {
-  const state = React.useMemo(() => parseCommand(command), [command]);
+  const parsed = React.useMemo(() => parseCommand(command), [command]);
+
+  // 显式选择（Codex B4）：初值从命令派生；一旦用户选择即保持用户意图，
+  // custom 自由输入 runner 头不会翻转 UI，同系列重复点击为 no-op。
+  const [selection, setSelection] = React.useState<Family | null>(null);
+  const family = selection ?? parsed.family;
+
+  // 各系列最近一次作者草稿（Codex B1）：Rust 的 crate/binary 从命令串恢复
+  // 不出来，Dialog 初值优先取这里。
+  const authoringRef = React.useRef<Partial<Record<Family, FamilyFormState>>>({});
   const [dialogOpen, setDialogOpen] = React.useState(false);
 
   // env 图标 Tooltip：hover/focus 即时显示，click 额外「钉住」。
@@ -53,31 +71,49 @@ export function CommandFamilyInput({
   const [envFocused, setEnvFocused] = React.useState(false);
   const [envPinned, setEnvPinned] = React.useState(false);
 
-  // 与服务端同判：预设生效 = 解析命中预设 && 未整体关闭 && 用户未显式同名配置。
-  const activePresets = envPresetsFor(state).filter(
+  // 与服务端同判（D13）：显式作者状态优先，预设生效 = 命中预设 && 未整体
+  // 关闭 && 用户未显式同名配置。
+  const famState = commandOptions.family ?? parsed;
+  const activePresets = envPresetsFor(famState).filter(
     (preset) =>
       !commandOptions.envPresetDisabled &&
       !commandOptions.env.some((entry) => entry.key.trim() === preset.key),
   );
 
-  const switchFamily = (family: Family): void => {
+  const switchFamily = (next: Family): void => {
+    if (next === family) {
+      return; // 同系列重复点击 no-op（Codex B4：不再清空命令）
+    }
+    setSelection(next);
     // 系列选择只作用于 string 模式（D8）；argv 模式/编辑流保持现状。
-    const nextState: WizardCommandOptions = {
+    const options: WizardCommandOptions = {
       ...commandOptions,
       ...(commandOptions.argsMode === "array" ? { argsMode: "string" as const } : {}),
     };
-    onCommandOptionsChange(nextState);
-    onCommandChange(
-      buildCommand({
-        ...EMPTY_FAMILY_STATE,
-        family,
-        runner: family === "python" ? "uvx" : family === "npm" ? "npx" : "",
-      }),
-    );
+    const template = familyTemplate(next);
+    authoringRef.current[next] = template;
+    // 非 custom 模板作为作者状态上传（rust 空模板的命令行为空，只读区引导
+    // 进入 Dialog；custom 不上传投影，保持按命令派生）。
+    onCommandOptionsChange({
+      ...options,
+      family: next === "custom" ? null : template,
+    });
+    onCommandChange(buildCommand(template));
   };
 
-  const FamilyIcon = FAMILY_ICON[state.family];
-  const isCustom = state.family === "custom";
+  const openDialog = (): void => {
+    setDialogOpen(true);
+  };
+
+  const dialogInitial: FamilyFormState =
+    authoringRef.current[family] !== undefined
+      ? (authoringRef.current[family] as FamilyFormState)
+      : parsed.family === family
+        ? parsed
+        : familyTemplate(family);
+
+  const FamilyIcon = FAMILY_ICON[family];
+  const isCustom = family === "custom";
 
   return (
     <>
@@ -86,22 +122,22 @@ export function CommandFamilyInput({
           <DropdownMenuTrigger
             disabled={disabled}
             className="flex w-9 items-center justify-center rounded-l-lg border-r border-input transition-colors outline-none hover:bg-accent focus-visible:z-10 focus-visible:border-ring"
-            aria-label={`命令系列：${FAMILY_LABEL[state.family]}，点击切换`}
-            title={`命令系列：${FAMILY_LABEL[state.family]}`}
+            aria-label={`命令系列：${FAMILY_LABEL[family]}，点击切换`}
+            title={`命令系列：${FAMILY_LABEL[family]}`}
           >
             <FamilyIcon className="size-4 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-36">
-            {FAMILY_ORDER.map((family) => {
-              const ItemIcon = FAMILY_ICON[family];
+            {FAMILY_ORDER.map((item) => {
+              const ItemIcon = FAMILY_ICON[item];
               return (
                 <DropdownMenuItem
-                  key={family}
-                  onClick={() => switchFamily(family)}
-                  className={family === state.family ? "bg-accent/60" : undefined}
+                  key={item}
+                  onClick={() => switchFamily(item)}
+                  className={item === family ? "bg-accent/60" : undefined}
                 >
                   <ItemIcon className="text-muted-foreground" />
-                  {FAMILY_LABEL[family]}
+                  {FAMILY_LABEL[item]}
                 </DropdownMenuItem>
               );
             })}
@@ -124,15 +160,15 @@ export function CommandFamilyInput({
             type="button"
             className="h-full min-w-0 flex-1 cursor-pointer truncate px-2.5 text-left font-mono text-sm outline-none select-none disabled:cursor-not-allowed disabled:opacity-60"
             disabled={disabled}
-            title={command.length > 0 ? command : `点击配置 ${FAMILY_LABEL[state.family]} 系列命令`}
-            aria-label={`配置 ${FAMILY_LABEL[state.family]} 系列命令`}
-            onClick={() => setDialogOpen(true)}
+            title={command.length > 0 ? command : `点击配置 ${FAMILY_LABEL[family]} 系列命令`}
+            aria-label={`配置 ${FAMILY_LABEL[family]} 系列命令`}
+            onClick={openDialog}
           >
             {command.length > 0 ? (
               command
             ) : (
               <span className="text-muted-foreground">
-                点击配置 {FAMILY_LABEL[state.family]} 系列命令…
+                点击配置 {FAMILY_LABEL[family]} 系列命令…
               </span>
             )}
           </button>
@@ -182,14 +218,20 @@ export function CommandFamilyInput({
 
       <FamilyFormDialog
         open={dialogOpen}
-        initial={state}
+        initial={dialogInitial}
         initialEnvPresetDisabled={commandOptions.envPresetDisabled}
         onOpenChange={setDialogOpen}
         onApply={(next, envPresetDisabled) => {
+          authoringRef.current[next.family] = next;
+          setSelection(next.family);
           onCommandChange(buildCommand(next));
-          if (envPresetDisabled !== commandOptions.envPresetDisabled) {
-            onCommandOptionsChange({ ...commandOptions, envPresetDisabled });
-          }
+          // 作者状态投影上传（B1）：envPresetDisabled 与 family 一并持久化。
+          onCommandOptionsChange({
+            ...commandOptions,
+            ...(commandOptions.argsMode === "array" ? { argsMode: "string" as const } : {}),
+            envPresetDisabled,
+            family: next.family === "custom" ? null : next,
+          });
           setDialogOpen(false);
         }}
       />

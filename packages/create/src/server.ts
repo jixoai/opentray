@@ -502,6 +502,30 @@ const handleApi = async (
       if (typeof body.envPresetDisabled === "boolean") {
         patch.envPresetDisabled = body.envPresetDisabled;
       }
+      // 系列作者状态（D11）：完整 FamilyFormState 投影或显式 null（回到派生）。
+      if (body.family === null) {
+        patch.family = null;
+      } else if (typeof body.family === "object" && body.family !== null) {
+        const projection = body.family as Record<string, unknown>;
+        const familyValue = projection.family;
+        if (
+          familyValue === "npm" || familyValue === "go" || familyValue === "rust" ||
+          familyValue === "python" || familyValue === "dotnet" || familyValue === "custom"
+        ) {
+          const str = (value: unknown): string =>
+            typeof value === "string" ? value : "";
+          patch.family = {
+            family: familyValue,
+            runner: str(projection.runner),
+            runnerFlags: str(projection.runnerFlags),
+            pkg: str(projection.pkg),
+            version: str(projection.version),
+            args: str(projection.args),
+            binary: str(projection.binary),
+            raw: str(projection.raw),
+          };
+        }
+      }
       session.updateCommandOptions(patch);
       respond(response, 200, "application/json", '{"ok":true}\n');
       return;
