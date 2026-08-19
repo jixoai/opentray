@@ -43,3 +43,26 @@ Every listed application — wizard or registered — SHALL offer an open action
 - **GIVEN** a listed wizard application with no materialized bundle
 - **WHEN** the user triggers open
 - **THEN** the entry SHALL be spawned detached with the absolute Node runtime
+
+### Requirement: Uninstall SHALL work for wizard projects as well as registrations
+
+The applications list SHALL offer uninstall for BOTH layouts (user requirement #11, redesign-create-opentray-webui interview). Uninstalling a wizard project SHALL first verify ownership through the scaffold markers, then: detect a running app entry by matching the project's absolute `main.mjs` path in the process list; refuse with a typed running-state failure (listing the pids) unless stopping is explicitly authorized; when authorized, terminate the whole entry process tree with bounded escalation; finally remove the project directory and any OpenTray-home Darwin bundle materialized for that app identity. Completion SHALL report exactly what was removed and retain the manual OS-pin cleanup hint. Registry-layout uninstall SHALL keep its existing envelope semantics.
+
+#### Scenario: Wizard app refuses while running
+
+- **GIVEN** a listed wizard project whose entry process is alive
+- **WHEN** uninstall is requested without stop authorization
+- **THEN** the request SHALL fail with the running state and the matched pid
+- **AND** no file SHALL be removed
+
+#### Scenario: Wizard app uninstalls after authorized stop
+
+- **GIVEN** a listed wizard project with a running entry and explicit stop authorization
+- **WHEN** uninstall runs
+- **THEN** the entry process tree SHALL terminate, the project directory SHALL be removed, and a materialized OpenTray-home bundle for that identity SHALL be removed when present
+
+#### Scenario: Ownership gate
+
+- **GIVEN** a directory under the create root without wizard scaffold markers
+- **WHEN** the wizard-uninstall path is invoked for its key
+- **THEN** removal SHALL be refused without touching the directory
