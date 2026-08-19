@@ -23,5 +23,8 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "scripts/**/*.mjs"
+  ],
+  "exclude": [
+    "src/prototypes"
   ]
 }
