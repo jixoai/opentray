@@ -189,14 +189,23 @@ export const ApplicationsRoute = (): React.JSX.Element => {
   const confirmUninstall = async (): Promise<void> => {
     const target = confirmTarget;
     setConfirmTarget(null);
-    if (target?.appId === undefined) return;
-    const response = await uninstallApp(target.appId, { stopRunning: false, purgeTarget: purge });
+    if (target === null) return;
+    // 端点按目录 key 寻址：向导与注册两种布局都能卸载（需求 #11）。
+    const response = await uninstallApp(target.key, { stopRunning: false, purgeTarget: purge });
     if (response.status === 200) {
-      const data = response.data as { registrationPath: string; targetRetained: boolean; targetDeleted: boolean; payloadPath: string; manualPinCleanupHint: string };
+      const data = response.data as {
+        registrationPath?: string;
+        projectPath?: string;
+        targetRetained?: boolean;
+        targetDeleted?: boolean;
+        payloadPath?: string;
+        manualPinCleanupHint: string;
+      };
       setResult(
         [
-          `${messages.applications.uninstallRetained} ${data.targetRetained ? data.payloadPath : ""}`.trim(),
-          data.targetDeleted ? `${messages.applications.uninstallDeleted} ${data.payloadPath}` : "",
+          data.projectPath !== undefined ? data.projectPath : "",
+          data.targetRetained === true ? `${messages.applications.uninstallRetained} ${data.payloadPath ?? ""}` : "",
+          data.targetDeleted === true ? `${messages.applications.uninstallDeleted} ${data.payloadPath ?? ""}` : "",
           data.manualPinCleanupHint,
         ]
           .filter(Boolean)
@@ -302,12 +311,10 @@ export const ApplicationsRoute = (): React.JSX.Element => {
                       <Share2Icon width={14} height={14} aria-hidden />
                       {messages.applications.share}
                     </Button>
-                    {app.source !== "wizard" && (
-                      <Button variant="destructive" size="sm" onClick={() => setConfirmTarget(app)}>
-                        <Trash2Icon width={14} height={14} aria-hidden />
-                        {messages.applications.uninstall}
-                      </Button>
-                    )}
+                    <Button variant="destructive" size="sm" onClick={() => setConfirmTarget(app)}>
+                      <Trash2Icon width={14} height={14} aria-hidden />
+                      {messages.applications.uninstall}
+                    </Button>
                   </div>
 
                   {expanded && (
@@ -368,9 +375,14 @@ export const ApplicationsRoute = (): React.JSX.Element => {
           <AlertDialogHeader>
             <AlertDialogTitle>{messages.applications.uninstallTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              {messages.applications.uninstallDescription}
-              {confirmTarget?.appId !== undefined && (
-                <span className="tech-ltr mt-2 block truncate">{confirmTarget.appId}</span>
+              {confirmTarget?.source === "wizard"
+                ? messages.applications.uninstallWizardDescription
+                : messages.applications.uninstallDescription}
+              <span className="tech-ltr mt-2 block truncate">
+                {confirmTarget?.appId ?? confirmTarget?.key}
+              </span>
+              {confirmTarget?.projectDir !== undefined && (
+                <span className="tech-ltr mt-1 block truncate">{confirmTarget.projectDir}</span>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>

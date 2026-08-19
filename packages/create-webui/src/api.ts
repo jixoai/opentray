@@ -71,12 +71,12 @@ export interface UninstallResult {
 }
 
 export const uninstallApp = (
-  appId: string,
+  key: string,
   options: { readonly stopRunning: boolean; readonly purgeTarget: boolean },
 ): Promise<{ readonly status: number; readonly data: UninstallResult | { readonly code: string; readonly message: string } }> =>
-  request<UninstallResult | { code: string; message: string }>(`/api/apps/${encodeURIComponent(appId)}/uninstall`, {
+  request<UninstallResult | { code: string; message: string }>(`/api/apps/${encodeURIComponent(key)}/uninstall`, {
     method: "POST",
-    body: { appId, ...options },
+    body: { ...options },
   });
 
 export interface SkillEntry {

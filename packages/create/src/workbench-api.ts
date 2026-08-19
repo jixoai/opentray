@@ -20,6 +20,7 @@ import {
   readWizardProjectIcon,
   stopRunningApp,
   uninstallApp,
+  uninstallWizardProject,
   type CreateConfigV1,
   type EmbeddedResource,
 } from "@create-opentray/core";
@@ -224,7 +225,32 @@ export const handleWorkbenchApi = async (
 
   const uninstallMatch = /^\/api\/apps\/([^/]+)\/uninstall$/.exec(pathname);
   if (uninstallMatch !== null && request.method === "POST") {
-    const appId = typeof request.body.appId === "string" ? request.body.appId : undefined;
+    // 双布局卸载（需求 #11 修订 D6）：向导项目走脚手架所有权验证 +
+    // 运行探测/授权停止 + 删除项目与 bundle；注册布局维持信封语义。
+    const key = decodeURIComponent(uninstallMatch[1]!);
+    const entry = await findCreateEntry(key);
+    if (entry === undefined) {
+      return { status: 404, body: { code: "not_found", message: `no application at key ${key}` } };
+    }
+    if (entry.source === "wizard") {
+      const result = await uninstallWizardProject({
+        key,
+        stopRunning: request.body.stopRunning === true,
+      });
+      if (!result.ok) {
+        return {
+          status: result.error.code === "not_found" ? 404 : result.error.code === "app_running" ? 409 : 500,
+          body: result.error,
+        };
+      }
+      return { status: 200, body: result.value };
+    }
+    const appId =
+      entry?.source === "registered" && entry.record.config !== undefined
+        ? entry.record.config.appId
+        : typeof request.body.appId === "string"
+          ? request.body.appId
+          : undefined;
     if (appId === undefined) {
       return { status: 400, body: { code: "invalid_config", message: "appId is required" } };
     }

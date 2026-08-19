@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { findCreateEntry, listCreateEntries, readWizardProjectIcon } from "./scan";
+import { findCreateEntry, listCreateEntries, readWizardProjectIcon, uninstallWizardProject } from "./scan";
 
 const writeWizardProject = async (dir: string, over: Record<string, unknown> = {}): Promise<void> => {
   await mkdir(join(dir, "app-icon"), { recursive: true });
@@ -127,5 +127,62 @@ describe("readWizardProjectIcon", () => {
     expect(icon).toBeDefined();
     expect(icon?.bytes.byteLength).toBe(8);
     expect(icon?.sha256).toMatch(/^[0-9a-f]{64}$/u);
+  });
+});
+
+// 卸载（需求 #11 修订 D6）：所有权门 / 运行拒绝 / 授权停止 / 目录删除。
+describe("uninstallWizardProject", () => {
+  it("refuses a non-wizard directory without touching it", async () => {
+    const home = await mkdtemp(join(tmpdir(), "scan-uninstall-"));
+    const root = join(home, ".opentray", "create");
+    await mkdir(join(root, "foreign"), { recursive: true });
+    await writeFile(join(root, "foreign", "keep.txt"), "x");
+    const result = await uninstallWizardProject({ key: "foreign", homeDir: home });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("not_found");
+    expect(await readFile(join(root, "foreign", "keep.txt"), "utf8")).toBe("x");
+  });
+
+  it("refuses while the entry is running and lists the pid", async () => {
+    const home = await mkdtemp(join(tmpdir(), "scan-uninstall-"));
+    const root = join(home, ".opentray", "create");
+    await writeWizardProject(join(root, "web-dsh-npx"));
+    const result = await uninstallWizardProject({
+      key: "web-dsh-npx",
+      homeDir: home,
+      findPids: async () => [4242],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("app_running");
+      expect(result.error.pids).toContain(4242);
+    }
+    // 目录未被触碰
+    expect(await findCreateEntry("web-dsh-npx", home)).toBeDefined();
+  });
+
+  it("stops the tree and removes the project when authorized", async () => {
+    const home = await mkdtemp(join(tmpdir(), "scan-uninstall-"));
+    const root = join(home, ".opentray", "create");
+    await writeWizardProject(join(root, "web-dsh-npx"));
+    const killed: number[] = [];
+    const result = await uninstallWizardProject({
+      key: "web-dsh-npx",
+      homeDir: home,
+      stopRunning: true,
+      findPids: async () => [4242, 4243],
+      killTree: async (pid) => {
+        killed.push(pid);
+      },
+      platform: "linux",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(killed).toEqual([4242, 4243]);
+      expect(result.value.stoppedPids).toEqual([4242, 4243]);
+      expect(result.value.projectRemoved).toBe(true);
+      expect(result.value.bundleRemoved).toBe(false); // 非 darwin 无 bundle
+    }
+    expect(await findCreateEntry("web-dsh-npx", home)).toBeUndefined();
   });
 });

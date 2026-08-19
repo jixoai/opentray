@@ -127,9 +127,12 @@ export {
   listCreateEntries,
   readWizardProjectConfig,
   readWizardProjectIcon,
+  uninstallWizardProject,
   type CreateRootEntry,
   type WizardProjectConfig,
   type WizardProjectIcon,
+  type WizardUninstallOptions,
+  type WizardUninstallResult,
 } from "./scan";
 export { createDirectoryLink, linkCapabilities, type LinkCapabilities } from "./links";
 export {
