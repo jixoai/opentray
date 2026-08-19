@@ -93,3 +93,4 @@
 - [x] 12.1 R8-B1（组合测试缺口）：新增 it.each(cancellationPaths)×「Dialog 内 npm 编辑→切 Go 编辑→切回 npm 后取消」组合——断言 npm 重开为打开快照、Go 会话草稿不可恢复、外层命令串未因编辑/取消上传；跨系列确定用例补「命令含 draft-npm 且不含 Go 草稿」payload 断言（确定仅提交当前系列）。webui 62 项。
 - [x] 12.2 R8-B2（意图注释治理）：command-family-input.tsx 与 family-form-dialog.tsx 头部补齐用户原始需求（时间戳）+ 正交意图清单 + 妥协声明（会话 reducer 拆分推迟至归档后重构轮，理由记录）。
 - [x] 12.3 回归：webui 62 / create 249 全绿；typecheck 绿；生产资产重建。core 全量在复核侧环境因宿主进程检查用例失败（lifecycle/resources，非本变更面）；我侧 core 定向 32 绿。
+- [x] 12.4 R9 针对性复核（/tmp/codex-review-add-create-command-family-r8.md）：B1/B2 双双判定闭合、无新阻塞，**综合评分 9.4/10（7.8 → +1.6），通过本轮复核**。评分轨迹：3.5 → 5.5 → 6.0 → 5.0 → 6.5 → 6.0 → 7.8 → 9.4。遗留非阻塞（复核明确不影响闭合）：确定路径 callback recorder 精确断言作者投影、command-display/command-options 分离 SSE 事件乱序测试。

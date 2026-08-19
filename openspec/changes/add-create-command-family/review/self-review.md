@@ -1,46 +1,27 @@
-# add-create-command-family — Self-Review (Round 4)
+# add-create-command-family — Self-Review (Final)
 
-对照基准：`plans/plan.md`（Round 2，D1–D13）、`specs/` deltas、`tasks.md`。
-复核闭环：Codex R1 3.5/10（B1–B5）→ R2 修复 → Codex R2 5.5/10（剩恢复链 + 带值 flag）→ R3 修复 → Codex R3 6.0/10（剩 cargo 路径绕过 + 客户端 tokenizer 近似）→ R4 修复（本稿，待 R4 复核）。
+对照基准：`plans/plan.md`（Round 5，D1–D13 含 D11a）、`specs/` deltas、`tasks.md`。
+复核闭环（8 轮）：R1 3.5 → R2 5.5 → R3 6.0 → R4/R5 5.0 → R6 6.5 → R7 6.0 →（算法升级：Codex gpt-5.6-terra/max 接管实现）→ R8 7.8 → R9 **9.4 通过**。结论文件：/tmp/codex-review-add-create-command-family*.md（r1–r8）。
+Proof gate：`bun run openspec:vision -- check add-create-command-family` → ok:true。
 
-## Round 4 增量（d39e81c）
+## 最终状态
 
-| 阻塞 | 修复 | 证据 |
-|------|------|------|
-| R3-B1 cargo 路径绕过（`/opt/homebrew/bin/cargo install` 溜过字面头判定） | 两级判定：字面头 + resolveOnPath 解析后可执行文件名（basename cargo 且首非选项子命令 install；新增 WizardOptions.resolveOnPath seam） | wizard.test 三用例（路径形式/seam 裸名/非 cargo 放行） |
-| R3-B2 客户端轻量 tokenizer 近似（转义差异域 + 投影被升为权威） | webui 依赖 shell-quote（^1.10.0，与 core 同版本），镜像 tokenizeCommand 与 core tokenizeCommandLine 逐行对齐（配平 + op 拒绝） | `npx tool a\ b` 转义金样本进 core（32）与 webui（49）两份测试 |
-| （UI）选择器可供性 | 品牌图标 + ChevronDown 下拉箭头（w-11），含用户手动微调的两端布局 | typecheck/测试绿；生产资产重建 |
+- 意图五要点全部落地：分系列 appId（runner 归一 + 全名尾段 npmjs/golang/rust/python/dotnet）、env 预设（用户 env 行唯一可信源的双向投影）、单行 InputGroup + 会话化表单 Dialog、官方 SVG 图标、预设命令不进生产；custom/?edit= 零回归。
+- 草稿生命周期经 Codex max 实现的 DialogSession 模型闭合（打开快照 / 会话内跨系列暂存 / 取消四路径整体丢弃 / 确定仅提交当前系列 / D11a SSE 合流），组件交互测试矩阵锁定（webui 62）。
+- 安全边界：cargo install 保守完备禁跑（realpath 归一 + argv 含独立 install token 即拒，误拒边界入法 D7/spec）；参数 POSIX 对称序列化 + shell-quote 双端同源，往返逐项无损。
+- 测试终值：core 32 / create 249 / webui 62；三包 typecheck 绿。
 
-测试：core 32 / create 248 / webui 49 全绿；三包 typecheck 绿；validate 通过。
+## 遗留（非阻塞，复核确认不影响闭合）
 
-## 偏差（Deviations from intent）
+1. 确定路径的 callback recorder 精确断言（作者投影与命令串同时只提交当前系列）。
+2. command-display / command-options 分离 SSE 事件的乱序时序测试。
+3. 会话 reducer / projectionCache 拆分为 controller hook（归档后重构轮，已在文件头声明）。
+4. Windows 原生 cargo 路径判定 CI 用例（CARGO.EXE/重解析点，本地仅符号链接测试）。
 
-1. **D12 保证域收窄**：`tokenizeCommandLine` 既有配平法则拒绝含奇数单引号的 token（如 `"it's"`，先于本变更存在）。序列化按 POSIX 规范实现，但保证域 = tokenizer 接受域。修改 tokenizer 影响全部命令流，超出本变更范围。
-2. **D11 跨系列切换仍为「重置模板」**：同系列重复点击已 no-op；跨系列确认/撤销待用户反馈再迭代。
-3. **B3 采用客户端同规则而非服务端投影**：与 D9 镜像模式一致；服务端投影记为后续演进项。R4 起客户端 tokenizer 与 core 同源，该取舍的漂移风险已消除。
-4. **R4 复核未执行**：Codex 会话异常（hook 超时/中断，R3 结论文件未能落盘、从终端缓冲还原），由用户接手处理 Codex 环境；R4 修复基于 R3 结论完成，独立复核待用户恢复后补跑。
+## Git 证据（12+ 笔）
 
-## 需用户确认的新问题
+6b09564 docs(spec) → e4cf887 feat R1 → a3a31ec chore 原型 → b992caa/aad8947 R2 → 05b2211/6bbbaa1 R3 → d39e81c R4+箭头 → 04ac1dc R5 投影 → bd8da4a R6 → ffa974a R7 → f2e4f01 R8（codex max）→ 984d6f9 R9 → 本稿工件提交。未跟踪：`.zcode/`（会话产物）。
 
-1. 跨系列切换直接重置命令，是否需要「确认/可撤销」？
-2. 分享 env 确认是否要升级为服务端投影契约？
-3. Codex 环境恢复后是否补跑 R4 复核（建议：是）。
+## 循环终态
 
-## 证据
-
-- 测试：core 32 / create 248 / webui 49 全绿；三包 `tsc --noEmit` 绿；vision-driven 基线绿。
-- E2E：六系列推导、env true↔undefined 落盘取证、rust 投影重启恢复（快照 + UI）、cargo install 字面/路径拒绝未 spawn、带值 flag 回落 custom。
-- Codex 结论：R1 `/tmp/codex-review-add-create-command-family.md`（3.5）、R2 `…-r2.md`（5.5）、R3 6.0（终端缓冲还原，原文因 codex 写文件 hook 超时未落盘）。
-- GUI 冒烟：IAB 快照多轮（选择器/只读区/env 图标/Rust 恢复/无错误浮层）。
-
-## Git 证据
-
-- `6b09564` docs(spec) → `e4cf887` feat R1 → `a3a31ec` chore 原型 → `b992caa` docs(spec) R2 → `aad8947` fix R2 → `05b2211` docs(spec) R3 → `6bbbaa1` fix R3 → `d39e81c` fix R4（含用户微调）。
-- 未提交路径：`.zcode/`（会话产物）；review/ 工件随本稿提交。
-- tasks 勾选均由当前上下文完成并验证后更新。
-
-## 循环状态
-
-- 迭代次数：4（R1 实现 + R2/R3/R4 修复）；评分轨迹 3.5 → 5.5 → 6.0 → 待 R4。
-- 下一循环动作：用户恢复 Codex 后补跑 R4 复核；通过则 `check` gate → 用户验收 → archive。
-- 退出条件判断：意图五要点全部落地；两轮阻塞均收敛至「边界保真」主题且本轮已按结论闭合，待独立复核确认。
+迭代 9 轮（R1 实现 + 8 轮复核/修复，其中 R8 由 Codex max 按算法升级规则接管实现）；退出条件满足：R9 复核 9.4 通过 + check gate ok。下一步：用户浏览器验收 → `openspec archive add-create-command-family`（归档提交为最后一步）。
