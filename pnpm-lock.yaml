@@ -115,12 +115,6 @@ importers:
 
   packages/create:
     dependencies:
-      '@create-opentray/cli':
-        specifier: workspace:*
-        version: link:packages/cli
-      '@create-opentray/core':
-        specifier: workspace:*
-        version: link:packages/core
       '@opentray/packaging':
         specifier: workspace:*
         version: link:../packaging
@@ -137,6 +131,12 @@ importers:
         specifier: ^18.0.0
         version: 18.1.0
     devDependencies:
+      '@create-opentray/cli':
+        specifier: workspace:*
+        version: link:packages/cli
+      '@create-opentray/core':
+        specifier: workspace:*
+        version: link:packages/core
       '@types/yargs':
         specifier: ^17.0.33
         version: 17.0.35

@@ -31,13 +31,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@create-opentray/core": "workspace:*",
     "@opentray/packaging": "workspace:*",
     "@opentray/spec": "workspace:*",
     "@opentray/vite-plugin": "workspace:*",
     "sharp": "^0.33.5",
-    "yargs": "^18.0.0",
-    "@create-opentray/cli": "workspace:*"
+    "yargs": "^18.0.0"
   },
   "optionalDependencies": {
     "@lydell/node-pty": "^1.1.0"
@@ -47,7 +45,9 @@
     "ghostty-web": "^0.4.0",
     "tsdown": "^0.22.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "@create-opentray/core": "workspace:*",
+    "@create-opentray/cli": "workspace:*"
   },
   "engines": {
     "node": ">=20"
