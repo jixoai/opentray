@@ -1,0 +1,61 @@
+name: Deploy website
+
+# Orthogonal intents (maintained 2026-09-06; original user request: 新增
+# ./opentray 官网站点):
+# 1. Deploy the official static site to GitHub Pages on every push to main
+#    (plus manual dispatch) — serving from the project pages path
+#    (jixoai.github.io/opentray) until the Owner configures custom-domain DNS.
+# 2. Install only the site subset (`pnpm install --filter @opentray/website...`)
+#    — never the whole workspace, never the crates.
+# 3. CNAME/DNS cutover is Owner-managed external configuration: when DNS
+#    exists, set SITE_CNAME=1 + SITE_URL + SITE_DOMAIN in the build step —
+#    no other code change (documented in packages/website/README.md).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.20.0"
+          cache: pnpm
+      - name: Install the site build toolchain (site subset only)
+        run: pnpm install --frozen-lockfile --filter @opentray/website...
+      - name: Build the static site (project pages path mode)
+        run: pnpm --filter @opentray/website run build
+        env:
+          SITE_BASE: /opentray
+      - name: Run the automated static checks
+        run: pnpm --filter @opentray/website run check
+        env:
+          SITE_BASE: /opentray
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/website/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

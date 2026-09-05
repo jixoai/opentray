@@ -1,0 +1,10 @@
+<!--
+  Orthogonal intents (maintained 2026-09-06; original user request: 新增
+  ./opentray 官网站点): the site favicon's `>_` terminal mark in the project
+  icon hex #00a6f4 (brand hue 222 family; mirrors the shared jixoai favicon
+  recipe, hue-swapped only).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect x="2" y="2" width="28" height="28" fill="#000000" stroke="#00a6f4" stroke-width="3"/>
+  <text x="7" y="22" font-family="Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#00a6f4">&gt;_</text>
+</svg>
