@@ -11,6 +11,8 @@ decisions to the public skills/opentray guide):
 
 <p align="center"><img src="./docs/opentray-logo.png" alt="OpenTray logo" width="180"></p>
 
+English | [简体中文](README-zh.md)
+
 OpenTray is a desktop status runtime for Node/Deno/Bun CLI and AI-skill ecosystems.
 
 The current platform model is tray-first:

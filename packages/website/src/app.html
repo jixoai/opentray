@@ -9,8 +9,11 @@
   3. favicon + theme-color carry the project icon hex #00a6f4 (openspec
      change 2026-09-06-add-website; deliberate divergence from the skill's
      #000000 dark-canvas rule — recorded in NOTES.md).
+  4. Locale surface (2026-09-06): lang is a %lang% placeholder resolved
+     per request by src/hooks.server.ts (en at the root, zh under /zh/),
+     so each prerendered page ships its own <html lang>.
 -->
-<html lang="en">
+<html lang="%lang%">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

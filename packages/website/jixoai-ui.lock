@@ -148,6 +148,13 @@
       "files": {
         "src/lib/context-plugin.svelte.ts": "f0579853a19393e6e4bca9209b13d43d19bbf60b898fced7e431eda442af228e"
       }
+    },
+    "language-switcher": {
+      "files": {
+        "src/lib/ui/language-switcher/language-switcher.svelte": "84d4c5abcc24bade5bbecf88641f9dbf49734a65d36ca5522958a2a79ddd77dd",
+        "src/lib/ui/language-switcher/index.ts": "a72251a1cc444ccade54626ded0f285a41f208be2882c9b281fd4a03277e8038",
+        "src/lib/ui/language-switcher/language-switcher-defaults.svelte.ts": "3f7604ca149764ca5e0e84376d2d2b884f29b0acc7ff94078131bd40e0260f46"
+      }
     }
   }
 }

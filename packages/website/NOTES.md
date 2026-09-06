@@ -15,6 +15,13 @@ unipty `packages/www`.
 - Explicitly added and locked: `scrollbar-measure`, `website-scaffold`,
   `terminal-header`, `terminal-footer`, `theme-toggle`, `hero-section`,
   `section-card`, `press-button`, `terminal-card`, `card-grid`, `llms-txt`.
+- Locale surface (2026-09-06 site-i18n-zh change): `language-switcher` added
+  as a single-item `add` (23 items in the lock now); its closure
+  (`utils`, `jixoai-theme`, `icons`, `defaults`) was already installed and
+  locked, so no other items moved. The CLI re-created `src/lib/jixoai.css`
+  (hue 222 re-applied) — byte-identical to the previous on-disk file, and
+  the alias-resolved `src/lib/ui/language-switcher/**` paths landed directly
+  (no `src/@ui/` relocation needed this time).
 - Dependency closure explicitly locked (files land via registryDependencies,
   but only explicitly-named items enter `jixoai-ui.lock`): `icons`,
   `defaults`, `utils`, `navigation-menu`, `popover`, `density`, `paint`,
@@ -67,6 +74,55 @@ unipty `packages/www`.
   hex `#00a6f4` (unipty uses its own green); the logo PNG
   (`static/opentray-logo.png`) is a byte-identical copy of
   `docs/opentray-logo.png`.
+
+## Locale surface (2026-09-06, openspec change 2026-09-06-site-i18n-zh)
+
+- `/` stays English (stable inbound URLs); `/zh/` is the Chinese mirror.
+  Both routes render the SAME shared component (`home-page.svelte`) over
+  per-locale dictionaries in `src/lib/home-content.ts` (en from README.md,
+  zh from README-zh.md), so the pages are isomorphic by construction and
+  copy cannot drift structurally.
+- `<html lang>`: app.html carries the `%lang%` placeholder resolved by
+  `src/hooks.server.ts` through the shared pathname law in
+  `src/lib/locale.ts` (openspecui website precedent). Client-side locale
+  hops never re-run the server hook, so the layout also syncs
+  `document.documentElement.lang` in a `$effect` (SSR never runs effects —
+  prerendered pages keep the server-resolved lang).
+- **Detection is pathname-based, not `$app/paths`-base-based** (pitfall
+  found the hard way): during prerender `base` from `$app/paths` is
+  page-RELATIVE (`.` at the root, `..` under `/zh/`) because
+  `paths.relative` defaults to true, so stripping the config base off
+  `page.url.pathname` cannot work — `page.url.pathname` itself is always
+  absolute (base included). `$lib/locale` matches the `zh` segment under an
+  optional base segment instead; the same law serves the hook and the
+  layout chrome.
+- `/zh/` serves WITH its trailing slash: a page-level
+  `export const trailingSlash = 'always'` in `src/routes/zh/+page.ts`
+  overrides the global `never` so `dist/zh/index.html` exists and the
+  directory URL resolves on plain static hosts (`/opentray/zh` → 301 by
+  the host, GitHub Pages behavior included).
+- hreflang alternates (en / zh / x-default, absolute) render in both
+  pages' heads from `SITE_URL`; `constants.ts` now resolves it from the
+  build-time `__SITE_URL__` define (fed by the same `SITE_URL` env as the
+  llms.txt plugin), so head alternates and the AI export layer move
+  together at the custom-domain cutover.
+- llms.txt locale split: `locale: { segments: ['zh'], default: '' }` in the
+  plugin config — root `llms.txt` (en + an "Other languages" section
+  linking `zh/llms.txt`), `zh/llms.txt`, per-page mirrors `index.md` +
+  `zh/index.md`; `llms-full.txt` follows the default locale only (the
+  plugin's mixed-language-dump rule). Byte-identity re-verified twice in
+  both root and `/opentray` base modes.
+- Header switcher composition: `switcherFrame={false}` with
+  `LanguageSwitcher` + `ThemeToggle` in one flex cluster (both controls are
+  self-framed) — the openspecui bilingual-site composition; this also
+  removes the pre-existing frame-in-frame on the compact ThemeToggle.
+  Switcher hrefs carry the live URL hash (`$derived` on `page.url.hash`,
+  empty at prerender), so locale hops preserve the current anchor; brand
+  link and the Overview entry stay on the current locale.
+- `scripts/check-site.mjs` extended: both pages' refs resolve (nested
+  pages ship page-relative `../` refs — resolution is per-page-directory
+  now), hreflang + `<html lang>` assertions per page, and the zh AI-export
+  set (`zh/llms.txt`, `zh/index.md`, "Other languages" cross-link).
 
 ## Base-path behavior (verified 2026-09-06)
 
