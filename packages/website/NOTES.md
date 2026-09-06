@@ -178,10 +178,11 @@ unipty `packages/www`.
   prerendering (see the `$lib/locale` header note). Verified baked
   values in both modes' dist: `''` (CNAME) and `'/opentray'`
   (SITE_BASE=/opentray).
-- Switcher persistence lives in the layout as a DELEGATED click handler
-  on the bezel wrapper (reads the clicked anchor's `hreflang`) — the
-  registry `language-switcher` item stays byte-identical to its lock.
-  An explicit click always beats detection afterwards.
+- Switcher persistence moved INTO the registry `language-switcher`
+  (consumer-feedback-fixes P0-2, 2026-09-06 upgrade): the component's
+  own click handler writes localStorage `lang`, so the layout-level
+  DELEGATED click handler on the bezel wrapper was REMOVED. An explicit
+  click still always beats detection.
 - Verification (playwright-core 1.63, machine-cached Chromium):
   3-site matrix × both serving modes — zh-CN → `/zh/` (hash preserved),
   zh-Hans-CN primary-subtag hit, en-US stay, en-US-first list stay,
@@ -191,3 +192,32 @@ unipty `packages/www`.
   lands on target surface) all green; builds + check-site PASS in both
   modes; dev server spot check confirms the placeholders resolve in
   the dev pipeline too.
+
+## Upstream consumer-feedback-fixes consumption (2026-09-06)
+
+- `npx jixoai-ui upgrade` (registry ui.jixoai.com): updated 8 items
+  (`jixoai-theme`, `scrollbar-measure`, `theme-toggle`, `hero-section`,
+  `press-button`, `defaults`, `context-plugin`, `language-switcher`),
+  56 unchanged, 3 skipped (CLI 已锁未装 foolproofing). Lock 23 → 23
+  items; lock↔disk hash verify 63/64 files exact (the one divergence is
+  `jixoai.css`: lock records the pre-hue canonical hash by design, the
+  on-disk file carries the applied hue 222 — re-applied by the upgrade,
+  verified `--brand-hue: 222`).
+- Hack removal: the `persistLocale` event-delegation hack in
+  `+layout.svelte` (bezel-wrapper `onclick` reading `a[hreflang]`) is
+  deleted — the upgraded registry `language-switcher` now ships the
+  persistence contract itself (P0-2: click → `localStorage.lang`,
+  try/catch silent, pure anchor navigation preserved). Layout header
+  comment updated accordingly (intent 5 folded into intent 4).
+- `theme-toggle` gained an optional `labels` prop (localization of the
+  full variant's text labels); this site uses `variant="compact"`
+  (icon-only), so no labels passed — English defaults are fine.
+- `jixoai.css` comment-context fix consumed (the --brand-hue comment now
+  states consumers keep the static hue; the wall-clock rotation note is
+  scoped to ui.jixoai.com itself).
+- Verification: dual-mode builds PASS (default subpath + SITE_CNAME=1
+  SITE_DOMAIN=opentray.jixoai.com SITE_URL=https://opentray.jixoai.com,
+  dist/CNAME written), check-site PASS in CNAME mode; playwright
+  headless spot check on dev (port 13126): click 中文 → `lang=zh` +
+  lands `/zh/`, reload stays zh with `<html lang="zh">`, click EN →
+  `lang=en` + reload stays en — 6/6 green.
