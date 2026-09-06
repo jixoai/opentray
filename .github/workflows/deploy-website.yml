@@ -37,14 +37,18 @@ jobs:
           cache: pnpm
       - name: Install the site build toolchain (site subset only)
         run: pnpm install --frozen-lockfile --filter @opentray/website...
-      - name: Build the static site (project pages path mode)
+      - name: Build the static site (custom-domain mode)
         run: pnpm --filter @opentray/website run build
         env:
-          SITE_BASE: /opentray
+          SITE_CNAME: "1"
+          SITE_DOMAIN: opentray.jixoai.com
+          SITE_URL: https://opentray.jixoai.com
       - name: Run the automated static checks
         run: pnpm --filter @opentray/website run check
         env:
-          SITE_BASE: /opentray
+          SITE_CNAME: "1"
+          SITE_DOMAIN: opentray.jixoai.com
+          SITE_URL: https://opentray.jixoai.com
 
       - uses: actions/upload-pages-artifact@v3
         with:
