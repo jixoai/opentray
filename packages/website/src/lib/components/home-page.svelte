@@ -1,9 +1,11 @@
 <!--
   Orthogonal intents (maintained 2026-09-06; original user request 2026-09-06
-  Asia/Shanghai: 所有站点需要至少提供中英两种语言的支持——/zh/ 中文镜像页):
+  Asia/Shanghai: 所有站点需要至少提供中英两种语言的支持——/zh/ 中文镜像页;
+  extended 2026-09-06: 官网文案要升级——目的先行，可溯源到意图信源):
   1. One home-page renderer for both locales: markup is locale-invariant,
-     copy comes from home-content.ts (en from README.md, zh from
-     README-zh.md), so / and /zh/ stay isomorphic by construction.
+     copy comes from home-content.ts (purpose-led, sourced from the repo's
+     intent documents — README pair, AGENTS.md Vision, SPEC.md), so / and
+     /zh/ stay isomorphic by construction.
   2. Per-locale head: <title>/<description> plus hreflang alternates
      (en / zh / x-default) with absolute URLs from the canonical SITE_URL —
      the same origin the llms.txt export layer treats as truth.

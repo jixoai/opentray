@@ -136,3 +136,22 @@ unipty `packages/www`.
   named error; with it, `dist/CNAME` is written after the vite build (the
   AI export layer never sees CNAME — it is not HTML, so byte-stability is
   unaffected).
+
+## Purpose-led copy rewrite (2026-09-06, release-automation-and-copy)
+
+- Hero and all eight feature cards rewritten from feature-inventory prose
+  to purpose-led narrative in both locales (home-content.ts). Every claim
+  stays traceable: the "not a tray icon — an entry point without Electron"
+  framing is AGENTS.md Vision verbatim in intent; "one install" is SPEC.md;
+  broker-not-addon / no-worker-split is README Packaging; "six platforms"
+  counts the six `<os>-<arch>` runtime packages (3 OSes × 2 arches); the
+  "four adapters" count is the README packaging section.
+- Traceability anchors live in the home-content.ts header comment and the
+  openspec change tasks; feature ids were re-keyed (`tray-first` → `why`)
+  to match the new first card ("why it exists" leads the grid).
+- zh quotes use 「」 inside single-quoted TS strings (no escaping churn);
+  hero title splits keep the `<em>` rung on the contrast word
+  (en `without` / zh `不必`) so both locales emphasize the same token.
+- Both serving modes re-verified after the rewrite: CNAME mode and
+  `SITE_BASE=/opentray` build + check-site PASS; new copy grep-verified in
+  dist HTML and both llms.md mirrors (en/zh isomorphic).
