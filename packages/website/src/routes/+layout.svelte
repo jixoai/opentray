@@ -13,6 +13,10 @@
      self-framed, the openspecui bilingual-site composition); switcher
      hrefs keep the current hash so anchor position survives the locale
      hop, and the Overview entry + brand link stay on the current locale.
+  5. Locale persistence (2026-09-06, locale-negotiation change): an
+     explicit switcher click writes localStorage `lang` — the key the
+     app.html pre-paint negotiation reads as the WINNING choice, so an
+     explicit pick always beats browser-language detection.
 -->
 <script lang="ts">
   import '$lib/scrollbar-measure';
@@ -69,6 +73,21 @@
     { code: 'en', label: 'EN', href: `${enHref}${hash}` },
     { code: 'zh', label: '中文', href: `${base}/zh/${hash}` },
   ]);
+
+  // Persistence for the app.html negotiation (delegated on the bezel
+  // wrapper — the registry switcher renders plain anchors with hreflang,
+  // so the click's target locale is read from the anchor itself and the
+  // registry item stays untouched).
+  const persistLocale = (event: MouseEvent) => {
+    const code = (event.target as HTMLElement | null)?.closest('a[hreflang]')?.getAttribute('hreflang');
+    if (code === 'en' || code === 'zh') {
+      try {
+        window.localStorage.setItem('lang', code);
+      } catch {
+        /* storage unavailable — the navigation itself still proceeds */
+      }
+    }
+  };
 </script>
 
 <WebsiteScaffold>
@@ -90,7 +109,7 @@
         />
       {/snippet}
       {#snippet switcher()}
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2" onclick={persistLocale}>
           <LanguageSwitcher
             variant="pair"
             locales={switcherLocales}

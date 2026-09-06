@@ -12,7 +12,14 @@
   4. Locale surface (2026-09-06): lang is a %lang% placeholder resolved
      per request by src/hooks.server.ts (en at the root, zh under /zh/),
      so each prerendered page ships its own <html lang>.
+  5. Locale negotiation (2026-09-06): before first paint, a zh-preferring
+     visitor on the DEFAULT (en) surface is sent to its /zh/ mirror —
+     explicit persisted choice (localStorage `lang`, written by the
+     switcher) first, else the first navigator.languages match. Detection
+     only ever happens on the default surface; the non-default surface
+     never redirects (loop-proof by construction — see the script).
 -->
+
 <html lang="%lang%">
   <head>
     <meta charset="utf-8" />
@@ -20,6 +27,48 @@
     <meta name="theme-color" content="#00a6f4" />
     <link rel="icon" href="%sveltekit.assets%/icon.svg" />
     <link rel="icon" type="image/png" href="%sveltekit.assets%/opentray-logo.png" />
+    <script>
+      (() => {
+        // Locale negotiation, BEFORE first paint (openspec change
+        // 2026-09-06-locale-negotiation): a zh-preferring visitor on the
+        // default (en) surface is sent to the same page under /zh/ (path +
+        // hash preserved) via location.replace (no history entry).
+        // Precedence: explicit persisted choice (localStorage `lang`,
+        // written by the layout's switcher) > first navigator.languages
+        // match on the primary subtag (zh-CN/zh-Hans → zh).
+        // Loop-proof by construction: the script only redirects AWAY from
+        // the default surface, the target always carries the /zh/ prefix
+        // (so the condition can never hold again), and nothing ever
+        // redirects back from /zh/.
+        const siteBase = '%site_base%'; // baked per build by hooks.server.ts (same env law as kit.paths.base)
+        const path = window.location.pathname;
+        const route =
+          siteBase !== '' && `${path}/`.startsWith(`${siteBase}/`)
+            ? path.slice(siteBase.length) || '/'
+            : path;
+        if (/^\/zh(?:\/|$)/.test(route)) return; // already on the zh surface — never redirect
+        const negotiate = () => {
+          try {
+            const stored = window.localStorage.getItem('lang');
+            if (stored === 'zh' || stored === 'en') return stored; // explicit choice wins
+          } catch {
+            /* storage unavailable → fall through to detection */
+          }
+          const langs = navigator.languages ?? (navigator.language ? [navigator.language] : []);
+          for (const tag of langs) {
+            const primary = String(tag).split('-')[0].toLowerCase();
+            if (primary === 'zh') return 'zh';
+            if (primary === 'en') return 'en'; // default already matches — first match wins
+          }
+          return null;
+        };
+        if (negotiate() === 'zh') {
+          window.location.replace(
+            `${siteBase}/zh${route === '/' ? '/' : route}${window.location.hash}`,
+          );
+        }
+      })();
+    </script>
     <script>
       (() => {
         // No-flash theme bootstrap + JS liveness flag (reveal/card-grid

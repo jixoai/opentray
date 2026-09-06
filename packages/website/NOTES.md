@@ -155,3 +155,39 @@ unipty `packages/www`.
 - Both serving modes re-verified after the rewrite: CNAME mode and
   `SITE_BASE=/opentray` build + check-site PASS; new copy grep-verified in
   dist HTML and both llms.md mirrors (en/zh isomorphic).
+
+## Locale negotiation (2026-09-06 locale-negotiation change)
+
+- Pre-paint bootstrap in `src/app.html` (inline, before first paint): a
+  zh-preferring visitor on the DEFAULT (en) surface is sent once to the
+  same page under `/zh/` (path + hash preserved) via `location.replace`
+  (no history entry). Precedence: explicit persisted choice
+  (localStorage `lang`) > first `navigator.languages` match on the
+  primary subtag (zh-CN/zh-Hans → zh; en-US wins the stay, so
+  `['en-US','zh-CN']` stays — first match wins).
+- **The law: detection only happens on the default-language surface; the
+  non-default surface never redirects.** Loop-proof by construction:
+  the script only redirects away from the default surface, the target
+  always carries the `/zh/` prefix (so the condition can never hold
+  again), and nothing ever redirects back from `/zh/`. Crawlers/no-JS
+  get the static default (hreflang carries the alternates).
+- Base-aware by baking: `hooks.server.ts` substitutes the
+  serving-mode base into the script from the SAME env law as
+  `kit.paths.base` (SITE_CNAME=1 → '', else SITE_BASE) — env parsing,
+  not `$app/paths`, because that `base` is page-relative during
+  prerendering (see the `$lib/locale` header note). Verified baked
+  values in both modes' dist: `''` (CNAME) and `'/opentray'`
+  (SITE_BASE=/opentray).
+- Switcher persistence lives in the layout as a DELEGATED click handler
+  on the bezel wrapper (reads the clicked anchor's `hreflang`) — the
+  registry `language-switcher` item stays byte-identical to its lock.
+  An explicit click always beats detection afterwards.
+- Verification (playwright-core 1.63, machine-cached Chromium):
+  3-site matrix × both serving modes — zh-CN → `/zh/` (hash preserved),
+  zh-Hans-CN primary-subtag hit, en-US stay, en-US-first list stay,
+  pt-BR-first list walk → `/zh/`, stored `zh` honored, stored `en` on
+  `/zh/` stays (no bounce), zh-CN on `/zh/` stays (loop law) — 16/16
+  per-mode cases + real-click switcher persistence (writes `lang`,
+  lands on target surface) all green; builds + check-site PASS in both
+  modes; dev server spot check confirms the placeholders resolve in
+  the dev pipeline too.
