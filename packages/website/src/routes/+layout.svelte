@@ -30,6 +30,13 @@
   import NavigationMenuLink from '$lib/ui/navigation-menu/navigation-menu-link.svelte';
   import ThemeToggle from '$lib/ui/theme-toggle/theme-toggle.svelte';
   import LanguageSwitcher from '$lib/ui/language-switcher/language-switcher.svelte';
+  import ResponsivePicture, { type PictureSet } from '$lib/components/responsive-picture.svelte';
+  // image pipeline (Owner law 2026-09-07): the 1024px source png rides
+  // vite-imagetools — webp srcset + png fallback at 48/96px for the 24px
+  // header slot (DPR 2–4 covered); emitted URLs carry kit.paths.base so
+  // the subpath build mode resolves identically to the ${base} string it
+  // replaces.
+  import opentrayLogo from '$lib/assets/opentray-logo.png?w=48;96&format=webp;png&as=picture';
   import {
     APP_MODE_GUIDE_URL,
     CREATE_APP_GUIDE_URL,
@@ -84,12 +91,11 @@
       switcherFrame={false}
     >
       {#snippet logo()}
-        <img
-          src={`${base}/opentray-logo.png`}
+        <ResponsivePicture
+          set={opentrayLogo as PictureSet}
           alt=""
           class="h-6 w-6 object-contain"
-          loading="eager"
-          decoding="async"
+          eager
         />
       {/snippet}
       {#snippet switcher()}

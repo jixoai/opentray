@@ -1,8 +1,10 @@
 /*
 Orthogonal intents (maintained 2026-09-06; original user request: 新增 ./opentray
 官网站点，AI 导出层随站点交付; extended 2026-09-06: 所有站点需要至少提供中英
-两种语言的支持):
+两种语言的支持; extended 2026-09-07: 响应式品牌图片管线):
 1. One vite pipeline for dev/build (sveltekit + tailwindcss v4 css-first).
+   [image-pipeline] imagetools rides FIRST so `?w=…&format=webp;png&as=picture`
+   imports resolve before any consumer plugin (Owner image-optimization law).
 2. ONE llms.txt generation point: the registry llms-txt vite plugin, wired
    here and nowhere else (orchestrated double generation is forbidden by the
    llms-txt law); siteUrl is the project pages URL until the Owner cuts DNS.
@@ -16,6 +18,7 @@ Orthogonal intents (maintained 2026-09-06; original user request: 新增 ./opent
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
+import { imagetools } from 'vite-imagetools';
 import { llmsTxt } from './vite-plugins/llms-txt.mjs';
 
 // The AI export layer's canonical URL: the project pages path until the
@@ -25,6 +28,9 @@ const siteUrl = process.env.SITE_URL ?? 'https://opentray.jixoai.com';
 
 export default defineConfig({
   plugins: [
+    // image pipeline (Owner law 2026-09-07): ?w=…&format=webp;png&as=picture
+    // imports for raster brand assets; must run before the sveltekit plugin.
+    imagetools(),
     sveltekit(),
     tailwindcss(),
     llmsTxt({
