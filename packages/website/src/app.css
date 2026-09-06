@@ -11,6 +11,11 @@ Orthogonal intents (maintained 2026-09-06; original user request: 新增 ./opent
    The registry sheet already maps colors, fonts, shadows, popover/
    destructive/input/ring (the unipty-era pitfall is fixed upstream in
    jixoai-ui 0.3.0) and owns the scrollbar + press + reveal laws.
+3. Mobile polish overrides (2026-09-06 mobile-audit): presentation-only
+   seam rules over LOCKED registry chrome (terminal-header, hero-section —
+   untouched files; the seams are their stable hooks). Unlayered on
+   purpose: they must win over the components' utility cascade. See the
+   dedicated section near the end of this file.
 */
 @import 'tailwindcss';
 @import './lib/jixoai.css';
@@ -142,6 +147,57 @@ Orthogonal intents (maintained 2026-09-06; original user request: 新增 ./opent
 }
 .dark .tok-number {
   color: var(--secondary);
+}
+
+/* -------------------------------------------------------------------------
+ * Mobile polish overrides (2026-09-06 mobile-audit, P2) — presentation
+ * seams over the LOCKED registry chrome. The registry files stay
+ * byte-identical (jixoai-ui.lock); every rule below rides a stable hook
+ * the locked components already ship. Unlayered on purpose: these must
+ * outrank the utility cascade layered inside the components.
+ *
+ * 1. zh hero title: the hero H1 wraps with `text-wrap: balance`; in CJK
+ *    prose the balancer evens line widths by stretching the few ASCII
+ *    spaces (around "CLI"/"AI") to 2-3 character widths — reading as
+ *    accidental justification. zh titles read ragged-left instead;
+ *    every other locale keeps the balanced wrap.
+ * 2. header brand domain line: below sm the stacked tier has no room for
+ *    the domain row — the registry truncate seam cuts it to "jixo.…" —
+ *    so the narrow tier shows the wordmark only (sm+ keeps all rows).
+ * 3. hamburger hit area: the pointer-modality chrome band sizes the
+ *    button at 32px inside its 38px frame; an invisible ::after grows
+ *    the touch target to the 44px floor without touching any paint.
+ * ---------------------------------------------------------------------- */
+:lang(zh) [data-jx-hero-title] {
+  text-align: left;
+  /* `wrap` (not `normal`) is deliberate, twice over: the build minifier
+   * strips bare `text-wrap: normal` as an initial value, AND Chromium 145
+   * silently REJECTS the `normal` keyword in declarations (verified
+   * 2026-09-06 mobile-audit: inline style.setProperty('text-wrap',
+   * 'normal', 'important') is dropped) while accepting every other
+   * keyword. `wrap` is the explicit form of ordinary wrapping (mode:
+   * wrap, style: normal) — no balancing, so no stretched ASCII gaps in
+   * CJK prose, incl. the pre-webfont fallback phase where the balancer's
+   * justify-like gaps were reported. Engines that predate the `wrap`
+   * keyword ignore the declaration and keep the utility's balance —
+   * no regression. !important outranks the locked component's layered
+   * text-balance utility. */
+  text-wrap: wrap !important;
+}
+
+@media (max-width: 39.99rem) {
+  .jx-nav [data-jx-chrome] > a span.font-nav.truncate.text-sm {
+    display: none;
+  }
+}
+
+.jx-nav button[aria-label='Toggle navigation'] {
+  position: relative;
+}
+.jx-nav button[aria-label='Toggle navigation']::after {
+  content: '';
+  inset: -6px;
+  position: absolute;
 }
 
 /* Reduced-motion law: the registry sheet already neutralizes reveal + press;
