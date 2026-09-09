@@ -74,11 +74,20 @@ export const parseWindowSpec = (
   return { ok: true, width, height };
 };
 
+/** Enrichment presets for URL creation (add-create-url-apps D10). */
+export interface CreateEnrichment {
+  /** Scraped page title — fills appName when neither flag nor base supplies it. */
+  readonly appName?: string;
+  /** Scraped favicon (normalized temp file) — fills the app icon source. */
+  readonly appIconPath?: string;
+}
+
 /** Compile flags over an optional base config document. */
 export const compileDesiredConfig = async (
   options: CreateFlagOptions,
   configPath: string | undefined,
   baseCwd: string,
+  enrichment?: CreateEnrichment,
 ): Promise<Result<CreateConfigV1>> => {
   let base: CreateConfigV1 | undefined;
   if (configPath !== undefined) {
@@ -116,9 +125,12 @@ export const compileDesiredConfig = async (
   }
 
   // URL identity defaults (D5): the address text alone derives them offline.
+  // Scraped presets (D10) sit BETWEEN the base document and the address
+  // derivation: flag > --config > scraped preset > address text.
   const derived = url === undefined ? undefined : deriveUrlIdentity(url);
   const appId = options.appId ?? base?.appId ?? derived?.appId;
-  const appName = options.appName ?? base?.appName ?? derived?.appName;
+  const appName =
+    options.appName ?? base?.appName ?? (url === undefined ? undefined : enrichment?.appName) ?? derived?.appName;
   if (appId === undefined) {
     return err("invalid_config", "--app-id is required (or supply a complete --config document)");
   }

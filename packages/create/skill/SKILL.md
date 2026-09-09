@@ -94,8 +94,11 @@ npx create-opentray create \
 
   Identity derives offline from the address (`app.com.example` / `App`);
   override with `--app-id`/`--app-name`. It is mutually exclusive with
-  `--exec`/`--arg`/`--cwd`/`--env` and never fetches or probes the address.
-  `app edit <id> --url <new-address>` changes it later; export emits `--url`.
+  `--exec`/`--arg`/`--cwd`/`--env`. Because the address is known up front,
+  creation scrapes the page once and adopts its `<title>` and best favicon
+  as DEFAULTS (explicit flags win; failures fall back silently; `--no-scrape`
+  skips the fetch). `app edit <id> --url <new-address>` changes it later;
+  export emits `--url`.
 - Icon sources may be local files, `http(s)` URLs, or `data:` URLs. The CLI
   never scrapes names or favicons — everything is explicit.
 - `--dry-run` prints the Core plan (effects, warnings, blocks) without

@@ -17,6 +17,7 @@ import {
   applyCreate,
   buildExportPlan,
   buildScriptExport,
+  deriveUrlPresets,
   err,
   formatPosixCommandLine,
   listRegistrations,
@@ -36,7 +37,7 @@ import {
   type Result,
 } from "@create-opentray/core";
 
-import { compileDesiredConfig, type CreateFlagOptions } from "./options";
+import { compileDesiredConfig, type CreateEnrichment, type CreateFlagOptions } from "./options";
 import { CliOutcome, emitOutcome, emitProgress, type CliStreams } from "./output";
 import { listSkillFiles, readSkillFile, resolveSkillRoot, validateSkillPath } from "./skill";
 
@@ -148,6 +149,8 @@ interface CreateArgs {
   readonly stopRunning?: boolean;
   readonly skipInstall?: boolean;
   readonly dryRun?: boolean;
+  /** Negated --no-scrape; default true (scrape the URL for defaults). */
+  readonly scrape?: boolean;
   readonly json?: boolean;
 }
 
@@ -168,7 +171,31 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
       (flags as Record<string, unknown>)[key] = value;
     }
   }
-  const compiled = await compileDesiredConfig(flags, args.config, cwd);
+
+  // URL-mode enrichment (D10): unlike a command — which must run before
+  // anything can be scraped — the address is known up front, so creation
+  // adopts the page title and best favicon as DEFAULTS. Bounded fetch,
+  // silent fallback, off-switch --no-scrape; explicit flags/config always win.
+  let enrichment: CreateEnrichment | undefined;
+  let presetIconPath: string | undefined;
+  if (
+    args.url !== undefined &&
+    args.scrape !== false &&
+    (args.appName === undefined || args.appIcon === undefined)
+  ) {
+    const presets = await deriveUrlPresets(args.url);
+    enrichment = presets;
+    presetIconPath = presets.appIconPath;
+    if (presets.appName !== undefined || presets.appIconPath !== undefined) {
+      emitProgress(
+        `scraped defaults from ${args.url}: ${[presets.appName !== undefined ? "title" : undefined, presets.appIconPath !== undefined ? "favicon" : undefined].filter(Boolean).join(" + ")} (defaults; explicit flags win)`,
+        context.streams,
+        args.json === true,
+      );
+    }
+  }
+
+  const compiled = await compileDesiredConfig(flags, args.config, cwd, enrichment);
   if (!compiled.ok) {
     finish(context, { ok: false, error: { code: compiled.error.code, message: compiled.error.message } }, args.json === true);
     return;
@@ -176,7 +203,8 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
 
   const desired: DesiredState = {
     config: compiled.value,
-    appIconSource: iconSourceInput(args.appIcon),
+    appIconSource: iconSourceInput(args.appIcon) ??
+      (presetIconPath === undefined ? undefined : ({ kind: "file", path: presetIconPath } as ResourceInput)),
     trayIconSource: iconSourceInput(args.trayIcon),
   };
   const applyOptions = {
@@ -231,7 +259,8 @@ const createCommand = (context: CliContext): CommandModule => ({
       .option("config", { type: "string", describe: "base v1 config document (explicit flags override named fields)" })
       .option("app-id", { type: "string", describe: "immutable reverse-dotted identity, e.g. app.example (default under --url: derived from the address)" })
       .option("app-name", { type: "string", describe: "display name (default under --url: derived from the address)" })
-      .option("url", { type: "string", describe: "application source: open this http(s) URL directly (mutually exclusive with --exec/--arg/--cwd/--env)" })
+      .option("url", { type: "string", describe: "application source: open this http(s) URL directly (mutually exclusive with --exec/--arg/--cwd/--env); scrapes the page for default name/icon unless --no-scrape" })
+      .option("scrape", { type: "boolean", default: true, describe: "scrape the --url page for default name/icon (negate with --no-scrape for offline/privacy)" })
       .option("exec", { type: "string", describe: "command executable" })
       .option("arg", { type: "array", string: true, describe: "one exact argv element (repeatable)" })
       .option("cwd", { type: "string", describe: "command working directory (default: current)" })

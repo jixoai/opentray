@@ -1,3 +1,4 @@
+import http from "node:http";
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -248,7 +249,7 @@ describe("skill paths", () => {
 // 互斥、edit 可改 url、export 携带 --url。
 describe("create --url (add-create-url-apps)", () => {
   it("creates a URL application from --url alone with derived identity", async () => {
-    const code = await run(["create", "--url", "https://example.com/app"]);
+    const code = await run(["create", "--url", "https://example.com/app", "--no-scrape"]);
     expect(code, errLines.join("\n")).toBe(0);
     const configPath = join(home, ".opentray", "create", "app-com-example", "create-opentray.json");
     const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -275,12 +276,12 @@ describe("create --url (add-create-url-apps)", () => {
   });
 
   it("rejects a non-http(s) --url before planning", async () => {
-    const code = await run(["create", "--url", "file:///Users/me/site"]);
+    const code = await run(["create", "--url", "file:///Users/me/site", "--no-scrape"]);
     expect(code).not.toBe(0);
   });
 
   it("edits the url of a URL application", async () => {
-    await run(["create", "--url", "https://example.com"]);
+    await run(["create", "--url", "https://example.com", "--no-scrape"]);
     const code = await run(["app", "edit", "com.example", "--url", "https://example.org/app"]);
     expect(code, errLines.join("\n")).toBe(0);
     const config = JSON.parse(
@@ -291,7 +292,7 @@ describe("create --url (add-create-url-apps)", () => {
   });
 
   it("exports a URL application as a --url invocation", async () => {
-    await run(["create", "--url", "https://example.com/app"]);
+    await run(["create", "--url", "https://example.com/app", "--no-scrape"]);
     const code = await run(["app", "export", "app.com.example", "--format", "command"]);
     expect(code, errLines.join("\n")).toBe(0);
     const command = outLines.join("\n");
@@ -313,3 +314,97 @@ describe("create --url (add-create-url-apps)", () => {
     const payloadFiles = await readdir(join(home, ".opentray", "create", "switch-example", "app"));
     expect(payloadFiles).not.toContain("app-shell-server.mjs");
   });
+
+// D10：URL 创建默认抓取链接页面——本地 fixture server 提供 title 与
+// favicon，验证预设进 committed 配置/快照；--no-scrape 与不可达地址回落。
+describe("create --url scraped defaults (D10)", () => {
+  let fixture: http.Server;
+  let fixtureUrl: string;
+
+  beforeAll(async () => {
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from([0x00, 0x00, 0x00, 0x0d]),
+      Buffer.from("IHDR", "latin1"),
+      Buffer.from([0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00]),
+      Buffer.from([0x1f, 0x15, 0xc4, 0x89]),
+      Buffer.alloc(64, 7),
+    ]);
+    fixture = http.createServer((request, response) => {
+      if (request.url === "/app") {
+        response.writeHead(200, { "content-type": "text/html" });
+        response.end(
+          `<html><head><title>Fixture News</title>` +
+            `<link rel="icon" href="/icon.png" sizes="64x64">` +
+            `</head><body>ok</body></html>`,
+        );
+        return;
+      }
+      if (request.url === "/icon.png") {
+        response.writeHead(200, { "content-type": "image/png" });
+        response.end(png);
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    await new Promise<void>((resolvePromise) => fixture.listen(0, "127.0.0.1", () => resolvePromise()));
+    const address = fixture.address();
+    if (typeof address === "object" && address !== null) {
+      fixtureUrl = `http://127.0.0.1:${address.port}`;
+    }
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolvePromise) => fixture.close(() => resolvePromise()));
+  });
+
+  it("adopts the scraped title and favicon as defaults", async () => {
+    const code = await run(["create", "--url", `${fixtureUrl}/app`]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "app-1-0-0-127", "create-opentray.json"), "utf8"),
+    );
+    expect(config.appName).toBe("Fixture News");
+    expect(config.icons.appIcon).toBeDefined();
+    // favicon 经抓取管线规范化为临时文件，再由 importResource 提交快照。
+    expect(config.icons.appIcon.source.kind).toBe("file");
+    expect(config.icons.appIcon.path).toMatch(/^app-icon\./u);
+    const payloadIcon = join(home, ".opentray", "create", "app-1-0-0-127", "app", "app-icon", "app-icon.png");
+    await expect(readFile(payloadIcon)).resolves.toBeDefined();
+  });
+
+  it("explicit flags win over scraped presets", async () => {
+    const code = await run([
+      "create", "--url", `${fixtureUrl}/app`,
+      "--app-id", "explicit.example", "--app-name", "Explicit Name",
+    ]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "explicit-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.appName).toBe("Explicit Name");
+    // 显式 --app-name 给了但 --app-icon 未给：favicon 预设仍填充图标。
+    expect(config.icons.appIcon).toBeDefined();
+  });
+
+  it("--no-scrape keeps the address-derived name and skips the network", async () => {
+    const code = await run(["create", "--url", `${fixtureUrl}/app`, "--no-scrape", "--app-id", "quiet.example"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "quiet-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.appName).toBe("App"); // 地址路径段 /app 推导，非 Fixture News
+    expect(config.icons.appIcon).toBeUndefined();
+  });
+
+  it("falls back silently on an unreachable address", async () => {
+    const code = await run(["create", "--url", "http://127.0.0.1:1", "--app-id", "down.example"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "down-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.appName).toBe("127");
+    expect(config.icons.appIcon).toBeUndefined();
+  });
+});

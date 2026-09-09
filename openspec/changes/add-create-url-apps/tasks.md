@@ -36,3 +36,11 @@
 ## 5. Docs
 
 - [x] 5.1 packages/create/README.md：命令树/Non-interactive create 增加 `--url`；skill references（cli-reference/how-it-works）同步。
+
+## 6. Round 2（用户验收轮：URL 创建抓取预设，D10）
+
+- [x] 6.1 backup-plan → plan-v1.md；plan.md 新增 D10：URL 创建默认抓取页面 title/favicon 作预设（flag > --config > 预设 > 地址推导；appId 恒地址推导；--no-scrape 关闭；失败静默回落；edit 不抓取）。
+- [x] 6.2 Core/scrape.ts：scrapeUrl 提炼（scrapeService 变 loopback 包装；/favicon.ico 兜底按站点根解析）+ deriveUrlPresets（title 截断 80、favicon 走已规范化临时文件）+ index 导出。
+- [x] 6.3 CLI：compileDesiredConfig enrichment 注入点；create --scrape/--no-scrape（yargs 否定式，default true）；runCreate 抓取接线 + progress 提示；appIconSource 预设回填。
+- [x] 6.4 测试：scrape.test 4 项（任意地址抓取、根化兜底、预设/失败、title 截断）；commands.test 既有 URL 用例 --no-scrape 化 + 4 项 D10 e2e（fixture server 预设进 committed 配置/快照、显式 flag 优先、--no-scrape、不可达回落）。
+- [x] 6.5 specs delta：create-cli-command-tree MODIFIED requirement 修订 no-scraping 条款（命令模式不抓保持）+ 两个新 scenario；README/skill 三件套同步。

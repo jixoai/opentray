@@ -183,24 +183,24 @@ describe("workbench /api/apps URL project", () => {
 
   it("lists the URL project healthy with hasEnv false", async () => {
     const response = await get("/api/apps");
-    expect(response.status).toBe(200);
-    const row = (response.body as Record<string, unknown>[]).find((entry) => entry.key === "com-example");
+    expect(response?.status).toBe(200);
+    const row = (response!.body as Record<string, unknown>[]).find((entry) => entry.key === "com-example");
     expect(row?.status).toBe("healthy");
     expect(row?.hasEnv).toBe(false);
   });
 
   it("prefills the URL project with url and no command defaults", async () => {
     const response = await get("/api/apps/com-example/config");
-    expect(response.status).toBe(200);
-    const config = response.body as Record<string, unknown>;
+    expect(response?.status).toBe(200);
+    const config = response!.body as Record<string, unknown>;
     expect(config.url).toBe("https://example.com");
     expect(config.command).toBeUndefined();
   });
 
   it("exports the URL project without env acknowledgement", async () => {
     const response = await post("/api/apps/com-example/export", { format: "command" });
-    expect(response.status).toBe(200);
-    const body = response.body as { command?: string };
+    expect(response?.status).toBe(200);
+    const body = response!.body as { command?: string };
     expect(body.command).toContain("--url");
     expect(body.command).not.toContain("--exec");
   });

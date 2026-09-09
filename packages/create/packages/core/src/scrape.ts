@@ -9,6 +9,9 @@
 // 3. Decode true pixel dimensions (sharp; ICO via directory/PNG-payload/DIB
 //    extraction) and a perceptual hash; rank by clarity, hide near-duplicates.
 // 4. Keep scrape failures non-fatal with an empty result and a glyph fallback source.
+// 5. URL-mode creation presets (add-create-url-apps D10): scrape an arbitrary
+//    http(s) address once and adopt title + best favicon as DEFAULTS — a URL
+//    app knows its address up front, unlike a command that must run first.
 
 import { createHash } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
@@ -213,15 +216,16 @@ const defaultFetch: ScrapeFetch = {
 const MAX_ICON_DOWNLOADS = 8;
 
 /**
- * Scrape title and ALL icon candidates from a service port. Never throws:
- * failures return `ok: false` with whatever partial identity was found.
+ * Scrape title and ALL icon candidates from an arbitrary http(s) URL.
+ * Never throws: failures return `ok: false` with whatever partial identity
+ * was found. (`scrapeService` is the loopback-port wrapper over this.)
  */
-export const scrapeService = async (
-  port: number,
+export const scrapeUrl = async (
+  url: string,
   options: { fetch?: ScrapeFetch; tempDir?: string } = {},
 ): Promise<ScrapeResult> => {
   const fetchImpl = options.fetch ?? defaultFetch;
-  const origin = serviceUrl(port);
+  const origin = url;
   const page = await fetchImpl.page(origin);
   if (!page.ok) {
     return {
@@ -234,9 +238,11 @@ export const scrapeService = async (
 
   const title = extractTitle(page.body);
   const candidates = rankFaviconCandidates(extractFaviconCandidates(page.body));
+  // The root /favicon.ico fallback is resolved against the ORIGIN (not the
+  // full address): a deep link like /app must still probe the site root.
   const orderedUrls = [
     ...candidates.map((candidate) => resolveFaviconUrl(candidate.href, origin)),
-    `${origin}/favicon.ico`,
+    resolveFaviconUrl("/favicon.ico", origin),
   ]
     .filter((url): url is string => url !== undefined)
     .filter((url, index, all) => all.indexOf(url) === index)
@@ -325,6 +331,52 @@ export const scrapeService = async (
     icons,
   };
 }
+
+/**
+ * Scrape title and ALL icon candidates from a service port. Never throws:
+ * failures return `ok: false` with whatever partial identity was found.
+ */
+export const scrapeService = (
+  port: number,
+  options: { fetch?: ScrapeFetch; tempDir?: string } = {},
+): Promise<ScrapeResult> => scrapeUrl(serviceUrl(port), options);
+
+// URL-mode creation presets (add-create-url-apps D10, 2026-09-09; owner
+// acceptance round): unlike a command app — which must RUN before anything
+// can be scraped — a URL app knows its address up front, so creation may
+// adopt the page title and best favicon as DEFAULTS. The favicon flows as
+// the scrape pipeline's already-normalized temp file (ICO frames cracked,
+// SVG densified), feeding the same importResource snapshot path the wizard
+// uses. Every failure path degrades to {} — enrichment never blocks or
+// fails creation.
+export interface UrlPresets {
+  /** Page `<title>` (whitespace-normalized, length-capped) or undefined. */
+  readonly appName?: string;
+  /** Normalized temp-file icon source for the app icon, or undefined. */
+  readonly appIconPath?: string;
+}
+
+/** Upper bound for an adopted page title (display names stay sane). */
+const PRESET_TITLE_MAX = 80;
+
+export const deriveUrlPresets = async (
+  url: string,
+  options: { fetch?: ScrapeFetch; tempDir?: string } = {},
+): Promise<UrlPresets> => {
+  const scraped = await scrapeUrl(url, options);
+  if (!scraped.ok) {
+    return {};
+  }
+  const title = scraped.title?.trim();
+  const appName =
+    title !== undefined && title.length > 0
+      ? (title.length > PRESET_TITLE_MAX ? `${title.slice(0, PRESET_TITLE_MAX - 1).trimEnd()}…` : title)
+      : undefined;
+  return {
+    ...(appName === undefined ? {} : { appName }),
+    ...(scraped.iconPath === undefined ? {} : { appIconPath: scraped.iconPath }),
+  };
+};
 
 const black = { r: 0, g: 0, b: 0 };
 const white = { r: 255, g: 255, b: 255 };

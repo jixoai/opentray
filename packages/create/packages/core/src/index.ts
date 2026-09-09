@@ -68,6 +68,8 @@ export {
 } from "./port-scan";
 export {
   scrapeService,
+  scrapeUrl,
+  deriveUrlPresets,
   writeGlyphIconTemp,
   extractTitle,
   extractFaviconCandidates,
@@ -78,6 +80,8 @@ export {
   type IconVariant as ScrapedIconVariant,
   type ScrapeResult,
   type ScrapedIcon,
+  type ScrapeFetch,
+  type UrlPresets,
 } from "./scrape";
 export {
   APP_ICON_CANVAS,

@@ -7,10 +7,13 @@ A v1 application carries exactly ONE source:
 - **Command** — `--exec/--arg/--cwd/--env`: create-opentray supervises a local
   start command and hosts the HTTP services it owns.
 - **URL** — `--url <http(s) address>`: no command at all. The generated app
-  opens one window directly at the frozen address. Creation never fetches or
-  probes the URL (fully offline); identity defaults derive from the address
-  text (`https://example.com/app` → appId `app.com.example`, name `App`).
-  URL apps carry no PTY, no terminal/address-bar shell, and no env overlay.
+  opens one window directly at the frozen address. The address is known up
+  front (unlike a command that must run first), so creation scrapes the page
+  once and adopts its `<title>` and best favicon as DEFAULTS — explicit flags
+  win, failures fall back silently to the address-derived name and a glyph
+  icon, and `--no-scrape` skips the fetch. appId always derives from the
+  address text, never from page content. URL apps carry no PTY, no
+  terminal/address-bar shell, and no env overlay.
 
 ## The creation pipeline
 

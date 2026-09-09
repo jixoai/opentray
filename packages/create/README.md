@@ -44,12 +44,14 @@ npx create-opentray create \
   (no command): `npx create-opentray create --url https://example.com` derives
   the app id/name from the address (`https://example.com/app` →
   `app.com.example` / `App`); override with `--app-id`/`--app-name`. It is
-  mutually exclusive with `--exec`/`--arg`/`--cwd`/`--env`, works fully
-  offline (the URL is never fetched or probed during creation), and the
-  generated app opens one window at the address with no terminal or PTY.
-- Icon sources: local files, `http(s)` URLs, or `data:` URLs. The CLI never
-  scrapes names or favicons (URL apps use a glyph fallback icon unless
-  `--app-icon` is supplied).
+  mutually exclusive with `--exec`/`--arg`/`--cwd`/`--env`, and the generated
+  app opens one window at the address with no terminal or PTY. Because the
+  address is known up front (unlike a command that must run first), creation
+  scrapes the page once and adopts its `<title>` and best favicon as
+  defaults — explicit flags always win, failures fall back silently
+  (address-derived name + glyph icon), and `--no-scrape` disables the fetch.
+- Icon sources: local files, `http(s)` URLs, or `data:` URLs. Outside URL-mode
+  enrichment the CLI never scrapes names or favicons.
 - `--config <file>` loads a complete v1 document; explicit flags override
   only their named fields.
 - `--dry-run` prints the plan without mutating anything.

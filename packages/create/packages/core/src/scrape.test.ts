@@ -13,7 +13,9 @@ import {
   rankFaviconCandidates,
   resolveFaviconUrl,
   SVG_RASTER_TARGET,
+  deriveUrlPresets,
   scrapeService,
+  scrapeUrl,
   writeGlyphIconTemp,
   type ScrapeFetch,
 } from "./scrape";
@@ -374,5 +376,63 @@ describe("tolerant HTML parsing (node-html-parser)", () => {
     const candidates = extractFaviconCandidates(html);
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.sizes).toBe("180x180");
+  });
+});
+
+// add-create-url-apps D10：URL 创建预设——任意地址抓 title/favicon；
+// /favicon.ico 兜底按站点根解析；失败返回空预设（绝不阻塞创建）。
+describe("scrapeUrl / deriveUrlPresets", () => {
+  it("scrapes an arbitrary address and resolves the favicon fallback against the site root", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "scrape-url-test-"));
+    const iconBytes = new Map([
+      ["https://example.com/big.png", PNG_BYTES],
+    ]);
+    const result = await scrapeUrl("https://example.com/app", {
+      fetch: fetchMock({ iconBytes }),
+      tempDir,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.title).toBe("Scraped Title");
+    expect(result.iconUrl).toBe("https://example.com/big.png");
+  });
+
+  it("resolves /favicon.ico at the origin, not the deep path", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "scrape-url-test-"));
+    const iconBytes = new Map([
+      ["https://example.com/favicon.ico", PNG_BYTES],
+    ]);
+    const result = await scrapeUrl("https://example.com/app", {
+      fetch: fetchMock({ iconBytes }),
+      tempDir,
+    });
+    expect(result.iconUrl).toBe("https://example.com/favicon.ico");
+  });
+
+  it("deriveUrlPresets returns title + icon path and degrades to empty on failure", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "scrape-url-test-"));
+    const presets = await deriveUrlPresets("https://example.com", {
+      fetch: fetchMock({ iconBytes: new Map([["https://example.com/big.png", PNG_BYTES]]) }),
+      tempDir,
+    });
+    expect(presets.appName).toBe("Scraped Title");
+    expect(presets.appIconPath).toBeDefined();
+    expect(await readFile(presets.appIconPath!)).toEqual(PNG_BYTES);
+
+    const failed = await deriveUrlPresets("https://example.com", {
+      fetch: fetchMock({ pageOk: false }),
+      tempDir,
+    });
+    expect(failed).toEqual({});
+  });
+
+  it("caps an adopted page title at 80 characters", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "scrape-url-test-"));
+    const longTitle = "A".repeat(120);
+    const presets = await deriveUrlPresets("https://example.com", {
+      fetch: fetchMock({ pageHtml: html(longTitle) }),
+      tempDir,
+    });
+    expect(presets.appName?.length).toBe(80);
+    expect(presets.appName?.endsWith("…")).toBe(true);
   });
 });

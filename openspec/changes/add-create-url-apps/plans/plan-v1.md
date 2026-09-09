@@ -57,7 +57,6 @@ npx create-opentray create --url https://example.com \
 | D7 | `scan.ts` 的 payload 配置读取兼容 URL 应用（command 可缺省） | `app list`/发现面不区分两类应用的健康语义 |
 | D8 | WebUI wizard 的 URL 模式**本轮不做**（后续独立 change） | wizard 核心价值是「跑命令验证端口」，URL 应用无验证环节；CLI 非交互一步到位已是完整用户路径。webui 是独立 React 包，混入会显著扩大本轮验证面 |
 | D9 | `open-app`、runtime-record、stop/uninstall 不改 | URL 应用 main.mjs 与命令应用同为单 node 进程（还少了子树） |
-| D10 | URL 创建默认抓取链接页面，把 `<title>` 与最佳 favicon 作为**默认预设**（用户验收轮拍板，2026-09-09）。优先级：显式 flag > `--config` 文档 > 抓取预设 > 地址文本推导；appId 恒用地址推导（title 不稳定，不进身份）；favicon 用抓取管线已规范化的临时文件（ICO 已拆帧、SVG 已致密化）作为 file 源喂给既有 importResource 快照。`--no-scrape` 显式关闭（离线/隐私出口）；抓取 bounded（默认 5s/请求）且任何失败静默回落（hostname 推导 + glyph），绝不阻塞创建。dry-run 同样抓取（展示真实将提交的预设）。app edit 不抓取（注册已有 committed 快照）。命令模式不受影响——其 never-scrape 法则保持（CLI 不跑命令，无从抓起） | 这是 URL 模式相对命令模式的结构性优势：命令要跑起来才能抓，URL 创建时链接就在手上；wizard 对已验证服务的 suggestion 心智在 CLI URL 路径的直接投影 |
 
 ## 数据流
 

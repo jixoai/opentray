@@ -19,7 +19,7 @@ command flags (`--exec` family) OR `--url`. Options:
 | `--config <file>` | base v1 document; explicit flags override named fields only |
 | `--app-id <id>` | immutable reverse-dotted identity (required without `--config`/`--url`) |
 | `--app-name <name>` | display name (required without `--config`/`--url`) |
-| `--url <address>` | URL source: open this http(s) address directly (no command); derives default identity offline; mutually exclusive with `--exec`/`--arg`/`--cwd`/`--env` |
+| `--url <address>` | URL source: open this http(s) address directly (no command); scrapes the page for default name/icon unless `--no-scrape`; mutually exclusive with `--exec`/`--arg`/`--cwd`/`--env` |
 | `--exec <executable>` | command executable |
 | `--arg <value>` | one exact argv element (repeatable) |
 | `--cwd <dir>` | command working directory (default: current) |
