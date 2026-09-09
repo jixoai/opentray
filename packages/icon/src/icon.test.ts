@@ -1,4 +1,4 @@
-import { readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import zlib from "node:zlib";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -37,6 +37,63 @@ const icnsTagsOf = (bytes: Uint8Array): readonly string[] => {
     offset += view.getUint32(offset + 4);
   }
   return tags;
+};
+
+// The kernel is a no-sharp stack (jsquash WASM); fixtures are hand-encoded
+// PNGs so tests never gain a native dependency.
+const CRC_TABLE = new Uint32Array(
+  Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) {
+      c = (c & 1) !== 0 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    return c >>> 0;
+  }),
+);
+const crc32Of = (bytes: Buffer): number => {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+};
+const pngChunk = (type: string, data: Buffer): Buffer => {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32Of(body));
+  return Buffer.concat([length, body, crc]);
+};
+const encodeRgbaPng = (
+  width: number,
+  height: number,
+  pixelAt: (x: number, y: number) => readonly [number, number, number, number],
+): Buffer => {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  const raw = Buffer.alloc(height * (1 + width * 4));
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (1 + width * 4);
+    raw[row] = 0; // filter: none
+    for (let x = 0; x < width; x += 1) {
+      const [r, g, b, a] = pixelAt(x, y);
+      const offset = row + 1 + x * 4;
+      raw[offset] = r;
+      raw[offset + 1] = g;
+      raw[offset + 2] = b;
+      raw[offset + 3] = a;
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
 };
 
 describe("glyph construction", () => {
@@ -137,6 +194,64 @@ describe("composition semantics (create round-12 port)", () => {
     expect(autoBackground({ luminance: undefined, coverage: 0.5 })).toBe("white");
     expect(autoBackground({ luminance: 0.8, coverage: 0.5 })).toBe("black");
     expect(autoBackground({ luminance: 0.2, coverage: 0.5 })).toBe("white");
+  });
+
+  it("auto background: a solid opaque border ring means the art carries its own backdrop — match it", () => {
+    // 白底黑字（维基百科类）：满幅 + 纯白边框环 → 白底（owner 2026-09-10）。
+    expect(
+      autoBackground({
+        luminance: 0.9,
+        coverage: 1,
+        edge: { opaque: 1, luminance: 0.97, uniform: true },
+      }),
+    ).toBe("white");
+    // 黑底亮字：纯黑边框环 → 黑底。
+    expect(
+      autoBackground({
+        luminance: 0.3,
+        coverage: 1,
+        edge: { opaque: 1, luminance: 0.05, uniform: true },
+      }),
+    ).toBe("black");
+    // 满幅但边框杂色（照片/满幅艺术）→ 保持透明透传。
+    expect(
+      autoBackground({
+        luminance: 0.6,
+        coverage: 1,
+        edge: { opaque: 1, luminance: 0.5, uniform: false },
+      }),
+    ).toBe("transparent");
+    // 环不连续（边缘半透明缺口）→ 不是自带底，保持透明。
+    expect(
+      autoBackground({
+        luminance: 0.6,
+        coverage: 1,
+        edge: { opaque: 0.8, luminance: 0.97, uniform: true },
+      }),
+    ).toBe("transparent");
+  });
+
+  it("foregroundStats derives the border ring from a solid-pad foreground", async () => {
+    // 白底黑字 fixture（手工 PNG，kernel 无 sharp 依赖）：边缘环应 uniform
+    // 且高亮度，走白底建议。
+    const dir = join(tmpdir(), `opentray-icon-edge-${process.pid}`);
+    await mkdir(dir, { recursive: true });
+    const solidPath = join(dir, "white-pad.png");
+    const radius = 90;
+    const whitePad = encodeRgbaPng(400, 400, (x, y) => {
+      const dx = x - 200;
+      const dy = y - 200;
+      return dx * dx + dy * dy <= radius * radius ? [17, 17, 17, 255] : [255, 255, 255, 255];
+    });
+    await writeFile(solidPath, whitePad);
+    const stats = await foregroundStats(solidPath);
+    expect(stats.coverage).toBeGreaterThanOrEqual(0.985);
+    expect(stats.edge).toBeDefined();
+    expect(stats.edge!.uniform).toBe(true);
+    expect(stats.edge!.opaque).toBeGreaterThanOrEqual(0.98);
+    expect(stats.edge!.luminance).toBeGreaterThan(0.5);
+    expect(autoBackground(stats)).toBe("white");
+    await rm(dir, { recursive: true, force: true });
   });
 
   it("foregroundStats reads luminance and coverage from a real foreground", async () => {

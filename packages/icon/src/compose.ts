@@ -82,26 +82,83 @@ const foregroundSample = async (
   return insideImage(decoded, 512, "lanczos3");
 };
 
+/** Border-ring analysis of the sampled foreground (owner 2026-09-10). */
+export interface ForegroundEdgeStats {
+  /** Ring opaque ratio (0–1); the border is "solid" near 1. */
+  readonly opaque: number;
+  /** Mean ring luminance over opaque pixels (0 = black … 1 = white). */
+  readonly luminance: number;
+  /** True when ring pixels stay within one narrow color band per channel. */
+  readonly uniform: boolean;
+}
+
+/** Per-channel spread tolerance for a "solid color" border (JPEG noise room). */
+const EDGE_UNIFORM_SPREAD = 24 / 255;
+
 /** Both analysis metrics from ONE decode (huge uploads must not double). */
 export const foregroundStats = async (
   sourcePath: string,
-): Promise<{ luminance: number | undefined; coverage: number }> => {
+): Promise<{
+  luminance: number | undefined;
+  coverage: number;
+  /** Undefined when the sampled border ring has no opaque pixels at all. */
+  edge: ForegroundEdgeStats | undefined;
+}> => {
   const { data, width, height } = await foregroundSample(sourcePath);
   let weight = 0;
   let sum = 0;
   let opaque = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const a = (data[i + 3] ?? 0) / 255;
-    if (a > 0) {
-      const lum =
-        (0.299 * (data[i] ?? 0) + 0.587 * (data[i + 1] ?? 0) + 0.114 * (data[i + 2] ?? 0)) / 255;
-      weight += a;
-      sum += lum * a;
+  // Border ring (owner rule): a solid opaque ring means the art carries its
+  // own solid backdrop (e.g. a white-pad logo) — the auto background should
+  // MATCH that color instead of transparency, so the squircle tile stays
+  // seamless instead of floating the pad on the system backdrop.
+  const ring = Math.max(2, Math.round(Math.min(width, height) * 0.04));
+  let ringTotal = 0;
+  let ringOpaque = 0;
+  let ringWeight = 0;
+  let ringSum = 0;
+  let ringMin = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  let ringMax = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (let y = 0; y < height; y += 1) {
+    const inBandRow = y < ring || y >= height - ring;
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      const a = (data[i + 3] ?? 0) / 255;
+      if (a > 0) {
+        const lum =
+          (0.299 * (data[i] ?? 0) + 0.587 * (data[i + 1] ?? 0) + 0.114 * (data[i + 2] ?? 0)) / 255;
+        weight += a;
+        sum += lum * a;
+      }
+      const isOpaque = (data[i + 3] ?? 0) > 16;
+      if (isOpaque) opaque += 1;
+      if (inBandRow || x < ring || x >= width - ring) {
+        ringTotal += 1;
+        if (isOpaque) {
+          ringOpaque += 1;
+          ringWeight += a;
+          ringSum +=
+            (0.299 * (data[i] ?? 0) + 0.587 * (data[i + 1] ?? 0) + 0.114 * (data[i + 2] ?? 0)) / 255 * a;
+          for (let c = 0; c < 3; c += 1) {
+            const v = (data[i + c] ?? 0) / 255;
+            if (v < ringMin[c]!) ringMin[c] = v;
+            if (v > ringMax[c]!) ringMax[c] = v;
+          }
+        }
+      }
     }
-    if ((data[i + 3] ?? 0) > 16) opaque += 1;
   }
   const luminance = weight < width * height * 0.02 ? undefined : sum / weight;
-  return { luminance, coverage: opaque / (width * height) };
+  const edge =
+    ringOpaque === 0
+      ? undefined
+      : {
+          opaque: ringOpaque / ringTotal,
+          luminance: ringSum / ringWeight,
+          uniform:
+            ringMin.every((min, c) => (ringMax[c]! - min) <= EDGE_UNIFORM_SPREAD),
+        };
+  return { luminance, coverage: opaque / (width * height), edge };
 };
 
 /** Mean luminance of the artwork's own pixels (0 = black … 1 = white). */
@@ -118,10 +175,19 @@ export const foregroundCoverage = async (sourcePath: string): Promise<number> =>
 export const autoBackground = (options: {
   readonly luminance: number | undefined;
   readonly coverage: number;
+  /** Border-ring analysis (owner 2026-09-10): solid ring = solid backdrop. */
+  readonly edge?: ForegroundEdgeStats | undefined;
 }): IconBackground => {
-  // A fully opaque foreground already carries its own backdrop — compose on
-  // transparency so the user's art passes through verbatim.
   if (options.coverage >= 0.985) {
+    // A fully opaque foreground with a SOLID border ring carries its own
+    // backdrop color (white-pad logos like Wikipedia, black-pad marks): match
+    // that color so the composed squircle tile stays seamless. Opaque art
+    // WITHOUT a solid ring (photos, full-bleed artwork) still composes on
+    // transparency so the user's art passes through verbatim.
+    const edge = options.edge;
+    if (edge !== undefined && edge.opaque >= 0.98 && edge.uniform) {
+      return edge.luminance > 0.5 ? "white" : "black";
+    }
     return "transparent";
   }
   // Light artwork → dark background; dark artwork → light background. The

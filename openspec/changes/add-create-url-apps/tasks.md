@@ -61,3 +61,10 @@
 - [x] 8.3 CLI：--toolbar 遇 frameEmbeddable===false 打印明确警告并回退直连 payload（delete flags.toolbar）；--no-scrape 无探测数据时请求照常（限制已文档明示）。
 - [x] 8.4 测试：scrape 31（策略矩阵 + 预设投影）、CLI 26/26（fixture /deny 路由 e2e：警告 + 无 shell 资产；允许路由保留 toolbar）；用例生命周期归位（fixture server 的 afterAll 时序修复）。
 - [x] 8.5 实机验证：HN --toolbar 自动回退（警告可见）；Wikipedia --toolbar 获得 true toolbar（地址栏 + 快捷键 + 托盘 Reload）。
+
+## 9. Round 5（用户验收轮：图标背景自动选择的边缘环规则，D14）
+
+- [x] 9.1 kernel compose.ts：`foregroundStats` 增边缘环统计（环宽 `max(2, round(min(w,h)×0.04))`，`edge: { opaque, luminance, uniform }`，uniform 容差 24/255）；`autoBackground` 满幅分支匹配实色环（white-pad→white、black-pad→black），无环旧调用行为不变；`ForegroundEdgeStats` 导出。
+- [x] 9.2 测试：icon.test.ts autoBackground edge 参数矩阵（白环/黑环/杂色/不连续）+ foregroundStats 白底 fixture 实测（手工 PNG 编码器——kernel 无 sharp 依赖，测试不引入原生依赖）；15/15 全绿。
+- [x] 9.3 `pnpm --filter @opentray/icon build` 重建 dist；create-core icon-compose 4/4（wizard `analyzeIconForeground` 直传 stats 零改动受益）。
+- [x] 9.4 实证：生产路径探针（deriveUrlPresets 抓真实 en.wikipedia.org favicon）→ `edge {opaque 1, luminance 0.996, uniform true}` → 建议 white；独立向导实例 API + 浏览器走查（「白色 自动」选中、预览白底黑标、squircle 外角透明像素核验）；create-webui owner-law 注释同步。

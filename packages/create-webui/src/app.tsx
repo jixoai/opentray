@@ -190,9 +190,10 @@ const selectedIconRefStale = (
         const analysis = (await response.json()) as IconAnalysis;
         if (effectiveForegroundRef.current !== foreground) return; // superseded
         setIconAnalysis(analysis);
-        // Owner law: light art → black bg, dark art → white bg, fully
-        // opaque art → transparent. A manual pick survives only until the
-        // next foreground change.
+        // Owner law: light art → black bg, dark art → white bg, fully opaque
+        // art → transparent, unless its solid border ring reveals a carried
+        // backdrop (white-pad favicons stay white). A manual pick survives
+        // only until the next foreground change.
         iconBackgroundManualRef.current = false;
         setIconBackground(analysis.suggested);
         // The auto suggestion is part of the frozen form too — sync it so
