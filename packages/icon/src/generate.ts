@@ -448,13 +448,15 @@ function isCacheMetadata(
 async function resolveSourceImplementationPath(
   implementationPath: string
 ): Promise<string | null> {
-  if (implementationPath.endsWith(`${path.sep}src${path.sep}generate.ts`)) {
+  if (implementationPath.endsWith(`${path.sep}src${path.sep}index.ts`)) {
     return implementationPath;
   }
+  // The bundled implementation is the package entry; its source counterpart
+  // is the source entry one level above dist (linked-source dev checkouts).
   const candidate = path.join(
     path.dirname(path.dirname(implementationPath)),
     "src",
-    "generate.ts"
+    "index.ts"
   );
   try {
     await fs.access(candidate);

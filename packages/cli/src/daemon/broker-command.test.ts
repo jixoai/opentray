@@ -378,7 +378,12 @@ describe("darwin bundle default app icon", () => {
       ensureDevDarwinCarrierTemplate: async () => templatePath,
       appBundle: {
         path: join(root, "home/.opentray/apps/opentray/Notes.app"),
-        ...(options.appBundle ?? {}),
+        ...(options.appBundle?.reinitialize === undefined
+          ? {}
+          : { reinitialize: options.appBundle.reinitialize }),
+        ...(options.appBundle?.defaultAppIcon === undefined
+          ? {}
+          : { defaultAppIcon: options.appBundle.defaultAppIcon }),
       },
       ...(options.appIcon === undefined ? {} : { appIcon: options.appIcon }),
     });
