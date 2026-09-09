@@ -53,3 +53,11 @@
 - [x] 7.4 create-webui browse-page：⌘/Ctrl+←→/[]、⌘/Ctrl+R、F5、⌘/Ctrl+L 快捷键（wrapper 焦点域）+ jsdom 测试 3 项；dist 重建（browse.html 相对路径修正）。
 - [x] 7.5 测试：config（window 默认/显式）、scaffold（toolbar 资产/无 PTY/包装窗断言 + URL 默认 sync 断言更新）、CLI（flags e2e + export 往返 + patches-only 断言随持久 sync 字段更新）。
 - [x] 7.6 文档：README + skill 三件套同步（含 iframe 嵌入与快捷键焦点限制的明示）。
+
+## 8. Round 4（用户验收轮：toolbar 嵌入探测回退）
+
+- [x] 8.1 根因实证：HN 的 GET 响应带 X-Frame-Options: DENY + CSP frame-ancestors 'self'（此前 HEAD 探测误判，已修正检查方法与文档表述）。
+- [x] 8.2 Core/scrape：responseHeadersAllowEmbedding（XFO 除 ALLOWALL 拒绝；CSP frame-ancestors 无通配拒绝）；ScrapeResult/deriveUrlPresets 透传 frameEmbeddable。
+- [x] 8.3 CLI：--toolbar 遇 frameEmbeddable===false 打印明确警告并回退直连 payload（delete flags.toolbar）；--no-scrape 无探测数据时请求照常（限制已文档明示）。
+- [x] 8.4 测试：scrape 31（策略矩阵 + 预设投影）、CLI 26/26（fixture /deny 路由 e2e：警告 + 无 shell 资产；允许路由保留 toolbar）；用例生命周期归位（fixture server 的 afterAll 时序修复）。
+- [x] 8.5 实机验证：HN --toolbar 自动回退（警告可见）；Wikipedia --toolbar 获得 true toolbar（地址栏 + 快捷键 + 托盘 Reload）。

@@ -47,3 +47,9 @@ N1（app edit source switch 文案与行为矛盾）/N2（lifecycle、scan 的 U
 - WebUI wizard 的 URL 创建模式（D8 明确本轮不做，后续 change）。
 - compileDesiredConfig 的互斥错误消息在「--config 带 url + 显式 --exec」
   组合下会提 --url 字样（用户未显式给 --url）；安全（拒绝），文案可再磨。
+
+## Round 3/4 补记（2026-09-09 验收轮）
+
+- Round 3（D11–D13 窗口功能）与 Round 4（嵌入探测回退）均由用户验收反馈驱动；测试面 core 197+ / cli 26 / webui 65，typecheck 三层绿。
+- 修正自查：此前用 HEAD 请求探测 HN 嵌入策略是误判（HN 仅在 GET 响应携带 X-Frame-Options/CSP）；本轮以 GET 抓取头为准并写入文档。教训：策略检查必须用与浏览器一致的方法（GET）。
+- CPU 战线（另一 change 的前置）：darwin set_activation_policy 变更检测已提交（broker 77.3%→4.4% 实测）；facade 轮询的 ABI 根因与两阶段修复路径已由子代理调研归档，待用户排期。
