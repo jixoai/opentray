@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>shared-icon-kernel — Self Review Evidence</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; line-height: 1.55; }
+  h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 28px; border-bottom: 1px solid rgba(128,128,128,.3); padding-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid rgba(128,128,128,.35); padding: 6px 9px; text-align: left; vertical-align: top; }
+  code { font-family: ui-monospace, monospace; font-size: 12px; }
+  .ok { color: #0a84ff; font-weight: 600; } .warn { color: #b25000; }
+  .img img { width: 100%; max-width: 860px; border-radius: 8px; margin: 8px 0; }
+  .img figcaption { font-size: 12px; opacity: .65; }
+</style>
+</head>
+<body>
+
+<h1>shared-icon-kernel — Self Review Evidence</h1>
+<p>变更：把 create-opentray 验证过的现代化图标标准下沉为 OpenTray 内核默认能力。
+SSOT：<code>openspec/changes/shared-icon-kernel/plans/plan.md</code>（D1–D11）。</p>
+
+<h2>1. 可见表面的证据（用户已验收）</h2>
+<figure class="img">
+  <img src="../demos/contact-sheet-preview.png" alt="四联 glyph 图标对比（N / 笔 / D / 5）"
+       onerror="this.parentElement.innerHTML='<p><em>预览图随 demo 目录 /tmp/opentray-icon-demo/contact-sheet.png 生成；归档后可由 demos/visual-demo.mjs 再生。</em></p>'">
+  <figcaption>四应用名（Notes / 笔记工具 / DevTool / 5G Watcher）的默认 glyph 图标 —— 同一 squircle 标准、亚像素居中（vision 代理像素级核验，IoU 0.996+，颜色偏差 ≤1/255）。</figcaption>
+</figure>
+<ul>
+  <li><strong>活演示</strong>：appMode 窗口应用（<code>demos/demo-window.mjs</code>）—— 省略 <code>appIcon</code>，Dock 显示「笔记工具」瓦片，<code>lsappinfo</code> 注册实证；Finder 内 4 个真实物化 <code>.app</code>。</li>
+  <li><strong>macOS 平台校验</strong>：<code>iconutil -c iconset</code> 往返通过（含 CJK 应用名）。</li>
+</ul>
+
+<h2>2. 命令证据（复核后全绿）</h2>
+<table>
+  <tr><th>验证面</th><th>命令</th><th>结果</th></tr>
+  <tr><td>内核单测</td><td><code>packages/icon: vitest run</code></td><td class="ok">13/13（含 JPEG/CRC/stem/macOS-miss 回归）</td></tr>
+  <tr><td>运行时集成</td><td><code>packages/cli: vitest run</code></td><td class="ok">121/121（5 个默认图标场景）</td></tr>
+  <tr><td>packaging / vite-plugin</td><td><code>vitest run</code></td><td class="ok">22/22 · 5/5</td></tr>
+  <tr><td>create core / create</td><td><code>vitest run</code></td><td class="ok">192/192 · 212/212</td></tr>
+  <tr><td>类型</td><td>6 包 <code>tsc --noEmit</code></td><td class="ok">全绿</td></tr>
+  <tr><td>B1 修复（真实 Node）</td><td>dist JPEG 解码冒烟</td><td class="ok">1×1 解码成功</td></tr>
+  <tr><td>B2 修复（权威 CRC）</td><td><code>zlib.crc32</code> 全 chunk 校验</td><td class="ok">全部合法（含注入 pHYs）</td></tr>
+  <tr><td>发布审计</td><td><code>npm pack --dry-run</code> · dist grep</td><td class="ok">866KB，无 sharp/私有 import</td></tr>
+  <tr><td>openspec 基线</td><td><code>vision-driven.test.ts</code> · schema validate</td><td class="ok">16/16 · valid</td></tr>
+</table>
+
+<h2>3. 复核闭环（fast-remix）</h2>
+<table>
+  <tr><th>发现</th><th>级别</th><th>处置</th></tr>
+  <tr><td>B1 exifr CJS/ESM 互操作</td><td class="warn">阻塞</td><td>已修 + 真实 Node 冒烟 + 回归测试</td></tr>
+  <tr><td>B2 CRC32 缺 <code>&amp;0xff</code></td><td class="warn">阻塞</td><td>已修 + zlib 权威校验 + 全 chunk 回归</td></tr>
+  <tr><td>create glyph 兜底未统一（spec 违约）</td><td class="warn">阻塞（合规）</td><td><code>fileStem</code> 接缝统一，字节等同回归</td></tr>
+  <tr><td>缓存缺 macOS 变体检 / 死代码 / 诊断 mkdir / 多 pHYs</td><td>建议</td><td>全部修复</td></tr>
+  <tr><td>trim/letterbox/dimensions 语义偏移</td><td>建议</td><td>注释明示（偏移方向均为更诚实信号）</td></tr>
+</table>
+<p>综合评分 7/10（架构 9 / 法案 8 / 文档 8 / 测试 6 / 正确性 5→修复后阻塞清零）。迭代 1 轮，无问题复现。</p>
+
+<h2>4. 偏差与新问题</h2>
+<p>详见 <code>review/self-review.md</code> §Deviations（5 条，全部已修或注释明示）与 §New Questions（无阻塞项）。</p>
+
+</body>
+</html>
