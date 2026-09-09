@@ -1127,3 +1127,27 @@ describe("URL mode", () => {
     expect(harness.session.urlSource).toBeUndefined();
   });
 });
+
+// 预览合成白名单（验收轮）：URL 模式的候选文件必须落在会话拥有的图标
+// 目录内——否则 icon-analyze/icon-compose 会 403，预览显示失败。
+describe("URL mode icon source roots", () => {
+  it("scrapes candidates into a wizard-owned directory", async () => {
+    const session = createWizardSession({
+      cwd: "/tmp",
+      skipInstall: true,
+      dependencyRange: "^0.0.0-test",
+      emit: () => undefined,
+      scrapeUrl: async (url) => ({
+        ok: true,
+        title: "T",
+        iconPath: "",
+        icons: [],
+      }),
+    });
+    await session.submitUrl("https://example.com/x");
+    // 真实 scrapeUrl 会把文件写进传入的 tempDir；这里断言抓取发生前后
+    // iconSourceRoots 已非空（目录在 scrape 前创建）。
+    expect(session.iconSourceRoots().length).toBeGreaterThan(0);
+    expect(session.urlSource).toBe("https://example.com/x");
+  });
+});

@@ -796,6 +796,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       services = [];
       selectedPort = undefined;
       scrapedTitle = undefined;
+      // 先建立会话拥有的图标目录再抓取：候选文件必须落在 iconSourceRoots()
+      // 白名单内，否则 /api/icon-analyze 与 /api/icon-compose 会以 403 拒绝
+      // 该路径（命令模式在提交流程里已提前初始化，URL 模式在此补齐）。
+      tempIconDir ??= await mkdtemp(join(tmpdir(), "create-opentray-"));
       const scraped = await (options.scrapeUrl ?? scrapeUrl)(
         parsed.href,
         tempIconDir === undefined ? {} : { tempDir: tempIconDir },
