@@ -10,7 +10,7 @@
 - [ ] 2.1 icon-kernel「One shared icon kernel SHALL own app-icon generation」——包存在性/命名法（`packages/icon` → `@opentray/icon`）、三方消费无重复实现、无 sharp/libvips 依赖（`npm pack --dry-run` + 依赖树断言）。
 - [x] 2.2 icon-kernel「Glyph defaults SHALL follow the continuous-curvature squircle standard」——glyph SVG 快照（figma-squircle path 参数 = 品牌路径 tile 参数）、1024 全幅 + 824-in-1024 变体几何断言、ICNS 10-tag 集合 + pHYs 72dpi chunk 存在、字体阶梯（拉丁内嵌 + CJK fontBuffers 真渲染 + 无静默丢字断言）。
 - [x] 2.3 icon-kernel「Kernel outputs SHALL carry full cache identity」——实现/recipe 变更触发再生成、未变更跳过（mtime/探针断言）。
-- [ ] 2.4 app-identity「Omitted appIcon SHALL materialize a synthesized glyph default」——省略 appIcon 物化断言（CFBundleIconFile/AppIcon.icns/manifest hash/Core catalog 空）、CJK 首字渲染、二次启动缓存命中、失败回落诊断、`defaultAppIcon: false` 复原旧行为、`reinitialize: false` 只读不注入、显式 appIcon 永不被替换。
+- [x] 2.4 app-identity「Omitted appIcon SHALL materialize a synthesized glyph default」——省略 appIcon 物化断言（CFBundleIconFile/AppIcon.icns/manifest hash/Core catalog 空）、CJK 首字渲染、二次启动缓存命中、失败回落诊断、`defaultAppIcon: false` 复原旧行为、`reinitialize: false` 只读不注入、显式 appIcon 永不被替换。
 - [ ] 2.5 create-materialize-pipeline「Create icon pipeline SHALL consume the shared icon kernel」——create 产物走共享内核（wizard glyph 兜底 = runtime 默认同标准）、compose 语义保持（round-12 亮度/覆盖/前景像素保持回归 fixture）。
 
 ## 3. Implementation
@@ -23,7 +23,7 @@
 - [x] 3.6 `encode.ts`：pHYs 72dpi chunk 注入（PNG chunk 手术 + CRC32）、ICNS 10-tag（自 1024/824 双变体取源）、ICO 7 档、Linux PNG。
 - [x] 3.7 `generate.ts`：`generateOpenTrayAppIcon`（保留 `composed`/`macosSourcePath`；cache schema bump：jsquash/resvg 实现身份替换 sharp 版本；recipe bump）。
 - [x] 3.8 `default-icon.ts`：`generateDefaultAppIcon({ appName, accent?, outputDir, cacheDir })`（glyph SVG → 双变体 → 三平台目录 + manifest；缓存身份 = appName+实现+recipe）。
-- [ ] 3.9 Runtime 接线（packages/cli）：`ensureDarwinBundle` 省略 appIcon 时生成默认图标（runtimeDir 缓存 + 失败诊断回落 + `appBundle.defaultAppIcon?: boolean` 默认 true + `reinitialize: false` 只读短路）；spec 类型同步。
+- [x] 3.9 Runtime 接线（packages/cli）：`ensureDarwinBundle` 省略 appIcon 时生成默认图标（runtimeDir 缓存 + 失败诊断回落 + `appBundle.defaultAppIcon?: boolean` 默认 true + `reinitialize: false` 只读短路）；spec 类型同步。
 - [ ] 3.10 vite-plugin 薄壳化：`openTrayAppIconPlugin`/`generateOpenTrayAppIcon` API 不变，内部 re-export `@opentray/icon`；移除 sharp/figma-squircle/icon-encoder 直接依赖。
 - [ ] 3.11 create 迁移：core 删除 icon-compose.ts/glyph 自有实现，改 import 共享内核；`writeGlyphIconTemp` 路径统一走 `generateDefaultAppIcon`；审计并迁移 tray 128px 等其余 sharp 用点，create 零 sharp。
 - [ ] 3.12 关键效果点意图注释（指向 plan.md D1–D11）。
