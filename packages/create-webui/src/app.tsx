@@ -13,6 +13,7 @@ import { ExportDialog } from "@/routes/export";
 
 import { AppConfigCard } from "@/components/app-config-card";
 import { CommandCard } from "@/components/command-card";
+import { UrlCard } from "@/components/url-card";
 import { CreateDialog } from "@/components/create-dialog";
 import { useDebouncedCallback } from "@/use-debounced-callback";
 import { TabsPanel, type IframeTab, type TerminalStatusBarState } from "@/components/tabs-panel";
@@ -81,6 +82,9 @@ function WizardPage(): React.JSX.Element {
     detailPane.set(panelOpen);
     return () => detailPane.set(false);
   }, [panelOpen]);
+  const [urlSource, setUrlSource] = React.useState<string | undefined>(undefined);
+  const [urlDrafting, setUrlDrafting] = React.useState(false);
+  const [urlInput, setUrlInput] = React.useState("");
   const [runAlive, setRunAlive] = React.useState(false);
   const [wizardState, setWizardState] = React.useState<WizardState>("idle");
   const [failReason, setFailReason] = React.useState<string | undefined>();
@@ -406,6 +410,7 @@ const selectedIconRefStale = (
           // discovered services reopens the tabs).
           setWizardState(payload.state);
           setRunAlive(payload.runAlive);
+          setUrlSource(payload.urlSource);
           setCommand(payload.command);
           setDisplayCommand(payload.command);
           setCommandOptions(payload.commandOptions);
@@ -802,6 +807,46 @@ const selectedIconRefStale = (
           scrollbarGutter: "stable",
         }}
       >
+      {/* 源模式切换（add-create-url-apps webui）：启动命令 | 网页地址 */}
+      <div className="flex items-center justify-center">
+        <div className="inline-flex rounded-lg border border-border bg-card p-0.5 text-xs">
+          <button
+            type="button"
+            className={"rounded-md px-3 py-1.5 transition-colors " + (urlSource === undefined && !urlDrafting ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+            disabled={wizardState === "materializing" || wizardState === "success"}
+            onClick={() => {
+              setUrlDrafting(false);
+              if (urlSource !== undefined) {
+                setUrlInput("");
+                void api("/api/url", { url: "", exit: true });
+              }
+            }}
+          >
+            启动命令
+          </button>
+          <button
+            type="button"
+            className={"rounded-md px-3 py-1.5 transition-colors " + (urlSource !== undefined || urlDrafting ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+            disabled={wizardState === "materializing" || wizardState === "success"}
+            onClick={() => setUrlDrafting(true)}
+          >
+            网页地址
+          </button>
+        </div>
+      </div>
+      {urlSource !== undefined || urlDrafting ? (
+        <UrlCard
+          value={urlInput}
+          onChange={setUrlInput}
+          activeSource={urlSource}
+          frozen={wizardState === "materializing" || wizardState === "frozen" || wizardState === "success"}
+          loading={false}
+          onSubmit={() => {
+            void api("/api/url", { url: urlInput });
+          }}
+        />
+      ) : (
+      <>
       {/* Card 1 — command + 命令选项 accordion inside */}
       <CommandCard
         command={command}
@@ -825,6 +870,8 @@ const selectedIconRefStale = (
         onRun={() => void runCommand()}
         onStop={() => void api("/api/stop", {})}
       />
+      </>
+      )}
 
       {/* Card 2 — 应用配置: identity form + merged 高级选项 */}
       <AppConfigCard

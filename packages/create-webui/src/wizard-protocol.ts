@@ -138,6 +138,8 @@ export type WizardEvent =
       state: WizardState;
       runAlive: boolean;
       command: string;
+      /** URL-mode source address; undefined in command mode. */
+      urlSource?: string;
       commandOptions: WizardCommandOptions;
       form: WizardFormValues;
       defaults: WizardFormDefaults;

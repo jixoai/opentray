@@ -966,3 +966,116 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
     expect(inlineShare.content).toContain("base64");
     expect(inlineShare.content).not.toContain("http://127.0.0.1:19080/x.png");
   });
+
+// URL 模式（add-create-url-apps webui 入口）：地址即源——一次抓取预设进
+// discovered，确认生成走同一 materialize 管线；「地址栏」即 toolbar，嵌入
+// 拒绝的目标自动回退直连（同 CLI D12 语义）。
+describe("URL mode", () => {
+  const fakeIcon = (async () => ({
+    schemaVersion: 1,
+    sourceSha256: "",
+    sourceImplementationSha256: null,
+    implementationSha256: "",
+    recipeVersion: "",
+    sharpVersion: "",
+    iconEncoderVersion: "",
+    figmaSquircleVersion: "",
+    outputPath: "",
+    icnsOutputPath: "",
+    icoOutputPath: "",
+    linuxPngOutputPaths: [],
+    manifestOutputPath: "",
+    appIcon: [],
+  })) as unknown as NonNullable<MaterializeContext["generateIcon"]>;
+
+  it("submits a url, derives presets, and materializes a URL app", async () => {
+    const urlHome = mkdtempSync(join(tmpdir(), "wizard-url-"));
+    const harness = createHarness({
+      homeDir: urlHome,
+      scrapeUrl: async (url) => ({
+        ok: true,
+        title: "Wiki Title",
+        iconPath: join(urlHome, "scraped.png"),
+        iconUrl: `${url}/icon.png`,
+        icons: [
+          {
+            index: 0,
+            url: `${url}/icon.png`,
+            path: join(urlHome, "scraped.png"),
+            width: 128,
+            height: 128,
+            format: "png",
+            variant: "original",
+          },
+        ],
+        frameEmbeddable: true,
+      }),
+      materializeContext: { generateIcon: fakeIcon, runInstall: async () => {} },
+    });
+    await writeFile(join(urlHome, "scraped.png"), "");
+    await harness.session.submitUrl("https://example.com/wiki");
+    expect(harness.session.state).toBe("discovered");
+    expect(harness.session.urlSource).toBe("https://example.com/wiki");
+    const lastForm = [...harness.events].reverse().find((event) => event.type === "form");
+    expect(lastForm).toBeDefined();
+    if (lastForm?.type !== "form") return;
+    expect(lastForm.defaults.appId).toBe("wiki.com.example");
+    expect(lastForm.defaults.appName).toBe("Wiki Title");
+
+    harness.session.confirm();
+    await harness.session.create();
+    expect(harness.session.state).toBe("success");
+    const persisted = JSON.parse(
+      await readFile(
+        join(urlHome, ".opentray", "create", "wiki-com-example", "opentray.app.json"),
+        "utf8",
+      ),
+    );
+    expect(persisted.url).toBe("https://example.com/wiki");
+    expect(persisted.command).toBeUndefined();
+    expect(persisted.appName).toBe("Wiki Title");
+  });
+
+  it("keeps the address bar only when the target allows embedding", async () => {
+    const denyHome = mkdtempSync(join(tmpdir(), "wizard-deny-"));
+    const harness = createHarness({
+      homeDir: denyHome,
+      scrapeUrl: async (url) => ({
+        ok: true,
+        title: "Denied",
+        iconPath: join(denyHome, "scraped.png"),
+        icons: [],
+        frameEmbeddable: false,
+      }),
+      materializeContext: { generateIcon: fakeIcon, runInstall: async () => {} },
+    });
+    await writeFile(join(denyHome, "scraped.png"), "");
+    await harness.session.submitUrl("https://example.com/deny");
+    harness.session.updateForm({ showAddressBar: true });
+    harness.session.confirm();
+    await harness.session.create();
+    expect(harness.session.state).toBe("success");
+    const persisted = JSON.parse(
+      await readFile(
+        join(denyHome, ".opentray", "create", "deny-com-example", "opentray.app.json"),
+        "utf8",
+      ),
+    );
+    // 嵌入拒绝：地址栏回退，窗口直连。
+    expect(persisted.window.toolbar).toBeUndefined();
+    expect(harness.events.some(
+      (event) => event.type === "materialize-log" && event.message.includes("forbids iframe embedding"),
+    )).toBe(true);
+  });
+
+  it("exits URL mode with an empty url", async () => {
+    const harness = createHarness({
+      scrapeUrl: async () => ({ ok: false, title: undefined, iconPath: undefined, icons: [] }),
+    });
+    await harness.session.submitUrl("https://example.com");
+    expect(harness.session.state).toBe("discovered");
+    await harness.session.submitUrl("");
+    expect(harness.session.state).toBe("idle");
+    expect(harness.session.urlSource).toBeUndefined();
+  });
+});

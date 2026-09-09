@@ -461,6 +461,18 @@ const handleApi = async (
   }
   const body = preReadBody ?? (await readJsonBody(request));
   switch (pathname) {
+    case "/api/url": {
+      // URL 模式（webui 入口）：非空 url 抓取预设并进入 discovered；空 url
+      // 退出 URL 模式回到 idle。地址合法性由 session 承担（typed failed）。
+      const url = typeof body.url === "string" ? body.url : "";
+      if (url.trim().length === 0 && body.exit !== true) {
+        respond(response, 400, "application/json", '{"error":"url is required"}\n');
+        return;
+      }
+      await session.submitUrl(url);
+      respond(response, 200, "application/json", '{"ok":true}\n');
+      return;
+    }
     case "/api/command": {
       // Array form: argv elements used verbatim (array input mode).
       if (Array.isArray(body.argv)) {

@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { toProjectDirectoryName } from "@create-opentray/core";
+import { deriveUrlIdentity, scrapeUrl, toProjectDirectoryName } from "@create-opentray/core";
 import type { FamilyFormState } from "@create-opentray/core";
 import {
   deriveFamily,
@@ -222,6 +222,8 @@ export type WizardEvent =
       readonly state: WizardState;
       readonly runAlive: boolean;
       readonly command: string;
+      /** URL 模式激活时的源地址（命令模式为 undefined）。 */
+      readonly urlSource?: string;
       readonly commandOptions: WizardCommandOptions;
       readonly form: WizardFormValues;
       readonly defaults: WizardFormDefaults;
@@ -254,6 +256,8 @@ export interface WizardOptions {
   /** Test/embedding seam for listener ownership. */
   readonly listPortOwners?: () => Promise<import("@create-opentray/core").ListenerOwners>;
   readonly scrape?: typeof scrapeService;
+  /** Test seam for the URL-mode preset scrape. */
+  readonly scrapeUrl?: typeof scrapeUrl;
   readonly resolveVector?: typeof resolveLaunchVector;
   /** Test/embedding seam for PATH resolution of the cargo-install guard. */
   readonly resolveOnPath?: typeof resolveOnPath;
@@ -303,6 +307,11 @@ export interface WizardSession {
   /** String form is tokenized; array form is taken as argv verbatim (array
    *  input mode — no string splitting is ever applied to it). */
   submitCommand(command: string | readonly string[]): Promise<void>;
+  /** URL 模式入口：地址即源（一次抓取预设，进入 discovered 可确认态）；
+   * 空 url 退出 URL 模式回到 idle。 */
+  submitUrl(url: string): Promise<void>;
+  /** Active URL-mode source address; undefined in command mode. */
+  readonly urlSource: string | undefined;
   /** Derive placeholder defaults from command text without spawning anything. */
   prime(command: string | readonly string[]): void;
   readonly commandOptions: WizardCommandOptions;
@@ -393,6 +402,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let iconPort: number | undefined;
   let currentTokens: readonly string[] = [];
   let currentCommand = "";
+  // URL 模式（add-create-url-apps webui 入口）：地址即源，无命令运行/端口
+  // 发现；预设（title/favicon/嵌入策略）一次抓取即冻结为占位默认。
+  let urlSource: string | undefined;
+  let urlFrameEmbeddable: boolean | undefined;
   let scrapedTitle: string | undefined;
   let interactive = true; // optimistic until the PTY reports otherwise
   let resolvedVector: LaunchVector | undefined;
@@ -459,6 +472,19 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
    * never the user's values. Empty values mean "use the default".
    */
   const currentDefaults = (): WizardFormDefaults => {
+    // URL 模式：身份来自地址文本（appId 恒地址推导），标题来自页面抓取。
+    if (urlSource !== undefined) {
+      const identity = deriveUrlIdentity(urlSource);
+      const effectiveAppId = form.appId.trim().length > 0 ? form.appId : identity.appId;
+      return {
+        appId: identity.appId,
+        appName: scrapedTitle ?? identity.appName,
+        iconPath: currentIconPath ?? "",
+        targetDir:
+          options.targetDir ??
+          join(homeDir, ".opentray", "create", toProjectDirectoryName(effectiveAppId)),
+      };
+    }
     // 分系列默认 appId（add-create-command-family D3/D11）：系列作者状态优先，
     // 否则按命令串派生；custom 命令的 deriveFamily 结果恒等于现行
     // deriveDefaultAppId 规则 —— 单一路径，旧行为对 custom 零改变。
@@ -646,6 +672,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         state,
         runAlive,
         command: currentCommand,
+        ...(urlSource === undefined ? {} : { urlSource }),
         commandOptions: { ...commandOptions, env: [...commandOptions.env] },
         form: { ...form },
         defaults: currentDefaults(),
@@ -665,6 +692,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
     get runAlive() {
       return runAlive;
+    },
+    get urlSource() {
+      return urlSource;
     },
     get iconCandidates() {
       return iconCandidates;
@@ -725,6 +755,69 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     },
     get result() {
       return result;
+    },
+
+    async submitUrl(url) {
+      if (state !== "idle" && state !== "failed" && state !== "running" && state !== "discovered") {
+        throw new Error(`cannot enter URL mode while ${state}`);
+      }
+      // 空 url：退出 URL 模式，回到可编辑 idle（命令模式表单恢复）。
+      const trimmed = url.trim();
+      if (trimmed.length === 0) {
+        urlSource = undefined;
+        urlFrameEmbeddable = undefined;
+        scrapedTitle = undefined;
+        iconCandidates = [];
+        iconPort = undefined;
+        currentIconPath = undefined;
+        currentIconUrl = undefined;
+        stopTimers();
+        setState("idle");
+        publishServices();
+        publishForm();
+        return;
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(trimmed);
+      } catch {
+        setState("failed", "URL 无效：需要完整的 http(s) 地址");
+        return;
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        setState("failed", "URL 仅支持 http(s) 地址");
+        return;
+      }
+      // URL 模式取代命令模式：清空命令侧会话态（无预览进程可停——
+      // submitUrl 只从无 run 的编辑态进入）。
+      urlSource = parsed.href;
+      currentTokens = [];
+      currentCommand = "";
+      services = [];
+      selectedPort = undefined;
+      scrapedTitle = undefined;
+      const scraped = await (options.scrapeUrl ?? scrapeUrl)(
+        parsed.href,
+        tempIconDir === undefined ? {} : { tempDir: tempIconDir },
+      );
+      // 候选挂合成端口 0（真实服务端口恒 > 0，永不冲突）。
+      iconCandidates = scraped.ok ? scraped.icons : [];
+      iconPort = 0;
+      currentIconPath = scraped.ok ? scraped.icons[0]?.path : undefined;
+      currentIconUrl = scraped.ok ? scraped.icons[0]?.url : undefined;
+      scrapedTitle = scraped.ok ? scraped.title : undefined;
+      urlFrameEmbeddable = scraped.ok ? scraped.frameEmbeddable : undefined;
+      stopTimers();
+      setState("discovered");
+      emit({ type: "icons", port: 0, icons: iconCandidates });
+      emit({
+        type: "scrape",
+        port: 0,
+        ...(scrapedTitle === undefined ? {} : { title: scrapedTitle }),
+        hasIcon: iconCandidates.length > 0,
+      });
+      publishServices();
+      publishForm();
     },
 
     async submitCommand(command) {
@@ -1143,6 +1236,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       frozenTrayIconUrl = undefined;
       resolvedServicePort = undefined;
       resolvedTargetDir = undefined;
+      if (urlSource !== undefined) {
+        // URL 模式无预览进程：编辑态就是 discovered（预设已就位）。
+        setState("discovered");
+        publishForm();
+        return;
+      }
       setState(selectedPort === undefined ? "running" : "discovered");
       publishForm();
       // Resume the discovery/scrape polling that confirm() stopped. When no
@@ -1165,24 +1264,27 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           message: "share requires a confirmed (frozen) parameter set",
         };
       }
-      if (currentTokens.length === 0) {
+      if (urlSource === undefined && currentTokens.length === 0) {
         return { ok: false, code: "state_error", message: "no command recorded" };
       }
-      let vector: LaunchVector;
-      try {
-        vector = await (options.resolveVector ?? resolveLaunchVector)({
-          tokens: currentTokens,
-          cwd: effectiveCwd(),
-        });
-      } catch (error) {
-        return {
-          ok: false,
-          code: "resolve_failed",
-          message: `failed to resolve the launch vector: ${error instanceof Error ? error.message : String(error)}`,
-        };
+      let vector: LaunchVector | undefined;
+      let env: Record<string, string> | undefined;
+      if (urlSource === undefined) {
+        try {
+          vector = await (options.resolveVector ?? resolveLaunchVector)({
+            tokens: currentTokens,
+            cwd: effectiveCwd(),
+          });
+        } catch (error) {
+          return {
+            ok: false,
+            code: "resolve_failed",
+            message: `failed to resolve the launch vector: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+        const envOverlay = commandEnv();
+        env = Object.keys(envOverlay).length > 0 ? envOverlay : vector.env;
       }
-      const envOverlay = commandEnv();
-      const env = Object.keys(envOverlay).length > 0 ? envOverlay : vector.env;
       const embedded: EmbeddedResource[] = [];
       // 图标分享法则：网页抓取的图标默认保留原始 http 链接 + 生成参数
       // （--icon-background/--icon-scale/--tray-template），inlineIcon 显式
@@ -1257,12 +1359,28 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         schemaVersion: 1,
         appId: frozen.appId,
         appName: frozen.appName,
-        command: {
-          executable: vector.command,
-          args: [...vector.args],
-          cwd: vector.cwd,
-          ...(env === undefined ? {} : { env }),
-        },
+        ...(urlSource !== undefined
+          ? {
+              url: urlSource,
+              window: {
+                width: 1_200,
+                height: 800,
+                ...(frozen.showAddressBar === true && urlFrameEmbeddable !== false
+                  ? { toolbar: true }
+                  : {}),
+                titleFollowsDocument: true,
+                iconFollowsDocument: false,
+              },
+            }
+          : {
+              command: {
+                executable: vector!.command,
+                args: [...vector!.args],
+                cwd: vector!.cwd,
+                ...(env === undefined ? {} : { env }),
+              },
+              window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
+            }),
         packageManager: frozen.pm,
         icons: {
           imageSmoothingEnabled: frozen.imageSmoothingEnabled !== false,
@@ -1272,7 +1390,6 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           ...(appIcon === undefined ? {} : { appIcon }),
           ...(trayIcon === undefined ? {} : { trayIcon }),
         },
-        window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
         developerMode: frozen.developerMode === true,
       };
       const envCount = Object.keys(config.command?.env ?? {}).length;
@@ -1333,7 +1450,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         throw new Error(`cannot create while ${state}`);
       }
       const frozen = frozenForm ?? form;
-      if (currentTokens.length === 0) {
+      if (urlSource === undefined && currentTokens.length === 0) {
         throw new Error("no command recorded");
       }
       setState("materializing");
@@ -1344,6 +1461,85 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       if (run !== undefined) {
         await run.kill();
         run = undefined;
+      }
+
+      // URL 模式：地址即源——无命令向量需要解析；「地址栏」开关即 toolbar
+      // （嵌入拒绝时自动回退直连并留下日志，同 CLI D12 语义）。
+      if (urlSource !== undefined) {
+        const toolbarWanted = frozen.showAddressBar === true;
+        const toolbar = toolbarWanted && urlFrameEmbeddable !== false;
+        if (toolbarWanted && !toolbar) {
+          emit({
+            type: "materialize-log",
+            message: `warning: ${urlSource} forbids iframe embedding (X-Frame-Options / CSP frame-ancestors); the address bar falls back to the direct window`,
+          });
+        }
+        try {
+          result = await materialize(
+            {
+              config: {
+                schemaVersion: 1,
+                appId: frozen.appId,
+                appName: frozen.appName,
+                url: urlSource,
+                service: { port: 0 },
+                window: {
+                  width: 1_200,
+                  height: 800,
+                  ...(toolbar ? { toolbar: true } : {}),
+                  titleFollowsDocument: true,
+                  iconFollowsDocument: false,
+                },
+                ...(frozen.developerMode === true ? { developerMode: true } : {}),
+              },
+              targetDir: resolvedTargetDir ?? currentDefaults().targetDir,
+              dependencyRange: options.dependencyRange,
+              iconSourcePath: frozenIconPath ?? currentIconPath,
+              ...(frozen.iconBackground === undefined
+                ? {}
+                : { iconBackground: frozen.iconBackground }),
+              ...(frozen.iconScale === undefined
+                ? {}
+                : { iconScale: frozen.iconScale }),
+              ...(currentTrayIconPath === undefined
+                ? {}
+                : { trayIconSourcePath: currentTrayIconPath }),
+              ...(trayIconIsSolid ? { trayIconIsSolid: true } : {}),
+              ...(frozen.imageSmoothingEnabled === false ? { imageSmoothingEnabled: false } : {}),
+              ...(frozen.developerMode === true ? { developerMode: true } : {}),
+              packageManager: frozen.pm,
+              skipInstall: options.skipInstall,
+              force: frozen.force,
+            },
+            {
+              log: (event) => {
+                if (event.type === "step") {
+                  emit({ type: "materialize-step", step: event.step, message: event.message });
+                  return;
+                }
+                emit({ type: "materialize-log", message: event.message });
+              },
+              ...(options.platform === undefined ? {} : { platform: options.platform }),
+              ...(options.materializeContext ?? {}),
+            },
+          );
+          setState("success");
+          emit({
+            type: "success",
+            projectDir: result.projectDir,
+            pinHint: pinningHint(),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const occupied = message.includes("target directory is not empty");
+          setState(
+            "failed",
+            occupied
+              ? `${message}；可在「高级选项」中开启 强制覆盖 后重试`
+              : message,
+          );
+        }
+        return;
       }
 
       try {
