@@ -67,13 +67,34 @@ export interface CreateConfigV1 {
   readonly schemaVersion: typeof CONFIG_SCHEMA_VERSION;
   readonly appId: string;
   readonly appName: string;
-  readonly command: CommandConfig;
+  /** Command source; exactly one of command/url is present (v1 XOR, D1). */
+  readonly command?: CommandConfig;
+  /** URL source: the http(s) address the generated window opens directly. */
+  readonly url?: string;
   readonly packageManager: PackageManagerName;
   readonly icons: IconsConfig;
   readonly window: WindowConfig;
   /** Maps only to WebView `devtools` admission; default false. */
   readonly developerMode: boolean;
 }
+
+/** Discriminated application source of a parsed v1 document. */
+export type AppSource =
+  | { readonly kind: "command"; readonly command: CommandConfig }
+  | { readonly kind: "url"; readonly url: string };
+
+/** Narrow a parsed v1 document to its single source (invariant: XOR held). */
+export const appSourceOf = (config: CreateConfigV1): AppSource => {
+  if (config.url !== undefined && config.command === undefined) {
+    return { kind: "url", url: config.url };
+  }
+  if (config.command !== undefined && config.url === undefined) {
+    return { kind: "command", command: config.command };
+  }
+  throw new Error(
+    `invalid v1 configuration for ${config.appId}: exactly one of command/url must be present`,
+  );
+};
 
 export const DEFAULT_WINDOW: WindowConfig = { width: 1_200, height: 800 };
 export const DEFAULT_ICON_SCALE = 0.8;
@@ -175,6 +196,24 @@ const commandSchema = z
   })
   .strict();
 
+// URL source (D4): http(s) only; the address text is the whole source — no
+// fetch, no liveness probe, no synthesized command semantics.
+const urlSchema = z.string().trim().superRefine((value, ctx) => {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    ctx.addIssue({ code: "custom", message: `url must be a valid absolute address, got: ${value}` });
+    return;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    ctx.addIssue({
+      code: "custom",
+      message: `url must use http or https, got protocol ${parsed.protocol}`,
+    });
+  }
+});
+
 const iconsSchema = z
   .object({
     appIcon: iconResourceRefSchema.optional(),
@@ -201,18 +240,41 @@ const windowSchema = z
   .strict()
   .default(DEFAULT_WINDOW);
 
-const createConfigShape = z.object({
+const createConfigObject = z.object({
   schemaVersion: z.number().int(),
   appId: z.string().refine((value) => isValidAppId(value), {
     message: "appId must be a reverse-dotted identity",
   }),
   appName: z.string().trim().min(1, "appName must be a non-empty string"),
-  command: commandSchema,
+  command: commandSchema.optional(),
+  url: urlSchema.optional(),
   packageManager: z.enum(["npm", "pnpm", "bun"]),
   icons: iconsSchema.optional(),
   window: windowSchema,
   developerMode: z.boolean().default(false),
 });
+
+// v1 XOR law (D1): exactly one application source — command vector or URL.
+const exactlyOneSource = (
+  value: { command?: unknown; url?: unknown },
+  ctx: z.RefinementCtx,
+): void => {
+  const hasCommand = value.command !== undefined;
+  const hasUrl = value.url !== undefined;
+  if (hasCommand && hasUrl) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["url"],
+      message: "configuration must carry exactly one source: command and url are both present",
+    });
+  } else if (!hasCommand && !hasUrl) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["command"],
+      message: "configuration must carry exactly one source: neither command nor url is present",
+    });
+  }
+};
 
 /**
  * Strict v1 parse. Unknown future schema versions are reported as
@@ -238,7 +300,7 @@ export const parseCreateConfig = (raw: unknown): Result<CreateConfigV1> => {
   if (found !== CONFIG_SCHEMA_VERSION) {
     return err("invalid_config", `unsupported schemaVersion ${String(found)}`);
   }
-  const parsed = createConfigShape.loose().safeParse(raw);
+  const parsed = createConfigObject.loose().superRefine(exactlyOneSource).safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
     const path = first === undefined ? "" : first.path.join(".");
@@ -253,7 +315,8 @@ export const parseCreateConfig = (raw: unknown): Result<CreateConfigV1> => {
     schemaVersion: CONFIG_SCHEMA_VERSION,
     appId: value.appId,
     appName: value.appName,
-    command: value.command,
+    ...(value.command === undefined ? {} : { command: value.command }),
+    ...(value.url === undefined ? {} : { url: value.url }),
     packageManager: value.packageManager,
     icons: value.icons ?? iconsSchema.parse({}),
     window: value.window,

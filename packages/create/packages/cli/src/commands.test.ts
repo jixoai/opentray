@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -243,3 +243,73 @@ describe("skill paths", () => {
     expect(validateSkillPath("references/cli-reference.md").ok).toBe(true);
   });
 });
+
+// add-create-url-apps D5/D6：--url 单独创建（身份离线推导）、与命令 flags
+// 互斥、edit 可改 url、export 携带 --url。
+describe("create --url (add-create-url-apps)", () => {
+  it("creates a URL application from --url alone with derived identity", async () => {
+    const code = await run(["create", "--url", "https://example.com/app"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const configPath = join(home, ".opentray", "create", "app-com-example", "create-opentray.json");
+    const config = JSON.parse(await readFile(configPath, "utf8"));
+    expect(config.url).toBe("https://example.com/app");
+    expect(config.command).toBeUndefined();
+    expect(config.appId).toBe("app.com.example");
+    expect(config.appName).toBe("App");
+
+    const payloadDir = join(home, ".opentray", "create", "app-com-example", "app");
+    const payloadFiles = await readdir(payloadDir);
+    expect(payloadFiles).toContain("main.mjs");
+    expect(payloadFiles).not.toContain("app-shell-server.mjs");
+    const packageJson = JSON.parse(await readFile(join(payloadDir, "package.json"), "utf8"));
+    expect(packageJson.dependencies["@lydell/node-pty"]).toBeUndefined();
+    const entry = await readFile(join(payloadDir, "main.mjs"), "utf8");
+    expect(entry).toContain("url: config.url");
+    expect(entry).not.toContain("node-pty");
+  });
+
+  it("rejects --url together with --exec", async () => {
+    const code = await run(["create", "--url", "https://example.com", "--exec", "node"]);
+    expect(code).not.toBe(0);
+    expect([...outLines, ...errLines].join("\n")).toContain("mutually exclusive");
+  });
+
+  it("rejects a non-http(s) --url before planning", async () => {
+    const code = await run(["create", "--url", "file:///Users/me/site"]);
+    expect(code).not.toBe(0);
+  });
+
+  it("edits the url of a URL application", async () => {
+    await run(["create", "--url", "https://example.com"]);
+    const code = await run(["app", "edit", "com.example", "--url", "https://example.org/app"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "com-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.url).toBe("https://example.org/app");
+    expect(config.command).toBeUndefined();
+  });
+
+  it("exports a URL application as a --url invocation", async () => {
+    await run(["create", "--url", "https://example.com/app"]);
+    const code = await run(["app", "export", "app.com.example", "--format", "command"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const command = outLines.join("\n");
+    expect(command).toContain("--url");
+    expect(command).toContain("https://example.com/app");
+    expect(command).not.toContain("--exec");
+  });
+});
+
+  it("switches a command application to a URL application via app edit --url", async () => {
+    await run(["create", "--app-id", "switch.example", "--app-name", "Switch", "--exec", "node", "--arg", "serve.js"]);
+    const code = await run(["app", "edit", "switch.example", "--url", "https://example.com/app"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "switch-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.url).toBe("https://example.com/app");
+    expect(config.command).toBeUndefined();
+    const payloadFiles = await readdir(join(home, ".opentray", "create", "switch-example", "app"));
+    expect(payloadFiles).not.toContain("app-shell-server.mjs");
+  });

@@ -130,6 +130,7 @@ interface CreateArgs {
   readonly config?: string;
   readonly appId?: string;
   readonly appName?: string;
+  readonly url?: string;
   readonly exec?: string;
   readonly arg?: readonly string[];
   readonly cwd?: string;
@@ -150,11 +151,15 @@ interface CreateArgs {
   readonly json?: boolean;
 }
 
+/** --url is mutually exclusive with every command flag (add-create-url-apps D6). */
+const commandFlagGiven = (argv: Record<string, unknown>): boolean =>
+  argv.exec !== undefined || argv.arg !== undefined || argv.cwd !== undefined || argv.env !== undefined;
+
 const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> => {
   const cwd = context.cwd ?? process.cwd();
   const flags: CreateFlagOptions = {};
   const optional: readonly (keyof CreateFlagOptions)[] = [
-    "appId", "appName", "exec", "arg", "cwd", "env", "pm", "appIcon", "trayIcon",
+    "appId", "appName", "url", "exec", "arg", "cwd", "env", "pm", "appIcon", "trayIcon",
     "iconBackground", "iconScale", "imageSmoothing", "trayTemplate", "developerMode", "window",
   ];
   for (const key of optional) {
@@ -224,8 +229,9 @@ const createCommand = (context: CliContext): CommandModule => ({
   builder: (yargs: Argv) =>
     yargs
       .option("config", { type: "string", describe: "base v1 config document (explicit flags override named fields)" })
-      .option("app-id", { type: "string", describe: "immutable reverse-dotted identity, e.g. app.example" })
-      .option("app-name", { type: "string", describe: "display name" })
+      .option("app-id", { type: "string", describe: "immutable reverse-dotted identity, e.g. app.example (default under --url: derived from the address)" })
+      .option("app-name", { type: "string", describe: "display name (default under --url: derived from the address)" })
+      .option("url", { type: "string", describe: "application source: open this http(s) URL directly (mutually exclusive with --exec/--arg/--cwd/--env)" })
       .option("exec", { type: "string", describe: "command executable" })
       .option("arg", { type: "array", string: true, describe: "one exact argv element (repeatable)" })
       .option("cwd", { type: "string", describe: "command working directory (default: current)" })
@@ -245,11 +251,17 @@ const createCommand = (context: CliContext): CommandModule => ({
       .option("dry-run", { type: "boolean", default: false, describe: "print the Core plan without mutation" })
       .option("json", { type: "boolean", default: false, describe: "machine-readable typed result on stdout" })
       .check((argv: Record<string, unknown>) => {
-        if (argv.config === undefined && argv["app-id"] === undefined) {
-          throw new Error("--app-id is required unless --config supplies a complete document");
+        if (argv.url !== undefined && commandFlagGiven(argv)) {
+          throw new Error("--url is mutually exclusive with --exec/--arg/--cwd/--env");
         }
-        if (argv.config === undefined && argv["app-name"] === undefined) {
-          throw new Error("--app-name is required unless --config supplies a complete document");
+        // Under --url the identity derives from the address (options.ts);
+        // the explicit requirement applies only to command creations.
+        const derivableIdentity = argv.url !== undefined || argv.config !== undefined;
+        if (!derivableIdentity && argv["app-id"] === undefined) {
+          throw new Error("--app-id is required unless --config supplies a complete document or --url derives it");
+        }
+        if (!derivableIdentity && argv["app-name"] === undefined) {
+          throw new Error("--app-name is required unless --config supplies a complete document or --url derives it");
         }
         return true;
       }),
@@ -306,6 +318,7 @@ const appEditCommand = (context: CliContext): CommandModule => ({
       .positional("app-id", { type: "string", describe: "existing immutable appId", demandOption: true })
       .option("config", { type: "string" })
       .option("app-name", { type: "string" })
+      .option("url", { type: "string", describe: "switch/replace the URL source (mutually exclusive with --exec/--arg/--cwd/--env)" })
       .option("exec", { type: "string" })
       .option("arg", { type: "array", string: true })
       .option("cwd", { type: "string" })
@@ -360,26 +373,26 @@ const appEditCommand = (context: CliContext): CommandModule => ({
         return;
       }
     }
-    // Compile patches over the committed document.
-    const baseDoc = {
-      schemaVersion: 1 as const,
-      appId: base.appId,
-      appName: base.appName,
-      command: base.command,
-      packageManager: base.packageManager,
-      icons: base.icons,
-      window: base.window,
-      developerMode: base.developerMode,
-    };
-    // Write the base to a temp view through compileDesiredConfig by passing
-    // it as inline overrides: reuse the compiler with explicit values.
-    const patched = {
+    // Compile patches over the committed document. An explicit --url (or
+    // --exec) is a deliberate source switch: the other source's projections
+    // are dropped, not mixed (add-create-url-apps D6).
+    const switchingToUrl = args.url !== undefined;
+    const switchingToCommand = args.exec !== undefined;
+    const urlValue = switchingToCommand ? undefined : args.url ?? base.url;
+    const execValue = switchingToUrl ? undefined : args.exec ?? base.command?.executable;
+    const argValue = switchingToUrl ? undefined : args.arg ?? base.command?.args;
+    const cwdValue = switchingToUrl ? undefined : args.cwd ?? base.command?.cwd;
+    const envValue = switchingToUrl || base.command === undefined
+      ? args.env ?? []
+      : args.env ?? Object.entries(base.command.env ?? {}).map(([k, v]) => `${k}=${v}`);
+    const patched: CreateFlagOptions = {
       appId: base.appId,
       appName: args.appName ?? base.appName,
-      exec: args.exec ?? base.command.executable,
-      arg: args.arg ?? base.command.args,
-      cwd: args.cwd ?? base.command.cwd,
-      env: args.env ?? Object.entries(base.command.env ?? {}).map(([k, v]) => `${k}=${v}`),
+      ...(urlValue === undefined ? {} : { url: urlValue }),
+      ...(execValue === undefined ? {} : { exec: execValue }),
+      ...(argValue === undefined ? {} : { arg: argValue }),
+      ...(cwdValue === undefined ? {} : { cwd: cwdValue }),
+      ...(envValue.length === 0 ? {} : { env: envValue }),
       pm: args.pm ?? base.packageManager,
       iconBackground: args.iconBackground ?? base.icons.background,
       iconScale: args.iconScale ?? base.icons.scale,
@@ -388,7 +401,6 @@ const appEditCommand = (context: CliContext): CommandModule => ({
       developerMode: args.developerMode ?? base.developerMode,
       window: args.window ?? `${base.window.width}x${base.window.height}`,
     };
-    void baseDoc;
     const cwd = context.cwd ?? process.cwd();
     const compiled = await compileDesiredConfig(patched, undefined, cwd);
     if (!compiled.ok) {
@@ -507,7 +519,7 @@ const appExportCommand = (context: CliContext): CommandModule => ({
       return;
     }
     const config = existing.value.config;
-    const envCount = Object.keys(config.command.env ?? {}).length;
+    const envCount = Object.keys(config.command?.env ?? {}).length;
     if (envCount > 0 && (argv["acknowledge-env"] as boolean) !== true) {
       finish(context, { ok: false, error: { code: "env_ack_required", message: `this application has ${envCount} environment entrie(s); complete export includes their values — pass --acknowledge-env after reviewing them` } }, json);
       return;

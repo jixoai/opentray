@@ -111,7 +111,7 @@ export const handleWorkbenchApi = async (
               isLink: false,
               hasEnv:
                 entry.config !== undefined &&
-                Object.keys(entry.config.command.env ?? {}).length > 0,
+                Object.keys(entry.config.command?.env ?? {}).length > 0,
               hasIcon: await exists(join(projectDir, "app-icon", "app-icon.png")),
               ...(entry.config === undefined
                 ? { error: { code: "invalid_config", message: "unreadable wizard project config" } }
@@ -131,7 +131,7 @@ export const handleWorkbenchApi = async (
             isLink: entry.record.isLink,
             hasEnv:
               entry.record.config !== undefined &&
-              Object.keys(entry.record.config.command.env ?? {}).length > 0,
+              Object.keys(entry.record.config.command?.env ?? {}).length > 0,
             hasIcon: await exists(join(projectDir, "app-icon", "app-icon.png")),
             ...(entry.record.error === undefined
               ? {}
@@ -178,19 +178,28 @@ export const handleWorkbenchApi = async (
         return { status: 500, body: { code: "invalid_config", message: "unreadable wizard project config" } };
       }
       // Same v1-shaped document the edit flow consumes, projected read-only
-      // from the wizard project's frozen opentray.app.json.
+      // from the wizard project's frozen opentray.app.json. A URL project
+      // projects its address; the projection never synthesizes command
+      // defaults for it (add-create-url-apps D7).
       const config: CreateConfigV1 = {
         schemaVersion: 1,
         appId: entry.config.appId,
         appName: entry.config.appName,
-        command: {
-          executable: entry.config.command.executable,
-          args: [...entry.config.command.args],
-          cwd: entry.config.command.cwd,
-          ...(entry.config.command.env === undefined
-            ? {}
-            : { env: { ...entry.config.command.env } }),
-        },
+        ...(entry.config.url === undefined
+          ? {}
+          : { url: entry.config.url }),
+        ...(entry.config.command === undefined
+          ? {}
+          : {
+              command: {
+                executable: entry.config.command.executable,
+                args: [...entry.config.command.args],
+                cwd: entry.config.command.cwd,
+                ...(entry.config.command.env === undefined
+                  ? {}
+                  : { env: { ...entry.config.command.env } }),
+              },
+            }),
         packageManager: entry.config.packageManager,
         icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
         window: entry.config.window,
@@ -304,14 +313,21 @@ export const handleWorkbenchApi = async (
         schemaVersion: 1,
         appId: entry.config.appId,
         appName: entry.config.appName,
-        command: {
-          executable: entry.config.command.executable,
-          args: [...entry.config.command.args],
-          cwd: entry.config.command.cwd,
-          ...(entry.config.command.env === undefined
-            ? {}
-            : { env: { ...entry.config.command.env } }),
-        },
+        ...(entry.config.url === undefined
+          ? {}
+          : { url: entry.config.url }),
+        ...(entry.config.command === undefined
+          ? {}
+          : {
+              command: {
+                executable: entry.config.command.executable,
+                args: [...entry.config.command.args],
+                cwd: entry.config.command.cwd,
+                ...(entry.config.command.env === undefined
+                  ? {}
+                  : { env: { ...entry.config.command.env } }),
+              },
+            }),
         packageManager: entry.config.packageManager,
         icons: {
           imageSmoothingEnabled: true,
@@ -381,7 +397,7 @@ export const handleWorkbenchApi = async (
         }
       }
     }
-    const envCount = Object.keys(config.command.env ?? {}).length;
+    const envCount = Object.keys(config.command?.env ?? {}).length;
     if (envCount > 0 && request.body.acknowledgeEnv !== true) {
       // Env guard WITHOUT heuristics and WITHOUT echoing values.
       return {

@@ -70,9 +70,9 @@ describe("listCreateEntries", () => {
     if (wizard.source !== "wizard") throw new Error("expected wizard entry");
     // 投影：命令向量 / env / pm(lockfile 推断) / 窗口 / 图标稳定路径。
     expect(wizard.config?.appId).toBe("web.dsh.npx");
-    expect(wizard.config?.command.executable).toBe("/usr/local/bin/node");
-    expect(wizard.config?.command.args).toContain("@deepseek-ai/dsh@latest");
-    expect(wizard.config?.command.env).toEqual({ TOKEN: "secret-value" });
+    expect(wizard.config?.command?.executable).toBe("/usr/local/bin/node");
+    expect(wizard.config?.command?.args).toContain("@deepseek-ai/dsh@latest");
+    expect(wizard.config?.command?.env).toEqual({ TOKEN: "secret-value" });
     expect(wizard.config?.packageManager).toBe("pnpm");
     expect(wizard.config?.developerMode).toBe(true);
     expect(wizard.config?.servicePort).toBe(3080);
@@ -184,5 +184,21 @@ describe("uninstallWizardProject", () => {
       expect(result.value.bundleRemoved).toBe(false); // 非 darwin 无 bundle
     }
     expect(await findCreateEntry("web-dsh-npx", home)).toBeUndefined();
+  });
+});
+
+// add-create-url-apps D7：URL 项目投影暴露 url、不合成 command 默认值。
+describe("readWizardProjectConfig URL project", () => {
+  it("projects a url project without synthesizing command defaults", async () => {
+    const home = await mkdtemp(join(tmpdir(), "scan-url-test-"));
+    const root = join(home, ".opentray", "create");
+    await writeWizardProject(join(root, "com-example"), { command: undefined, url: "https://example.com" });
+    const entries = await listCreateEntries(home);
+    const urlEntry = entries.find((entry) => entry.key === "com-example");
+    expect(urlEntry?.source).toBe("wizard");
+    if (urlEntry?.source !== "wizard") throw new Error("expected wizard entry");
+    expect(urlEntry.config?.url).toBe("https://example.com");
+    expect(urlEntry.config?.command).toBeUndefined();
+    expect(urlEntry.config?.appId).toBe("web.dsh.npx");
   });
 });

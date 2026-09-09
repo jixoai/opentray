@@ -41,12 +41,15 @@ const exists = async (path: string): Promise<boolean> => {
 export interface WizardProjectConfig {
   readonly appId: string;
   readonly appName: string;
-  readonly command: {
+  /** Command projection; absent for URL projects (source is the url below). */
+  readonly command?: {
     readonly executable: string;
     readonly args: readonly string[];
     readonly cwd: string;
     readonly env?: Readonly<Record<string, string>>;
   };
+  /** URL source projection (add-create-url-apps D7): undefined for command projects. */
+  readonly url?: string;
   readonly window: { readonly width: number; readonly height: number };
   readonly developerMode: boolean;
   /** Inferred from the project's lockfile (scaffold package.json records pm nowhere). */
@@ -92,6 +95,9 @@ export const readWizardProjectConfig = async (
         ),
       )
     : undefined;
+  // URL projects carry the address instead of a command; the projection never
+  // synthesizes command defaults for them (add-create-url-apps D7).
+  const url = typeof raw.url === "string" ? raw.url : undefined;
   const window = isRecord(raw.window)
     ? {
         width: Number.isFinite(raw.window.width) ? Number(raw.window.width) : 1_200,
@@ -103,16 +109,27 @@ export const readWizardProjectConfig = async (
     : 0;
   const files = await readdir(projectDir).catch(() => [] as string[]);
   const iconSourcePath = join(projectDir, "app-icon", "app-icon.png");
-  return {
+  const base = {
     appId: raw.appId,
     appName: raw.appName,
-    command: { executable, args, cwd, ...(env === undefined ? {} : { env }) },
     window,
     developerMode: raw.developerMode === true,
     packageManager: detectPackageManager(files, undefined),
     servicePort: service,
     iconSourcePath: (await exists(iconSourcePath)) ? iconSourcePath : undefined,
   };
+  if (command !== undefined) {
+    return {
+      ...base,
+      command: { executable, args, cwd, ...(env === undefined ? {} : { env }) },
+    };
+  }
+  if (url !== undefined) {
+    // URL projects carry the address instead of a command; the projection
+    // never synthesizes command defaults for them (add-create-url-apps D7).
+    return { ...base, url };
+  }
+  return undefined;
 };
 
 export interface WizardProjectIcon {

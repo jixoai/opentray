@@ -11,8 +11,10 @@
 export {
   deriveDefaultAppId,
   deriveDefaultAppName,
+  deriveUrlIdentity,
   isValidAppId,
   toProjectDirectoryName,
+  type DerivedUrlIdentity,
 } from "./app-id";
 export {
   buildCommand,
@@ -115,10 +117,12 @@ export {
   DEFAULT_WINDOW,
   ICON_SCALE_MAX,
   ICON_SCALE_MIN,
+  appSourceOf,
   isContainedPath,
   parseCreateConfig,
   sameIdentity,
   serializeCreateConfig,
+  type AppSource,
   type CommandConfig,
   type CreateConfigV1,
   type IconBackgroundName,
@@ -227,6 +231,7 @@ export {
   SCAFFOLD_MARKER_FILES,
   createEntrySource,
   createShellServerSource,
+  createUrlEntrySource,
   type ScaffoldAppConfig,
   type ScaffoldOptions,
   type ScaffoldResult,

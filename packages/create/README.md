@@ -2,9 +2,9 @@
 
 # create-opentray
 
-Turn any start command that serves HTTP locally into an OpenTray-hosted
-desktop app — through a browser wizard or fully non-interactively, without
-writing OpenTray code.
+Turn any start command that serves HTTP locally — or any http(s) URL — into
+an OpenTray-hosted desktop app: through a browser wizard or fully
+non-interactively, without writing OpenTray code.
 
 ```bash
 npx create-opentray
@@ -40,8 +40,16 @@ npx create-opentray create \
 
 - `--arg` is repeatable; each value is ONE exact argv element — never a shell
   string (`&&` stays a literal argument).
+- `--url <address>` packages the http(s) URL directly as an application
+  (no command): `npx create-opentray create --url https://example.com` derives
+  the app id/name from the address (`https://example.com/app` →
+  `app.com.example` / `App`); override with `--app-id`/`--app-name`. It is
+  mutually exclusive with `--exec`/`--arg`/`--cwd`/`--env`, works fully
+  offline (the URL is never fetched or probed during creation), and the
+  generated app opens one window at the address with no terminal or PTY.
 - Icon sources: local files, `http(s)` URLs, or `data:` URLs. The CLI never
-  scrapes names or favicons.
+  scrapes names or favicons (URL apps use a glyph fallback icon unless
+  `--app-icon` is supplied).
 - `--config <file>` loads a complete v1 document; explicit flags override
   only their named fields.
 - `--dry-run` prints the plan without mutating anything.

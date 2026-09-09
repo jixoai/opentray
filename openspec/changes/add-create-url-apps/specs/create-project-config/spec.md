@@ -42,7 +42,7 @@ Core SHALL strictly validate schema version, identity, source (command vector or
 
 ### Requirement: URL identity SHALL derive from the address when not supplied
 
-Core SHALL provide a pure identity derivation for URL applications: the default appId SHALL be the URL's first non-empty, appId-legal path segment (when one exists) followed by the reversed hostname segments (e.g. `https://example.com/app` → `app.com.example`, `https://example.com` → `com.example`); the default appName SHALL be the Title Case of that first path segment or, absent a path, of the first hostname label. Callers MAY override both. Derivation SHALL NOT fetch the URL or read anything but the address text. A derived appId that is not a valid reverse-dotted identity SHALL fall back to the shared default rather than fail creation.
+Core SHALL provide a pure identity derivation for URL applications: the default appId SHALL be the URL's first non-empty path segment that is legal as an appId first segment (bare alphanumeric; hyphenated segments contribute the display name only) followed by the reversed hostname segments (e.g. `https://example.com/app` → `app.com.example`, `https://example.com` → `com.example`); the default appName SHALL be the Title Case of the first path segment or, absent a path, of the first hostname label. Callers MAY override both. Derivation SHALL NOT fetch the URL or read anything but the address text. A derived appId that is not a valid reverse-dotted identity (e.g. a single-label host like `localhost`) SHALL fall back to the shared default appId while still deriving the display name, rather than fail creation.
 
 #### Scenario: Identity derives offline from the address
 

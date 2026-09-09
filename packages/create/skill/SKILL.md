@@ -1,16 +1,17 @@
 ---
 name: create-opentray
-description: create-opentray guide for turning any HTTP-serving start command into an OpenTray-hosted desktop application — WebUI wizard, non-interactive CLI creation, the v1 create-opentray.json configuration authority, the fixed ~/.opentray/create registry, application lifecycle (edit, copy, export, uninstall), icon handling including pixel-art smoothing, developer mode, and platform limitations. Use when scaffolding or managing applications created by create-opentray.
+description: create-opentray guide for turning any HTTP-serving start command — or any http(s) URL — into an OpenTray-hosted desktop application — WebUI wizard, non-interactive CLI creation, the v1 create-opentray.json configuration authority, the fixed ~/.opentray/create registry, application lifecycle (edit, copy, export, uninstall), icon handling including pixel-art smoothing, developer mode, and platform limitations. Use when scaffolding or managing applications created by create-opentray.
 ---
 
 # create-opentray
 
 ## Overview
 
-`create-opentray` packages a start command that serves HTTP locally into an
-OpenTray-hosted desktop application: a real tray icon, a webview window, and a
-supervised child process. This skill explains how it works, how to drive it
-non-interactively, and how to manage created applications.
+`create-opentray` packages a start command that serves HTTP locally — or a
+plain http(s) URL — into an OpenTray-hosted desktop application: a real tray
+icon, a webview window, and (for command apps) a supervised child process.
+This skill explains how it works, how to drive it non-interactively, and how
+to manage created applications.
 
 Three adapter surfaces share one Core:
 
@@ -18,8 +19,9 @@ Three adapter surfaces share one Core:
    WebUI wizard. It can run your command once, discover the HTTP ports it
    owns, and suggest a name/icon from the served page.
 2. `create-opentray create …` — fully non-interactive creation. No browser,
-   no prompts, no sniffing: identity, icons, and the command vector are all
-   explicit.
+   no prompts, no sniffing: identity, icons, and the command vector (or the
+   `--url` address) are all explicit; under `--url` the identity derives
+   from the address offline.
 3. `create-opentray app …` — manage registered applications: list, edit,
    copy, export, uninstall.
 
@@ -29,10 +31,12 @@ OpenTray is a desktop status platform: your application calls `createTray()`
 and owns its own foreground/background lifetime. A created application is a
 small generated project whose entry (`main.mjs`):
 
-- spawns your recorded start command as a supervised child,
-- discovers the command's owned HTTP listening ports at runtime,
-- hosts each verified port in an application-mode webview window, and
-- owns the tray session with a Quit menu item.
+- command app: spawns your recorded start command as a supervised child,
+  discovers the command's owned HTTP listening ports at runtime, and hosts
+  each verified port in an application-mode webview window;
+- URL app (`--url`): opens exactly one application-mode webview window at
+  the frozen address and supervises nothing;
+- both own the tray session with a Quit menu item.
 
 The generated project depends only on published packages (`opentray`,
 `@opentray/ext-webview`) — never on the create-opentray tool itself.
@@ -49,12 +53,13 @@ Every registered application has exactly one editable desired-state document:
   tray-icon.<ext>
 ```
 
-`create-opentray.json` records app identity and name, the exact command
-vector (executable, args, cwd, env overlay), package-manager choice, icon
-resource references with content hashes and provenance, icon-rendering
-options (including `imageSmoothingEnabled`), window options, and
-`developerMode`. Generated files are derived output — editing them is
-overwritten on the next apply; edit the JSON instead.
+`create-opentray.json` records app identity and name, exactly ONE source
+(the command vector — executable, args, cwd, env overlay — or a `url`
+address), package-manager choice, icon resource references with content
+hashes and provenance, icon-rendering options (including
+`imageSmoothingEnabled`), window options, and `developerMode`. Generated
+files are derived output — editing them is overwritten on the next apply;
+edit the JSON instead.
 
 Key rules:
 
@@ -81,6 +86,16 @@ npx create-opentray create \
 
 - `--arg` is repeatable and each value is ONE exact argv element — never a
   shell string. Metacharacters like `&&` stay literal.
+- `--url <address>` packages an http(s) URL directly (no command):
+
+  ```sh
+  npx create-opentray create --url https://example.com/app
+  ```
+
+  Identity derives offline from the address (`app.com.example` / `App`);
+  override with `--app-id`/`--app-name`. It is mutually exclusive with
+  `--exec`/`--arg`/`--cwd`/`--env` and never fetches or probes the address.
+  `app edit <id> --url <new-address>` changes it later; export emits `--url`.
 - Icon sources may be local files, `http(s)` URLs, or `data:` URLs. The CLI
   never scrapes names or favicons — everything is explicit.
 - `--dry-run` prints the Core plan (effects, warnings, blocks) without

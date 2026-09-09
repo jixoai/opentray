@@ -1275,7 +1275,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         window: { width: 1_200, height: 800 },
         developerMode: frozen.developerMode === true,
       };
-      const envCount = Object.keys(config.command.env ?? {}).length;
+      const envCount = Object.keys(config.command?.env ?? {}).length;
       if (envCount > 0 && exportOptions.acknowledgeEnv !== true) {
         // 与注册导出同一条无启发式守卫，且永不回显值。
         return {

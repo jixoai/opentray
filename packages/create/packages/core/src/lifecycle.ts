@@ -253,7 +253,7 @@ export const planCreate = async (options: PlanOptions): Promise<Result<Lifecycle
     effects.push({ type: "install-dependencies" });
   }
 
-  const envCount = Object.keys(desired.config.command.env ?? {}).length;
+  const envCount = Object.keys(desired.config.command?.env ?? {}).length;
   return ok({
     effects,
     warnings,
@@ -295,14 +295,20 @@ const buildMaterializeInput = (
     schemaVersion: 1,
     appId: config.appId,
     appName: config.appName,
-    // Scaffold config persists the launch vector projection of the exact
-    // command config (executable/args/cwd/env share the same names).
-    command: {
-      command: config.command.executable,
-      args: config.command.args,
-      cwd: config.command.cwd,
-      ...(config.command.env === undefined ? {} : { env: config.command.env }),
-    },
+    // Scaffold config persists the source projection of the v1 document: the
+    // launch vector for command apps (executable/args/cwd/env share the same
+    // names), or the URL for URL apps (add-create-url-apps D1/D2).
+    ...(config.command === undefined
+      ? {}
+      : {
+          command: {
+            command: config.command.executable,
+            args: config.command.args,
+            cwd: config.command.cwd,
+            ...(config.command.env === undefined ? {} : { env: config.command.env }),
+          },
+        }),
+    ...(config.url === undefined ? {} : { url: config.url }),
     service: { port: 0 },
     window: config.window,
     ...(config.developerMode === true ? { developerMode: true } : {}),

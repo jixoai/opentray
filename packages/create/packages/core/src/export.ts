@@ -89,14 +89,24 @@ const toCliFlags = (config: CreateConfigV1): readonly string[] => {
     config.appId,
     "--app-name",
     config.appName,
-    "--exec",
-    config.command.executable,
-    ...config.command.args.flatMap((arg) => ["--arg", arg]),
-    "--cwd",
-    config.command.cwd,
-    "--pm",
-    config.packageManager,
   ];
+  // Source serialization (add-create-url-apps D6): a URL app carries --url and
+  // no command flags; a command app carries the exact argv vector.
+  if (config.url !== undefined) {
+    flags.push("--url", config.url);
+  } else if (config.command !== undefined) {
+    flags.push(
+      "--exec",
+      config.command.executable,
+      ...config.command.args.flatMap((arg) => ["--arg", arg]),
+      "--cwd",
+      config.command.cwd,
+    );
+    for (const [key, value] of Object.entries(config.command.env ?? {})) {
+      flags.push("--env", `${key}=${value}`);
+    }
+  }
+  flags.push("--pm", config.packageManager);
   if (config.icons.appIcon !== undefined) {
     flags.push("--app-icon", config.icons.appIcon.source.ref);
   }
@@ -121,15 +131,12 @@ const toCliFlags = (config: CreateConfigV1): readonly string[] => {
   if (config.window.width !== 1_200 || config.window.height !== 800) {
     flags.push("--window", `${config.window.width}x${config.window.height}`);
   }
-  for (const [key, value] of Object.entries(config.command.env ?? {})) {
-    flags.push("--env", `${key}=${value}`);
-  }
   return flags;
 };
 
 /** Build the export plan. Env acknowledgement is computed WITHOUT heuristics. */
 export const buildExportPlan = (input: ExportPlanInput): Result<ExportPlan> => {
-  const envEntries = Object.entries(input.config.command.env ?? {});
+  const envEntries = Object.entries(input.config.command?.env ?? {});
   const requiresEnvAcknowledgement = envEntries.length > 0;
   const hasEmbedded = (input.embeddedResources ?? []).length > 0;
 
@@ -193,7 +200,7 @@ export const buildScriptExport = (
   readonly commandLine: string;
   readonly requiresEnvAcknowledgement: boolean;
 }> => {
-  const envEntries = Object.entries(input.config.command.env ?? {});
+  const envEntries = Object.entries(input.config.command?.env ?? {});
   const requiresEnvAcknowledgement = envEntries.length > 0;
   const lines: string[] = [scriptHeader(shell)];
 
@@ -272,7 +279,7 @@ export interface ExportReview {
 
 /** Present env entries for review. No classification of any name/value. */
 export const reviewEnvironment = (config: CreateConfigV1): ExportReview => {
-  const envEntries = Object.entries(config.command.env ?? {}).map(([key, value]) => ({ key, value }));
+  const envEntries = Object.entries(config.command?.env ?? {}).map(([key, value]) => ({ key, value }));
   return {
     envEntries,
     requiresAcknowledgement: envEntries.length > 0,

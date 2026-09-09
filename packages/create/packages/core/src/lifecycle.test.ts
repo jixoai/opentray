@@ -123,7 +123,11 @@ describe("plan/apply", () => {
   });
 
   it("requires env acknowledgement flag on the plan when env is non-empty", async () => {
-    const withEnv = { ...config("env.example"), command: { ...config("env.example").command, env: { API_TOKEN: "hunter2" } } };
+    const base = config("env.example");
+    const withEnv = {
+      ...base,
+      command: { executable: "/usr/bin/node", args: ["serve"], cwd: "/tmp/project", env: { API_TOKEN: "hunter2" } },
+    };
     const plan = await planCreate({
       desired: desired(withEnv),
       skipInstall: true,
@@ -306,5 +310,52 @@ describe("uninstall", () => {
     expect(result.ok).toBe(true);
     const remaining = await listRegistrations(home);
     expect(remaining.map((record) => record.key)).not.toContain("managed-example");
+  });
+});
+
+// add-create-url-apps：URL desired state 走同一条 plan/apply 事务管线；
+// env ack 恒 false（URL 源没有 env 概念）。
+describe("planCreate/applyCreate URL application", () => {
+  it("plans and applies a URL desired state through the same kernel", async () => {
+    const urlHome = await mkdtemp(join(tmpdir(), "lifecycle-url-"));
+    try {
+      const urlApp: CreateConfigV1 = {
+        schemaVersion: 1,
+        appId: "com.example",
+        appName: "Example",
+        url: "https://example.com",
+        packageManager: "npm",
+        icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
+        window: { width: 1_200, height: 800 },
+        developerMode: false,
+      };
+      const plan = await planCreate({ desired: desired(urlApp), skipInstall: true, homeDir: urlHome });
+      expect(plan.ok).toBe(true);
+      if (plan.ok) {
+        expect(plan.value.requiresEnvAcknowledgement).toBe(false);
+        expect(plan.value.effects.map((effect) => effect.type)).toContain("commit-config");
+      }
+      const applied = await applyCreate({
+        desired: desired(urlApp),
+        skipInstall: true,
+        homeDir: urlHome,
+        dependencyRange: "^0.0.0-test",
+      });
+      expect(applied.ok).toBe(true);
+      const committed = JSON.parse(
+        await readFile(join(urlHome, ".opentray", "create", "com-example", CONFIG_FILENAME), "utf8"),
+      );
+      expect(committed.url).toBe("https://example.com");
+      expect(committed.command).toBeUndefined();
+      // 本文件 mock 了 materializePayload（payload 是桩文件），改从 mock 收到
+      // 的输入钉住 buildMaterializeInput 的 scaffold 投影：url 透传、无 command 段。
+      const { materializePayload } = await import("./materialize");
+      const materializeInput = vi.mocked(materializePayload).mock.lastCall?.[0];
+      expect(materializeInput?.config.url).toBe("https://example.com");
+      expect(materializeInput?.config.command).toBeUndefined();
+      expect(materializeInput?.config.appId).toBe("com.example");
+    } finally {
+      await rm(urlHome, { recursive: true, force: true });
+    }
   });
 });

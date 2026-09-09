@@ -215,12 +215,58 @@ describe("export", () => {
 
   it("flags env acknowledgement for ANY non-empty env without heuristics", () => {
     const baseEnv = config("env.example");
-    const withEnv = { ...baseEnv, command: { ...baseEnv.command, env: { RANDOM_NAME_XYZ: "1" } } };
+    const withEnv = {
+      ...baseEnv,
+      command: { executable: "/usr/bin/node", args: ["serve"], cwd: "/tmp/project", env: { RANDOM_NAME_XYZ: "1" } },
+    };
     const review = reviewEnvironment(withEnv);
     expect(review.requiresAcknowledgement).toBe(true);
     expect(review.envEntries).toEqual([{ key: "RANDOM_NAME_XYZ", value: "1" }]);
     expect(reviewEnvironment(config("noenv.example")).requiresAcknowledgement).toBe(false);
     const plan = buildExportPlan({ config: withEnv });
     expect(plan.ok && plan.value.requiresEnvAcknowledgement).toBe(true);
+  });
+});
+
+// add-create-url-apps D6：URL 应用导出携带 --url，无命令 flags，永不要求
+// env acknowledgement（URL 源没有 env 概念）。
+describe("export URL application", () => {
+  const urlApp = (appId: string): CreateConfigV1 => ({
+    schemaVersion: 1,
+    appId,
+    appName: "Url App",
+    url: "https://example.com/app",
+    packageManager: "npm",
+    icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
+    window: { width: 1200, height: 800 },
+    developerMode: false,
+  });
+
+  it("exports as --url without command flags or env acknowledgement", () => {
+    const plan = buildExportPlan({ config: urlApp("url.example") });
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.value.requiresEnvAcknowledgement).toBe(false);
+      const command = plan.value.directCommand?.command ?? [];
+      expect(command).toContain("--url");
+      expect(command).toContain("https://example.com/app");
+      expect(command).not.toContain("--exec");
+      expect(command).not.toContain("--arg");
+      expect(command).not.toContain("--cwd");
+      expect(command).not.toContain("--env");
+    }
+    expect(reviewEnvironment(urlApp("url.example")).requiresAcknowledgement).toBe(false);
+  });
+
+  it("script exports serialize the url invocation for both shells", () => {
+    for (const shell of ["sh", "powershell"] as const) {
+      const script = buildScriptExport({ config: urlApp("url.example") }, shell);
+      expect(script.ok).toBe(true);
+      if (script.ok) {
+        expect(script.value.commandLine).toContain("--url");
+        expect(script.value.commandLine).not.toContain("--exec");
+        expect(script.value.requiresEnvAcknowledgement).toBe(false);
+      }
+    }
   });
 });

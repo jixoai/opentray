@@ -157,3 +157,51 @@ describe("workbench /api/apps dual-layout discovery", () => {
     expect(data.dataUrl).toMatch(/^data:image\/png;base64,/u);
   });
 });
+
+// add-create-url-apps B1 修复验证：URL wizard 项目在列表/预填/导出端点
+// 不崩溃、不合成 command 默认值。
+describe("workbench /api/apps URL project", () => {
+  beforeAll(async () => {
+    const dir = join(root, "com-example");
+    await mkdir(join(dir, "app-icon"), { recursive: true });
+    await writeFile(
+      join(dir, "opentray.app.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        appId: "com.example",
+        appName: "Example",
+        url: "https://example.com",
+        service: { port: 0 },
+        window: { width: 1200, height: 800 },
+        developerMode: false,
+      }),
+      "utf8",
+    );
+    await writeFile(join(dir, "main.mjs"), "// generated\n", "utf8");
+    await writeFile(join(dir, "pnpm-lock.yaml"), "", "utf8");
+  });
+
+  it("lists the URL project healthy with hasEnv false", async () => {
+    const response = await get("/api/apps");
+    expect(response.status).toBe(200);
+    const row = (response.body as Record<string, unknown>[]).find((entry) => entry.key === "com-example");
+    expect(row?.status).toBe("healthy");
+    expect(row?.hasEnv).toBe(false);
+  });
+
+  it("prefills the URL project with url and no command defaults", async () => {
+    const response = await get("/api/apps/com-example/config");
+    expect(response.status).toBe(200);
+    const config = response.body as Record<string, unknown>;
+    expect(config.url).toBe("https://example.com");
+    expect(config.command).toBeUndefined();
+  });
+
+  it("exports the URL project without env acknowledgement", async () => {
+    const response = await post("/api/apps/com-example/export", { format: "command" });
+    expect(response.status).toBe(200);
+    const body = response.body as { command?: string };
+    expect(body.command).toContain("--url");
+    expect(body.command).not.toContain("--exec");
+  });
+});

@@ -2,10 +2,13 @@
 // appId is the command segment before the first Option, reversed and dot-joined;
 // 2026-08-19 scoped-package commands must derive like the user reads them —
 // `npx @deepseek-ai/dsh@latest web` → `web.dsh.npx`: the `@scope` segment is
-// dropped and `name@version` keeps only `name`):
+// dropped and `name@version` keeps only `name`;
+// 2026-09-09 add-create-url-apps D5: URL applications derive identity from the
+// address text alone — first path segment + reversed hostname, offline):
 // 1. Derive the default appId from the pre-option tokens of the command.
-// 2. Keep the derivation pure so it is testable against the user's example.
-// 3. Provide a display-name and directory-safe projection for scaffolding.
+// 2. Derive the default identity of a URL application from its address.
+// 3. Keep the derivations pure so they are testable against the user's examples.
+// 4. Provide a display-name and directory-safe projection for scaffolding.
 
 /** A token that looks like a command option, e.g. `--xx`, `-p`, or `--port=8080`. */
 const isOptionToken = (token: string): boolean => token.startsWith("-") && token.length > 1;
@@ -75,4 +78,57 @@ export const toProjectDirectoryName = (appId: string): string => {
 export const isValidAppId = (appId: string): boolean => {
   const trimmed = appId.trim();
   return trimmed.length > 0 && /^[a-z0-9]+(\.[a-z0-9-]+)+$/iu.test(trimmed);
+};
+
+// URL identity derivation (add-create-url-apps D5, 2026-09-09): the address
+// text alone decides — first appId-legal path segment (most specific first,
+// matching the command derivation style) + reversed hostname; no fetch.
+// The appId FIRST segment must be bare alphanumeric (isValidAppId law), so a
+// hyphenated path segment (e.g. /my-tool) contributes the display name only.
+const APPID_PATH_SEGMENT = /^[a-z0-9]+$/u;
+const NAME_PATH_SEGMENT = /^[a-z0-9][a-z0-9_-]*$/iu;
+
+const titleCaseSegment = (segment: string): string =>
+  segment
+    .split(/[-_]+/u)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+export interface DerivedUrlIdentity {
+  readonly appId: string;
+  readonly appName: string;
+}
+
+/**
+ * Default identity for a URL application: `https://example.com/app` derives
+ * appId `app.com.example` / appName `App`; `https://example.com` derives
+ * `com.example` / `Example`. An address whose derivation is not a valid
+ * reverse-dotted identity (e.g. single-label hosts like `localhost`) falls
+ * back to the shared appId while still deriving the display name.
+ */
+export const deriveUrlIdentity = (url: string): DerivedUrlIdentity => {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { appId: "app.opentray", appName: "App" };
+  }
+  const hostLabels = parsed.hostname.toLowerCase().split(".").filter((label) => label.length > 0);
+  if (hostLabels.length === 0) {
+    return { appId: "app.opentray", appName: "App" };
+  }
+  const pathSegments = parsed.pathname
+    .split("/")
+    .map((segment) => segment.toLowerCase())
+    .filter((segment) => segment.length > 0);
+  const appIdSegment = pathSegments.find((segment) => APPID_PATH_SEGMENT.test(segment));
+  const nameSegment = pathSegments.find((segment) => NAME_PATH_SEGMENT.test(segment));
+  const reversedHost = [...hostLabels].reverse();
+  const appId = (appIdSegment === undefined ? reversedHost : [appIdSegment, ...reversedHost]).join(".");
+  const appName = titleCaseSegment(nameSegment ?? hostLabels[0] ?? "app") || "App";
+  if (!isValidAppId(appId)) {
+    return { appId: "app.opentray", appName };
+  }
+  return { appId, appName };
 };

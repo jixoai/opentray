@@ -124,3 +124,62 @@ describe("detectPackageManager", () => {
     expect(detectPackageManager([], undefined)).toBe("npm");
   });
 });
+
+// add-create-url-apps D2/D3：URL payload 与命令 payload 同构，但剥离全部
+// 命令宿主资产——无 PTY 依赖、无 shell host、无端口监控；直接窗口。
+describe("writeScaffold URL application", () => {
+  const urlAppConfig = {
+    schemaVersion: 1 as const,
+    appId: "com.example",
+    appName: "Example",
+    url: "https://example.com",
+    service: { port: 0 },
+    window: { width: 1000, height: 700 },
+  };
+
+  it("omits command-hosting assets (no PTY dependency, no shell host)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "scaffold-url-test-"));
+    await writeScaffold({ config: urlAppConfig, targetDir: dir, dependencyRange: "^0.18.0" });
+
+    const files = await readdir(dir);
+    expect(files).toContain("package.json");
+    expect(files).toContain("opentray.app.json");
+    expect(files).toContain("main.mjs");
+    expect(files).not.toContain("app-shell-server.mjs");
+    expect(files).not.toContain("app-shell");
+
+    const packageJson = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+    expect(packageJson.dependencies.opentray).toBe("^0.18.0");
+    expect(packageJson.dependencies["@lydell/node-pty"]).toBeUndefined();
+
+    const persisted = JSON.parse(await readFile(join(dir, "opentray.app.json"), "utf8"));
+    expect(persisted.url).toBe("https://example.com");
+    expect(persisted.command).toBeUndefined();
+  });
+
+  it("generates an entry that opens the address directly with no supervision", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "scaffold-url-test-"));
+    await writeScaffold({ config: urlAppConfig, targetDir: dir, dependencyRange: "^0.18.0" });
+    const entry = await readFile(join(dir, "main.mjs"), "utf8");
+
+    // D2：唯一窗口直接指向冻结 URL，窗口尺寸来自 v1 window 选项。
+    expect(entry).toContain("url: config.url");
+    expect(entry).toContain("width: config.window.width");
+    expect(entry).toContain("appMode: true");
+    expect(entry).toContain("titleSync");
+    expect(entry).toContain("iconSync");
+    // 无命令监督：无 PTY、无命令 spawn、无端口监控、无进程树清理。
+    expect(entry).not.toContain("node-pty");
+    expect(entry).not.toContain("ensureServiceWindow");
+    expect(entry).not.toContain("listOwnedListeningPorts");
+    expect(entry).not.toContain("listProcessTreePids");
+    expect(entry).not.toContain("app-shell-server");
+    // D6 同法：启动失败写入 app.log。
+    expect(entry).toContain("startup failed");
+    expect(entry).toContain("primaryEvent");
+    // README 呈现 URL 形态。
+    const readme = await readFile(join(dir, "README.md"), "utf8");
+    expect(readme).toContain("https://example.com");
+    expect(readme).not.toContain("Command:");
+  });
+});

@@ -1,15 +1,19 @@
 // Flag → Core v1 desired-state compilation (openspec change
-// add-create-opentray-cli).
+// add-create-opentray-cli; URL source + identity defaults added by
+// add-create-url-apps).
 //
 // A valid config document supplies the base desired state; explicit field
 // options override ONLY their named fields. Destructive/process controls
-// stay operation inputs and are never written into v1 config.
+// stay operation inputs and are never written into v1 config. `--url`
+// selects the URL application source (mutually exclusive with the command
+// flags) and derives default identity offline from the address text.
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
   CONFIG_SCHEMA_VERSION,
+  deriveUrlIdentity,
   parseCreateConfig,
   type CreateConfigV1,
   type IconBackgroundName,
@@ -21,6 +25,8 @@ import { err, ok } from "@create-opentray/core";
 export interface CreateFlagOptions {
   readonly appId?: string;
   readonly appName?: string;
+  /** URL application source; mutually exclusive with exec/arg/cwd/env. */
+  readonly url?: string;
   readonly exec?: string;
   readonly arg?: readonly string[];
   readonly cwd?: string;
@@ -95,8 +101,24 @@ export const compileDesiredConfig = async (
     base = result.value;
   }
 
-  const appId = options.appId ?? base?.appId;
-  const appName = options.appName ?? base?.appName;
+  // Source negotiation (add-create-url-apps D5/D6): --url selects the URL
+  // source and is mutually exclusive with every command flag at THIS layer;
+  // an explicit --url also overrides a command-carrying base document (a
+  // deliberate source switch, mirroring named-field override semantics).
+  const url = options.url ?? base?.url;
+  const hasCommandFlag =
+    options.exec !== undefined ||
+    options.arg !== undefined ||
+    options.cwd !== undefined ||
+    options.env !== undefined;
+  if (url !== undefined && hasCommandFlag) {
+    return err("invalid_config", "--url is mutually exclusive with --exec/--arg/--cwd/--env");
+  }
+
+  // URL identity defaults (D5): the address text alone derives them offline.
+  const derived = url === undefined ? undefined : deriveUrlIdentity(url);
+  const appId = options.appId ?? base?.appId ?? derived?.appId;
+  const appName = options.appName ?? base?.appName ?? derived?.appName;
   if (appId === undefined) {
     return err("invalid_config", "--app-id is required (or supply a complete --config document)");
   }
@@ -104,20 +126,17 @@ export const compileDesiredConfig = async (
     return err("invalid_config", "--app-name is required (or supply a complete --config document)");
   }
 
-  const executable = options.exec ?? base?.command.executable;
-  if (executable === undefined || executable.length === 0) {
-    return err("invalid_config", "--exec <executable> is required (or supply a complete --config document)");
-  }
+  const executable = options.exec ?? base?.command?.executable;
   const args =
     options.arg !== undefined
       ? [...options.arg]
-      : base?.command.args ?? [];
+      : base?.command?.args ?? [];
   const cwd =
     options.cwd !== undefined
       ? resolve(baseCwd, options.cwd)
-      : base?.command.cwd ?? baseCwd;
+      : base?.command?.cwd ?? baseCwd;
 
-  const env: Record<string, string> = { ...(base?.command.env ?? {}) };
+  const env: Record<string, string> = { ...(base?.command?.env ?? {}) };
   for (const entry of options.env ?? []) {
     const parsed = parseEnvEntry(entry);
     if (!parsed.ok) {
@@ -154,16 +173,27 @@ export const compileDesiredConfig = async (
 
   // Assembled documents pass through the SAME strict v1 parser as config
   // files: flag input can never bypass validation.
+  const source =
+    url !== undefined
+      ? { url }
+      : executable === undefined || executable.length === 0
+        ? null
+        : {
+            command: {
+              executable,
+              args,
+              cwd,
+              ...(Object.keys(env).length === 0 ? {} : { env }),
+            },
+          };
+  if (source === null) {
+    return err("invalid_config", "--exec <executable> or --url <address> is required (or supply a complete --config document)");
+  }
   return parseCreateConfig({
     schemaVersion: CONFIG_SCHEMA_VERSION,
     appId,
     appName,
-    command: {
-      executable,
-      args,
-      cwd,
-      ...(Object.keys(env).length === 0 ? {} : { env }),
-    },
+    ...source,
     packageManager: pm,
     icons: {
       imageSmoothingEnabled: imageSmoothing,

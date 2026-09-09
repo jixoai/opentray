@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appSourceOf,
   isContainedPath,
   parseCreateConfig,
   serializeCreateConfig,
@@ -77,7 +78,7 @@ describe("parseCreateConfig", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.command.args).toEqual(["a", "&&", "rm -rf /"]);
+      expect(result.value.command?.args).toEqual(["a", "&&", "rm -rf /"]);
     }
   });
 
@@ -120,5 +121,66 @@ describe("isContainedPath", () => {
     expect(isContainedPath("/r/app", "/r/application")).toBe(false);
     expect(isContainedPath("/r/app", "/r/app")).toBe(false);
     expect(isContainedPath("/r/app", "/r/../etc")).toBe(false);
+  });
+});
+
+// add-create-url-apps D1/D4: url 是与 command 互斥的应用源；仅 http(s)。
+describe("parseCreateConfig URL source (add-create-url-apps)", () => {
+  const { command: _command, ...urlBase } = validConfig();
+  const urlConfig = (url: string = "https://example.com"): Record<string, unknown> => ({
+    ...urlBase,
+    url,
+  });
+
+  it("accepts a url-only document and synthesizes no command defaults", () => {
+    const result = parseCreateConfig(urlConfig());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.url).toBe("https://example.com");
+      expect(result.value.command).toBeUndefined();
+    }
+  });
+
+  it("rejects command and url together", () => {
+    const result = parseCreateConfig({ ...urlConfig(), command: validConfig().command });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_config");
+      expect(result.error.message).toContain("exactly one source");
+    }
+  });
+
+  it("rejects neither command nor url", () => {
+    const result = parseCreateConfig({ ...urlBase });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_config");
+      expect(result.error.message).toContain("exactly one source");
+    }
+  });
+
+  it("rejects non-http(s) URL schemes", () => {
+    for (const url of ["file:///Users/me/site", "ftp://example.com", "example.com"]) {
+      const result = parseCreateConfig(urlConfig(url));
+      expect(result.ok, url).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe("invalid_config");
+      }
+    }
+  });
+
+  it("serializes a url app without a command field", () => {
+    const result = parseCreateConfig(urlConfig());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(serializeCreateConfig(result.value)).not.toContain('"command"');
+    }
+  });
+
+  it("appSourceOf discriminates the single source", () => {
+    const urlResult = parseCreateConfig(urlConfig());
+    expect(urlResult.ok && appSourceOf(urlResult.value)).toEqual({ kind: "url", url: "https://example.com" });
+    const commandResult = parseCreateConfig(validConfig());
+    expect(commandResult.ok && appSourceOf(commandResult.value).kind).toBe("command");
   });
 });

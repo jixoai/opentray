@@ -1,5 +1,17 @@
 # How create-opentray works
 
+## The two application sources
+
+A v1 application carries exactly ONE source:
+
+- **Command** — `--exec/--arg/--cwd/--env`: create-opentray supervises a local
+  start command and hosts the HTTP services it owns.
+- **URL** — `--url <http(s) address>`: no command at all. The generated app
+  opens one window directly at the frozen address. Creation never fetches or
+  probes the URL (fully offline); identity defaults derive from the address
+  text (`https://example.com/app` → appId `app.com.example`, name `App`).
+  URL apps carry no PTY, no terminal/address-bar shell, and no env overlay.
+
 ## The creation pipeline
 
 1. **Desired state** — CLI flags or the WebUI form compile into one v1
@@ -15,6 +27,8 @@
 
 ## What the generated app does at runtime
 
+Command apps:
+
 - Reads the frozen command vector from its derived config and spawns the
   command with an absolute, PATH-independent executable.
 - Continuously monitors the command's OWNED listening ports (ownership is
@@ -24,6 +38,13 @@
   stops listening marks its window detached.
 - Publishes a tray with Quit; optional startup-terminal and address-bar
   shells when configured.
+
+URL apps:
+
+- Publish the tray (Show/Quit) and exactly one application-mode webview
+  window at the frozen URL, with document-title and favicon sync.
+- Supervise nothing: no child process, no port monitor; Quit destroys the
+  window and tray session and exits.
 
 ## Force and ownership
 

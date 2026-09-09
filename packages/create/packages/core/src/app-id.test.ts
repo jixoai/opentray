@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveDefaultAppId,
   deriveDefaultAppName,
+  deriveUrlIdentity,
   isValidAppId,
   toProjectDirectoryName,
 } from "./app-id";
@@ -76,5 +77,35 @@ describe("isValidAppId", () => {
   it("rejects single segments and empty values", () => {
     expect(isValidAppId("somecommand")).toBe(false);
     expect(isValidAppId("")).toBe(false);
+  });
+});
+
+// add-create-url-apps D5：URL 身份离线推导——路径首段（最具体段在前，
+// 与命令推导风格一致）+ reversed hostname；不可推导时回落共享默认。
+describe("deriveUrlIdentity", () => {
+  it("derives path segment + reversed hostname offline", () => {
+    expect(deriveUrlIdentity("https://dsh.example.com/app")).toEqual({
+      appId: "app.com.example.dsh",
+      appName: "App",
+    });
+  });
+
+  it("derives from the hostname alone for a root URL", () => {
+    expect(deriveUrlIdentity("https://example.com")).toEqual({
+      appId: "com.example",
+      appName: "Example",
+    });
+  });
+
+  it("falls back to the shared default for underivable identities", () => {
+    expect(deriveUrlIdentity("http://localhost:3000")).toEqual({
+      appId: "app.opentray",
+      appName: "Localhost",
+    });
+    expect(deriveUrlIdentity("not a url")).toEqual({ appId: "app.opentray", appName: "App" });
+  });
+
+  it("title-cases hyphenated segments for the display name", () => {
+    expect(deriveUrlIdentity("https://example.com/my-tool").appName).toBe("My Tool");
   });
 });
