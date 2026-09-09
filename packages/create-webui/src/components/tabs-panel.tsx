@@ -51,6 +51,8 @@ interface TabsPanelProps {
   onIframeNavigate(port: number, url: string, mode: "push" | "replace"): void;
   onIframeHistoryMove(port: number, delta: -1 | 1): void;
   onJumpToService(port: number): void;
+  /** URL 模式：没有命令预览——终端 tab/面板按需省略。 */
+  hideTerminal?: boolean;
   /** Layout hook for the detail pane (e.g. "h-full" to fill it). */
   className?: string;
 }
@@ -121,6 +123,7 @@ export function TabsPanel({
   onIframeNavigate,
   onIframeHistoryMove,
   onJumpToService,
+  hideTerminal = false,
   className,
 }: TabsPanelProps): React.JSX.Element {
   return (
@@ -133,17 +136,21 @@ export function TabsPanel({
         {/* Lifted browser-style strip (shadcn tabs-13 pattern on the
             official base-nova `line` variant). */}
         <TabsList variant="line" className="w-full justify-start border-b px-2">
-          <TabsTrigger value="terminal">
-            <TerminalIcon className="size-3.5" />
-            终端
-            {!interactive && terminalReady ? (
-              <span className="text-[10px] text-amber-400">非交互</span>
-            ) : null}
-          </TabsTrigger>
+          {hideTerminal ? null : (
+            <TabsTrigger value="terminal">
+              <TerminalIcon className="size-3.5" />
+              终端
+              {!interactive && terminalReady ? (
+                <span className="text-[10px] text-amber-400">非交互</span>
+              ) : null}
+            </TabsTrigger>
+          )}
           {iframeTabs.map((tab) => (
             <TabsTrigger key={tab.port} value={`svc-${tab.port}`}>
               <Globe className="size-3.5" />
-              {hostnameOf(tab.url)}:{new URL(tab.url).port}
+              {new URL(tab.url).port === ""
+                ? hostnameOf(tab.url)
+                : `${hostnameOf(tab.url)}:${new URL(tab.url).port}`}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -152,7 +159,10 @@ export function TabsPanel({
       {/* Persistent pages: every tab's card stays mounted; visibility is
           CSS only. Switching tabs cannot reload iframes or reset the
           terminal renderer. */}
-      <div className="flex min-h-0 flex-1 flex-col" hidden={activeTab !== "terminal"}>
+      <div
+        className="flex min-h-0 flex-1 flex-col"
+        hidden={hideTerminal || activeTab !== "terminal"}
+      >
         <Card size="sm" className="min-h-0 flex-1 gap-0">
           {/* CardHeader: the command this terminal is running. */}
           <CardHeader className="border-b [.border-b]:pb-2">

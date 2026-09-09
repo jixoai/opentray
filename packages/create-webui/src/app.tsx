@@ -1040,6 +1040,7 @@ const selectedIconRefStale = (
                     ]
                   : [...services]
               }
+              hideTerminal={urlSource !== undefined}
               iframeTabs={iframeTabs}
               activeTab={activeTab}
               onActiveTabChange={setActiveTab}
