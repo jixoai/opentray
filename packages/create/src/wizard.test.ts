@@ -1023,6 +1023,18 @@ describe("URL mode", () => {
     manifestOutputPath: "",
     appIcon: [],
   })) as unknown as NonNullable<MaterializeContext["generateIcon"]>;
+  // The glyph default catalog has its own seam (URL apps materialize with no
+  // icon source); stubbing it keeps these URL-mode tests free of real wasm.
+  const fakeDefaultIcon = (async () => ({
+    fullPngPath: "",
+    macOSPngPath: "",
+    icnsPath: "",
+    icoPath: "",
+    linuxPngPaths: [],
+    manifestPath: "",
+    appIcon: [],
+    cacheIdentity: "",
+  })) as unknown as NonNullable<MaterializeContext["generateDefaultIcon"]>;
 
   it("submits a url, derives presets, and materializes a URL app", async () => {
     const urlHome = mkdtempSync(join(tmpdir(), "wizard-url-"));
@@ -1046,7 +1058,7 @@ describe("URL mode", () => {
         ],
         frameEmbeddable: true,
       }),
-      materializeContext: { generateIcon: fakeIcon, runInstall: async () => {} },
+      materializeContext: { generateIcon: fakeIcon, generateDefaultIcon: fakeDefaultIcon, runInstall: async () => {} },
     });
     await writeFile(join(urlHome, "scraped.png"), "");
     await harness.session.submitUrl("https://example.com/wiki");
@@ -1083,7 +1095,7 @@ describe("URL mode", () => {
         icons: [],
         frameEmbeddable: false,
       }),
-      materializeContext: { generateIcon: fakeIcon, runInstall: async () => {} },
+      materializeContext: { generateIcon: fakeIcon, generateDefaultIcon: fakeDefaultIcon, runInstall: async () => {} },
     });
     await writeFile(join(denyHome, "scraped.png"), "");
     await harness.session.submitUrl("https://example.com/deny");
