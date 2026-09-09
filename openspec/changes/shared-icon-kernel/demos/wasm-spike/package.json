@@ -1,0 +1,10 @@
+{
+  "name": "wasm-spike",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@jsquash/png": "^3.1.1",
+    "@jsquash/resize": "^2.1.1",
+    "@resvg/resvg-wasm": "^2.6.2"
+  }
+}
