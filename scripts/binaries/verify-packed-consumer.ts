@@ -55,6 +55,7 @@ try {
   const packageDirs = [
     "packages/spec",
     "packages/packaging",
+    "packages/icon",
     "packages/cli",
     "packages/ext-webview",
     targetPackages.runtimeDir,
@@ -74,6 +75,7 @@ try {
 
   const specTarball = requireTarball(tarballs, "@opentray/spec");
   const packagingTarball = requireTarball(tarballs, "@opentray/packaging");
+  const iconTarball = requireTarball(tarballs, "@opentray/icon");
   const runtimeTarball = requireTarball(tarballs, targetPackages.runtimeName);
   const extensionTarball = requireTarball(tarballs, targetPackages.extensionName);
   const dependencies: Record<string, string> = {
@@ -92,6 +94,7 @@ try {
       overrides: {
         "@opentray/spec": fileDependency(specTarball),
         "@opentray/packaging": fileDependency(packagingTarball),
+        "@opentray/icon": fileDependency(iconTarball),
         [targetPackages.runtimeName]: fileDependency(runtimeTarball),
         [targetPackages.extensionName]: fileDependency(extensionTarball),
       },
@@ -99,6 +102,7 @@ try {
   } else {
     dependencies["@opentray/spec"] = fileDependency(specTarball);
     dependencies["@opentray/packaging"] = fileDependency(packagingTarball);
+    dependencies["@opentray/icon"] = fileDependency(iconTarball);
     dependencies[targetPackages.runtimeName] = fileDependency(runtimeTarball);
     dependencies[targetPackages.extensionName] = fileDependency(extensionTarball);
   }

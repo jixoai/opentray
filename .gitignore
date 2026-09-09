@@ -14,8 +14,10 @@ coverage/
 .svelte-kit/
 .worktree/
 research/
+.zcode/
 
 target/
+target
 *.log
 
 # CI/local staging places generated native artifacts into package directories.
