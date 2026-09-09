@@ -44,3 +44,12 @@
 - [x] 6.3 CLI：compileDesiredConfig enrichment 注入点；create --scrape/--no-scrape（yargs 否定式，default true）；runCreate 抓取接线 + progress 提示；appIconSource 预设回填。
 - [x] 6.4 测试：scrape.test 4 项（任意地址抓取、根化兜底、预设/失败、title 截断）；commands.test 既有 URL 用例 --no-scrape 化 + 4 项 D10 e2e（fixture server 预设进 committed 配置/快照、显式 flag 优先、--no-scrape、不可达回落）。
 - [x] 6.5 specs delta：create-cli-command-tree MODIFIED requirement 修订 no-scraping 条款（命令模式不抓保持）+ 两个新 scenario；README/skill 三件套同步。
+
+## 7. Round 3（用户验收轮：窗口导航/toolbar/sync 默认值，D11–D13）
+
+- [x] 7.1 backup-plan → plan-v2.md；plan.md 新增 D11（快捷键分层：wrapper 键盘 + 托盘 Reload）、D12（URL toolbar：shell 资产回归、无 PTY）、D13（titleFollowsDocument 默认 true 单向 / iconFollowsDocument 默认 false opt-in，进 v1 config 往返）。
+- [x] 7.2 Core/config：window 加 toolbar/titleFollowsDocument/iconFollowsDocument（zod 默认填充）；scaffold URL 分支 hostShell=toolbar；url-entry-template：toolbar 包装窗 + 无 sync、直连窗 titleSync 单向 + iconSync opt-in、托盘 Reload（evaluate location.reload()）；命令模板服务窗口同步 D13 投影。
+- [x] 7.3 Core/export：--toolbar/--no-title-follow/--icon-follow 仅在偏离默认时序列化；CLI create/edit flags（yargs 无 default，避免吞 --config 文档值）。
+- [x] 7.4 create-webui browse-page：⌘/Ctrl+←→/[]、⌘/Ctrl+R、F5、⌘/Ctrl+L 快捷键（wrapper 焦点域）+ jsdom 测试 3 项；dist 重建（browse.html 相对路径修正）。
+- [x] 7.5 测试：config（window 默认/显式）、scaffold（toolbar 资产/无 PTY/包装窗断言 + URL 默认 sync 断言更新）、CLI（flags e2e + export 往返 + patches-only 断言随持久 sync 字段更新）。
+- [x] 7.6 文档：README + skill 三件套同步（含 iframe 嵌入与快捷键焦点限制的明示）。

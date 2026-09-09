@@ -61,6 +61,12 @@ export interface CommandConfig {
 export interface WindowConfig {
   readonly width: number;
   readonly height: number;
+  /** URL applications: host the address-bar wrapper page (D12). */
+  readonly toolbar?: boolean;
+  /** Window title follows document.title (document→window one-way); D13 default true. */
+  readonly titleFollowsDocument: boolean;
+  /** Runtime favicon→window-icon following; D13 default false (opt-in). */
+  readonly iconFollowsDocument: boolean;
 }
 
 export interface CreateConfigV1 {
@@ -96,7 +102,12 @@ export const appSourceOf = (config: CreateConfigV1): AppSource => {
   );
 };
 
-export const DEFAULT_WINDOW: WindowConfig = { width: 1_200, height: 800 };
+export const DEFAULT_WINDOW: WindowConfig = {
+  width: 1_200,
+  height: 800,
+  titleFollowsDocument: true,
+  iconFollowsDocument: false,
+};
 export const DEFAULT_ICON_SCALE = 0.8;
 export const ICON_SCALE_MIN = 0.5;
 export const ICON_SCALE_MAX = 0.95;
@@ -236,6 +247,9 @@ const windowSchema = z
   .object({
     width: z.number().int().positive().default(DEFAULT_WINDOW.width),
     height: z.number().int().positive().default(DEFAULT_WINDOW.height),
+    toolbar: z.boolean().optional(),
+    titleFollowsDocument: z.boolean().default(true),
+    iconFollowsDocument: z.boolean().default(false),
   })
   .strict()
   .default(DEFAULT_WINDOW);

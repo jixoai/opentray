@@ -56,3 +56,16 @@ Core SHALL provide a pure identity derivation for URL applications: the default 
 - **GIVEN** the address `https://example.com` and no explicit identity options
 - **WHEN** identity is derived
 - **THEN** the appId SHALL be `com.example` and the appName SHALL be `Example`
+
+## ADDED Requirements
+
+### Requirement: Window behavior options SHALL carry durable sync and toolbar defaults
+
+The v1 `window` object SHALL accept optional `toolbar` (URL applications), `titleFollowsDocument` (default true — the window title follows the page's `document.title`, document→window one-way), and `iconFollowsDocument` (default false — runtime favicon→window-icon following is opt-in). These are desired-state facts: they round-trip through edit/export and are projected into the generated window's `titleSync`/`iconSync` options and toolbar layout.
+
+#### Scenario: Title follows, icon does not, by default
+
+- **GIVEN** a URL application created without sync flags
+- **WHEN** its config is parsed
+- **THEN** `titleFollowsDocument` SHALL default to true and `iconFollowsDocument` to false
+- **AND** an export invocation SHALL reproduce any explicit deviation from those defaults

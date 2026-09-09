@@ -131,6 +131,16 @@ const toCliFlags = (config: CreateConfigV1): readonly string[] => {
   if (config.window.width !== 1_200 || config.window.height !== 800) {
     flags.push("--window", `${config.window.width}x${config.window.height}`);
   }
+  // Window behavior facts (D12/D13): serialize only deviations from defaults.
+  if (config.window.toolbar === true) {
+    flags.push("--toolbar");
+  }
+  if (config.window.titleFollowsDocument === false) {
+    flags.push("--no-title-follow");
+  }
+  if (config.window.iconFollowsDocument === true) {
+    flags.push("--icon-follow");
+  }
   return flags;
 };
 

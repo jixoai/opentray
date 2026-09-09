@@ -100,7 +100,14 @@ describe("create", () => {
     expect(committed.appName).toBe("Renamed");
     expect(committed.packageManager).toBe("pnpm");
     expect(committed.icons.imageSmoothingEnabled).toBe(false);
-    expect(committed.window).toEqual({ width: 900, height: 700 });
+    expect(committed.window).toEqual({
+      width: 900,
+      height: 700,
+      // D13：sync 字段是持久事实，默认显式记录；toolbar 未给则省略。
+      titleFollowsDocument: true,
+      iconFollowsDocument: false,
+    });
+    expect(committed.window.toolbar).toBeUndefined();
     expect(committed.developerMode).toBe(true);
   });
 
@@ -265,7 +272,7 @@ describe("create --url (add-create-url-apps)", () => {
     const packageJson = JSON.parse(await readFile(join(payloadDir, "package.json"), "utf8"));
     expect(packageJson.dependencies["@lydell/node-pty"]).toBeUndefined();
     const entry = await readFile(join(payloadDir, "main.mjs"), "utf8");
-    expect(entry).toContain("url: config.url");
+    expect(entry).toContain("url: toolbarUrl ?? config.url");
     expect(entry).not.toContain("node-pty");
   });
 
@@ -406,5 +413,40 @@ describe("create --url scraped defaults (D10)", () => {
     );
     expect(config.appName).toBe("127");
     expect(config.icons.appIcon).toBeUndefined();
+  });
+});
+
+// D12/D13：窗口行为 flags 编译进 v1 window 并 export 往返。
+describe("create --url window behavior flags", () => {
+  it("records toolbar and sync deviations, and exports them back", async () => {
+    const code = await run([
+      "create", "--url", "https://example.com/app",
+      "--no-scrape", "--toolbar", "--icon-follow", "--no-title-follow",
+    ]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "app-com-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.window.toolbar).toBe(true);
+    expect(config.window.iconFollowsDocument).toBe(true);
+    expect(config.window.titleFollowsDocument).toBe(false);
+
+    const exportCode = await run(["app", "export", "app.com.example", "--format", "command"]);
+    expect(exportCode, errLines.join("\n")).toBe(0);
+    const command = outLines.join("\n");
+    expect(command).toContain("--toolbar");
+    expect(command).toContain("--icon-follow");
+    expect(command).toContain("--no-title-follow");
+  });
+
+  it("defaults to title-follow-on and icon-follow-off", async () => {
+    const code = await run(["create", "--url", "https://example.com", "--no-scrape", "--app-id", "plain.example"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "plain-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.window.titleFollowsDocument).toBe(true);
+    expect(config.window.iconFollowsDocument).toBe(false);
+    expect(config.window.toolbar).toBeUndefined();
   });
 });

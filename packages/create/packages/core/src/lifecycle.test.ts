@@ -37,7 +37,7 @@ const config = (appId: string, name = "App"): CreateConfigV1 => ({
   command: { executable: "/usr/bin/node", args: ["serve"], cwd: "/tmp/project" },
   packageManager: "npm",
   icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
-  window: { width: 1_200, height: 800 },
+  window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
   developerMode: false,
 });
 
@@ -326,7 +326,7 @@ describe("planCreate/applyCreate URL application", () => {
         url: "https://example.com",
         packageManager: "npm",
         icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
-        window: { width: 1_200, height: 800 },
+        window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
         developerMode: false,
       };
       const plan = await planCreate({ desired: desired(urlApp), skipInstall: true, homeDir: urlHome });

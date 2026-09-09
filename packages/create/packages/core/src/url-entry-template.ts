@@ -1,17 +1,24 @@
 // Orthogonal intents (2026-09-09, openspec change add-create-url-apps; original
-// user request: create-opentray packages a URL directly as an application):
+// user request: create-opentray packages a URL directly as an application;
+// acceptance round 3 adds toolbar mode, tray reload, and durable sync
+// defaults D11–D13):
 // 1. Render the URL app entry from the frozen config as one real TS template
 //    literal (compile-checked here; no string surgery at build time).
-// 2. One application-mode WebView window targets the frozen URL directly —
-//    no PTY, no shell host, no port monitor: a URL application supervises
-//    nothing (decision D2 in plans/plan.md).
-// 3. Quit destroys the window and tray session and exits; there is no child
-//    process tree to sweep (decision D9).
-// 4. Any startup failure persists its stack to app.log before exit(1) — the
-//    same durable-surface law as the command entry.
+// 2. Direct mode: one application-mode WebView window targets the frozen URL;
+//    title follows the document one-way by default, icon following is opt-in
+//    (D13). No PTY, no port monitor: a URL application supervises nothing.
+// 3. Toolbar mode (D12): the shell host serves the shared address-bar wrapper
+//    and the window loads browse.html?url=<target> — still no PTY dependency.
+//    Neither sync option is set: the wrapper document's metadata is not the
+//    target page's (same law as command-mode address-bar windows).
+// 4. Tray menu offers Reload (D11): the page reloads through the WebView
+//    evaluate channel without restarting the app.
+// 5. Quit destroys the window and tray session and exits; there is no child
+//    process tree to sweep (D9).
+// 6. Any startup failure persists its stack to app.log before exit(1).
 import type { ScaffoldAppConfig } from "./scaffold";
 
-/** The generated URL app entry: owns tray + one direct window. */
+/** The generated URL app entry: owns tray + one direct or wrapped window. */
 export const createUrlEntrySource = (config: ScaffoldAppConfig): string => {
   if (config.url === undefined) {
     throw new Error("URL entry template requires a url source");
@@ -42,6 +49,9 @@ const nodeRuntime = () => {
 };
 
 const config = ${JSON.stringify(config, null, 2)};
+const toolbarMode = config.window.toolbar === true;
+const titleFollows = config.window.titleFollowsDocument !== false;
+const iconFollows = config.window.iconFollowsDocument === true;
 
 const appLogPath = resolve(PROJECT_DIR, "app.log");
 await mkdir(dirname(appLogPath), { recursive: true });
@@ -78,6 +88,7 @@ const main = async () => {
       : { "text-only": "${config.appName.replace(/['"\\]/gu, "").slice(0, 2) || "A"}" },
     menu: { items: [
       { type: "item", id: 1, title: \`Show \${config.appName}\`, primaryEvent: true },
+      { type: "item", id: 3, title: "Reload" },
       { type: "separator" },
       { type: "item", id: 2, title: "Quit" },
     ] },
@@ -96,20 +107,45 @@ const main = async () => {
   // must not request devtools at all — default windows are not inspectable.
   const devtools = config.developerMode === true ? { devtools: true } : {};
 
-  // The single direct window (D2): the frozen URL IS the service address.
-  // Page metadata sync mirrors the address-bar-less command windows: document
-  // titles follow the site and the favicon follows the window.
+  // Toolbar mode (D12): the shell host serves the shared address-bar wrapper;
+  // no PTY is registered because a URL app supervises nothing. The wrapper
+  // carries neither sync option — its document metadata is not the target's.
+  let shellPort = null;
+  if (toolbarMode) {
+    const shellApi = await import("./app-shell-server.mjs");
+    shellPort = await shellApi.listenShell();
+    if (shellPort === null) {
+      await logSink("[create-opentray] toolbar shell host failed to listen; falling back to the direct window\\n", "utf8");
+    }
+  }
+  const toolbarUrl = toolbarMode && shellPort !== null
+    ? \`http://127.0.0.1:\${shellPort}/browse.html?url=\${encodeURIComponent(config.url)}\`
+    : null;
+
   const window = tray.extend(WebviewExt).createWebviewWindow({
-    url: config.url,
+    url: toolbarUrl ?? config.url,
     width: config.window.width,
     height: config.window.height,
     title: config.appName,
     style: { appMode: true, autoHide: false, keepOnTop: false },
     ...devtools,
-    titleSync: { documentToWindow: true, windowToDocument: true },
-    iconSync: { faviconToWindow: true, windowToFavicon: true },
+    // D13 sync defaults project only onto the DIRECT window (toolbar windows
+    // set neither: one-way title following; icon following is opt-in).
+    ...(toolbarUrl === null
+      ? {
+          ...(titleFollows ? { titleSync: { documentToWindow: true } } : {}),
+          ...(iconFollows ? { iconSync: { faviconToWindow: true } } : {}),
+        }
+      : {}),
   });
   await window.show().catch(() => {});
+
+  // Tray reload (D11): reload the page in place through the evaluate channel.
+  const reload = async () => {
+    try {
+      await window.evaluate("location.reload()");
+    } catch { /* window gone */ }
+  };
 
   const quit = async () => {
     try { await window.destroy(); } catch {}
@@ -124,6 +160,7 @@ const main = async () => {
       }).catch(() => {});
       return;
     }
+    if (itemId === 3) { void reload(); return; }
     if (itemId === 2) void quit();
   });
 
@@ -140,5 +177,6 @@ main().catch(async (error) => {
   console.error(error);
   process.exit(1);
 });
+
 `;
 };

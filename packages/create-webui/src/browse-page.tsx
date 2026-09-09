@@ -46,6 +46,7 @@ export function BrowsePage(): React.JSX.Element {
   const fallbackIndex = React.useRef(0);
   const nav = React.useRef(navigationApi());
   const frameRef = React.useRef<HTMLIFrameElement>(null);
+  const barRef = React.useRef<HTMLInputElement>(null);
   const [navVersion, setNavVersion] = React.useState(0);
 
   const applyTarget = React.useCallback((target: string): void => {
@@ -100,7 +101,17 @@ export function BrowsePage(): React.JSX.Element {
     applyTarget(target);
   };
 
-  const back = (): void => {
+  // Re-derive availability per navigation commit (navVersion bump).
+  const entry = nav.current?.currentEntry ?? null;
+  const canBack =
+    entry !== null ? entry.index > 0 : fallbackIndex.current > 0;
+  const canForward =
+    entry !== null
+      ? entry.index < (nav.current?.entries().length ?? 1) - 1
+      : fallbackIndex.current < fallbackHistory.current.length - 1;
+  void navVersion;
+
+  const back = React.useCallback((): void => {
     const api = nav.current;
     if (api !== undefined && api.currentEntry !== null && api.currentEntry.index > 0) {
       const previous = api.entries()[api.currentEntry.index - 1];
@@ -117,9 +128,9 @@ export function BrowsePage(): React.JSX.Element {
       fallbackIndex.current -= 1;
       applyTarget(fallbackHistory.current[fallbackIndex.current] as string);
     }
-  };
+  }, [applyTarget]);
 
-  const forward = (): void => {
+  const forward = React.useCallback((): void => {
     const api = nav.current;
     if (api !== undefined && api.currentEntry !== null) {
       const entries = api.entries();
@@ -137,17 +148,47 @@ export function BrowsePage(): React.JSX.Element {
       fallbackIndex.current += 1;
       applyTarget(fallbackHistory.current[fallbackIndex.current] as string);
     }
-  };
+  }, [applyTarget]);
 
-  // Re-derive availability per navigation commit (navVersion bump).
-  const entry = nav.current?.currentEntry ?? null;
-  const canBack =
-    entry !== null ? entry.index > 0 : fallbackIndex.current > 0;
-  const canForward =
-    entry !== null
-      ? entry.index < (nav.current?.entries().length ?? 1) - 1
-      : fallbackIndex.current < fallbackHistory.current.length - 1;
-  void navVersion;
+  const reload = React.useCallback((): void => {
+    if (frameRef.current !== null) {
+      frameRef.current.src = frameSrc;
+    }
+  }, [frameSrc]);
+
+  // Common navigation shortcuts (focus in the WRAPPER only — keystrokes with
+  // focus inside a cross-origin embedded page never cross the origin boundary
+  // to reach this document; the tray Reload item covers that case).
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const meta = event.metaKey || event.ctrlKey;
+      const focusInBar = document.activeElement === barRef.current;
+      if (event.key === "F5" || (meta && event.key.toLowerCase() === "r")) {
+        event.preventDefault();
+        reload();
+        return;
+      }
+      if (focusInBar) return; // typing in the address bar owns every other key
+      if ((meta && event.key === "ArrowLeft") || (meta && event.key === "[")) {
+        event.preventDefault();
+        back();
+        return;
+      }
+      if ((meta && event.key === "ArrowRight") || (meta && event.key === "]")) {
+        event.preventDefault();
+        forward();
+        return;
+      }
+      if (meta && event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        barRef.current?.focus();
+        barRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [back, forward, reload]);
+
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
@@ -162,17 +203,14 @@ export function BrowsePage(): React.JSX.Element {
         <Button
           variant="ghost"
           size="icon-sm"
-          onClick={() => {
-            if (frameRef.current !== null) {
-              frameRef.current.src = frameSrc;
-            }
-          }}
+          onClick={reload}
           aria-label="重新加载"
         >
           <RotateCw />
         </Button>
         <Globe className="size-4 shrink-0 text-muted-foreground" />
         <Input
+          ref={barRef}
           className="h-7 font-mono text-xs"
           value={bar}
           placeholder="输入 URL 跳转"

@@ -202,7 +202,12 @@ export const handleWorkbenchApi = async (
             }),
         packageManager: entry.config.packageManager,
         icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
-        window: entry.config.window,
+        window: {
+          width: entry.config.window.width,
+          height: entry.config.window.height,
+          titleFollowsDocument: true,
+          iconFollowsDocument: false,
+        },
         developerMode: entry.config.developerMode,
       };
       return { status: 200, body: config };
@@ -344,7 +349,12 @@ export const handleWorkbenchApi = async (
                 },
               }),
         },
-        window: entry.config.window,
+        window: {
+          width: entry.config.window.width,
+          height: entry.config.window.height,
+          titleFollowsDocument: true,
+          iconFollowsDocument: false,
+        },
         developerMode: entry.config.developerMode,
       };
       if (icon !== undefined) {

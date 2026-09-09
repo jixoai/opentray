@@ -281,12 +281,17 @@ const main = async () => {
       title: baseTitle,
       style: { appMode: true, autoHide: false, keepOnTop: false },
       ...devtools,
-      ...(showAddressBar ? {} : { titleSync: { documentToWindow: true, windowToDocument: true } }),
-      ...(showAddressBar ? {} : { iconSync: { faviconToWindow: true, windowToFavicon: true } }),
+      ...(showAddressBar || !titleFollows ? {} : { titleSync: { documentToWindow: true } }),
+      ...(showAddressBar || !iconFollows ? {} : { iconSync: { faviconToWindow: true } }),
     });
     serviceWindows.set(port, { win, detached: false });
     await win.show().catch(() => {});
   };
+
+  // D13 sync defaults (address-bar-less service windows): the title follows
+  // the document one-way; runtime favicon following is opt-in only.
+  const titleFollows = config.window.titleFollowsDocument !== false;
+  const iconFollows = config.window.iconFollowsDocument === true;
 
   if (showTerminal) {
     await ensureTerminalWindow();

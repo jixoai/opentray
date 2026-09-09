@@ -22,7 +22,7 @@ const config = (appId: string): CreateConfigV1 => ({
   command: { executable: "/usr/bin/node", args: ["serve"], cwd: "/tmp/project" },
   packageManager: "npm",
   icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
-  window: { width: 1200, height: 800 },
+  window: { width: 1200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
   developerMode: false,
 });
 
@@ -238,7 +238,7 @@ describe("export URL application", () => {
     url: "https://example.com/app",
     packageManager: "npm",
     icons: { imageSmoothingEnabled: true, background: "transparent", scale: 0.8 },
-    window: { width: 1200, height: 800 },
+    window: { width: 1200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
     developerMode: false,
   });
 

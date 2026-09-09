@@ -1272,7 +1272,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           ...(appIcon === undefined ? {} : { appIcon }),
           ...(trayIcon === undefined ? {} : { trayIcon }),
         },
-        window: { width: 1_200, height: 800 },
+        window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
         developerMode: frozen.developerMode === true,
       };
       const envCount = Object.keys(config.command?.env ?? {}).length;
@@ -1371,7 +1371,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               appName: frozen.appName,
               command: resolvedVector,
               service: { port: resolvedServicePort ?? 0 },
-              window: { width: 1_200, height: 800 },
+              window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
               ...(frozen.developerMode === true ? { developerMode: true } : {}),
             },
             targetDir: resolvedTargetDir ?? currentDefaults().targetDir,

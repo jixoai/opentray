@@ -32,7 +32,14 @@ export interface ScaffoldAppConfig {
   /** URL source: the address the generated window opens directly. */
   readonly url?: string;
   readonly service: { readonly port: number };
-  readonly window: { readonly width: number; readonly height: number };
+  readonly window: {
+    readonly width: number;
+    readonly height: number;
+    /** URL applications: host the address-bar wrapper (D12). */
+    readonly toolbar?: boolean;
+    readonly titleFollowsDocument: boolean;
+    readonly iconFollowsDocument: boolean;
+  };
   /** Tray icon asset (written by materialize); omitted → text-only tray. */
   readonly trayIcon?: { readonly path: string; readonly template: boolean };
   /** Generated-app shell (startup terminal / address-bar tabs). */
@@ -74,6 +81,9 @@ export const SCAFFOLD_MARKER_FILES = [
 export const writeScaffold = async (options: ScaffoldOptions): Promise<ScaffoldResult> => {
   const projectDir = resolve(options.targetDir);
   const isUrlApp = options.config.url !== undefined;
+  // D12: a URL app hosts shell assets ONLY in toolbar mode; command apps
+  // always do (terminal = abnormal-exit surface).
+  const hostShell = !isUrlApp || options.config.window.toolbar === true;
   await mkdir(join(projectDir, "app-icon"), { recursive: true });
 
   const writtenFiles: string[] = [];
@@ -87,11 +97,7 @@ export const writeScaffold = async (options: ScaffoldOptions): Promise<ScaffoldR
   await write("package.json", createPackageJson(options));
   await write("opentray.app.json", `${JSON.stringify(options.config, null, 2)}\n`);
   await write("main.mjs", isUrlApp ? createUrlEntrySource(options.config) : createEntrySource(options.config));
-  if (!isUrlApp) {
-    // The shell host is unconditional for COMMAND apps (D2): the terminal
-    // window is every app's abnormal-exit surface, and the address bar may be
-    // enabled later by config. A URL app supervises nothing (D3 of
-    // add-create-url-apps) — no terminal surface, no shell assets.
+  if (hostShell) {
     await write("app-shell-server.mjs", createShellServerSource(options.config));
     const shellAssetsDir = options.shellAssetsDir ?? (await resolveBundledShellAssetsDir());
     if (shellAssetsDir !== undefined) {

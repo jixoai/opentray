@@ -87,7 +87,7 @@ describe("wizard pipeline integration", () => {
           appName: scraped.title ?? "Fallback",
           command: { command: process.execPath, args: tokens.tokens.slice(1), cwd: workDir },
           service: { port },
-          window: { width: 1_200, height: 800 },
+          window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
         },
         targetDir,
         dependencyRange: "^0.18.0",

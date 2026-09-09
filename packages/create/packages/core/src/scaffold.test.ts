@@ -13,7 +13,7 @@ const config = {
   appName: "Somecommand Start",
   command: { command: "/usr/local/bin/somecommand", args: ["start"], cwd: "/tmp/xyz" },
   service: { port: 19080 },
-  window: { width: 1200, height: 800 },
+  window: { width: 1200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
 };
 
 describe("writeScaffold", () => {
@@ -134,7 +134,7 @@ describe("writeScaffold URL application", () => {
     appName: "Example",
     url: "https://example.com",
     service: { port: 0 },
-    window: { width: 1000, height: 700 },
+    window: { width: 1000, height: 700, titleFollowsDocument: true, iconFollowsDocument: false },
   };
 
   it("omits command-hosting assets (no PTY dependency, no shell host)", async () => {
@@ -163,17 +163,24 @@ describe("writeScaffold URL application", () => {
     const entry = await readFile(join(dir, "main.mjs"), "utf8");
 
     // D2：唯一窗口直接指向冻结 URL，窗口尺寸来自 v1 window 选项。
-    expect(entry).toContain("url: config.url");
+    expect(entry).toContain("url: toolbarUrl ?? config.url");
     expect(entry).toContain("width: config.window.width");
     expect(entry).toContain("appMode: true");
-    expect(entry).toContain("titleSync");
-    expect(entry).toContain("iconSync");
+    // D13：标题单向跟随是默认；icon 跟随默认关闭（不再出现 iconSync）。
+    expect(entry).toContain("titleSync: { documentToWindow: true }");
+    expect(entry).not.toContain("windowToDocument");
+    expect(entry).not.toContain("windowToFavicon");
+    // icon 跟随是条件项（iconFollows 才注入），默认不激活。
+    expect(entry).toContain("...(iconFollows ? { iconSync: { faviconToWindow: true } } : {})");
+    // D11：托盘菜单提供 Reload。
+    expect(entry).toContain('title: "Reload"');
     // 无命令监督：无 PTY、无命令 spawn、无端口监控、无进程树清理。
     expect(entry).not.toContain("node-pty");
     expect(entry).not.toContain("ensureServiceWindow");
     expect(entry).not.toContain("listOwnedListeningPorts");
     expect(entry).not.toContain("listProcessTreePids");
-    expect(entry).not.toContain("app-shell-server");
+    // D12：shell host 仅在 toolbar 模式下按需加载（条件表达式），默认直连。
+    expect(entry).toContain("toolbarMode && shellPort !== null");
     // D6 同法：启动失败写入 app.log。
     expect(entry).toContain("startup failed");
     expect(entry).toContain("primaryEvent");
@@ -181,5 +188,39 @@ describe("writeScaffold URL application", () => {
     const readme = await readFile(join(dir, "README.md"), "utf8");
     expect(readme).toContain("https://example.com");
     expect(readme).not.toContain("Command:");
+  });
+});
+
+// D12：URL toolbar 模式——shell 资产回来（仍无 PTY 依赖），窗口加载包装页。
+describe("writeScaffold URL application toolbar mode", () => {
+  const toolbarConfig = {
+    schemaVersion: 1 as const,
+    appId: "com.example",
+    appName: "Example",
+    url: "https://example.com",
+    service: { port: 0 },
+    window: {
+      width: 1200,
+      height: 800,
+      toolbar: true,
+      titleFollowsDocument: true,
+      iconFollowsDocument: false,
+    },
+  };
+
+  it("hosts the shell server and wrapper assets without the PTY dependency", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "scaffold-url-toolbar-"));
+    await writeScaffold({ config: toolbarConfig, targetDir: dir, dependencyRange: "^0.18.0" });
+
+    const files = await readdir(dir);
+    expect(files).toContain("app-shell-server.mjs");
+    const packageJson = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+    expect(packageJson.dependencies["@lydell/node-pty"]).toBeUndefined();
+
+    const entry = await readFile(join(dir, "main.mjs"), "utf8");
+    expect(entry).toContain("browse.html?url=");
+    expect(entry).toContain("encodeURIComponent(config.url)");
+    // toolbar 窗口不设置任何 sync 选项（wrapper 元数据非目标页面元数据）。
+    expect(entry).toContain("...(toolbarUrl === null");
   });
 });

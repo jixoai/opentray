@@ -23,7 +23,7 @@ const validConfig = (overrides: Partial<CreateConfigV1> = {}): CreateConfigV1 =>
     background: "transparent",
     scale: 0.8,
   },
-  window: { width: 1_200, height: 800 },
+  window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
   developerMode: false,
   ...overrides,
 });
@@ -37,7 +37,12 @@ describe("parseCreateConfig", () => {
       expect(result.value.icons.background).toBe("transparent");
       expect(result.value.icons.scale).toBe(0.8);
       expect(result.value.developerMode).toBe(false);
-      expect(result.value.window).toEqual({ width: 1_200, height: 800 });
+      expect(result.value.window).toEqual({
+        width: 1_200,
+        height: 800,
+        titleFollowsDocument: true,
+        iconFollowsDocument: false,
+      });
     }
   });
 
@@ -182,5 +187,28 @@ describe("parseCreateConfig URL source (add-create-url-apps)", () => {
     expect(urlResult.ok && appSourceOf(urlResult.value)).toEqual({ kind: "url", url: "https://example.com" });
     const commandResult = parseCreateConfig(validConfig());
     expect(commandResult.ok && appSourceOf(commandResult.value).kind).toBe("command");
+  });
+});
+
+// D12/D13：window 行为字段是持久化事实——默认可省略，显式值往返保留。
+describe("parseCreateConfig window behavior options", () => {
+  const { command: _c, ...urlBase } = validConfig();
+
+  it("applies durable sync defaults for absent fields", () => {
+    const result = parseCreateConfig({ ...urlBase, url: "https://example.com" });
+    expect(result.ok && result.value.window.titleFollowsDocument).toBe(true);
+    expect(result.ok && result.value.window.iconFollowsDocument).toBe(false);
+    expect(result.ok && result.value.window.toolbar).toBeUndefined();
+  });
+
+  it("preserves explicit toolbar and sync deviations", () => {
+    const result = parseCreateConfig({
+      ...urlBase,
+      url: "https://example.com",
+      window: { width: 800, height: 600, toolbar: true, titleFollowsDocument: false, iconFollowsDocument: true },
+    });
+    expect(result.ok && result.value.window.toolbar).toBe(true);
+    expect(result.ok && result.value.window.titleFollowsDocument).toBe(false);
+    expect(result.ok && result.value.window.iconFollowsDocument).toBe(true);
   });
 });

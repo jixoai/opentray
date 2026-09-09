@@ -44,8 +44,14 @@ Command apps:
 
 URL apps:
 
-- Publish the tray (Show/Quit) and exactly one application-mode webview
-  window at the frozen URL, with document-title and favicon sync.
+- Publish the tray (Show/Reload/Quit) and one application-mode webview
+  window at the frozen URL. The title follows the page document by default
+  (one-way); runtime favicon→icon following is opt-in (`--icon-follow`).
+- Toolbar mode (`--toolbar`) wraps the address in the shared address-bar
+  page: back/forward/reload buttons, an address input, and the ⌘/Ctrl
+  navigation shortcuts while the wrapper has focus (keystrokes inside a
+  cross-origin embedded page are not observable by the wrapper; the tray
+  Reload item always works). Sites that forbid embedding cannot be wrapped.
 - Supervise nothing: no child process, no port monitor; Quit destroys the
   window and tray session and exits.
 

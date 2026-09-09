@@ -40,6 +40,12 @@ export interface CreateFlagOptions {
   readonly trayTemplate?: boolean;
   readonly developerMode?: boolean;
   readonly window?: string;
+  /** URL applications: host the address-bar wrapper (D12). */
+  readonly toolbar?: boolean;
+  /** Window title follows document.title; default true (D13). */
+  readonly titleFollow?: boolean;
+  /** Runtime favicon→window-icon following; default false (D13). */
+  readonly iconFollow?: boolean;
 }
 
 const PACKAGE_MANAGERS: readonly PackageManagerName[] = ["npm", "pnpm", "bun"];
@@ -174,13 +180,26 @@ export const compileDesiredConfig = async (
   const trayTemplate = options.trayTemplate ?? base?.icons.trayTemplate ?? false;
   const developerMode = options.developerMode ?? base?.developerMode ?? false;
 
-  let window = base?.window ?? { width: 1_200, height: 800 };
+  const baseWindow = base?.window;
+  const window = {
+    width: baseWindow?.width ?? 1_200,
+    height: baseWindow?.height ?? 800,
+    ...(baseWindow?.toolbar === undefined ? {} : { toolbar: baseWindow.toolbar }),
+    titleFollowsDocument: options.titleFollow ?? baseWindow?.titleFollowsDocument ?? true,
+    iconFollowsDocument: options.iconFollow ?? baseWindow?.iconFollowsDocument ?? false,
+  };
   if (options.window !== undefined) {
     const parsed = parseWindowSpec(options.window);
     if (!parsed.ok) {
       return err("invalid_config", parsed.message);
     }
-    window = { width: parsed.width, height: parsed.height };
+    window.width = parsed.width;
+    window.height = parsed.height;
+  }
+  // Window behavior options (D12/D13): explicit flags over the base document,
+  // with the durable defaults filling absent fields.
+  if (options.toolbar !== undefined) {
+    window.toolbar = options.toolbar;
   }
 
   // Assembled documents pass through the SAME strict v1 parser as config

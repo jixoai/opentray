@@ -33,6 +33,9 @@ command flags (`--exec` family) OR `--url`. Options:
 | `--tray-template` | treat the tray source as a darwin template |
 | `--developer-mode` | admit WebView DevTools (default false) |
 | `--window <WxH>` | window size (default 1200x800) |
+| `--toolbar` | URL apps: host the address-bar wrapper (back/forward/reload + shortcuts) |
+| `--title-follow <bool>` | window title follows document.title (default true; negate with `--no-title-follow`) |
+| `--icon-follow <bool>` | runtime favicon→window-icon following (default off) |
 | `--force` | replace a VERIFIED existing payload |
 | `--stop-running` | stop a verified running instance first |
 | `--skip-install` | write the project without installing |

@@ -50,6 +50,14 @@ npx create-opentray create \
   scrapes the page once and adopts its `<title>` and best favicon as
   defaults — explicit flags always win, failures fall back silently
   (address-derived name + glyph icon), and `--no-scrape` disables the fetch.
+- URL app window options: `--toolbar` hosts the shared address-bar wrapper
+  (back/forward/reload buttons, address input, and the ⌘/Ctrl+←→, ⌘/Ctrl+[
+  ], ⌘/Ctrl+R, F5, ⌘/Ctrl+L shortcuts while focus is in the wrapper; sites
+  that forbid embedding cannot be wrapped). Every URL app's tray menu offers
+  Reload regardless of toolbar mode. By default the window title follows the
+  page (`--no-title-follow` to stop) and the icon does NOT follow favicon
+  changes at runtime (`--icon-follow` to enable); both persist in the v1
+  config and round-trip through export.
 - Icon sources: local files, `http(s)` URLs, or `data:` URLs. Outside URL-mode
   enrichment the CLI never scrapes names or favicons.
 - `--config <file>` loads a complete v1 document; explicit flags override

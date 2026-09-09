@@ -220,7 +220,13 @@ describe("app edit field inheritance", () => {
     expect(after.icons.background).toBe("black");
     expect(after.icons.scale).toBe(0.9);
     expect(after.developerMode).toBe(true);
-    expect(after.window).toEqual({ width: 900, height: 600 });
+    expect(after.window).toEqual({
+      width: 900,
+      height: 600,
+      // D13: sync facts persist explicitly through edit.
+      titleFollowsDocument: true,
+      iconFollowsDocument: false,
+    });
   });
 });
 

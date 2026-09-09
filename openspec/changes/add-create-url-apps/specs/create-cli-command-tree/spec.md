@@ -42,3 +42,16 @@ Under `--url`, creation SHALL by default fetch the address once and adopt the pa
 - **WHEN** `create` runs
 - **THEN** creation SHALL succeed with the address-derived name and the glyph fallback icon
 - **AND** `--no-scrape` SHALL produce the same result without any network attempt
+
+## ADDED Requirements
+
+### Requirement: Create SHALL expose window behavior options
+
+`create` (and `app edit`) SHALL accept `--toolbar` (URL applications only: host the address-bar wrapper), `--no-title-follow` (negate the default window-title-follows-document behavior), and `--icon-follow` (opt in to runtime favicon→window-icon following). These compile into the v1 `window` object and round-trip through export.
+
+#### Scenario: Toolbar and sync flags compile and round-trip
+
+- **GIVEN** `create --url https://example.com --toolbar --icon-follow`
+- **WHEN** the invocation compiles and its registration is exported
+- **THEN** the committed `window` SHALL record the toolbar and icon-following facts
+- **AND** the exported command SHALL carry `--toolbar` and `--icon-follow`

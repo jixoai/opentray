@@ -99,6 +99,13 @@ npx create-opentray create \
   as DEFAULTS (explicit flags win; failures fall back silently; `--no-scrape`
   skips the fetch). `app edit <id> --url <new-address>` changes it later;
   export emits `--url`.
+- URL app window behavior (all persisted in v1 config, export round-trips):
+  `--toolbar` wraps the address in the shared address-bar page (back/forward/
+  reload buttons + ⌘/Ctrl+←→, ⌘/Ctrl+[] , ⌘/Ctrl+R, F5, ⌘/Ctrl+L shortcuts
+  while the wrapper has focus; sites forbidding embedding cannot be wrapped);
+  the tray menu always offers Reload; the window title follows the document
+  by default (`--no-title-follow` opts out) and favicon following is opt-in
+  (`--icon-follow`).
 - Icon sources may be local files, `http(s)` URLs, or `data:` URLs. The CLI
   never scrapes names or favicons — everything is explicit.
 - `--dry-run` prints the Core plan (effects, warnings, blocks) without

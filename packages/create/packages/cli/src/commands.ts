@@ -145,6 +145,9 @@ interface CreateArgs {
   readonly trayTemplate?: boolean;
   readonly developerMode?: boolean;
   readonly window?: string;
+  readonly toolbar?: boolean;
+  readonly titleFollow?: boolean;
+  readonly iconFollow?: boolean;
   readonly force?: boolean;
   readonly stopRunning?: boolean;
   readonly skipInstall?: boolean;
@@ -164,6 +167,7 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
   const optional: readonly (keyof CreateFlagOptions)[] = [
     "appId", "appName", "url", "exec", "arg", "cwd", "env", "pm", "appIcon", "trayIcon",
     "iconBackground", "iconScale", "imageSmoothing", "trayTemplate", "developerMode", "window",
+    "toolbar", "titleFollow", "iconFollow",
   ];
   for (const key of optional) {
     const value = (args as Record<string, unknown>)[key];
@@ -274,6 +278,9 @@ const createCommand = (context: CliContext): CommandModule => ({
       .option("tray-template", { type: "boolean", describe: "treat the tray source as a darwin template" })
       .option("developer-mode", { type: "boolean", describe: "admit WebView DevTools in the generated app" })
       .option("window", { type: "string", describe: "window size <width>x<height> (default 1200x800)" })
+      .option("toolbar", { type: "boolean", describe: "URL applications: host the address-bar wrapper (back/forward/reload toolbar)" })
+      .option("title-follow", { type: "boolean", describe: "window title follows document.title (default true; negate with --no-title-follow)" })
+      .option("icon-follow", { type: "boolean", describe: "runtime favicon-to-window-icon following (default off)" })
       .option("force", { type: "boolean", default: false, describe: "replace a VERIFIED existing payload (never adopts user files)" })
       .option("stop-running", { type: "boolean", default: false, describe: "stop a verified running instance before apply" })
       .option("skip-install", { type: "boolean", default: false, describe: "write the project without installing dependencies" })
@@ -361,6 +368,9 @@ const appEditCommand = (context: CliContext): CommandModule => ({
       .option("tray-template", { type: "boolean" })
       .option("developer-mode", { type: "boolean" })
       .option("window", { type: "string" })
+      .option("toolbar", { type: "boolean" })
+      .option("title-follow", { type: "boolean" })
+      .option("icon-follow", { type: "boolean" })
       .option("force", { type: "boolean", default: false })
       .option("stop-running", { type: "boolean", default: false })
       .option("restart", { type: "boolean", default: false, describe: "launch again after a stop-running edit" })
@@ -429,6 +439,13 @@ const appEditCommand = (context: CliContext): CommandModule => ({
       trayTemplate: args.trayTemplate ?? base.icons.trayTemplate ?? false,
       developerMode: args.developerMode ?? base.developerMode,
       window: args.window ?? `${base.window.width}x${base.window.height}`,
+      ...((args.toolbar ?? base.window.toolbar) === undefined ? {} : { toolbar: args.toolbar ?? base.window.toolbar }),
+      ...(args.titleFollow === undefined && base.window.titleFollowsDocument === undefined
+        ? {}
+        : { titleFollow: args.titleFollow ?? base.window.titleFollowsDocument }),
+      ...(args.iconFollow === undefined && base.window.iconFollowsDocument === undefined
+        ? {}
+        : { iconFollow: args.iconFollow ?? base.window.iconFollowsDocument }),
     };
     const cwd = context.cwd ?? process.cwd();
     const compiled = await compileDesiredConfig(patched, undefined, cwd);
