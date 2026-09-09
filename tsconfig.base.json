@@ -8,6 +8,9 @@
       "@opentray/spec": [
         "packages/spec/src/index.ts"
       ],
+      "@opentray/icon": [
+        "packages/icon/src/index.ts"
+      ],
       "@opentray/packaging": [
         "packages/packaging/src/index.ts"
       ],

@@ -1,0 +1,54 @@
+{
+  "name": "@opentray/icon",
+  "version": "0.21.1",
+  "description": "Shared OpenTray app-icon generation kernel: glyph defaults, composition, squircle tiling, and ICNS/ICO/Linux PNG encoding on a WebAssembly image stack.",
+  "keywords": [
+    "app-icon",
+    "icns",
+    "ico",
+    "opentray",
+    "squircle",
+    "wasm"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jsquash/avif": "^2.1.1",
+    "@jsquash/jpeg": "^1.6.0",
+    "@jsquash/png": "^3.1.1",
+    "@jsquash/resize": "^2.1.1",
+    "@jsquash/webp": "^1.5.0",
+    "@opentray/spec": "workspace:*",
+    "@resvg/resvg-wasm": "^2.6.2",
+    "@shockpkg/icon-encoder": "^3.2.3",
+    "exifr": "^7.1.3",
+    "figma-squircle": "^1.1.0"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}
