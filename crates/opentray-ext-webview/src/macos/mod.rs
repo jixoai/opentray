@@ -977,15 +977,25 @@ impl MacosWebviewRuntime {
 }
 
 fn set_activation_policy(app: &NSApplication, app_mode: bool) {
+    let target_policy = if app_mode {
+        NSApplicationActivationPolicy::Regular
+    } else {
+        NSApplicationActivationPolicy::Accessory
+    };
+    // Unchanged policy = no-op. This runs on every drain tick (~60Hz per
+    // shown window); re-asserting an already-applied policy re-set the
+    // application icon and re-rendered the Dock tile every tick — measured as
+    // a steady ~60% single-core burn on an otherwise idle broker (2026-09-09
+    // CPU diagnosis). AppKit's current value is the sole truth here, so no
+    // runtime-side cache is needed.
+    if app.activationPolicy() == target_policy {
+        return;
+    }
     // AppKit may re-read the carrier bundle artwork while promoting an accessory
     // process into a regular Dock application. Preserve the Core App projection
     // across that transition and explicitly invalidate the Dock tile afterward.
     let application_icon = app.applicationIconImage();
-    app.setActivationPolicy(if app_mode {
-        NSApplicationActivationPolicy::Regular
-    } else {
-        NSApplicationActivationPolicy::Accessory
-    });
+    app.setActivationPolicy(target_policy);
     if let Some(application_icon) = application_icon.as_deref() {
         unsafe { app.setApplicationIconImage(Some(application_icon)) };
         app.dockTile().display();
