@@ -424,16 +424,32 @@ const selectedIconRefStale = (
           setIconCandidates(payload.icons ?? []);
           setIconCandidatesPort(payload.iconsPort);
           setIframeTabs(
-            payload.services.map((service) => ({
-              port: service.port,
-              url: service.url,
-              history: [service.url],
-              historyIndex: 0,
-            })),
+            payload.urlSource !== undefined
+              ? [
+                  {
+                    port: 0,
+                    url: payload.urlSource,
+                    history: [payload.urlSource],
+                    historyIndex: 0,
+                  },
+                ]
+              : payload.services.map((service) => ({
+                  port: service.port,
+                  url: service.url,
+                  history: [service.url],
+                  historyIndex: 0,
+                })),
           );
-          const commandActive = payload.runAlive || payload.services.length > 0;
+          const commandActive =
+            payload.runAlive || payload.services.length > 0 || payload.urlSource !== undefined;
           setPanelOpen(commandActive);
-          setActiveTab(commandActive && payload.services.length > 0 ? `svc-${payload.services[0]!.port}` : "terminal");
+          setActiveTab(
+            payload.urlSource !== undefined
+              ? "svc-0"
+              : commandActive && payload.services.length > 0
+                ? `svc-${payload.services[0]!.port}`
+                : "terminal",
+          );
           break;
         }
         case "state":
@@ -818,6 +834,9 @@ const selectedIconRefStale = (
               setUrlDrafting(false);
               if (urlSource !== undefined) {
                 setUrlInput("");
+                setUrlSource(undefined);
+                setIframeTabs([]);
+                setPanelOpen(false);
                 void api("/api/url", { url: "", exit: true });
               }
             }}
@@ -841,8 +860,18 @@ const selectedIconRefStale = (
           activeSource={urlSource}
           frozen={wizardState === "materializing" || wizardState === "frozen" || wizardState === "success"}
           loading={false}
-          onSubmit={() => {
-            void api("/api/url", { url: urlInput });
+          failedReason={wizardState === "failed" ? failReason : undefined}
+          onSubmit={(normalized) => {
+            void api("/api/url", { url: normalized }).then((response) => {
+              if (!response.ok) return;
+              // 乐观打开右侧预览（snapshot/事件流兜底刷新恢复）。
+              setUrlSource(normalized);
+              setIframeTabs([
+                { port: 0, url: normalized, history: [normalized], historyIndex: 0 },
+              ]);
+              setPanelOpen(true);
+              setActiveTab("svc-0");
+            });
           }}
         />
       ) : (
@@ -999,7 +1028,18 @@ const selectedIconRefStale = (
               terminalReady={termReady}
               interactive={interactive}
               status={status}
-              services={[...services]}
+              services={
+                urlSource !== undefined
+                  ? [
+                      {
+                        port: 0,
+                        url: urlSource,
+                        firstSeenAt: 0,
+                        title: hostnameOf(urlSource),
+                      },
+                    ]
+                  : [...services]
+              }
               iframeTabs={iframeTabs}
               activeTab={activeTab}
               onActiveTabChange={setActiveTab}

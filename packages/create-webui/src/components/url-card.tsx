@@ -18,7 +18,10 @@ export interface UrlCardProps {
   frozen: boolean;
   /** A preset fetch is in flight. */
   loading: boolean;
-  onSubmit(): void;
+  /** Failed-state reason from the session (URL 模式唯一的错误显示面). */
+  failedReason?: string | undefined;
+  /** Receives the NORMALIZED url (protocol-completed). */
+  onSubmit(value: string): void;
 }
 
 const normalize = (raw: string): string => {
@@ -33,6 +36,7 @@ export function UrlCard({
   activeSource,
   frozen,
   loading,
+  failedReason,
   onSubmit,
 }: UrlCardProps): React.JSX.Element {
   return (
@@ -52,8 +56,9 @@ export function UrlCard({
             onChange={(event) => onChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || frozen || loading) return;
-              onChange(normalize(value));
-              onSubmit();
+              const normalized = normalize(value);
+              onChange(normalized);
+              onSubmit(normalized);
             }}
             aria-label="网页地址"
           />
@@ -62,14 +67,18 @@ export function UrlCard({
           size="sm"
           disabled={frozen || loading || value.trim().length === 0}
           onClick={() => {
-            onChange(normalize(value));
-            onSubmit();
+            const normalized = normalize(value);
+            onChange(normalized);
+            onSubmit(normalized);
           }}
         >
           {loading ? <Loader2 className="size-4 animate-spin" /> : null}
           获取预设
         </Button>
       </div>
+      {failedReason !== undefined ? (
+        <p className="pt-2 text-xs text-destructive" role="alert">{failedReason}</p>
+      ) : null}
       {activeSource !== undefined ? (
         <p className="pt-2 text-xs text-muted-foreground">
           源地址：<span className="font-mono">{activeSource}</span>
