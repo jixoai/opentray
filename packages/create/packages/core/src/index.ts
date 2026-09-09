@@ -70,6 +70,7 @@ export {
   scrapeService,
   scrapeUrl,
   deriveUrlPresets,
+  responseHeadersAllowEmbedding,
   writeGlyphIconTemp,
   extractTitle,
   extractFaviconCandidates,

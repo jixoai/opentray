@@ -102,7 +102,11 @@ npx create-opentray create \
 - URL app window behavior (all persisted in v1 config, export round-trips):
   `--toolbar` wraps the address in the shared address-bar page (back/forward/
   reload buttons + ⌘/Ctrl+←→, ⌘/Ctrl+[] , ⌘/Ctrl+R, F5, ⌘/Ctrl+L shortcuts
-  while the wrapper has focus; sites forbidding embedding cannot be wrapped);
+  while the wrapper has focus). Embedding-hostile targets (X-Frame-Options /
+  CSP frame-ancestors refusing third-party iframes) are detected during the
+  creation scrape and degrade to the direct window with a notice — e.g.
+  news.ycombinator.com sends `X-Frame-Options: DENY`, so HN always runs
+  direct;
   the tray menu always offers Reload; the window title follows the document
   by default (`--no-title-follow` opts out) and favicon following is opt-in
   (`--icon-follow`).

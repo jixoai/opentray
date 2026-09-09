@@ -26,6 +26,13 @@ Toolbar mode (`window.toolbar`) SHALL host the shared address-bar wrapper page (
 
 Every URL application's tray menu SHALL offer a `Reload` item that reloads the page through the WebView evaluate channel (`location.reload()`) without restarting the app. Toolbar-mode wrapper pages SHALL bind back/forward/reload/address-focus keyboard shortcuts (⌘/Ctrl+←→, ⌘/Ctrl+[ ], ⌘/Ctrl+R, F5, ⌘/Ctrl+L) to their existing navigation model; the documented limitation SHALL state that keystrokes with focus inside a cross-origin embedded page are not observable by the wrapper.
 
+#### Scenario: Embedding-hostile targets degrade to the direct window
+
+- **GIVEN** `--toolbar` against an address whose response carries `X-Frame-Options: DENY` or a CSP `frame-ancestors` without a wildcard
+- **WHEN** creation runs with scraping enabled
+- **THEN** it SHALL emit an explicit notice and commit `toolbar` unset, producing the direct window payload
+- **AND** `--no-scrape` (no probe data) SHALL keep the toolbar request untouched, with the limitation documented
+
 #### Scenario: Toolbar wraps the address without the PTY
 
 - **GIVEN** a URL application generated with `toolbar: true`

@@ -163,7 +163,7 @@ const commandFlagGiven = (argv: Record<string, unknown>): boolean =>
 
 const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> => {
   const cwd = context.cwd ?? process.cwd();
-  const flags: CreateFlagOptions = {};
+  const flags: { -readonly [K in keyof CreateFlagOptions]: CreateFlagOptions[K] } = {};
   const optional: readonly (keyof CreateFlagOptions)[] = [
     "appId", "appName", "url", "exec", "arg", "cwd", "env", "pm", "appIcon", "trayIcon",
     "iconBackground", "iconScale", "imageSmoothing", "trayTemplate", "developerMode", "window",
@@ -182,10 +182,11 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
   // silent fallback, off-switch --no-scrape; explicit flags/config always win.
   let enrichment: CreateEnrichment | undefined;
   let presetIconPath: string | undefined;
+  let toolbarRequested = args.toolbar === true;
   if (
     args.url !== undefined &&
     args.scrape !== false &&
-    (args.appName === undefined || args.appIcon === undefined)
+    (args.appName === undefined || args.appIcon === undefined || toolbarRequested)
   ) {
     const presets = await deriveUrlPresets(args.url);
     enrichment = presets;
@@ -193,6 +194,18 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
     if (presets.appName !== undefined || presets.appIconPath !== undefined) {
       emitProgress(
         `scraped defaults from ${args.url}: ${[presets.appName !== undefined ? "title" : undefined, presets.appIconPath !== undefined ? "favicon" : undefined].filter(Boolean).join(" + ")} (defaults; explicit flags win)`,
+        context.streams,
+        args.json === true,
+      );
+    }
+    // Toolbar feasibility (D12): the wrapper embeds the target in an iframe;
+    // a page whose response policy forbids embedding cannot be wrapped, so
+    // the request degrades to the direct window with an explicit notice.
+    if (toolbarRequested && presets.frameEmbeddable === false) {
+      toolbarRequested = false;
+      delete flags.toolbar;
+      emitProgress(
+        `warning: ${args.url} forbids iframe embedding (X-Frame-Options / CSP frame-ancestors); falling back to the direct window`,
         context.streams,
         args.json === true,
       );

@@ -14,6 +14,7 @@ import {
   resolveFaviconUrl,
   SVG_RASTER_TARGET,
   deriveUrlPresets,
+  responseHeadersAllowEmbedding,
   scrapeService,
   scrapeUrl,
   writeGlyphIconTemp,
@@ -434,5 +435,52 @@ describe("scrapeUrl / deriveUrlPresets", () => {
     });
     expect(presets.appName?.length).toBe(80);
     expect(presets.appName?.endsWith("…")).toBe(true);
+  });
+});
+
+// D12 嵌入策略判定：X-Frame-Options（除 ALLOWALL）与无通配的
+// CSP frame-ancestors 都拒绝第三方 iframe（toolbar 包装可行性）。
+describe("responseHeadersAllowEmbedding", () => {
+  it("allows by default and rejects X-Frame-Options except ALLOWALL", () => {
+    expect(responseHeadersAllowEmbedding({})).toBe(true);
+    expect(responseHeadersAllowEmbedding({ "x-frame-options": "DENY" })).toBe(false);
+    expect(responseHeadersAllowEmbedding({ "x-frame-options": "SAMEORIGIN" })).toBe(false);
+    expect(responseHeadersAllowEmbedding({ "x-frame-options": "ALLOWALL" })).toBe(true);
+  });
+
+  it("rejects CSP frame-ancestors without a wildcard", () => {
+    expect(responseHeadersAllowEmbedding({
+      "content-security-policy": "default-src 'self'; frame-ancestors 'self'",
+    })).toBe(false);
+    expect(responseHeadersAllowEmbedding({
+      "content-security-policy": "frame-ancestors 'none'",
+    })).toBe(false);
+    expect(responseHeadersAllowEmbedding({
+      "content-security-policy": "frame-ancestors *; default-src 'self'",
+    })).toBe(true);
+    expect(responseHeadersAllowEmbedding({
+      "content-security-policy": "default-src 'self'",
+    })).toBe(true);
+  });
+
+  it("derives frameEmbeddable through deriveUrlPresets", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "scrape-embed-test-"));
+    const denied = await deriveUrlPresets("https://example.com", {
+      fetch: {
+        page: async () => ({
+          ok: true, status: 200,
+          body: html("Denied"),
+          headers: { "x-frame-options": "DENY" },
+        }),
+        bytes: async () => ({ ok: false, status: 0, bytes: Buffer.alloc(0), contentType: "" }),
+      },
+      tempDir,
+    });
+    expect(denied.frameEmbeddable).toBe(false);
+    const allowed = await deriveUrlPresets("https://example.com", {
+      fetch: fetchMock({}),
+      tempDir,
+    });
+    expect(allowed.frameEmbeddable).toBe(true);
   });
 });

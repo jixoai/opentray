@@ -52,9 +52,13 @@ npx create-opentray create \
   (address-derived name + glyph icon), and `--no-scrape` disables the fetch.
 - URL app window options: `--toolbar` hosts the shared address-bar wrapper
   (back/forward/reload buttons, address input, and the ⌘/Ctrl+←→, ⌘/Ctrl+[
-  ], ⌘/Ctrl+R, F5, ⌘/Ctrl+L shortcuts while focus is in the wrapper; sites
-  that forbid embedding cannot be wrapped). Every URL app's tray menu offers
-  Reload regardless of toolbar mode. By default the window title follows the
+  ], ⌘/Ctrl+R, F5, ⌘/Ctrl+L shortcuts while focus is in the wrapper). Sites
+  that forbid iframe embedding cannot be wrapped: creation probes the page's
+  embedding policy during the default scrape and, when the target refuses
+  (`X-Frame-Options` / CSP `frame-ancestors`), prints a notice and falls
+  back to the direct window automatically (with `--no-scrape` there is no
+  probe data, so the toolbar request stands). Every URL app's tray menu
+  offers Reload regardless of toolbar mode. By default the window title follows the
   page (`--no-title-follow` to stop) and the icon does NOT follow favicon
   changes at runtime (`--icon-follow` to enable); both persist in the v1
   config and round-trip through export.

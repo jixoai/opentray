@@ -56,6 +56,11 @@ export interface ScrapeResult {
   readonly iconUrl?: string;
   /** All viable candidates ranked by clarity, near-duplicates removed. */
   readonly icons: readonly ScrapedIcon[];
+  /**
+   * Whether the page's response policy allows third-party iframe embedding
+   * (toolbar mode feasibility); undefined when the page could not be fetched.
+   */
+  readonly frameEmbeddable?: boolean;
 }
 
 export interface FaviconCandidate {
@@ -216,6 +221,30 @@ const defaultFetch: ScrapeFetch = {
 const MAX_ICON_DOWNLOADS = 8;
 
 /**
+ * Whether the page's response headers permit embedding by a third-party
+ * origin (the toolbar wrapper): rejects on X-Frame-Options (except
+ * ALLOWALL) and on CSP frame-ancestors without a wildcard. Absent both
+ * policies, embedding is allowed by default — same default browsers use.
+ */
+export const responseHeadersAllowEmbedding = (headers: Record<string, string>): boolean => {
+  const xfo = (headers["x-frame-options"] ?? "").trim().toUpperCase();
+  if (xfo.length > 0 && !xfo.split(",").map((token) => token.trim()).includes("ALLOWALL")) {
+    return false;
+  }
+  // Multiple CSP headers (and repeated directives) join into one scan: a
+  // frame-ancestors directive exists and none of its sources is a wildcard.
+  const csp = (headers["content-security-policy"] ?? "").toLowerCase();
+  const directive = /frame-ancestors\s+([^;]+)/gu;
+  for (const match of csp.matchAll(directive)) {
+    const sources = (match[1] ?? "").trim();
+    if (sources.length === 0 || !sources.split(/\s+/u).includes("*")) {
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
  * Scrape title and ALL icon candidates from an arbitrary http(s) URL.
  * Never throws: failures return `ok: false` with whatever partial identity
  * was found. (`scrapeService` is the loopback-port wrapper over this.)
@@ -329,6 +358,7 @@ export const scrapeUrl = async (
     iconPath: originals[0]?.path,
     ...(originals[0] === undefined ? {} : { iconUrl: originals[0].url }),
     icons,
+    frameEmbeddable: responseHeadersAllowEmbedding(page.headers),
   };
 }
 
@@ -354,6 +384,8 @@ export interface UrlPresets {
   readonly appName?: string;
   /** Normalized temp-file icon source for the app icon, or undefined. */
   readonly appIconPath?: string;
+  /** Page policy allows third-party iframe embedding; undefined when unknown. */
+  readonly frameEmbeddable?: boolean;
 }
 
 /** Upper bound for an adopted page title (display names stay sane). */
@@ -375,6 +407,7 @@ export const deriveUrlPresets = async (
   return {
     ...(appName === undefined ? {} : { appName }),
     ...(scraped.iconPath === undefined ? {} : { appIconPath: scraped.iconPath }),
+    ...(scraped.frameEmbeddable === undefined ? {} : { frameEmbeddable: scraped.frameEmbeddable }),
   };
 };
 

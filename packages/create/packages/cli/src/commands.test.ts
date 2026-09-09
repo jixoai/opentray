@@ -324,9 +324,10 @@ describe("create --url (add-create-url-apps)", () => {
 
 // D10：URL 创建默认抓取链接页面——本地 fixture server 提供 title 与
 // favicon，验证预设进 committed 配置/快照；--no-scrape 与不可达地址回落。
+let fixtureUrl = "";
+
 describe("create --url scraped defaults (D10)", () => {
   let fixture: http.Server;
-  let fixtureUrl: string;
 
   beforeAll(async () => {
     const png = Buffer.concat([
@@ -347,6 +348,11 @@ describe("create --url scraped defaults (D10)", () => {
         );
         return;
       }
+      if (request.url === "/deny") {
+        response.writeHead(200, { "content-type": "text/html", "x-frame-options": "DENY" });
+        response.end("<html><head><title>Denied</title></head><body>ok</body></html>");
+        return;
+      }
       if (request.url === "/icon.png") {
         response.writeHead(200, { "content-type": "image/png" });
         response.end(png);
@@ -360,6 +366,27 @@ describe("create --url scraped defaults (D10)", () => {
     if (typeof address === "object" && address !== null) {
       fixtureUrl = `http://127.0.0.1:${address.port}`;
     }
+  });
+
+  it("falls back to the direct window when the page forbids embedding", async () => {
+    const code = await run(["create", "--url", `${fixtureUrl}/deny`, "--toolbar", "--app-id", "deny.example"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    expect(errLines.join("\n")).toContain("forbids iframe embedding");
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "deny-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.window.toolbar).toBeUndefined();
+    const payloadFiles = await readdir(join(home, ".opentray", "create", "deny-example", "app"));
+    expect(payloadFiles).not.toContain("app-shell-server.mjs");
+  });
+
+  it("keeps toolbar when the page allows embedding", async () => {
+    const code = await run(["create", "--url", `${fixtureUrl}/app`, "--toolbar", "--app-id", "embed.example"]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "embed-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.window.toolbar).toBe(true);
   });
 
   afterAll(async () => {
