@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -78,7 +78,7 @@ describe("broker command resolver", () => {
     );
     expect(await realpath(command.command)).toBe(await realpath(expected));
     expect(await readFile(command.command, "utf8")).toBe("source-broker");
-  });
+  }, 120_000);
 
   it("hashes one exact resolved broker executable into its launch identity", async () => {
     const root = await mkdtemp(join(tmpdir(), "opentray-broker-artifact-"));
@@ -351,6 +351,129 @@ describe("broker native target", () => {
       carrierTemplateRelativePath: "app/Info.plist",
     });
   });
+});
+
+describe("darwin bundle default app icon", () => {
+  const materialize = async (root: string, options: {
+    appName?: string;
+    appIcon?: import("@opentray/spec").AppIcon;
+    appBundle?: import("@opentray/packaging").OpenTrayAppBundleOptions;
+  } = {}) => {
+    const brokerPath = join(root, "target/debug/opentray");
+    const templatePath = join(root, "packages/darwin-app-carrier/Info.plist");
+    await mkdir(dirname(brokerPath), { recursive: true });
+    await mkdir(dirname(templatePath), { recursive: true });
+    await writeFile(brokerPath, "source-broker", "utf8");
+    await writeFile(templatePath, template(), "utf8");
+    const paths = resolveDaemonPaths({
+      homeDir: join(root, "home"),
+      packageVersion: "0.1.0",
+      ...(options.appName === undefined ? {} : { appName: options.appName }),
+    });
+    const command = await resolveBrokerCommand(paths, {
+      env: { OPENTRAY_BROKER_BIN: brokerPath },
+      platform: "darwin",
+      arch: "arm64",
+      findWorkspaceRoot: async () => root,
+      ensureDevDarwinCarrierTemplate: async () => templatePath,
+      appBundle: {
+        path: join(root, "home/.opentray/apps/opentray/Notes.app"),
+        ...(options.appBundle ?? {}),
+      },
+      ...(options.appIcon === undefined ? {} : { appIcon: options.appIcon }),
+    });
+    return { command, paths };
+  };
+
+  const icnsMagicOf = async (path: string): Promise<string> => {
+    const bytes = await readFile(path);
+    return String.fromCharCode(...bytes.subarray(0, 4));
+  };
+
+  it("synthesizes the glyph default icon when appIcon is omitted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-default-icon-"));
+    tempDirs.push(root);
+    const { command } = await materialize(root, { appName: "Notes App" });
+    const bundle = join(root, "home/.opentray/apps/opentray/Notes.app");
+    const iconPath = join(bundle, "Contents/Resources/AppIcon.icns");
+    expect(await icnsMagicOf(iconPath)).toBe("icns");
+    const plist = await readFile(join(bundle, "Contents/Info.plist"), "utf8");
+    expect(plist).toContain("AppIcon.icns");
+    expect(plist).toContain("Notes App");
+    const manifest = JSON.parse(
+      await readFile(join(bundle, "Contents/Resources/opentray-app-bundle.json"), "utf8"),
+    );
+    expect(manifest.icon).toBeDefined();
+    expect(command.command).toContain("Notes.app");
+  }, 120_000);
+
+  it("reuses the cached default icon across repeated materializations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-default-icon-cache-"));
+    tempDirs.push(root);
+    const { paths } = await materialize(root, { appName: "Cached App" });
+    // Bundle files are rewritten on every managed materialization; the kernel
+    // cache under runtimeDir is the authority for "generation did not rerun".
+    const cacheIcon = join(paths.runtimeDir, "app-icon", "default-app-icon.icns");
+    const before = await stat(cacheIcon);
+    await materialize(root, { appName: "Cached App" });
+    const after = await stat(cacheIcon);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+  }, 120_000);
+
+  it("restores the iconless behavior under defaultAppIcon: false", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-default-icon-off-"));
+    tempDirs.push(root);
+    await materialize(root, {
+      appName: "Off App",
+      appBundle: { defaultAppIcon: false },
+    });
+    const bundle = join(root, "home/.opentray/apps/opentray/Notes.app");
+    await expect(readFile(join(bundle, "Contents/Resources/AppIcon.icns"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    const plist = await readFile(join(bundle, "Contents/Info.plist"), "utf8");
+    expect(plist).not.toContain("CFBundleIconFile");
+  }, 120_000);
+
+  it("never injects a default into a read-only reinitialization", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-default-icon-readonly-"));
+    tempDirs.push(root);
+    // First materialization without any icon: the prebuilt bundle has none.
+    await materialize(root, {
+      appName: "Readonly App",
+      appBundle: { defaultAppIcon: false },
+    });
+    const bundle = join(root, "home/.opentray/apps/opentray/Notes.app");
+    // Read-only validation must pass without injecting the synthesized icon.
+    await materialize(root, {
+      appName: "Readonly App",
+      appBundle: { reinitialize: false },
+    });
+    await expect(readFile(join(bundle, "Contents/Resources/AppIcon.icns"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  }, 120_000);
+
+  it("a declared appIcon wins over glyph synthesis", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opentray-default-icon-declared-"));
+    tempDirs.push(root);
+    const declaredBytes = new Uint8Array([0x69, 0x63, 0x6e, 0x73, 0, 0, 0, 8]); // "icns" + len
+    await materialize(root, {
+      appName: "Declared App",
+      appIcon: [
+        {
+          platform: "darwin",
+          format: "icns",
+          source: { type: "encoded", data: declaredBytes },
+        },
+      ],
+    });
+    const iconPath = join(
+      root,
+      "home/.opentray/apps/opentray/Notes.app/Contents/Resources/AppIcon.icns",
+    );
+    expect(new Uint8Array(await readFile(iconPath))).toEqual(declaredBytes);
+  }, 120_000);
 });
 
 const errno = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code });

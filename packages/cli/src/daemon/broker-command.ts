@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, readFile, realpath } from "node:fs/promises";
+import { access, appendFile, readFile, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 
 import type { BrokerArtifactIdentity } from "@opentray/spec";
 import type { AppIcon } from "@opentray/spec";
+import { generateDefaultAppIcon } from "@opentray/icon";
 import {
   ensureDarwinAppBundle,
   type OpenTrayAppBundleOptions,
@@ -362,6 +363,7 @@ const ensureDarwinBundle = async (
   if (arch !== "arm64" && arch !== "x64") {
     throw new Error(`unsupported Darwin app bundle architecture: ${arch}`);
   }
+  const defaultAppIcon = await synthesizeDefaultAppIcon(options, appBundle, paths);
   return ensureDarwinAppBundle({
     bundlePath: appBundle.path,
     packageName: options.packageIdentity?.name ?? paths.callerLabel,
@@ -370,9 +372,46 @@ const ensureDarwinBundle = async (
     target: { os: "darwin", arch },
     brokerPath,
     templatePath,
-    ...(options.appIcon === undefined ? {} : { appIcon: options.appIcon }),
+    ...(defaultAppIcon === undefined && options.appIcon === undefined
+      ? {}
+      : { appIcon: (options.appIcon ?? defaultAppIcon)! }),
     ...(appBundle.reinitialize === undefined ? {} : { reinitialize: appBundle.reinitialize }),
   });
+};
+
+/**
+ * The synthesized glyph default (shared-icon-kernel plan D6/D7/D8): a carrier
+ * materialization concern, never Core App identity. Only synthesized when the
+ * caller declared no `appIcon`, did not opt out, and the runtime owns bundle
+ * generation (`reinitialize: false` keeps a prebuilt bundle read-only).
+ * Failure falls back to the pre-change behavior (no icon) with a diagnostic
+ * line in the runtime's stable broker log — it must never block a start.
+ */
+const synthesizeDefaultAppIcon = async (
+  options: ResolveBrokerCommandOptions,
+  appBundle: OpenTrayAppBundleOptions & { readonly path: string },
+  paths: DaemonPaths,
+): Promise<AppIcon | undefined> => {
+  if (options.appIcon !== undefined) return undefined;
+  if (appBundle.defaultAppIcon === false) return undefined;
+  if (appBundle.reinitialize === false) return undefined;
+  try {
+    const generated = await generateDefaultAppIcon({
+      appName: paths.appName,
+      outputDir: join(paths.runtimeDir, "app-icon"),
+    });
+    return generated.appIcon;
+  } catch (error) {
+    try {
+      await appendFile(
+        paths.brokerLog,
+        `[opentray:icon] default app icon synthesis failed; materializing without an icon: ${String(error)}\n`,
+      );
+    } catch {
+      // Diagnostics must never turn an icon fallback into a start failure.
+    }
+    return undefined;
+  }
 };
 
 const runCargoBuild = (workspaceRoot: string, targetDir?: string): Promise<void> =>

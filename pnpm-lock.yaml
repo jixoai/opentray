@@ -29,6 +29,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@opentray/icon':
+        specifier: workspace:*
+        version: link:../icon
       '@opentray/packaging':
         specifier: workspace:*
         version: link:../packaging

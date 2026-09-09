@@ -42,6 +42,13 @@ export interface OpenTrayAppBundleOptions {
   readonly path?: string | URL;
   /** Defaults to true. False validates a plugin-generated bundle read-only. */
   readonly reinitialize?: boolean;
+  /**
+   * Defaults to true: with `appIcon` omitted, the runtime synthesizes the
+   * first-letter glyph default icon into the materialized bundle. False
+   * restores the pre-synthesis behavior (no icon, OS default artwork).
+   * Read-only validation (`reinitialize: false`) never injects a default.
+   */
+  readonly defaultAppIcon?: boolean;
 }
 
 export interface DarwinAppBundleOptions {

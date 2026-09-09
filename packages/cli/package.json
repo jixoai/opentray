@@ -41,6 +41,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@opentray/icon": "workspace:*",
     "@opentray/packaging": "workspace:*",
     "@opentray/spec": "workspace:*"
   },
