@@ -63,6 +63,13 @@ Declare application identity in runtime options and window role in the WebView
 style. A WebView title or favicon does not replace `appName` or `appIcon` as the
 Dock/taskbar identity.
 
+Omitting `appIcon` is valid: on macOS the runtime synthesizes a default icon
+from `appName` — the first letter on the standard squircle tile — when it
+materializes the application bundle, so the Dock never shows the generic
+executable placeholder. The synthesized default is not part of the declared
+App identity catalog; pass an explicit `appIcon` (or set
+`appBundle.defaultAppIcon: false`) when you want different behavior.
+
 ```ts
 import { WebviewExt } from "@opentray/ext-webview";
 import { createTray } from "opentray";

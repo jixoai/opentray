@@ -5,6 +5,7 @@
   "fixed": [
     [
       "opentray",
+      "@opentray/icon",
       "create-opentray",
       "@opentray/spec",
       "@opentray/darwin-arm64",

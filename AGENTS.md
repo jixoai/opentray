@@ -96,16 +96,16 @@ The following laws were established from the 2026-07-18 macOS `pnpm-pub` and `sk
 - Diagnose retained-window failures as a command chain: `menuClick -> facade command -> broker extension dispatch -> native window state`. If `close()/hide()` returns successfully but native visibility stays true, inspect AppKit/Win32 projection. If a newly added command such as `isVisible` is rejected while older event commands still work, inspect broker/dylib command-surface skew before changing window code.
 - The dynamic extension ABI must preserve actionable rejection detail. A bare `returned code 1` only identifies `EXT_ERR_REJECTED`; run an isolated broker with `OPENTRAY_DAEMON_STDIO=inherit` or add bounded diagnostic transport before attributing the failure to a specific native branch.
 - Native acceptance must use one coherent artifact graph. Record the broker executable path, loaded extension library path, hashes or versions, endpoint identity, and PID before a restart destroys the evidence. A successful restart is runtime-replacement evidence, not proof of the original root cause.
-- `@opentray/vite-plugin` optionally owns consumer app-icon normalization and ICNS/ICO/Linux theme
-  generation. Its cache
-  identity includes the source image, the linked generator source, the built generator
-  implementation, the rendering recipe, encoder versions, and every output path. Linked consumers
-  must rebuild the plugin before `vite dev` or `vite build`; source-dev tray lookup prefers
-  `webui/static` so a stale build directory cannot shadow the current generated asset.
-- Generated preview/Linux PNGs use 72 DPI. ICNS encoding uses explicit macOS @1x/@2x tags with
-  decoded/re-encoded PNG payloads, so AppKit sees 1024 px / 512 pt, 512 px / 512 pt, and
-  512 px / 256 pt representations instead of inheriting a source image's physical density. The
-  encoder and representation recipe are cache identity.
+- `@opentray/icon` owns app-icon normalization and ICNS/ICO/Linux theme generation;
+  `@opentray/vite-plugin` is a thin shell over it. The kernel's cache identity includes the source
+  image, the linked generator source, the built generator implementation, the rendering recipe,
+  encoder/rasterizer stack versions, and every output path. Linked consumers must rebuild the
+  kernel before `vite dev` or `vite build`; source-dev tray lookup prefers `webui/static` so a
+  stale build directory cannot shadow the current generated asset.
+- Generated preview/Linux PNGs use 72 DPI (explicit `pHYs` chunk). ICNS encoding uses explicit
+  macOS @1x/@2x tags with decoded/re-encoded PNG payloads, so AppKit sees 1024 px / 512 pt,
+  512 px / 512 pt, and 512 px / 256 pt representations instead of inheriting a source image's
+  physical density. The encoder and representation recipe are cache identity.
 - Release-grade extension manifest inspection must execute a same-target native inspector built beside the extension. Do not depend on `bun:ffi` for this gate because Windows arm64 Bun builds may disable TinyCC and `dlopen()` entirely.
 - Extension cleanup remains session-authoritative. Extension state must be scoped to its owning `(appId, trayId, sessionId)` and a session-close callback must not clear another live session's retained window.
 
@@ -171,14 +171,30 @@ mode directly:
   format-mismatched.
 - File sources are validated relative to the caller and canonicalized to absolute paths before
   broker dispatch. A reused broker working directory must never reinterpret an App identity asset.
-- Omitted `appIcon` never inherits tray artwork. Packaged/carrier identity wins when present, then
-  the operating-system executable/default artwork applies. This keeps tray templates and App
-  identity independently reproducible.
-- Vite consumers should use `openTrayAppIconPlugin` to generate ICNS, ICO, Linux PNGs, and the
-  relocatable AppIcon manifest from one explicit brand-symbol source. The plugin runs in dev and
-  build; consumers with a non-`static` public directory set explicit output paths and make runtime
-  App identity consume those generated assets. Hand-maintained native encoders or a favicon-derived
-  parallel catalog are not equivalent. Tray artwork remains separately owned.
+- Omitted `appIcon` never inherits tray artwork. When the runtime materializes a Darwin bundle,
+  it synthesizes the first-letter glyph default icon (appName-derived, shared squircle standard)
+  through the icon kernel so the Dock never falls through to the operating-system generic
+  executable artwork. The synthesized default is a carrier materialization concern only: the Core
+  declared catalog stays empty and the public App icon methods keep declared-catalog semantics.
+  `appBundle.defaultAppIcon: false` restores the iconless behavior, read-only reinitialization
+  never injects a default, and a declared `appIcon` always wins unchanged. Generation failure
+  falls back to the iconless behavior with a broker-log diagnostic and must never block a start.
+  This keeps tray templates and App identity independently reproducible.
+- `@opentray/icon` owns the single app-icon generation kernel: glyph defaults, composition,
+  squircle tiling, and ICNS/ICO/Linux PNG encoding on a WebAssembly image stack (jsquash codecs,
+  resvg rasterizer; no sharp/libvips). The Vite plugin, create-opentray core, and the runtime
+  daemon consume this kernel; consumers must not carry duplicate pipelines. Its cache identity
+  includes the source image, the linked generator source, the built generator implementation, the
+  rendering recipe, encoder/rasterizer stack versions, and every output path. The WASM rasterizer
+  cannot autoload system fonts — glyph text must flow through the explicit font ladder (embedded
+  OFL subset plus a bounded OS font scan), and a rendered glyph is verified by a text-presence
+  pixel probe rather than trusted.
+- Vite consumers should use `openTrayAppIconPlugin` (a thin shell over the kernel) to generate
+  ICNS, ICO, Linux PNGs, and the relocatable AppIcon manifest from one explicit brand-symbol
+  source. The plugin runs in dev and build; consumers with a non-`static` public directory set
+  explicit output paths and make runtime App identity consume those generated assets.
+  Hand-maintained native encoders or a favicon-derived parallel catalog are not equivalent. Tray
+  artwork remains separately owned.
 - Creating an already-known explicit `appId` is idempotent. It returns the existing App identity
   without clearing its name, icon, or trays; callers use the App mutation API for deliberate
   identity changes.
