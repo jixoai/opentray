@@ -22,7 +22,7 @@ import {
   glyphLetterOf,
   neutralGlyphLetterOf,
 } from "./glyph";
-import { embeddedGlyphFont } from "./fonts";
+import { embeddedGlyphFont, glyphLadderFingerprint } from "./fonts";
 import {
   cloneImage,
   emptyImageOf,
@@ -71,6 +71,12 @@ export interface DefaultAppIconResult {
   /** Absolute file sources ready to pass to the runtime as `appIcon`. */
   readonly appIcon: AppIcon;
   readonly cacheIdentity: string;
+  /**
+   * True when the name's own first glyph could not be covered by the font
+   * ladder on this host and the neutral terminal mark was used instead
+   * (e.g. CJK names on CJK-less CI runners and containers).
+   */
+  readonly degraded: boolean;
 }
 
 /** Generate (or reuse, by full identity) the default glyph App icon catalog. */
@@ -125,7 +131,8 @@ export async function generateDefaultAppIcon(
     manifestPath: path.resolve(manifestPath),
     linuxPngPaths,
   };
-  if (await defaultCacheMatches(cachePath, expected)) {
+  const cached = await readCachedDegraded(cachePath, cacheIdentity);
+  if (cached !== undefined && (await defaultCacheMatches(cachePath, expected))) {
     return {
       fullPngPath,
       macOSPngPath,
@@ -135,10 +142,11 @@ export async function generateDefaultAppIcon(
       manifestPath,
       appIcon,
       cacheIdentity,
+      degraded: cached,
     };
   }
 
-  const full = await renderGlyphPixels(options.appName, accent);
+  const { image: full, degraded } = await renderGlyphPixels(options.appName, accent);
   const macOSVariant = await macosContentVariant(full);
 
   await fs.mkdir(options.outputDir, { recursive: true });
@@ -201,7 +209,7 @@ export async function generateDefaultAppIcon(
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   await fs.writeFile(
     cachePath,
-    `${JSON.stringify({ ...expected, appIcon }, null, 2)}\n`,
+    `${JSON.stringify({ ...expected, appIcon, degraded }, null, 2)}\n`,
     "utf8",
   );
   return {
@@ -213,32 +221,61 @@ export async function generateDefaultAppIcon(
     manifestPath,
     appIcon,
     cacheIdentity,
+    degraded,
   };
 }
+
+/** The cache record persists the degradation flag across restarts. */
+const readCachedDegraded = async (
+  cachePath: string,
+  cacheIdentity: string,
+): Promise<boolean | undefined> => {
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(cachePath, "utf8"));
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const record = parsed as Record<string, unknown>;
+    if (record.cacheIdentity !== cacheIdentity || typeof record.degraded !== "boolean") {
+      return undefined;
+    }
+    return record.degraded;
+  } catch {
+    return undefined;
+  }
+};
 
 /** Render the glyph tile with the text-presence ladder (no silent blanks). */
 const renderGlyphPixels = async (
   appName: string,
   accent: string,
-): Promise<ImageDataLike> => {
+): Promise<{ image: ImageDataLike; degraded: boolean }> => {
   // Ladder: the name's actual first character, then — only when it differs —
-  // its first ASCII letter/digit. No unrelated forced glyph: a wrong letter
-  // reads as the app's identity and is worse than a diagnosed fallback.
+  // its first ASCII letter/digit. The terminal attempt is the neutral "A"
+  // mark, which the embedded subset always covers: a host without the name's
+  // scripts (e.g. CJK-less CI runners and containers) still gets a truthful
+  // glyph tile — flagged degraded — instead of a failed generation, because
+  // callers below this generator have no further fallback.
   const primary = glyphLetterOf(appName);
   const neutral = neutralGlyphLetterOf(appName);
-  const attempts: readonly string[] =
-    neutral !== null && neutral !== primary ? [primary, neutral] : [primary];
+  const attempts: readonly (string | { terminal: string })[] = [
+    primary,
+    ...(neutral !== null && neutral !== primary ? [neutral] : []),
+    { terminal: "A" },
+  ];
   let lastRatio = 0;
-  for (const letter of attempts) {
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index]!;
+    const letter = typeof attempt === "string" ? attempt : attempt.terminal;
     const svg = buildGlyphIconSvg(appName, accent, letter);
     const rendered = await rasterizeSvg(svg, CANVAS);
     lastRatio = brightPixelRatio(rendered);
     if (lastRatio >= TEXT_PRESENCE_FLOOR) {
-      return rendered;
+      return { image: rendered, degraded: index > 0 };
     }
   }
+  // The terminal mark is covered by the embedded subset; a blank render there
+  // means the raster stack itself is broken.
   throw new Error(
-    `default app icon glyph rendered without text pixels for ${JSON.stringify(appName)} (probe ${lastRatio.toFixed(4)} < ${TEXT_PRESENCE_FLOOR}); the font ladder covered neither ${JSON.stringify(primary)}${attempts.length > 1 ? ` nor ${JSON.stringify(neutral)}` : ""}`,
+    `default app icon glyph rendered without text pixels for ${JSON.stringify(appName)} (probe ${lastRatio.toFixed(4)} < ${TEXT_PRESENCE_FLOOR}); even the embedded-subset terminal mark failed`,
   );
 };
 
@@ -264,6 +301,7 @@ async function defaultIconCacheIdentity(options: {
 }): Promise<string> {
   const font = await embeddedGlyphFont();
   const fontHash = crypto.createHash("sha256").update(font).digest("hex");
+  const ladderFingerprint = await glyphLadderFingerprint();
   const stack = [
     await packageVersion("@jsquash/png"),
     await packageVersion("@jsquash/resize"),
@@ -281,6 +319,7 @@ async function defaultIconCacheIdentity(options: {
         options.accent,
         options.fileStem,
         fontHash,
+        ladderFingerprint,
         stack,
         path.resolve(options.outputDir),
       ].join("|"),

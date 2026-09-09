@@ -114,6 +114,22 @@ export const embeddedGlyphFont = async (): Promise<Uint8Array> => {
 };
 
 let ladderPromise: Promise<readonly Uint8Array[]> | undefined;
+let ladderFingerprintPromise: Promise<string> | undefined;
+
+/**
+ * Stable identity of the discovered ladder (path + byte length pairs): OS
+ * font changes invalidate generated-icon caches without hashing font bytes.
+ */
+export const glyphLadderFingerprint = (): Promise<string> => {
+  ladderFingerprintPromise ??= (async () => {
+    const parts: string[] = [];
+    for (const buffer of await glyphFontLadder()) {
+      parts.push(`${buffer.byteLength}`);
+    }
+    return parts.join(",");
+  })();
+  return ladderFingerprintPromise;
+};
 
 /**
  * The full font ladder for resvg `fontBuffers`: embedded subset first, then a

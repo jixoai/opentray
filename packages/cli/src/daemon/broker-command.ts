@@ -400,6 +400,14 @@ const synthesizeDefaultAppIcon = async (
       appName: paths.appName,
       outputDir: join(paths.runtimeDir, "app-icon"),
     });
+    if (generated.degraded) {
+      // The name's script is not covered by this host's fonts; the neutral
+      // terminal mark is used. Diagnosed, never blocking.
+      await appendFile(
+        paths.brokerLog,
+        `[opentray:icon] default app icon degraded to the neutral mark: no font in the ladder covers the first character of ${JSON.stringify(paths.appName)}\n`,
+      ).catch(() => {});
+    }
     return generated.appIcon;
   } catch (error) {
     try {
