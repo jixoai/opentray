@@ -36,8 +36,9 @@ import { ensureLoopbackNoProxy, serviceUrl } from "./port-scan";
 /** Tolerant HTML parsing (node-html-parser): unquoted attrs, case, malformation. */
 const parseHtml = (html: string) => parse(html, { blockTextElements: { script: true, style: true } });
 
-/** Variant tag: the original art, or a solid-color silhouette derived from it. */
-export type IconVariant = "original" | "solid-black" | "solid-white";
+/** Variant tag: the original art, a solid-color silhouette derived from it,
+ * or an AI subject-extraction derived by the wizard's browser client. */
+export type IconVariant = "original" | "solid-black" | "solid-white" | "subject";
 
 /** One scraped icon candidate, ranked and deduplicated. */
 export interface ScrapedIcon {

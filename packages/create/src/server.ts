@@ -459,6 +459,43 @@ const handleApi = async (
     respond(response, 200, "application/json", JSON.stringify({ path }) + "\n");
     return;
   }
+  if (pathname === "/api/icon-candidate") {
+    // Raw image bytes in the request body — must not pass the JSON reader.
+    // Metadata (port/variantOf/width/height/format) rides the query string.
+    const query = new URL(request.url ?? "/", "http://127.0.0.1").searchParams;
+    const port = Number.parseInt(query.get("port") ?? "", 10);
+    const variantOf = Number.parseInt(query.get("variantOf") ?? "", 10);
+    const width = Number.parseInt(query.get("width") ?? "", 10);
+    const height = Number.parseInt(query.get("height") ?? "", 10);
+    if (!Number.isInteger(port) || !Number.isInteger(variantOf) || !Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
+      respond(response, 400, "application/json", '{"error":"port, variantOf, width and height are required"}\n');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) {
+      const piece = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      chunks.push(piece);
+    }
+    const bytes = Buffer.concat(chunks);
+    if (bytes.length < 64) {
+      respond(response, 400, "application/json", '{"error":"image bytes are required"}\n');
+      return;
+    }
+    const format = query.get("format") ?? "png";
+    const appended = await session.addIconCandidate(port, {
+      bytes,
+      variantOf,
+      width,
+      height,
+      format,
+    });
+    if (appended === undefined) {
+      respond(response, 409, "application/json", '{"error":"candidate not acceptable for this port/state"}\n');
+      return;
+    }
+    respond(response, 200, "application/json", JSON.stringify({ index: appended.index }) + "\n");
+    return;
+  }
   const body = preReadBody ?? (await readJsonBody(request));
   switch (pathname) {
     case "/api/url": {

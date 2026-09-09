@@ -28,7 +28,7 @@ export interface WizardFormValues {
 }
 
 /** One scraped icon candidate (ranked by clarity, deduplicated). */
-export type IconVariant = "original" | "solid-black" | "solid-white";
+export type IconVariant = "original" | "solid-black" | "solid-white" | "subject";
 
 
 export interface IconAnalysis {

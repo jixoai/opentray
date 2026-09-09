@@ -39,6 +39,8 @@ interface AppFormProps {
   iconComposeError: string | undefined;
   iconBackground: IconBackground;
   iconScale: number;
+  /** True while the browser-side AI subject extraction is running. */
+  subjectExtracting: boolean;
   onIconBackgroundChange(background: IconBackground): void;
   onIconScaleChange(scale: number): void;
   onPickIconCandidate(candidate: IconCandidate): void;
@@ -60,6 +62,7 @@ export function AppForm({
   iconComposeError,
   iconBackground,
   iconScale,
+  subjectExtracting,
   onIconBackgroundChange,
   onIconScaleChange,
   onPickIconCandidate,
@@ -127,7 +130,12 @@ export function AppForm({
                 未抓取到候选图标；将使用首字母图标
               </span>
             ) : (
-              iconCandidates.map((candidate) => {
+              // App-icon picker: originals plus AI subject extractions; the
+              // solid silhouettes are tray-template art and stay in the
+              // advanced tray picker only.
+              iconCandidates
+                .filter((candidate) => candidate.variant === "original" || candidate.variant === "subject")
+                .map((candidate) => {
                 const src =
                   iconCandidatesPort === undefined
                     ? undefined
@@ -135,13 +143,17 @@ export function AppForm({
                 const picked =
                   selectedIconRef ===
                   `${iconCandidatesPort}:${candidate.index}`;
-                const isDefault = selectedIconRef === undefined && candidate.index === 0;
+                const isDefault = selectedIconRef === undefined && candidate.variant === "original" && candidate.index === (iconCandidates.find((c) => c.variant === "original")?.index ?? -1);
                 return (
                   <button
                     key={candidate.index}
                     type="button"
                     disabled={disabled}
-                    title={`${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`}
+                    title={
+                      candidate.variant === "subject"
+                        ? `AI 主体提取 ${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`
+                        : `${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`
+                    }
                     onClick={() => onPickIconCandidate(candidate)}
                     className={cn(
                       "icon-checker flex size-14 items-center justify-center overflow-hidden rounded-lg border p-1 transition-all",
@@ -154,7 +166,11 @@ export function AppForm({
                     {src !== undefined ? (
                       <img
                         src={src}
-                        alt={`候选图标 ${candidate.width}×${candidate.height}`}
+                        alt={
+                          candidate.variant === "subject"
+                            ? `主体提取候选 ${candidate.width}×${candidate.height}`
+                            : `候选图标 ${candidate.width}×${candidate.height}`
+                        }
                         className="size-full object-contain"
                       />
                     ) : null}
@@ -162,6 +178,12 @@ export function AppForm({
                 );
               })
             )}
+            {subjectExtracting ? (
+              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground" role="status">
+                <span className="inline-block size-3 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-muted-foreground" />
+                AI 提取主体中…
+              </span>
+            ) : null}
           </div>
           {selectedIconRef !== undefined || uploadedIconUrl !== undefined ? (
             <button
@@ -174,7 +196,12 @@ export function AppForm({
             </button>
           ) : null}
         </div>
-        {/* Icon composition (owner round-12): background + scale + preview. */}
+        {/* Icon composition (owner round-12): background + scale + preview.
+         * Meaningless without a foreground — hidden until an icon is in
+         * effect (explicit pick/upload, or the scraped preset default). */}
+        {(values.iconPath.trim().length > 0 ||
+          defaults.iconPath.trim().length > 0 ||
+          uploadedIconUrl !== undefined) && (
         <div className="mt-3 rounded-lg border border-border p-3">
           <div className="flex items-start gap-3">
             <div
@@ -259,6 +286,7 @@ export function AppForm({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       <div>

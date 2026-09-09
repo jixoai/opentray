@@ -47,6 +47,8 @@ export interface AppConfigCardProps {
   iconComposeError: string | undefined;
   iconBackground: IconBackground;
   iconScale: number;
+  /** True while the browser-side AI subject extraction is running. */
+  subjectExtracting: boolean;
   onIconBackgroundChange(background: IconBackground): void;
   onIconScaleChange(scale: number): void;
   selectedTrayRef: string | undefined;
@@ -77,6 +79,7 @@ export function AppConfigCard({
   iconComposeError,
   iconBackground,
   iconScale,
+  subjectExtracting,
   onIconBackgroundChange,
   onIconScaleChange,
   selectedTrayRef,
@@ -107,6 +110,7 @@ export function AppConfigCard({
         iconComposeError={iconComposeError}
         iconBackground={iconBackground}
         iconScale={iconScale}
+        subjectExtracting={subjectExtracting}
         onIconBackgroundChange={onIconBackgroundChange}
         onIconScaleChange={onIconScaleChange}
         onPickIconCandidate={onPickIconCandidate}

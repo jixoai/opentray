@@ -109,7 +109,9 @@ export function IconPicker({
                 title={
                   candidate.variant === "original"
                     ? `${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`
-                    : `${candidate.variant === "solid-black" ? "黑色" : "白色"}纯色 ${candidate.format.toUpperCase()}`
+                    : candidate.variant === "subject"
+                      ? `AI 主体提取 ${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`
+                      : `${candidate.variant === "solid-black" ? "黑色" : "白色"}纯色 ${candidate.format.toUpperCase()}`
                 }
                 onClick={() => onPick(candidate)}
                 className={cn(

@@ -1151,3 +1151,103 @@ describe("URL mode icon source roots", () => {
     expect(session.urlSource).toBe("https://example.com/x");
   });
 });
+
+describe("addIconCandidate (browser-derived subject candidates)", () => {
+  const fakeMaterializeContext = {
+    runInstall: async () => {},
+  };
+
+  it("appends a subject candidate into the port-scoped list and emits icons", async () => {
+    const urlHome = mkdtempSync(join(tmpdir(), "wizard-subject-"));
+    const harness = createHarness({
+      homeDir: urlHome,
+      scrapeUrl: async () => ({
+        ok: true,
+        title: "Subject Title",
+        iconPath: join(urlHome, "scraped.png"),
+        icons: [
+          {
+            index: 0,
+            url: "https://example.com/icon.png",
+            path: join(urlHome, "scraped.png"),
+            width: 160,
+            height: 160,
+            format: "png",
+            variant: "original",
+          },
+        ],
+        frameEmbeddable: true,
+      }),
+      materializeContext: fakeMaterializeContext,
+    });
+    await writeFile(join(urlHome, "scraped.png"), Buffer.alloc(64, 1));
+    await harness.session.submitUrl("https://example.com/wiki");
+
+    const appended = await harness.session.addIconCandidate(0, {
+      bytes: Buffer.from("subject-png-bytes-0123456789"),
+      variantOf: 0,
+      width: 1024,
+      height: 1024,
+      format: "png",
+    });
+    expect(appended).toBeDefined();
+    expect(appended?.variant).toBe("subject");
+    expect(appended?.variantOf).toBe(0);
+    expect(appended?.index).toBe(1);
+    // The derived bytes live under a wizard-owned icon root so the icon
+    // routes keep serving them after the scrape dir is gone.
+    expect(
+      harness.session.iconSourceRoots().some((root) => appended!.path.startsWith(root)),
+    ).toBe(true);
+    expect(
+      harness.session.iconCandidates.some((icon) => icon.index === appended?.index),
+    ).toBe(true);
+    // The icons event lets connected clients pick the candidate up live.
+    expect(
+      harness.events.some(
+        (event) => event.type === "icons" && event.icons.some((icon) => icon.index === 1),
+      ),
+    ).toBe(true);
+    // Selecting it works like any scraped candidate (default tray coupling).
+    expect(harness.session.selectIconCandidate(0, 1)).toBe(true);
+  });
+
+  it("rejects derivations from another port or an unknown source", async () => {
+    const urlHome = mkdtempSync(join(tmpdir(), "wizard-subject-2-"));
+    const harness = createHarness({
+      homeDir: urlHome,
+      scrapeUrl: async () => ({
+        ok: true,
+        title: "T",
+        iconPath: join(urlHome, "scraped.png"),
+        icons: [
+          {
+            index: 0,
+            url: "https://example.com/icon.png",
+            path: join(urlHome, "scraped.png"),
+            width: 64,
+            height: 64,
+            format: "png",
+            variant: "original",
+          },
+        ],
+      }),
+      materializeContext: fakeMaterializeContext,
+    });
+    await writeFile(join(urlHome, "scraped.png"), Buffer.alloc(64, 1));
+    await harness.session.submitUrl("https://example.com/wiki");
+
+    const payload = {
+      bytes: Buffer.from("subject-png-bytes-0123456789"),
+      variantOf: 0,
+      width: 1024,
+      height: 1024,
+      format: "png",
+    };
+    // URL-mode candidates are port-scoped to 0: another port must not append.
+    expect(await harness.session.addIconCandidate(1, payload)).toBeUndefined();
+    // Deriving from a candidate that does not exist is rejected.
+    expect(await harness.session.addIconCandidate(0, { ...payload, variantOf: 99 })).toBeUndefined();
+    expect(harness.session.iconCandidates).toHaveLength(1);
+  });
+});

@@ -25,6 +25,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { extractSubject } from "./subject-extraction";
+
 import {
   api,
   composedIconUrl,
@@ -218,6 +220,56 @@ const selectedIconRefStale = (
     // iconScale deliberately excluded: scale changes recompose through the
     // explicit handler without re-running analysis.
   }, [values.iconPath, defaults.iconPath]);
+
+  // ---- AI subject extraction (round-6): derive one extra candidate from the
+  // clearest original. Enhancement-only — failures never surface as errors.
+  const [subjectExtracting, setSubjectExtracting] = React.useState(false);
+  const subjectAttemptedRef = React.useRef<ReadonlySet<string>>(new Set());
+  React.useEffect(() => {
+    const port = iconCandidatesPort;
+    const top = iconCandidates.find((candidate) => candidate.variant === "original");
+    if (port === undefined || top === undefined) {
+      return;
+    }
+    if (wizardState === "frozen" || wizardState === "materializing" || wizardState === "success") {
+      return;
+    }
+    // One attempt per source candidate per page session; a replace-scrape
+    // brings new indexes and naturally re-triggers.
+    const key = `${port}:${top.index}`;
+    if (subjectAttemptedRef.current.has(key)) {
+      return;
+    }
+    if (iconCandidates.some((c) => c.variant === "subject" && c.variantOf === top.index)) {
+      return;
+    }
+    subjectAttemptedRef.current = new Set([...subjectAttemptedRef.current, key]);
+    void (async () => {
+      setSubjectExtracting(true);
+      try {
+        const sourceBytes = await (await fetch(iconDataUrl(port, top.index))).blob();
+        const subject = await extractSubject(sourceBytes);
+        if (subject === undefined) {
+          return;
+        }
+        const token = encodeURIComponent(
+          new URLSearchParams(location.search).get("token") ?? "",
+        );
+        const query = `token=${token}&port=${port}&variantOf=${top.index}&width=${subject.width}&height=${subject.height}`;
+        await fetch(`/api/icon-candidate?${query}`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: subject.bytes,
+        });
+        // The appended candidate arrives through the "icons" SSE event; no
+        // local state is mutated here.
+      } catch {
+        // Enhancement-only: network/model failures are silent.
+      } finally {
+        setSubjectExtracting(false);
+      }
+    })();
+  }, [iconCandidates, iconCandidatesPort, wizardState]);
 
   /**
    * Composition is heavyweight (form patch + real 1024² sharp render): the
@@ -917,6 +969,7 @@ const selectedIconRefStale = (
         iconComposeError={iconComposeError}
         iconBackground={iconBackground}
         iconScale={iconScale}
+        subjectExtracting={subjectExtracting}
         onIconBackgroundChange={handleIconBackgroundChange}
         onIconScaleChange={handleIconScaleChange}
         selectedTrayRef={selectedTrayRef}

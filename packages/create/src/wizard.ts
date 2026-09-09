@@ -286,6 +286,20 @@ export interface WizardSession {
   selectTrayIconCandidate(port: number, index: number): boolean;
   /** Test/extension seam: replace the scraped candidate set for a port. */
   replaceIconCandidates(port: number, icons: readonly ScrapedIcon[]): void;
+  /** Append a wizard-derived candidate (e.g. browser-side subject extraction)
+   * for the port the current candidates belong to; bytes land in the
+   * session-owned temp dir so icon routes keep serving them. Returns the
+   * appended candidate, or undefined when the port/state rejects it. */
+  addIconCandidate(
+    port: number,
+    candidate: {
+      readonly bytes: Buffer;
+      readonly variantOf: number;
+      readonly width: number;
+      readonly height: number;
+      readonly format: string;
+    },
+  ): Promise<ScrapedIcon | undefined>;
   /** Compose the app icon preview/asset for the current foreground. */
   composeIcon(options: {
     foregroundPath: string;
@@ -710,6 +724,40 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       iconCandidates = icons;
     },
 
+    async addIconCandidate(port, candidate) {
+      if (state === "frozen" || state === "materializing" || state === "success") {
+        return undefined;
+      }
+      // Candidates are port-scoped: a derivation from another port's scrape
+      // must not leak into the current list.
+      if (iconPort !== port) {
+        return undefined;
+      }
+      const source = iconCandidates.find((icon) => icon.index === candidate.variantOf);
+      if (source === undefined) {
+        return undefined;
+      }
+      // Same containment rule as uploads: derived bytes live in the
+      // session-owned temp dir the icon routes whitelist.
+      const dir = tempIconDir ?? (tempIconDir = await mkdtemp(join(tmpdir(), "create-opentray-")));
+      const name = `subject-${createHash("sha256").update(candidate.bytes).digest("hex").slice(0, 16)}.bin`;
+      const path = join(dir, name);
+      await writeFile(path, candidate.bytes);
+      const appended: ScrapedIcon = {
+        index: iconCandidates.reduce((max, icon) => Math.max(max, icon.index), -1) + 1,
+        url: source.url,
+        path,
+        width: candidate.width,
+        height: candidate.height,
+        format: candidate.format,
+        variant: "subject",
+        variantOf: source.index,
+      };
+      iconCandidates = [...iconCandidates, appended];
+      emit({ type: "icons", port, icons: iconCandidates });
+      return appended;
+    },
+
     selectTrayIconCandidate(port, index) {
       if (state === "frozen" || state === "materializing" || state === "success") {
         return false;
@@ -721,7 +769,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       touched.trayIconPath = true;
       currentTrayIconPath = candidate.path;
       currentTrayIconUrl = candidate.url;
-      trayIconIsSolid = candidate.variant !== "original";
+      trayIconIsSolid = candidate.variant === "solid-black" || candidate.variant === "solid-white";
       form = { ...form, trayIconPath: candidate.path };
       publishForm();
       return true;
@@ -742,7 +790,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         // Default coupling: the tray follows the app icon until overridden.
         currentTrayIconPath = candidate.path;
         currentTrayIconUrl = candidate.url;
-        trayIconIsSolid = candidate.variant !== "original";
+        trayIconIsSolid = candidate.variant === "solid-black" || candidate.variant === "solid-white";
         form = { ...form, iconPath: candidate.path, trayIconPath: candidate.path };
       } else {
         form = { ...form, iconPath: candidate.path };

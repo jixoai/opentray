@@ -201,6 +201,58 @@ describe("wizard server", () => {
     }
   });
 
+  it("appends derived subject candidates via /api/icon-candidate", async () => {
+    const { events, server, session } = await createTestServer();
+    try {
+      // Simulate a scraped candidate via the session seam.
+      const dir = await mkdtemp(join(tmpdir(), "icon-cand-test-"));
+      const iconPath = join(dir, "icon-0.bin");
+      await writeFile(iconPath, Buffer.from("fake-png-bytes-0123456789"));
+      session.replaceIconCandidates(19090, [
+        { index: 0, url: "http://127.0.0.1:19090/favicon.svg", path: iconPath, width: 512, height: 512, format: "svg", variant: "original" },
+      ]);
+
+      const append = await fetch(
+        new URL(
+          `/api/icon-candidate?port=19090&variantOf=0&width=1024&height=1024&token=${server.token}`,
+          server.url,
+        ),
+        {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: Buffer.alloc(128, 7),
+        },
+      );
+      expect(append.status).toBe(200);
+      const { index } = (await append.json()) as { index: number };
+      expect(index).toBe(1);
+      // The appended candidate serves through the icon-data route and the
+      // port-scoped list carries it as a subject variant.
+      const bytes = await fetch(
+        new URL(`/api/icon-data/19090/${index}?token=${server.token}`, server.url),
+      );
+      expect(bytes.status).toBe(200);
+      expect(session.iconCandidates.some((c) => c.index === index && c.variant === "subject")).toBe(true);
+      expect(events.some((event) => event.type === "icons" && event.icons.length === 2)).toBe(true);
+
+      // Wrong port scope → rejected without mutating the list.
+      const wrongPort = await fetch(
+        new URL(
+          `/api/icon-candidate?port=19091&variantOf=0&width=8&height=8&token=${server.token}`,
+          server.url,
+        ),
+        { method: "POST", body: Buffer.alloc(128, 7) },
+      );
+      expect(wrongPort.status).toBe(409);
+
+      // Missing metadata → 400 before any bytes are read.
+      const missing = await post(new URL(`/api/icon-candidate?token=${server.token}`, server.url), {});
+      expect(missing.status).toBe(400);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("serves built webui assets with traversal guards", async () => {
     const { server } = await createTestServer();
     try {

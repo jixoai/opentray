@@ -68,3 +68,13 @@
 - [x] 9.2 测试：icon.test.ts autoBackground edge 参数矩阵（白环/黑环/杂色/不连续）+ foregroundStats 白底 fixture 实测（手工 PNG 编码器——kernel 无 sharp 依赖，测试不引入原生依赖）；15/15 全绿。
 - [x] 9.3 `pnpm --filter @opentray/icon build` 重建 dist；create-core icon-compose 4/4（wizard `analyzeIconForeground` 直传 stats 零改动受益）。
 - [x] 9.4 实证：生产路径探针（deriveUrlPresets 抓真实 en.wikipedia.org favicon）→ `edge {opaque 1, luminance 0.996, uniform true}` → 建议 white；独立向导实例 API + 浏览器走查（「白色 自动」选中、预览白底黑标、squircle 外角透明像素核验）；create-webui owner-law 注释同步。
+
+## 10. Round 6（用户验收轮：图标候选 UX 三项，D15–D16）
+
+- [x] 10.1 #3 定性：zh.wikipedia.org 的两个纯黑候选 = scrape 管线的 `solid-black` alpha 蒙版剪影（macOS 托盘模板素材，探针实证 4 候选 = 2 原图 + 2 剪影）；根因是 app-form 渲染候选未过滤 variant（icon-picker 有过滤）。
+- [x] 10.2 #1+D15：图标合成卡片（背景/缩放/预览）仅在有生效前景时渲染（values/defaults.iconPath 或上传）；app-form 候选行过滤为 original+subject（含「AI 主体提取」title/alt）；`trayIconIsSolid` 收窄为仅 solid-*（wizard.ts 两处）。
+- [x] 10.3 #2+D16 服务端：`IconVariant` 增 `"subject"`；wizard 会话新方法 `addIconCandidate(port, {bytes, variantOf, width, height, format})`（state/port/variantOf 守卫、字节落会话拥有 temp dir、index 顺延、emit icons 事件）；server 新路由 `/api/icon-candidate`（裸字节 + query 元数据，400/409 分级）。
+- [x] 10.4 #2 webui：`subject-extraction.ts` 懒加载 @imgly/background-removal（isnet_quint8 + device gpu）；app.tsx 自动提取 effect（每源候选每页面会话一次、frozen/materializing/success 不跑、失败静默、spinner 状态经 prop 链入 app-form）；候选/托盘选择器认识 subject 变体。
+- [x] 10.5 构建链：webui 依赖 `@imgly/background-removal@^1.7.0` + `onnxruntime-web@1.21.0`（peer 精确锁）；`scripts/prune-ort-wasm.mjs` 剪除 Vite 复制的死重 ort wasm（imgly#147；dist 26MB→4MB）并入 build 链。
+- [x] 10.6 测试：wizard.test addIconCandidate 2 项（追加+事件+containment+可选；端口/未知源拒绝）、server.test 路由 1 项（200+icon-data 服务+409+400）；create 43、webui 65 全绿，typecheck 双零。
+- [x] 10.7 实机走查（独立实例 47812 + 内置浏览器）：空态背景卡片隐藏 ✓；zh.wikipedia 预设后卡片显示（白色 自动，D14 生效）✓；应用图标行仅 2 原图（纯黑剪影移出）✓；「AI 提取主体中…」→ CDN 模型分块下载 → `AI 主体提取 160×160 PNG` 候选落地 → 点选后分析（明度 0.47/覆盖 18%）自动建议白色 ✓；截图视觉确认（3 候选 + 透明底 W 主体 + 白底合成预览）✓。

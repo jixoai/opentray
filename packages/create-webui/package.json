@@ -6,7 +6,7 @@
   "description": "create-opentray wizard WebUI (React + shadcn/ui), built to static assets consumed by the create-opentray wizard server.",
   "license": "MIT",
   "scripts": {
-    "build": "vite build && node scripts/copy-wasm.mjs && node scripts/fix-shell-paths.mjs",
+    "build": "vite build && node scripts/copy-wasm.mjs && node scripts/fix-shell-paths.mjs && node scripts/prune-ort-wasm.mjs",
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts"
@@ -15,11 +15,13 @@
     "@base-ui/react": "^1.7.0",
     "@headless-tree/core": "^1.7.0",
     "@headless-tree/react": "^1.7.0",
+    "@imgly/background-removal": "^1.7.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.545.0",
     "markdown-it": "^15.0.0",
     "markdown-it-front-matter": "^0.2.3",
+    "onnxruntime-web": "1.21.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "shadcn": "^4.18.0",
@@ -31,17 +33,17 @@
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.2",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.3.0",
     "@types/markdown-it": "^14.2.0",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.4",
     "ghostty-web": "^0.4.0",
+    "jsdom": "^26.1.0",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
     "vite": "^7.2.7",
-    "vitest": "^4.1.7",
-    "jsdom": "^26.1.0",
-    "@testing-library/react": "^16.3.0",
-    "@testing-library/dom": "^10.4.0"
+    "vitest": "^4.1.7"
   }
 }
