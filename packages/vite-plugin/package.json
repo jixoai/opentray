@@ -32,11 +32,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@opentray/icon": "workspace:*",
     "@opentray/packaging": "workspace:*",
-    "@opentray/spec": "workspace:*",
-    "@shockpkg/icon-encoder": "^3.2.3",
-    "figma-squircle": "^1.1.0",
-    "sharp": "^0.33.5"
+    "@opentray/spec": "workspace:*"
   },
   "devDependencies": {
     "tsdown": "^0.22.1",

@@ -45,13 +45,16 @@ export default {
 };
 ```
 
-The cache identity includes the source image, the plugin implementation, the
-rendering recipe, and the `sharp`, `@shockpkg/icon-encoder`, and
-`figma-squircle` versions. ICNS output uses explicit macOS @1x/@2x tags rather
-than copying one PNG into incompatible representation slots. In a linked
-checkout the cache also hashes `packages/vite-plugin/src/app-icon.ts`, so editing
-the generator source invalidates the cache even when the bundle hash is
-unchanged. A linked consumer should rebuild this package before starting Vite.
+Generation lives in the shared `@opentray/icon` kernel (WebAssembly image
+stack — jsquash codecs and a resvg rasterizer; no sharp/libvips), so the Vite
+plugin, create-opentray, and the OpenTray runtime share one implementation and
+one visual standard. The cache identity includes the source image, the kernel
+implementation, the rendering recipe, and the codec/rasterizer stack versions.
+ICNS output uses explicit macOS @1x/@2x tags rather than copying one PNG into
+incompatible representation slots. In a linked checkout the cache also hashes
+the kernel's source entry, so editing the generator source invalidates the
+cache even when the bundle hash is unchanged. A linked consumer should rebuild
+`@opentray/icon` before starting Vite.
 
 The output contains:
 

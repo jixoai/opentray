@@ -10,7 +10,7 @@ non-interactively, without writing OpenTray code.
 npx create-opentray
 ```
 
-Requires Node >= 20 (native `sharp` icon pipeline).
+Requires Node >= 20.
 
 ## Command tree
 

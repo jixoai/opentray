@@ -34,7 +34,6 @@
     "@opentray/packaging": "workspace:*",
     "@opentray/spec": "workspace:*",
     "@opentray/vite-plugin": "workspace:*",
-    "sharp": "^0.33.5",
     "yargs": "^18.0.0"
   },
   "optionalDependencies": {

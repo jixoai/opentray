@@ -13,7 +13,6 @@ export default defineConfig({
     alias: {
       "@opentray/spec": resolve(__dirname, "../../../spec/src/index.ts"),
       "@opentray/packaging": resolve(__dirname, "../../../packaging/src/index.ts"),
-      "@opentray/vite-plugin": resolve(__dirname, "../../../vite-plugin/src/index.ts"),
     },
   },
 });

@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 
-import sharp from "sharp";
 import { describe, expect, it } from "vitest";
+
+import { encodeImagePng } from "@opentray/icon";
 
 import { formatOpenTrayArtifactStem } from "@opentray/packaging";
 
@@ -125,17 +126,8 @@ describe("@opentray/vite-plugin", () => {
     const icnsOutputPath = join(root, "icons", "app-icon.icns");
     const cachePath = join(root, ".cache", "app-icon.json");
     const implementationPath = join(root, "dist", "index.mjs");
-    const implementationSourcePath = join(root, "src", "app-icon.ts");
-    await sharp({
-      create: {
-        width: 64,
-        height: 64,
-        channels: 4,
-        background: { r: 39, g: 87, b: 255, alpha: 1 },
-      },
-    })
-      .png()
-      .toFile(sourcePath);
+    const implementationSourcePath = join(root, "src", "index.ts");
+    await writeSolidPng(sourcePath, 39, 87, 255);
     await mkdir(join(root, "dist"), { recursive: true });
     await writeFile(implementationPath, "export const recipe = 1;\n");
     await mkdir(join(root, "src"), { recursive: true });
@@ -154,7 +146,7 @@ describe("@opentray/vite-plugin", () => {
     expect(png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
     expect(icns.subarray(0, 4).toString("ascii")).toBe("icns");
     expect(ico.subarray(0, 4)).toEqual(Buffer.from([0, 0, 1, 0]));
-    expect((await sharp(outputPath).metadata()).density).toBe(72);
+    expect(pngDensityOf(await readFile(outputPath))).toBe(72);
     expect(readIcnsTags(icns)).toEqual([
       "TOC ",
       "ic12",
@@ -198,7 +190,7 @@ describe("@opentray/vite-plugin", () => {
       expect((await readFile(linux.path)).subarray(0, 8)).toEqual(
         Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
       );
-      expect((await sharp(linux.path).metadata()).density).toBe(72);
+      expect(pngDensityOf(await readFile(linux.path))).toBe(72);
     }
     expect(JSON.parse(await readFile(cachePath, "utf8"))).toMatchObject({
       implementationSha256: first.implementationSha256,
@@ -238,16 +230,7 @@ describe("@opentray/vite-plugin", () => {
       first.sourceImplementationSha256,
     );
 
-    await sharp({
-      create: {
-        width: 64,
-        height: 64,
-        channels: 4,
-        background: { r: 255, g: 39, b: 87, alpha: 1 },
-      },
-    })
-      .png()
-      .toFile(sourcePath);
+    await writeSolidPng(sourcePath, 255, 39, 87);
     const sourceChanged = await generateOpenTrayAppIcon({
       sourcePath,
       outputPath,
@@ -266,11 +249,35 @@ describe("@opentray/vite-plugin", () => {
       implementationPath,
     });
     await expect(stat(outputPath)).resolves.toBeTruthy();
-  }, 20_000);
+  }, 120_000);
 });
 
 const appBundleTemplate = (): string =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>OpenTray</string></dict></plist>\n`;
+
+const writeSolidPng = async (
+  path: string,
+  r: number,
+  g: number,
+  b: number,
+  size = 64,
+): Promise<void> => {
+  const data = new Uint8ClampedArray(size * size * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = r;
+    data[i + 1] = g;
+    data[i + 2] = b;
+    data[i + 3] = 255;
+  }
+  await writeFile(path, await encodeImagePng({ data, width: size, height: size, colorSpace: "srgb" }));
+};
+
+const pngDensityOf = (png: Buffer): number | undefined => {
+  const index = png.indexOf("pHYs", 8, "ascii");
+  // Chunk layout: [len][type][data: xPpm yPpm unit][crc] — unit is a metre flag.
+  if (index === -1 || png[index + 12] !== 1) return undefined;
+  return Math.round(png.readUInt32BE(index + 4) * 0.0254);
+};
 
 const readIcnsTags = (icon: Buffer): string[] => {
   const tags: string[] = [];

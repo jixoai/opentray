@@ -5,8 +5,9 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
+import { buildGlyphIconSvg, emptyImageOf, encodeImagePng } from "@opentray/icon";
+
 import {
-  createGlyphIconSvg,
   extractFaviconCandidates,
   extractTitle,
   faviconCandidateSize,
@@ -194,13 +195,13 @@ describe("scrapeService", () => {
 
 describe("glyph fallback", () => {
   it("renders a letter into an SVG", () => {
-    const svg = createGlyphIconSvg("Vite", "#123456");
+    const svg = buildGlyphIconSvg("Vite", "#123456");
     expect(svg).toContain(">V<");
     expect(svg).toContain("#123456");
   });
 
   it("escapes markup in the glyph letter", () => {
-    const svg = createGlyphIconSvg("<x>");
+    const svg = buildGlyphIconSvg("<x>");
     expect(svg).not.toContain("<x>");
   });
 
@@ -217,11 +218,10 @@ describe("glyph fallback", () => {
 describe("icon candidate collection", () => {
   /** Distinct art patterns: aHash must tell them apart at any size. */
   const patternPng = async (size: number, pattern: "checker" | "gradient" | "stripes"): Promise<Buffer> => {
-    const sharpModule = await import("sharp");
-    const raw = Buffer.alloc(size * size * 3);
+    const image = emptyImageOf(size, size);
     for (let y = 0; y < size; y += 1) {
       for (let x = 0; x < size; x += 1) {
-        const idx = (y * size + x) * 3;
+        const idx = (y * size + x) * 4;
         let shade: number;
         if (pattern === "checker") {
           shade = (Math.floor(x / Math.max(1, size / 8)) + Math.floor(y / Math.max(1, size / 8))) % 2 === 0 ? 230 : 20;
@@ -230,12 +230,13 @@ describe("icon candidate collection", () => {
         } else {
           shade = y % 2 === 0 ? 240 : 40;
         }
-        raw[idx] = shade;
-        raw[idx + 1] = shade;
-        raw[idx + 2] = shade;
+        image.data[idx] = shade;
+        image.data[idx + 1] = shade;
+        image.data[idx + 2] = shade;
+        image.data[idx + 3] = 255;
       }
     }
-    return sharpModule.default(raw, { raw: { width: size, height: size, channels: 3 } }).png().toBuffer();
+    return Buffer.from(await encodeImagePng(image));
   };
 
   it("collects an SVG favicon instead of skipping it", async () => {

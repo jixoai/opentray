@@ -96,7 +96,7 @@ export {
   foregroundLuminance,
   foregroundStats,
   type IconBackground,
-} from "./icon-compose";
+} from "@opentray/icon";
 export { toPngBuffer as decodeIco } from "./icon-codec";
 export {
   startCommandRun,

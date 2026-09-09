@@ -127,9 +127,6 @@ importers:
       '@opentray/vite-plugin':
         specifier: workspace:*
         version: link:../vite-plugin
-      sharp:
-        specifier: ^0.33.5
-        version: 0.33.5
       yargs:
         specifier: ^18.0.0
         version: 18.1.0
@@ -275,24 +272,21 @@ importers:
 
   packages/create/packages/core:
     dependencies:
+      '@opentray/icon':
+        specifier: workspace:*
+        version: link:../../../icon
       '@opentray/packaging':
         specifier: workspace:*
         version: link:../../../packaging
       '@opentray/spec':
         specifier: workspace:*
         version: link:../../../spec
-      '@opentray/vite-plugin':
-        specifier: workspace:*
-        version: link:../../../vite-plugin
       decode-ico:
         specifier: ^0.4.1
         version: 0.4.1
       node-html-parser:
         specifier: ^9.0.1
         version: 9.0.1
-      sharp:
-        specifier: ^0.33.5
-        version: 0.33.5
       shell-quote:
         specifier: ^1.10.0
         version: 1.10.0
@@ -552,21 +546,15 @@ importers:
 
   packages/vite-plugin:
     dependencies:
+      '@opentray/icon':
+        specifier: workspace:*
+        version: link:../icon
       '@opentray/packaging':
         specifier: workspace:*
         version: link:../packaging
       '@opentray/spec':
         specifier: workspace:*
         version: link:../spec
-      '@shockpkg/icon-encoder':
-        specifier: ^3.2.3
-        version: 3.2.3
-      figma-squircle:
-        specifier: ^1.1.0
-        version: 1.1.0
-      sharp:
-        specifier: ^0.33.5
-        version: 0.33.5
       vite:
         specifier: '>=5'
         version: 8.0.14(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0)

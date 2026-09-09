@@ -6,8 +6,9 @@
 // candidates):
 // 1. Fetch the service root with proxy-free loopback semantics.
 // 2. Download all declared candidates (capped), never skipping SVG.
-// 3. Decode true pixel dimensions (sharp; ICO via directory/PNG-payload/DIB
-//    extraction) and a perceptual hash; rank by clarity, hide near-duplicates.
+// 3. Decode true pixel dimensions (WASM raster stack; ICO via directory/
+//    PNG-payload/DIB extraction) and a perceptual hash; rank by clarity,
+//    hide near-duplicates.
 // 4. Keep scrape failures non-fatal with an empty result and a glyph fallback source.
 // 5. URL-mode creation presets (add-create-url-apps D10): scrape an arbitrary
 //    http(s) address once and adopt title + best favicon as DEFAULTS — a URL
@@ -19,6 +20,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parse } from "node-html-parser";
+
+import {
+  buildGlyphIconSvg,
+  containImage,
+  decodeImage,
+  decodeImageFile,
+  emptyImageOf,
+  encodeImagePng,
+  resizeImage,
+} from "@opentray/icon";
 
 import { ensureLoopbackNoProxy, serviceUrl } from "./port-scan";
 
@@ -425,33 +436,23 @@ const renderSolidSilhouette = async (
   color: { r: number; g: number; b: number },
 ): Promise<Buffer | undefined> => {
   try {
-    const sharpModule = await import("sharp");
-    const sharp = sharpModule.default;
-    const { data, info } = await sharp(sourcePath, { failOn: "none" })
-      .resize(SOLID_SIZE, SOLID_SIZE, {
-        fit: "contain",
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      })
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    if (info.channels !== 4) {
-      return undefined;
+    const image = await containImage(
+      await decodeImageFile(sourcePath),
+      SOLID_SIZE,
+      SOLID_SIZE,
+    );
+    // RGB discarded (repainted in the solid color), alpha kept: the shape
+    // language macOS tray templates want.
+    for (let i = 0; i < image.data.length; i += 4) {
+      image.data[i] = color.r;
+      image.data[i + 1] = color.g;
+      image.data[i + 2] = color.b;
     }
-    const out = Buffer.alloc(data.length);
-    for (let i = 0; i < data.length; i += 4) {
-      out[i] = color.r;
-      out[i + 1] = color.g;
-      out[i + 2] = color.b;
-      out[i + 3] = data[i + 3] ?? 0;
-    }
-    return sharp(out, { raw: { width: info.width, height: info.height, channels: 4 } })
-      .png()
-      .toBuffer();
+    return Buffer.from(await encodeImagePng(image));
   } catch {
     return undefined;
   }
-};;
+};
 
 /** Recognizable raster image signatures (PNG/JPEG/GIF/ICO/BMP/WebP). */
 const hasRasterImageSignature = (bytes: Buffer): boolean => {
@@ -504,7 +505,8 @@ const ensureTempIconDir = async (tempDir?: string): Promise<string | undefined> 
  * Validate and normalize candidate bytes. Returns decodable image bytes plus a
  * format tag: raster signatures pass through, SVG text passes through, and ICO
  * containers are cracked open to their largest frame (PNG payload extracted
- * verbatim, BMP DIB rows converted to PNG) because sharp cannot read ICO.
+ * verbatim, BMP DIB rows converted to PNG) because the raster stack cannot
+ * read ICO containers.
  */
 const prepareIconBytes = async (
   bytes: Buffer,
@@ -513,8 +515,8 @@ const prepareIconBytes = async (
   if (looksLikeSvg(bytes, contentType)) {
     return { bytes: await densifySvg(bytes), format: "svg" };
   }
-  // ICO first: its magic overlaps the generic raster check, but sharp cannot
-  // read ICO — crack the container to its largest frame.
+  // ICO first: its magic overlaps the generic raster check, but the raster
+  // stack cannot read ICO — crack the container to its largest frame.
   if (isIcoContainer(bytes)) {
     const extracted = await extractLargestIcoFrame(bytes);
     if (extracted !== undefined) {
@@ -530,13 +532,13 @@ const prepareIconBytes = async (
 };
 
 /**
- * Rewrite an SVG so it rasterizes at high resolution. sharp (librsvg) pays
- * no attention to a density attribute; it renders at the declared
- * width/height. Scraped favicons declare small intrinsic sizes (often just
- * 16–50px), so the rasterized base bitmap is tiny and every later upscale
- * (icon catalog, tray, candidates) is blurry. Rewriting the root <svg>
- * width/height to a large target — viewBox untouched, so vector geometry
- * scales cleanly — gives every downstream consumer a crisp base.
+ * Rewrite an SVG so it rasterizes at high resolution. The rasterizer renders
+ * at the declared width/height, ignoring density attributes. Scraped
+ * favicons declare small intrinsic sizes (often just 16–50px), so the
+ * rasterized base bitmap is tiny and every later upscale (icon catalog,
+ * tray, candidates) is blurry. Rewriting the root <svg> width/height to a
+ * large target — viewBox untouched, so vector geometry scales cleanly —
+ * gives every downstream consumer a crisp base.
  */
 export const SVG_RASTER_TARGET = 1024;
 
@@ -596,11 +598,11 @@ const isIcoContainer = (bytes: Buffer): boolean =>
  * Crack an ICO open with decode-ico (palette/row-alignment/AND-mask/
  * BITFIELDS coverage the hand-rolled DIB reader lacked): pick the largest
  * frame by area; PNG frames pass through verbatim, BMP frames re-encode
- * from the decoder's RGBA through sharp.
+ * from the decoder's RGBA through the shared kernel encoder.
  */
 const extractLargestIcoFrame = async (ico: Buffer): Promise<Buffer | undefined> => {
   const decodeIco = (await import("decode-ico")).default;
-  const { toPngBuffer } = await import("./icon-codec.js");
+  const { toPngBuffer } = await import("./icon-codec");
   let best:
     | { width: number; height: number; data: Uint8Array; png: boolean }
     | undefined;
@@ -634,11 +636,9 @@ const iconDimensions = async (
     return svgDimensions(bytes) ?? { width: 512, height: 512 };
   }
   try {
-    const sharpModule = await import("sharp");
-    const sharp = sharpModule.default;
-    const meta = await sharp(bytes, { failOn: "none" }).metadata();
-    if (meta.width !== undefined && meta.height !== undefined && meta.width > 0) {
-      return { width: meta.width, height: meta.height };
+    const image = await decodeImage(new Uint8Array(bytes));
+    if (image.width > 0 && image.height > 0) {
+      return { width: image.width, height: image.height };
     }
   } catch {
     // fall through to raster header parsing
@@ -679,27 +679,41 @@ const svgDimensions = (bytes: Buffer): { width: number; height: number } | undef
 /** 64-bit average hash over an 8x8 grayscale normalization (perceptual dedupe). */
 const iconPerceptualHash = async (bytes: Buffer): Promise<string | undefined> => {
   try {
-    const sharpModule = await import("sharp");
-    const sharp = sharpModule.default;
-    const { data } = await sharp(bytes, { failOn: "none" })
-      .removeAlpha()
-      .flatten({ background: "#ffffff" })
-      .resize(8, 8, { fit: "fill" })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    if (data.length < 64) {
+    // Flatten over white at FULL resolution BEFORE the downscale: the WASM
+    // resize premultiplies alpha, and hashing the premultiplied thumb lets a
+    // solid-white silhouette's letterbox ringing mimic a solid-black shape —
+    // the two color variants would collide and dedupe each other away.
+    const decoded = await decodeImage(new Uint8Array(bytes));
+    const flattened = emptyImageOf(decoded.width, decoded.height);
+    for (let i = 0; i < decoded.data.length; i += 4) {
+      const alpha = (decoded.data[i + 3] ?? 0) / 255;
+      flattened.data[i] = Math.round((decoded.data[i] ?? 0) * alpha + 255 * (1 - alpha));
+      flattened.data[i + 1] = Math.round(
+        (decoded.data[i + 1] ?? 0) * alpha + 255 * (1 - alpha),
+      );
+      flattened.data[i + 2] = Math.round(
+        (decoded.data[i + 2] ?? 0) * alpha + 255 * (1 - alpha),
+      );
+      flattened.data[i + 3] = 255;
+    }
+    const image = await resizeImage(flattened, 8, 8, "lanczos3");
+    if (image.data.length < 64 * 4) {
       return undefined;
     }
-    let sum = 0;
-    for (const value of data.subarray(0, 64)) {
-      sum += value;
-    }
-    const mean = sum / 64;
-    let hash = "";
+    // Luma follows BT.601, like the former sharp grayscale chain.
+    const luma: number[] = [];
     for (let i = 0; i < 64; i += 1) {
-      const value = data[i];
-      hash += value === undefined ? "0" : value >= mean ? "1" : "0";
+      const o = i * 4;
+      luma.push(
+        0.299 * (image.data[o] ?? 0) +
+          0.587 * (image.data[o + 1] ?? 0) +
+          0.114 * (image.data[o + 2] ?? 0),
+      );
+    }
+    const mean = luma.reduce((sum, value) => sum + value, 0) / 64;
+    let hash = "";
+    for (const value of luma) {
+      hash += value >= mean ? "1" : "0";
     }
     return hash;
   } catch {
@@ -727,26 +741,14 @@ const writeIconTemp = async (bytes: Buffer, dir?: string): Promise<string> => {
 };
 
 /**
- * First-letter glyph fallback source: a self-contained SVG that the icon
- * generator can rasterize when no favicon was usable.
+ * Persist the glyph fallback SVG (the shared kernel's first-letter tile) as
+ * a temp icon source.
  */
-export const createGlyphIconSvg = (appName: string, accent = "#0A84FF"): string => {
-  const letter = (appName.trim().charAt(0) || "A").toUpperCase();
-  const escaped = letter.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">`,
-    `<rect width="512" height="512" rx="96" fill="${accent}"/>`,
-    `<text x="256" y="256" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="280" font-weight="600" fill="#FFFFFF" text-anchor="middle" dominant-baseline="central">${escaped}</text>`,
-    `</svg>`,
-  ].join("");
-};
-
-/** Persist the glyph fallback SVG as a temp icon source. */
 export const writeGlyphIconTemp = async (
   appName: string,
   tempDir: string,
 ): Promise<string> => {
   const path = join(tempDir, "glyph.svg");
-  await writeFile(path, createGlyphIconSvg(appName), "utf8");
+  await writeFile(path, buildGlyphIconSvg(appName), "utf8");
   return path;
 };

@@ -18,12 +18,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@opentray/icon": "workspace:*",
     "@opentray/packaging": "workspace:*",
     "@opentray/spec": "workspace:*",
-    "@opentray/vite-plugin": "workspace:*",
     "decode-ico": "^0.4.1",
     "node-html-parser": "^9.0.1",
-    "sharp": "^0.33.5",
     "shell-quote": "^1.10.0",
     "zod": "^4.4.3"
   },

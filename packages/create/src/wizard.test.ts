@@ -127,9 +127,9 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
 
 const waitFor = async (
   predicate: () => boolean,
-  // Generous budget: the suite shares a process with real sharp pipelines
-  // (1024² icon compositions) whose CPU bursts stall these real-timer polls;
-  // 2s flaked under that contention.
+  // Generous budget: the suite shares a process with real icon-composition
+  // pipelines (1024² raster work) whose CPU bursts stall these real-timer
+  // polls; 2s flaked under that contention.
   timeoutMs = 15_000,
 ): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
@@ -401,7 +401,6 @@ describe("wizard session", () => {
           sourceImplementationSha256: null,
           implementationSha256: "",
           recipeVersion: "",
-          sharpVersion: "",
           iconEncoderVersion: "",
           figmaSquircleVersion: "",
           outputPath: "",
@@ -644,7 +643,6 @@ describe("wizard session", () => {
           sourceImplementationSha256: null,
           implementationSha256: "",
           recipeVersion: "",
-          sharpVersion: "",
           iconEncoderVersion: "",
           figmaSquircleVersion: "",
           outputPath: "",
@@ -699,7 +697,6 @@ describe("wizard session", () => {
           sourceImplementationSha256: null,
           implementationSha256: "",
           recipeVersion: "",
-          sharpVersion: "",
           iconEncoderVersion: "",
           figmaSquircleVersion: "",
           outputPath: "",
@@ -781,7 +778,6 @@ describe("wizard session", () => {
           sourceImplementationSha256: null,
           implementationSha256: "",
           recipeVersion: "",
-          sharpVersion: "",
           iconEncoderVersion: "",
           figmaSquircleVersion: "",
           outputPath: "",

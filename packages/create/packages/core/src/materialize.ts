@@ -10,18 +10,23 @@
 //    command's first real run happens when the user opens the app.
 
 import { spawn } from "node:child_process";
-import { mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
+  composeAppIcon,
+  containImage,
+  decodeImageFile,
+  encodeImagePng,
+  generateOpenTrayAppIcon,
+} from "@opentray/icon";
+import type { IconBackground } from "@opentray/icon";
+import {
   resolveDefaultDarwinAppBundlePath,
   sanitizeAppBundleName,
 } from "@opentray/packaging";
-import { generateOpenTrayAppIcon } from "@opentray/vite-plugin";
 
-import { composeAppIcon } from "./icon-compose";
-import type { IconBackground } from "./icon-compose";
 import { writeGlyphIconTemp } from "./scrape";
 
 const errorMessage = (error: unknown): string =>
@@ -155,17 +160,18 @@ export const materializePayload = async (
   if (traySource !== undefined) {
     const trayPath = join(appIconDir, "tray-icon.png");
     try {
-      const sharpModule = await import("sharp");
-      await sharpModule.default(traySource, { failOn: "none" })
-        .resize(128, 128, {
-          fit: "contain",
-          background: { r: 0, g: 0, b: 0, alpha: 0 },
-          // v1 imageSmoothingEnabled=false keeps pixel-art edges discrete on
-          // the tray projection too, not just the app-icon foreground.
-          ...(smoothing ? {} : { kernel: sharpModule.default.kernel.nearest }),
-        })
-        .png()
-        .toFile(trayPath);
+      const source = await decodeImageFile(traySource);
+      // Transparent letterbox containment: the tray source keeps its own
+      // shape on the 128px canvas instead of gaining opaque padding.
+      const tray = await containImage(
+        source,
+        128,
+        128,
+        // v1 imageSmoothingEnabled=false keeps pixel-art edges discrete on
+        // the tray projection too, not just the app-icon foreground.
+        smoothing ? "lanczos3" : "nearest",
+      );
+      await writeFile(trayPath, await encodeImagePng(tray));
       // Solid-silhouette sources are single-color art: darwin templates let
       // macOS tint them for light/dark menu bars.
       const template = input.trayIconIsSolid === true;
