@@ -27,7 +27,7 @@ import {
   sanitizeAppBundleName,
 } from "@opentray/packaging";
 
-import { writeGlyphIconTemp } from "./scrape";
+import { generateDefaultAppIcon } from "@opentray/icon";
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -69,6 +69,8 @@ export interface MaterializeResult {
 export interface MaterializeContext {
   readonly log: (event: MaterializeLogEvent) => void;
   readonly generateIcon?: typeof generateOpenTrayAppIcon;
+  /** Same seam for the glyph default catalog (wizard tests stub both). */
+  readonly generateDefaultIcon?: typeof generateDefaultAppIcon;
   readonly runInstall?: (options: RunInstallOptions) => Promise<void>;
 }
 
@@ -231,9 +233,20 @@ export const materializePayload = async (
   context.log({ type: "log", message: `wrote ${scaffold.writtenFiles.join(", ")}` });
 
   step("icon", "generating platform icon catalog");
-  const iconSource =
-    input.iconSourcePath ??
-    (await writeGlyphIconTemp(input.config.appName, scaffold.appIconDir));
+  // Glyph defaults share ONE generator with the runtime's omitted-appIcon
+  // materialization (the accent-squircle standard). The brand re-tiling path
+  // is only for real source art; a glyph drawn through it would render a
+  // second, smaller tile — a divergent default standard.
+  const generateDefault = context.generateDefaultIcon ?? generateDefaultAppIcon;
+  const glyphCatalogIntoScaffold = async () => {
+    const generated = await generateDefault({
+      appName: input.config.appName,
+      outputDir: scaffold.appIconDir,
+      fileStem: "app-icon",
+      cachePath: join(scaffold.appIconDir, ".cache.json"),
+    });
+    return { ...generated, linuxPngOutputPaths: generated.linuxPngPaths };
+  };
   const generate = context.generateIcon ?? generateOpenTrayAppIcon;
   const generateIntoScaffold = async (sourcePath: string) =>
     generate({
@@ -259,21 +272,21 @@ export const materializePayload = async (
       ? composedIcon.compositePath
       : input.iconSourcePath;
   let iconMetadata;
-  try {
-    iconMetadata = await generateIntoScaffold(
-      catalogSource !== undefined ? catalogSource : iconSource,
-    );
-  } catch (error) {
-    // BOTH routes degrade to the glyph: an undecodable raw source AND an
-    // encoder-side failure of a composed source must never fail the whole
-    // materialization (the review flagged the asymmetric rethrow).
-    context.log({
-      type: "log",
-      message: `icon source unusable (${errorMessage(error)}); falling back to glyph icon`,
-    });
-    iconMetadata = await generateIntoScaffold(
-      await writeGlyphIconTemp(input.config.appName, scaffold.appIconDir),
-    );
+  if (catalogSource === undefined) {
+    iconMetadata = await glyphCatalogIntoScaffold();
+  } else {
+    try {
+      iconMetadata = await generateIntoScaffold(catalogSource);
+    } catch (error) {
+      // An undecodable or unencodable source degrades to the glyph default —
+      // never to a failed materialization (asymmetric rethrow was flagged in
+      // review).
+      context.log({
+        type: "log",
+        message: `icon source unusable (${errorMessage(error)}); falling back to glyph icon`,
+      });
+      iconMetadata = await glyphCatalogIntoScaffold();
+    }
   }
   context.log({
     type: "log",

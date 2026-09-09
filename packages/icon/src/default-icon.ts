@@ -51,6 +51,12 @@ export interface DefaultAppIconOptions {
   readonly appName: string;
   readonly accent?: string;
   readonly outputDir: string;
+  /**
+   * Output file stem. The runtime uses the default (`default-app-icon`); the
+   * create pipeline passes `app-icon` so the glyph fallback lands in the
+   * scaffold's standard catalog layout — one generator, one visual standard.
+   */
+  readonly fileStem?: string;
   /** Cache metadata path; defaults to `<outputDir>/../.cache/default-app-icon.json`. */
   readonly cachePath?: string;
 }
@@ -72,15 +78,16 @@ export async function generateDefaultAppIcon(
   options: DefaultAppIconOptions,
 ): Promise<DefaultAppIconResult> {
   const accent = options.accent ?? GLYPH_ACCENT_DEFAULT;
-  const fullPngPath = path.join(options.outputDir, "default-app-icon.png");
-  const macOSPngPath = path.join(options.outputDir, "default-app-icon-macos.png");
-  const icnsPath = path.join(options.outputDir, "default-app-icon.icns");
-  const icoPath = path.join(options.outputDir, "default-app-icon.ico");
+  const stem = options.fileStem ?? "default-app-icon";
+  const fullPngPath = path.join(options.outputDir, `${stem}.png`);
+  const macOSPngPath = path.join(options.outputDir, `${stem}-macos.png`);
+  const icnsPath = path.join(options.outputDir, `${stem}.icns`);
+  const icoPath = path.join(options.outputDir, `${stem}.ico`);
   const linuxPngPaths = LINUX_SIZES.map((size) => ({
     size,
-    path: path.join(options.outputDir, "linux", `${size}x${size}`, "default-app-icon.png"),
+    path: path.join(options.outputDir, "linux", `${size}x${size}`, `${stem}.png`),
   }));
-  const manifestPath = path.join(options.outputDir, "default-app-icon.json");
+  const manifestPath = path.join(options.outputDir, `${stem}.json`);
   const cachePath =
     options.cachePath ??
     path.join(options.outputDir, "..", ".cache", "default-app-icon.json");
@@ -105,12 +112,14 @@ export async function generateDefaultAppIcon(
   const cacheIdentity = await defaultIconCacheIdentity({
     appName: options.appName,
     accent,
+    fileStem: stem,
     outputDir: options.outputDir,
   });
   const expected = {
     schemaVersion: CACHE_SCHEMA_VERSION,
     cacheIdentity,
     fullPngPath: path.resolve(fullPngPath),
+    macOSPngPath: path.resolve(macOSPngPath),
     icnsPath: path.resolve(icnsPath),
     icoPath: path.resolve(icoPath),
     manifestPath: path.resolve(manifestPath),
@@ -250,6 +259,7 @@ const macosContentVariant = async (full: ImageDataLike): Promise<ImageDataLike> 
 async function defaultIconCacheIdentity(options: {
   appName: string;
   accent: string;
+  fileStem: string;
   outputDir: string;
 }): Promise<string> {
   const font = await embeddedGlyphFont();
@@ -269,6 +279,7 @@ async function defaultIconCacheIdentity(options: {
         RECIPE_VERSION,
         options.appName,
         options.accent,
+        options.fileStem,
         fontHash,
         stack,
         path.resolve(options.outputDir),
@@ -283,6 +294,7 @@ async function defaultCacheMatches(
     schemaVersion: number;
     cacheIdentity: string;
     fullPngPath: string;
+    macOSPngPath: string;
     icnsPath: string;
     icoPath: string;
     manifestPath: string;
@@ -302,6 +314,7 @@ async function defaultCacheMatches(
     }
     await Promise.all([
       fs.access(expected.fullPngPath),
+      fs.access(expected.macOSPngPath),
       fs.access(expected.icnsPath),
       fs.access(expected.icoPath),
       fs.access(expected.manifestPath),

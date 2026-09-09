@@ -53,7 +53,10 @@ const exifOrientationOf = async (
   bytes: Uint8Array,
 ): Promise<number> => {
   if (format !== "jpeg") return 1;
-  const { orientation } = await import("exifr");
+  // exifr ships CJS; under Node ESM the callable lives on `default`, while
+  // bundler-run tests also accept the named form — resolve both.
+  const imported = await import("exifr");
+  const orientation = (imported.default ?? imported).orientation;
   return (await orientation(bytes)) ?? 1;
 };
 
@@ -308,7 +311,12 @@ export const pasteImage = (
   }
 };
 
-/** Bounding box of pixels with alpha above `threshold` (sharp `trim` port). */
+/**
+ * Bounding box of pixels with alpha above `threshold`. Deliberate deviation
+ * from sharp's `.trim()`, which keyed on the top-left pixel COLOR: opaque
+ * letterboxed sources (e.g. a white-matte logo JPEG) no longer crop their
+ * background — alpha is the honest content signal for icon foregrounds.
+ */
 export const trimBounds = (
   image: ImageDataLike,
   threshold = 0,

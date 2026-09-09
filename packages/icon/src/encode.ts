@@ -46,7 +46,7 @@ const CRC_TABLE: readonly number[] = (() => {
 const crc32 = (bytes: Uint8Array): number => {
   let crc = 0xffffffff;
   for (let i = 0; i < bytes.length; i += 1) {
-    crc = CRC_TABLE[(crc ^ bytes[i]!)!]! ^ (crc >>> 8);
+    crc = CRC_TABLE[(crc ^ bytes[i]!) & 0xff]! ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 };
@@ -75,31 +75,30 @@ const PHYS_DATA = (() => {
 
 /**
  * Ensure a PNG carries exactly one `pHYs` chunk at 72 DPI, inserted after
- * IHDR (replacing any existing chunk so the value cannot drift).
+ * IHDR. Every pre-existing `pHYs` chunk (however many a malformed input
+ * carried) is dropped so the emitted density cannot drift.
  */
 export const pngWithDensity = (png: Uint8Array): Uint8Array => {
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
   // Walk chunks; the IHDR/IEND pair bounds the file in any valid PNG.
   let offset = 8; // signature
-  let insertAt = -1;
-  let physAt = -1;
-  let end = png.length;
+  let ihdrEnd = -1;
+  const segments: Uint8Array[] = [];
+  const tail: Uint8Array[] = [];
   while (offset + 12 <= png.length) {
     const length = chunkLength(view, offset);
     const type = chunkType(png, offset + 4);
+    const chunkEnd = offset + 12 + length;
     if (type === "IHDR") {
-      insertAt = offset + 12 + length;
+      ihdrEnd = chunkEnd;
+      segments.push(png.subarray(offset, chunkEnd));
+    } else if (type !== "pHYs") {
+      (ihdrEnd === -1 ? segments : tail).push(png.subarray(offset, chunkEnd));
     }
-    if (type === "pHYs") {
-      physAt = offset;
-    }
-    offset += 12 + length;
-    if (type === "IEND") {
-      end = offset;
-      break;
-    }
+    offset = chunkEnd;
+    if (type === "IEND") break;
   }
-  if (insertAt === -1) throw new Error("pngWithDensity: IHDR chunk not found");
+  if (ihdrEnd === -1) throw new Error("pngWithDensity: IHDR chunk not found");
 
   const chunk = new Uint8Array(12 + PHYS_DATA.length);
   const chunkView = new DataView(chunk.buffer);
@@ -114,24 +113,11 @@ export const pngWithDensity = (png: Uint8Array): Uint8Array => {
     crc32(chunk.subarray(4, 8 + PHYS_DATA.length)),
   );
 
-  const body = new Uint8Array(png.subarray(0, end));
-  const physEnd = physAt === -1 ? -1 : physAt + 12 + chunkLength(view, physAt);
-  const withoutPhys =
-    physAt === -1
-      ? body
-      : concat(body.subarray(0, physAt), body.subarray(physEnd));
-  // After removal the insertion point (post-IHDR) is unchanged: pHYs always
-  // followed IHDR in valid files that carried one.
-  const insertView = new DataView(withoutPhys.buffer, withoutPhys.byteOffset);
-  let ihdrEnd = 8;
-  {
-    const length = chunkLength(insertView, ihdrEnd);
-    ihdrEnd += 12 + length;
-  }
   return concat(
-    withoutPhys.subarray(0, ihdrEnd),
+    png.subarray(0, 8),
+    ...segments,
     chunk,
-    withoutPhys.subarray(ihdrEnd),
+    ...tail,
   );
 };
 

@@ -102,16 +102,3 @@ export class IconKernelInitError extends Error {
     this.name = "IconKernelInitError";
   }
 }
-
-/** Run a wasm-backed operation with a typed init-failure wrapper. */
-export const withInitDiagnostics = async <T>(
-  stage: string,
-  operation: () => Promise<T>,
-): Promise<T> => {
-  try {
-    return await operation();
-  } catch (error) {
-    if (error instanceof IconKernelInitError) throw error;
-    throw new IconKernelInitError(stage, error);
-  }
-};

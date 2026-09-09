@@ -1,4 +1,5 @@
 import { readFile, rm, stat } from "node:fs/promises";
+import zlib from "node:zlib";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -166,6 +167,73 @@ describe("composition semantics (create round-12 port)", () => {
     expect(opaqueCoverage(full)).toBeGreaterThan(0.5);
     const macOS = await decodeImageFile(composed.macOSPath);
     expect(macOS.width).toBe(1024);
+    await rm(dir, { recursive: true, force: true });
+  }, 120_000);
+});
+
+describe("jpeg decode (exifr interop regression)", () => {
+  it("decodes a JPEG without the CJS/ESM named-export trap", async () => {
+    // 1x1 grayscale JPEG. The original bug: `import("exifr")` under Node ESM
+    // exposes the callable on `default`, so `orientation` was undefined and
+    // EVERY jpeg decode threw after the pixels were already decoded.
+    const b64 =
+      "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==";
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const { decodeImage } = await import("./index");
+    const image = await decodeImage(bytes);
+    expect(image.width).toBe(1);
+    expect(image.height).toBe(1);
+  });
+});
+
+describe("png chunk integrity", () => {
+  const allChunkCrcsValid = (png: Uint8Array): boolean => {
+    const buffer = Buffer.from(png);
+    let offset = 8;
+    while (offset + 12 <= buffer.length) {
+      const length = buffer.readUInt32BE(offset);
+      const type = buffer.subarray(offset + 4, offset + 8);
+      const expected = buffer.readUInt32BE(offset + 8 + length);
+      const actual = zlib.crc32(buffer.subarray(offset + 4, offset + 8 + length)) >>> 0;
+      if (expected !== actual) return false;
+      offset += 12 + length;
+      if (type.toString("ascii") === "IEND") break;
+    }
+    return true;
+  };
+
+  it("every emitted chunk carries a spec-valid CRC (incl. injected pHYs)", async () => {
+    const dir = join(tmpdir(), `opentray-icon-crc-${process.pid}`);
+    const result = await generateDefaultAppIcon({ appName: "Crc", outputDir: dir });
+    for (const path of [result.fullPngPath, result.macOSPngPath, ...result.linuxPngPaths.map((p) => p.path)]) {
+      expect(allChunkCrcsValid(new Uint8Array(await readFile(path)))).toBe(true);
+    }
+    await rm(dir, { recursive: true, force: true });
+  }, 120_000);
+
+});
+
+describe("default icon cache completeness", () => {
+  it("regenerates when the macOS variant file is missing", async () => {
+    const dir = join(tmpdir(), `opentray-icon-macosmiss-${process.pid}`);
+    const first = await generateDefaultAppIcon({ appName: "Miss", outputDir: dir });
+    await rm(first.macOSPngPath, { force: true });
+    const second = await generateDefaultAppIcon({ appName: "Miss", outputDir: dir });
+    const after = await stat(second.macOSPngPath);
+    expect(after.size).toBeGreaterThan(0);
+    await rm(dir, { recursive: true, force: true });
+  }, 120_000);
+
+  it("fileStem relocates outputs without changing bytes (create ↔ runtime parity)", async () => {
+    const dir = join(tmpdir(), `opentray-icon-stem-${process.pid}`);
+    const a = await generateDefaultAppIcon({ appName: "Parity", outputDir: join(dir, "a") });
+    const b = await generateDefaultAppIcon({
+      appName: "Parity",
+      outputDir: join(dir, "b"),
+      fileStem: "app-icon",
+    });
+    expect(b.icnsPath.endsWith("app-icon.icns")).toBe(true);
+    expect(await readFile(b.icnsPath)).toEqual(await readFile(a.icnsPath));
     await rm(dir, { recursive: true, force: true });
   }, 120_000);
 });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, appendFile, readFile, realpath } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -403,6 +403,9 @@ const synthesizeDefaultAppIcon = async (
     return generated.appIcon;
   } catch (error) {
     try {
+      // Embedded callers may reach bundle resolution before the runtime
+      // directory exists; diagnostics must never block materialization.
+      await mkdir(dirname(paths.brokerLog), { recursive: true });
       await appendFile(
         paths.brokerLog,
         `[opentray:icon] default app icon synthesis failed; materializing without an icon: ${String(error)}\n`,

@@ -410,6 +410,16 @@ describe("wizard session", () => {
           manifestOutputPath: "",
           appIcon: [],
         })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
+        generateDefaultIcon: (async () => ({
+          fullPngPath: "",
+          macOSPngPath: "",
+          icnsPath: "",
+          icoPath: "",
+          linuxPngPaths: [],
+          manifestPath: "",
+          appIcon: [],
+          cacheIdentity: "",
+        })) as unknown as NonNullable<MaterializeContext["generateDefaultIcon"]>,
         runInstall: async ({ log }) => {
           void log;
         },
@@ -652,6 +662,16 @@ describe("wizard session", () => {
           manifestOutputPath: "",
           appIcon: [],
         })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
+        generateDefaultIcon: (async () => ({
+          fullPngPath: "",
+          macOSPngPath: "",
+          icnsPath: "",
+          icoPath: "",
+          linuxPngPaths: [],
+          manifestPath: "",
+          appIcon: [],
+          cacheIdentity: "",
+        })) as unknown as NonNullable<MaterializeContext["generateDefaultIcon"]>,
         runInstall: async () => {},
       },
     });
@@ -706,6 +726,16 @@ describe("wizard session", () => {
           manifestOutputPath: "",
           appIcon: [],
         })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
+        generateDefaultIcon: (async () => ({
+          fullPngPath: "",
+          macOSPngPath: "",
+          icnsPath: "",
+          icoPath: "",
+          linuxPngPaths: [],
+          manifestPath: "",
+          appIcon: [],
+          cacheIdentity: "",
+        })) as unknown as NonNullable<MaterializeContext["generateDefaultIcon"]>,
         runInstall: async () => {},
       },
     });
@@ -787,6 +817,16 @@ describe("wizard session", () => {
           manifestOutputPath: "",
           appIcon: [],
         })) as unknown as NonNullable<MaterializeContext["generateIcon"]>,
+        generateDefaultIcon: (async () => ({
+          fullPngPath: "",
+          macOSPngPath: "",
+          icnsPath: "",
+          icoPath: "",
+          linuxPngPaths: [],
+          manifestPath: "",
+          appIcon: [],
+          cacheIdentity: "",
+        })) as unknown as NonNullable<MaterializeContext["generateDefaultIcon"]>,
       },
     });
 

@@ -627,7 +627,12 @@ const extractLargestIcoFrame = async (ico: Buffer): Promise<Buffer | undefined> 
   return toPngBuffer(Buffer.from(best.data), best.width, best.height, 4);
 };
 
-/** True pixel dimensions; SVG uses intrinsic attrs, else viewBox, else 512. */
+/**
+ * True pixel dimensions; SVG uses intrinsic attrs, else viewBox, else 512.
+ * Rasters decode through the kernel (the sharp metadata()-style header probe
+ * is gone): favicon candidates are small, and only URL-mode scrapes can meet
+ * larger photos — bounded by the scrape's own fetch limits.
+ */
 const iconDimensions = async (
   bytes: Buffer,
   format: string,
