@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>add-create-url-apps — Self Review Evidence</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; line-height: 1.55; }
+  h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 28px; border-bottom: 1px solid rgba(128,128,128,.3); padding-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid rgba(128,128,128,.35); padding: 6px 9px; text-align: left; vertical-align: top; }
+  code { font-family: ui-monospace, monospace; font-size: 12px; }
+  ul, ol { padding-left: 22px; } li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<h1>add-create-url-apps — Self-Review (Round 1)</h1>
+<p>日期：2026-09-09。复核方式：general-purpose 子代理独立审 diff（fast-remix），</p>
+<p>主编排者对其结论逐项仲裁后修复。</p>
+<h2>子代理复核结论摘要</h2>
+<p>评分 6.5/10 → 阻塞 B1（workbench-api.ts 13 处 <code>config.command</code> 未适配，</p>
+<p>WebUI 列表/预填/导出对 URL 应用崩溃 + 根包 typecheck 实证红）+ 非阻塞</p>
+<p>N1（app edit source switch 文案与行为矛盾）/N2（lifecycle、scan 的 URL</p>
+<p>直接用例缺失）/N3（tasks 未勾选）/N4（根包 vitest worker 噪声）。</p>
+<h2>主编排者仲裁与处理</h2>
+<ul>
+<li><strong>B1 属实，已修</strong>：workbench-api.ts 五处（hasEnv ×2、config 预填、export</li>
+</ul>
+<p>  构造、envCount）改为源条件展开/optional 链，URL 投影不合成 command；</p>
+<p>  补 3 个端点用例（列表 healthy hasEnv=false、预填 url 无 command、</p>
+<p>  export --url 无 --exec）。</p>
+<ul>
+<li><strong>教训记录</strong>：主编排者此前对根包 typecheck 的"绿"是假绿——<code>cmd | head; echo $?</code></li>
+</ul>
+<p>  取了 head 的退出码（AGENTS.md 已有的「管道吞退出码」纠偏条目再次复现）。</p>
+<p>  收尾验证已全部改为显式退出码文件。</p>
+<ul>
+<li><strong>N1 采纳（实现真 switch）</strong>：app edit 在显式 <code>--url</code>（或 <code>--exec</code>）时</li>
+</ul>
+<p>  丢弃另一源的投影，command ↔ URL 应用可互切；新增 CLI 用例断言切换后</p>
+<p>  config 无 command 且 payload 无 app-shell-server.mjs。</p>
+<ul>
+<li><strong>N2 采纳</strong>：lifecycle 新增 URL desired state 的 plan/apply 用例（经</li>
+</ul>
+<p>  materializePayload mock 输入钉住 buildMaterializeInput 投影——本文件</p>
+<p>  mock 了 payload，直接断言桩文件缺 opentray.app.json 属测试错误，已改）；</p>
+<p>  scan 新增 URL wizard 项目投影用例。</p>
+<ul>
+<li><strong>N3 已勾</strong>、<strong>N4 确认环境噪声</strong>：顺序全量 225/225 全过，4 个 worker</li>
+</ul>
+<p>  启动 error 与断言无关；此前全量并行时 wizard 3 失败同因（单文件复跑</p>
+<p>  28/28 绿，与 add-create-command-family 5.8 记录一致）。</p>
+<h2>最终验证证据</h2>
+<ul>
+<li>core vitest 全绿（含 16 个新 URL 用例）+ <code>tsc --noEmit</code> 0</li>
+<li>cli vitest 34/34（含 6 个新用例）+ typecheck 0</li>
+<li>create 根包 vitest 顺序 225/225 + typecheck 0</li>
+<li>create-webui vitest 62/62 + typecheck 0</li>
+<li>vision-driven 基线 16/16（首轮 5 fail 为机器负载 spawn 超时，空闲复跑绿）</li>
+<li>端到端取证（临时 HOME，真实 CLI）：<code>create --url</code> 身份自动推导</li>
+</ul>
+<p>  （<code>https://dsh.example.com/app</code> → <code>app.com.example.dsh</code>）、apply payload</p>
+<p>  无 PTY/shell 资产、<code>app list</code> healthy、<code>app export</code> 输出</p>
+<p>  <code>--app-id com.example --app-name Example --url https://example.com --pm npm --window 1000x700</code></p>
+<h2>遗留（记录不阻塞）</h2>
+<ul>
+<li>WebUI wizard 的 URL 创建模式（D8 明确本轮不做，后续 change）。</li>
+<li>compileDesiredConfig 的互斥错误消息在「--config 带 url + 显式 --exec」</li>
+</ul>
+<p>  组合下会提 --url 字样（用户未显式给 --url）；安全（拒绝），文案可再磨。</p>
+<h2>Round 3/4 补记（2026-09-09 验收轮）</h2>
+<ul>
+<li>Round 3（D11–D13 窗口功能）与 Round 4（嵌入探测回退）均由用户验收反馈驱动；测试面 core 197+ / cli 26 / webui 65，typecheck 三层绿。</li>
+<li>修正自查：此前用 HEAD 请求探测 HN 嵌入策略是误判（HN 仅在 GET 响应携带 X-Frame-Options/CSP）；本轮以 GET 抓取头为准并写入文档。教训：策略检查必须用与浏览器一致的方法（GET）。</li>
+<li>CPU 战线（另一 change 的前置）：darwin set_activation_policy 变更检测已提交（broker 77.3%→4.4% 实测）；facade 轮询的 ABI 根因与两阶段修复路径已由子代理调研归档，待用户排期。</li>
+</ul>
+<h2>Round 5–11 补记（2026-09-10 验收轮，终态）</h2>
+<p>11 轮用户验收循环（图标体系全线），每轮独立实例走查后才请验收；两个走查中发现的缺陷当轮修复复验：</p>
+<ul>
+<li><strong>R10-1 根因订正</strong>：换链图标残留最初归因 HTTP 缓存；实测 <code>/api/icon-data</code> 本就 <code>no-store</code>，真机制是 React src 字符串不变则不重取。修复（<code>?g=&lt;generation&gt;</code> 缓存穿透）不受影响，判定依据已订正进 tasks.md 14.1。</li>
+<li><strong>R10 走查自抓 bug</strong>：替换回收同序号槽位但代际不变 → 缩略图二次残留；修复为替换路径递增 iconGeneration（纯追加仍稳定，D19 语义不变）。</li>
+<li><strong>模型内联一轮回退</strong>：D17c vendor 79MB 随包发布 → D18 用户拍板改后端磁盘缓存代理（发布包回 4MB）；quint8→fp16 有像素实证（残留覆盖 0.175→0.081）。</li>
+<li><strong>免按钮化（D21）</strong>：设置变更 500ms 尾沿防抖自动重提取，在途变更挂起恰好一次 trailing；选中态下代际变更自动重提交选中，搭既有前景管线自动重新融合——不新建第二条融合路径。</li>
+</ul>
+<p>### 终态验证证据</p>
+<ul>
+<li>create 46/46（generation/替换语义/imgly 代理）、create-webui 68/68（postProcessSubject 3 项）、core scrape 31/31、icon 15/15；typecheck 双零；<code>openspec:vision validate</code> 通过；vision-driven 基线 16/16。</li>
+<li>实机走查：换链穿透（baidu→wikipedia，<code>?g=</code> 跳变 + 视觉确认）；shrink 2/4px 重提取服务端字节哈希实测变化（4576B→1583B）；替换后形状恒 1 主体 + 2 剪影；滑杆/模型钮免按钮自动重提取（g=1→2→3）；合成 key 三换（<code>1a5e…→2c78…→1971…</code>）；全图含 1024px 合成预览解码 <code>complete:true</code>。</li>
+<li>版本链：53f431d / a0c2245（R5）→ 6ca26b4 → fcdd8b4 → 8ab52f8 → dd50f72 → 17d0ff9 → 0d9d8ee（R6–R11）。</li>
+<li>用户终审：「可以了，整理收尾，发布新版本」（2026-09-10）。</li>
+</ul>
+<p>### 遗留（记录不阻塞）</p>
+<ul>
+<li>提取「边缘外扩」（dilate）候选——量化模型切多时的对称出路，实现成本低，待用户需要时另起小轮。</li>
+<li>URL 卡客户端乐观源地址显示（服务端 urlSource 为准）；IPC 轮询两阶段修复（既有 backlog）。</li>
+</ul>
+</body>
+</html>

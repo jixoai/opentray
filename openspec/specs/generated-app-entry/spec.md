@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change create-no-first-launch-force-terminal. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: The entry SHALL run the command through a PTY unconditionally
 
 Every generated application SHALL depend on a prebuilt native PTY package and SHALL spawn the recorded command through a pseudo-terminal regardless of shell options, matching the wizard preview's TTY environment. A PTY-module load failure SHALL degrade to pipe transport, SHALL log the degradation to `app.log`, and SHALL NOT fail the entry. The shell host (static UI + PTY ring + port state) SHALL be scaffolded unconditionally.
@@ -95,3 +97,36 @@ The entry SHALL wrap its whole startup in a top-level error boundary. Any startu
 - **THEN** `app.log` SHALL contain the error message and stack
 - **AND** the process exit code SHALL be non-zero
 
+### Requirement: A URL application SHALL offer toolbar mode, always-reachable reload, and the durable window sync defaults
+
+Toolbar mode (`window.toolbar`) SHALL host the shared address-bar wrapper page (`browse.html?url=<encoded target>`) instead of the direct address, include the shell server and shell UI assets in the payload while remaining free of the PTY dependency, and set neither `titleSync` nor `iconSync` (the wrapper document's metadata is not the target page's — same law as command-mode address-bar windows). Non-toolbar windows SHALL project the config sync defaults: title follows the document one-way; icon following is opt-in.
+
+Every URL application's tray menu SHALL offer a `Reload` item that reloads the page through the WebView evaluate channel (`location.reload()`) without restarting the app. Toolbar-mode wrapper pages SHALL bind back/forward/reload/address-focus keyboard shortcuts (⌘/Ctrl+←→, ⌘/Ctrl+[ ], ⌘/Ctrl+R, F5, ⌘/Ctrl+L) to their existing navigation model; the documented limitation SHALL state that keystrokes with focus inside a cross-origin embedded page are not observable by the wrapper.
+
+#### Scenario: Embedding-hostile targets degrade to the direct window
+
+- **GIVEN** `--toolbar` against an address whose response carries `X-Frame-Options: DENY` or a CSP `frame-ancestors` without a wildcard
+- **WHEN** creation runs with scraping enabled
+- **THEN** it SHALL emit an explicit notice and commit `toolbar` unset, producing the direct window payload
+- **AND** `--no-scrape` (no probe data) SHALL keep the toolbar request untouched, with the limitation documented
+
+#### Scenario: Toolbar wraps the address without the PTY
+
+- **GIVEN** a URL application generated with `toolbar: true`
+- **WHEN** its payload is written
+- **THEN** the window target SHALL be the wrapper page carrying the encoded address
+- **AND** the payload SHALL contain `app-shell-server.mjs` and `app-shell/` but no `@lydell/node-pty` dependency
+- **AND** the entry SHALL set neither titleSync nor iconSync on that window
+
+#### Scenario: Tray reload is always reachable
+
+- **GIVEN** any running URL application
+- **WHEN** the tray Reload item is activated
+- **THEN** the page SHALL reload without the app process restarting
+
+#### Scenario: Sync defaults project into the direct window
+
+- **GIVEN** a non-toolbar URL application with default sync options
+- **WHEN** its entry is generated
+- **THEN** the window SHALL carry one-way document→window title sync
+- **AND** it SHALL NOT carry favicon→window icon sync

@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change unify-create-opentray-core. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Icon rendering SHALL preserve explicit sampling intent
 
 The v1 icon model SHALL represent application and tray source resources independently and SHALL persist `imageSmoothingEnabled` as a rendering choice. When false, every Core-owned resize/composition path for the app-icon foreground and tray icon SHALL use nearest-neighbor/no-smoothing behavior so low-resolution pixel edges remain discrete. When true, the normal high-quality smoothing recipe SHALL apply. The choice SHALL participate in render/cache identity.
@@ -26,7 +28,7 @@ The v1 `developerMode` option SHALL default to false. When true, generated WebVi
 
 ### Requirement: Core SHALL export commands and scripts from normalized desired state
 
-Core SHALL provide an adapter-neutral export model for a complete create invocation and for POSIX shell and PowerShell script files. Export SHALL serialize the exact argv command vector and all create options with shell-appropriate quoting; it SHALL not translate the semantic meaning of an explicitly selected shell. Generated scripts SHALL use deterministic line endings/encoding for their target and SHALL fail clearly when a value cannot be represented safely.
+Core SHALL provide an adapter-neutral export model for a complete create invocation and for POSIX shell and PowerShell script files. Export SHALL serialize the application source — the exact argv command vector and cwd/env, or the `--url` address — plus all create options with shell-appropriate quoting; it SHALL not translate the semantic meaning of an explicitly selected shell. A URL application export SHALL carry `--url` and no command flags, and SHALL never require environment acknowledgement. Generated scripts SHALL use deterministic line endings/encoding for their target and SHALL fail clearly when a value cannot be represented safely.
 
 #### Scenario: Spaces and quotes round-trip
 
@@ -34,6 +36,13 @@ Core SHALL provide an adapter-neutral export model for a complete create invocat
 - **WHEN** Core exports and the target shell executes the script
 - **THEN** the create command SHALL receive the same logical values
 - **AND** metacharacters SHALL not gain unintended shell meaning
+
+#### Scenario: URL application exports as a URL invocation
+
+- **GIVEN** a registered URL application
+- **WHEN** its export plan is built in any format
+- **THEN** the serialized invocation SHALL contain `--url <address>` and no `--exec`/`--arg`/`--cwd`/`--env` tokens
+- **AND** re-running the export SHALL recreate the same desired state
 
 ### Requirement: Uploaded resources SHALL make script export self-contained
 
@@ -56,4 +65,3 @@ Core SHALL determine only whether the exported desired state contains one or mor
 - **WHEN** Core builds a complete export plan
 - **THEN** the plan SHALL still require environment-risk acknowledgement
 - **AND** Core SHALL make no claim about whether the value is sensitive
-
