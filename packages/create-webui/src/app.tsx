@@ -101,6 +101,8 @@ function WizardPage(): React.JSX.Element {
   const [hasScrapedIcon, setHasScrapedIcon] = React.useState(false);
   const [iconCandidates, setIconCandidates] = React.useState<IconCandidate[]>([]);
   const [iconCandidatesPort, setIconCandidatesPort] = React.useState<number | undefined>();
+  /** Scrape generation: bumps per list replacement (URL switch / re-scrape). */
+  const [iconGeneration, setIconGeneration] = React.useState(0);
   const [selectedIconRef, setSelectedIconRef] = React.useState<string | undefined>();
   // Icon composition (owner round-12): foreground analysis + composed preview.
   const [iconAnalysis, setIconAnalysis] = React.useState<IconAnalysis | undefined>();
@@ -227,6 +229,8 @@ const selectedIconRefStale = (
   /** Spinner label from the extraction progress callback (model % / infer). */
   const [subjectStage, setSubjectStage] = React.useState<string | undefined>(undefined);
   const subjectAttemptedRef = React.useRef<ReadonlySet<string>>(new Set());
+  /** Scrape generation the current attempt keys belong to. */
+  const subjectGenerationRef = React.useRef(0);
   React.useEffect(() => {
     const port = iconCandidatesPort;
     const top = iconCandidates.find((candidate) => candidate.variant === "original");
@@ -236,8 +240,15 @@ const selectedIconRefStale = (
     if (wizardState === "frozen" || wizardState === "materializing" || wizardState === "success") {
       return;
     }
-    // One attempt per source candidate per page session; a replace-scrape
-    // brings new indexes and naturally re-triggers.
+    // Candidate lists are REPLACED per scrape and the port:index keys
+    // restart from zero (URL mode is always port 0; even identical favicon
+    // bytes across two URLs reuse them), so a scrape-generation bump from
+    // the server must reset the attempt keys — otherwise the first URL's
+    // keys would suppress extraction for every subsequent one.
+    if (subjectGenerationRef.current !== iconGeneration) {
+      subjectGenerationRef.current = iconGeneration;
+      subjectAttemptedRef.current = new Set();
+    }
     const key = `${port}:${top.index}`;
     if (subjectAttemptedRef.current.has(key)) {
       return;
@@ -245,6 +256,7 @@ const selectedIconRefStale = (
     if (iconCandidates.some((c) => c.variant === "subject" && c.variantOf === top.index)) {
       return;
     }
+    const generation = iconGeneration;
     subjectAttemptedRef.current = new Set([...subjectAttemptedRef.current, key]);
     void (async () => {
       setSubjectExtracting(true);
@@ -252,6 +264,11 @@ const selectedIconRefStale = (
         const sourceBytes = await (await fetch(iconDataUrl(port, top.index))).blob();
         const subject = await extractSubject(sourceBytes, setSubjectStage);
         if (subject === undefined) {
+          return;
+        }
+        // Superseded by a URL switch mid-extraction: appending the OLD
+        // subject would pair it with the NEW list's same-index candidate.
+        if (subjectGenerationRef.current !== generation) {
           return;
         }
         const token = encodeURIComponent(
@@ -272,7 +289,7 @@ const selectedIconRefStale = (
         setSubjectStage(undefined);
       }
     })();
-  }, [iconCandidates, iconCandidatesPort, wizardState]);
+  }, [iconCandidates, iconCandidatesPort, iconGeneration, wizardState]);
 
   /**
    * Composition is heavyweight (form patch + real 1024² sharp render): the
@@ -479,6 +496,7 @@ const selectedIconRefStale = (
           // Server field is iconCandidates (snapshot); keep undefined-safe.
           setIconCandidates(payload.icons ?? []);
           setIconCandidatesPort(payload.iconsPort);
+          setIconGeneration(payload.iconsGeneration ?? 0);
           setIframeTabs(
             payload.urlSource !== undefined
               ? [
@@ -588,6 +606,7 @@ const selectedIconRefStale = (
         case "icons":
           setIconCandidates(payload.icons);
           setIconCandidatesPort(payload.port);
+          setIconGeneration(payload.generation);
           // Server-side selection reset: revert to the default candidate.
           if (selectedIconRefStale(payload.icons, selectedIconRef, payload.port)) {
             setSelectedIconRef(undefined);

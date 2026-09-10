@@ -94,3 +94,11 @@
 - [x] 12.3 删除构建期 vendor：vendor-imgly-data.mjs、build 链项、.imgly-cache、copy-webui 排除、dist/imgly-data（webui dist 回 4MB，发布包不再携带模型）。
 - [x] 12.4 测试：server 代理 1 项（fixture 上游 → miss 下载 → 关停上游后 hit 持久 → 502/404 形状守卫），10/10；wizard 34/34；webui 65/65 + 版本守卫；typecheck 双零。
 - [x] 12.5 走查：冷缓存首跑（后端从 CDN 拉 fp16 106MB/30 文件、浏览器 32 分块全走代理 0 直连、spinner「下载模型 10%→…」）；**质量数值**：fp16 subject 覆盖 0.081 vs quint8 0.175（多出≈残留白垫），近白残留仅 232px；**跨重启**：新随机端口 + 新会话 → 12s 内候选落地（磁盘缓存命中）。
+
+## 13. Round 9（用户验收轮：换链后主体提取实时跟随，D19）
+
+- [x] 13.1 根因：提取去重 key 为 `端口:序号`——URL 模式端口恒 0、序号每次从 0 起，换链后 key 复用被「已尝试」抑制；且 en/zh 等域名共享同一 favicon 静态资产（内容寻址路径相同），纯内容路径也无法区分代际。
+- [x] 13.2 服务端：icons 事件与 snapshot 增 `generation`（scrape 侧替换处递增：submitUrl、scrape 轮询、replaceIconCandidates 缝、复位点；addIconCandidate 追加不增）。
+- [x] 13.3 webui：按 generation 重置尝试记录（快照恢复同样生效）；在途提取被代际更换超越时废弃结果（旧主体不与新列表同序号候选错配）。
+- [x] 13.4 测试：新增 generation 语义用例（换链递增 / 追加稳定 / snapshot 透传）；wizard+server 44 用例（3 个 materialize 超时为高负载抖动，单跑仲裁全过）；webui 65 + 守卫 + typecheck 双零。
+- [x] 13.5 走查实证：同内容重新提交（zh→zh，favicon 字节相同）→ 代际 1→2 → 主体重新提取并追加（事件序列 (1,2)(1,5)(2,2)(2,5)）；快照恢复路径亦触发提取。走查中确证一个客户端现象：URL 卡存在乐观源地址状态（提交中断时页面可先行显示新地址），服务端 urlSource 为准。

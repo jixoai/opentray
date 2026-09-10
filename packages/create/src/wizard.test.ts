@@ -1238,6 +1238,55 @@ describe("addIconCandidate (browser-derived subject candidates)", () => {
     expect(harness.session.selectIconCandidate(0, 1)).toBe(true);
   });
 
+  it("bumps the icons generation per scrape replacement but not per append", async () => {
+    const urlHome = mkdtempSync(join(tmpdir(), "wizard-gen-"));
+    const scrapedIcons = [
+      {
+        index: 0,
+        url: "https://example.com/icon.png",
+        path: join(urlHome, "scraped.png"),
+        width: 160,
+        height: 160,
+        format: "png",
+        variant: "original" as const,
+      },
+    ];
+    const harness = createHarness({
+      homeDir: urlHome,
+      scrapeUrl: async () => ({
+        ok: true,
+        title: "T",
+        iconPath: join(urlHome, "scraped.png"),
+        icons: scrapedIcons,
+      }),
+      materializeContext: fakeMaterializeContext,
+    });
+    await writeFile(join(urlHome, "scraped.png"), Buffer.alloc(64, 1));
+    await harness.session.submitUrl("https://example.com/a");
+    const afterFirst = [...harness.events].reverse().find((event) => event.type === "icons");
+    if (afterFirst?.type !== "icons") throw new Error("no icons event after submit");
+    // An append (subject derivation) keeps the generation stable.
+    const appended = await harness.session.addIconCandidate(0, {
+      bytes: Buffer.alloc(128, 9),
+      variantOf: 0,
+      width: 64,
+      height: 64,
+      format: "png",
+    });
+    expect(appended).toBeDefined();
+    const afterAppend = [...harness.events].reverse().find((event) => event.type === "icons");
+    if (afterAppend?.type !== "icons") throw new Error("no icons event after append");
+    expect(afterAppend.generation).toBe(afterFirst.generation);
+    // A URL switch (list replacement) bumps it — even when the scrape returns
+    // identical candidate content (same path), which is the acceptance case.
+    await harness.session.submitUrl("https://example.com/b");
+    const afterSwitch = [...harness.events].reverse().find((event) => event.type === "icons");
+    if (afterSwitch?.type !== "icons") throw new Error("no icons event after switch");
+    expect(afterSwitch.generation).toBeGreaterThan(afterFirst.generation);
+    // The snapshot carries the current generation for page-refresh recovery.
+    expect(harness.session.snapshot().iconsGeneration).toBe(afterSwitch.generation);
+  });
+
   it("rejects derivations from another port or an unknown source", async () => {
     const urlHome = mkdtempSync(join(tmpdir(), "wizard-subject-2-"));
     const harness = createHarness({

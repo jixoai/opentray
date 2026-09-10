@@ -117,7 +117,13 @@ export type WizardEvent =
       selectedPort: number | undefined;
     }
   | { type: "scrape"; port: number; title?: string; hasIcon: boolean }
-  | { type: "icons"; port: number; icons: IconCandidate[] }
+  | {
+      type: "icons";
+      port: number;
+      icons: IconCandidate[];
+      /** Bumps per scrape-side list replacement; stable across appends. */
+      generation: number;
+    }
   | {
       type: "form";
       values: WizardFormValues;
@@ -149,6 +155,8 @@ export type WizardEvent =
       /** Server emits this as `iconCandidates`; alias tolerated on read. */
       icons?: IconCandidate[];
       iconsPort?: number | undefined;
+      /** Scrape-generation counter carried by icons events and snapshots. */
+      iconsGeneration?: number | undefined;
       interactive: boolean;
     };
 

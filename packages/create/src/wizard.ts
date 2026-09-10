@@ -207,7 +207,15 @@ export type WizardEvent =
       readonly selectedPort: number | undefined;
     }
   | { readonly type: "scrape"; readonly port: number; readonly title?: string; readonly hasIcon: boolean }
-  | { readonly type: "icons"; readonly port: number; readonly icons: readonly ScrapedIcon[] }
+  | {
+      readonly type: "icons";
+      readonly port: number;
+      readonly icons: readonly ScrapedIcon[];
+      /** Bumps on every scrape-side REPLACEMENT of the list (not appends):
+       * indexes restart from zero per scrape, so clients keying per-candidate
+       * work (e.g. subject extraction) need this to tell generations apart. */
+      readonly generation: number;
+    }
   | {
       readonly type: "form";
       readonly values: WizardFormValues;
@@ -238,6 +246,8 @@ export type WizardEvent =
       readonly selectedPort?: number | undefined;
       readonly iconCandidates: readonly ScrapedIcon[];
       readonly iconsPort?: number | undefined;
+      /** Scrape-generation counter carried by icons events and snapshots. */
+      readonly iconsGeneration: number;
       readonly interactive: boolean;
     };
 
@@ -420,6 +430,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let trayIconIsSolid = false;
   let iconCandidates: readonly ScrapedIcon[] = [];
   let iconPort: number | undefined;
+  // Scrape-generation counter: bumped whenever the candidate list is
+  // REPLACED from a scrape (indexes restart at 0 each time, so identical
+  // content across two scrapes is still a new generation for clients).
+  let iconGeneration = 0;
   let currentTokens: readonly string[] = [];
   let currentCommand = "";
   // URL 模式（add-create-url-apps webui 入口）：地址即源，无命令运行/端口
@@ -572,12 +586,13 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       // one remains the empty-field default.
       iconCandidates = scraped.icons;
       iconPort = port;
+      iconGeneration += 1;
       currentIconPath = scraped.icons[0]?.path;
       currentIconUrl = scraped.icons[0]?.url;
       if (scraped.title !== undefined) {
         scrapedTitle = scraped.title;
       }
-      emit({ type: "icons", port, icons: scraped.icons });
+      emit({ type: "icons", port, icons: scraped.icons, generation: iconGeneration });
       emit({
         type: "scrape",
         port,
@@ -701,6 +716,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         ...(selectedPort === undefined ? {} : { selectedPort }),
         iconCandidates: [...iconCandidates],
         ...(iconPort === undefined ? {} : { iconsPort: iconPort }),
+        iconsGeneration: iconGeneration,
         interactive,
       };
     },
@@ -728,6 +744,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     replaceIconCandidates(port, icons) {
       iconPort = port;
       iconCandidates = icons;
+      iconGeneration += 1;
     },
 
     async addIconCandidate(port, candidate) {
@@ -790,7 +807,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         ];
       }
       iconCandidates = candidates;
-      emit({ type: "icons", port, icons: iconCandidates });
+      emit({ type: "icons", port, icons: iconCandidates, generation: iconGeneration });
       return appended;
     },
 
@@ -853,6 +870,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         scrapedTitle = undefined;
         iconCandidates = [];
         iconPort = undefined;
+        iconGeneration += 1;
         currentIconPath = undefined;
         currentIconUrl = undefined;
         stopTimers();
@@ -891,13 +909,14 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       // 候选挂合成端口 0（真实服务端口恒 > 0，永不冲突）。
       iconCandidates = scraped.ok ? scraped.icons : [];
       iconPort = 0;
+      iconGeneration += 1;
       currentIconPath = scraped.ok ? scraped.icons[0]?.path : undefined;
       currentIconUrl = scraped.ok ? scraped.icons[0]?.url : undefined;
       scrapedTitle = scraped.ok ? scraped.title : undefined;
       urlFrameEmbeddable = scraped.ok ? scraped.frameEmbeddable : undefined;
       stopTimers();
       setState("discovered");
-      emit({ type: "icons", port: 0, icons: iconCandidates });
+      emit({ type: "icons", port: 0, icons: iconCandidates, generation: iconGeneration });
       emit({
         type: "scrape",
         port: 0,
@@ -985,6 +1004,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       currentTrayIconUrl = undefined;
       trayIconIsSolid = false;
       iconCandidates = [];
+      iconGeneration += 1;
       touched.appId = false;
       touched.appName = false;
       touched.pm = false;
