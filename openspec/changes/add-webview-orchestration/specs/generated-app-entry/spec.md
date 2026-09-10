@@ -42,3 +42,22 @@ Every URL application's tray menu SHALL offer a `Reload` item that reloads the c
 - **WHEN** its entry runs
 - **THEN** the window title SHALL follow the real target document one-way (the content webview in toolbar mode)
 - **AND** it SHALL NOT carry favicon→window icon sync unless explicitly opted in
+
+## ADDED Requirements
+
+### Requirement: A command application SHALL offer the same native toolbar carrier over its service window
+
+A command application with `window.toolbar` enabled SHALL host the same navigation-toolbar carrier over each dedicated service window: one toolbar webview (shell-served toolbar page at a fixed top strip) and one content webview loading the verified service URL directly, composed by the declarative layered layout, driven by the same create-package channel navigation interface as URL applications. The legacy `show-address-bar` shell option (address-bar wrapper page with the service in an iframe, Web Navigation API pseudo-routes) SHALL be replaced by this carrier — no generated payload of this change or later SHALL ship an iframe-wrapped service window. PTY supervision, port sniffing, startup-terminal, and teardown laws are unchanged: the toolbar composes the service window; it does not alter command supervision.
+
+#### Scenario: Command toolbar composes the service window natively
+
+- **GIVEN** a command application generated with `window.toolbar: true`
+- **WHEN** a listened port opens its dedicated window
+- **THEN** the window SHALL host the toolbar webview above a content webview loading the verified service URL
+- **AND** the payload SHALL contain no iframe-wrapping browse page for the service window
+
+#### Scenario: The toolbar never alters command supervision
+
+- **GIVEN** a running command application with toolbar enabled
+- **WHEN** the supervised command exits abnormally
+- **THEN** the abnormal-exit force-reveal and teardown laws SHALL apply exactly as without the toolbar

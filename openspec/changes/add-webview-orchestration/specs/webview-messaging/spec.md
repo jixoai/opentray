@@ -2,44 +2,66 @@
 
 ### Requirement: Message channels SHALL be targeted connections without port transfer
 
-The webview extension SHALL provide `createMessageChannel({ target: webviewId })`: the broker creates one channel, the creator holds one endpoint implicitly (the host/entry process is a legal endpoint), and the target webview receives its endpoint through the `onCreatedMessageChannel` push event. There SHALL be no port handles that callers transfer between contexts. Channels SHALL be discoverable: `listMessageChannels` on the host facade lists all live channels of the calling session; the page bridge equivalent SHALL list only channels that page participates in. Channel ids SHALL be opaque and unique within their session scope.
+The webview extension SHALL provide `createMessageChannel({ target: webviewId })`: the broker creates one channel, the creator holds one endpoint implicitly (the host/entry process is a legal creator), and the target webview receives its endpoint through the `onCreatedMessageChannel` push event. There SHALL be no port handles that callers transfer between contexts. A target SHALL always be a webview; the host cannot be targeted and participates only as creator. Both creator sides are symmetric: the host facade calls the facade method, and a bridged page calls `navigator.opentrayWebview.createMessageChannel({ target })`, which resolves to the creating endpoint after the broker validates scope and bridge access — the target page's `onCreatedMessageChannel` event and the creator's resolution SHALL both be observable, and their relative order across the two sides is unspecified.
+
+Channel discovery: `listMessageChannels` SHALL return every channel of the calling session in state `open` or `closed`, including bounded tombstones — the host facade sees all channels of its session; a page sees only channels it participates in. `destroyed` channels SHALL NOT be listed. Channel ids SHALL be opaque and unique within their session scope.
 
 #### Scenario: Entry connects to its toolbar page
 
 - **GIVEN** a window with webview `toolbar` whose page bridge is enabled
 - **WHEN** the entry calls `createMessageChannel({ target: toolbarId })`
-- **THEN** the entry SHALL hold a usable endpoint immediately
+- **THEN** the entry SHALL hold a usable endpoint (post / onMessage / close) immediately
 - **AND** the toolbar page SHALL receive exactly one `onCreatedMessageChannel` event with its endpoint
 - **AND** neither side SHALL ever hold or transfer the other side's port object
 
-#### Scenario: Listing reflects live participation
+#### Scenario: A page creates a channel to a sibling page
+
+- **GIVEN** bridged pages `a` and `b` in the same extension session
+- **WHEN** page `a` calls `navigator.opentrayWebview.createMessageChannel({ target: bId })`
+- **THEN** the call SHALL resolve to an endpoint for page `a`
+- **AND** page `b` SHALL receive `onCreatedMessageChannel`
+- **AND** both endpoints SHALL post and receive symmetrically with the host-created case
+
+#### Scenario: Listing reflects live channels plus bounded tombstones
 
 - **GIVEN** one open channel between the host and webview `a`, and one closed channel between webviews `a` and `b`
 - **WHEN** each participant lists its channels
-- **THEN** the host SHALL see both channels with their states
-- **AND** page `a` SHALL see only the two channels it participates in
+- **THEN** the host SHALL see both channels with their states and close reasons
+- **AND** page `a` SHALL see exactly the two channels it participates in
+- **AND** a channel that was explicitly destroyed SHALL be absent from every list
 
 ### Requirement: Channel authority SHALL be session-scoped and page-access-gated
 
-Channel creation SHALL be legal for the host facade without restriction and for pages only within the creating extension session (`(appId, trayId, sessionId)`): a channel between views of different sessions SHALL be impossible to express, not merely rejected. A channel endpoint SHALL only be delivered to a webview whose page bridge is enabled by the existing page-access policy; a target without bridge access SHALL fail channel creation with a typed error. Arbitrary third-party content pages have no bridge by default and therefore cannot create or receive channels.
+Channel creation SHALL be legal for the host facade without restriction and for pages only within the creating extension session (`(appId, trayId, sessionId)`): a channel between views of different sessions SHALL be impossible to express, not merely rejected. A channel endpoint SHALL only be delivered to a webview whose page bridge is enabled by the existing page-access policy; a target without bridge access SHALL fail channel creation with the typed error `bridge_required`. A creation attempt crossing the session scope SHALL fail with the typed error `session_scope`. Arbitrary third-party content pages have no bridge by default and therefore cannot create or receive channels.
 
 #### Scenario: Bridgeless target rejects creation
 
 - **GIVEN** webview `content` showing an arbitrary cross-origin site with no page bridge
 - **WHEN** any caller attempts `createMessageChannel({ target: contentId })`
-- **THEN** creation SHALL fail with a typed error
+- **THEN** creation SHALL fail with the typed error `bridge_required`
 - **AND** no endpoint, event, or channel state SHALL be created
+
+#### Scenario: Cross-session targeting is unexpressible
+
+- **GIVEN** two live extension sessions of the same app
+- **WHEN** a participant of session 1 attempts to create a channel targeting a webview of session 2
+- **THEN** creation SHALL fail with the typed error `session_scope`
+- **AND** no partial channel state SHALL survive in either session
 
 ### Requirement: Channel lifecycle SHALL be an explicit observable state machine
 
-Every channel SHALL progress `created → open → closed(reason) → destroyed`. Closing reasons SHALL be structured values covering at least: `explicit` (either endpoint closed), `peer_webview_destroyed`, `window_destroyed`, `session_closed`, `document_navigated` (page-side endpoint), and `queue_overflow`. Sending on a non-open endpoint SHALL return a typed error and SHALL NOT silently drop the message. Delivery SHALL preserve per-endpoint FIFO order. Each port queue SHALL be bounded (message count and byte size); exceeding the bound SHALL close the channel with `queue_overflow` rather than grow unbounded. Closed channels SHALL remain queryable as bounded tombstones (id, endpoints, reason) until destroyed. A page-side endpoint SHALL close with `document_navigated` when its document navigates; the host-side endpoint SHALL observe the same transition. Messages SHALL NOT be buffered across document navigation.
+Every channel SHALL progress `created → open → closed(reason) → destroyed`. Closing reasons SHALL be structured values covering at least: `explicit` (either endpoint closed), `peer_webview_destroyed`, `window_destroyed`, `session_closed`, `document_navigated` (page-side endpoint), and `queue_overflow`. Sending on a non-open endpoint SHALL return the typed error `not_open` and SHALL NOT silently drop the message. Delivery SHALL preserve per-endpoint FIFO order.
+
+Queue bounds (exact): each port queue SHALL hold at most 1000 messages AND at most 1 MiB cumulative payload, measured as UTF-8 encoded byte length; the boundary values themselves are legal (enqueue succeeds at exactly 1000 messages / exactly 1,048,576 bytes). A single message whose payload exceeds 1 MiB SHALL be rejected with the typed error `payload_too_large` without entering the queue and without closing the channel. Exceeding either cumulative bound on enqueue SHALL close the channel with reason `queue_overflow`.
+
+Tombstones: closed channels SHALL remain listed with their reason until destroyed. Destroy SHALL occur on explicit destroy by a participant, on tombstone-capacity eviction (each session retains at most its 32 most recently closed channels, oldest evicted), and on session close (all channels of that session destroyed). A page-side endpoint SHALL close with `document_navigated` when its document navigates; the host-side or peer endpoint SHALL observe the same transition. Messages SHALL NOT be buffered across document navigation.
 
 #### Scenario: Peer teardown closes channels with reason
 
 - **GIVEN** an open channel between the host and webview `toolbar`
 - **WHEN** `toolbar` is destroyed via `destroyWebview`
 - **THEN** the channel SHALL close with reason `peer_webview_destroyed`
-- **AND** a subsequent send from the host endpoint SHALL fail with a typed error instead of dropping silently
+- **AND** a subsequent send from the host endpoint SHALL fail with the typed error `not_open` instead of dropping silently
 
 #### Scenario: Navigation closes the page-side endpoint honestly
 
@@ -48,12 +70,21 @@ Every channel SHALL progress `created → open → closed(reason) → destroyed`
 - **THEN** the page-side endpoint SHALL close with `document_navigated` and pending messages SHALL NOT be replayed into the new document
 - **AND** the host-side endpoint SHALL observe the closure
 
-#### Scenario: Queue overflow is bounded, not fatal
+#### Scenario: Queue bounds are exact and testable
 
 - **GIVEN** an open channel whose target endpoint is not consuming messages
-- **WHEN** the producer exceeds the per-port queue bound
-- **THEN** the channel SHALL close with `queue_overflow`
-- **AND** the producer SHALL receive the typed close event, not an unbounded memory footprint
+- **WHEN** the producer enqueues up to exactly 1000 small messages (cumulative under 1 MiB)
+- **THEN** all enqueues SHALL succeed and the channel SHALL remain open
+- **WHEN** one more message is enqueued
+- **THEN** the channel SHALL close with reason `queue_overflow`
+- **AND** a single message larger than 1 MiB against a healthy channel SHALL be rejected with `payload_too_large` while the channel stays open
+
+#### Scenario: Tombstones are bounded and evicted oldest-first
+
+- **GIVEN** a session with 32 closed channels retained as tombstones
+- **WHEN** a 33rd channel closes
+- **THEN** the oldest tombstone SHALL be destroyed and absent from lists
+- **AND** the newly closed channel SHALL be listed with its reason
 
 ### Requirement: Channel transport SHALL be push-based with typed payloads
 
