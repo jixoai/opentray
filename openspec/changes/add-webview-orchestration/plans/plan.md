@@ -85,7 +85,11 @@ const ch = await shell.createMessageChannel({ target: toolbar.id }) // 定向直
   law：状态按 (appId, trayId, sessionId) 归属，session-close 不得清掉别的 live
   session」；「Windows WebView2 Profile Law：retained WebContext、profile 路径不继承
   broker executable」。
-- **验收基建**：Owner 将以 herdr 0.9 多设备连接 Windows 真机做双平台验收。
+- **验收基建（Owner 指示，2026-09-11）**：Windows 侧开发/编译/验证使用局域网真机
+  ——herdr pane 内执行 `ssh gaubeehonor` 登录，项目检出位于
+  `E:\dev\github\opentray`；分支经 LAN 内 git 同步（不对外发布）；Windows 侧
+  工作整体交给专门的子代理执行（子代理反馈协议照常生效）；重负载构建遵守
+  herdr pane 受控与并行度规则。
 
 ## 决策（四轮 grill 拍板 + Codex R1 复核修订，2026-09-11）
 
@@ -106,7 +110,7 @@ const ch = await shell.createMessageChannel({ target: toolbar.id }) // 定向直
 | D13 | **toolbar 载体切换（两种应用）**：iframe 包装退役（**破坏性更新**，不留下降/隐藏选项）；URL 应用 toolbar 与命令应用地址栏窗口统一改为 toolbar webview（顶层固定高）+ content webview（fill）；地址栏真值 = content 的 urlChange；托盘 Reload 语义保持；**命令应用获得同等的 `window.toolbar` 生成契约（generated-app-entry 新 requirement），旧 `show-address-bar` 高级选项语义替换为原生载体** | 生成物冻结 → 零迁移；两种应用共用同一 browse.html 载体，只切一种会留下半旧半新的双面维护 |
 | D14 | **frameEmbeddable 探测退役**：scrape 的 `responseHeadersAllowEmbedding`、ScrapeResult/deriveUrlPresets 的 frameEmbeddable 透传、CLI 回退路径整体删除；requirement 级断言 = generated-app-entry MODIFIED 的「SHALL NOT probe, warn about, or strip」scenario；task 级验证 = 符号级 grep 门（源码与测试无 frameEmbeddable/responseHeadersAllowEmbedding 残留） | 原生承载下嵌入策略构造性无关；死面不留 |
 | D15 | **向导「导航工具栏」开关**：URL 与 command 应用流程都提供（用户明示 localhost 也统一支持，部分应用依赖前进后退/路由路径可见），**默认全关** | 「一些应用依赖」→ 开关而非默认位 |
-| D16 | **双平台同批交付 + DTO 平价为 spec 契约**：本 change 引入的每个通用能力字段（webviewId、布局协议、通道帧、事件帧）必须由两平台 capability DTO 序列化（Darwin release 编译门）；macOS 先行、Windows 泛化随后，同一 change 收口；Windows 验收经 herdr 0.9 多设备真机 | 拆 change 会造成能力契约漂移；平价不欠债 |
+| D16 | **双平台同批交付 + DTO 平价为 spec 契约**：本 change 引入的每个通用能力字段（webviewId、布局协议、通道帧、事件帧）必须由两平台 capability DTO 序列化（Darwin release 编译门）；macOS 先行、Windows 泛化随后，同一 change 收口；Windows 真机验收经 `ssh gaubeehonor`（herdr pane，`E:\dev\github\opentray`，专门子代理执行） | 拆 change 会造成能力契约漂移；平价不欠债 |
 | D17 | **流程**：单 change（webview-extension delta + webview-layout 新 + webview-messaging 新 + generated-app-entry/create-wizard/create-project-config/create-cli-command-tree delta）；FULL-WORKFLOW；Codex 复核闭环（herdr，gpt-5.6-terra / xhigh） | 平台级能力变更的复核价值配得上 RemixCode |
 | D18 | **所有权三元组法（Codex B3）**：多 webview 状态按 `(appId, trayId, sessionId)` 归属；windowId 会话内唯一；webviewId 窗口会话内唯一；`session_closed` 必须按 session id 精确清扫（**封死现存 mod.rs:587-590 忽略 id 清全局的缺陷**）；lease 断开只清本 lease 的 N 个 webview；同 tray 多 session 交叉清扫隔离进 BDD。协议帧携带 owner tuple 字段 | AGENTS.md Extension cleanup law 的直接投影；生命周期 requirement 弃用「surface」措辞回归 App/Tray/Session 本体 |
 | D19 | **事件传输闭环（Codex B8）**：`urlChange/titleChange/focused` 是 per-view 推送帧，键 = `(windowId, webviewId)`；订阅 = facade 监听器（创建即生效，断连即失效）；事件按 view 有序；**新事件禁止复用 16ms drain 轮询**（原生回调直推事件通道）；传输语义进 2.1/2.4/3.5 三层测试 | CPU 轮询成本法；drain 是存量路径，不是新事件的观察机制 |

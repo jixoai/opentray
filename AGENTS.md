@@ -409,6 +409,12 @@ pnpm -r list --depth -1
 
 Before claiming completion, run the narrowest command set that proves the current change.
 
+Windows-side development, compilation, and verification run on the Owner's LAN
+machine: execute `ssh gaubeehonor` inside a herdr pane; the repository checkout
+lives at `E:\dev\github\opentray`. Sync branches over the LAN (never publish
+work-in-progress remotes); delegate this work to a dedicated subagent that
+reports process reclamation evidence and toolchain friction.
+
 ## Release Operations
 
 OpenTray uses changesets plus npm Trusted Publishing.

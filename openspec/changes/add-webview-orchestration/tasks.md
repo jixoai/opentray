@@ -24,11 +24,12 @@
 - [ ] 3.5 Rust 通道：注册表（会话作用域 + owner tuple）+ 状态机（精确上限/墓碑 LRU32）+ 推送投递（ipc_handler 收 + evaluate_script 派发）；per-view urlChange/title/focused 事件**原生回调直推事件通道（不进 16ms drain）**；back/forward 原生历史 API（WKWebView goBack 穿透）。
 - [ ] 3.6 macOS 原生验证：multiwebview 窗口冒烟——toolbar+content 布局、resize 跟手、**focus() 切换 + focused 事件**、navigate/back/forward、urlChange 跟随页内跳转、HN（XFO DENY）整页渲染、登录态持久实证、box 边框绘制且鼠标穿透、不透明重叠 + 透明拒绝。
 
-## 4. Implementation — P1 Windows 泛化
+## 4. Implementation — P1 Windows 泛化（真机 `ssh gaubeehonor`，专门子代理执行）
 
+- [ ] 4.0 Windows 真机准备：herdr pane 内起 `ssh gaubeehonor` 会话；验证 `E:\dev\github\opentray` 检出与工具链在位（cargo、pnpm）；将 `add-webview-orchestration` 分支经 LAN git 同步到该检出（不对外发布）；后续 4.x 全部在该真机执行，产物/日志取证回传；子代理报告须含进程回收证据与遇到的工具链摩擦（子代理反馈协议）。
 - [ ] 4.1 Windows child webview 接线（WebView2 多 controller 同 HWND、**共享 environment + 每 session retained WebContext（outlives children，创建错误含 profile 路径，profile 路径法不变）**、bounds 物理/逻辑换算、z 序 child HWND 顺序、box parent hit-test 穿透）；WM_SIZE 多 controller 泛化（host paint → N controller bounds → WRY child bounds 顺序法保持）。
 - [ ] 4.2 Windows 通道/事件同实现验证（WebMessageReceived + ExecuteScript 派发；DTO 平价断言在 Windows 编译/测试通过）。
-- [ ] 4.3 Windows 真机验收（herdr 0.9 多设备）：同 3.6 冒烟清单在 Windows 真机复跑取证 + WebContext/profile 专项（controller 销毁重建不换 profile 目录）。
+- [ ] 4.3 Windows 真机验收：同 3.6 冒烟清单在真机复跑取证 + WebContext/profile 专项（controller 销毁重建不换 profile 目录）。
 
 ## 5. Implementation — P2 create 承载切换
 
