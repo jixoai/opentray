@@ -19,6 +19,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { StableIframe } from "@/components/stable-iframe";
 import { hostnameOf, type DiscoveredService } from "@/wizard-protocol";
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 import { cn } from "@/lib/utils";
 
 export interface IframeTab {
@@ -78,37 +80,43 @@ const StatusBar = ({
   services: readonly DiscoveredService[];
   activeTab: string;
   onJumpToService(port: number): void;
-}): React.JSX.Element => (
-  <CardFooter className="h-8 shrink-0 gap-3 overflow-x-auto px-3 py-0 text-[11px] text-muted-foreground">
-    <span className="font-mono whitespace-nowrap">
-      光标 {status.cursorY}:{status.cursorX}
-    </span>
-    <span className="font-mono whitespace-nowrap">
-      {status.cols}×{status.rows}
-    </span>
-    <span className="font-mono whitespace-nowrap">
-      {status.selection === undefined
-        ? "无选区"
-        : `选区 ${status.selection.start.y}:${status.selection.start.x} – ${status.selection.end.y}:${status.selection.end.x}`}
-    </span>
-    <span className="h-3 w-px bg-border" />
-    {services.length === 0 ? (
-      <span>嗅探 HTTP 服务中…（未发现不影响创建应用）</span>
-    ) : (
-      services.map((service) => (
-        <Badge
-          key={service.port}
-          variant={activeTab === `svc-${service.port}` ? "default" : "secondary"}
-          className="cursor-pointer font-mono whitespace-nowrap"
-          onClick={() => onJumpToService(service.port)}
-        >
-          :{service.port}
-          {service.title ? ` · ${service.title}` : ""}
-        </Badge>
-      ))
-    )}
-  </CardFooter>
-);
+}): React.JSX.Element => {
+  const { messages } = usePreferences();
+  return (
+    <CardFooter className="h-8 shrink-0 gap-3 overflow-x-auto px-3 py-0 text-[11px] text-muted-foreground">
+      <span className="font-mono whitespace-nowrap">
+        {fmt(messages.tabs.cursor, { y: status.cursorY, x: status.cursorX })}
+      </span>
+      <span className="font-mono whitespace-nowrap">
+        {status.cols}×{status.rows}
+      </span>
+      <span className="font-mono whitespace-nowrap">
+        {status.selection === undefined
+          ? messages.tabs.noSelection
+          : fmt(messages.tabs.selection, {
+              start: `${status.selection.start.y}:${status.selection.start.x}`,
+              end: `${status.selection.end.y}:${status.selection.end.x}`,
+            })}
+      </span>
+      <span className="h-3 w-px bg-border" />
+      {services.length === 0 ? (
+        <span>{messages.tabs.sniffing}</span>
+      ) : (
+        services.map((service) => (
+          <Badge
+            key={service.port}
+            variant={activeTab === `svc-${service.port}` ? "default" : "secondary"}
+            className="cursor-pointer font-mono whitespace-nowrap"
+            onClick={() => onJumpToService(service.port)}
+          >
+            :{service.port}
+            {service.title ? ` · ${service.title}` : ""}
+          </Badge>
+        ))
+      )}
+    </CardFooter>
+  );
+};
 
 export function TabsPanel({
   command,
@@ -126,6 +134,7 @@ export function TabsPanel({
   hideTerminal = false,
   className,
 }: TabsPanelProps): React.JSX.Element {
+  const { messages } = usePreferences();
   return (
     <div className={cn("flex min-h-0 flex-col gap-2", className)}>
       {/* The tab strip. Panels are kept mounted OUTSIDE TabsContent on
@@ -139,9 +148,11 @@ export function TabsPanel({
           {hideTerminal ? null : (
             <TabsTrigger value="terminal">
               <TerminalIcon className="size-3.5" />
-              终端
+              {messages.tabs.terminal}
               {!interactive && terminalReady ? (
-                <span className="text-[10px] text-amber-400">非交互</span>
+                <span className="text-[10px] text-amber-400">
+                  {messages.tabs.nonInteractive}
+                </span>
               ) : null}
             </TabsTrigger>
           )}
@@ -168,7 +179,7 @@ export function TabsPanel({
           <CardHeader className="border-b [.border-b]:pb-2">
             <span className="tech-ltr flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground">
               <TerminalIcon className="size-4 shrink-0" />
-              <span className="truncate">{command || "尚未运行命令"}</span>
+              <span className="truncate">{command || messages.tabs.noCommand}</span>
             </span>
           </CardHeader>
           {/* CardBody: the terminal surface. */}
@@ -178,7 +189,9 @@ export function TabsPanel({
               className="min-h-0 min-w-0 h-full bg-[#05070b] px-1"
             />
             {!terminalReady ? (
-              <div className="p-3 text-xs text-muted-foreground">正在加载终端渲染器…</div>
+              <div className="p-3 text-xs text-muted-foreground">
+                {messages.tabs.loadingRenderer}
+              </div>
             ) : null}
           </CardContent>
           <StatusBar
@@ -205,7 +218,7 @@ export function TabsPanel({
                   size="icon-sm"
                   disabled={tab.historyIndex === 0}
                   onClick={() => onIframeHistoryMove(tab.port, -1)}
-                  aria-label="后退"
+                  aria-label={messages.common.back}
                 >
                   <ArrowLeft />
                 </Button>
@@ -214,7 +227,7 @@ export function TabsPanel({
                   size="icon-sm"
                   disabled={tab.historyIndex >= tab.history.length - 1}
                   onClick={() => onIframeHistoryMove(tab.port, 1)}
-                  aria-label="前进"
+                  aria-label={messages.common.forward}
                 >
                   <ArrowRight />
                 </Button>
@@ -222,7 +235,7 @@ export function TabsPanel({
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => onIframeNavigate(tab.port, tab.url, "replace")}
-                  aria-label="重新加载"
+                  aria-label={messages.common.reload}
                 >
                   <RotateCw />
                 </Button>
@@ -231,7 +244,7 @@ export function TabsPanel({
                   className="tech-ltr h-7 font-mono text-xs"
                   defaultValue={tab.url}
                   key={`${tab.port}:${tab.historyIndex}:${tab.url}`}
-                  placeholder="输入 URL 跳转"
+                  placeholder={messages.tabs.urlPlaceholder}
                   onKeyDown={(event) => {
                     if (event.key !== "Enter") return;
                     const raw = (event.target as HTMLInputElement).value;

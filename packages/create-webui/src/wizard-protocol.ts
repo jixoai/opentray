@@ -1,6 +1,7 @@
 /** Wizard server event contract (mirrors packages/create/src/wizard.ts). */
 
 import type { FamilyFormState } from "@/lib/command-family";
+import { getApiLocale } from "@/api";
 
 export interface DiscoveredService {
   port: number;
@@ -173,7 +174,11 @@ export const api = (path: string, body: Record<string, unknown> = {}): Promise<R
   });
 
 export const openEventStream = (): EventSource =>
-  new EventSource(`/api/events?token=${encodeURIComponent(WIZARD_TOKEN)}`);
+  new EventSource(
+    `/api/events?token=${encodeURIComponent(WIZARD_TOKEN)}${
+      getApiLocale() === undefined ? "" : `&lang=${encodeURIComponent(getApiLocale()!)}`
+    }`,
+  );
 
 /** Candidate thumbnail source (img tags cannot send auth headers). */
 /**

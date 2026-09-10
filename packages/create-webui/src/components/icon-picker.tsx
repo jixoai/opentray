@@ -6,6 +6,8 @@
 import { Upload } from "lucide-react";
 import * as React from "react";
 
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 import { cn } from "@/lib/utils";
 import { iconDataUrl, type IconCandidate } from "@/wizard-protocol";
 
@@ -41,6 +43,7 @@ export function IconPicker({
   onUpload,
   onClear,
 }: IconPickerProps): React.JSX.Element {
+  const { messages } = usePreferences();
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = React.useState(false);
 
@@ -54,7 +57,7 @@ export function IconPicker({
       <button
         type="button"
         disabled={disabled}
-        aria-label="选择本地图片"
+        aria-label={messages.icon.uploadShortAria}
         onClick={() => fileRef.current?.click()}
         onDragOver={(event) => {
           event.preventDefault();
@@ -75,11 +78,15 @@ export function IconPicker({
         )}
       >
         {uploadedUrl !== undefined ? (
-          <img src={uploadedUrl} alt="已选图标" className="icon-checker size-full rounded object-contain" />
+          <img
+            src={uploadedUrl}
+            alt={messages.icon.uploadedAlt}
+            className="icon-checker size-full rounded object-contain"
+          />
         ) : (
           <span className="flex flex-col items-center gap-1 text-muted-foreground">
             <Upload className="size-4" />
-            <span className="text-[10px] leading-tight">上传</span>
+            <span className="text-[10px] leading-tight">{messages.icon.upload}</span>
           </span>
         )}
       </button>
@@ -97,7 +104,7 @@ export function IconPicker({
       />
       <div className="flex flex-1 flex-wrap items-center gap-2">
         {visible.length === 0 ? (
-          <span className="text-xs text-muted-foreground">暂无候选图标</span>
+          <span className="text-xs text-muted-foreground">{messages.icon.noCandidatesShort}</span>
         ) : (
           visible.map((candidate) => {
             const src =
@@ -113,8 +120,18 @@ export function IconPicker({
                   candidate.variant === "original"
                     ? `${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`
                     : candidate.variant === "subject"
-                      ? `AI 主体提取 ${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`
-                      : `${candidate.variant === "solid-black" ? "黑色" : "白色"}纯色 ${candidate.format.toUpperCase()}`
+                      ? fmt(messages.icon.subjectTitle, {
+                          w: candidate.width,
+                          h: candidate.height,
+                          format: candidate.format.toUpperCase(),
+                        })
+                      : fmt(messages.icon.solid, {
+                          color:
+                            candidate.variant === "solid-black"
+                              ? messages.icon.colorBlack
+                              : messages.icon.colorWhite,
+                          format: candidate.format.toUpperCase(),
+                        })
                 }
                 onClick={() => onPick(candidate)}
                 className={cn(
@@ -128,7 +145,7 @@ export function IconPicker({
                 {src !== undefined ? (
                   <img
                     src={src}
-                    alt={`候选 ${candidate.variant}`}
+                    alt={fmt(messages.icon.candidateVariant, { variant: candidate.variant })}
                     className="size-full object-contain"
                   />
                 ) : null}
@@ -147,7 +164,7 @@ export function IconPicker({
           onClick={onClear}
           className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
         >
-          清除
+          {messages.icon.clear}
         </button>
       ) : null}
     </div>

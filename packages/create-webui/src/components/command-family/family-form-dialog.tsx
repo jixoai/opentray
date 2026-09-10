@@ -35,7 +35,6 @@ import {
   buildCommand,
   buildRustCommands,
   deriveFamily,
-  FAMILY_LABEL,
   FAMILY_ORDER,
   NPM_RUNNERS,
   PYTHON_RUNNERS,
@@ -43,6 +42,9 @@ import {
   type Family,
   type FamilyFormState,
 } from "@/lib/command-family";
+import { familyLabel } from "@/lib/family-label";
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 import { FAMILY_ICON } from "./brand-icons";
 
 type StructuredFamily = Exclude<Family, "custom">;
@@ -113,6 +115,7 @@ export function FamilyFormDialog({
   onCancel,
   onApply,
 }: FamilyFormDialogProps): React.JSX.Element {
+  const { messages } = usePreferences();
   const handleOpenChange = (next: boolean): void => {
     if (!next) {
       onCancel();
@@ -135,8 +138,8 @@ export function FamilyFormDialog({
             <DropdownMenu>
               <DropdownMenuTrigger
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                aria-label="切换命令系列"
-                title="切换命令系列"
+                aria-label={messages.family.switchAria}
+                title={messages.family.switchAria}
               >
                 <FamilyIcon className="size-4" />
                 <ChevronDown className="size-3" />
@@ -151,26 +154,24 @@ export function FamilyFormDialog({
                       className={family === draft.family ? "bg-accent/60" : undefined}
                     >
                       <ItemIcon className="text-muted-foreground" />
-                      {FAMILY_LABEL[family]}
+                      {familyLabel(family, messages)}
                     </DropdownMenuItem>
                   );
                 })}
               </DropdownMenuContent>
             </DropdownMenu>
-            配置 {FAMILY_LABEL[draft.family]} 系列命令
+            {fmt(messages.family.dialogTitle, { name: familyLabel(draft.family, messages) })}
           </DialogTitle>
-          <DialogDescription>
-            修改字段实时预览命令与默认应用标识；确定后写回命令行。
-          </DialogDescription>
+          <DialogDescription>{messages.family.dialogDescription}</DialogDescription>
         </DialogHeader>
 
         <div key={draft.family} className="space-y-4">
           {draft.family === "npm" ? (
             <>
               <div>
-                <Label>Runner</Label>
+                <Label>{messages.family.runner}</Label>
                 <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                  同一包换 runner 推导结果不变；deno run 自动补 npm: 前缀。
+                  {messages.family.runnerHint}
                 </p>
                 {runnerChips(NPM_RUNNERS, draft.runner, (runner) =>
                   patch({ runner }),
@@ -178,7 +179,7 @@ export function FamilyFormDialog({
               </div>
               {draft.runnerFlags.length > 0 || draft.runner === "deno run" ? (
                 <div>
-                  <Label>Runner 参数</Label>
+                  <Label>{messages.family.runnerFlags}</Label>
                   <Input
                     className="mt-1.5 font-mono text-xs"
                     placeholder="-A"
@@ -189,9 +190,9 @@ export function FamilyFormDialog({
               ) : null}
               <div className="grid grid-cols-[1fr_110px] gap-3">
                 <div>
-                  <Label>包名</Label>
+                  <Label>{messages.family.pkg}</Label>
                   <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                    支持 @scope/name 与 npm: 前缀。
+                    {messages.family.pkgHint}
                   </p>
                   <Input
                     className="mt-0 font-mono text-xs"
@@ -201,9 +202,9 @@ export function FamilyFormDialog({
                   />
                 </div>
                 <div>
-                  <Label>版本</Label>
+                  <Label>{messages.family.version}</Label>
                   <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                    留空 = latest。
+                    {messages.family.versionLatest}
                   </p>
                   <Input
                     className="mt-0 font-mono text-xs"
@@ -214,9 +215,9 @@ export function FamilyFormDialog({
                 </div>
               </div>
               <div>
-                <Label>运行参数</Label>
+                <Label>{messages.family.args}</Label>
                 <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                  追加在包名之后；子命令参与 appId 推导。
+                  {messages.family.argsHint}
                 </p>
                 <Input
                   className="mt-0 font-mono text-xs"
@@ -232,9 +233,9 @@ export function FamilyFormDialog({
             <>
               <div className="grid grid-cols-[1fr_110px] gap-3">
                 <div>
-                  <Label>Module 路径</Label>
+                  <Label>{messages.family.modulePath}</Label>
                   <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                    取末段作为身份，如 rsc.io/fortune → fortune。
+                    {messages.family.modulePathHint}
                   </p>
                   <Input
                     className="mt-0 font-mono text-xs"
@@ -244,9 +245,9 @@ export function FamilyFormDialog({
                   />
                 </div>
                 <div>
-                  <Label>版本</Label>
+                  <Label>{messages.family.version}</Label>
                   <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                    留空 = 本地/默认。
+                    {messages.family.versionLocal}
                   </p>
                   <Input
                     className="mt-0 font-mono text-xs"
@@ -257,7 +258,7 @@ export function FamilyFormDialog({
                 </div>
               </div>
               <div>
-                <Label>运行参数</Label>
+                <Label>{messages.family.args}</Label>
                 <Input
                   className="mt-0 font-mono text-xs"
                   placeholder="serve --port 8080"
@@ -272,9 +273,9 @@ export function FamilyFormDialog({
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label>安装 crate</Label>
+                  <Label>{messages.family.crate}</Label>
                   <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                    cargo install 目标；Rust 不能直跑，需先安装。
+                    {messages.family.crateHint}
                   </p>
                   <Input
                     className="mt-0 font-mono text-xs"
@@ -284,20 +285,22 @@ export function FamilyFormDialog({
                   />
                 </div>
                 <div>
-                  <Label>运行二进制</Label>
+                  <Label>{messages.family.binary}</Label>
                   <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                    留空默认与 crate 同名。
+                    {messages.family.binaryHint}
                   </p>
                   <Input
                     className="mt-0 font-mono text-xs"
-                    placeholder={draft.pkg.trim().length > 0 ? draft.pkg.trim() : "二进制名"}
+                    placeholder={
+                      draft.pkg.trim().length > 0 ? draft.pkg.trim() : messages.family.binaryPlaceholder
+                    }
                     value={draft.binary}
                     onChange={(event) => patch({ binary: event.target.value })}
                   />
                 </div>
               </div>
               <div>
-                <Label>运行参数</Label>
+                <Label>{messages.family.args}</Label>
                 <Input
                   className="mt-0 font-mono text-xs"
                   placeholder="--json ."
@@ -322,16 +325,16 @@ export function FamilyFormDialog({
           {draft.family === "python" ? (
             <>
               <div>
-                <Label>Runner</Label>
+                <Label>{messages.family.runner}</Label>
                 {runnerChips(PYTHON_RUNNERS, draft.runner, (runner) =>
                   patch({ runner }),
                 )}
               </div>
               <div className="grid grid-cols-[1fr_110px] gap-3">
                 <div>
-                  <Label>包名</Label>
+                  <Label>{messages.family.pkg}</Label>
                   <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                    包名中的 . _ 归一为 - 参与推导。
+                    {messages.family.pkgPythonHint}
                   </p>
                   <Input
                     className="mt-0 font-mono text-xs"
@@ -341,7 +344,7 @@ export function FamilyFormDialog({
                   />
                 </div>
                 <div>
-                  <Label>版本</Label>
+                  <Label>{messages.family.version}</Label>
                   <Input
                     className="mt-0 font-mono text-xs"
                     placeholder="latest"
@@ -351,7 +354,7 @@ export function FamilyFormDialog({
                 </div>
               </div>
               <div>
-                <Label>运行参数</Label>
+                <Label>{messages.family.args}</Label>
                 <Input
                   className="mt-0 font-mono text-xs"
                   placeholder="format --check ."
@@ -366,9 +369,9 @@ export function FamilyFormDialog({
             <>
               <div className="grid grid-cols-[1fr_110px] gap-3">
                 <div>
-                  <Label>工具 ID</Label>
+                  <Label>{messages.family.toolId}</Label>
                   <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                    .NET 10 dnx：NuGet 工具临时运行，无需安装。
+                    {messages.family.toolIdHint}
                   </p>
                   <Input
                     className="mt-0 font-mono text-xs"
@@ -378,7 +381,7 @@ export function FamilyFormDialog({
                   />
                 </div>
                 <div>
-                  <Label>版本</Label>
+                  <Label>{messages.family.version}</Label>
                   <Input
                     className="mt-0 font-mono text-xs"
                     placeholder="latest"
@@ -388,7 +391,7 @@ export function FamilyFormDialog({
                 </div>
               </div>
               <div>
-                <Label>运行参数</Label>
+                <Label>{messages.family.args}</Label>
                 <Input
                   className="mt-0 font-mono text-xs"
                   placeholder="--verify-no-changes"
@@ -405,14 +408,18 @@ export function FamilyFormDialog({
             {command.length > 0 ? (
               command
             ) : (
-              <span className="text-muted-foreground">填写后生成命令…</span>
+              <span className="text-muted-foreground">
+                {messages.family.commandPreviewEmpty}
+              </span>
             )}
           </code>
         </div>
 
         {envPreset !== null ? (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground">环境变量预设</span>
+            <span className="text-[11px] text-muted-foreground">
+              {messages.family.envPresetTitle}
+            </span>
             {envPreset.state === "off" ? (
               <button
                 type="button"
@@ -420,18 +427,20 @@ export function FamilyFormDialog({
                 title={envPreset.defaultNote}
                 onClick={() => onEnvPresetChange("enable")}
               >
-                + {envPreset.key}=true（启用）
+                {fmt(messages.family.presetEnable, { key: envPreset.key })}
               </button>
             ) : (
               <span
                 className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/60 py-0.5 pr-1 pl-1.5 font-mono text-[11px]"
-                title="来自下方「命令选项 → 环境变量」配置（唯一可信源），两侧同步"
+                title={messages.family.envPresetSourceDialog}
               >
                 {envPreset.key}={envPreset.explicitValue ?? ""}
-                <span className="font-sans text-[10px] text-muted-foreground">env 已配置</span>
+                <span className="font-sans text-[10px] text-muted-foreground">
+                  {messages.family.presetConfigured}
+                </span>
                 <button
                   type="button"
-                  aria-label="移除环境变量预设"
+                  aria-label={messages.family.presetRemove}
                   title={envPreset.defaultNote}
                   className="rounded px-1 text-muted-foreground transition-colors hover:text-foreground"
                   onClick={() => onEnvPresetChange("disable")}
@@ -442,33 +451,31 @@ export function FamilyFormDialog({
             )}
           </div>
         ) : (
-          <p className="text-[11px] text-muted-foreground">
-            此系列/runner 无需注入环境变量。
-          </p>
+          <p className="text-[11px] text-muted-foreground">{messages.family.presetNone}</p>
         )}
 
         <div className="space-y-1 rounded-lg border border-border bg-muted/40 p-3">
-          <p className="text-[11px] text-muted-foreground">
-            默认应用标识（由命令推导，可在下方应用配置中覆盖）
-          </p>
+          <p className="text-[11px] text-muted-foreground">{messages.family.appIdPreview}</p>
           <code className="font-mono text-sm font-medium break-all">
             {preview.appId}
           </code>
           <p className="text-[11px] text-muted-foreground">
-            名称 {preview.appName} · ~/.opentray/create/
-            {toProjectDirectoryName(preview.appId)}/
+            {fmt(messages.family.namePreview, {
+              name: preview.appName,
+              dir: toProjectDirectoryName(preview.appId),
+            })}
           </p>
         </div>
 
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>取消</DialogClose>
+          <DialogClose render={<Button variant="outline" />}>{messages.common.cancel}</DialogClose>
           <Button
             onClick={() => {
               onApply(draft);
             }}
           >
             <Check />
-            确定
+            {messages.family.apply}
           </Button>
         </DialogFooter>
       </DialogContent>

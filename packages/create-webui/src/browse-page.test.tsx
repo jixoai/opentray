@@ -2,7 +2,33 @@
 import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { PreferencesProvider } from "@/preferences";
 import { BrowsePage } from "./browse-page";
+
+// jsdom does not implement matchMedia; the preferences provider's system-theme
+// observation path needs it.
+if (typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string): MediaQueryList => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
+const renderPage = (): ReturnType<typeof render> =>
+  render(
+    <PreferencesProvider initialLocale="en" initialTheme="system">
+      <BrowsePage />
+    </PreferencesProvider>,
+  );
 
 const initialSrc = (): string => {
   const frame = document.querySelector("iframe");
@@ -24,7 +50,7 @@ const press = (init: KeyboardEventInit): void => {
 describe("BrowsePage navigation shortcuts (add-create-url-apps D11)", () => {
   it("drives back/forward through the fallback history with ⌘ arrows", () => {
     window.history.replaceState({}, "", "/browse.html?url=http%3A%2F%2F127.0.0.1%2Fa");
-    render(<BrowsePage />);
+    renderPage();
     expect(initialSrc()).toBe("http://127.0.0.1/a");
 
     navigateBar("http://127.0.0.1/b");
@@ -43,7 +69,7 @@ describe("BrowsePage navigation shortcuts (add-create-url-apps D11)", () => {
 
   it("reloads the embedded frame on ⌘R and F5", () => {
     window.history.replaceState({}, "", "/browse.html?url=http%3A%2F%2F127.0.0.1%2Fa");
-    render(<BrowsePage />);
+    renderPage();
     navigateBar("http://127.0.0.1/b");
     const frame = document.querySelector("iframe");
     if (frame === null) throw new Error("iframe not rendered");
@@ -57,7 +83,7 @@ describe("BrowsePage navigation shortcuts (add-create-url-apps D11)", () => {
 
   it("keeps ordinary typing in the address bar untouched", () => {
     window.history.replaceState({}, "", "/browse.html?url=http%3A%2F%2F127.0.0.1%2Fa");
-    render(<BrowsePage />);
+    renderPage();
     navigateBar("http://127.0.0.1/b");
     // 焦点在地址栏内时，普通字符与 ⌘←（文本编辑光标移动）不触发导航。
     const input = document.querySelector("input");

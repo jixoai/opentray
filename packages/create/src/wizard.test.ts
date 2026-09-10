@@ -24,6 +24,10 @@ interface Harness {
   setScrape(result: MutableScrapeState): void;
   emitRunExit(code: number | null): void;
   killRun(): void;
+  emitRunPtyUnavailable(
+    reason?: "pty_bun_terminal_missing" | "pty_node_pty_missing",
+    message?: string,
+  ): void;
 }
 
 interface MutableScrapeState {
@@ -119,6 +123,16 @@ const createHarness = (overrides: Partial<WizardOptions> = {}): Harness => {
     },
     emitRunExit() {
       runOnEvent?.({ type: "exit", code: 1 });
+    },
+    emitRunPtyUnavailable(
+      reason?: "pty_bun_terminal_missing" | "pty_node_pty_missing",
+      message?: string,
+    ) {
+      runOnEvent?.({
+        type: "pty-unavailable",
+        ...(reason === undefined ? {} : { reason }),
+        ...(message === undefined ? {} : { message }),
+      });
     },
     killRun() {
       runOnEvent?.({ type: "exit", code: 137 });
@@ -1397,5 +1411,59 @@ describe("addIconCandidate (browser-derived subject candidates)", () => {
     // Deriving from a candidate that does not exist is rejected.
     expect(await harness.session.addIconCandidate(0, { ...payload, variantOf: 99 })).toBeUndefined();
     expect(harness.session.iconCandidates).toHaveLength(1);
+  });
+});
+
+// 服务端 locale 通道（webui i18n 全面修复 2026-09-11）：会话默认 zh-CN 保持
+// 历史行为；webui 通过 setLocale（请求头/事件流 lang 参数解析后）切换后，
+// 服务端直出的引导文案跟随切换；pty-unavailable 以机器 reason 码本地化，
+// 不再透传 core 的 zh 原文。
+describe("session locale channel", () => {
+  const failedReason = (events: readonly WizardEvent[]): string | undefined =>
+    events.find(
+      (event): event is Extract<WizardEvent, { type: "state" }> =>
+        event.type === "state" && event.state === "failed",
+    )?.reason;
+
+  const termModeNotice = (events: readonly WizardEvent[]): string | undefined =>
+    events.find(
+      (event): event is Extract<WizardEvent, { type: "term-mode" }> =>
+        event.type === "term-mode" && event.interactive === false && event.message !== undefined,
+    )?.message;
+
+  it("defaults to zh-CN user-facing guidance", async () => {
+    const harness = createHarness();
+    await harness.session.submitUrl("not-a-url");
+    expect(failedReason(harness.events)).toContain("URL 无效");
+  });
+
+  it("localizes guidance after setLocale", async () => {
+    const english = createHarness();
+    english.session.setLocale("en");
+    await english.session.submitUrl("not-a-url");
+    expect(failedReason(english.events)).toContain("full http(s) address");
+    expect(failedReason(english.events)).not.toContain("URL 无效");
+
+    // A fresh session keeps the zh-CN default (historical behavior).
+    const chinese = createHarness();
+    await chinese.session.submitUrl("not-a-url");
+    expect(failedReason(chinese.events)).toContain("URL 无效");
+  });
+
+  it("prefers the localized pty-unavailable text over the raw message", async () => {
+    const harness = createHarness();
+    harness.session.setLocale("en");
+    await harness.session.submitCommand("node server.js");
+    harness.emitRunPtyUnavailable("pty_node_pty_missing", "raw fallback");
+    const notice = termModeNotice(harness.events);
+    expect(notice).toContain("node-pty is unavailable");
+    expect(notice).not.toBe("raw fallback");
+  });
+
+  it("keeps the raw message when no machine reason is present", async () => {
+    const harness = createHarness();
+    await harness.session.submitCommand("node server.js");
+    harness.emitRunPtyUnavailable(undefined, "custom passthrough");
+    expect(termModeNotice(harness.events)).toBe("custom passthrough");
   });
 });

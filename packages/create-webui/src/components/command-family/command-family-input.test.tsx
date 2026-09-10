@@ -6,9 +6,28 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DEFAULT_COMMAND_OPTIONS, type WizardCommandOptions } from "@/wizard-protocol";
+import { PreferencesProvider } from "@/preferences";
 import { CommandFamilyInput } from "./command-family-input";
 
 afterEach(cleanup);
+
+// jsdom does not implement matchMedia; the preferences provider's system-theme
+// observation path needs it.
+if (typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string): MediaQueryList => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  });
+}
 
 const npmProjection: NonNullable<WizardCommandOptions["family"]> = {
   family: "npm",
@@ -58,14 +77,16 @@ function StatefulHarness({ snapshot }: StatefulHarnessProps): React.JSX.Element 
   }, [snapshot]);
 
   return (
-    <CommandFamilyInput
-      command={command}
-      onCommandChange={setCommand}
-      commandOptions={commandOptions}
-      onCommandOptionsChange={setCommandOptions}
-      disabled={false}
-      onRun={() => {}}
-    />
+    <PreferencesProvider initialLocale="zh-CN" initialTheme="system">
+      <CommandFamilyInput
+        command={command}
+        onCommandChange={setCommand}
+        commandOptions={commandOptions}
+        onCommandOptionsChange={setCommandOptions}
+        disabled={false}
+        onRun={() => {}}
+      />
+    </PreferencesProvider>
   );
 }
 

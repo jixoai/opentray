@@ -60,6 +60,7 @@ import type { LaunchVector } from "@create-opentray/core";
 import { resolveLaunchVector } from "@create-opentray/core";
 import { resolveOnPath } from "@create-opentray/core";
 import { pinningHint } from "@create-opentray/core";
+import { ptyUnavailableMessage, userMessages, type UiLocale } from "@create-opentray/core";
 
 export interface WizardEnvEntry {
   readonly key: string;
@@ -332,6 +333,8 @@ export interface WizardSession {
   analyzeIconForeground(foregroundPath: string): Promise<WizardIconAnalysis>;
   readonly form: WizardFormValues;
   readonly result: MaterializeResult | undefined;
+  /** Adopt the webui's locale for every user-facing string this session emits. */
+  setLocale(locale: UiLocale): void;
   /** Whole-session state for reconnecting clients (page refresh recovery). */
   snapshot(): WizardEvent;
   /** String form is tokenized; array form is taken as argv verbatim (array
@@ -442,6 +445,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let urlFrameEmbeddable: boolean | undefined;
   let scrapedTitle: string | undefined;
   let interactive = true; // optimistic until the PTY reports otherwise
+  // Webui 报告的 locale（请求头/事件流参数）；服务端直出文案经 user-messages
+  // 本地化。默认 zh-CN 与历史行为一致；webui 首个请求/事件流连接即覆盖。
+  let uiLocale: UiLocale = "zh-CN";
   let resolvedVector: LaunchVector | undefined;
   let frozenForm: WizardFormValues | undefined;
   let resolvedServicePort: number | undefined;
@@ -701,6 +707,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       return state;
     },
 
+    setLocale(locale: UiLocale): void {
+      uiLocale = locale;
+    },
+
     snapshot(): WizardEvent {
       return {
         type: "snapshot",
@@ -902,11 +912,11 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       try {
         parsed = new URL(trimmed);
       } catch {
-        setState("failed", "URL 无效：需要完整的 http(s) 地址");
+        setState("failed", userMessages(uiLocale).urlInvalid);
         return;
       }
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        setState("failed", "URL 仅支持 http(s) 地址");
+        setState("failed", userMessages(uiLocale).urlSchemeUnsupported);
         return;
       }
       // URL 模式取代命令模式：清空命令侧会话态（无预览进程可停——
@@ -969,7 +979,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         }
       } else if (tokens.length === 0 || tokens[0]!.trim().length === 0) {
         submitting = false;
-        setState("failed", "数组模式至少需要程序元素（第一个参数）");
+        setState("failed", userMessages(uiLocale).argvProgramRequired);
         return;
       }
       // Rust 安装禁跑（D7/D11 / Codex R4-B1）：`cargo install …` 绝不被向导代
@@ -1082,10 +1092,16 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           }
           if (event.type === "pty-unavailable") {
             interactive = false;
+            // Machine reason code wins: the raw message is the zh-CN default
+            // from core; the session-localized catalog text replaces it.
+            const message =
+              event.reason !== undefined
+                ? ptyUnavailableMessage(event.reason, uiLocale)
+                : event.message;
             emit({
               type: "term-mode",
               interactive: false,
-              ...(event.message === undefined ? {} : { message: event.message }),
+              ...(message === undefined ? {} : { message }),
             });
             return;
           }
@@ -1654,7 +1670,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           emit({
             type: "success",
             projectDir: result.projectDir,
-            pinHint: pinningHint(),
+            pinHint: pinningHint(process.platform, uiLocale),
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -1662,7 +1678,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
           setState(
             "failed",
             occupied
-              ? `${message}；可在「高级选项」中开启 强制覆盖 后重试`
+              ? `${message}${userMessages(uiLocale).dirOccupiedSuffix}`
               : message,
           );
         }
@@ -1736,7 +1752,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         emit({
           type: "success",
           projectDir: result.projectDir,
-          pinHint: pinningHint(),
+          pinHint: pinningHint(process.platform, uiLocale),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1744,7 +1760,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         setState(
           "failed",
           occupied
-            ? `${message}；可在「高级选项」中开启 强制覆盖 后重试`
+            ? `${message}${userMessages(uiLocale).dirOccupiedSuffix}`
             : message,
         );
       }

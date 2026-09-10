@@ -14,6 +14,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { usePreferences } from "@/preferences";
 
 const navigationApi = (): Navigation | undefined =>
   typeof window !== "undefined" && "navigation" in window
@@ -39,6 +40,7 @@ const initialTarget = (): string => {
 };
 
 export function BrowsePage(): React.JSX.Element {
+  const { messages } = usePreferences();
   const initial = React.useRef(initialTarget());
   const [bar, setBar] = React.useState(initial.current);
   const [frameSrc, setFrameSrc] = React.useState(initial.current);
@@ -194,17 +196,29 @@ export function BrowsePage(): React.JSX.Element {
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Address bar (Web Navigation API managed) */}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
-        <Button variant="ghost" size="icon-sm" disabled={!canBack} onClick={back} aria-label="后退">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={!canBack}
+          onClick={back}
+          aria-label={messages.common.back}
+        >
           <ArrowLeft />
         </Button>
-        <Button variant="ghost" size="icon-sm" disabled={!canForward} onClick={forward} aria-label="前进">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={!canForward}
+          onClick={forward}
+          aria-label={messages.common.forward}
+        >
           <ArrowRight />
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
           onClick={reload}
-          aria-label="重新加载"
+          aria-label={messages.common.reload}
         >
           <RotateCw />
         </Button>
@@ -213,7 +227,7 @@ export function BrowsePage(): React.JSX.Element {
           ref={barRef}
           className="h-7 font-mono text-xs"
           value={bar}
-          placeholder="输入 URL 跳转"
+          placeholder={messages.tabs.urlPlaceholder}
           onChange={(event) => setBar(event.target.value)}
           onKeyDown={(event) => {
             if (event.key !== "Enter") return;

@@ -21,6 +21,13 @@ export interface CommandRunEvent {
   readonly chunk?: string;
   readonly code?: number | null;
   readonly message?: string;
+  /**
+   * Stable machine code for pty-unavailable events so consumers can localize
+   * (and detect) the reason without parsing the human-readable message.
+   */
+  readonly reason?:
+    | "pty_bun_terminal_missing"
+    | "pty_node_pty_missing";
 }
 
 export interface CommandRunTerminalSize {
@@ -284,6 +291,7 @@ export const startCommandRun = async (options: CommandRunOptions): Promise<Comma
     } else if (process.versions.bun !== undefined) {
       options.onEvent({
         type: "pty-unavailable",
+        reason: "pty_bun_terminal_missing",
         message:
           "Bun 版本缺少 Bun.Terminal（需要 Bun ≥ 1.2.19），预览以非交互模式运行。",
       });
@@ -301,6 +309,7 @@ export const startCommandRun = async (options: CommandRunOptions): Promise<Comma
       } else {
         options.onEvent({
           type: "pty-unavailable",
+          reason: "pty_node_pty_missing",
           message:
             "node-pty 不可用，预览以非交互模式运行（无法向命令输入内容）。可安装 @lydell/node-pty 启用交互。",
         });

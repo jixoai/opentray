@@ -7,6 +7,8 @@
 import { X } from "lucide-react";
 import * as React from "react";
 
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 import { cn } from "@/lib/utils";
 
 export interface TagInputProps {
@@ -26,6 +28,7 @@ export function TagInput({
   className,
   ...rest
 }: TagInputProps): React.JSX.Element {
+  const { messages } = usePreferences();
   const [draft, setDraft] = React.useState("");
 
   const commitDraft = (): void => {
@@ -53,7 +56,7 @@ export function TagInput({
           {!disabled ? (
             <button
               type="button"
-              aria-label={`移除参数 ${index + 1}`}
+              aria-label={fmt(messages.command.argvRemove, { n: index + 1 })}
               className="text-muted-foreground hover:text-foreground"
               onClick={() => {
                 onTagsChange(tags.filter((_, i) => i !== index));
@@ -68,7 +71,10 @@ export function TagInput({
         className="min-w-24 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground"
         value={draft}
         disabled={disabled}
-        placeholder={placeholder ?? (tags.length === 0 ? "程序（如 npx）" : "参数，回车添加")}
+        placeholder={
+          placeholder ??
+          (tags.length === 0 ? messages.command.argvProgram : messages.command.argvArg)
+        }
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") {

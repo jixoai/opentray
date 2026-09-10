@@ -3,6 +3,18 @@
 const token = (): string =>
   new URLSearchParams(window.location.search).get("token") ?? "";
 
+// Locale the server should localize its user-facing strings to. The
+// PreferencesProvider keeps this in sync; every request carries it as a
+// header so a mid-session language switch self-heals on the next call.
+let apiLocale: string | undefined;
+
+export const setApiLocale = (locale: string): void => {
+  apiLocale = locale;
+};
+
+/** Current server-facing locale (undefined until the preferences resolve). */
+export const getApiLocale = (): string | undefined => apiLocale;
+
 const request = async <T>(
   path: string,
   init: { readonly method?: string; readonly body?: unknown } = {},
@@ -11,6 +23,7 @@ const request = async <T>(
     method: init.method ?? "GET",
     headers: {
       authorization: `Bearer ${token()}`,
+      ...(apiLocale === undefined ? {} : { "x-opentray-locale": apiLocale }),
       ...(init.body === undefined ? {} : { "content-type": "application/json" }),
     },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),

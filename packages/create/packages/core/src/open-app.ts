@@ -16,6 +16,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expectedDarwinBundlePath } from "./materialize";
+import { userMessages, type UiLocale } from "./user-messages";
 
 export interface OpenAppInput {
   readonly projectDir: string;
@@ -109,13 +110,21 @@ export const openMaterializedApp = async (input: OpenAppInput): Promise<OpenAppR
   return spawnEntryCold(input.projectDir);
 };
 
-/** Platform-truthful pinning hint; makes no persistence claim before first open. */
-export const pinningHint = (platform: NodeJS.Platform = process.platform): string => {
+/**
+ * Platform-truthful pinning hint; makes no persistence claim before first
+ * open. `locale` localizes the wizard/webui projection; the default keeps
+ * direct core consumers (CLI) on their historical output.
+ */
+export const pinningHint = (
+  platform: NodeJS.Platform = process.platform,
+  locale: UiLocale = "zh-CN",
+): string => {
+  const messages = userMessages(locale);
   if (platform === "darwin") {
-    return "首次打开应用后，右键点击 Dock 中的应用图标，选择“选项 → 在程序坞中保留”，即可固定到 Dock。";
+    return messages.pinHintDarwin;
   }
   if (platform === "win32") {
-    return "右键点击任务栏中的应用图标，选择“固定到任务栏”即可固定。（OpenTray 尚未生成开始菜单快捷方式）";
+    return messages.pinHintWindows;
   }
-  return "可将应用窗口固定到任务栏/收藏夹；Linux 桌面快捷方式生成尚未提供。";
+  return messages.pinHintOther;
 };

@@ -22,6 +22,7 @@ import {
   type Messages,
   LOCALES,
 } from "./i18n";
+import { setApiLocale } from "./api";
 
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -130,8 +131,15 @@ export const PreferencesProvider = ({
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
   const [theme, setThemeState] = useState<ThemeMode>(initialTheme);
 
+  // Synchronous seed: the wizard's SSE mount effect (a child) runs BEFORE this
+  // component's effects, so the event-stream lang param needs the locale
+  // before the first effect pass. Idempotent under StrictMode double render.
+  setApiLocale(initialLocale);
+
   useEffect(() => {
     applyDocumentChrome(locale, theme);
+    // Server-localized strings (pin hints, guidance) follow the UI locale.
+    setApiLocale(locale);
   }, [locale, theme]);
 
   // Live OS color-scheme observation in system mode (no reload, no state loss).

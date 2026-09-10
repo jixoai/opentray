@@ -9,6 +9,8 @@ import * as React from "react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 import { cn } from "@/lib/utils";
 import type { SubjectExtractionSettings } from "@/subject-extraction";
 import {
@@ -83,6 +85,7 @@ export function AppForm({
   onClearIcon,
   onPatch,
 }: AppFormProps): React.JSX.Element {
+  const { messages } = usePreferences();
   const disabled = frozen;
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = React.useState(false);
@@ -92,12 +95,12 @@ export function AppForm({
     <div className="grid grid-cols-1 gap-y-1">
       {/* Icon picker: square file input + scraped candidates, full row. */}
       <div>
-        <Label>应用图标</Label>
+        <Label>{messages.icon.appLabel}</Label>
         <div className="mt-1.5 flex flex-wrap items-start gap-3">
           <button
             type="button"
             disabled={disabled}
-            aria-label="选择本地图片作为应用图标"
+            aria-label={messages.icon.uploadAria}
             onClick={() => fileRef.current?.click()}
             onDragOver={(event) => {
               event.preventDefault();
@@ -118,11 +121,15 @@ export function AppForm({
             )}
           >
             {uploadedIconUrl !== undefined ? (
-              <img src={uploadedIconUrl} alt="已选图标" className="icon-checker size-full rounded object-contain" />
+              <img
+                src={uploadedIconUrl}
+                alt={messages.icon.uploadedAlt}
+                className="icon-checker size-full rounded object-contain"
+              />
             ) : (
               <span className="flex flex-col items-center gap-1 text-muted-foreground">
                 <Upload className="size-4" />
-                <span className="text-[10px] leading-tight">点击或拖入图片</span>
+                <span className="text-[10px] leading-tight">{messages.icon.clickOrDrop}</span>
               </span>
             )}
           </button>
@@ -140,9 +147,7 @@ export function AppForm({
           />
           <div className="flex flex-1 flex-wrap items-center gap-2">
             {iconCandidates.length === 0 ? (
-              <span className="text-xs text-muted-foreground">
-                未抓取到候选图标；将使用首字母图标
-              </span>
+              <span className="text-xs text-muted-foreground">{messages.icon.noCandidates}</span>
             ) : (
               // App-icon picker: originals plus AI subject extractions; the
               // solid silhouettes are tray-template art and stay in the
@@ -165,7 +170,11 @@ export function AppForm({
                     disabled={disabled}
                     title={
                       candidate.variant === "subject"
-                        ? `AI 主体提取 ${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`
+                        ? fmt(messages.icon.subjectTitle, {
+                            w: candidate.width,
+                            h: candidate.height,
+                            format: candidate.format.toUpperCase(),
+                          })
                         : `${candidate.width}×${candidate.height} ${candidate.format.toUpperCase()}`
                     }
                     onClick={() => onPickIconCandidate(candidate)}
@@ -182,8 +191,14 @@ export function AppForm({
                         src={src}
                         alt={
                           candidate.variant === "subject"
-                            ? `主体提取候选 ${candidate.width}×${candidate.height}`
-                            : `候选图标 ${candidate.width}×${candidate.height}`
+                            ? fmt(messages.icon.subjectAlt, {
+                                w: candidate.width,
+                                h: candidate.height,
+                              })
+                            : fmt(messages.icon.candidateAlt, {
+                                w: candidate.width,
+                                h: candidate.height,
+                              })
                         }
                         className="size-full object-contain"
                       />
@@ -195,7 +210,7 @@ export function AppForm({
             {subjectExtracting ? (
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground" role="status">
                 <span className="inline-block size-3 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-muted-foreground" />
-                {subjectStage ?? "AI 提取主体中…"}
+                {subjectStage ?? messages.icon.extracting}
               </span>
             ) : null}
             <button
@@ -205,18 +220,20 @@ export function AppForm({
               onClick={() => setSubjectPanelOpen((open) => !open)}
               className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
             >
-              AI 提取设置
+              {messages.icon.settings}
             </button>
           </div>
           {subjectPanelOpen ? (
             <div className="mt-2 grid grid-cols-1 gap-2.5 rounded-lg border border-border p-3">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-[11px] text-muted-foreground">模型精度</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {messages.icon.modelPrecision}
+                </span>
                 <div className="flex gap-1.5">
                   {([
-                    ["isnet", "高精"],
-                    ["isnet_fp16", "标准"],
-                    ["isnet_quint8", "轻量"],
+                    ["isnet", messages.icon.modelHigh],
+                    ["isnet_fp16", messages.icon.modelStandard],
+                    ["isnet_quint8", messages.icon.modelLight],
                   ] as const).map(([value, label]) => (
                     <button
                       key={value}
@@ -238,9 +255,13 @@ export function AppForm({
               </div>
               <div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground">去除半透明残留（alpha 阈值）</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {messages.icon.alphaLabel}
+                  </span>
                   <span className="text-[11px] tabular-nums text-muted-foreground">
-                    {subjectSettings.alphaThreshold === 0 ? "关闭" : subjectSettings.alphaThreshold}
+                    {subjectSettings.alphaThreshold === 0
+                      ? messages.common.off
+                      : subjectSettings.alphaThreshold}
                   </span>
                 </div>
                 <input
@@ -254,14 +275,18 @@ export function AppForm({
                     onSubjectSettingsChange({ ...subjectSettings, alphaThreshold: Number(event.target.value) })
                   }
                   className="mt-1 w-full accent-foreground"
-                  aria-label="主体提取 alpha 阈值"
+                  aria-label={messages.icon.alphaAria}
                 />
               </div>
               <div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground">边缘收缩（去白边/光晕）</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {messages.icon.shrinkLabel}
+                  </span>
                   <span className="text-[11px] tabular-nums text-muted-foreground">
-                    {subjectSettings.shrink === 0 ? "关闭" : `${subjectSettings.shrink}px`}
+                    {subjectSettings.shrink === 0
+                      ? messages.common.off
+                      : `${subjectSettings.shrink}px`}
                   </span>
                 </div>
                 <input
@@ -275,11 +300,11 @@ export function AppForm({
                     onSubjectSettingsChange({ ...subjectSettings, shrink: Number(event.target.value) })
                   }
                   className="mt-1 w-full accent-foreground"
-                  aria-label="主体提取边缘收缩"
+                  aria-label={messages.icon.shrinkAria}
                 />
               </div>
               <p className="text-[11px] leading-relaxed text-muted-foreground">
-                调整设置会自动重新提取，并替换现有主体候选及其托盘剪影。
+                {messages.icon.settingsHint}
               </p>
             </div>
           ) : null}
@@ -290,7 +315,7 @@ export function AppForm({
               onClick={onClearIcon}
               className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
             >
-              清除选择（回到默认）
+              {messages.icon.clearSelection}
             </button>
           ) : null}
         </div>
@@ -305,12 +330,12 @@ export function AppForm({
             <div
               role="img"
               className="icon-checker size-14 shrink-0 overflow-hidden rounded-[10px]"
-              aria-label="图标合成预览"
+              aria-label={messages.icon.composePreviewAria}
             >
               {iconComposition !== undefined ? (
                 <img
                   src={composedIconUrl(iconComposition.key)}
-                  alt="图标合成预览"
+                  alt={messages.icon.composePreviewAria}
                   className="size-full object-contain"
                   onError={(event) => {
                     event.currentTarget.style.display = "none";
@@ -318,12 +343,12 @@ export function AppForm({
                 />
               ) : (
                 <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">
-                  预览
+                  {messages.icon.previewOnly}
                 </span>
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <Label>图标背景</Label>
+              <Label>{messages.icon.background}</Label>
               <div className="mt-1.5 flex gap-1.5">
                 {(["black", "white", "transparent"] as const).map((bg) => (
                   <button
@@ -339,16 +364,22 @@ export function AppForm({
                         : "border-border text-muted-foreground hover:border-foreground/40",
                     )}
                   >
-                    {bg === "black" ? "黑色" : bg === "white" ? "白色" : "透明"}
+                    {bg === "black"
+                      ? messages.icon.bgBlack
+                      : bg === "white"
+                        ? messages.icon.bgWhite
+                        : messages.icon.bgTransparent}
                     {iconAnalysis !== undefined && iconAnalysis.suggested === bg ? (
-                      <span className="text-[10px] text-muted-foreground/70">自动</span>
+                      <span className="text-[10px] text-muted-foreground/70">
+                        {messages.icon.autoBadge}
+                      </span>
                     ) : null}
                   </button>
                 ))}
               </div>
               <div className="mt-2.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-[11px]">前景缩放</Label>
+                  <Label className="text-[11px]">{messages.icon.scale}</Label>
                   <span className="text-[11px] tabular-nums text-muted-foreground">
                     {Math.round(iconScale * 100)}%
                   </span>
@@ -362,7 +393,7 @@ export function AppForm({
                   disabled={disabled}
                   onChange={(event) => onIconScaleChange(Number(event.target.value) / 100)}
                   className="mt-1 w-full accent-foreground"
-                  aria-label="前景图标缩放"
+                  aria-label={messages.icon.scaleAria}
                 />
               </div>
               {iconComposeError !== undefined ? (
@@ -373,12 +404,18 @@ export function AppForm({
               {iconAnalysis !== undefined ? (
                 <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
                   {iconBackground === "transparent"
-                    ? "透明背景：原始像素直接透出。"
-                    : `已按明暗自动选择${iconAnalysis.suggested === iconBackground ? "" : "（已手动覆盖）"}：${
-                        iconAnalysis.luminance === undefined
-                          ? "无法分析明暗"
-                          : `前景明度 ${iconAnalysis.luminance.toFixed(2)}、覆盖率 ${(iconAnalysis.coverage * 100).toFixed(0)}%`
-                      }。`}
+                    ? messages.icon.transparentNote
+                    : fmt(messages.icon.luminanceNote, {
+                        manual:
+                          iconAnalysis.suggested === iconBackground ? "" : messages.icon.manualOverride,
+                        detail:
+                          iconAnalysis.luminance === undefined
+                            ? messages.icon.luminanceUnavailable
+                            : fmt(messages.icon.luminanceDetail, {
+                                luminance: iconAnalysis.luminance.toFixed(2),
+                                coverage: (iconAnalysis.coverage * 100).toFixed(0),
+                              }),
+                      })}
                 </p>
               ) : null}
             </div>
@@ -394,18 +431,18 @@ export function AppForm({
           className="mt-1 font-mono"
           disabled={disabled}
           value={values.appId}
-          placeholder={defaults.appId || "由命令推导（如 start.somecommand.npx）"}
+          placeholder={defaults.appId || messages.form.appIdPlaceholder}
           onChange={(event) => onPatch({ appId: event.target.value })}
         />
       </div>
       <div>
-        <Label htmlFor="appName">应用名称</Label>
+        <Label htmlFor="appName">{messages.form.appName}</Label>
         <Input
           id="appName"
           className="mt-1"
           disabled={disabled}
           value={values.appName}
-          placeholder={defaults.appName || "从服务页面标题抓取"}
+          placeholder={defaults.appName || messages.form.appNamePlaceholder}
           onChange={(event) => onPatch({ appName: event.target.value })}
         />
       </div>

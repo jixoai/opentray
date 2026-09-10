@@ -23,6 +23,8 @@ import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 import type { WizardCommandOptions } from "@/wizard-protocol";
 
 export interface CommandCardProps {
@@ -55,6 +57,7 @@ export function CommandCard({
   onRun,
   onStop,
 }: CommandCardProps): React.JSX.Element {
+  const { messages } = usePreferences();
   const patchCommand = (patch: Partial<WizardCommandOptions>): void => {
     onCommandOptionsChange({ ...commandOptions, ...patch });
   };
@@ -68,7 +71,7 @@ export function CommandCard({
             tags={argv}
             onTagsChange={onArgvChange}
             disabled={runAlive}
-            aria-label="命令参数（argv）"
+            aria-label={messages.command.argvAria}
           />
         ) : (
           <CommandFamilyInput
@@ -81,14 +84,14 @@ export function CommandCard({
           />
         )}
         {runAlive ? (
-          <Button variant="destructive" onClick={onStop} aria-label="中断命令">
+          <Button variant="destructive" onClick={onStop} aria-label={messages.command.stopAria}>
             <Square />
-            中断
+            {messages.command.stop}
           </Button>
         ) : (
-          <Button disabled={frozen} onClick={onRun} aria-label="运行命令">
+          <Button disabled={frozen} onClick={onRun} aria-label={messages.command.runAria}>
             <Play />
-            运行
+            {messages.command.run}
           </Button>
         )}
       </div>
@@ -105,15 +108,15 @@ export function CommandCard({
           <AccordionTrigger>
             <span className="flex items-center gap-2">
               <Settings2 className="size-4 text-muted-foreground" />
-              命令选项
+              {messages.command.options}
             </span>
           </AccordionTrigger>
           <AccordionContent className="space-y-4">
             <div className="grid grid-cols-1 gap-3">
               <div>
-                <Label>参数输入模式</Label>
+                <Label>{messages.command.argsModeLabel}</Label>
                 <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                  数组模式逐个输入参数（回车添加），原样传递、绝不拆分。
+                  {messages.command.argsModeHint}
                 </p>
                 {/* 单选 toggle 组：字符串 vs 数组 (argv)。空选（全不选）被忽略，
                     保证任意时刻恰有一种输入模式。 */}
@@ -130,21 +133,25 @@ export function CommandCard({
                   }}
                   disabled={frozen}
                 >
-                  <ToggleGroupItem value="string">字符串</ToggleGroupItem>
-                  <ToggleGroupItem value="array">数组 (argv)</ToggleGroupItem>
+                  <ToggleGroupItem value="string">{messages.command.modeString}</ToggleGroupItem>
+                  <ToggleGroupItem value="array">{messages.command.modeArray}</ToggleGroupItem>
                 </ToggleGroup>
               </div>
               <div>
-                <Label htmlFor="cmd-cwd">工作目录 (cwd)</Label>
+                <Label htmlFor="cmd-cwd">{messages.command.cwdLabel}</Label>
                 <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                  留空使用用户主目录（下方完整路径）；相对路径按主目录解析。
+                  {messages.command.cwdHint}
                 </p>
                 <Input
                   id="cmd-cwd"
                   className="mt-0 font-mono text-xs"
                   disabled={frozen}
                   value={commandOptions.cwd}
-                  placeholder={defaultCwd.length > 0 ? `默认：${defaultCwd}` : "默认：用户主目录"}
+                  placeholder={
+                    defaultCwd.length > 0
+                      ? fmt(messages.command.cwdDefault, { path: defaultCwd })
+                      : messages.command.cwdDefaultHome
+                  }
                   title={defaultCwd}
                   onChange={(event) => patchCommand({ cwd: event.target.value })}
                 />
@@ -156,20 +163,20 @@ export function CommandCard({
               </div>
             </div>
             <div>
-              <Label>环境变量 (env)</Label>
+              <Label>{messages.command.envLabel}</Label>
               <p className="mt-0.5 mb-1.5 text-[11px] text-muted-foreground">
-                启动命令时叠加在当前环境之上；同时写入生成的应用。
+                {messages.command.envHint}
               </p>
               <div className="space-y-1.5">
                 {commandOptions.env.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">未配置</p>
+                  <p className="text-xs text-muted-foreground">{messages.command.envEmpty}</p>
                 ) : (
                   commandOptions.env.map((entry, index) => (
                     <div key={index} className="flex gap-1.5">
                       <Input
                         className="font-mono text-xs"
                         disabled={frozen}
-                        aria-label={`env 名称 ${index + 1}`}
+                        aria-label={fmt(messages.command.envName, { n: index + 1 })}
                         value={entry.key}
                         placeholder="NAME"
                         onChange={(event) => {
@@ -181,7 +188,7 @@ export function CommandCard({
                       <Input
                         className="font-mono text-xs"
                         disabled={frozen}
-                        aria-label={`env 值 ${index + 1}`}
+                        aria-label={fmt(messages.command.envValue, { n: index + 1 })}
                         value={entry.value}
                         placeholder="value"
                         onChange={(event) => {
@@ -194,7 +201,7 @@ export function CommandCard({
                         variant="ghost"
                         size="icon-sm"
                         disabled={frozen}
-                        aria-label="删除环境变量"
+                        aria-label={messages.command.envRemove}
                         onClick={() => {
                           patchCommand({
                             env: commandOptions.env.filter((_, i) => i !== index),
@@ -215,7 +222,7 @@ export function CommandCard({
                   }
                 >
                   <TerminalIcon className="size-3.5" />
-                  添加变量
+                  {messages.command.envAdd}
                 </Button>
               </div>
             </div>

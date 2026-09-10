@@ -111,6 +111,14 @@ export {
 } from "./command-run";
 export { openMaterializedApp, pinningHint } from "./open-app";
 export {
+  isUiLocale,
+  ptyUnavailableMessage,
+  resolveUiLocale,
+  userMessages,
+  UI_LOCALES,
+  type UiLocale,
+} from "./user-messages";
+export {
   attempt,
   err,
   isCreateError,

@@ -40,7 +40,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { LOCALES, localeLabel, type Locale } from "./i18n";
+import { LOCALES, LOCALE_SHORT, localeLabel } from "./i18n";
 import { usePreferences, type ThemeMode } from "./preferences";
 
 export type WorkbenchRoute = "add" | "applications" | "help";
@@ -79,18 +79,6 @@ export const useWorkbenchNavigation = (): NavigationValue => {
   return value;
 };
 
-const LOCALE_SHORT: Record<Locale, string> = {
-  "zh-CN": "中",
-  ja: "日",
-  ko: "한",
-  en: "EN",
-  ar: "ع",
-  fr: "FR",
-  es: "ES",
-  de: "DE",
-  ru: "RU",
-};
-
 /**
  * Header row: [logo] [title] ... [toggle] when expanded; when collapsed
  * only the logo shows and hovering it swaps in the toggle button.
@@ -102,9 +90,10 @@ const LOCALE_SHORT: Record<Locale, string> = {
  *  - collapsed: only [logo]; hovering the logo swaps in the toggle button
  */
 const SidebarBrandRow = ({ product }: { product: string }): React.JSX.Element => {
+  const { messages } = usePreferences();
   const { state, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
-  const label = `${product} · ${collapsed ? "展开" : "收起"}`;
+  const label = `${product} · ${collapsed ? messages.shell.expand : messages.shell.collapse}`;
 
   if (collapsed) {
     return (

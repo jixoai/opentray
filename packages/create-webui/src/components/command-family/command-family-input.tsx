@@ -21,17 +21,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { fmt } from "@/i18n";
+import { familyLabel } from "@/lib/family-label";
 import {
   buildCommand,
   EMPTY_FAMILY_STATE,
   envPresetsFor,
   explicitEnvValue,
-  FAMILY_LABEL,
   FAMILY_ORDER,
   parseCommand,
   type Family,
   type FamilyFormState,
 } from "@/lib/command-family";
+import { usePreferences } from "@/preferences";
 import type { WizardCommandOptions } from "@/wizard-protocol";
 import { FAMILY_ICON } from "./brand-icons";
 import { FamilyFormDialog, type EnvPresetProjection } from "./family-form-dialog";
@@ -87,6 +89,7 @@ export function CommandFamilyInput({
   disabled,
   onRun,
 }: CommandFamilyInputProps): React.JSX.Element {
+  const { messages } = usePreferences();
   const parsed = React.useMemo(() => parseCommand(command), [command]);
   const serverFamily = commandOptions.family;
 
@@ -314,8 +317,10 @@ export function CommandFamilyInput({
           <DropdownMenuTrigger
             disabled={disabled}
             className="flex w-11 items-center justify-between gap-1 rounded-l-lg border-r border-input transition-colors outline-none hover:bg-accent focus-visible:z-10 focus-visible:border-ring"
-            aria-label={`命令系列：${FAMILY_LABEL[family]}，点击切换`}
-            title={`命令系列：${FAMILY_LABEL[family]}`}
+            aria-label={fmt(messages.family.selectorAria, {
+              name: familyLabel(family, messages),
+            })}
+            title={fmt(messages.family.selectorTitle, { name: familyLabel(family, messages) })}
           >
             <FamilyIcon className="size-4 text-muted-foreground ms-2" />
             {/* 下拉箭头：明示此处可切换系列，而非纯装饰图标 */}
@@ -331,7 +336,7 @@ export function CommandFamilyInput({
                   className={item === family ? "bg-accent/60" : undefined}
                 >
                   <ItemIcon className="text-muted-foreground" />
-                  {FAMILY_LABEL[item]}
+                  {familyLabel(item, messages)}
                 </DropdownMenuItem>
               );
             })}
@@ -354,15 +359,23 @@ export function CommandFamilyInput({
             type="button"
             className="h-full min-w-0 flex-1 cursor-pointer truncate px-2.5 text-left font-mono text-sm outline-none select-none disabled:cursor-not-allowed disabled:opacity-60"
             disabled={disabled}
-            title={command.length > 0 ? command : `点击配置 ${FAMILY_LABEL[family]} 系列命令`}
-            aria-label={`配置 ${FAMILY_LABEL[family]} 系列命令`}
+            title={
+              command.length > 0
+                ? command
+                : fmt(messages.family.configureTitle, { name: familyLabel(family, messages) })
+            }
+            aria-label={fmt(messages.family.configureAria, {
+              name: familyLabel(family, messages),
+            })}
             onClick={openDialog}
           >
             {command.length > 0 ? (
               command
             ) : (
               <span className="text-muted-foreground">
-                点击配置 {FAMILY_LABEL[family]} 系列命令…
+                {fmt(messages.family.configurePlaceholder, {
+                  name: familyLabel(family, messages),
+                })}
               </span>
             )}
           </button>
@@ -382,7 +395,7 @@ export function CommandFamilyInput({
                 <span
                   tabIndex={0}
                   className="mr-1 flex size-6 shrink-0 self-center cursor-help items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  aria-label="命令将携带 npm_config_yes 环境变量，悬停或点击查看"
+                  aria-label={messages.family.envCarryAria}
                   onPointerEnter={() => setEnvHovered(true)}
                   onPointerLeave={() => setEnvHovered(false)}
                   onFocus={() => setEnvFocused(true)}
@@ -395,13 +408,11 @@ export function CommandFamilyInput({
             </TooltipTrigger>
             <TooltipContent side="top">
               <div className="space-y-1 text-left">
-                <p className="text-[11px] opacity-70">环境变量预设</p>
+                <p className="text-[11px] opacity-70">{messages.family.envPresetTitle}</p>
                 <p className="font-mono text-xs">
                   {presetDefinition.key}={explicitValue}
                 </p>
-                <p className="text-[11px] opacity-70">
-                  来自「命令选项 → 环境变量」配置（唯一可信源，两侧同步）
-                </p>
+                <p className="text-[11px] opacity-70">{messages.family.envPresetSource}</p>
               </div>
             </TooltipContent>
           </Tooltip>

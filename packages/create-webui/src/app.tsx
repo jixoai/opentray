@@ -25,6 +25,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 import {
   DEFAULT_SUBJECT_SETTINGS,
   extractSubject,
@@ -68,6 +70,7 @@ const EMPTY_VALUES: WizardFormValues = {
 const EMPTY_DEFAULTS: WizardFormDefaults = { appId: "", appName: "", targetDir: "", iconPath: "" };
 
 function WizardPage(): React.JSX.Element {
+  const { messages } = usePreferences();
   const { query } = useWorkbenchRoute();
   const editAppId = query.get("edit");
   const [editLoaded, setEditLoaded] = React.useState<string | undefined>(undefined);
@@ -220,7 +223,7 @@ const selectedIconRefStale = (
       } catch {
         setIconAnalysis(undefined);
         setIconComposition(undefined);
-        setIconComposeError("图标分析或合成失败，预览不可用");
+        setIconComposeError(messages.icon.composeError);
       }
     })();
     // iconScale deliberately excluded: scale changes recompose through the
@@ -251,7 +254,16 @@ const selectedIconRefStale = (
       setSubjectExtracting(true);
       try {
         const sourceBytes = await (await fetch(iconDataUrl(port, top.index, generation))).blob();
-        const subject = await extractSubject(sourceBytes, subjectSettingsRef.current, setSubjectStage);
+        const subject = await extractSubject(
+          sourceBytes,
+          subjectSettingsRef.current,
+          (stage) =>
+            setSubjectStage(
+              stage.kind === "download"
+                ? fmt(messages.icon.extractingDownload, { percent: stage.percent })
+                : messages.icon.extractingInfer,
+            ),
+        );
         if (subject === undefined) {
           return;
         }
@@ -438,7 +450,7 @@ const selectedIconRefStale = (
       } catch {
         setIconAnalysis(undefined);
         setIconComposition(undefined);
-        setIconComposeError("图标合成失败，预览未更新");
+        setIconComposeError(messages.icon.recomposeError);
       }
     },
     [],
@@ -512,7 +524,7 @@ const selectedIconRefStale = (
       if (host === null) return;
       const handle = await createGhosttyTerminal(host);
       if (disposed || handle === undefined) {
-        if (!disposed) setTermFallback("ghostty-web 加载失败，输出将以纯文本显示");
+        if (!disposed) setTermFallback(messages.tabs.ghosttyFallback);
         return;
       }
       terminalRef.current = handle;
@@ -769,12 +781,19 @@ const selectedIconRefStale = (
             : undefined;
   const dialogIconLabel =
     iconComposition !== undefined
-      ? `合成 ${iconComposition.background === "transparent" ? "透明底" : iconComposition.background === "black" ? "黑底" : "白底"}`
+      ? fmt(messages.icon.composed, {
+          background:
+            iconComposition.background === "transparent"
+              ? messages.icon.bgNameTransparent
+              : iconComposition.background === "black"
+                ? messages.icon.bgNameBlack
+                : messages.icon.bgNameWhite,
+        })
       : uploadedIconUrl !== undefined
-        ? "本地图片"
+        ? messages.icon.localImage
         : iconCandidates[0] !== undefined
           ? `${iconCandidates[0].width}×${iconCandidates[0].height} ${iconCandidates[0].format.toUpperCase()}`
-          : "首字母图标";
+          : messages.icon.firstLetter;
   // Tray icon: the raw source (never the composite) or the text fallback.
   // The selection ref is port-scoped and can go stale across runs; the
   // SERVER form's trayIconPath is the authority — resolve it back to a
@@ -804,10 +823,10 @@ const selectedIconRefStale = (
   })();
   const dialogTrayLabel =
     uploadedTrayUrl !== undefined
-      ? "本地图片"
+      ? messages.icon.localImage
       : dialogTraySrc !== undefined
-        ? "跟随源图"
-        : "跟随应用图标";
+        ? messages.icon.followSource
+        : messages.icon.followApp;
   // ---- actions ----
   const running = wizardState === "running" || wizardState === "discovered";
   // The form is the core flow: usable from idle, before any command runs.
@@ -897,12 +916,12 @@ const selectedIconRefStale = (
       const response = await api("/api/confirm", {});
       if (!response.ok) {
         const detail = (await response.json().catch(() => ({}))) as { error?: string };
-        setConfirmError(detail.error ?? `确认失败（${response.status}）`);
+        setConfirmError(detail.error ?? fmt(messages.dialog.confirmFailed, { status: response.status }));
         return;
       }
       setConfirmError(undefined);
     } catch {
-      setConfirmError("确认请求失败");
+      setConfirmError(messages.dialog.confirmRequestFailed);
     }
   };
   React.useEffect(() => {
@@ -996,7 +1015,7 @@ const selectedIconRefStale = (
               }
             }}
           >
-            启动命令
+            {messages.wizard.sourceCommand}
           </button>
           <button
             type="button"
@@ -1004,7 +1023,7 @@ const selectedIconRefStale = (
             disabled={wizardState === "materializing" || wizardState === "success"}
             onClick={() => setUrlDrafting(true)}
           >
-            网页地址
+            {messages.wizard.sourceUrl}
           </button>
         </div>
       </div>

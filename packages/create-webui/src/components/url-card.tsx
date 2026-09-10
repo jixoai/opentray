@@ -9,6 +9,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { usePreferences } from "@/preferences";
 
 export interface UrlCardProps {
   value: string;
@@ -39,11 +40,12 @@ export function UrlCard({
   failedReason,
   onSubmit,
 }: UrlCardProps): React.JSX.Element {
+  const { messages } = usePreferences();
   return (
     <section className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-center gap-2 pb-3 text-sm font-medium text-muted-foreground">
         <Link2 className="size-4" />
-        网页地址
+        {messages.wizard.sourceUrl}
       </div>
       <div className="flex gap-2">
         <div className="relative flex-1">
@@ -60,7 +62,7 @@ export function UrlCard({
               onChange(normalized);
               onSubmit(normalized);
             }}
-            aria-label="网页地址"
+            aria-label={messages.wizard.sourceUrl}
           />
         </div>
         <Button
@@ -73,7 +75,7 @@ export function UrlCard({
           }}
         >
           {loading ? <Loader2 className="size-4 animate-spin" /> : null}
-          获取预设
+          {messages.url.fetch}
         </Button>
       </div>
       {failedReason !== undefined ? (
@@ -81,13 +83,12 @@ export function UrlCard({
       ) : null}
       {activeSource !== undefined ? (
         <p className="pt-2 text-xs text-muted-foreground">
-          源地址：<span className="font-mono">{activeSource}</span>
-          ——标题/图标预设来自该页面，均可在下方修改。
+          <span>{messages.url.sourcePrefix}</span>
+          <span className="font-mono">{activeSource}</span>
+          <span>{messages.url.activeSuffix}</span>
         </p>
       ) : (
-        <p className="pt-2 text-xs text-muted-foreground">
-          直接把网页打包成应用：不需要命令，创建时抓取页面标题与图标作为预设。
-        </p>
+        <p className="pt-2 text-xs text-muted-foreground">{messages.url.idleNote}</p>
       )}
     </section>
   );

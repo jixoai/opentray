@@ -26,6 +26,7 @@ import type {
 } from "./wizard";
 import { normalizeFamilyProjection } from "./wizard";
 import { openMaterializedApp } from "@create-opentray/core";
+import { resolveUiLocale } from "@create-opentray/core";
 import { handleWorkbenchApi } from "./workbench-api";
 
 export interface WizardServerHandle {
@@ -147,6 +148,10 @@ export const createWizardServer = async (
         respond(response, 401, "text/plain", "unauthorized\n");
         return;
       }
+      const streamLocale = resolveUiLocale(url.searchParams.get("lang"));
+      if (streamLocale !== undefined) {
+        session.setLocale(streamLocale);
+      }
       response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -257,6 +262,13 @@ export const createWizardServer = async (
       if (!isLoopbackHost(request)) {
         respond(response, 403, "application/json", '{"error":"forbidden host"}\n');
         return;
+      }
+      const headerLocale = request.headers["x-opentray-locale"];
+      const requestLocale = resolveUiLocale(
+        Array.isArray(headerLocale) ? headerLocale[0] : headerLocale,
+      );
+      if (requestLocale !== undefined) {
+        session.setLocale(requestLocale);
       }
       // Workbench routes (apps/skill/export) are Core projections with
       // their own body contract. The raw-bytes icon-upload route must NOT

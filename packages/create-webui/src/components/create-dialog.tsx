@@ -12,6 +12,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { WizardFormValues } from "@/wizard-protocol";
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 
 // 生成 = scaffold → icon → install；命令的首次运行属于「打开应用」（用户决策 D1）。
 const PIPELINE_STEPS = ["scaffold", "icon", "install"] as const;
@@ -64,6 +66,12 @@ export function CreateDialog({
   confirmError,
   onOpenChange,
 }: CreateDialogProps): React.JSX.Element {
+  const { messages } = usePreferences();
+  const stepLabel: Record<(typeof PIPELINE_STEPS)[number], string> = {
+    scaffold: messages.dialog.stepScaffold,
+    icon: messages.dialog.stepIcon,
+    install: messages.dialog.stepInstall,
+  };
   const logRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
@@ -94,58 +102,68 @@ export function CreateDialog({
         {phase === "confirm" ? (
           <>
             <DialogHeader>
-              <DialogTitle>确认应用信息</DialogTitle>
-              <DialogDescription>
-                表单已固定，以下值将用于生成应用。
-              </DialogDescription>
+              <DialogTitle>{messages.dialog.confirmTitle}</DialogTitle>
+              <DialogDescription>{messages.dialog.confirmDescription}</DialogDescription>
             </DialogHeader>
             <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-2 text-sm">
               <dt className="text-muted-foreground">App ID</dt>
               <dd className="font-mono break-all">{frozenValues.appId}</dd>
-              <dt className="text-muted-foreground">应用名称</dt>
+              <dt className="text-muted-foreground">{messages.form.appName}</dt>
               <dd className="break-all">{frozenValues.appName}</dd>
-              <dt className="text-muted-foreground">图标</dt>
+              <dt className="text-muted-foreground">{messages.dialog.icon}</dt>
               <dd className="flex flex-wrap items-center gap-4">
                 <span className="flex items-center gap-2">
                   <span
                     className="icon-checker flex size-10 items-center justify-center overflow-hidden rounded-md"
-                    aria-label="应用图标预览"
+                    aria-label={messages.dialog.appIconPreview}
                   >
                     {iconSrc !== undefined ? (
-                      <img src={iconSrc} alt="应用图标" className="size-full object-contain" />
+                      <img
+                        src={iconSrc}
+                        alt={messages.dialog.appIcon}
+                        className="size-full object-contain"
+                      />
                     ) : (
-                      <span className="text-[10px] text-muted-foreground">无</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {messages.common.none}
+                      </span>
                     )}
                   </span>
                   <span className="flex flex-col">
-                    <span className="text-xs leading-tight">应用图标</span>
+                    <span className="text-xs leading-tight">{messages.dialog.appIcon}</span>
                     <span className="font-mono text-[10px] leading-tight text-muted-foreground">{iconLabel}</span>
                   </span>
                 </span>
                 <span className="flex items-center gap-2">
                   <span
                     className="icon-checker flex size-10 items-center justify-center overflow-hidden rounded-md"
-                    aria-label="托盘图标预览"
+                    aria-label={messages.dialog.trayIconPreview}
                   >
                     {traySrc !== undefined ? (
-                      <img src={traySrc} alt="托盘图标" className="size-full object-contain" />
+                      <img
+                        src={traySrc}
+                        alt={messages.dialog.trayIcon}
+                        className="size-full object-contain"
+                      />
                     ) : (
-                      <span className="text-[10px] text-muted-foreground">文字</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {messages.dialog.textTray}
+                      </span>
                     )}
                   </span>
                   <span className="flex flex-col">
-                    <span className="text-xs leading-tight">托盘图标</span>
+                    <span className="text-xs leading-tight">{messages.dialog.trayIcon}</span>
                     <span className="font-mono text-[10px] leading-tight text-muted-foreground">{trayLabel}</span>
                   </span>
                 </span>
               </dd>
-              <dt className="text-muted-foreground">服务端口</dt>
+              <dt className="text-muted-foreground">{messages.dialog.port}</dt>
               <dd className="font-mono">
                 {selectedPort !== undefined
-                  ? `:${selectedPort}（生成后运行时重新嗅探）`
-                  : "运行时嗅探"}
+                  ? fmt(messages.dialog.portSelected, { port: selectedPort })
+                  : messages.dialog.portRuntime}
               </dd>
-              <dt className="text-muted-foreground">包管理器</dt>
+              <dt className="text-muted-foreground">{messages.advanced.pm}</dt>
               <dd>{frozenValues.pm}</dd>
             </dl>
             {confirmError !== undefined ? (
@@ -153,18 +171,18 @@ export function CreateDialog({
             ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onBack}>
-                返回修改
+                {messages.dialog.back}
               </Button>
               <Button variant="outline" onClick={onShare}>
-                分享
+                {messages.dialog.share}
               </Button>
-              <Button onClick={onCreate}>确认生成</Button>
+              <Button onClick={onCreate}>{messages.dialog.confirmCreate}</Button>
             </div>
           </>
         ) : phase === "pending" ? (
           <>
             <DialogHeader>
-              <DialogTitle>正在生成应用…</DialogTitle>
+              <DialogTitle>{messages.dialog.pendingTitle}</DialogTitle>
             </DialogHeader>
             <div className="flex flex-wrap gap-1.5">
               {PIPELINE_STEPS.map((step) => (
@@ -172,7 +190,7 @@ export function CreateDialog({
                   key={step}
                   variant={stepState(step) === "done" ? "default" : "secondary"}
                 >
-                  {step}
+                  {stepLabel[step]}
                 </Badge>
               ))}
             </div>
@@ -188,26 +206,26 @@ export function CreateDialog({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <CheckCircle2 className="size-5 text-emerald-400" />
-                应用已生成
+                {messages.dialog.successTitle}
               </DialogTitle>
             </DialogHeader>
             <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-2 text-sm">
-              <dt className="text-muted-foreground">项目目录</dt>
+              <dt className="text-muted-foreground">{messages.dialog.projectDir}</dt>
               <dd className="font-mono break-all">{result.projectDir}</dd>
               {result.bundlePath ? (
                 <>
-                  <dt className="text-muted-foreground">macOS Bundle</dt>
+                  <dt className="text-muted-foreground">{messages.dialog.macosBundle}</dt>
                   <dd className="font-mono break-all">{result.bundlePath}</dd>
                 </>
               ) : null}
             </dl>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onClose}>
-                完成
+                {messages.dialog.done}
               </Button>
               <Button onClick={onOpenApp}>
                 <ExternalLink />
-                打开应用
+                {messages.dialog.openApp}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">{result.pinHint}</p>
@@ -217,15 +235,15 @@ export function CreateDialog({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <TriangleAlert className="size-5 text-red-400" />
-                生成失败
+                {messages.dialog.failedTitle}
               </DialogTitle>
             </DialogHeader>
             <p className="break-all font-mono text-xs text-red-400">
-              {error ?? "未知错误"}
+              {error ?? messages.dialog.unknownError}
             </p>
             <div className="flex justify-end">
               <Button variant="outline" onClick={onBack}>
-                返回重试
+                {messages.dialog.backRetry}
               </Button>
             </div>
           </>

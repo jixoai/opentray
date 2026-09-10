@@ -65,6 +65,15 @@ export interface ExtractedSubject {
   readonly height: number;
 }
 
+/**
+ * Structured extraction progress: `download` carries the model-asset download
+ * percentage, `infer` marks the inference phase. UI layers map this to their
+ * own localized spinner labels.
+ */
+export type SubjectExtractionStage =
+  | { kind: "download"; percent: number }
+  | { kind: "infer" };
+
 /** Structural pixel buffer (ImageData-compatible) for canvas-free tests. */
 export interface SubjectPixels {
   readonly data: Uint8ClampedArray;
@@ -121,13 +130,13 @@ export const postProcessSubject = (
 
 /**
  * Extract the subject of an icon (background removed); undefined on failure.
- * `onStage` receives a short human-readable progress label for the spinner
- * (the backend's first-run CDN download is a multi-second wait).
+ * `onStage` receives the structured progress stage for the spinner (the
+ * backend's first-run CDN download is a multi-second wait).
  */
 export const extractSubject = async (
   source: Blob,
   settings: SubjectExtractionSettings = DEFAULT_SUBJECT_SETTINGS,
-  onStage?: (label: string) => void,
+  onStage?: (stage: SubjectExtractionStage) => void,
 ): Promise<ExtractedSubject | undefined> => {
   try {
     const removeBackground = await loadRemoveBackground();
@@ -135,9 +144,7 @@ export const extractSubject = async (
       if (total <= 0) return;
       const percent = Math.min(100, Math.round((current / total) * 100));
       onStage?.(
-        key.startsWith("fetch:")
-          ? `AI 提取主体中（下载模型 ${percent}%）`
-          : "AI 提取主体中（推理中）",
+        key.startsWith("fetch:") ? { kind: "download", percent } : { kind: "infer" },
       );
     };
     // device "gpu" falls back to CPU WASM when WebGPU is unavailable — that

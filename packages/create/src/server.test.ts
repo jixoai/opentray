@@ -95,6 +95,56 @@ describe("wizard server", () => {
     }
   });
 
+  it("adopts the webui locale from the event stream and request header", async () => {
+    // Built like bin.ts: the session adopts the SERVER's emit so SSE frames
+    // actually stream (the shared createTestServer helper wires its own
+    // array-collecting emit and never reaches the HTTP stream).
+    const server = await createWizardServer((emit) =>
+      createWizardSession({
+        cwd: "/tmp/wizard-cwd",
+        skipInstall: true,
+        force: true,
+        dependencyRange: "^0.0.0-test",
+        emit,
+      }),
+    );
+    try {
+      // ?lang= on the SSE stream adopts the locale before any snapshot replay;
+      // an invalid URL submission then emits guidance in that locale.
+      const eventsUrl = new URL(`/api/events?token=${server.token}&lang=en`, server.url);
+      const response = await fetch(eventsUrl);
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let frames = "";
+      const readUntil = async (predicate: (text: string) => boolean): Promise<void> => {
+        for (let i = 0; i < 50 && !predicate(frames); i += 1) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          frames += decoder.decode(value);
+        }
+        expect(predicate(frames)).toBe(true);
+      };
+      await readUntil((text) => text.includes(": connected") && text.includes("\"type\":\"snapshot\""));
+
+      await post(new URL("/api/url", server.url), { url: "not-a-url" }, {
+        authorization: `Bearer ${server.token}`,
+        // The header locale wins for this request's later emissions.
+        "x-opentray-locale": "en",
+      });
+      await readUntil((text) => text.includes("full http(s) address"));
+      expect(frames).not.toContain("URL 无效");
+
+      // A later request re-switches the session locale (mid-session heal).
+      await post(new URL("/api/url", server.url), { url: "still not a url" }, {
+        authorization: `Bearer ${server.token}`,
+        "x-opentray-locale": "zh-CN",
+      });
+      await reader.cancel();
+    } finally {
+      await server.close();
+    }
+  });
+
   it("rejects unknown API endpoints with 404", async () => {
     const { server } = await createTestServer();
     try {

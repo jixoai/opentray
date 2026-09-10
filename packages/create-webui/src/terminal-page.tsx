@@ -12,6 +12,8 @@ import {
   prewarmGhostty,
   type TerminalHandle,
 } from "@/components/terminal-pane";
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 
 interface ShellService {
   port: number;
@@ -30,6 +32,7 @@ type ShellEvent =
   | { type: "services"; services: ShellService[] };
 
 export function TerminalPage(): React.JSX.Element {
+  const { messages } = usePreferences();
   const [command, setCommand] = React.useState("");
   const [interactive, setInteractive] = React.useState(false);
   const [services, setServices] = React.useState<ShellService[]>([]);
@@ -112,7 +115,9 @@ export function TerminalPage(): React.JSX.Element {
           {command || "…"}
         </span>
         {!interactive ? (
-          <span className="ml-auto shrink-0 text-[10px] text-amber-400">非交互</span>
+          <span className="ml-auto shrink-0 text-[10px] text-amber-400">
+            {messages.tabs.nonInteractive}
+          </span>
         ) : null}
       </div>
       {/* PTY stream */}
@@ -120,14 +125,14 @@ export function TerminalPage(): React.JSX.Element {
       {/* Status bar: cursor, size, ports with detach marks */}
       <div className="flex h-8 shrink-0 items-center gap-3 overflow-x-auto border-t border-border bg-card px-3 text-[11px] text-muted-foreground">
         <span className="font-mono whitespace-nowrap">
-          光标 {status.cursorY}:{status.cursorX}
+          {fmt(messages.tabs.cursor, { y: status.cursorY, x: status.cursorX })}
         </span>
         <span className="font-mono whitespace-nowrap">
           {status.cols}×{status.rows}
         </span>
         <span className="h-3 w-px bg-border" />
         {services.length === 0 ? (
-          <span>监听端口嗅探中…</span>
+          <span>{messages.tabs.portsSniffing}</span>
         ) : (
           services.map((service) => (
             <Badge

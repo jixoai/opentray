@@ -24,6 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { fmt } from "@/i18n";
+import { usePreferences } from "@/preferences";
 import type { SubjectExtractionSettings } from "@/subject-extraction";
 import type {
   IconAnalysis,
@@ -107,6 +109,7 @@ export function AppConfigCard({
   onPatch,
   onConfirm,
 }: AppConfigCardProps): React.JSX.Element {
+  const { messages } = usePreferences();
   return (
     <section className="rounded-xl border border-border bg-card p-4">
       <AppForm
@@ -138,7 +141,7 @@ export function AppConfigCard({
       {/* Merged 高级选项: window modes + tray icon + package manager */}
       <Accordion className="mt-4 border-t border-border pt-1">
         <AccordionItem value="advanced" className="border-b-0">
-          <AccordionTrigger>高级选项</AccordionTrigger>
+          <AccordionTrigger>{messages.advanced.title}</AccordionTrigger>
           <AccordionContent className="space-y-4">
             <div className="grid grid-cols-1 gap-3">
               <div className="flex items-start gap-3 rounded-lg border border-border p-3">
@@ -150,11 +153,11 @@ export function AppConfigCard({
                 />
                 <div>
                   <Label htmlFor="showStartupTerminal" className="text-foreground">
-                    显示启动终端
+                    {messages.advanced.startupTerminal}
                   </Label>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                     <TerminalIcon className="mr-0.5 inline size-3" />
-                    应用启动时打开独立终端窗口，实时显示命令的 PTY 输出（可交互）。
+                    {messages.advanced.startupTerminalHint}
                   </p>
                 </div>
               </div>
@@ -167,10 +170,10 @@ export function AppConfigCard({
                 />
                 <div>
                   <Label htmlFor="showAddressBar" className="text-foreground">
-                    显示地址栏
+                    {messages.advanced.addressBar}
                   </Label>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    服务窗口顶部显示地址栏（Web Navigation API 管理导航）。
+                    {messages.advanced.addressBarHint}
                   </p>
                 </div>
               </div>
@@ -183,10 +186,10 @@ export function AppConfigCard({
                 />
                 <div>
                   <Label htmlFor="imageSmoothingEnabled" className="text-foreground">
-                    平滑缩放（imageSmoothingEnabled）
+                    {messages.advanced.smoothing}
                   </Label>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    默认开启高质量缩放；上传低分辨率像素风图标时关闭可保留硬边锯齿（等比放大应用到应用图标前景与托盘图标）。
+                    {messages.advanced.smoothingHint}
                   </p>
                 </div>
               </div>
@@ -199,19 +202,19 @@ export function AppConfigCard({
                 />
                 <div>
                   <Label htmlFor="developerMode" className="text-foreground">
-                    允许开发者模式
+                    {messages.advanced.developer}
                   </Label>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    仅表示生成应用内的 WebView DevTools 准入；不改变其它行为。
+                    {messages.advanced.developerHint}
                   </p>
                 </div>
               </div>
             </div>
 
             <div>
-              <Label>托盘图标</Label>
+              <Label>{messages.advanced.tray}</Label>
               <p className="mb-1.5 mt-0.5 text-[11px] text-muted-foreground">
-                默认与应用图标一致；纯色候选适合系统托盘（macOS 模板风格）。
+                {messages.advanced.trayHint}
               </p>
               <IconPicker
                 candidates={candidates}
@@ -221,7 +224,7 @@ export function AppConfigCard({
                 selectedRef={selectedTrayRef}
                 uploadedUrl={uploadedTrayUrl}
                 includeVariants
-                defaultLabel="默认跟随应用图标"
+                defaultLabel={messages.icon.followApp}
                 onPick={onPickTray}
                 onUpload={onUploadTray}
                 onClear={onClearTray}
@@ -229,11 +232,9 @@ export function AppConfigCard({
             </div>
 
             <div>
-              <Label htmlFor="pm">包管理器</Label>
+              <Label htmlFor="pm">{messages.advanced.pm}</Label>
               <p className="mt-0.5 mb-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                仅为生成的应用安装依赖时使用的工具（决定 install
-                命令与锁文件形态），不影响应用本身的运行方式——生成的应用始终以
-                Node 启动。默认自动跟随你启动向导所用的包管理器，一般无需修改。
+                {messages.advanced.pmHint}
               </p>
               <Select
                 value={values.pm}
@@ -252,17 +253,16 @@ export function AppConfigCard({
             </div>
 
             <div className="rounded-lg border border-border p-3">
-              <Label>生成位置</Label>
+              <Label>{messages.advanced.location}</Label>
               <p className="mt-1 font-mono text-[11px] break-all text-muted-foreground">
-                {defaults.targetDir || "~/.opentray/create/<应用名>"}
+                {defaults.targetDir || messages.advanced.locationDefault}
               </p>
               <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                生成的项目默认落在 OpenTray 主目录下，同一命令重复创建会落到同一位置；
-                也可在启动向导时通过位置参数指定其他目录。
+                {messages.advanced.locationHint}
               </p>
               {targetDirExists ? (
                 <p className="mt-2 text-[11px] font-medium text-amber-400">
-                  目标目录已存在且非空——继续生成会失败，或开启下方强制覆盖。
+                  {messages.advanced.dirExistsWarning}
                 </p>
               ) : null}
               <div className="mt-3 flex items-start gap-3">
@@ -274,11 +274,10 @@ export function AppConfigCard({
                 />
                 <div>
                   <Label htmlFor="force-overwrite" className="text-foreground">
-                    强制覆盖已存在的目录
+                    {messages.advanced.force}
                   </Label>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    开启后将清空目标目录内的现有内容并重新生成（等同
-                    --force）。请确认目录中没有你需要的文件。
+                    {messages.advanced.forceHint}
                   </p>
                 </div>
               </div>
@@ -289,12 +288,12 @@ export function AppConfigCard({
 
       <div className="mt-4 flex items-center gap-3">
         <Button onClick={onConfirm} disabled={frozen}>
-          确定创建应用
+          {messages.advanced.confirm}
         </Button>
         <span className="text-xs text-muted-foreground">
           {selectedPort !== undefined
-            ? `已选服务 :${selectedPort}（点击状态栏服务可切换）`
-            : "未运行也不影响：应用启动时会自行嗅探命令的监听端口"}
+            ? fmt(messages.advanced.serviceSelected, { port: selectedPort })
+            : messages.advanced.serviceNone}
         </span>
       </div>
     </section>
