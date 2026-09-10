@@ -41,6 +41,8 @@ interface AppFormProps {
   iconScale: number;
   /** True while the browser-side AI subject extraction is running. */
   subjectExtracting: boolean;
+  /** Spinner label while extraction runs (model download % / infer). */
+  subjectStage?: string | undefined;
   onIconBackgroundChange(background: IconBackground): void;
   onIconScaleChange(scale: number): void;
   onPickIconCandidate(candidate: IconCandidate): void;
@@ -63,6 +65,7 @@ export function AppForm({
   iconBackground,
   iconScale,
   subjectExtracting,
+  subjectStage,
   onIconBackgroundChange,
   onIconScaleChange,
   onPickIconCandidate,
@@ -181,7 +184,7 @@ export function AppForm({
             {subjectExtracting ? (
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground" role="status">
                 <span className="inline-block size-3 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-muted-foreground" />
-                AI 提取主体中…
+                {subjectStage ?? "AI 提取主体中…"}
               </span>
             ) : null}
           </div>

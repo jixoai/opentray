@@ -12,8 +12,8 @@ import {
 } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
-import { readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,9 +40,17 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
 export const createWizardServer = async (
   createSession: (emit: (event: WizardEvent) => void) => WizardSession,
-  options: { readonly port?: number } = {},
+  options: {
+    readonly port?: number;
+    /** Test seam: upstream dist base for the model proxy (default: IMG.LY CDN). */
+    readonly imglyUpstream?: (version: string) => string;
+    /** Test seam: disk cache root (default: ~/.opentray/cache/imgly-data). */
+    readonly imglyCacheRoot?: string;
+  } = {},
 ): Promise<WizardServerHandle> => {
   const token = randomBytes(16).toString("hex");
+  const imglyUpstream = options.imglyUpstream ?? IMGLY_UPSTREAM;
+  const imglyCacheRoot = options.imglyCacheRoot ?? join(homedir(), ".opentray", "cache", "imgly-data");
   const clients = new Set<ServerResponse>();
   const eventLog: WizardEvent[] = [];
 
@@ -162,10 +170,10 @@ export const createWizardServer = async (
       await handleAssetFile(url.pathname, response);
       return;
     }
-    // Vendored browser subject-extraction model assets (dist/imgly-data) —
-    // same containment-guarded static serving as the SPA assets.
+    // Model proxy/cache for browser subject extraction: loopback serving with
+    // a persistent disk cache in front of the vendor CDN (owner round-8).
     if (url.pathname.startsWith("/imgly-data/")) {
-      await handleAssetFile(url.pathname, response);
+      await handleImglyAsset(url, response, imglyCacheRoot, imglyUpstream);
       return;
     }
     if (url.pathname === "/logo.png" || FAVICON_PATHS.has(url.pathname)) {
@@ -426,6 +434,104 @@ const handleVendorAsset = async (pathname: string, response: ServerResponse): Pr
   }
   respond(response, 404, "text/plain", "terminal renderer asset is missing\n");
 };
+
+/**
+ * Backend model proxy/cache for the browser subject extraction (owner
+ * round-8): the wizard rebinds a RANDOM port every launch, so a browser-side
+ * cache can never survive — the backend downloads model assets from the
+ * vendor CDN ONCE into a persistent disk cache and serves the frontend from
+ * loopback. Content-addressed chunks are immutable → long-lived cache headers.
+ */
+const IMGLY_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".json": "application/json",
+  ".wasm": "application/wasm",
+  ".mjs": "text/javascript; charset=utf-8",
+};
+/** Model chunks are 4 MiB; bound the proxy to stop unbounded disk writes. */
+const IMGLY_FILE_LIMIT = 16 * 1024 * 1024;
+const IMGLY_UPSTREAM = (version: string): string =>
+  `https://staticimgly.com/@imgly/background-removal-data/${version}/dist/`;
+
+const handleImglyAsset = async (
+  url: URL,
+  response: ServerResponse,
+  cacheRoot: string,
+  upstream: (version: string) => string,
+): Promise<void> => {
+  // /imgly-data/<version>/<name>: strict shapes only — version pins the CDN
+  // tree, name is a single segment (resources.json or a hex chunk).
+  const match = /^\/imgly-data\/([\w.-]+)\/([\w.-]+)$/.exec(url.pathname);
+  if (match === null) {
+    respond(response, 404, "text/plain", "not found\n");
+    return;
+  }
+  const version = match[1] as string;
+  const name = match[2] as string;
+  if (version.includes("..") || name.includes("..")) {
+    respond(response, 404, "text/plain", "not found\n");
+    return;
+  }
+  const contentType = IMGLY_CONTENT_TYPES[extname(name).toLowerCase()] ?? "application/octet-stream";
+  const respondBytes = (bytes: Buffer, fromCache: boolean): void => {
+    response.writeHead(200, {
+      "content-type": contentType,
+      "content-length": bytes.length,
+      // Content-addressed payloads are immutable; the browser cache serves
+      // same-session refetches while the DISK cache survives port changes.
+      "cache-control": "public, max-age=31536000, immutable",
+      "x-opentray-imgly-cache": fromCache ? "hit" : "miss",
+    });
+    response.end(bytes);
+  };
+  const dir = join(cacheRoot, version);
+  const path = join(dir, name);
+  const cached = await readFile(path).catch(() => undefined);
+  if (cached !== undefined) {
+    respondBytes(cached, true);
+    return;
+  }
+  const fetchFromUpstream = async (): Promise<Buffer> => {
+    const upstreamResponse = await fetch(`${upstream(version)}${name}`);
+    if (!upstreamResponse.ok) {
+      throw new Error(`upstream ${upstreamResponse.status}`);
+    }
+    const bytes = Buffer.from(await upstreamResponse.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > IMGLY_FILE_LIMIT) {
+      throw new Error(`upstream size out of bounds: ${bytes.length}`);
+    }
+    // Atomic commit: temp sibling + rename, so a killed download can never
+    // leave a truncated chunk that later serves as a cache hit.
+    await mkdir(dir, { recursive: true });
+    const tempPath = join(dir, `.${name}.${randomBytes(6).toString("hex")}.tmp`);
+    await writeFile(tempPath, bytes);
+    await rm(path, { force: true });
+    await rename(tempPath, path);
+    return bytes;
+  };
+  // One in-flight download per file: parallel chunk requests dedupe instead
+  // of racing the upstream.
+  const inFlight = handleImglyAsset.inFlight.get(path);
+  if (inFlight !== undefined) {
+    try {
+      respondBytes(await inFlight, true);
+    } catch {
+      respond(response, 502, "text/plain", "model asset upstream failed\n");
+    }
+    return;
+  }
+  const download = fetchFromUpstream();
+  handleImglyAsset.inFlight.set(path, download);
+  try {
+    respondBytes(await download, false);
+  } catch (error) {
+    respond(response, 502, "text/plain", `model asset upstream failed: ${String(error)}\n`);
+  } finally {
+    handleImglyAsset.inFlight.delete(path);
+  }
+};
+/** In-flight upstream downloads, keyed by cache path (per server instance). */
+handleImglyAsset.inFlight = new Map<string, Promise<Buffer>>();
+
 
 /** Containment: icon routes must only read sources the wizard itself
  *  produced (its temp dirs / saved uploads), never arbitrary paths. */

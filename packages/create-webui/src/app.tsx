@@ -224,6 +224,8 @@ const selectedIconRefStale = (
   // ---- AI subject extraction (round-6): derive one extra candidate from the
   // clearest original. Enhancement-only — failures never surface as errors.
   const [subjectExtracting, setSubjectExtracting] = React.useState(false);
+  /** Spinner label from the extraction progress callback (model % / infer). */
+  const [subjectStage, setSubjectStage] = React.useState<string | undefined>(undefined);
   const subjectAttemptedRef = React.useRef<ReadonlySet<string>>(new Set());
   React.useEffect(() => {
     const port = iconCandidatesPort;
@@ -248,7 +250,7 @@ const selectedIconRefStale = (
       setSubjectExtracting(true);
       try {
         const sourceBytes = await (await fetch(iconDataUrl(port, top.index))).blob();
-        const subject = await extractSubject(sourceBytes);
+        const subject = await extractSubject(sourceBytes, setSubjectStage);
         if (subject === undefined) {
           return;
         }
@@ -267,6 +269,7 @@ const selectedIconRefStale = (
         // Enhancement-only: network/model failures are silent.
       } finally {
         setSubjectExtracting(false);
+        setSubjectStage(undefined);
       }
     })();
   }, [iconCandidates, iconCandidatesPort, wizardState]);
@@ -970,6 +973,7 @@ const selectedIconRefStale = (
         iconBackground={iconBackground}
         iconScale={iconScale}
         subjectExtracting={subjectExtracting}
+        subjectStage={subjectStage}
         onIconBackgroundChange={handleIconBackgroundChange}
         onIconScaleChange={handleIconScaleChange}
         selectedTrayRef={selectedTrayRef}

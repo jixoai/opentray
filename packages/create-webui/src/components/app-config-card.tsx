@@ -49,6 +49,8 @@ export interface AppConfigCardProps {
   iconScale: number;
   /** True while the browser-side AI subject extraction is running. */
   subjectExtracting: boolean;
+  /** Spinner label while extraction runs (model download % / infer). */
+  subjectStage?: string | undefined;
   onIconBackgroundChange(background: IconBackground): void;
   onIconScaleChange(scale: number): void;
   selectedTrayRef: string | undefined;
@@ -80,6 +82,7 @@ export function AppConfigCard({
   iconBackground,
   iconScale,
   subjectExtracting,
+  subjectStage,
   onIconBackgroundChange,
   onIconScaleChange,
   selectedTrayRef,
@@ -111,6 +114,7 @@ export function AppConfigCard({
         iconBackground={iconBackground}
         iconScale={iconScale}
         subjectExtracting={subjectExtracting}
+        {...(subjectStage === undefined ? {} : { subjectStage })}
         onIconBackgroundChange={onIconBackgroundChange}
         onIconScaleChange={onIconScaleChange}
         onPickIconCandidate={onPickIconCandidate}

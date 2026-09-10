@@ -6,10 +6,10 @@
   "description": "create-opentray wizard WebUI (React + shadcn/ui), built to static assets consumed by the create-opentray wizard server.",
   "license": "MIT",
   "scripts": {
-    "build": "vite build && node scripts/copy-wasm.mjs && node scripts/fix-shell-paths.mjs && node scripts/prune-ort-wasm.mjs && node scripts/vendor-imgly-data.mjs",
+    "build": "vite build && node scripts/copy-wasm.mjs && node scripts/fix-shell-paths.mjs && node scripts/prune-ort-wasm.mjs",
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config vitest.config.ts"
+    "test": "vitest run --config vitest.config.ts && node scripts/check-imgly-version.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

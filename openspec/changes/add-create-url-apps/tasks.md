@@ -86,3 +86,11 @@
 - [x] 11.3 模型内联：`vendor-imgly-data.mjs`（quint8 + 双 wasm/mjs loader 共 22 分块 ~79MB，.imgly-cache 缓存，失败降级警告）入 build 链；server 增 `/imgly-data/*` 静态路由；subject-extraction 本地 publicPath 优先 + CDN 兜底；copy-webui 的 shell 拷贝排除 imgly-data；create-webui/.gitignore（dist/.imgly-cache）。
 - [x] 11.4 测试：scrape 断言改为「无 solid 输出」；wizard addIconCandidate 用真实 PNG fixture 断言 subject + 双剪影派生（variants/尺寸/containment）；core 31、create 43、webui 65 全绿，typecheck 双零。
 - [x] 11.5 走查（独立实例）：模型 100% 本地加载（localChunks 21 / cdnChunks 0）；预设态卡片隐藏；主体候选落地；点选后卡片出现且「白色 自动」；高级托盘选择器出现「黑色纯色/白色纯色」subject 派生剪影。
+
+## 12. Round 8（用户验收轮：模型后端缓存代理 + fp16 质量，D18）
+
+- [x] 12.1 后端缓存代理：`/imgly-data/<version>/<file>` 路由（形状严格校验、`~/.opentray/cache/imgly-data/<version>/` 持久磁盘缓存、temp+rename 原子提交、in-flight 去重、16MB 单文件上限、immutable 缓存头、上游可注入测试缝）。
+- [x] 12.2 前端：版本化 publicPath `/imgly-data/<IMGLY_DATA_VERSION>/`（版本 pin 由 `check-imgly-version.mjs` 入 test 链守卫）；模型切 isnet_fp16；progress 回调 → spinner 文案（下载百分比/推理中）；浏览器不再直连 CDN。
+- [x] 12.3 删除构建期 vendor：vendor-imgly-data.mjs、build 链项、.imgly-cache、copy-webui 排除、dist/imgly-data（webui dist 回 4MB，发布包不再携带模型）。
+- [x] 12.4 测试：server 代理 1 项（fixture 上游 → miss 下载 → 关停上游后 hit 持久 → 502/404 形状守卫），10/10；wizard 34/34；webui 65/65 + 版本守卫；typecheck 双零。
+- [x] 12.5 走查：冷缓存首跑（后端从 CDN 拉 fp16 106MB/30 文件、浏览器 32 分块全走代理 0 直连、spinner「下载模型 10%→…」）；**质量数值**：fp16 subject 覆盖 0.081 vs quint8 0.175（多出≈残留白垫），近白残留仅 232px；**跨重启**：新随机端口 + 新会话 → 12s 内候选落地（磁盘缓存命中）。

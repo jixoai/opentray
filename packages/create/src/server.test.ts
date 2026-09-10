@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,7 +8,9 @@ import { describe, expect, it } from "vitest";
 import { createWizardServer } from "./server";
 import { createWizardSession, type WizardEvent } from "./wizard";
 
-const createTestServer = async () => {
+const createTestServer = async (
+  options: Parameters<typeof createWizardServer>[1] = {},
+) => {
   const events: WizardEvent[] = [];
   const session = createWizardSession({
     cwd: "/tmp/wizard-cwd",
@@ -16,9 +19,7 @@ const createTestServer = async () => {
     dependencyRange: "^0.0.0-test",
     emit: (event) => events.push(event),
   });
-  const server = await createWizardServer(
-    () => session,
-  );
+  const server = await createWizardServer(() => session, options);
   return { events, server, session };
 };
 
@@ -272,6 +273,75 @@ describe("wizard server", () => {
       expect(missing.status).toBe(404);
     } finally {
       await server.close();
+    }
+  });
+});
+
+describe("model asset proxy (/imgly-data)", () => {
+  it("downloads once from upstream, then serves from the persistent disk cache", async () => {
+    // Fixture upstream standing in for the vendor CDN.
+    const chunk = Buffer.from("model-chunk-bytes-0123456789abcdef");
+    const upstreamHitCount = { value: 0 };
+    const upstream = createServer((request, response) => {
+      upstreamHitCount.value += 1;
+      if (request.url === "/dist/resources.json") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end('{"\\u002fmodels\\u002fisnet_fp16":{"size":1,"chunks":[]}}');
+        return;
+      }
+      if (request.url === "/dist/abc123") {
+        response.writeHead(200, { "content-type": "application/octet-stream" });
+        response.end(chunk);
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    await new Promise<void>((resolvePromise) => upstream.listen(0, "127.0.0.1", resolvePromise));
+    const upstreamPort = (upstream.address() as { port: number }).port;
+    const cacheRoot = await mkdtemp(join(tmpdir(), "imgly-proxy-test-"));
+    const { server } = await createTestServer({
+      imglyCacheRoot: cacheRoot,
+      imglyUpstream: () => `http://127.0.0.1:${upstreamPort}/dist/`,
+    });
+    try {
+      const base = new URL(server.url);
+      // First fetch: upstream miss → download → cache-miss response.
+      const first = await fetch(
+        new URL(`/imgly-data/1.7.0/abc123?token=${server.token}`, base),
+      );
+      expect(first.status).toBe(200);
+      expect(Buffer.from(await first.arrayBuffer()).equals(chunk)).toBe(true);
+      expect(first.headers.get("x-opentray-imgly-cache")).toBe("miss");
+      expect(first.headers.get("content-type")).toBe("application/octet-stream");
+      // JSON metadata gets its typed content type.
+      const meta = await fetch(
+        new URL(`/imgly-data/1.7.0/resources.json?token=${server.token}`, base),
+      );
+      expect(meta.status).toBe(200);
+      expect(meta.headers.get("content-type")).toBe("application/json");
+      // Shut the upstream down: the disk cache must keep serving.
+      await new Promise<void>((resolvePromise) => upstream.close(() => resolvePromise()));
+      const second = await fetch(
+        new URL(`/imgly-data/1.7.0/abc123?token=${server.token}`, base),
+      );
+      expect(second.status).toBe(200);
+      expect(Buffer.from(await second.arrayBuffer()).equals(chunk)).toBe(true);
+      expect(second.headers.get("x-opentray-imgly-cache")).toBe("hit");
+      expect(upstreamHitCount.value).toBe(2);
+      // Unknown upstream file after shutdown → 502 (no cache entry).
+      const unavailable = await fetch(
+        new URL(`/imgly-data/1.7.0/nope?token=${server.token}`, base),
+      );
+      expect(unavailable.status).toBe(502);
+      // Malformed paths (traversal, missing segments) never reach the cache.
+      const traversal = await fetch(
+        new URL(`/imgly-data/1.7.0/../secret?token=${server.token}`, base),
+      );
+      expect(traversal.status).toBe(404);
+    } finally {
+      await server.close();
+      await rm(cacheRoot, { recursive: true, force: true });
     }
   });
 });
