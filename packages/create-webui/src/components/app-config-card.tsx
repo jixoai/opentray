@@ -55,9 +55,8 @@ export interface AppConfigCardProps {
   subjectStage?: string | undefined;
   /** Advanced extraction knobs (model precision / alpha threshold / shrink). */
   subjectSettings: SubjectExtractionSettings;
+  /** Settings changes apply immediately (debounced re-extraction upstream). */
   onSubjectSettingsChange(settings: SubjectExtractionSettings): void;
-  /** Re-run extraction for the current top original with current knobs. */
-  onSubjectReextract(): void;
   onIconBackgroundChange(background: IconBackground): void;
   onIconScaleChange(scale: number): void;
   selectedTrayRef: string | undefined;
@@ -93,7 +92,6 @@ export function AppConfigCard({
   subjectStage,
   subjectSettings,
   onSubjectSettingsChange,
-  onSubjectReextract,
   onIconBackgroundChange,
   onIconScaleChange,
   selectedTrayRef,
@@ -129,7 +127,6 @@ export function AppConfigCard({
         {...(subjectStage === undefined ? {} : { subjectStage })}
         subjectSettings={subjectSettings}
         onSubjectSettingsChange={onSubjectSettingsChange}
-        onSubjectReextract={onSubjectReextract}
         onIconBackgroundChange={onIconBackgroundChange}
         onIconScaleChange={onIconScaleChange}
         onPickIconCandidate={onPickIconCandidate}

@@ -240,9 +240,14 @@ const selectedIconRefStale = (
   const subjectAttemptedRef = React.useRef<ReadonlySet<string>>(new Set());
   /** Scrape generation the current attempt keys belong to. */
   const subjectGenerationRef = React.useRef(0);
+  /** Mirrors subjectExtracting for use inside timers/async without re-renders. */
+  const subjectExtractingRef = React.useRef(false);
+  /** A settings change landed mid-extraction: run once more after it settles. */
+  const subjectRerunPendingRef = React.useRef(false);
 
   const runSubjectExtraction = React.useCallback(
     async (top: IconCandidate, port: number, generation: number) => {
+      subjectExtractingRef.current = true;
       setSubjectExtracting(true);
       try {
         const sourceBytes = await (await fetch(iconDataUrl(port, top.index, generation))).blob();
@@ -269,12 +274,73 @@ const selectedIconRefStale = (
       } catch {
         // Enhancement-only: network/model failures are silent.
       } finally {
+        subjectExtractingRef.current = false;
         setSubjectExtracting(false);
         setSubjectStage(undefined);
+        if (subjectRerunPendingRef.current) {
+          subjectRerunPendingRef.current = false;
+          triggerSubjectRerun();
+        }
       }
     },
+    // triggerSubjectRerun is a stable debounced scheduler defined below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
+  /** Round-11 #2: settings changes re-extract automatically — model taps and
+   * settled slider values schedule ONE trailing run with the latest settings
+   * (continuous drags coalesce); an in-flight run defers it via the pending
+   * flag instead of dropping or stacking. */
+  const triggerSubjectRerun = useDebouncedCallback(() => {
+    if (wizardState === "frozen" || wizardState === "materializing" || wizardState === "success") {
+      return;
+    }
+    const port = iconCandidatesPort;
+    const top = iconCandidates.find((candidate) => candidate.variant === "original");
+    if (port === undefined || top === undefined) {
+      return;
+    }
+    if (subjectExtractingRef.current) {
+      subjectRerunPendingRef.current = true;
+      return;
+    }
+    void runSubjectExtraction(top, port, iconGeneration);
+  }, 500);
+
+  const handleSubjectSettingsChange = (next: SubjectExtractionSettings): void => {
+    setSubjectSettings(next);
+    triggerSubjectRerun();
+  };
+
+  /** Round-11 #3: a generation bump can swap the bytes under a LIVE selection
+   * (re-extraction recycles the subject's index slot; a URL switch replaces
+   * the whole list). Re-commit the selection so the server form points at the
+   * new file — the foreground effect downstream re-analyzes and re-composes
+   * with the 图标背景 card automatically. */
+  const selectionGenerationRef = React.useRef<number | undefined>(undefined);
+  React.useEffect(() => {
+    if (selectedIconRef === undefined && selectedTrayRef === undefined) return;
+    if (iconCandidatesPort === undefined) return;
+    if (selectionGenerationRef.current === undefined) {
+      selectionGenerationRef.current = iconGeneration;
+      return;
+    }
+    if (selectionGenerationRef.current === iconGeneration) return;
+    selectionGenerationRef.current = iconGeneration;
+    if (selectedIconRef !== undefined && !selectedIconRefStale(iconCandidates, selectedIconRef, iconCandidatesPort)) {
+      void api("/api/icon-select", {
+        port: iconCandidatesPort,
+        index: Number.parseInt(selectedIconRef.split(":")[1] ?? "", 10),
+      });
+    }
+    if (selectedTrayRef !== undefined && !selectedIconRefStale(iconCandidates, selectedTrayRef, iconCandidatesPort)) {
+      void api("/api/tray-icon-select", {
+        port: iconCandidatesPort,
+        index: Number.parseInt(selectedTrayRef.split(":")[1] ?? "", 10),
+      });
+    }
+  }, [iconGeneration, selectedIconRef, selectedTrayRef, iconCandidates, iconCandidatesPort]);
 
   React.useEffect(() => {
     const port = iconCandidatesPort;
@@ -304,21 +370,6 @@ const selectedIconRefStale = (
     subjectAttemptedRef.current = new Set([...subjectAttemptedRef.current, key]);
     void runSubjectExtraction(top, port, iconGeneration);
   }, [iconCandidates, iconCandidatesPort, iconGeneration, wizardState, runSubjectExtraction]);
-
-  /** Advanced-settings round-10: rerun extraction for the current top
-   * original with the latest knobs (the session REPLACES the prior subject
-   * and its silhouettes, so no duplicates stack). */
-  const handleSubjectReextract = (): void => {
-    const port = iconCandidatesPort;
-    const top = iconCandidates.find((candidate) => candidate.variant === "original");
-    if (port === undefined || top === undefined || subjectExtracting) {
-      return;
-    }
-    if (wizardState === "frozen" || wizardState === "materializing" || wizardState === "success") {
-      return;
-    }
-    void runSubjectExtraction(top, port, iconGeneration);
-  };
 
   /**
    * Composition is heavyweight (form patch + real 1024² sharp render): the
@@ -1024,8 +1075,7 @@ const selectedIconRefStale = (
         subjectExtracting={subjectExtracting}
         subjectStage={subjectStage}
         subjectSettings={subjectSettings}
-        onSubjectSettingsChange={setSubjectSettings}
-        onSubjectReextract={handleSubjectReextract}
+        onSubjectSettingsChange={handleSubjectSettingsChange}
         onIconBackgroundChange={handleIconBackgroundChange}
         onIconScaleChange={handleIconScaleChange}
         selectedTrayRef={selectedTrayRef}
@@ -1036,6 +1086,9 @@ const selectedIconRefStale = (
           if (iconCandidatesPort === undefined) return;
           setSelectedIconRef(`${iconCandidatesPort}:${candidate.index}`);
           setUploadedIconUrl(undefined);
+          // Baseline the generation at pick time: the refresh effect only
+          // re-commits when the bytes under this selection change later.
+          selectionGenerationRef.current = iconGeneration;
           void api("/api/icon-select", {
             port: iconCandidatesPort,
             index: candidate.index,
@@ -1075,6 +1128,7 @@ const selectedIconRefStale = (
           if (iconCandidatesPort === undefined) return;
           setSelectedTrayRef(`${iconCandidatesPort}:${candidate.index}`);
           setUploadedTrayUrl(undefined);
+          selectionGenerationRef.current = iconGeneration;
           void api("/api/tray-icon-select", {
             port: iconCandidatesPort,
             index: candidate.index,

@@ -66,12 +66,19 @@ The wizard WebUI SHALL run browser-side AI subject extraction on the clearest sc
 - **WHEN** a derivation is submitted for a different port or an unknown source candidate
 - **THEN** the session SHALL reject the append without mutating the candidate list
 
-### Requirement: Subject extraction SHALL expose advanced post-processing settings
+### Requirement: Subject extraction settings SHALL apply automatically and keep an active selection fused
 
-The webui SHALL expose an advanced extraction panel with a model-precision choice (full-precision, standard fp16, and quantized variants of the isnet model), an alpha threshold (0–128, zeroing mask alpha below the threshold), and an edge shrink (0–6 px, eroding the mask with N 3×3 minimum-filter passes). Post-processing SHALL be a pure function over structured pixel data so it is testable without a browser canvas. A manual re-extract action SHALL rerun extraction for the current top original with the latest settings and submit it through the replacement semantics above; while an extraction is in flight the action SHALL be disabled.
+The webui SHALL expose an advanced extraction panel with a model-precision choice (full-precision, standard fp16, and quantized variants of the isnet model), an alpha threshold (0–128, zeroing mask alpha below the threshold), and an edge shrink (0–6 px, eroding the mask with N 3×3 minimum-filter passes). Post-processing SHALL be a pure function over structured pixel data so it is testable without a browser canvas. There SHALL be no explicit apply button: every committed settings change (a model tap or a settled slider value) SHALL re-run extraction for the current top original with the latest settings through the replacement semantics above — continuous slider drags SHALL coalesce into one trailing run, and a change landing while an extraction is in flight SHALL defer exactly one further run with the latest settings instead of dropping or stacking. When a generation bump replaces the bytes under a LIVE selection (the selected index still exists in the new list), the webui SHALL re-commit that selection (app icon, and tray icon when one is picked) so the server form points at the new file and the existing analysis/background-suggestion/composition pipeline re-fuses automatically.
 
-#### Scenario: Extraction knobs post-process the mask
+#### Scenario: Settings changes re-extract automatically
 
-- **GIVEN** a subject extraction result with semi-transparent residue at the edges
-- **WHEN** the user sets a non-zero alpha threshold or edge shrink and re-extracts
-- **THEN** the replacement candidate's mask SHALL have the threshold zeroed and/or the N-pass eroded alpha applied before the PNG is submitted
+- **GIVEN** the advanced extraction panel with a rendered subject
+- **WHEN** the user changes a slider (or taps a different model precision) and takes no further action
+- **THEN** extraction SHALL re-run with the latest settings after the input settles, replacing the prior subject and its silhouettes
+- **AND** a fast drag through several values SHALL produce exactly one re-extraction with the final value
+
+#### Scenario: An active selection re-fuses after replacement
+
+- **GIVEN** the user has selected the subject candidate and the composition card shows a fused preview
+- **WHEN** a settings change (or URL switch) replaces the bytes under that selected index
+- **THEN** the selection SHALL be re-committed against the new candidate list and the composition preview SHALL re-render from the new bytes without any user action

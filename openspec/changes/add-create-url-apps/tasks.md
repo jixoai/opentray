@@ -111,3 +111,10 @@
 - [x] 14.4 走查发现的残留向量修复：替换回收同序号槽位但代际不变 → 缩略图 src 不变 → 旧主体像素残留；修复为替换路径递增 `iconGeneration`（追加仍稳定，D19 语义不变）。
 - [x] 14.5 测试：替换语义用例扩展（替换后恰 1 主体 + 2 剪影 + 代际 +1）；后处理纯函数 3 项（默认 no-op 同引用/阈值清零/腐蚀收缩）；聚焦复跑通过。
 - [x] 14.6 实机走查（独立实例 47812→47813 + 内置浏览器）：baidu→wikipedia 换链缩略图 `?g=1→?g=2` 穿透、候选行换成维基 W（视觉判读确认非百度残留）；设置面板收缩 2px/4px 重提取——服务端字节哈希实测变化（4576B→1583B，收缩更狠字节更少）、列表形状恒为 1 主体 + 2 剪影；修复后复验重提取缩略图 `g=2→g=3` 跳变且三图 `complete:true` 解码成功。
+
+## 15. Round 11（用户验收轮：设置即应用 + 选中态自动重新融合，D21）
+
+- [x] 15.1 #2 去按钮自动应用：删除「按当前设置重新提取」按钮及 onSubjectReextract prop 链（app-form/app-config-card/app.tsx）；设置变更（模型精度点选、滑杆输入）经 `useDebouncedCallback` 500ms 尾沿防抖自动重提取——连续拖动合并为一次、以最新设置为准；提取在途时新变更挂起（`subjectRerunPendingRef`）为恰好一次 trailing 重跑，在 `runSubjectExtraction` finally 收口。
+- [x] 15.2 #3 选中态自动重新融合：`selectionGenerationRef` 记录选中时的代际（pick handler 写入），effect 监听代际变更——选中仍存活（`selectedIconRefStale` 为假）时自动重提交 `/api/icon-select`（托盘选中同享 `/api/tray-icon-select`）；服务端 form 的 iconPath 切到新字节文件后，既有前景 effect 自动重分析 + 背景建议 + 重新合成，无第二条融合路径。
+- [x] 15.3 测试与构建：webui 68/68、tsc 零、build 干净（dist 4MB，ort wasm 剪除链正常）。
+- [x] 15.4 走查实证（独立实例 47815）：面板确认无按钮、文案「调整设置会自动重新提取」；仅改边缘收缩滑杆 3px（不点任何按钮）→ 500ms 后自动提取、代际 g=1→g=2、缩略图全部换 URL、选中主体自动重提交、合成 key `1a5e…→2c78…` 重新融合；再点「轻量」模型钮 → g=2→g=3、合成 key 再换 `1971…`；三轮提取后服务端形状恒为 1 主体 + 2 剪影（无叠加）；全部图片（含 1024px 合成预览）解码 `complete:true`。

@@ -7,7 +7,6 @@
 import { Upload } from "lucide-react";
 import * as React from "react";
 
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -49,9 +48,8 @@ interface AppFormProps {
   subjectStage?: string | undefined;
   /** Advanced extraction knobs (model precision / alpha threshold / shrink). */
   subjectSettings: SubjectExtractionSettings;
+  /** Settings changes apply immediately (debounced re-extraction upstream). */
   onSubjectSettingsChange(settings: SubjectExtractionSettings): void;
-  /** Re-run extraction for the current top original with current knobs. */
-  onSubjectReextract(): void;
   onIconBackgroundChange(background: IconBackground): void;
   onIconScaleChange(scale: number): void;
   onPickIconCandidate(candidate: IconCandidate): void;
@@ -78,7 +76,6 @@ export function AppForm({
   subjectStage,
   subjectSettings,
   onSubjectSettingsChange,
-  onSubjectReextract,
   onIconBackgroundChange,
   onIconScaleChange,
   onPickIconCandidate,
@@ -281,20 +278,9 @@ export function AppForm({
                   aria-label="主体提取边缘收缩"
                 />
               </div>
-              <div className="flex items-center gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-7 px-2.5 text-[11px]"
-                  disabled={disabled || subjectExtracting}
-                  onClick={onSubjectReextract}
-                >
-                  按当前设置重新提取
-                </Button>
-                <span className="text-[11px] leading-relaxed text-muted-foreground">
-                  重新提取会替换现有主体候选及其托盘剪影。
-                </span>
-              </div>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                调整设置会自动重新提取，并替换现有主体候选及其托盘剪影。
+              </p>
             </div>
           ) : null}
           {selectedIconRef !== undefined || uploadedIconUrl !== undefined ? (
