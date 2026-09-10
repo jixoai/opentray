@@ -25,7 +25,11 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { extractSubject } from "./subject-extraction";
+import {
+  DEFAULT_SUBJECT_SETTINGS,
+  extractSubject,
+  type SubjectExtractionSettings,
+} from "./subject-extraction";
 
 import {
   api,
@@ -223,46 +227,26 @@ const selectedIconRefStale = (
     // explicit handler without re-running analysis.
   }, [values.iconPath, defaults.iconPath]);
 
-  // ---- AI subject extraction (round-6): derive one extra candidate from the
-  // clearest original. Enhancement-only — failures never surface as errors.
+  // ---- AI subject extraction (round-6/10): derive one extra candidate from
+  // the clearest original. Enhancement-only — failures never surface as
+  // errors. The runner is shared by the auto effect and the manual
+  // re-extract button (advanced settings round-10).
   const [subjectExtracting, setSubjectExtracting] = React.useState(false);
   /** Spinner label from the extraction progress callback (model % / infer). */
   const [subjectStage, setSubjectStage] = React.useState<string | undefined>(undefined);
+  const [subjectSettings, setSubjectSettings] = React.useState<SubjectExtractionSettings>(DEFAULT_SUBJECT_SETTINGS);
+  const subjectSettingsRef = React.useRef(subjectSettings);
+  subjectSettingsRef.current = subjectSettings;
   const subjectAttemptedRef = React.useRef<ReadonlySet<string>>(new Set());
   /** Scrape generation the current attempt keys belong to. */
   const subjectGenerationRef = React.useRef(0);
-  React.useEffect(() => {
-    const port = iconCandidatesPort;
-    const top = iconCandidates.find((candidate) => candidate.variant === "original");
-    if (port === undefined || top === undefined) {
-      return;
-    }
-    if (wizardState === "frozen" || wizardState === "materializing" || wizardState === "success") {
-      return;
-    }
-    // Candidate lists are REPLACED per scrape and the port:index keys
-    // restart from zero (URL mode is always port 0; even identical favicon
-    // bytes across two URLs reuse them), so a scrape-generation bump from
-    // the server must reset the attempt keys — otherwise the first URL's
-    // keys would suppress extraction for every subsequent one.
-    if (subjectGenerationRef.current !== iconGeneration) {
-      subjectGenerationRef.current = iconGeneration;
-      subjectAttemptedRef.current = new Set();
-    }
-    const key = `${port}:${top.index}`;
-    if (subjectAttemptedRef.current.has(key)) {
-      return;
-    }
-    if (iconCandidates.some((c) => c.variant === "subject" && c.variantOf === top.index)) {
-      return;
-    }
-    const generation = iconGeneration;
-    subjectAttemptedRef.current = new Set([...subjectAttemptedRef.current, key]);
-    void (async () => {
+
+  const runSubjectExtraction = React.useCallback(
+    async (top: IconCandidate, port: number, generation: number) => {
       setSubjectExtracting(true);
       try {
-        const sourceBytes = await (await fetch(iconDataUrl(port, top.index))).blob();
-        const subject = await extractSubject(sourceBytes, setSubjectStage);
+        const sourceBytes = await (await fetch(iconDataUrl(port, top.index, generation))).blob();
+        const subject = await extractSubject(sourceBytes, subjectSettingsRef.current, setSubjectStage);
         if (subject === undefined) {
           return;
         }
@@ -288,8 +272,53 @@ const selectedIconRefStale = (
         setSubjectExtracting(false);
         setSubjectStage(undefined);
       }
-    })();
-  }, [iconCandidates, iconCandidatesPort, iconGeneration, wizardState]);
+    },
+    [],
+  );
+
+  React.useEffect(() => {
+    const port = iconCandidatesPort;
+    const top = iconCandidates.find((candidate) => candidate.variant === "original");
+    if (port === undefined || top === undefined) {
+      return;
+    }
+    if (wizardState === "frozen" || wizardState === "materializing" || wizardState === "success") {
+      return;
+    }
+    // Candidate lists are REPLACED per scrape and the port:index keys
+    // restart from zero (URL mode is always port 0; even identical favicon
+    // bytes across two URLs reuse them), so a scrape-generation bump from
+    // the server must reset the attempt keys — otherwise the first URL's
+    // keys would suppress extraction for every subsequent one.
+    if (subjectGenerationRef.current !== iconGeneration) {
+      subjectGenerationRef.current = iconGeneration;
+      subjectAttemptedRef.current = new Set();
+    }
+    const key = `${port}:${top.index}`;
+    if (subjectAttemptedRef.current.has(key)) {
+      return;
+    }
+    if (iconCandidates.some((c) => c.variant === "subject" && c.variantOf === top.index)) {
+      return;
+    }
+    subjectAttemptedRef.current = new Set([...subjectAttemptedRef.current, key]);
+    void runSubjectExtraction(top, port, iconGeneration);
+  }, [iconCandidates, iconCandidatesPort, iconGeneration, wizardState, runSubjectExtraction]);
+
+  /** Advanced-settings round-10: rerun extraction for the current top
+   * original with the latest knobs (the session REPLACES the prior subject
+   * and its silhouettes, so no duplicates stack). */
+  const handleSubjectReextract = (): void => {
+    const port = iconCandidatesPort;
+    const top = iconCandidates.find((candidate) => candidate.variant === "original");
+    if (port === undefined || top === undefined || subjectExtracting) {
+      return;
+    }
+    if (wizardState === "frozen" || wizardState === "materializing" || wizardState === "success") {
+      return;
+    }
+    void runSubjectExtraction(top, port, iconGeneration);
+  };
 
   /**
    * Composition is heavyweight (form patch + real 1024² sharp render): the
@@ -683,9 +712,9 @@ const selectedIconRefStale = (
       : uploadedIconUrl !== undefined
         ? uploadedIconUrl
         : iconCandidatesPort !== undefined && selectedCandidateIndex !== undefined && iconCandidates.some((c) => c.index === selectedCandidateIndex)
-          ? iconDataUrl(iconCandidatesPort, selectedCandidateIndex)
+          ? iconDataUrl(iconCandidatesPort, selectedCandidateIndex, iconGeneration)
           : iconCandidatesPort !== undefined && iconCandidates !== undefined && iconCandidates[0] !== undefined && selectedIconRef === undefined
-            ? iconDataUrl(iconCandidatesPort, iconCandidates[0]!.index)
+            ? iconDataUrl(iconCandidatesPort, iconCandidates[0]!.index, iconGeneration)
             : undefined;
   const dialogIconLabel =
     iconComposition !== undefined
@@ -706,14 +735,14 @@ const selectedIconRefStale = (
     const authoritative = values.trayIconPath.trim();
     if (authoritative.length > 0 && iconCandidatesPort !== undefined) {
       const hit = iconCandidates.find((c) => c.path === authoritative);
-      if (hit !== undefined) return iconDataUrl(iconCandidatesPort, hit.index);
+      if (hit !== undefined) return iconDataUrl(iconCandidatesPort, hit.index, iconGeneration);
     }
     const match = /^([^:]+):(\d+)$/.exec(selectedTrayRef ?? "");
     if (match !== null) {
       const port = Number(match[1]);
       const index = Number(match[2]);
       if (Number.isInteger(port) && Number.isInteger(index)) {
-        return iconDataUrl(port, index);
+        return iconDataUrl(port, index, iconGeneration);
       }
     }
     if (authoritative.length === 0) {
@@ -984,6 +1013,7 @@ const selectedIconRefStale = (
         defaults={defaults}
         candidates={iconCandidates}
         candidatesPort={iconCandidatesPort}
+        candidatesGeneration={iconGeneration}
         selectedIconRef={selectedIconRef}
         uploadedIconUrl={uploadedIconUrl}
         iconAnalysis={iconAnalysis}
@@ -993,6 +1023,9 @@ const selectedIconRefStale = (
         iconScale={iconScale}
         subjectExtracting={subjectExtracting}
         subjectStage={subjectStage}
+        subjectSettings={subjectSettings}
+        onSubjectSettingsChange={setSubjectSettings}
+        onSubjectReextract={handleSubjectReextract}
         onIconBackgroundChange={handleIconBackgroundChange}
         onIconScaleChange={handleIconScaleChange}
         selectedTrayRef={selectedTrayRef}

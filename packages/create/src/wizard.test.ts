@@ -1158,13 +1158,16 @@ describe("addIconCandidate (browser-derived subject candidates)", () => {
     runInstall: async () => {},
   };
 
-  /** A real decodable RGBA PNG: a centered opaque square on transparency,
-   * shaped like an AI-extracted subject (its alpha mask IS the subject). */
-  const subjectPng = async (): Promise<Buffer> => {
+  /** A real decodable RGBA PNG: an opaque square on transparency, shaped
+   * like an AI-extracted subject (its alpha mask IS the subject). The
+   * `shift` offsets the square so successive derivations produce distinct
+   * bytes (and thus distinct content-addressed paths). */
+  const subjectPng = async (shift = 0): Promise<Buffer> => {
     const size = 64;
     const image = emptyImageOf(size, size);
-    for (let y = 16; y < 48; y += 1) {
-      for (let x = 16; x < 48; x += 1) {
+    for (let y = 16 + shift; y < 48 + shift; y += 1) {
+      for (let x = 16 + shift; x < 48 + shift; x += 1) {
+        if (x >= size || y >= size) continue;
         const idx = (y * size + x) * 4;
         image.data[idx] = 40;
         image.data[idx + 1] = 40;
@@ -1284,7 +1287,77 @@ describe("addIconCandidate (browser-derived subject candidates)", () => {
     if (afterSwitch?.type !== "icons") throw new Error("no icons event after switch");
     expect(afterSwitch.generation).toBeGreaterThan(afterFirst.generation);
     // The snapshot carries the current generation for page-refresh recovery.
-    expect(harness.session.snapshot().iconsGeneration).toBe(afterSwitch.generation);
+    const snapshot = harness.session.snapshot();
+    if (snapshot.type !== "snapshot") throw new Error("expected snapshot event");
+    expect(snapshot.iconsGeneration).toBe(afterSwitch.generation);
+  });
+
+  it("re-extraction replaces the prior subject and its silhouettes", async () => {
+    const urlHome = mkdtempSync(join(tmpdir(), "wizard-subject-replace-"));
+    const harness = createHarness({
+      homeDir: urlHome,
+      scrapeUrl: async () => ({
+        ok: true,
+        title: "T",
+        iconPath: join(urlHome, "scraped.png"),
+        icons: [
+          {
+            index: 0,
+            url: "https://example.com/icon.png",
+            path: join(urlHome, "scraped.png"),
+            width: 64,
+            height: 64,
+            format: "png",
+            variant: "original",
+          },
+        ],
+      }),
+      materializeContext: fakeMaterializeContext,
+    });
+    await writeFile(join(urlHome, "scraped.png"), Buffer.alloc(64, 1));
+    await harness.session.submitUrl("https://example.com/a");
+
+    const first = await harness.session.addIconCandidate(0, {
+      bytes: await subjectPng(),
+      variantOf: 0,
+      width: 64,
+      height: 64,
+      format: "png",
+    });
+    expect(first).toBeDefined();
+    const firstPath = first!.path;
+    const genAfterFirstAdd = harness.session.snapshot();
+    if (genAfterFirstAdd.type !== "snapshot") throw new Error("expected snapshot event");
+    expect(
+      harness.session.iconCandidates.filter((icon) => icon.variant === "subject"),
+    ).toHaveLength(1);
+    expect(
+      harness.session.iconCandidates.filter((icon) => icon.variant === "solid-black" || icon.variant === "solid-white"),
+    ).toHaveLength(2);
+
+    // A tweaked re-derivation from the SAME source swaps the pair out.
+    const second = await harness.session.addIconCandidate(0, {
+      bytes: await subjectPng(6),
+      variantOf: 0,
+      width: 64,
+      height: 64,
+      format: "png",
+    });
+    expect(second).toBeDefined();
+    const subjects = harness.session.iconCandidates.filter((icon) => icon.variant === "subject");
+    expect(subjects).toHaveLength(1);
+    expect(subjects[0]?.index).toBe(second?.index);
+    expect(
+      harness.session.iconCandidates.filter((icon) => icon.variant === "solid-black" || icon.variant === "solid-white"),
+    ).toHaveLength(2);
+    // The prior subject's bytes are gone from the list (indexes may be
+    // legitimately recycled by the replacement pair).
+    expect(harness.session.iconCandidates.some((icon) => icon.path === firstPath && icon.variant === "subject")).toBe(false);
+    // The recycled index slot carries new bytes, so the replacement must bump
+    // the generation — thumbnail URLs change and browsers drop stale pixels.
+    const genAfterReplace = harness.session.snapshot();
+    if (genAfterReplace.type !== "snapshot") throw new Error("expected snapshot event");
+    expect(genAfterReplace.iconsGeneration).toBe(genAfterFirstAdd.iconsGeneration + 1);
   });
 
   it("rejects derivations from another port or an unknown source", async () => {

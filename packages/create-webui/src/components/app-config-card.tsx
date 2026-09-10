@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import type { SubjectExtractionSettings } from "@/subject-extraction";
 import type {
   IconAnalysis,
   IconBackground,
@@ -39,6 +40,7 @@ export interface AppConfigCardProps {
   defaults: WizardFormDefaults;
   candidates: IconCandidate[];
   candidatesPort: number | undefined;
+  candidatesGeneration: number;
   selectedIconRef: string | undefined;
   uploadedIconUrl: string | undefined;
   /** Icon composition state (owner round-12). */
@@ -51,6 +53,11 @@ export interface AppConfigCardProps {
   subjectExtracting: boolean;
   /** Spinner label while extraction runs (model download % / infer). */
   subjectStage?: string | undefined;
+  /** Advanced extraction knobs (model precision / alpha threshold / shrink). */
+  subjectSettings: SubjectExtractionSettings;
+  onSubjectSettingsChange(settings: SubjectExtractionSettings): void;
+  /** Re-run extraction for the current top original with current knobs. */
+  onSubjectReextract(): void;
   onIconBackgroundChange(background: IconBackground): void;
   onIconScaleChange(scale: number): void;
   selectedTrayRef: string | undefined;
@@ -74,6 +81,7 @@ export function AppConfigCard({
   defaults,
   candidates,
   candidatesPort,
+  candidatesGeneration,
   selectedIconRef,
   uploadedIconUrl,
   iconAnalysis,
@@ -83,6 +91,9 @@ export function AppConfigCard({
   iconScale,
   subjectExtracting,
   subjectStage,
+  subjectSettings,
+  onSubjectSettingsChange,
+  onSubjectReextract,
   onIconBackgroundChange,
   onIconScaleChange,
   selectedTrayRef,
@@ -106,6 +117,7 @@ export function AppConfigCard({
         frozen={frozen}
         iconCandidates={candidates}
         iconCandidatesPort={candidatesPort}
+        iconCandidatesGeneration={candidatesGeneration}
         uploadedIconUrl={uploadedIconUrl}
         selectedIconRef={selectedIconRef}
         iconAnalysis={iconAnalysis}
@@ -115,6 +127,9 @@ export function AppConfigCard({
         iconScale={iconScale}
         subjectExtracting={subjectExtracting}
         {...(subjectStage === undefined ? {} : { subjectStage })}
+        subjectSettings={subjectSettings}
+        onSubjectSettingsChange={onSubjectSettingsChange}
+        onSubjectReextract={onSubjectReextract}
         onIconBackgroundChange={onIconBackgroundChange}
         onIconScaleChange={onIconScaleChange}
         onPickIconCandidate={onPickIconCandidate}
@@ -204,6 +219,7 @@ export function AppConfigCard({
               <IconPicker
                 candidates={candidates}
                 port={candidatesPort}
+                generation={candidatesGeneration}
                 disabled={frozen}
                 selectedRef={selectedTrayRef}
                 uploadedUrl={uploadedTrayUrl}

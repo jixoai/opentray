@@ -766,7 +766,20 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       const name = `subject-${createHash("sha256").update(candidate.bytes).digest("hex").slice(0, 16)}.bin`;
       const path = join(dir, name);
       await writeFile(path, candidate.bytes);
-      let nextIndex = iconCandidates.reduce((max, icon) => Math.max(max, icon.index), -1) + 1;
+      // Re-extraction REPLACES: a subject re-derived from the same source
+      // (settings tweak / manual rerun) swaps out the prior subject AND the
+      // silhouettes derived from it — never stacks duplicates.
+      const priorSubject = iconCandidates.find(
+        (icon) => icon.variant === "subject" && icon.variantOf === source.index,
+      );
+      const base = priorSubject === undefined
+        ? iconCandidates
+        : iconCandidates.filter(
+            (icon) =>
+              icon !== priorSubject &&
+              !(icon.variantOf === priorSubject.index && icon.variant !== "original" && icon.variant !== "subject"),
+          );
+      let nextIndex = base.reduce((max, icon) => Math.max(max, icon.index), -1) + 1;
       const appended: ScrapedIcon = {
         index: nextIndex,
         url: source.url,
@@ -777,7 +790,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         variant: "subject",
         variantOf: source.index,
       };
-      let candidates = [...iconCandidates, appended];
+      let candidates = [...base, appended];
       // D17: the AI subject's alpha mask IS the subject shape — derive the
       // tray-template silhouettes from IT (an opaque favicon's own mask is a
       // full square, which produced useless solid tiles pre-D17).
@@ -807,6 +820,12 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         ];
       }
       iconCandidates = candidates;
+      if (priorSubject !== undefined) {
+        // Thumbnail identity is (index, generation): a replacement recycles
+        // the subject's index slot, so a stable generation would leave the
+        // browser rendering the prior subject's bytes at the same URL.
+        iconGeneration += 1;
+      }
       emit({ type: "icons", port, icons: iconCandidates, generation: iconGeneration });
       return appended;
     },

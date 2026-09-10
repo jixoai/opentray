@@ -12,6 +12,8 @@ import { iconDataUrl, type IconCandidate } from "@/wizard-protocol";
 export interface IconPickerProps {
   candidates: IconCandidate[];
   port: number | undefined;
+  /** Scrape generation (thumbnail cache buster). */
+  generation: number;
   disabled: boolean;
   /** Currently picked `port:index`, or undefined for the default (index 0). */
   selectedRef: string | undefined;
@@ -29,6 +31,7 @@ export interface IconPickerProps {
 export function IconPicker({
   candidates,
   port,
+  generation,
   disabled,
   selectedRef,
   uploadedUrl,
@@ -98,7 +101,7 @@ export function IconPicker({
         ) : (
           visible.map((candidate) => {
             const src =
-              port === undefined ? undefined : iconDataUrl(port, candidate.index);
+              port === undefined ? undefined : iconDataUrl(port, candidate.index, generation);
             const picked = selectedRef === `${port}:${candidate.index}`;
             const isDefault = selectedRef === undefined && candidate.variant === "original" && candidate.index === (originals[0]?.index ?? -1);
             return (

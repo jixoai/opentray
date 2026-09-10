@@ -7,9 +7,11 @@
 import { Upload } from "lucide-react";
 import * as React from "react";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import type { SubjectExtractionSettings } from "@/subject-extraction";
 import {
   composedIconUrl,
   iconDataUrl,
@@ -29,6 +31,8 @@ interface AppFormProps {
   iconCandidates: IconCandidate[];
   /** Port the candidates were scraped from (thumbnail endpoint scope). */
   iconCandidatesPort: number | undefined;
+  /** Scrape generation (thumbnail cache buster + extraction generations). */
+  iconCandidatesGeneration: number;
   /** Local preview object URL for an uploaded icon. */
   uploadedIconUrl: string | undefined;
   /** Selection reference: `port:index` when a candidate is picked. */
@@ -43,6 +47,11 @@ interface AppFormProps {
   subjectExtracting: boolean;
   /** Spinner label while extraction runs (model download % / infer). */
   subjectStage?: string | undefined;
+  /** Advanced extraction knobs (model precision / alpha threshold / shrink). */
+  subjectSettings: SubjectExtractionSettings;
+  onSubjectSettingsChange(settings: SubjectExtractionSettings): void;
+  /** Re-run extraction for the current top original with current knobs. */
+  onSubjectReextract(): void;
   onIconBackgroundChange(background: IconBackground): void;
   onIconScaleChange(scale: number): void;
   onPickIconCandidate(candidate: IconCandidate): void;
@@ -57,6 +66,7 @@ export function AppForm({
   frozen,
   iconCandidates,
   iconCandidatesPort,
+  iconCandidatesGeneration,
   uploadedIconUrl,
   selectedIconRef,
   iconAnalysis,
@@ -66,6 +76,9 @@ export function AppForm({
   iconScale,
   subjectExtracting,
   subjectStage,
+  subjectSettings,
+  onSubjectSettingsChange,
+  onSubjectReextract,
   onIconBackgroundChange,
   onIconScaleChange,
   onPickIconCandidate,
@@ -76,6 +89,7 @@ export function AppForm({
   const disabled = frozen;
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = React.useState(false);
+  const [subjectPanelOpen, setSubjectPanelOpen] = React.useState(false);
 
   return (
     <div className="grid grid-cols-1 gap-y-1">
@@ -142,7 +156,7 @@ export function AppForm({
                 const src =
                   iconCandidatesPort === undefined
                     ? undefined
-                    : iconDataUrl(iconCandidatesPort, candidate.index);
+                    : iconDataUrl(iconCandidatesPort, candidate.index, iconCandidatesGeneration);
                 const picked =
                   selectedIconRef ===
                   `${iconCandidatesPort}:${candidate.index}`;
@@ -187,7 +201,102 @@ export function AppForm({
                 {subjectStage ?? "AI 提取主体中…"}
               </span>
             ) : null}
+            <button
+              type="button"
+              disabled={disabled}
+              aria-expanded={subjectPanelOpen}
+              onClick={() => setSubjectPanelOpen((open) => !open)}
+              className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+            >
+              AI 提取设置
+            </button>
           </div>
+          {subjectPanelOpen ? (
+            <div className="mt-2 grid grid-cols-1 gap-2.5 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] text-muted-foreground">模型精度</span>
+                <div className="flex gap-1.5">
+                  {([
+                    ["isnet", "高精"],
+                    ["isnet_fp16", "标准"],
+                    ["isnet_quint8", "轻量"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={disabled}
+                      aria-pressed={subjectSettings.model === value}
+                      onClick={() => onSubjectSettingsChange({ ...subjectSettings, model: value })}
+                      className={cn(
+                        "h-7 rounded-md border px-2.5 text-[11px] transition-colors",
+                        subjectSettings.model === value
+                          ? "border-foreground bg-secondary text-secondary-foreground"
+                          : "border-border text-muted-foreground hover:border-foreground/40",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-muted-foreground">去除半透明残留（alpha 阈值）</span>
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {subjectSettings.alphaThreshold === 0 ? "关闭" : subjectSettings.alphaThreshold}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={128}
+                  step={8}
+                  value={subjectSettings.alphaThreshold}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    onSubjectSettingsChange({ ...subjectSettings, alphaThreshold: Number(event.target.value) })
+                  }
+                  className="mt-1 w-full accent-foreground"
+                  aria-label="主体提取 alpha 阈值"
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-muted-foreground">边缘收缩（去白边/光晕）</span>
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {subjectSettings.shrink === 0 ? "关闭" : `${subjectSettings.shrink}px`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={6}
+                  step={1}
+                  value={subjectSettings.shrink}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    onSubjectSettingsChange({ ...subjectSettings, shrink: Number(event.target.value) })
+                  }
+                  className="mt-1 w-full accent-foreground"
+                  aria-label="主体提取边缘收缩"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-7 px-2.5 text-[11px]"
+                  disabled={disabled || subjectExtracting}
+                  onClick={onSubjectReextract}
+                >
+                  按当前设置重新提取
+                </Button>
+                <span className="text-[11px] leading-relaxed text-muted-foreground">
+                  重新提取会替换现有主体候选及其托盘剪影。
+                </span>
+              </div>
+            </div>
+          ) : null}
           {selectedIconRef !== undefined || uploadedIconUrl !== undefined ? (
             <button
               type="button"

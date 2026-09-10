@@ -176,8 +176,14 @@ export const openEventStream = (): EventSource =>
   new EventSource(`/api/events?token=${encodeURIComponent(WIZARD_TOKEN)}`);
 
 /** Candidate thumbnail source (img tags cannot send auth headers). */
-export const iconDataUrl = (port: number, index: number): string =>
-  `/api/icon-data/${port}/${index}?token=${encodeURIComponent(WIZARD_TOKEN)}`;
+/**
+ * Candidate thumbnail URL. The `g` generation query is the cache buster:
+ * indexes restart from zero per scrape, so without it the browser serves the
+ * PREVIOUS URL's cached thumbnail after a link switch (baidu → wikipedia
+ * showed baidu's art while the server list had already moved on).
+ */
+export const iconDataUrl = (port: number, index: number, generation = 0): string =>
+  `/api/icon-data/${port}/${index}?g=${generation}&token=${encodeURIComponent(WIZARD_TOKEN)}`;
 
 /** Match a service URL to an iframe tab by hostname (port-agnostic). */
 export const hostnameOf = (url: string): string => {
