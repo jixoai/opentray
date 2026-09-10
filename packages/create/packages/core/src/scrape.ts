@@ -323,46 +323,20 @@ export const scrapeUrl = async (
   collected.sort((a, b) => b.width * a.height === a.width * b.height ? 0 : b.width * b.height - a.width * a.height);
   const originals = collected.map((c, order) => ({ ...c, order }));
 
-  // Solid-color silhouettes (tray/template candidates): alpha mask filled
-  // with one color, rendered at a tray-appropriate size, deduped among
-  // themselves — identical silhouettes from different sources collapse.
-  const solids: { url: string; path: string; variant: IconVariant; variantOf: number; hash: string | undefined }[] = [];
-  for (const original of originals) {
-    for (const variant of ["solid-black", "solid-white"] as const) {
-      const solid = await renderSolidSilhouette(original.path, variant === "solid-black" ? black : white);
-      if (solid === undefined) {
-        continue;
-      }
-      const hash = await iconPerceptualHash(solid);
-      if (hash !== undefined && solids.some((s) => s.hash !== undefined && hamming(hash, s.hash) <= 6)) {
-        continue;
-      }
-      const path = await writeIconTemp(solid, dir);
-      solids.push({ url: original.url, path, variant, variantOf: original.order, hash });
-    }
-  }
+  // Solid tray-template silhouettes are NO LONGER derived here: the alpha
+  // mask of an opaque white-pad favicon is a full square, which produced
+  // useless solid tiles. They are now derived server-side from the
+  // browser-extracted SUBJECT (see wizard addIconCandidate / D17).
 
-  const icons: ScrapedIcon[] = [
-    ...originals.map<ScrapedIcon>((c) => ({
-      index: c.order,
-      url: c.url,
-      path: c.path,
-      width: c.width,
-      height: c.height,
-      format: c.format,
-      variant: "original",
-    })),
-    ...solids.map<ScrapedIcon>((s, i) => ({
-      index: originals.length + i,
-      url: s.url,
-      path: s.path,
-      width: SOLID_SIZE,
-      height: SOLID_SIZE,
-      format: "png",
-      variant: s.variant,
-      variantOf: s.variantOf,
-    })),
-  ];
+  const icons: ScrapedIcon[] = originals.map<ScrapedIcon>((c) => ({
+    index: c.order,
+    url: c.url,
+    path: c.path,
+    width: c.width,
+    height: c.height,
+    format: c.format,
+    variant: "original",
+  }));
 
   return {
     ok: true,
@@ -423,16 +397,16 @@ export const deriveUrlPresets = async (
   };
 };
 
-const black = { r: 0, g: 0, b: 0 };
-const white = { r: 255, g: 255, b: 255 };
-const SOLID_SIZE = 128;
+/** Tray-template silhouette render size (tray projections are ≤ 64pt). */
+export const SOLID_SIZE = 128;
 
 /**
  * Render a solid-color silhouette from an icon's alpha mask (RGB discarded,
- * alpha kept) — the shape language macOS tray templates want. Non-decodable
- * sources (e.g. corrupt bytes) return undefined instead of failing the scrape.
+ * alpha kept) — the shape language macOS tray templates want. Called on the
+ * browser-extracted SUBJECT (its alpha mask IS the subject shape); returns
+ * undefined for non-decodable sources instead of failing the caller.
  */
-const renderSolidSilhouette = async (
+export const renderSolidSilhouette = async (
   sourcePath: string,
   color: { r: number; g: number; b: number },
 ): Promise<Buffer | undefined> => {

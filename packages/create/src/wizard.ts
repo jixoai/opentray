@@ -33,7 +33,13 @@ import {
   composeAppIcon,
   foregroundStats,
 } from "@create-opentray/core";
-import { scrapeService, writeGlyphIconTemp, type ScrapedIcon } from "@create-opentray/core";
+import {
+  scrapeService,
+  writeGlyphIconTemp,
+  renderSolidSilhouette,
+  SOLID_SIZE,
+  type ScrapedIcon,
+} from "@create-opentray/core";
 import { tokenizeCommandLine } from "@create-opentray/core";
 import {
   buildExportPlan,
@@ -743,8 +749,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       const name = `subject-${createHash("sha256").update(candidate.bytes).digest("hex").slice(0, 16)}.bin`;
       const path = join(dir, name);
       await writeFile(path, candidate.bytes);
+      let nextIndex = iconCandidates.reduce((max, icon) => Math.max(max, icon.index), -1) + 1;
       const appended: ScrapedIcon = {
-        index: iconCandidates.reduce((max, icon) => Math.max(max, icon.index), -1) + 1,
+        index: nextIndex,
         url: source.url,
         path,
         width: candidate.width,
@@ -753,7 +760,36 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         variant: "subject",
         variantOf: source.index,
       };
-      iconCandidates = [...iconCandidates, appended];
+      let candidates = [...iconCandidates, appended];
+      // D17: the AI subject's alpha mask IS the subject shape — derive the
+      // tray-template silhouettes from IT (an opaque favicon's own mask is a
+      // full square, which produced useless solid tiles pre-D17).
+      for (const [variant, color] of [
+        ["solid-black", { r: 0, g: 0, b: 0 }],
+        ["solid-white", { r: 255, g: 255, b: 255 }],
+      ] as const) {
+        const solid = await renderSolidSilhouette(path, color);
+        if (solid === undefined) {
+          continue;
+        }
+        const solidPath = join(dir, `solid-${variant}-${createHash("sha256").update(solid).digest("hex").slice(0, 12)}.bin`);
+        await writeFile(solidPath, solid);
+        nextIndex += 1;
+        candidates = [
+          ...candidates,
+          {
+            index: nextIndex,
+            url: source.url,
+            path: solidPath,
+            width: SOLID_SIZE,
+            height: SOLID_SIZE,
+            format: "png",
+            variant,
+            variantOf: appended.index,
+          },
+        ];
+      }
+      iconCandidates = candidates;
       emit({ type: "icons", port, icons: iconCandidates });
       return appended;
     },

@@ -78,3 +78,11 @@
 - [x] 10.5 构建链：webui 依赖 `@imgly/background-removal@^1.7.0` + `onnxruntime-web@1.21.0`（peer 精确锁）；`scripts/prune-ort-wasm.mjs` 剪除 Vite 复制的死重 ort wasm（imgly#147；dist 26MB→4MB）并入 build 链。
 - [x] 10.6 测试：wizard.test addIconCandidate 2 项（追加+事件+containment+可选；端口/未知源拒绝）、server.test 路由 1 项（200+icon-data 服务+409+400）；create 43、webui 65 全绿，typecheck 双零。
 - [x] 10.7 实机走查（独立实例 47812 + 内置浏览器）：空态背景卡片隐藏 ✓；zh.wikipedia 预设后卡片显示（白色 自动，D14 生效）✓；应用图标行仅 2 原图（纯黑剪影移出）✓；「AI 提取主体中…」→ CDN 模型分块下载 → `AI 主体提取 160×160 PNG` 候选落地 → 点选后分析（明度 0.47/覆盖 18%）自动建议白色 ✓；截图视觉确认（3 候选 + 透明底 W 主体 + 白底合成预览）✓。
+
+## 11. Round 7（用户验收轮：卡片显隐语义修正 + 剪影算法替代 + 模型内联，D17）
+
+- [x] 11.1 卡片显隐改权威源：预设会把 iconPath 提交进服务端 form（与手选不可区分），显隐改用 webui 自身 `selectedIconRef`/`uploadedIconUrl`——预设态隐藏、点选/上传后显示（走查实证：预设态 card:false → 点选后 card:true）。
+- [x] 11.2 剪影算法替代：scrape.ts 移除原图蒙版剪影生成（zh.wikipedia 双黑候选根因）；`renderSolidSilhouette`/`SOLID_SIZE` 导出；`addIconCandidate` 在 subject 落库后从 subject alpha 蒙版派生 solid-black/white（像素实证：剪影 coverage 0.191 = W 主体形状，旧算法为 ~1.0 实心方块）。
+- [x] 11.3 模型内联：`vendor-imgly-data.mjs`（quint8 + 双 wasm/mjs loader 共 22 分块 ~79MB，.imgly-cache 缓存，失败降级警告）入 build 链；server 增 `/imgly-data/*` 静态路由；subject-extraction 本地 publicPath 优先 + CDN 兜底；copy-webui 的 shell 拷贝排除 imgly-data；create-webui/.gitignore（dist/.imgly-cache）。
+- [x] 11.4 测试：scrape 断言改为「无 solid 输出」；wizard addIconCandidate 用真实 PNG fixture 断言 subject + 双剪影派生（variants/尺寸/containment）；core 31、create 43、webui 65 全绿，typecheck 双零。
+- [x] 11.5 走查（独立实例）：模型 100% 本地加载（localChunks 21 / cdnChunks 0）；预设态卡片隐藏；主体候选落地；点选后卡片出现且「白色 自动」；高级托盘选择器出现「黑色纯色/白色纯色」subject 派生剪影。

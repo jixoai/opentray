@@ -9,6 +9,7 @@ import type { CommandRun, CommandRunEvent, CommandRunOptions } from "@create-ope
 import type { DiscoveredService } from "@create-opentray/core";
 import type { ScrapeResult } from "@create-opentray/core";
 import type { MaterializeContext } from "@create-opentray/core";
+import { emptyImageOf, encodeImagePng, SOLID_SIZE } from "@create-opentray/core";
 
 const neverResolve = (): Promise<{ code: number | null }> =>
   new Promise<{ code: number | null }>(() => {});
@@ -1157,7 +1158,24 @@ describe("addIconCandidate (browser-derived subject candidates)", () => {
     runInstall: async () => {},
   };
 
-  it("appends a subject candidate into the port-scoped list and emits icons", async () => {
+  /** A real decodable RGBA PNG: a centered opaque square on transparency,
+   * shaped like an AI-extracted subject (its alpha mask IS the subject). */
+  const subjectPng = async (): Promise<Buffer> => {
+    const size = 64;
+    const image = emptyImageOf(size, size);
+    for (let y = 16; y < 48; y += 1) {
+      for (let x = 16; x < 48; x += 1) {
+        const idx = (y * size + x) * 4;
+        image.data[idx] = 40;
+        image.data[idx + 1] = 40;
+        image.data[idx + 2] = 200;
+        image.data[idx + 3] = 255;
+      }
+    }
+    return Buffer.from(await encodeImagePng(image));
+  };
+
+  it("appends a subject candidate and derives tray silhouettes from it", async () => {
     const urlHome = mkdtempSync(join(tmpdir(), "wizard-subject-"));
     const harness = createHarness({
       homeDir: urlHome,
@@ -1184,7 +1202,7 @@ describe("addIconCandidate (browser-derived subject candidates)", () => {
     await harness.session.submitUrl("https://example.com/wiki");
 
     const appended = await harness.session.addIconCandidate(0, {
-      bytes: Buffer.from("subject-png-bytes-0123456789"),
+      bytes: await subjectPng(),
       variantOf: 0,
       width: 1024,
       height: 1024,
@@ -1199,9 +1217,17 @@ describe("addIconCandidate (browser-derived subject candidates)", () => {
     expect(
       harness.session.iconSourceRoots().some((root) => appended!.path.startsWith(root)),
     ).toBe(true);
-    expect(
-      harness.session.iconCandidates.some((icon) => icon.index === appended?.index),
-    ).toBe(true);
+    // D17: the AI subject's alpha mask drives the tray-template silhouettes —
+    // exactly one black and one white variant derived from the subject.
+    const variants = harness.session.iconCandidates
+      .filter((icon) => icon.variantOf === 1)
+      .map((icon) => icon.variant)
+      .sort();
+    expect(variants).toEqual(["solid-black", "solid-white"]);
+    const solid = harness.session.iconCandidates.find(
+      (icon) => icon.variant === "solid-black",
+    );
+    expect(solid?.width).toBe(SOLID_SIZE);
     // The icons event lets connected clients pick the candidate up live.
     expect(
       harness.events.some(

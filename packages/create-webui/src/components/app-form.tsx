@@ -197,11 +197,11 @@ export function AppForm({
           ) : null}
         </div>
         {/* Icon composition (owner round-12): background + scale + preview.
-         * Meaningless without a foreground — hidden until an icon is in
-         * effect (explicit pick/upload, or the scraped preset default). */}
-        {(values.iconPath.trim().length > 0 ||
-          defaults.iconPath.trim().length > 0 ||
-          uploadedIconUrl !== undefined) && (
+         * Follows EXPLICIT icon selection only — a URL/command preset
+         * commits iconPath into the server form (indistinguishable from a
+         * pick there), so the webui's own selection/upload state is the
+         * visibility authority. */}
+        {(selectedIconRef !== undefined || uploadedIconUrl !== undefined) && (
         <div className="mt-3 rounded-lg border border-border p-3">
           <div className="flex items-start gap-3">
             <div

@@ -260,9 +260,9 @@ describe("icon candidate collection", () => {
     // rasterized base is crisp (viewBox geometry untouched).
     expect(originals[0]?.width).toBe(SVG_RASTER_TARGET);
     expect(result.iconPath).toBe(originals[0]?.path);
-    // Solid silhouettes derived from the SVG join the candidate list.
-    const solids = result.icons.filter((i) => i.variant !== "original");
-    expect(solids.map((s) => s.variant).sort()).toEqual(["solid-black", "solid-white"]);
+    // D17: scrape no longer derives solid silhouettes — an opaque favicon's
+    // alpha mask is a full square. Solids are derived from the AI subject.
+    expect(result.icons.every((i) => i.variant === "original")).toBe(true);
   });
 
   it("collects multiple candidates ranked by true pixel clarity", async () => {

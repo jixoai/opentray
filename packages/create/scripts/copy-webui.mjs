@@ -60,6 +60,9 @@ for (const entry of readdirSync(webuiDist)) {
   if (entry === "index.html") {
     continue; // wizard page, not part of the generated-app shell
   }
+  if (entry === "imgly-data") {
+    continue; // wizard-only ML model assets (~76 MB), never app shell payload
+  }
   const source = resolve(webuiDist, entry);
   if (statSync(source).isDirectory()) {
     mkdirSync(resolve(shellTarget, entry), { recursive: true });

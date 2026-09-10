@@ -9,7 +9,7 @@
  * keeps its scraped candidates untouched.
  */
 
-type RemoveBackground = (input: Blob) => Promise<Blob>;
+type RemoveBackground = (input: Blob, config?: { publicPath?: string }) => Promise<Blob>;
 
 let removeBackgroundRef: RemoveBackground | undefined;
 
@@ -20,11 +20,22 @@ const loadRemoveBackground = async (): Promise<RemoveBackground> => {
   const module = await import("@imgly/background-removal");
   const loaded = module.removeBackground;
   // isnet_quint8 (~42 MB) is plenty for favicon-sized art and halves the
-  // first-use download; device "gpu" falls back to CPU WASM when WebGPU is
-  // unavailable. Model assets stream from the vendor CDN.
-  removeBackgroundRef = (input) => loaded(input, { model: "isnet_quint8", device: "gpu" });
+  // payload; device "gpu" falls back to CPU WASM when WebGPU is unavailable.
+  removeBackgroundRef = (input, config) =>
+    // The vendored copy ships with the wizard (dist/imgly-data, served at
+    // /imgly-data/) — offline and CDN-outage safe; the absolute URL is
+    // required by the runtime's new URL(..., publicPath) resolution.
+    loaded(input, {
+      model: "isnet_quint8",
+      device: "gpu",
+      ...(config === undefined ? {} : { publicPath: config.publicPath }),
+    });
   return removeBackgroundRef;
 };
+
+/** Wizard-local vendored model assets (owner decision: ship inline). */
+const localPublicPath = (): string =>
+  new URL("/imgly-data/", window.location.origin).toString();
 
 export interface ExtractedSubject {
   readonly bytes: Blob;
@@ -36,7 +47,15 @@ export interface ExtractedSubject {
 export const extractSubject = async (source: Blob): Promise<ExtractedSubject | undefined> => {
   try {
     const removeBackground = await loadRemoveBackground();
-    const result = await removeBackground(source);
+    // Vendored assets first (offline, no CDN dependency); fall back to the
+    // package default CDN when the local copy is absent (dev builds without
+    // the vendor step). Both failures are silent enhancement degradation.
+    let result: Blob;
+    try {
+      result = await removeBackground(source, { publicPath: localPublicPath() });
+    } catch {
+      result = await removeBackground(source);
+    }
     const bitmap = await createImageBitmap(result);
     try {
       return { bytes: result, width: bitmap.width, height: bitmap.height };

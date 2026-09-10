@@ -162,6 +162,12 @@ export const createWizardServer = async (
       await handleAssetFile(url.pathname, response);
       return;
     }
+    // Vendored browser subject-extraction model assets (dist/imgly-data) —
+    // same containment-guarded static serving as the SPA assets.
+    if (url.pathname.startsWith("/imgly-data/")) {
+      await handleAssetFile(url.pathname, response);
+      return;
+    }
     if (url.pathname === "/logo.png" || FAVICON_PATHS.has(url.pathname)) {
       await handleAssetFile(url.pathname, response);
       return;
