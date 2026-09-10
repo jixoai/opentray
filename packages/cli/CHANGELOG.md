@@ -1,5 +1,14 @@
 # opentray
 
+## 0.23.0
+
+### Patch Changes
+
+- Updated dependencies [2541354]
+  - @opentray/icon@0.23.0
+  - @opentray/spec@0.23.0
+  - @opentray/packaging@0.23.0
+
 ## 0.22.0
 
 ### Minor Changes
