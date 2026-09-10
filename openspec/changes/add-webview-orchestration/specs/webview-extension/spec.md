@@ -117,3 +117,28 @@ On Windows, all webview controllers of one extension session SHALL share a singl
 - **WHEN** `toolbar` is destroyed and recreated
 - **THEN** `content` SHALL keep its session and profile state
 - **AND** the recreated `toolbar` SHALL attach to the same shared environment without a new profile directory
+
+### Requirement: Overlay and titlebar geometry SHALL be projected per webview and updated on layout commits
+
+Window-level overlay facts are unchanged: the `windowControlsOverlay` declaration is a window-level fact, Windows `AppWindowTitleBar.LeftInset`/`RightInset`/`Height` remain the safe-area authority read synchronously on the HWND-owning thread, and the existing overlay initialization-order laws keep holding. On top of those facts, the page-bridge `getTitlebarAreaRect()` SHALL report the safe-area rect in the receiving webview's own viewport coordinates: the intersection of the window overlay region with that webview's current layout rect, translated into view-local space; a webview that does not intersect the overlay region SHALL receive an empty rect. A window whose single webview fills the client area SHALL report exactly the values a full-window webview reports today — existing single-webview windows keep their geometry.
+
+Projection SHALL be recomputed inside the layout commit transaction (after frames are applied) and on overlay metric changes (scale factor, style, or system metric changes); affected bridged webviews SHALL receive `geometrychange` push events. Custom drag regions SHALL be declared in view-local coordinates and translated into window coordinates through the declaring webview's current layout rect; a layout commit SHALL re-register active regions under the new rects, so no stale translation survives a layout change. Windows non-client hit-testing and drag routing SHALL resolve against whichever child webview actually occupies the titlebar region under the cursor.
+
+#### Scenario: A view outside the titlebar region gets an empty safe area
+
+- **GIVEN** a window with a frameless titlebar overlay and a layout placing webview `content` entirely below the overlay region
+- **WHEN** `content`'s page calls `getTitlebarAreaRect()`
+- **THEN** it SHALL receive an empty rect and SHALL NOT render titlebar padding
+
+#### Scenario: The titlebar view gets view-local coordinates that track layout changes
+
+- **GIVEN** webview `bar` occupying the top strip intersecting the caption-button region at window coordinates `{x: 0, y: 0, width: 800, height: 44}`
+- **WHEN** its page calls `getTitlebarAreaRect()`, the host then commits a layout moving `bar` down by 20 logical pixels
+- **THEN** the first call SHALL return the caption-button exclusion translated into `bar`'s local space
+- **AND** the layout commit SHALL recompute the projection and push a `geometrychange` event to `bar` with the shifted local rect
+
+#### Scenario: Full-window single webview keeps today's geometry
+
+- **GIVEN** a frameless overlay window whose only webview fills the client area (the default layout)
+- **WHEN** its page measures the titlebar area before and after this change's implementation
+- **THEN** the reported rect SHALL equal the window-level values a full-window webview reports today

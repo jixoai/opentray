@@ -117,6 +117,7 @@ const ch = await shell.createMessageChannel({ target: toolbar.id }) // 定向直
 | D20 | **通道精确语义（Codex B5/B6）**：`listMessageChannels` = live + closed 墓碑（每会话 LRU 上限 32 条，destroy = 显式调用 / 容量逐出 / 会话关闭；destroyed 不再列出）；队列上限 = 每端口 ≤1000 条 **且** ≤1 MiB（UTF-8 字节长，按累计值计，边界值合法）；单条 payload > 1 MiB → 类型化错误 `payload_too_large`（不入队、不关通道）；超限累积 → 关通道 reason `queue_overflow`。类型化错误码注册表：`unknown_view / invalid_layout_measure / multiwebview_unsupported_style / translucent_overlap / bridge_required / session_scope / not_open / payload_too_large`（reason 与 error 是两个命名空间） | 「bounded 但无数值」不可验收；list 自相矛盾必须裁决；稳定错误码是协议契约 |
 | D21 | **平台实现契约（Codex B9/B10）**：Taffy 是 `opentray-ext-webview` 的依赖（**永不进 opentray-core**——kernel 法），版本随实现落 Cargo 并记入构建证据；布局输入校验（有限、非负、min≤max；NaN/±∞/负值 → `invalid_layout_measure`）发生在求解之前；逻辑像素 → 物理像素经窗口 scale factor 于 apply 时换算；Windows：N 个 controller 共享同一 WebView2 environment + 每 session retained WebContext（outlives children，创建错误含 profile 路径），profile 路径法不变；box 输入穿透在 Windows 走 parent hit-test 契约（child 不吞鼠标） | wry 原语只证明可挂载，不证明 OpenTray 平台法已被满足；契约不落 requirement 就不可验收 |
 | D22 | **向导预览边界（Codex B1）**：向导创作期预览 tab（StableIframe）保持 iframe——它是 authoring-time-only 表面，**永不作为物化应用载体**；生成应用的 toolbar/地址栏窗口只用多 webview 载体（living spec 的 `Show-address-bar` iframe 法随之 MODIFIED） | 边界不命名则 living spec 与 delta 互相要求相反的载体 |
+| D23 | **overlay/标题栏几何按 webview 投影 + 布局事务化动态更新（Owner 提出，2026-09-11：「Windows overlay controls 我们原本几乎是硬编码的，webview 可移动后得跟着动态计算动态更新」）**：窗口级 overlay 事实不变（`windowControlsOverlay` 声明；Windows AppWindow LeftInset/RightInset/Height 仍是 HWND-owning STA 读到的窗口级权威；初始化顺序法不变）；页面桥 `getTitlebarAreaRect()` 重定义为**接收 webview 自身视口坐标**的安全区矩形 = (窗口 overlay 区域 ∩ 该 view 当前 rect) 平移到 view 本地，无交集返回空矩形；单 webview 铺满时退化为现值（既有窗口行为不变）。投影重算进**布局提交事务**：frames 应用后、以及 overlay 度量变化（DPI/样式/系统度量）时重算，并向受影响 bridged view 推送 `geometrychange`（推送制，随 D19）；自定义拖拽区以 view 本地坐标声明、按当前 view rect 平移到窗口坐标、布局提交时重注册（陈旧平移不得存活）；Windows WM_NCHITTEST/拖拽路由按标题栏区域下实际 child view 计算。v1 实现范围 = 契约 + 单 webview 退化路径 + 现有单视图窗口回归不变；多 webview frameless 仍被 D6 门控，解锁时继承本契约零协议变更 | 现实现 `getTitlebarAreaRect` 返回窗口坐标，仅因单 webview 铺满客户区而碰巧等于页面本地坐标（bootstrap.rs:945-1049 三处消费、appwindow.rs 窗口级 insets）——webview 可移动后必然错位；「几何拥有安全」法在多视图下只有投影化才能成立 |
 
 自持实施细节（Owner 有异议可回弹）：box 的 `kind` 判别字段（webview 为默认）；
 layer 的 `visible` 开关；通道 id 会话内不透明不可跨会话复用；控件家族膨胀后再考虑
@@ -147,6 +148,7 @@ layer 的 `visible` 开关；通道 id 会话内不透明不可跨会话复用�
 | D20 | webview-messaging 全 requirement（错误码/上限/list） | 2.3 |
 | D21 | webview-layout（输入校验）+ webview-extension（Windows context 契约句） | 2.2, 4.1, 4.3 |
 | D22 | create-wizard「Interactive Terminal Preview」MODIFIED + 「navigation toolbar option」边界句 | 2.6, 5.4 |
+| D23 | webview-extension「overlay geometry per-view projection」+ webview-layout 提交事务句 | 2.2, 2.4, 3.4, 4.1 |
 
 ## 架构与数据流
 

@@ -38,6 +38,8 @@ A layout tree referencing a view id that no registered view owns SHALL be reject
 
 Layout SHALL be solved by a native flex engine (Taffy) per layer. Taffy SHALL be a dependency of `opentray-ext-webview` only — `opentray-core` SHALL NOT depend on it — and the pinned Taffy version SHALL be recorded in build evidence. Solving works in logical pixels; application converts each solved rect to native pixels through the window's current scale factor at frame-application time. Window resize SHALL trigger native re-solve and native frame application for every affected view; the JS side SHALL never compute view coordinates and SHALL never participate in resize relayout. `setLayout(tree)` SHALL atomically replace the current layout document; `layout.update(viewId, patch)` SHALL update one node's sizing fields incrementally. Both operations SHALL preserve every other view's identity — replacing a layout SHALL never recreate webview browsing contexts that remain referenced by id in the new tree.
 
+A layout commit is one native transaction: solve, apply frames, then recompute per-webview overlay/titlebar safe-area projections and re-register view-declared drag regions under the new rects (the overlay projection contract lives in the webview-extension spec), pushing `geometrychange` events to affected bridged views. No intermediate state (half-applied frames, stale projections, stale drag-region translations) SHALL be observable to a page between the commit's start and end.
+
 #### Scenario: Live resize does not round-trip through JS
 
 - **GIVEN** an applied layered layout
