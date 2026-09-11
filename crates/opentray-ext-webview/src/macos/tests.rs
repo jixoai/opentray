@@ -9,6 +9,8 @@ use super::style::{
     SetStylePlatformPayload, SetStyleWindowsPayload, WindowPlatformStyleState,
 };
 use super::*;
+use crate::bootstrap::webview_bridge_bootstrap_script;
+use crate::orchestration::{StyleFacts, ViewEvents, WindowOwner, DEFAULT_WEBVIEW_ID};
 use crate::{
     MetadataSyncSettings, WebviewBackgroundEffectState, WebviewBackgroundInput,
     WebviewBrowserPermissionDecision, WebviewBrowserPermissionFamily, WebviewBrowserPermissionRule,
@@ -16,6 +18,40 @@ use crate::{
     WebviewWindowIcon,
 };
 use std::process::Command;
+
+/// Minimal window-level bridge for tests that exercise listener routing,
+/// capabilities, and event emission without AppKit.
+fn test_bridge() -> NavigatorWindowBridge {
+    NavigatorWindowBridge {
+        views: Vec::new(),
+        content_view: None,
+        ipc_messages: VecDeque::new(),
+        permission_messages: VecDeque::new(),
+        window_events: VecDeque::new(),
+        next_ipc_message_id: 1,
+        next_permission_message_id: 1,
+        style: WindowStyleState::default(),
+        navigator_window: NavigatorWindowSettings::default(),
+        navigator_screen: NavigatorScreenSettings::default(),
+        navigator_tray: NavigatorTraySettings::default(),
+        metadata: WindowMetadataState {
+            title: DEFAULT_WINDOW_TITLE.to_string(),
+            icon: None,
+            sync_title: MetadataSyncSettings::default(),
+            sync_icon: MetadataSyncSettings::default(),
+        },
+        app_region_drag: AppRegionDragState::default(),
+        devtools_enabled: false,
+        download: WebviewDownloadSettings::default(),
+        native_api_policy: WebviewNativeApiPolicy::default(),
+        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
+        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
+        page_source: PageSourceState::default(),
+        page_access: PageCapabilityAccess::default(),
+        tray_bounds: None,
+        size_constraints: WindowSizeConstraints::default(),
+    }
+}
 
 fn bootstrap_script(
     window_settings: NavigatorWindowSettings,
@@ -1365,72 +1401,74 @@ fn window_style_state_serializes_keep_on_top() {
 }
 
 #[test]
-fn navigator_window_bridge_tracks_listener_ids() {
-    let mut bridge = NavigatorWindowBridge {
-        webview: None,
-        content_view: None,
+fn navigator_window_bridge_tracks_listener_ids_per_webview() {
+    let mut bridge = test_bridge();
+    bridge.views.push(WebViewBridge {
+        id: DEFAULT_WEBVIEW_ID.to_string(),
+        policy: opentray_spec::webview::WebviewBridgePolicy::default(),
+        webview: test_webview_pointer(),
         listeners: HashMap::new(),
-        ipc_messages: VecDeque::new(),
-        permission_messages: VecDeque::new(),
-        window_events: VecDeque::new(),
         next_event_id: 1,
-        next_ipc_message_id: 1,
-        next_permission_message_id: 1,
-        style: WindowStyleState {
-            app_mode: false,
-            frameless: false,
-            resizable: true,
-            resizable_override: None,
-            keep_on_top: false,
-            auto_hide: true,
-            opacity: 1.0,
-            background: WebviewWindowBackground::Opaque,
-            platform: WindowPlatformStyleState {
-                macos: MacosWindowStyleState {
-                    corner_radius: None,
-                },
-            },
-        },
-        navigator_window: NavigatorWindowSettings {
-            enabled: true,
-            bind_window_globals: false,
-            window_controls_overlay: false,
-        },
-        navigator_screen: NavigatorScreenSettings::default(),
-        navigator_tray: NavigatorTraySettings::default(),
-        metadata: WindowMetadataState {
-            title: DEFAULT_WINDOW_TITLE.to_string(),
-            icon: None,
-            sync_title: MetadataSyncSettings::default(),
-            sync_icon: MetadataSyncSettings::default(),
-        },
-        app_region_drag: AppRegionDragState::default(),
-        devtools_enabled: false,
-        download: WebviewDownloadSettings::default(),
-        native_api_policy: WebviewNativeApiPolicy::default(),
-        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
-        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
-        page_source: PageSourceState::default(),
-        page_access: PageCapabilityAccess::default(),
-        tray_bounds: None,
-        size_constraints: WindowSizeConstraints::default(),
-    };
+    });
+    bridge.views.push(WebViewBridge {
+        id: "toolbar".to_string(),
+        policy: opentray_spec::webview::WebviewBridgePolicy::default(),
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
 
     let capabilities = bridge
         .capabilities_json()
         .expect("macOS capabilities should serialize");
     assert_eq!(capabilities["focus"], Value::Bool(true));
     assert_eq!(capabilities["resizable"], Value::Bool(true));
+    // Orchestration capability fields serialize on the page bridge surface.
+    assert_eq!(capabilities["multiwebview"], Value::Bool(true));
+    assert_eq!(capabilities["webviewNavigation"], Value::Bool(true));
+    assert_eq!(capabilities["focusWebview"], Value::Bool(true));
+    assert_eq!(
+        capabilities["webviewPushEvents"],
+        serde_json::json!(["urlChange", "titleChange", "focused"])
+    );
 
-    let event_id = bridge.add_listener("resized".to_string(), 42);
+    // Listener ids are per webview; routing returns the owning view.
+    let event_id = bridge
+        .add_listener("toolbar", "resized".to_string(), 42)
+        .expect("toolbar listener registers");
+    let other_id = bridge
+        .add_listener(DEFAULT_WEBVIEW_ID, "resized".to_string(), 43)
+        .expect("primary listener registers");
     assert_eq!(event_id, 1);
-    assert_eq!(bridge.listeners_for("resized").len(), 1);
+    assert_eq!(other_id, 1);
+    let routed = bridge.listeners_for("resized");
+    assert_eq!(routed.len(), 2);
+    assert!(routed.iter().any(|(view, _)| view == "toolbar"));
     assert!(bridge.has_listener("resized"));
     assert!(!bridge.has_listener("overlay.geometrychange"));
 
-    bridge.remove_listener("resized", event_id);
-    assert!(bridge.listeners_for("resized").is_empty());
+    bridge.remove_listener("toolbar", "resized", event_id);
+    assert_eq!(bridge.listeners_for("resized").len(), 1);
+    assert!(bridge.has_listener("resized"));
+    bridge.remove_listener(DEFAULT_WEBVIEW_ID, "resized", other_id);
     assert!(!bridge.has_listener("resized"));
+
+    // Unknown webviews cannot register listeners.
+    assert_eq!(bridge.add_listener("missing", "resized".to_string(), 44), None);
+
+    // Removing a view drops its listeners and transport entry together.
+    bridge
+        .add_listener("toolbar", "moved".to_string(), 45)
+        .expect("listener");
+    bridge.remove_view("toolbar");
+    assert!(!bridge.has_listener("moved"));
+    assert!(bridge.view_webview("toolbar").is_none());
+}
+
+/// A non-dereferenced stand-in pointer: tests only exercise id routing, not
+/// script evaluation.
+fn test_webview_pointer() -> NonNull<WebView> {
+    NonNull::dangling()
 }
 
 #[test]
@@ -1498,55 +1536,7 @@ fn multiple_downloads_policy_respects_exact_remote_allow_rule_on_macos() {
 
 #[test]
 fn emit_window_event_ignores_unlistened_download_events_on_macos() {
-    let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
-        webview: None,
-        content_view: None,
-        listeners: HashMap::new(),
-        ipc_messages: VecDeque::new(),
-        permission_messages: VecDeque::new(),
-        window_events: VecDeque::new(),
-        next_event_id: 1,
-        next_ipc_message_id: 1,
-        next_permission_message_id: 1,
-        style: WindowStyleState {
-            app_mode: false,
-            frameless: false,
-            resizable: true,
-            resizable_override: None,
-            keep_on_top: false,
-            auto_hide: true,
-            opacity: 1.0,
-            background: WebviewWindowBackground::Opaque,
-            platform: WindowPlatformStyleState {
-                macos: MacosWindowStyleState {
-                    corner_radius: None,
-                },
-            },
-        },
-        navigator_window: NavigatorWindowSettings {
-            enabled: true,
-            bind_window_globals: false,
-            window_controls_overlay: false,
-        },
-        navigator_screen: NavigatorScreenSettings::default(),
-        navigator_tray: NavigatorTraySettings::default(),
-        metadata: WindowMetadataState {
-            title: DEFAULT_WINDOW_TITLE.to_string(),
-            icon: None,
-            sync_title: MetadataSyncSettings::default(),
-            sync_icon: MetadataSyncSettings::default(),
-        },
-        app_region_drag: AppRegionDragState::default(),
-        devtools_enabled: false,
-        download: WebviewDownloadSettings::default(),
-        native_api_policy: WebviewNativeApiPolicy::default(),
-        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
-        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
-        page_source: PageSourceState::default(),
-        page_access: PageCapabilityAccess::default(),
-        tray_bounds: None,
-        size_constraints: WindowSizeConstraints::default(),
-    }));
+    let bridge = Rc::new(RefCell::new(test_bridge()));
 
     emit_window_event(
         &bridge,
@@ -1563,55 +1553,7 @@ fn emit_window_event_ignores_unlistened_download_events_on_macos() {
 
 #[test]
 fn app_region_drag_interaction_window_event_conserves_native_source() {
-    let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
-        webview: None,
-        content_view: None,
-        listeners: HashMap::new(),
-        ipc_messages: VecDeque::new(),
-        permission_messages: VecDeque::new(),
-        window_events: VecDeque::new(),
-        next_event_id: 1,
-        next_ipc_message_id: 1,
-        next_permission_message_id: 1,
-        style: WindowStyleState {
-            app_mode: false,
-            frameless: false,
-            resizable: true,
-            resizable_override: None,
-            keep_on_top: false,
-            auto_hide: true,
-            opacity: 1.0,
-            background: WebviewWindowBackground::Opaque,
-            platform: WindowPlatformStyleState {
-                macos: MacosWindowStyleState {
-                    corner_radius: None,
-                },
-            },
-        },
-        navigator_window: NavigatorWindowSettings {
-            enabled: true,
-            bind_window_globals: false,
-            window_controls_overlay: false,
-        },
-        navigator_screen: NavigatorScreenSettings::default(),
-        navigator_tray: NavigatorTraySettings::default(),
-        metadata: WindowMetadataState {
-            title: DEFAULT_WINDOW_TITLE.to_string(),
-            icon: None,
-            sync_title: MetadataSyncSettings::default(),
-            sync_icon: MetadataSyncSettings::default(),
-        },
-        app_region_drag: AppRegionDragState::default(),
-        devtools_enabled: false,
-        download: WebviewDownloadSettings::default(),
-        native_api_policy: WebviewNativeApiPolicy::default(),
-        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
-        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
-        page_source: PageSourceState::default(),
-        page_access: PageCapabilityAccess::default(),
-        tray_bounds: None,
-        size_constraints: WindowSizeConstraints::default(),
-    }));
+    let bridge = Rc::new(RefCell::new(test_bridge()));
 
     queue_window_interaction_event(&Rc::downgrade(&bridge), true);
 
@@ -1688,6 +1630,411 @@ fn initial_window_origin_clamps_to_visible_frame() {
 
     assert_eq!(origin.x, 1368.0);
     assert_eq!(origin.y, 2234.0);
+}
+
+#[test]
+fn per_webview_bridge_policy_defaults_to_no_bootstrap() {
+    use opentray_spec::webview::WebviewBridgePolicy;
+
+    // A policy-less child (every field false) gets no script at all.
+    assert_eq!(webview_bridge_bootstrap_script(WebviewBridgePolicy::default()), None);
+
+    // The toolbar carrier policy projects only the surfaces it names.
+    let toolbar = webview_bridge_bootstrap_script(WebviewBridgePolicy {
+        webview_id: true,
+        message_channels: true,
+        ..WebviewBridgePolicy::default()
+    })
+    .expect("toolbar policy injects the bridge");
+    assert!(toolbar.contains("navigator, \"window\""));
+
+    // navigatorWindow/navigatorScreen gate the corresponding surfaces.
+    let window_only = webview_bridge_bootstrap_script(WebviewBridgePolicy {
+        navigator_window: true,
+        ..WebviewBridgePolicy::default()
+    })
+    .expect("navigator window policy injects");
+    assert!(window_only.contains("navigator, \"window\""));
+    let screen_only = webview_bridge_bootstrap_script(WebviewBridgePolicy {
+        navigator_screen: true,
+        ..WebviewBridgePolicy::default()
+    })
+    .expect("navigator screen policy injects");
+    assert!(screen_only.contains("opentray.screen"));
+}
+
+#[test]
+fn per_view_event_handlers_push_to_outbox_not_the_drain_queue() {
+    let owner = WindowOwner {
+        app_id: "app-1".to_string(),
+        tray_id: "tray-1".to_string(),
+        session_id: Some("session-1".to_string()),
+        window_id: "win-1".to_string(),
+    };
+    let events = Rc::new(RefCell::new(ViewEvents::new(
+        "content",
+        opentray_spec::webview::WebviewBridgePolicy::default(),
+    )));
+    events.borrow_mut().subscribe(&[
+        opentray_spec::webview::WebviewEventKind::UrlChange,
+        opentray_spec::webview::WebviewEventKind::TitleChange,
+    ]);
+    let outbox = Rc::new(RefCell::new(VecDeque::new()));
+    let bridge = Rc::new(RefCell::new(test_bridge()));
+
+    // Drive the exact handler bodies the native observers call.
+    handle_view_url_started(&events, &Rc::downgrade(&outbox), &owner, "https://example.org/a");
+    handle_view_title_changed(&events, &Rc::downgrade(&outbox), &owner, "Example");
+
+    // Frames landed in the push outbox with the frozen schema.
+    let frames: Vec<_> = outbox.borrow_mut().drain(..).collect();
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0].kind, opentray_spec::webview::WebviewEventKind::UrlChange);
+    assert_eq!(frames[0].webview_id, "content");
+    assert_eq!(frames[0].owner.session_id, "session-1");
+    assert!(frames[0].is_coherent());
+    assert_eq!(frames[1].kind, opentray_spec::webview::WebviewEventKind::TitleChange);
+    assert!(frames[1].is_coherent());
+
+    // The legacy 16 ms window-event drain queue stays empty: the unified
+    // event family never rides the polling path.
+    assert!(bridge.borrow().window_events.is_empty());
+}
+
+#[test]
+fn bridge_style_facts_snapshot_feeds_the_exclusivity_checkpoints() {
+    let mut bridge = test_bridge();
+    assert_eq!(
+        bridge.style_facts(),
+        StyleFacts {
+            frameless: false,
+            translucent_background: false,
+        }
+    );
+
+    bridge.style.frameless = true;
+    assert!(bridge.style_facts().affects_translucency());
+
+    bridge.style.frameless = false;
+    bridge.style.background = WebviewWindowBackground::PlatformMaterial {
+        material: "hudWindow".to_string(),
+        state: WebviewBackgroundEffectState::Active,
+    };
+    assert!(bridge.style_facts().affects_translucency());
+
+    bridge.style.background = WebviewWindowBackground::Transparent;
+    assert!(bridge.style_facts().affects_translucency());
+    bridge.style.background = WebviewWindowBackground::Opaque;
+    assert!(!bridge.style_facts().affects_translucency());
+}
+
+#[test]
+fn style_patch_checkpoint_two_rejects_multiwebview_windows_before_mutation() {
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        eprintln!("skipping AppKit style-patch checkpoint test outside the main thread");
+        return;
+    };
+    let window = unsafe {
+        objc2_app_kit::NSWindow::initWithContentRect_styleMask_backing_defer(
+            objc2_app_kit::NSWindow::alloc(mtm),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(320.0, 200.0)),
+            framed_window_style_mask(false, true, false),
+            objc2_app_kit::NSBackingStoreType::Buffered,
+            true,
+        )
+    };
+    let bridge = Rc::new(RefCell::new(test_bridge()));
+    bridge.borrow_mut().views.push(WebViewBridge {
+        id: "toolbar".to_string(),
+        policy: Default::default(),
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
+    bridge.borrow_mut().views.push(WebViewBridge {
+        id: "content".to_string(),
+        policy: Default::default(),
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
+
+    let error = apply_window_style_patch(
+        &bridge,
+        &window,
+        SetStylePayload {
+            frameless: Some(true),
+            platform: Some(SetStylePlatformPayload {
+                macos: None,
+                windows: Some(SetStyleWindowsPayload::default()),
+                linux: None,
+            }),
+            ..SetStylePayload::default()
+        },
+    )
+    .expect_err("frameless on a multi-webview window must reject");
+    assert!(error.to_string().contains("multiwebview_unsupported_style"));
+    // Rejected before mutation: the framed style survives.
+    assert!(!bridge.borrow().style.frameless);
+
+    let error = apply_window_style_patch(
+        &bridge,
+        &window,
+        SetStylePayload {
+            background: Some(WebviewBackgroundInput::Keyword("hudWindow".to_string())),
+            ..SetStylePayload::default()
+        },
+    )
+    .expect_err("material on a multi-webview window must reject");
+    assert!(error.to_string().contains("multiwebview_unsupported_style"));
+    assert_eq!(
+        bridge.borrow().style.background,
+        WebviewWindowBackground::Opaque
+    );
+}
+
+#[test]
+fn style_patch_checkpoint_allows_single_webview_style_changes() {
+    // The pure decision covers this row (see orchestration tests); single
+    // webview windows keep today's unrestricted style changes.
+    assert!(crate::orchestration::style_change_allowed(
+        crate::orchestration::StyleFacts {
+            frameless: true,
+            translucent_background: true,
+        },
+        1,
+    )
+    .is_ok());
+}
+
+/// Full native orchestration smoke over the real AppKit/wry path: windowOnly
+/// show, sibling children via `build_as_child`, style-exclusivity checkpoint
+/// (1), list/subscribe/focus edges, precise session cleanup. Guarded by the
+/// repo's established pattern: AppKit window creation requires the main
+/// thread, so this test skips under ordinary cargo test threading while the
+/// pure orchestration rows carry the acceptance matrix.
+#[test]
+fn runtime_orchestration_smoke_on_main_thread() {
+    use crate::HandledCommand;
+    use objc2::MainThreadMarker;
+    use opentray_spec::webview::{
+        WebviewBridgePolicy, WebviewEventKind, WebviewOrchestrationCommand,
+    };
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        eprintln!("skipping AppKit orchestration smoke outside the main thread");
+        return;
+    };
+    let _ = mtm;
+    let mut runtime = MacosWebviewRuntime::default();
+    runtime.set_app_id("app-1");
+
+    let owner = opentray_spec::webview::WebviewOwnerTuple {
+        app_id: "app-1".to_string(),
+        tray_id: "tray-1".to_string(),
+        session_id: "session-1".to_string(),
+    };
+    fn show_window_only(
+        runtime: &mut MacosWebviewRuntime,
+        tray_id: &str,
+        session_id: &str,
+        window_id: &str,
+    ) -> crate::HandledCommand {
+        runtime
+            .handle(
+                tray_id,
+                crate::WebviewCommand::Show {
+                    html: None,
+                    url: None,
+                    width: Some(480.0),
+                    height: Some(320.0),
+                    tray_bounds: None,
+                    fallback_rect: None,
+                    show_settings: crate::WebviewShowSettings::default(),
+                    owner_session_id: Some(session_id.to_string()),
+                    window_id: Some(window_id.to_string()),
+                    window_only: true,
+                },
+            )
+            .expect("windowOnly show")
+    }
+    fn orchestrate(
+        runtime: &mut MacosWebviewRuntime,
+        tray_id: &str,
+        command: WebviewOrchestrationCommand,
+    ) -> crate::HandledCommand {
+        runtime
+            .handle(
+                tray_id,
+                crate::WebviewCommand::Orchestration(Box::new(command)),
+            )
+            .expect("orchestration command")
+    }
+
+    let shown = show_window_only(&mut runtime, "tray-1", "session-1", "win-1");
+    assert_eq!(shown.result["type"], "shown");
+
+    // Two sibling webviews compose one window.
+    let toolbar_policy = WebviewBridgePolicy {
+        webview_id: true,
+        message_channels: true,
+        ..WebviewBridgePolicy::default()
+    };
+    let create = |webview_id: &str, url: &str, policy: Option<WebviewBridgePolicy>| {
+        WebviewOrchestrationCommand::CreateWebview {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+            webview_id: webview_id.to_string(),
+            url: Some(url.to_string()),
+            html: None,
+            bridge: policy,
+        }
+    };
+    let created = orchestrate(
+        &mut runtime,
+        "tray-1",
+        create("toolbar", "https://example.org/toolbar", Some(toolbar_policy)),
+    );
+    assert_eq!(created.result["type"], "webview-ack");
+    let created = orchestrate(
+        &mut runtime,
+        "tray-1",
+        create("content", "https://example.org", None),
+    );
+    assert_eq!(created.result["type"], "webview-ack");
+
+    let listed = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::ListWebviews {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+        },
+    );
+    assert_eq!(listed.result["type"], "list-webviews-result");
+    assert_eq!(listed.result["webviews"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        listed.result["webviews"][0]["bridge"]["webviewId"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        listed.result["webviews"][1]["bridge"]["messageChannels"],
+        Value::Bool(false)
+    );
+
+    // Subscribe, establish `content` as the focused view, then focus-toolbar
+    // emits both focus edges with the full frame identity and per-view
+    // sequences (the scenario's precondition is content holding focus).
+    for webview_id in ["toolbar", "content"] {
+        orchestrate(
+            &mut runtime,
+            "tray-1",
+            WebviewOrchestrationCommand::SubscribeWebviewEvents {
+                owner: owner.clone(),
+                window_id: "win-1".to_string(),
+                webview_id: webview_id.to_string(),
+                kinds: vec![WebviewEventKind::Focused],
+            },
+        );
+    }
+    let content_focused = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::FocusWebview {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+            webview_id: "content".to_string(),
+        },
+    );
+    assert!(
+        content_focused.events.iter().any(|frame| frame.webview_id == "content"),
+        "content gains initial focus"
+    );
+    let focused = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::FocusWebview {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+            webview_id: "toolbar".to_string(),
+        },
+    );
+    assert_eq!(focused.result["type"], "webview-ack");
+    let edges: std::collections::HashMap<String, bool> = focused
+        .events
+        .iter()
+        .map(|frame| {
+            (
+                frame.webview_id.clone(),
+                matches!(
+                    frame.payload,
+                    opentray_spec::webview::WebviewEventPayload::Focused { focused: true }
+                ),
+            )
+        })
+        .collect();
+    assert_eq!(edges.get("toolbar"), Some(&true), "toolbar gains focus");
+    assert_eq!(edges.get("content"), Some(&false), "content loses focus");
+
+    // A second window session for the same tray is the typed rejection and
+    // leaves the live session untouched.
+    let rejected = runtime
+        .handle(
+            "tray-1",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: None,
+                height: None,
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: crate::WebviewShowSettings::default(),
+                owner_session_id: Some("session-2".to_string()),
+                window_id: Some("win-2".to_string()),
+                window_only: true,
+            },
+        )
+        .expect_err("second window session must reject at the ABI level");
+    assert!(rejected.to_string().contains("tray_session_active"));
+    let listed = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::ListWebviews {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+        },
+    );
+    assert_eq!(listed.result["webviews"].as_array().map(Vec::len), Some(2));
+
+    // Distinct trays coexist; closing session-1 removes exactly tray-1.
+    show_window_only(&mut runtime, "tray-2", "session-9", "win-9");
+    runtime.session_closed("session-1");
+    // The destroyed session's window is gone: further orchestration on it is
+    // the typed unknown-view rejection.
+    let result = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::ListWebviews {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+        },
+    );
+    assert_eq!(result.result["error"]["code"], "unknown_view");
+    // session-9's window on tray-2 remains untouched.
+    let HandledCommand { result, .. } = orchestrate(
+        &mut runtime,
+        "tray-2",
+        WebviewOrchestrationCommand::ListWebviews {
+            owner: opentray_spec::webview::WebviewOwnerTuple {
+                app_id: "app-1".to_string(),
+                tray_id: "tray-2".to_string(),
+                session_id: "session-9".to_string(),
+            },
+            window_id: "win-9".to_string(),
+        },
+    );
+    assert_eq!(result["type"], "list-webviews-result");
+    runtime.session_closed("session-9");
 }
 
 fn run_node_probe(script: &str, probe: &str) -> Value {

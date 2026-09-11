@@ -101,6 +101,7 @@ pub(super) fn handle_navigator_window_request(
     message: &str,
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     window: &Retained<NSWindow>,
+    source_webview: &str,
 ) {
     let request = match serde_json::from_str::<NavigatorWindowRequest>(message) {
         Ok(request) => request,
@@ -149,6 +150,7 @@ pub(super) fn handle_navigator_window_request(
         WINDOW_NAMESPACE => dispatch_navigator_window_command(
             bridge,
             window,
+            source_webview,
             &request.cmd,
             request.payload,
             request.options,
@@ -173,7 +175,7 @@ pub(super) fn handle_navigator_window_request(
             if request.namespace == PERMISSIONS_NAMESPACE {
                 return;
             }
-            if let Err(error) = resolve_callback(bridge, request.callback, response) {
+            if let Err(error) = resolve_callback(bridge, Some(source_webview), request.callback, response) {
                 eprintln!("opentray-ext-webview navigator callback failed: {error}");
             } else if webview_debug_enabled() {
                 eprintln!(
@@ -187,7 +189,9 @@ pub(super) fn handle_navigator_window_request(
                 eprintln!("opentray-ext-webview navigator request failed: {error}");
                 return;
             }
-            if let Err(callback_error) = reject_callback(bridge, request.error, &error) {
+            if let Err(callback_error) =
+                reject_callback(bridge, Some(source_webview), request.error, &error)
+            {
                 eprintln!("opentray-ext-webview navigator reject failed: {callback_error}");
             } else {
                 eprintln!(
@@ -311,6 +315,7 @@ fn dispatch_page_ipc_command(
 fn dispatch_navigator_window_command(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     window: &Retained<NSWindow>,
+    source_webview: &str,
     cmd: &str,
     payload: Value,
     _options: Option<Value>,
@@ -322,7 +327,12 @@ fn dispatch_navigator_window_command(
             })?;
             let event_id = bridge
                 .borrow_mut()
-                .add_listener(payload.event, payload.handler);
+                .add_listener(source_webview, payload.event, payload.handler);
+            let event_id = event_id.ok_or_else(|| {
+                WebviewRuntimeError::Rejected(
+                    "listen is not available for this webview's bridge".into(),
+                )
+            })?;
             Ok(json!({ "eventId": event_id }))
         }
         "unlisten" => {
@@ -333,7 +343,7 @@ fn dispatch_navigator_window_command(
             })?;
             bridge
                 .borrow_mut()
-                .remove_listener(&payload.event, payload.event_id);
+                .remove_listener(source_webview, &payload.event, payload.event_id);
             Ok(Value::Null)
         }
         "close" => {
@@ -570,6 +580,38 @@ pub(super) fn apply_window_style_patch(
     validate_style_request(&payload)?;
 
     let mut bridge_state = bridge.borrow_mut();
+
+    // Style-exclusivity checkpoint (2) (add-webview-orchestration D6):
+    // applying a translucency-affecting style to a window hosting more than
+    // one webview rejects with `multiwebview_unsupported_style` before any
+    // state changes, so the previous style survives untouched. The typed
+    // code rides the frozen error envelope inside the rejection message.
+    {
+        let mut projected = bridge_state.style.clone();
+        if let Some(frameless) = payload.frameless {
+            projected.frameless = frameless;
+        }
+        if let Some(background) = &payload.background {
+            projected.background = crate::parse_background_input(background.clone())?;
+        }
+        let facts = crate::orchestration::StyleFacts {
+            frameless: projected.frameless,
+            translucent_background: matches!(
+                projected.background,
+                crate::WebviewWindowBackground::Transparent
+                    | crate::WebviewWindowBackground::PlatformMaterial { .. }
+                    | crate::WebviewWindowBackground::Semantic { .. }
+            ),
+        };
+        if let Err(error) =
+            crate::orchestration::style_change_allowed(facts, bridge_state.views.len())
+        {
+            return Err(WebviewRuntimeError::Rejected(
+                serde_json::to_string(&error.envelope).unwrap_or_else(|_| error.code().as_str().to_string()),
+            ));
+        }
+    }
+
     let mut changed = false;
     if let Some(app_mode) = payload.app_mode {
         if bridge_state.style.app_mode != app_mode {
@@ -873,18 +915,20 @@ fn dispatch_private_sync_command(
 
 pub(super) fn resolve_callback(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: Option<&str>,
     callback_id: u32,
     payload: Value,
 ) -> Result<(), WebviewRuntimeError> {
-    evaluate_bridge_script(bridge, callback_script(callback_id, &payload)?)
+    evaluate_bridge_script(bridge, view_id, callback_script(callback_id, &payload)?)
 }
 
 pub(super) fn reject_callback(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: Option<&str>,
     callback_id: u32,
     error: &WebviewRuntimeError,
 ) -> Result<(), WebviewRuntimeError> {
-    evaluate_bridge_script(bridge, error_callback_script(callback_id, error)?)
+    evaluate_bridge_script(bridge, view_id, error_callback_script(callback_id, error)?)
 }
 
 pub(super) fn emit_window_event(
@@ -896,9 +940,10 @@ pub(super) fn emit_window_event(
     if listeners.is_empty() {
         return Ok(());
     }
-    for listener in listeners {
+    for (view_id, listener) in listeners {
         evaluate_bridge_script(
             bridge,
+            Some(view_id.as_str()),
             listener_event_script(listener.handler_id, listener.event_id, event, &payload)?,
         )?;
     }
@@ -947,13 +992,20 @@ fn listener_event_script(
 
 pub(super) fn evaluate_bridge_script(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: Option<&str>,
     script: String,
 ) -> Result<(), WebviewRuntimeError> {
     // Native -> page callbacks stay behind extension-owned internals, not the public navigator API.
-    let webview_ptr = bridge
-        .borrow()
-        .webview
-        .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
+    // With per-webview bridges the script evaluates in the webview whose page
+    // registered the listener; `None` addresses the primary webview.
+    let webview_ptr = {
+        let state = bridge.borrow();
+        match view_id {
+            Some(view_id) => state.view_webview(view_id),
+            None => state.primary_webview(),
+        }
+    }
+    .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
     let webview = MainThreadWebView(webview_ptr.as_ptr() as usize);
     DispatchQueue::main().exec_async(move || {
         if webview_debug_enabled() {

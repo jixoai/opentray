@@ -222,6 +222,7 @@ fn sync_title_to_page(
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     evaluate_bridge_script(
         bridge,
+        None,
         format!("{WINDOW_INTERNALS_GLOBAL}.setDocumentTitle({title_json});"),
     )
 }
@@ -239,6 +240,7 @@ fn sync_icon_to_page(
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     evaluate_bridge_script(
         bridge,
+        None,
         format!("{WINDOW_INTERNALS_GLOBAL}.setPageIconHref({href_json});"),
     )
 }

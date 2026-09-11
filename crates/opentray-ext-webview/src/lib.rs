@@ -6,6 +6,7 @@
 
 mod abi_support;
 mod bootstrap;
+mod orchestration;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "windows")]
@@ -14,9 +15,13 @@ mod windows;
 use std::ffi::{c_char, c_void, CString};
 use std::fmt;
 
+use opentray_spec::webview::{
+    OrchestrationErrorCode, WebviewErrorEnvelope, WebviewEventFrame, WebviewOrchestrationCommand,
+};
 use opentray_spec::{
-    ExtBytes, ExtContext, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope, Rect,
-    EXT_ABI_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED, EXT_OK,
+    ExtBytes, ExtContext, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
+    ExtensionScope, Rect, EXT_ABI_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED,
+    EXT_OK,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -332,6 +337,29 @@ struct WebviewExtension {
     runtime: WebviewRuntime,
 }
 
+/// One executed command: its response payload plus per-view push events
+/// (D19) flushed from the native event outboxes. The events ride the same
+/// extension envelopes as the response — the broker mirrors every envelope
+/// into an `ExtEvent` frame — and they never pass through the legacy
+/// window-event drain polling path.
+#[derive(Debug, Clone)]
+pub(crate) struct HandledCommand {
+    pub result: Value,
+    pub events: Vec<WebviewEventFrame>,
+}
+
+impl HandledCommand {
+    /// Result without flushed push events (Windows dispatch wrapper; the
+    /// orchestration batch will flush events there too).
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    fn plain(result: Value) -> Self {
+        Self {
+            result,
+            events: Vec::new(),
+        }
+    }
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[derive(Default)]
 struct UnsupportedWebviewRuntime;
@@ -342,7 +370,7 @@ impl UnsupportedWebviewRuntime {
         &mut self,
         _tray_id: &str,
         _command: WebviewCommand,
-    ) -> Result<Value, WebviewRuntimeError> {
+    ) -> Result<HandledCommand, WebviewRuntimeError> {
         // Non-macOS packages may already exist for distribution and contract validation.
         // Until a real native runtime lands, keep that state explicit instead of pretending a
         // visible WebView exists on this host.
@@ -352,6 +380,52 @@ impl UnsupportedWebviewRuntime {
     }
 
     fn session_closed(&mut self, _session_id: &str) {}
+
+    fn set_app_id(&mut self, _app_id: &str) {}
+}
+
+/// Owner tuple of an orchestration command (present on every variant of the
+/// frozen wire enum).
+fn orchestration_owner(command: &WebviewOrchestrationCommand) -> &opentray_spec::webview::WebviewOwnerTuple {
+    match command {
+        WebviewOrchestrationCommand::CreateWebview { owner, .. }
+        | WebviewOrchestrationCommand::DestroyWebview { owner, .. }
+        | WebviewOrchestrationCommand::ListWebviews { owner, .. }
+        | WebviewOrchestrationCommand::NavigateWebview { owner, .. }
+        | WebviewOrchestrationCommand::BackWebview { owner, .. }
+        | WebviewOrchestrationCommand::ForwardWebview { owner, .. }
+        | WebviewOrchestrationCommand::FocusWebview { owner, .. }
+        | WebviewOrchestrationCommand::SetWebviewLayout { owner, .. }
+        | WebviewOrchestrationCommand::UpdateWebviewLayout { owner, .. }
+        | WebviewOrchestrationCommand::GetWebviewUrl { owner, .. }
+        | WebviewOrchestrationCommand::GetWebviewTitle { owner, .. }
+        | WebviewOrchestrationCommand::SubscribeWebviewEvents { owner, .. }
+        | WebviewOrchestrationCommand::UnsubscribeWebviewEvents { owner, .. } => owner,
+    }
+}
+
+/// Typed session-scope rejection: the frame's owner tuple must describe the
+/// same app/tray the command envelope was dispatched under, so a client can
+/// never address another session's windows. Rejections return the frozen
+/// `{ error: { code, message } }` envelope as the command response data —
+/// the extension ABI's own error channel is category-level and cannot carry
+/// the orchestration error registry.
+fn session_scope_mismatch(
+    owner: &opentray_spec::webview::WebviewOwnerTuple,
+    extension_app_id: &str,
+    envelope_tray_id: &str,
+) -> Option<WebviewErrorEnvelope> {
+    if owner.app_id != extension_app_id || owner.tray_id != envelope_tray_id {
+        return Some(WebviewErrorEnvelope::new(
+            OrchestrationErrorCode::SessionScope,
+            format!(
+                "webview orchestration owner (app {}, tray {}) does not match the command scope \
+                 (app {extension_app_id}, tray {envelope_tray_id})",
+                owner.app_id, owner.tray_id
+            ),
+        ));
+    }
+    None
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -364,7 +438,19 @@ enum WebviewCommand {
         tray_bounds: Option<Rect>,
         fallback_rect: Option<Rect>,
         show_settings: WebviewShowSettings,
+        /// Owning session identity for the window (D18 owner tuple).
+        /// `None` while a legacy client does not send `sessionId`.
+        owner_session_id: Option<String>,
+        /// Window-session id to bind (default `default` when omitted).
+        window_id: Option<String>,
+        /// Create the window session without a primary webview; the
+        /// orchestration `create-webview` commands populate it.
+        window_only: bool,
     },
+    /// Multi-webview orchestration commands (add-webview-orchestration
+    /// D2/D18/D19). Parsed from the frozen kebab-case wire tags in
+    /// `opentray-spec::webview`; the owner tuple rides the command data.
+    Orchestration(Box<WebviewOrchestrationCommand>),
     Hide,
     Close,
     Destroy,
@@ -434,6 +520,14 @@ struct ShowCommandData {
     height: Option<f64>,
     #[serde(rename = "fallbackRect")]
     fallback_rect: Option<Rect>,
+    /// Owning session identity for the window (D18). Optional so legacy
+    /// clients stay compatible; orchestration cleanup matches it exactly
+    /// once clients attribute their sessions.
+    session_id: Option<String>,
+    /// Window-session id binding for the created window.
+    window_id: Option<String>,
+    /// Create the window session without a primary webview.
+    window_only: Option<bool>,
     native_window_api: Option<bool>,
     bind_window_globals: Option<bool>,
     native_screen_api: Option<bool>,
@@ -692,9 +786,12 @@ pub unsafe extern "C" fn opentray_ext_init(
             )
         }
     };
+    let mut runtime = WebviewRuntime::default();
+    // D18 owner tuples need the owning app identity inside the runtime.
+    runtime.set_app_id(&app_id);
     let instance = Box::new(WebviewExtension {
         app_id,
-        runtime: WebviewRuntime::default(),
+        runtime,
     });
     unsafe {
         *out_instance = Box::into_raw(instance).cast::<c_void>();
@@ -754,20 +851,55 @@ pub unsafe extern "C" fn opentray_ext_command(
         Ok(command) => command,
         Err(error) => return record_error(error.code(), error.category(), error.to_string()),
     };
+    if let WebviewCommand::Orchestration(ref orchestration) = command {
+        // Scope validation happens before dispatch so a mismatched owner
+        // tuple can never reach window state (zero partial state, D20).
+        if let Some(envelope_error) =
+            session_scope_mismatch(orchestration_owner(orchestration), &extension.app_id, tray_id)
+        {
+            let Ok(data) = serde_json::to_value(&envelope_error) else {
+                return record_error(
+                    EXT_ERR_INTERNAL,
+                    "serialization_failed",
+                    "WebView error envelope could not be serialized",
+                );
+            };
+            let events = vec![ExtensionEnvelope {
+                scope: envelope.scope,
+                data,
+            }];
+            return write_owned_events(out_events_json, &events);
+        }
+    }
     let tray_bounds = unsafe { read_tray_bounds(context) };
     let command = inject_tray_bounds(command, tray_bounds);
-    let event = match extension.runtime.handle(tray_id, command) {
-        Ok(event) => event,
+    let handled = match extension.runtime.handle(tray_id, command) {
+        Ok(handled) => handled,
         Err(error) => {
             eprintln!("opentray-ext-webview command failed: {error}");
             return record_error(error.code(), error.category(), error.to_string());
         }
     };
 
-    let events = vec![ExtensionEnvelope {
+    let mut events = vec![ExtensionEnvelope {
         scope: envelope.scope,
-        data: event,
+        data: handled.result,
     }];
+    for frame in handled.events {
+        // Push events travel under their owning window's scope so the broker
+        // routes each `ExtEvent` frame to the tray that owns the webview.
+        let Ok(data) = serde_json::to_value(&frame) else {
+            continue;
+        };
+        events.push(ExtensionEnvelope {
+            scope: ExtensionScope {
+                app_id: frame.owner.app_id.clone(),
+                tray_id: Some(frame.owner.tray_id.clone()),
+                ext: "webview".to_string(),
+            },
+            data,
+        });
+    }
     write_owned_events(out_events_json, &events)
 }
 
@@ -929,7 +1061,27 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                     )?,
                     bootstrap_requested,
                 },
+                owner_session_id: parsed.session_id,
+                window_id: parsed.window_id,
+                window_only: parsed.window_only.unwrap_or(false),
             })
+        }
+        // Multi-webview orchestration surface (frozen wire tags; see
+        // `opentray-spec::webview`). The serde tag of
+        // `WebviewOrchestrationCommand` matches these kebab-case names, so
+        // the whole data payload deserializes in one step; unknown tags keep
+        // falling through to the generic rejection below.
+        "create-webview" | "destroy-webview" | "list-webviews" | "navigate-webview"
+        | "back-webview" | "forward-webview" | "focus-webview" | "set-webview-layout"
+        | "update-webview-layout" | "get-webview-url" | "get-webview-title"
+        | "subscribe-webview-events" | "unsubscribe-webview-events" => {
+            let command: WebviewOrchestrationCommand =
+                serde_json::from_value(data.clone()).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "invalid webview orchestration command: {error}"
+                    ))
+                })?;
+            Ok(WebviewCommand::Orchestration(Box::new(command)))
         }
         "hide" => Ok(WebviewCommand::Hide),
         "close" => Ok(WebviewCommand::Close),
@@ -1517,6 +1669,9 @@ fn inject_tray_bounds(command: WebviewCommand, tray_bounds: Option<Rect>) -> Web
             tray_bounds: _,
             fallback_rect,
             show_settings,
+            owner_session_id,
+            window_id,
+            window_only,
         } => WebviewCommand::Show {
             html,
             url,
@@ -1525,6 +1680,9 @@ fn inject_tray_bounds(command: WebviewCommand, tray_bounds: Option<Rect>) -> Web
             tray_bounds,
             fallback_rect,
             show_settings,
+            owner_session_id,
+            window_id,
+            window_only,
         },
         other => other,
     }
@@ -1713,7 +1871,126 @@ mod tests {
                 show_settings: WebviewShowSettings {
                     ..WebviewShowSettings::default()
                 },
+                owner_session_id: None,
+                window_id: None,
+                window_only: false,
             }
+        );
+    }
+
+    #[test]
+    fn parse_show_command_reads_orchestration_owner_fields() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "sessionId": "session-7",
+            "windowId": "main-window",
+            "windowOnly": true,
+            "style": { "appMode": true }
+        }))
+        .expect("show command");
+
+        let WebviewCommand::Show {
+            owner_session_id,
+            window_id,
+            window_only,
+            ..
+        } = command
+        else {
+            panic!("expected show command");
+        };
+        assert_eq!(owner_session_id.as_deref(), Some("session-7"));
+        assert_eq!(window_id.as_deref(), Some("main-window"));
+        assert!(window_only);
+
+        // Legacy shows keep working without any owner attribution.
+        let legacy = parse_webview_command(&serde_json::json!({ "type": "show" }))
+            .expect("legacy show command");
+        let WebviewCommand::Show {
+            owner_session_id,
+            window_id,
+            window_only,
+            ..
+        } = legacy
+        else {
+            panic!("expected show command");
+        };
+        assert_eq!(owner_session_id, None);
+        assert_eq!(window_id, None);
+        assert!(!window_only);
+    }
+
+    #[test]
+    fn parse_orchestration_commands_use_the_frozen_wire_tags() {
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "create-webview",
+            "owner": {
+                "appId": "app-1",
+                "trayId": "tray-1",
+                "sessionId": "session-1"
+            },
+            "windowId": "win-1",
+            "webviewId": "toolbar",
+            "url": "http://127.0.0.1:5173/toolbar.html",
+            "bridge": { "webviewId": true, "messageChannels": true }
+        }))
+        .expect("create-webview command");
+
+        let WebviewCommand::Orchestration(command) = &command else {
+            panic!("expected orchestration command");
+        };
+        assert_eq!(command.command_type(), "create-webview");
+        assert_eq!(
+            orchestration_owner(command).tray_id, "tray-1",
+            "owner helper reads every variant"
+        );
+
+        let subscribe = parse_webview_command(&serde_json::json!({
+            "type": "subscribe-webview-events",
+            "owner": {
+                "appId": "app-1",
+                "trayId": "tray-1",
+                "sessionId": "session-1"
+            },
+            "windowId": "win-1",
+            "webviewId": "toolbar",
+            "kinds": ["urlChange", "focused"]
+        }))
+        .expect("subscribe command");
+        assert!(matches!(
+            subscribe,
+            WebviewCommand::Orchestration(command)
+                if matches!(&*command, WebviewOrchestrationCommand::SubscribeWebviewEvents { .. })
+        ));
+
+        // Unknown orchestration payloads stay rejected at parse time.
+        let error = parse_webview_command(&serde_json::json!({
+            "type": "create-webview",
+            "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" }
+        }))
+        .expect_err("missing required fields must reject");
+        assert!(error.to_string().contains("invalid webview orchestration command"));
+    }
+
+    #[test]
+    fn session_scope_mismatch_is_detected_before_dispatch() {
+        let owner = opentray_spec::webview::WebviewOwnerTuple {
+            app_id: "app-1".to_string(),
+            tray_id: "tray-2".to_string(),
+            session_id: "session-1".to_string(),
+        };
+        assert!(session_scope_mismatch(&owner, "app-1", "tray-1").is_some());
+        assert!(session_scope_mismatch(&owner, "app-2", "tray-2").is_some());
+        assert!(session_scope_mismatch(&owner, "app-1", "tray-2").is_none());
+
+        let mismatch = session_scope_mismatch(&owner, "app-1", "tray-1").unwrap();
+        assert_eq!(
+            serde_json::to_value(&mismatch).unwrap(),
+            serde_json::json!({
+                "error": {
+                    "code": "session_scope",
+                    "message": mismatch.error.message
+                }
+            })
         );
     }
 
@@ -1778,6 +2055,9 @@ mod tests {
                 height: Some(220.0),
                 tray_bounds: None,
                 fallback_rect: None,
+                owner_session_id: None,
+                window_id: None,
+                window_only: false,
                 show_settings: WebviewShowSettings {
                     navigator_window: NavigatorWindowSettings {
                         enabled: true,
