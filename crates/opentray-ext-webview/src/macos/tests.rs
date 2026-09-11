@@ -50,6 +50,8 @@ fn test_bridge() -> NavigatorWindowBridge {
         page_access: PageCapabilityAccess::default(),
         tray_bounds: None,
         size_constraints: WindowSizeConstraints::default(),
+        layout: crate::layout::WindowLayoutState::default(),
+        layout_tracker: std::rc::Weak::new(),
     }
 }
 
@@ -1429,7 +1431,10 @@ fn navigator_window_bridge_tracks_listener_ids_per_webview() {
     assert_eq!(capabilities["focusWebview"], Value::Bool(true));
     assert_eq!(
         capabilities["webviewPushEvents"],
-        serde_json::json!(["urlChange", "titleChange", "focused"])
+        // geometryChange joined the unified push family with the layout
+        // batch (D23): layout commits and overlay metric changes recompute
+        // per-view projections natively.
+        serde_json::json!(["urlChange", "titleChange", "focused", "geometryChange"])
     );
 
     // Listener ids are per webview; routing returns the owning view.
@@ -1444,6 +1449,13 @@ fn navigator_window_bridge_tracks_listener_ids_per_webview() {
     let routed = bridge.listeners_for("resized");
     assert_eq!(routed.len(), 2);
     assert!(routed.iter().any(|(view, _)| view == "toolbar"));
+    // Per-view routing (D23): geometry pushes address exactly one page's
+    // listeners and never fan out to unrelated webviews.
+    let toolbar_only = bridge.listeners_for_view("toolbar", "resized");
+    assert_eq!(toolbar_only.len(), 1);
+    assert!(toolbar_only.iter().all(|(view, _)| view == "toolbar"));
+    assert!(bridge.listeners_for_view("toolbar", "overlay.geometrychange").is_empty());
+    assert!(bridge.listeners_for_view("missing", "resized").is_empty());
     assert!(bridge.has_listener("resized"));
     assert!(!bridge.has_listener("overlay.geometrychange"));
 
