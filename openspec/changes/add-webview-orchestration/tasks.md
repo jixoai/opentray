@@ -65,7 +65,7 @@
 - [ ] 6.2 双平台端到端取证（隔离 HOME，绝不污染 Owner 会话）：macOS 本机 + Windows 真机——create --url <XFO DENY 站点> --toolbar 渲染/登录/地址栏跟随/后退前进/重载；命令应用 toolbar 服务窗同验证；单 webview 零改动路径回归（无 setLayout 的 createWebviewWindow）。
 - [ ] 6.3 回归：直连模式（非 toolbar）URL 应用与命令应用行为不变；vision-driven 基线（bun test scripts/openspec/vision-driven.test.ts + openspec schema validate vision-driven）。
 - [ ] 6.4 self-review（review/self-review.md + html）+ `check` + 分 phase 提交。
-- [ ] 6.5 Codex 复核闭环（herdr，gpt-5.6-terra / xhigh）：阻塞项修复后二次复核；评分与依据记录进 review；R1 报告 /tmp/codex-review-add-webview-orchestration.md、每轮对比。
+- [x] 6.5 Codex 复核闭环（文档轮七轮 5.5→8.2 签收 + 实现终核一轮）：**终核 6.6/10（口径独立于文档轮——评实现代码与可执行行为）**，两阻塞 B1/B2 全部当日修复并双平台复验：B1 close_all 墓碑逐出致迭代越界 panic（34 通道即崩）→ while 动态边界 + 40 通道回归（mac 137/137、win 145/145）；B2 页面桥 onClose 退订器缺 => 执行即 ReferenceError → 修复 + 双探针回归（含 sibling 订阅存活）。终核非阻塞建议（facade owner 再校验防御、nativeApi:true 语义澄清、Owner 走查关注五点）已入 self-review 与走查文档。报告 /tmp/codex-final-review-add-webview-orchestration.md。commits 9d8dd08。
 
 ## 7. Docs
 
