@@ -1,9 +1,9 @@
 ## MODIFIED Requirements
 
-### Requirement: Webview lifecycle SHALL be scoped to surface tray and lease
-
-<!-- Title is the OpenSpec merge identity with the living spec; the body below
+<!-- Title below is the OpenSpec merge identity with the living spec; the body
      replaces the deprecated "surface" vocabulary with App/Tray/Session. -->
+
+### Requirement: Webview lifecycle SHALL be scoped to surface tray and lease
 
 The webview extension SHALL associate each window session with its owning App/Tray/Session identity — the owner tuple `(appId, trayId, sessionId)` — plus the owning lease. Every window session, webview, layout document, and message channel created by the extension SHALL be tagged with this owner tuple in protocol frames and native state, and cleanup SHALL be keyed by it: a session-close callback SHALL destroy exactly the webviews, layouts, and channels whose owner tuple matches that session, and SHALL NOT touch state owned by any other live session. A tray scope SHALL own at most one active WebView window session per extension instance: creating a second window session for the same tray SHALL fail at creation with the typed error `tray_session_active` before any window state exists. A window session SHALL host one or more webview instances as sibling native views inside the window, addressed by webview id unique within the window session; the session SHALL remain valid as webviews are created and destroyed within it. Lease cleanup SHALL hide or destroy all webview state owned by the disconnected client without affecting webview state owned by other leases.
 
