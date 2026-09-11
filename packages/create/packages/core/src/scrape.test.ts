@@ -15,7 +15,6 @@ import {
   resolveFaviconUrl,
   SVG_RASTER_TARGET,
   deriveUrlPresets,
-  responseHeadersAllowEmbedding,
   scrapeService,
   scrapeUrl,
   writeGlyphIconTemp,
@@ -105,9 +104,9 @@ const fetchMock = (options: {
 }): ScrapeFetch => ({
   async page(url) {
     if (options.pageOk === false) {
-      return { ok: false, status: 0, body: "", headers: {} };
+      return { ok: false, status: 0, body: "" };
     }
-    return { ok: true, status: 200, body: options.pageHtml ?? html("Scraped Title"), headers: {} };
+    return { ok: true, status: 200, body: options.pageHtml ?? html("Scraped Title") };
   },
   async bytes(url) {
     const bytes = options.iconBytes?.get(url);
@@ -439,49 +438,25 @@ describe("scrapeUrl / deriveUrlPresets", () => {
   });
 });
 
-// D12 嵌入策略判定：X-Frame-Options（除 ALLOWALL）与无通配的
-// CSP frame-ancestors 都拒绝第三方 iframe（toolbar 包装可行性）。
-describe("responseHeadersAllowEmbedding", () => {
-  it("allows by default and rejects X-Frame-Options except ALLOWALL", () => {
-    expect(responseHeadersAllowEmbedding({})).toBe(true);
-    expect(responseHeadersAllowEmbedding({ "x-frame-options": "DENY" })).toBe(false);
-    expect(responseHeadersAllowEmbedding({ "x-frame-options": "SAMEORIGIN" })).toBe(false);
-    expect(responseHeadersAllowEmbedding({ "x-frame-options": "ALLOWALL" })).toBe(true);
-  });
-
-  it("rejects CSP frame-ancestors without a wildcard", () => {
-    expect(responseHeadersAllowEmbedding({
-      "content-security-policy": "default-src 'self'; frame-ancestors 'self'",
-    })).toBe(false);
-    expect(responseHeadersAllowEmbedding({
-      "content-security-policy": "frame-ancestors 'none'",
-    })).toBe(false);
-    expect(responseHeadersAllowEmbedding({
-      "content-security-policy": "frame-ancestors *; default-src 'self'",
-    })).toBe(true);
-    expect(responseHeadersAllowEmbedding({
-      "content-security-policy": "default-src 'self'",
-    })).toBe(true);
-  });
-
-  it("derives frameEmbeddable through deriveUrlPresets", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "scrape-embed-test-"));
-    const denied = await deriveUrlPresets("https://example.com", {
+// add-webview-orchestration D14：嵌入策略探测退役——多 webview 载体把目标页
+// 作为顶层浏览上下文加载，X-Frame-Options / CSP frame-ancestors 构造性无关；
+// 抓取结果不再携带任何嵌入可行性信号（符号级 grep 门见 tasks 5.3）。
+describe("scrapeUrl embedding-policy retirement (D14)", () => {
+  it("derives no embedding signal even for XFO-DENY responses", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "scrape-retired-test-"));
+    const presets = await deriveUrlPresets("https://example.com", {
       fetch: {
         page: async () => ({
-          ok: true, status: 200,
+          ok: true,
+          status: 200,
           body: html("Denied"),
-          headers: { "x-frame-options": "DENY" },
         }),
         bytes: async () => ({ ok: false, status: 0, bytes: Buffer.alloc(0), contentType: "" }),
       },
       tempDir,
     });
-    expect(denied.frameEmbeddable).toBe(false);
-    const allowed = await deriveUrlPresets("https://example.com", {
-      fetch: fetchMock({}),
-      tempDir,
-    });
-    expect(allowed.frameEmbeddable).toBe(true);
+    // 只有标题/图标预设；结果对象上不存在任何嵌入判定字段。
+    expect(presets).toEqual({ appName: "Denied" });
+    expect(Object.keys(presets)).toEqual(["appName"]);
   });
 });
