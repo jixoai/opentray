@@ -61,7 +61,12 @@ export interface CommandConfig {
 export interface WindowConfig {
   readonly width: number;
   readonly height: number;
-  /** URL applications: host the address-bar wrapper page (D12). */
+  /**
+   * Host the native navigation-toolbar carrier over the target/service page
+   * (add-webview-orchestration D12/D13) — valid for BOTH URL and command
+   * applications. The one canonical toolbar field; the legacy wizard
+   * showAddressBar input is retired.
+   */
   readonly toolbar?: boolean;
   /** Window title follows document.title (document→window one-way); D13 default true. */
   readonly titleFollowsDocument: boolean;

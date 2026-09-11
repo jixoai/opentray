@@ -163,7 +163,7 @@ describe("writeScaffold URL application", () => {
     const entry = await readFile(join(dir, "main.mjs"), "utf8");
 
     // D2：唯一窗口直接指向冻结 URL，窗口尺寸来自 v1 window 选项。
-    expect(entry).toContain("url: toolbarUrl ?? config.url");
+    expect(entry).toContain("{ url: config.url }");
     expect(entry).toContain("width: config.window.width");
     expect(entry).toContain("appMode: true");
     // D13：标题单向跟随是默认；icon 跟随默认关闭（不再出现 iconSync）。
@@ -180,7 +180,7 @@ describe("writeScaffold URL application", () => {
     expect(entry).not.toContain("listOwnedListeningPorts");
     expect(entry).not.toContain("listProcessTreePids");
     // D12：shell host 仅在 toolbar 模式下按需加载（条件表达式），默认直连。
-    expect(entry).toContain("toolbarMode && shellPort !== null");
+    expect(entry).toContain("if (toolbarMode)");
     // D6 同法：启动失败写入 app.log。
     expect(entry).toContain("startup failed");
     expect(entry).toContain("primaryEvent");
@@ -191,7 +191,9 @@ describe("writeScaffold URL application", () => {
   });
 });
 
-// D12：URL toolbar 模式——shell 资产回来（仍无 PTY 依赖），窗口加载包装页。
+// D12/D13（add-webview-orchestration）：URL toolbar 模式——shell 资产回来
+// （仍无 PTY 依赖），窗口 = toolbar webview + content webview 的多 webview
+// 载体（无 iframe 包装产物）。
 describe("writeScaffold URL application toolbar mode", () => {
   const toolbarConfig = {
     schemaVersion: 1 as const,
@@ -208,7 +210,7 @@ describe("writeScaffold URL application toolbar mode", () => {
     },
   };
 
-  it("hosts the shell server and wrapper assets without the PTY dependency", async () => {
+  it("hosts the shell server and toolbar assets without the PTY dependency", async () => {
     const dir = await mkdtemp(join(tmpdir(), "scaffold-url-toolbar-"));
     await writeScaffold({ config: toolbarConfig, targetDir: dir, dependencyRange: "^0.18.0" });
 
@@ -218,9 +220,86 @@ describe("writeScaffold URL application toolbar mode", () => {
     expect(packageJson.dependencies["@lydell/node-pty"]).toBeUndefined();
 
     const entry = await readFile(join(dir, "main.mjs"), "utf8");
-    expect(entry).toContain("browse.html?url=");
-    expect(entry).toContain("encodeURIComponent(config.url)");
-    // toolbar 窗口不设置任何 sync 选项（wrapper 元数据非目标页面元数据）。
-    expect(entry).toContain("...(toolbarUrl === null");
+    // 双 webview：toolbar（shell 资产 URL，显式 bridge 策略）+ content
+    // （冻结 URL 直接加载，无 bridge 策略 = 无桥）。
+    expect(entry).toContain("attachToolbarCarrier");
+    expect(entry).toContain("id: \"toolbar\"");
+    expect(entry).toContain("id: \"content\"");
+    expect(entry).toContain("bridge: { webviewId: true, messageChannels: true }");
+    expect(entry).toContain("contentUrl: config.url");
+    expect(entry).toContain("/toolbar.html");
+    // 声明式 column 布局：toolbar 固定 44px，content 填充。
+    expect(entry).toContain("column([fixed(\"toolbar\", 44), grow(\"content\")])");
+    // 通道导航接口（create 包私有 schema，D12）：指令 navigate/back/forward/
+    // reload、查询 get-url、事件 url——全部 JSON over channel payload。
+    expect(entry).toContain('createMessageChannel({ target: "toolbar" })');
+    expect(entry).toContain('kind === "navigate"');
+    expect(entry).toContain('kind === "back"');
+    expect(entry).toContain('kind === "forward"');
+    expect(entry).toContain('kind === "reload"');
+    expect(entry).toContain('kind === "get-url"');
+    expect(entry).toContain('{ kind: "url", url:');
+    // 无 iframe 包装产物：不加载 browse 包装页，不再 encodeURIComponent 目标。
+    expect(entry).not.toContain("browse.html");
+    expect(entry).not.toContain("encodeURIComponent");
+    expect(entry).not.toContain("<iframe");
+    // windowOnly 会话：窗口本身不携带 url。
+    expect(entry).toContain("windowOnly: true");
+    // 托盘 Reload → content 原生重载（navigate 当前 URL，不再 evaluate 于包装层）。
+    expect(entry).toContain("await content.getUrl()");
+    expect(entry).toContain("await content.navigate(url)");
+    // titleSync 投影到 content 真文档（entry 侧 onTitleChange → 原生 re-show
+    // 标题更新；v1 冻结面没有 host set-title 命令）。
+    expect(entry).toContain("onTitleChange");
+    expect(entry).toContain("shell.show({ title, windowOnly: true })");
+    // shell server 的 toolbar 导航面没有导航 HTTP 端点（D12：静态 + 终端监督端点）。
+    const shell = await readFile(join(dir, "app-shell-server.mjs"), "utf8");
+    expect(shell).not.toContain("/api/navigate");
+    expect(shell).not.toContain("/api/back");
+    expect(shell).not.toContain("/api/forward");
+    expect(shell).not.toContain("/api/reload");
+  });
+});
+
+// D13（add-webview-orchestration R2-B12）：命令应用获得同等的 toolbar 生成
+// 契约——window.toolbar 组合同一 toolbar 载体于服务窗，行为闭环与 URL 模式
+// 平价；旧 showAddressBar 字段退役，无 iframe browse 产物。
+describe("writeScaffold command application toolbar mode", () => {
+  const commandToolbarConfig = {
+    schemaVersion: 1 as const,
+    appId: "cmd.example",
+    appName: "Cmd Example",
+    command: { command: "/usr/local/bin/serve", args: ["start"], cwd: "/tmp/xyz" },
+    service: { port: 0 },
+    window: {
+      width: 1200,
+      height: 800,
+      toolbar: true,
+      titleFollowsDocument: true,
+      iconFollowsDocument: false,
+    },
+    shell: { showTerminal: false },
+  };
+
+  it("composes the same native carrier over the service window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "scaffold-cmd-toolbar-"));
+    await writeScaffold({ config: commandToolbarConfig, targetDir: dir, dependencyRange: "^0.18.0" });
+    const entry = await readFile(join(dir, "main.mjs"), "utf8");
+
+    // 服务窗 = 同一载体：toolbar webview + content webview + column 布局 + 通道。
+    expect(entry).toContain("attachToolbarCarrier");
+    expect(entry).toContain("toolbarMode && shellPort !== null");
+    expect(entry).toContain('toolbarUrl: `http://127.0.0.1:${shellPort}/toolbar.html`');
+    expect(entry).toContain("contentUrl: direct");
+    expect(entry).toContain("column([fixed(\"toolbar\", 44), grow(\"content\")])");
+    expect(entry).toContain('createMessageChannel({ target: "toolbar" })');
+    // 命令监督法不变：PTY / 端口嗅探 / 进程树清理原样保留。
+    expect(entry).toContain('await import("@lydell/node-pty")');
+    expect(entry).toContain("ensureServiceWindow");
+    expect(entry).toContain("listProcessTreePids");
+    // 无 iframe browse 产物；旧 showAddressBar 分支已删除。
+    expect(entry).not.toContain("browse.html");
+    expect(entry).not.toContain("showAddressBar");
+    expect(entry).not.toContain("<iframe");
   });
 });

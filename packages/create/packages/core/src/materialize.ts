@@ -52,8 +52,9 @@ export interface MaterializeInput {
   readonly imageSmoothingEnabled?: boolean;
   /** Tray icon source; defaults to the app icon source when omitted. */
   readonly trayIconSourcePath?: string;
-  /** Generated-app shell options (startup terminal / address bar). */
-  readonly shell?: { showTerminal: boolean; showAddressBar: boolean };
+  /** Generated-app shell options (startup terminal visibility only; the
+   *  toolbar is a `window.toolbar` fact, add-webview-orchestration D13). */
+  readonly shell?: { showTerminal: boolean };
   /** Adapter-owned prebuilt shell UI directory (copied to app-shell/). */
   readonly shellAssetsDir?: string;
   readonly packageManager: "npm" | "pnpm" | "bun";

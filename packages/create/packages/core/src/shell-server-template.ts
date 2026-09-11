@@ -1,10 +1,17 @@
 // Orthogonal intents (2026-08-16; owner round-9 demand: the generated app may
-// embed the SAME terminal/iframe tab experience the wizard has):
+// embed the SAME terminal experience the wizard has; 2026-09-11
+// add-webview-orchestration D12 fixes the shell server's navigation boundary):
 // 1. Render the generated app's shell-server entry source from a frozen config.
-// 2. Serve prebuilt shell UI statically + SSE state (command, PTY ring, ports).
+// 2. Serve prebuilt shell UI statically (terminal page + toolbar page) + SSE
+//    state (command, PTY ring, ports).
 // 3. Accept terminal input routed to the PTY registered by main.mjs.
 // 4. Report owned-port lifecycles so the shell can auto-open tabs and mark
 //    detached services; main.mjs owns detection and calls setServices.
+// 5. Navigation boundary (D12): this server exposes NO navigation HTTP API —
+//    the toolbar page's navigate/back/forward/reload commands and urlChange
+//    events flow exclusively over the extension message channel. The
+//    terminal endpoints (/api/events SSE, /api/terminal-input) are terminal
+//    supervision, not navigation, and keep their existing laws.
 // Kept physically separate from scaffold.ts: the template's nested JS template
 // literals are hostile to inline embedding.
 

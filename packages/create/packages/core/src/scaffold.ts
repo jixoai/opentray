@@ -6,8 +6,9 @@
 // 1. Write a self-contained consumer project that depends only on published packages.
 // 2. Persist the frozen identity, command vector, and service port as app config.
 // 3. Generate an entry that supervises the command and owns tray+window lifetime.
-// 4. Unconditionally scaffold the shell host (terminal window + address bar UI)
-//    and the native PTY dependency — `shell` options only tune initial visibility.
+// 4. Unconditionally scaffold the shell host (terminal window + toolbar page
+//    assets) and the native PTY dependency — `shell` options only tune
+//    initial terminal visibility; the toolbar is a `window.toolbar` fact.
 
 import { access, cp, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -35,17 +36,22 @@ export interface ScaffoldAppConfig {
   readonly window: {
     readonly width: number;
     readonly height: number;
-    /** URL applications: host the address-bar wrapper (D12). */
+    /**
+     * Host the native navigation-toolbar carrier (add-webview-orchestration
+     * D12/D13): one toolbar webview above one content webview per generated
+     * window, for BOTH URL and command applications. This is the one
+     * canonical toolbar field — the legacy shell `showAddressBar` input is
+     * retired (stale frozen occurrences are ignored by loose parsing).
+     */
     readonly toolbar?: boolean;
     readonly titleFollowsDocument: boolean;
     readonly iconFollowsDocument: boolean;
   };
   /** Tray icon asset (written by materialize); omitted → text-only tray. */
   readonly trayIcon?: { readonly path: string; readonly template: boolean };
-  /** Generated-app shell (startup terminal / address-bar tabs). */
+  /** Generated-app shell options (startup terminal visibility only). */
   readonly shell?: {
     readonly showTerminal: boolean;
-    readonly showAddressBar: boolean;
   };
   /** v1 developerMode: only WebView DevTools admission; default false. */
   readonly developerMode?: boolean;
@@ -81,8 +87,9 @@ export const SCAFFOLD_MARKER_FILES = [
 export const writeScaffold = async (options: ScaffoldOptions): Promise<ScaffoldResult> => {
   const projectDir = resolve(options.targetDir);
   const isUrlApp = options.config.url !== undefined;
-  // D12: a URL app hosts shell assets ONLY in toolbar mode; command apps
-  // always do (terminal = abnormal-exit surface).
+  // D12/D13: a URL app hosts shell assets ONLY in toolbar mode (the toolbar
+  // page); command apps always do (terminal = abnormal-exit surface, and the
+  // toolbar service window needs the toolbar page too).
   const hostShell = !isUrlApp || options.config.window.toolbar === true;
   await mkdir(join(projectDir, "app-icon"), { recursive: true });
 
@@ -118,14 +125,14 @@ export const writeScaffold = async (options: ScaffoldOptions): Promise<ScaffoldR
 };
 
 /**
- * Locate the adapter-staged shell UI (terminal.html/browse.html + assets).
+ * Locate the adapter-staged shell UI (terminal.html/toolbar.html + assets).
  * Layouts, in order:
  * - published create-opentray: `dist/shell` beside the package root (resolved
  *   through the package self-reference; core is bundled into that dist);
  * - source checkout: `<create root>/dist/shell` (built) or the create-webui
  *   vite output one workspace up.
  * Undefined means "no staged assets found" — the entry still runs; only the
- * optional terminal/address-bar pages would 404.
+ * optional terminal/toolbar pages would 404.
  */
 const resolveBundledShellAssetsDir = async (): Promise<string | undefined> => {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
