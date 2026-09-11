@@ -45,6 +45,15 @@ export type LocalRuntimeEventFrame = Extract<
   { type: "event" | "app-event" | "ext-event" }
 >;
 
+/**
+ * Transport-close sentinel every pending request rejects with when the
+ * broker socket closes (the broker exits once its last session closes, so a
+ * caller racing its own teardown against that exit sees this message).
+ * Exported so the tray-handle destroy path can treat it as the desired end
+ * state instead of a failure (P3.6 quit-path finding, 2026-09-12).
+ */
+export const BROKER_CONNECTION_CLOSED_MESSAGE = "broker connection closed";
+
 export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
   readonly callerLabel: string;
@@ -245,7 +254,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
       this.rejectAll(error);
     });
     socket.on("close", () => {
-      this.rejectAll(new Error("broker connection closed"));
+      this.rejectAll(new Error(BROKER_CONNECTION_CLOSED_MESSAGE));
     });
   }
 

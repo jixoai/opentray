@@ -35,6 +35,9 @@ vi.mock("./local-broker", () => ({
     }
     return mockState.connection;
   },
+  // Mirrors the real module's export so the SUT imports resolve under the
+  // factory (the sentinel literal must stay in sync with local-broker.ts).
+  BROKER_CONNECTION_CLOSED_MESSAGE: "broker connection closed",
 }));
 
 import { createTray, PROTOCOL_VERSION } from "./index";
@@ -205,6 +208,39 @@ describe("opentray ergonomic createTray", () => {
     expect(transport.closeCount).toBe(1);
   });
 
+  it("resolves destroy when the broker closes the transport during teardown (P3.6 quit path)", async () => {
+    // The broker exits once its last session closes; a destroy frame racing
+    // that exit rejects with the transport-close sentinel. The handle's
+    // destroy contract treats "the connection is gone" as the requested end
+    // state so generated-app Quit exits cleanly (add-webview-orchestration
+    // 3.6 finding, 2026-09-12).
+    const tray = await createTray({ id: "status" });
+    transport.failNextDestroyWithConnectionClosed = true;
+
+    await expect(tray.destroy()).resolves.toBeUndefined();
+
+    expect(transport.closeCount).toBe(1);
+  });
+
+  it("resolves destroy when the connection close itself rejects with the transport-close sentinel", async () => {
+    const tray = await createTray({ id: "status" });
+    transport.failNextCloseWithConnectionClosed = true;
+
+    await expect(tray.destroy()).resolves.toBeUndefined();
+
+    expect(transport.closeCount).toBe(1);
+  });
+
+  it("still surfaces typed destroy failures that are not the transport-close sentinel", async () => {
+    const tray = await createTray({ id: "status" });
+    transport.failNextDestroyTyped = true;
+
+    await expect(tray.destroy()).rejects.toThrow("failed_destroy_tray");
+
+    // The connection close still ran exactly once (finally semantics).
+    expect(transport.closeCount).toBe(1);
+  });
+
   it("closes the caller-owned broker session when tray creation fails", async () => {
     transport.failNextCreateTray = true;
 
@@ -361,6 +397,12 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
   closeCount = 0;
   failNextCreateTray = false;
   failNextSetMenu = false;
+  /** Next destroy-tray rejects with the transport-close sentinel. */
+  failNextDestroyWithConnectionClosed = false;
+  /** Next destroy-tray rejects with a typed (non-sentinel) failure. */
+  failNextDestroyTyped = false;
+  /** Next close() rejects with the transport-close sentinel. */
+  failNextCloseWithConnectionClosed = false;
   appName = "Test";
   appIcon: AppIcon | undefined;
   appIconVariant: string | undefined;
@@ -426,6 +468,15 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
         }
         return { type: "ack", requestId: frame.requestId };
       case "destroy-tray":
+        if (this.failNextDestroyWithConnectionClosed) {
+          this.failNextDestroyWithConnectionClosed = false;
+          throw new Error("broker connection closed");
+        }
+        if (this.failNextDestroyTyped) {
+          this.failNextDestroyTyped = false;
+          throw new Error("failed_destroy_tray");
+        }
+        return { type: "ack", requestId: frame.requestId };
       case "set-tray-icon":
       case "set-tray-tooltip":
       case "load-ext":
@@ -478,6 +529,10 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
 
   async close(): Promise<void> {
     this.closeCount += 1;
+    if (this.failNextCloseWithConnectionClosed) {
+      this.failNextCloseWithConnectionClosed = false;
+      throw new Error("broker connection closed");
+    }
   }
 
   emit(frame: OpenTrayEventFrame): void {

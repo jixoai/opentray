@@ -17,7 +17,7 @@ import {
   type EventfulTrayHandle,
   type TrayExtension,
 } from "./client";
-import { connectLocalBroker } from "./local-broker";
+import { connectLocalBroker, BROKER_CONNECTION_CLOSED_MESSAGE } from "./local-broker";
 import {
   normalizeCreateTrayMenu,
   type CreateTrayMenu,
@@ -143,10 +143,29 @@ const wrapCreateTrayHandle = (
       state.destroyPromise ??= (async () => {
         state.menuUnsubscribe();
         state.menuUnsubscribe = noop;
+        // The broker tears its transport down as soon as its last session
+        // closes, so the destroy request can race the broker-side socket
+        // close. Both the destroy frame and the connection close rejecting
+        // with the transport-close sentinel is the requested end state, not
+        // a failure — a generated app's Quit must exit cleanly when the
+        // broker exits first (P3.6 quit-path finding, 2026-09-12).
+        const isTransportClosed = (error: unknown): boolean =>
+          error instanceof Error &&
+          error.message === BROKER_CONNECTION_CLOSED_MESSAGE;
         try {
           await tray.destroy();
+        } catch (error) {
+          if (!isTransportClosed(error)) {
+            throw error;
+          }
         } finally {
-          await state.closeConnection();
+          try {
+            await state.closeConnection();
+          } catch (error) {
+            if (!isTransportClosed(error)) {
+              throw error;
+            }
+          }
         }
       })();
       await state.destroyPromise;
