@@ -9,4 +9,7 @@ version.workspace = true
 
 [dependencies]
 serde.workspace = true
-serde_json.workspace = true
+# `float_roundtrip` keeps float deserialization correctly rounded. Without it
+# serde_json may parse some decimals 1 ULP off, which would break RFC 8785
+# byte-identical canonical JSON against the TypeScript encoder.
+serde_json = { workspace = true, features = ["float_roundtrip"] }

@@ -1,0 +1,7 @@
+{
+  "name": "string escaping uses jcs short forms and lowercase hex",
+  "input": {
+    "text": "\u0000\b\t\n\f\r A\"\\/\u000F\u001Fä€中😀"
+  },
+  "expected": "{\"text\":\"\\u0000\\b\\t\\n\\f\\r A\\\"\\\\/\\u000f\\u001fä€中😀\"}"
+}

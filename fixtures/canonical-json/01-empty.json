@@ -1,0 +1,8 @@
+{
+  "name": "empty object and array",
+  "input": {
+    "emptyObject": {},
+    "emptyArray": []
+  },
+  "expected": "{\"emptyArray\":[],\"emptyObject\":{}}"
+}
