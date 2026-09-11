@@ -6,6 +6,7 @@
 
 mod abi_support;
 mod bootstrap;
+mod layout;
 mod orchestration;
 #[cfg(target_os = "macos")]
 mod macos;
