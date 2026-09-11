@@ -350,9 +350,10 @@ pub(crate) struct HandledCommand {
 }
 
 impl HandledCommand {
-    /// Result without flushed push events (Windows dispatch wrapper; the
-    /// orchestration batch will flush events there too).
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    /// Result without flushed push events. Both platform runtimes now build
+    /// the struct directly so their orchestration batches can attach push
+    /// events; the helper stays for callers that have nothing to flush.
+    #[allow(dead_code)]
     fn plain(result: Value) -> Self {
         Self {
             result,
