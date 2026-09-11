@@ -54,7 +54,7 @@ Every channel SHALL progress `created → open → closed(reason) → destroyed`
 
 `close()` and `destroy()` are distinct APIs, callable by any participant endpoint: `close()` is the graceful path — the channel enters `closed(explicit)` and its tombstone remains listed; `destroy()` (also exposed as the facade's `destroyMessageChannel(id)`) is idempotent, a no-op on repeat calls, removes the channel state immediately, emits `closed(destroyed)` to any still-open endpoints, and the tombstone disappears from lists at once. The remaining destroy entrances are tombstone-capacity eviction and session close. Tombstone bound: each session retains at most its 32 most recently closed channels, oldest evicted.
 
-Queue bounds (exact): each port queue SHALL hold at most 1000 messages AND at most 1 MiB cumulative payload; the boundary values themselves are legal. Payload byte accounting uses one canonical codec: a string payload counts its raw UTF-8 bytes; a JSON payload counts the UTF-8 bytes of its canonical compact serialization — keys sorted by UTF-8 byte order, no insignificant whitespace, shortest number forms, and no NaN/Infinity/undefined/function values (posting such a value SHALL fail with the typed error `invalid_payload` before any accounting). The canonical encoder is fixture-frozen in codec round-trip tests on both TS and Rust sides. A single message whose canonical byte length exceeds 1 MiB SHALL be rejected with the typed error `payload_too_large` without entering the queue and without closing the channel. Exceeding either cumulative bound on enqueue SHALL close the channel with reason `queue_overflow`. A page-side endpoint SHALL close with `document_navigated` when its document navigates; the other endpoint SHALL observe the same transition. Messages SHALL NOT be buffered across document navigation.
+Queue bounds (exact): each port queue SHALL hold at most 1000 messages AND at most 1 MiB cumulative payload; the boundary values themselves are legal. Payload byte accounting uses one canonical codec: a string payload counts its raw UTF-8 bytes; a JSON payload counts the UTF-8 bytes of its **RFC 8785 (JCS, JSON Canonicalization Scheme)** serialization — number forms (including `-0`, `1.0`, exponents, and the IEEE-754 safe-integer domain), string escaping, and key ordering (UTF-16 code unit order) are uniquely determined by RFC 8785, so the TS and Rust encoders produce identical bytes for the same value. The encodable value domain is the RFC 8785 domain; posting NaN, Infinity, undefined, or functions SHALL fail with the typed error `invalid_payload` before any accounting. The canonical encoder is verified by a shared fixture directory (`fixtures/canonical-json/`: input values plus expected byte output) consumed by both the TS and Rust codec tests. A single message whose canonical byte length exceeds 1 MiB SHALL be rejected with the typed error `payload_too_large` without entering the queue and without closing the channel. Exceeding either cumulative bound on enqueue SHALL close the channel with reason `queue_overflow`. A page-side endpoint SHALL close with `document_navigated` when its document navigates; the other endpoint SHALL observe the same transition. Messages SHALL NOT be buffered across document navigation.
 
 #### Scenario: Peer teardown closes channels with reason
 
@@ -82,12 +82,14 @@ Queue bounds (exact): each port queue SHALL hold at most 1000 messages AND at mo
 #### Scenario: Queue bounds are exact and reproducible across implementations
 
 - **GIVEN** an open channel whose target endpoint is not consuming messages
-- **WHEN** the producer enqueues up to exactly 1000 small messages (cumulative canonical bytes under 1 MiB)
-- **THEN** all enqueues SHALL succeed and the channel SHALL remain open
-- **WHEN** one more message is enqueued
+- **WHEN** the producer enqueues messages whose canonical byte lengths sum to exactly 1,048,576 bytes (under 1000 messages)
+- **THEN** the enqueue SHALL succeed and the channel SHALL remain open
+- **WHEN** one more single-byte message is enqueued
 - **THEN** the channel SHALL close with reason `queue_overflow`
-- **AND** a single message whose canonical serialization exceeds 1 MiB SHALL be rejected with `payload_too_large` while the channel stays open
-- **AND** the same value SHALL produce the same byte count in the TS and Rust canonical encoders (fixture-frozen)
+- **WHEN** instead exactly 1000 small messages (cumulative under 1 MiB) are enqueued, then one more
+- **THEN** the 1000 SHALL succeed and the 1001st SHALL close the channel with `queue_overflow`
+- **AND** a single message whose RFC 8785 serialization exceeds 1 MiB SHALL be rejected with `payload_too_large` while the channel stays open
+- **AND** the same value SHALL produce the same byte count in the TS and Rust canonical encoders (verified by the shared `fixtures/canonical-json/` suite, including `-0`, `1.0`, and exponent number forms)
 
 #### Scenario: Tombstones are bounded and evicted oldest-first
 

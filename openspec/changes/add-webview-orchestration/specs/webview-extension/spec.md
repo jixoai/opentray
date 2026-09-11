@@ -2,7 +2,7 @@
 
 ### Requirement: Webview lifecycle SHALL be scoped to surface tray and lease
 
-The webview extension SHALL associate each window session with its owning App/Tray/Session identity — the owner tuple `(appId, trayId, sessionId)` — plus the owning lease. Every window session, webview, layout document, and message channel created by the extension SHALL be tagged with this owner tuple in protocol frames and native state, and cleanup SHALL be keyed by it: a session-close callback SHALL destroy exactly the webviews, layouts, and channels whose owner tuple matches that session, and SHALL NOT touch state owned by any other live session. A tray scope SHALL own at most one active WebView window session per extension instance (a second session for the same tray is rejected at creation, before any window state exists). A window session SHALL host one or more webview instances as sibling native views inside the window, addressed by webview id unique within the window session; the session SHALL remain valid as webviews are created and destroyed within it. Lease cleanup SHALL hide or destroy all webview state owned by the disconnected client without affecting webview state owned by other leases.
+The webview extension SHALL associate each window session with its owning App/Tray/Session identity — the owner tuple `(appId, trayId, sessionId)` — plus the owning lease. Every window session, webview, layout document, and message channel created by the extension SHALL be tagged with this owner tuple in protocol frames and native state, and cleanup SHALL be keyed by it: a session-close callback SHALL destroy exactly the webviews, layouts, and channels whose owner tuple matches that session, and SHALL NOT touch state owned by any other live session. A tray scope SHALL own at most one active WebView window session per extension instance: creating a second window session for the same tray SHALL fail at creation with the typed error `tray_session_active` before any window state exists. A window session SHALL host one or more webview instances as sibling native views inside the window, addressed by webview id unique within the window session; the session SHALL remain valid as webviews are created and destroyed within it. Lease cleanup SHALL hide or destroy all webview state owned by the disconnected client without affecting webview state owned by other leases.
 
 `hide` SHALL make the tray-scoped window session invisible without destroying its page runtimes. Re-showing the same tray with a compatible session SHALL reuse that session instead of replacing it. Explicit destroy, lease cleanup, or extension deinitialization SHALL destroy the owned session together with every webview instance it hosts and their page runtimes cleanly.
 
@@ -22,6 +22,13 @@ Compatibility SHALL be defined by the bootstrap-immutable portion of the session
 - **WHEN** the client sends the explicit destroy command
 - **THEN** the extension destroys the native slot and every hosted webview's page runtime for that tray
 - **AND** a subsequent `show(...)` creates a new session from scratch.
+
+#### Scenario: A second session for the same tray is a typed rejection
+
+- **GIVEN** a tray with an active WebView window session
+- **WHEN** a caller creates another window session for that same tray
+- **THEN** creation SHALL fail with the typed error `tray_session_active`
+- **AND** the existing session, its webviews, and its layout SHALL remain untouched
 
 #### Scenario: Session cleanup is scoped to the closing session only
 
@@ -43,7 +50,7 @@ Compatibility SHALL be defined by the bootstrap-immutable portion of the session
 
 The webview facade SHALL expose `createWebview` (parent window session, unique webview id, url or html content, optional per-webview bridge policy), `destroyWebview`, and `listWebviews` on the window handle, and a per-webview `focus()` command raising that webview to native focus within its window. A webview created inside a window SHALL be a sibling native child view (macOS: NSView subview; Windows: child HWND) — never a separate OS window. Webview ids SHALL be unique within their window session. The page bridge SHALL expose the owning webview's id as a read-only property.
 
-Per-webview bridge policy: `createWebview` SHALL accept an optional declarative bridge policy from the same policy family as session bootstrap (navigator window/screen, native API admission, page access); omitted policy means **no bridge**. A child webview without an explicit policy never exposes the bridge to its pages — the arbitrary-content webview is bridgeless by default, and trusted webviews (such as a toolbar) opt in explicitly. The policy is bootstrap-immutable for that webview's lifetime, mirroring the session compatibility law.
+Per-webview bridge policy: `createWebview` SHALL accept an optional declarative bridge policy whose DTO is frozen as the boolean field set `{ webviewId, messageChannels, navigatorWindow, navigatorScreen, nativeApi }` — every field defaults to false, and omitting the policy entirely means all fields false (no bridge). A child webview without an explicit policy never exposes the bridge to its pages — the arbitrary-content webview is bridgeless by default, and trusted webviews (such as a toolbar) opt in explicitly (for the toolbar carrier: `{ webviewId: true, messageChannels: true }`). The policy is bootstrap-immutable for that webview's lifetime, mirroring the session compatibility law.
 
 Style exclusivity is one rule with one error: a window in a translucency-affecting style (frameless or material today; any future per-view transparent backing) SHALL NOT host multi-webview composition. The guard SHALL fire with the typed error `multiwebview_unsupported_style` at three checkpoints, before any state changes: (1) creating a second webview in such a window, (2) applying a frameless or material style mutation to a window that already hosts more than one webview, and (3) committing a layout in which any participating view carries a transparency-affecting style. Opaque stacking of webviews across layers of a framed window SHALL be supported. Every capability field introduced by this requirement (webview id, bridge policy, focus command, typed error) SHALL be serialized by both platforms' capability DTOs — Darwin release-grade builds are the cross-platform compiler gate.
 
@@ -58,8 +65,8 @@ Style exclusivity is one rule with one error: a window in a translucency-affecti
 
 - **GIVEN** webview `content` created without a bridge policy, showing an arbitrary cross-origin site
 - **WHEN** its page probes for the webview id property or channel APIs
-- **THEN** none SHALL be exposed
-- **AND** webview `toolbar` created with an explicit bridge policy in the same window SHALL expose them
+- **THEN** none SHALL be exposed (every bridge field defaults to false)
+- **AND** webview `toolbar` created with `{ webviewId: true, messageChannels: true }` in the same window SHALL expose exactly those bridge surfaces
 
 #### Scenario: Translucency-affecting styles and multi-webview are mutually exclusive at every checkpoint
 
@@ -87,7 +94,7 @@ Style exclusivity is one rule with one error: a window in a translucency-affecti
 
 Each webview SHALL expose `navigate` (explicit content replacement for that webview only, consistent with the content-replacement law), plus `back` and `forward` over the webview's native session history. URL and title changes SHALL be delivered to the host facade as push events (`urlChange`, `titleChange`), and focus transitions as `focused` edge events, for that webview.
 
-Event wire contract: every event frame SHALL carry `{ owner: {appId, trayId, sessionId}, windowId, webviewId, kind, seq, payload }` — the owner tuple rides the frame so session-scoped ids never collide across sessions; `seq` is a per-view monotonically increasing sequence number; payloads are `{url}` for `urlChange`, `{title}` for `titleChange`, and `{focused: boolean}` for `focused` (edge semantics: gained or lost). Subscription follows the facade handle's listeners, materialized as explicit wire subscribe/unsubscribe frames (fixture-frozen in the codec tests). Events are pure push with no replay: current values are read through the facade query commands `getUrl()` and `getTitle()`, which return `(value, seq)`; consumers subscribe first, then query, and discard events whose `seq` is not greater than the queried `seq`. `focused` has no query — consumers track edges. The native implementation SHALL push these events from native page-load, title, and focus callbacks directly onto the event channel — reusing the 16 ms window-event drain polling loop as the observation mechanism for these events is prohibited. On broker disconnect, pending event delivery stops and listeners observe the disconnect through the existing connection lifecycle, not through synthetic events.
+Event wire contract: the unified per-view event family is `kind ∈ { urlChange, titleChange, focused, geometryChange }` (geometryChange carries the overlay safe-area projection and is specified with the overlay requirement). Every event frame SHALL carry `{ owner: {appId, trayId, sessionId}, windowId, webviewId, kind, seq, payload }` — the owner tuple rides the frame so session-scoped ids never collide across sessions; `seq` is a per-view monotonically increasing sequence number; payloads are `{url}` for `urlChange`, `{title}` for `titleChange`, `{focused: boolean}` for `focused` (edge semantics: gained or lost), and `{rect}` for `geometryChange` (the view-local safe-area rect after projection). Subscription follows the facade handle's listeners, materialized as explicit wire subscribe/unsubscribe frames (fixture-frozen in the codec tests). Events are pure push with no replay: current values are read through the facade query commands `getUrl()` and `getTitle()`, which return `(value, seq)`; consumers subscribe first, then query, and discard events whose `seq` is not greater than the queried `seq`. `focused` and `geometryChange` have no query — consumers track edges and projection updates. The native implementation SHALL push these events from native page-load, title, focus, and layout-projection callbacks directly onto the event channel — reusing the 16 ms window-event drain polling loop as the observation mechanism for these events is prohibited. On broker disconnect, pending event delivery stops and listeners observe the disconnect through the existing connection lifecycle, not through synthetic events.
 
 #### Scenario: navigate retargets one webview without touching siblings
 
@@ -101,6 +108,14 @@ Event wire contract: every event frame SHALL carry `{ owner: {appId, trayId, ses
 - **GIVEN** webview `content` showing a page that links internally
 - **WHEN** the operator activates an in-page link
 - **THEN** the host SHALL receive one `urlChange` push event carrying the page's actual new URL
+- **AND** the delivery path SHALL not depend on any polling interval
+
+#### Scenario: Focus transfer emits both edges with full frame identity
+
+- **GIVEN** webviews `toolbar` and `content` in one window, `content` holding native focus, and the host subscribed to both views' `focused` events
+- **WHEN** the host calls `focus()` on the `toolbar` webview handle
+- **THEN** `content` SHALL receive `focused: false` and `toolbar` SHALL receive `focused: true`
+- **AND** both event frames SHALL carry the correct owner tuple, window id, webview id, and per-view sequence numbers that increased monotonically
 - **AND** the delivery path SHALL not depend on any polling interval
 
 #### Scenario: Query plus sequence resolves the subscription race
@@ -132,7 +147,7 @@ On Windows, all webview controllers of one extension session SHALL share a singl
 
 Window-level overlay facts are unchanged: the `windowControlsOverlay` declaration is a window-level fact, Windows `AppWindowTitleBar.LeftInset`/`RightInset`/`Height` remain the safe-area authority read synchronously on the HWND-owning thread, and the existing overlay initialization-order laws keep holding. On top of those facts, the page-bridge `getTitlebarAreaRect()` SHALL report the safe-area rect in the receiving webview's own viewport coordinates: the intersection of the window overlay region with that webview's current layout rect, translated into view-local space; a webview that does not intersect the overlay region SHALL receive an empty rect. A window whose single webview fills the client area SHALL report exactly the values a full-window webview reports today — existing single-webview windows keep their geometry.
 
-Projection SHALL be recomputed inside the layout commit transaction (after frames are applied) and on overlay metric changes (scale factor, style, or system metric changes); affected bridged webviews SHALL receive `geometrychange` push events. Custom drag regions SHALL be declared in view-local coordinates and translated into window coordinates through the declaring webview's current layout rect; a layout commit SHALL re-register active regions under the new rects, so no stale translation survives a layout change. Windows non-client hit-testing and drag routing SHALL resolve against whichever child webview actually occupies the titlebar region under the cursor.
+Projection SHALL be recomputed inside the layout commit transaction (after frames are applied) and on overlay metric changes (scale factor, style, or system metric changes); affected bridged webviews SHALL receive `geometryChange` push events as members of the unified per-view event family (same frame schema, sequence numbers, subscription mechanism, and no-polling guarantee as urlChange/titleChange/focused; payload is the view-local safe-area rect). Custom drag regions SHALL be declared in view-local coordinates and translated into window coordinates through the declaring webview's current layout rect; a layout commit SHALL re-register active regions under the new rects, so no stale translation survives a layout change. Windows non-client hit-testing and drag routing SHALL resolve against whichever child webview actually occupies the titlebar region under the cursor.
 
 #### Scenario: A view outside the titlebar region gets an empty safe area
 
@@ -145,7 +160,7 @@ Projection SHALL be recomputed inside the layout commit transaction (after frame
 - **GIVEN** webview `bar` occupying the top strip intersecting the caption-button region at window coordinates `{x: 0, y: 0, width: 800, height: 44}`
 - **WHEN** its page calls `getTitlebarAreaRect()`, the host then commits a layout moving `bar` down by 20 logical pixels
 - **THEN** the first call SHALL return the caption-button exclusion translated into `bar`'s local space
-- **AND** the layout commit SHALL recompute the projection and push a `geometrychange` event to `bar` with the shifted local rect
+- **AND** the layout commit SHALL recompute the projection and push a `geometryChange` event (unified event family) to `bar` with the shifted local rect
 
 #### Scenario: Full-window single webview keeps today's geometry
 

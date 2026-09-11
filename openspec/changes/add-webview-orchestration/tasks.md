@@ -7,24 +7,37 @@
 
 ## 2. BDD Contract（trace 到 plans/plan.md 决策与 specs requirement）
 
-- [ ] 2.1 协议类型（@opentray/spec + opentray-spec Rust）：多 webview 命令帧（create/destroy/list 含 per-child bridge 策略、navigate/back/forward、focus）、per-view 事件帧（**schema：`{owner:{appId,trayId,sessionId}, windowId, webviewId, kind∈{urlChange,titleChange,focused}, seq, payload}`** + 显式 subscribe/unsubscribe 帧，codec fixture 固化）、查询命令（`getUrl/getTitle` 返回 `(value, seq)`）、布局协议（layers/flex 字段/box/输入校验）、通道帧（create/onCreated/post/close/destroy/list + reason 枚举 + **canonical 紧凑 JSON 编码器（UTF-8 字节序键序、无空白、最短数字、拒 NaN/Infinity）** + 错误码注册表 `unknown_view/invalid_layout_measure/multiwebview_unsupported_style/bridge_required/session_scope/not_open/payload_too_large/invalid_payload`）、owner tuple `(appId, trayId, sessionId)` 字段——类型与编解码往返测试（**TS/Rust canonical 编码器对同一值产出相同字节计数——fixture 断言**）；两平台 DTO 平价断言（Darwin release 编译门）；事件传输语义测试（订阅生命周期/按 view 有序/断连停止，断言不依赖轮询间隔）——trace webview-extension 全部 requirement + webview-layout/webview-messaging 对应条款。
+- [ ] 2.1 协议类型（@opentray/spec + opentray-spec Rust）：多 webview 命令帧（create/destroy/list 含 **per-child bridge 策略 DTO `{webviewId, messageChannels, navigatorWindow, navigatorScreen, nativeApi}` 全默认 false**、navigate/back/forward、focus）、**统一事件族** per-view 事件帧（kind ∈ `{urlChange, titleChange, focused, geometryChange}`；schema：`{owner:{appId,trayId,sessionId}, windowId, webviewId, kind, seq, payload∈{url}|{title}|{focused}|{rect}}` + 显式 subscribe/unsubscribe 帧，codec fixture 固化）、查询命令（`getUrl/getTitle` 返回 `(value, seq)`）、布局协议（layers/flex 字段/box/输入校验）、通道帧（create/onCreated/post/close/destroy/list + reason 枚举 + **RFC 8785 canonical 编码器，共享 fixture `fixtures/canonical-json/`（输入值 + 期望字节，含 `-0`/`1.0`/指数/Unicode 边界）** + 错误码注册表 `unknown_view/invalid_layout_measure/multiwebview_unsupported_style/tray_session_active/bridge_required/session_scope/not_open/payload_too_large/invalid_payload`）、owner tuple 字段——类型与编解码往返测试（**TS/Rust canonical 编码器同字节——fixture 断言**）；两平台 DTO 平价断言（Darwin release 编译门）；事件传输语义测试（订阅生命周期/按 view 有序/断连停止，断言不依赖轮询间隔）——trace webview-extension 全部 requirement + webview-layout/webview-messaging 对应条款。
 - [ ] 2.2 布局求解：Taffy 集成纯函数测试——layer 树 → Rect 快照（toolbar 列布局、镂空叠层、flex 分配、min/max 钳制）、未知 view id（`unknown_view`）、非法度量（NaN/负值/∞/min>max → `invalid_layout_measure`，求解前拒绝）、默认单层单 fill 回退、**不透明跨层重叠合法 + 样式互斥三检查点同错误码 `multiwebview_unsupported_style`（child 创建 / 窗口样式变更 / layout commit，拒绝前旧状态保持）**、box 输入穿透——trace webview-layout 全 requirement + webview-extension「orchestration」样式互斥 scenario。
-- [ ] 2.2b overlay 投影（D23）：纯函数测试——(窗口 overlay 区域 ∩ view rect) → view 本地安全区（相交/部分相交/无交集空矩形）；单 webview 铺满退化 = 现值回归；布局提交后投影重算 + `geometrychange` 推送到受影响 view；拖拽区 view 本地声明 → 窗口坐标平移 → 布局提交重注册（陈旧平移清除）——trace webview-extension「overlay geometry per-view projection」+ webview-layout 提交事务句。
+- [ ] 2.2b overlay 投影（D23）：纯函数测试——(窗口 overlay 区域 ∩ view rect) → view 本地安全区（相交/部分相交/无交集空矩形）；单 webview 铺满退化 = 现值回归；布局提交后投影重算 + `geometryChange` 推送到受影响 view；拖拽区 view 本地声明 → 窗口坐标平移 → 布局提交重注册（陈旧平移清除）——trace webview-extension「overlay geometry per-view projection」+ webview-layout 提交事务句。
 - [ ] 2.3 通道状态机：created→open→closed(reason)→destroyed 全转移；`not_open` 类型化错误；FIFO；**close vs destroy 双 API（close=优雅关+墓碑保留；destroy=幂等立即移除+closed(destroyed) 事件+墓碑消失；重复 destroy no-op）**；**精确上限（恰 1000 条/恰 1 MiB canonical 字节合法；第 1001 条 → queue_overflow；单条 canonical >1MiB → payload_too_large 且通道存活；canonical 编码跨 TS/Rust 同字节 fixture；NaN/Infinity → invalid_payload）**；list 语义（live + closed 墓碑、每会话 LRU 32、destroyed 不列出、页面只见参与集）；文档导航关闭页面侧端口；无桥目标 `bridge_required`；跨会话 `session_scope` 且零部分状态；页面创建者（page→page 经桥方法、host 不可被定向）——trace webview-messaging 四 requirement。
 - [ ] 2.4 TS facade：createWebview（**含 per-child bridge 策略参数**）/destroyWebview/listWebviews/navigate/back/forward/focus()、urlChange/titleChange/focused 订阅 + **getUrl()/getTitle() 查询返回 (value, seq) + 订阅-查询-丢弃陈旧 seq 竞态语义**、setLayout/layout.update、row/column/view/fixed/grow sugar 编译对象 JSON、createMessageChannel({target})/onCreatedMessageChannel/listMessageChannels/**close()/destroy()/destroyMessageChannel(id)**——jsdom/mock endpoint 测试（含事件订阅生命周期与断连语义），trace 对应 requirement。
 - [ ] 2.5 page bridge：webviewId 只读属性、`navigator.opentrayWebview.createMessageChannel({target})`（创建端返回 + 对端 onCreatedMessageChannel）、端点收发/关闭/销毁事件、**无 bridge 策略的 child 零暴露（content webview 默认无桥）**——trace webview-extension「page bridge knows its own id」「bridge is opt-in per child」+ webview-messaging「targeted connections」「page creates a channel」。
 - [ ] 2.6 create 侧：toolbar 双 webview entry 模板断言（**两种应用**：URL toolbar + 命令应用服务窗 toolbar；布局、通道导航接口、无 PTY、shell 无导航端点、**无 iframe browse 产物**）、**命令应用行为闭环（服务 URL 真值/前进后退/重载/同步默认与 URL 模式平价）**、**showAddressBar 旧字段删除（canonical 唯一 = window.toolbar；旧冻结配置 loose-parse 忽略；新配置/导出不输出该字段）**、frameEmbeddable 全链路退役、向导开关默认关 + 两流程提供 + config 往返 + 预览边界（StableIframe 仅创作期）——trace generated-app-entry MODIFIED+ADDED、create-wizard MODIFIED+ADDED、create-project-config/create-cli-command-tree MODIFIED。
 - [ ] 2.7 会话清扫：owner tuple 归属——同 broker、同 app、**distinct trays** 双 session 各持多 webview 窗口，其一关闭 → 恰清该 session 的窗口/webview/布局/通道，另一 session 存活可观测；lease 断开同语义——trace webview-extension「Session cleanup is scoped」（并覆盖现存 mod.rs:587-590 忽略 session id 的缺陷修复）。
-- [ ] 2.7b 生命周期矩阵（R2-B8/B19）：逐 scenario 门——hide→show 复用（page runtime 存活）、explicit destroy → 全新 session、lease 断开隔离、bootstrap 兼容性（兼容会话可变 shell 状态 / bootstrap-immutable 漂移拒绝）——指定测试文件（Rust runtime 测试 + facade jsdom）与可观察断言；**overlay 投影 requirement 的四个 scenario 逐条映射测试位置（含 2.2b）**；结构上每个 spec scenario 至少被一个 task 覆盖。
+- [ ] 2.7b 生命周期与事件族 scenario → task → 测试位映射（可机器核对，替代数量自述）：
+  | scenario | task | 测试位 |
+  |---|---|---|
+  | lifecycle「Re-show preserves」 | 2.4 | facade jsdom：hide→show 复用、page runtime 存活 |
+  | lifecycle「Destroy removes」 | 2.4 | facade jsdom：destroy 后 show 全新 session |
+  | lifecycle「second session typed rejection」 | 2.7 | Rust runtime 测试：tray_session_active、旧 session 不动 |
+  | lifecycle「Session cleanup scoped」 | 2.7 | Rust runtime 测试：distinct trays 交叉清扫 |
+  | lifecycle「Lease cleanup」 | 2.7 | Rust runtime 测试：断连隔离 |
+  | orchestration「样式互斥三检查点」 | 2.2 | 纯函数：检查点 (1)(2) 同错误码（(3) 为 v1 前向兼容位不设 BDD） |
+  | events「Focus transfer both edges」 | 2.4 + 3.5 | facade 断言双 view focused true/false + 帧字段/seq；原生侧断言回调直推无轮询 |
+  | events「Query plus sequence」 | 2.4 | facade jsdom：订阅-查询-丢弃陈旧 seq |
+  | events「Events stop at disconnect」 | 2.4 | facade jsdom：断连停止 |
+  | overlay「empty safe area / view-local tracking / single-view regression」 | 2.2b + 3.4 | 纯函数投影 + 原生事务推送 geometryChange |
+  bootstrap 兼容性（可变 shell 状态可更新 / bootstrap-immutable 漂移拒绝）在 Rust runtime 测试覆盖（trace lifecycle MODIFIED 正文）。
 
 ## 3. Implementation — P1 原生能力（macOS 先行）
 
 - [ ] 3.1 commit-check research-plan 阶段后先提交 OpenSpec artifacts，再开始产品代码。
 - [ ] 3.2 协议层：opentray-spec Rust 帧（owner tuple 字段）+ @opentray/spec TS 类型 + 两平台 capability DTO（webviewId/布局/通道/事件/错误码）；Taffy 依赖进 opentray-ext-webview（版本锁 Cargo 并记构建证据；opentray-core 零变化）。
-- [ ] 3.3 Rust 结构重构：WebviewSlot 1:1:1 → Window 容器 + N webview 槽（bridge_state 单 webview 指针解体）；**`session_closed` 按 session id 精确清扫（修 mod.rs:587-590）**；wry build_as_child/with_bounds 接线；frameless/material → `multiwebview_unsupported_style`；透明/材质参与重叠 → `translucent_overlap`（layout commit 前）。
+- [ ] 3.3 Rust 结构重构：WebviewSlot 1:1:1 → Window 容器 + N webview 槽（bridge_state 单 webview 指针解体）；**`session_closed` 按 session id 精确清扫（修 mod.rs:587-590）**；wry build_as_child/with_bounds 接线；样式互斥检查点 (1) child 创建 + (2) 窗口样式变更 → `multiwebview_unsupported_style`（检查点 (3) layout commit 为 v1 前向兼容位——v1 无 per-view 透明输入，不设 BDD，见 plan D6）；**同 tray 第二 window session 创建 → `tray_session_active`**。
 - [ ] 3.4 Rust 布局：layer 数组 → 每层 Taffy 树求解（输入校验前置、逻辑→物理像素经 scale factor）→ setFrame 应用；resize 原生重算（windowDidResize 接线）；box 视图（layer-backed NSView，background/border/cornerRadius，不接受 first responder 实现输入穿透）；**布局提交事务含 overlay 安全区投影重算 + geometrychange 推送 + 拖拽区重注册（D23，单 webview 退化路径先行）**。
 - [ ] 3.5 Rust 通道：注册表（会话作用域 + owner tuple）+ 状态机（精确上限/墓碑 LRU32）+ 推送投递（ipc_handler 收 + evaluate_script 派发）；per-view urlChange/title/focused 事件**原生回调直推事件通道（不进 16ms drain）**；back/forward 原生历史 API（WKWebView goBack 穿透）。
-- [ ] 3.6 macOS 原生验证：multiwebview 窗口冒烟——toolbar+content 布局、resize 跟手、**focus() 切换 + focused 事件**、navigate/back/forward、urlChange 跟随页内跳转、HN（XFO DENY）整页渲染、登录态持久实证、box 边框绘制且鼠标穿透、不透明重叠 + 透明拒绝。
+- [ ] 3.6 macOS 原生验证：multiwebview 窗口冒烟——toolbar+content 布局、resize 跟手、**focus() 切换（断言双 view focused 边沿事件 + 帧字段/seq）**、navigate/back/forward、urlChange 跟随页内跳转、HN（XFO DENY）整页渲染、登录态持久实证、box 边框绘制且鼠标穿透、不透明重叠 + 样式互斥检查点 (1)(2) 拒绝、**toolbar bridge={webviewId,messageChannels} 且 content 零桥暴露**。
 
 ## 4. Implementation — P1 Windows 泛化（真机 `ssh gaubeehonor`，专门子代理执行）
 
