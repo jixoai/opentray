@@ -411,9 +411,16 @@ Before claiming completion, run the narrowest command set that proves the curren
 
 Windows-side development, compilation, and verification run on the Owner's LAN
 machine: execute `ssh gaubeehonor` inside a herdr pane; the repository checkout
-lives at `E:\dev\github\opentray`. Sync branches over the LAN (never publish
-work-in-progress remotes); delegate this work to a dedicated subagent that
-reports process reclamation evidence and toolchain friction.
+lives at `E:\dev\github\opentray` (use a dedicated branch worktree, never the
+Owner's main checkout). Sync branches over the LAN only — git push over ssh is
+broken on that host (its default sshd shell is cmd, which mangles git's POSIX
+quoting), so the working channel is `git bundle` + `scp` (SFTP) into a LAN bare
+relay that the Windows worktree fetches from. npm installs must pass
+`--registry=https://registry.npmmirror.com` (registry.npmjs.org is blocked on
+that host); the E: drive is space-constrained, so keep cargo on caller-scoped
+target directories; remote console output is GBK — run `chcp 65001` before
+reading diagnostics. Delegate this work to a dedicated subagent that reports
+process reclamation evidence and toolchain friction.
 
 ## Release Operations
 
