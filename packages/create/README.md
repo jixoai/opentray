@@ -50,18 +50,24 @@ npx create-opentray create \
   scrapes the page once and adopts its `<title>` and best favicon as
   defaults — explicit flags always win, failures fall back silently
   (address-derived name + glyph icon), and `--no-scrape` disables the fetch.
-- URL app window options: `--toolbar` hosts the shared address-bar wrapper
-  (back/forward/reload buttons, address input, and the ⌘/Ctrl+←→, ⌘/Ctrl+[
-  ], ⌘/Ctrl+R, F5, ⌘/Ctrl+L shortcuts while focus is in the wrapper). Sites
-  that forbid iframe embedding cannot be wrapped: creation probes the page's
-  embedding policy during the default scrape and, when the target refuses
-  (`X-Frame-Options` / CSP `frame-ancestors`), prints a notice and falls
-  back to the direct window automatically (with `--no-scrape` there is no
-  probe data, so the toolbar request stands). Every URL app's tray menu
-  offers Reload regardless of toolbar mode. By default the window title follows the
-  page (`--no-title-follow` to stop) and the icon does NOT follow favicon
-  changes at runtime (`--icon-follow` to enable); both persist in the v1
-  config and round-trip through export.
+- Window options (`--toolbar`, URL and command applications): `--toolbar`
+  composes the native navigation toolbar over the target/service page — one
+  toolbar webview at a fixed top strip (back/forward/reload buttons, address
+  input, and the ⌘/Ctrl+←→, ⌘/Ctrl+[], ⌘/Ctrl+R, F5, ⌘/Ctrl+L shortcuts
+  while the toolbar holds native focus) plus one content webview loading the
+  address directly as a top-level browsing context. The address bar follows
+  the content webview's URL events as its source of truth, and back/forward
+  drive the content webview's native history. Embedding policy is never
+  consulted — an embedding-hostile site renders the same as any other address
+  because the content webview is not an embedded context; creation does not
+  probe, warn about, or downgrade the toolbar request. Toolbar mode is off by
+  default and maps to the single canonical `window.toolbar` config field (the
+  legacy `showAddressBar` input no longer exists; stale occurrences in old
+  frozen configs are ignored). Every URL app's tray menu offers Reload
+  regardless of toolbar mode. By default the window title follows the page
+  (`--no-title-follow` to stop) and the icon does NOT follow favicon changes
+  at runtime (`--icon-follow` to enable); both persist in the v1 config and
+  round-trip through export.
 - Icon sources: local files, `http(s)` URLs, or `data:` URLs. Outside URL-mode
   enrichment the CLI never scrapes names or favicons.
 - `--config <file>` loads a complete v1 document; explicit flags override
@@ -150,7 +156,9 @@ continuously discovers the command's OWNED HTTP listening ports (foreign
 listeners such as browser DevTools sockets are never adopted), hosts each
 verified port in an application-mode WebView window, and owns the tray
 session (Quit lives in the tray menu). Optional startup-terminal and
-address-bar shells are available through the wizard's advanced options.
+navigation-toolbar (`--toolbar`) shells are available through the wizard's
+advanced options and the CLI; the toolbar composes a native toolbar webview
+above each service window's content webview.
 
 ## Platform notes
 

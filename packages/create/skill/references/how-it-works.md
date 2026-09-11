@@ -12,8 +12,9 @@ A v1 application carries exactly ONE source:
   once and adopts its `<title>` and best favicon as DEFAULTS — explicit flags
   win, failures fall back silently to the address-derived name and a glyph
   icon, and `--no-scrape` skips the fetch. appId always derives from the
-  address text, never from page content. URL apps carry no PTY, no
-  terminal/address-bar shell, and no env overlay.
+  address text, never from page content. URL apps carry no PTY, no terminal
+  shell, and no env overlay; toolbar mode adds only the shell-served toolbar
+  page (still no PTY).
 
 ## The creation pipeline
 
@@ -39,19 +40,24 @@ Command apps:
   DevTools sockets are never adopted).
 - Opens one application-mode webview window per verified port; a port that
   stops listening marks its window detached.
-- Publishes a tray with Quit; optional startup-terminal and address-bar
-  shells when configured.
+- Publishes a tray with Quit; optional startup-terminal and navigation-
+  toolbar shells when configured (the toolbar composes a native toolbar
+  webview above each service window's content webview).
 
 URL apps:
 
 - Publish the tray (Show/Reload/Quit) and one application-mode webview
   window at the frozen URL. The title follows the page document by default
   (one-way); runtime favicon→icon following is opt-in (`--icon-follow`).
-- Toolbar mode (`--toolbar`) wraps the address in the shared address-bar
-  page: back/forward/reload buttons, an address input, and the ⌘/Ctrl
-  navigation shortcuts while the wrapper has focus (keystrokes inside a
-  cross-origin embedded page are not observable by the wrapper; the tray
-  Reload item always works). Sites that forbid embedding cannot be wrapped.
+- Toolbar mode (`--toolbar`, `window.toolbar` in the v1 config) composes the
+  native navigation-toolbar carrier: one toolbar webview at a fixed top strip
+  (back/forward/reload buttons, address input, and the ⌘/Ctrl navigation
+  shortcuts while the toolbar holds native focus) above one content webview
+  loading the address directly as a top-level browsing context. The address
+  bar follows the content webview's URL events as its source of truth;
+  back/forward drive the content webview's native history. Embedding policy
+  is never consulted — an embedding-hostile site renders the same as any
+  other address because the content webview is not an embedded context.
 - Supervise nothing: no child process, no port monitor; Quit destroys the
   window and tray session and exits.
 
