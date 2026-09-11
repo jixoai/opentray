@@ -552,6 +552,9 @@ struct WindowCapabilities {
     focus_webview: bool,
     webview_id: bool,
     webview_bridge_policy: bool,
+    /// Message-channel surface (D9-D20), serialized on both platforms
+    /// (D16 DTO parity); stays `false` until task 4.2.
+    message_channels: bool,
     webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
@@ -983,6 +986,15 @@ impl WindowsWebviewRuntime {
                 Err(WebviewRuntimeError::Unsupported(
                     "multi-webview orchestration lands with the Windows generalization batch"
                         .into(),
+                ))
+            }
+            WebviewCommand::Channel(_) => {
+                // Same compile-surface parity as orchestration: the channel
+                // registry/state core (crate::channels) is platform-neutral;
+                // the WebView2 transport (WebMessageReceived +
+                // ExecuteScript) lands with task 4.2.
+                Err(WebviewRuntimeError::Unsupported(
+                    "message channels land with the Windows generalization batch".into(),
                 ))
             }
         }
@@ -2030,6 +2042,11 @@ fn build_webview(
             sync_icon,
             native_api_policy,
             permission_manager_policy,
+            // Message channels land with the Windows generalization batch
+            // (task 4.2); the primary surface stays channel-less.
+            false,
+            false,
+            "default",
         ))
         .with_ipc_handler(move |request| {
             handle_navigator_window_request(request.body(), &bridge_for_ipc);
@@ -5400,6 +5417,7 @@ impl NavigatorWindowBridge {
             focus_webview: false,
             webview_id: false,
             webview_bridge_policy: false,
+            message_channels: false,
             webview_push_events: Vec::new(),
             platform_capabilities: WindowPlatformCapabilities {
                 windows: WindowsWindowCapabilities {

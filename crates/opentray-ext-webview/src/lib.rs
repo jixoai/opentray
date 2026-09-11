@@ -6,6 +6,7 @@
 
 mod abi_support;
 mod bootstrap;
+mod channels;
 mod layout;
 mod orchestration;
 #[cfg(target_os = "macos")]
@@ -339,14 +340,20 @@ struct WebviewExtension {
 }
 
 /// One executed command: its response payload plus per-view push events
-/// (D19) flushed from the native event outboxes. The events ride the same
-/// extension envelopes as the response — the broker mirrors every envelope
-/// into an `ExtEvent` frame — and they never pass through the legacy
-/// window-event drain polling path.
+/// (D19) flushed from the native event outboxes, and host-bound channel
+/// events (D9-D20) flushed from the session channel registries. Both
+/// event families ride the same extension envelopes as the response — the
+/// broker mirrors every envelope into an `ExtEvent` frame — and they never
+/// pass through the legacy window-event drain polling path.
 #[derive(Debug, Clone)]
 pub(crate) struct HandledCommand {
     pub result: Value,
     pub events: Vec<WebviewEventFrame>,
+    /// Channel frames addressed to the host endpoint, flushed with the
+    /// command response (v1 delivery ruling, tasks 3.3b/3.5): frozen
+    /// `channel.closed` pushes plus the internal `channel.message`
+    /// envelope, each tagged with its owning tuple for scope routing.
+    pub channel_events: Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
 }
 
 impl HandledCommand {
@@ -357,6 +364,7 @@ impl HandledCommand {
         Self {
             result,
             events: Vec::new(),
+            channel_events: Vec::new(),
         }
     }
 }
@@ -383,6 +391,18 @@ impl UnsupportedWebviewRuntime {
     fn session_closed(&mut self, _session_id: &str) {}
 
     fn set_app_id(&mut self, _app_id: &str) {}
+}
+
+/// Owner tuple of an owner-carrying command (`None` for legacy commands):
+/// every orchestration variant and every channel request frame carries
+/// one; the dispatch layer validates it against the command envelope
+/// scope before any state can exist.
+fn command_owner_tuple(command: &WebviewCommand) -> Option<&opentray_spec::webview::WebviewOwnerTuple> {
+    match command {
+        WebviewCommand::Orchestration(orchestration) => Some(orchestration_owner(orchestration)),
+        WebviewCommand::Channel(request) => Some(request.owner()),
+        _ => None,
+    }
 }
 
 /// Owner tuple of an orchestration command (present on every variant of the
@@ -452,6 +472,12 @@ enum WebviewCommand {
     /// D2/D18/D19). Parsed from the frozen kebab-case wire tags in
     /// `opentray-spec::webview`; the owner tuple rides the command data.
     Orchestration(Box<WebviewOrchestrationCommand>),
+    /// Message-channel commands (D9-D11/D20): the five request frames of
+    /// `opentray-spec::channel` (`channel.create` / `channel.post` /
+    /// `channel.close` / `channel.destroy` / `channel.list`). Typed
+    /// rejections return the frozen `channel.error` envelope as the
+    /// command response data.
+    Channel(Box<channels::ChannelRequest>),
     Hide,
     Close,
     Destroy,
@@ -852,11 +878,11 @@ pub unsafe extern "C" fn opentray_ext_command(
         Ok(command) => command,
         Err(error) => return record_error(error.code(), error.category(), error.to_string()),
     };
-    if let WebviewCommand::Orchestration(ref orchestration) = command {
+    if let Some(owner) = command_owner_tuple(&command) {
         // Scope validation happens before dispatch so a mismatched owner
-        // tuple can never reach window state (zero partial state, D20).
-        if let Some(envelope_error) =
-            session_scope_mismatch(orchestration_owner(orchestration), &extension.app_id, tray_id)
+        // tuple can never reach window or channel state (zero partial
+        // state, D18/D20).
+        if let Some(envelope_error) = session_scope_mismatch(owner, &extension.app_id, tray_id)
         {
             let Ok(data) = serde_json::to_value(&envelope_error) else {
                 return record_error(
@@ -896,6 +922,18 @@ pub unsafe extern "C" fn opentray_ext_command(
             scope: ExtensionScope {
                 app_id: frame.owner.app_id.clone(),
                 tray_id: Some(frame.owner.tray_id.clone()),
+                ext: "webview".to_string(),
+            },
+            data,
+        });
+    }
+    for (owner, data) in handled.channel_events {
+        // Host-bound channel events ride the same response envelopes,
+        // routed under the owning session's tray scope (v1 flush ruling).
+        events.push(ExtensionEnvelope {
+            scope: ExtensionScope {
+                app_id: owner.app_id.clone(),
+                tray_id: Some(owner.tray_id.clone()),
                 ext: "webview".to_string(),
             },
             data,
@@ -1083,6 +1121,27 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                     ))
                 })?;
             Ok(WebviewCommand::Orchestration(Box::new(command)))
+        }
+        // Message-channel command surface (frozen wire tags; see
+        // `opentray-spec::channel`). The whole frame family parses here;
+        // only the five request frames are commands — result and push
+        // frames reject with the precise "not commands" message.
+        "channel.create" | "channel.create-result" | "channel.post" | "channel.post-result"
+        | "channel.close" | "channel.close-result" | "channel.destroy"
+        | "channel.destroy-result" | "channel.list" | "channel.list-result"
+        | "channel.error" | "channel.created" | "channel.closed" => {
+            let frame: opentray_spec::channel::ChannelFrame =
+                serde_json::from_value(data.clone()).map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "invalid channel command: {error}"
+                    ))
+                })?;
+            let request = channels::ChannelRequest::from_frame(frame).ok_or_else(|| {
+                WebviewRuntimeError::Rejected(
+                    "channel result and push frames are not commands".into(),
+                )
+            })?;
+            Ok(WebviewCommand::Channel(Box::new(request)))
         }
         "hide" => Ok(WebviewCommand::Hide),
         "close" => Ok(WebviewCommand::Close),
@@ -1970,6 +2029,78 @@ mod tests {
         }))
         .expect_err("missing required fields must reject");
         assert!(error.to_string().contains("invalid webview orchestration command"));
+    }
+
+    #[test]
+    fn parse_channel_commands_use_the_frozen_wire_tags() {
+        let owner = serde_json::json!({
+            "appId": "app-1",
+            "trayId": "tray-1",
+            "sessionId": "session-1"
+        });
+        let command = parse_webview_command(&serde_json::json!({
+            "type": "channel.create",
+            "owner": owner,
+            "target": "toolbar"
+        }))
+        .expect("channel.create command");
+        let WebviewCommand::Channel(request) = &command else {
+            panic!("expected channel command");
+        };
+        assert_eq!(request.owner().tray_id, "tray-1");
+        assert!(matches!(
+            &**request,
+            channels::ChannelRequest::Create { target, .. } if target == "toolbar"
+        ));
+        // The command carries its owner tuple for the scope check.
+        assert!(
+            command_owner_tuple(&command).is_some(),
+            "channel commands join the owner-scope check"
+        );
+
+        let posted = parse_webview_command(&serde_json::json!({
+            "type": "channel.post",
+            "owner": owner,
+            "channelId": "ch-1",
+            "payload": { "type": "navigate", "url": "https://example.com" }
+        }))
+        .expect("channel.post command");
+        assert!(matches!(
+            posted,
+            WebviewCommand::Channel(request)
+                if matches!(&*request, channels::ChannelRequest::Post { payload, .. }
+                    if payload == &serde_json::json!({ "type": "navigate", "url": "https://example.com" }))
+        ));
+
+        for tag in ["channel.close", "channel.destroy", "channel.list"] {
+            let mut frame = serde_json::json!({ "type": tag, "owner": owner });
+            if tag != "channel.list" {
+                frame["channelId"] = serde_json::json!("ch-1");
+            }
+            let command = parse_webview_command(&frame)
+                .unwrap_or_else(|error| panic!("{tag} must parse: {error}"));
+            assert!(
+                matches!(command, WebviewCommand::Channel(_)),
+                "{tag} maps to the channel command"
+            );
+        }
+
+        // Result and push frames are not commands.
+        let error = parse_webview_command(&serde_json::json!({
+            "type": "channel.create-result",
+            "owner": owner,
+            "channelId": "ch-1"
+        }))
+        .expect_err("result frames must reject");
+        assert!(error.to_string().contains("not commands"));
+        let error = parse_webview_command(&serde_json::json!({
+            "type": "channel.post",
+            "owner": owner,
+            "channelId": 7,
+            "payload": "x"
+        }))
+        .expect_err("malformed channel payloads reject at parse time");
+        assert!(error.to_string().contains("invalid channel command"));
     }
 
     #[test]

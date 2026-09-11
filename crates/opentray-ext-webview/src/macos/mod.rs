@@ -105,6 +105,10 @@ const PAGE_IPC_NAMESPACE: &str = "opentray.ipc";
 const PERMISSIONS_NAMESPACE: &str = "opentray.permissions";
 const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
+/// Page bridge namespace of the per-webview surface (D9/D2): the source
+/// webview id rides the ipc transport itself, so page-originated channel
+/// commands are scoped to the view the page lives in.
+pub(super) const WEBVIEW_CHANNEL_NAMESPACE: &str = "opentray.webview";
 const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
 const OPAQUE_BACKGROUND: RGBA = (255, 255, 255, 255);
 const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
@@ -306,6 +310,10 @@ pub(crate) struct MacosWebviewRuntime {
     // AppKit activation policy is process-wide. Keep the live app-mode projections explicit so
     // hiding one retained window cannot demote a sibling application window.
     app_mode_windows: HashSet<String>,
+    /// Host-bound channel events drained from sessions destroyed inside
+    /// the current command (their window is gone before the flush runs).
+    pending_channel_events:
+        Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
 }
 
 /// The primary webview created by a legacy `show`, before it is registered
@@ -350,6 +358,19 @@ pub(super) struct NavigatorWindowBridge {
     /// Native layout engine handle for the query path; the strong owner is
     /// the window session's `layout_tracker`.
     pub(super) layout_tracker: Weak<RefCell<LayoutTracker>>,
+    /// Session-scoped message-channel registry (D9-D20). Shared with the
+    /// per-webview ipc handlers so page-originated channel commands run
+    /// on the WebKit callback without reaching the runtime struct.
+    pub(super) channels: Rc<RefCell<crate::channels::SessionChannels>>,
+    /// Views that finished at least one page load (document navigation
+    /// discrimination for `document_navigated` closures).
+    pub(super) channel_loaded_views: HashSet<String>,
+    /// Views whose page can currently consume channel pushes (a push
+    /// before the first finished load cannot land in the document).
+    pub(super) channel_live_views: HashSet<String>,
+    /// Lifecycle push scripts held back for views that are not live yet;
+    /// flushed when the page finishes loading.
+    pub(super) pending_channel_pushes: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -406,6 +427,10 @@ struct WindowCapabilities {
     focus_webview: bool,
     webview_id: bool,
     webview_bridge_policy: bool,
+    /// Message-channel surface (D9-D20): channel commands plus the
+    /// `navigator.opentrayWebview` page bridge. Both platforms' DTOs
+    /// serialize this field (D16 parity).
+    message_channels: bool,
     webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
@@ -462,7 +487,15 @@ impl MacosWebviewRuntime {
         // this response. This is the only delivery path for orchestration
         // events; the 16 ms window-event drain never observes them.
         let events = self.flush_pending_events();
-        Ok(HandledCommand { result, events })
+        // Host-bound channel events ride the same response (v1 flush
+        // ruling, tasks 3.3b/3.5), including events drained from sessions
+        // destroyed by this very command.
+        let channel_events = self.flush_channel_events();
+        Ok(HandledCommand {
+            result,
+            events,
+            channel_events,
+        })
     }
 
     fn dispatch(
@@ -508,6 +541,7 @@ impl MacosWebviewRuntime {
                 Ok(json!({ "type": "shown" }))
             }
             WebviewCommand::Orchestration(command) => self.handle_orchestration(*command),
+            WebviewCommand::Channel(request) => self.handle_channel(*request),
             WebviewCommand::Hide => {
                 if let Some(session) = self.session(tray_id) {
                     let was_visible = window_is_visible(&session.window);
@@ -714,6 +748,27 @@ impl MacosWebviewRuntime {
         let removed = self.registry.session_closed(session_id);
         for entry in removed {
             if let Some(owner) = entry.owner {
+                // Channel law (D20): session close closes the session's
+                // channels with `session_closed` (distinct from the
+                // `window_destroyed` entrance) and stages the host
+                // observations for the next response flush — the
+                // session-close ABI call itself returns no events.
+                if let Some(session) = self.sessions.get_mut(&owner.tray_id) {
+                    let pushes = session
+                        .bridge
+                        .borrow()
+                        .channels
+                        .borrow_mut()
+                        .close_all(opentray_spec::channel::ChannelCloseReason::SessionClosed);
+                    self::bridge::deliver_channel_pushes(&session.bridge, &pushes, None);
+                    let events = session
+                        .bridge
+                        .borrow()
+                        .channels
+                        .borrow_mut()
+                        .drain_host_events();
+                    self.pending_channel_events.extend(events);
+                }
                 self.destroy_window_session(&owner.tray_id);
             }
         }
@@ -1032,6 +1087,186 @@ impl MacosWebviewRuntime {
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
     }
 
+    /// Message-channel commands (D9-D20, frozen `channel.*` wire tags).
+    /// The response data is the frozen result frame; typed rejections
+    /// return the `channel.error` envelope as Ok-data, mirroring the
+    /// orchestration convention (the extension ABI's error channel cannot
+    /// carry the typed registry). Push effects are delivered inline:
+    /// page-bound through the bridge script, host-bound through the
+    /// response flush.
+    fn handle_channel(
+        &mut self,
+        request: crate::channels::ChannelRequest,
+    ) -> Result<Value, WebviewRuntimeError> {
+        use crate::channels::ChannelRequest as Request;
+        use opentray_spec::channel::ChannelFrame;
+
+        let owner = request.owner().clone();
+        let Some(bridge) = self
+            .session_for_owner(&owner)
+            .map(|session| Rc::clone(&session.bridge))
+        else {
+            // A tray whose live window belongs to another session is the
+            // typed cross-session rejection; a tray with no window session
+            // at all has nothing addressable (unknown_view).
+            let session_live = self.registry.window(&owner.tray_id).is_some();
+            let code = if session_live {
+                opentray_spec::webview::OrchestrationErrorCode::SessionScope
+            } else {
+                opentray_spec::webview::OrchestrationErrorCode::UnknownView
+            };
+            let message = if session_live {
+                format!(
+                    "channel owner (app {}, tray {}, session {}) does not address the live \
+                     window session of tray {}",
+                    owner.app_id, owner.tray_id, owner.session_id, owner.tray_id
+                )
+            } else {
+                format!("tray {} has no webview window session to address", owner.tray_id)
+            };
+            return Ok(channel_error_frame(&owner, code, message));
+        };
+        let registry = bridge.borrow().channels.clone();
+        let sender = crate::channels::ChannelSender::Host;
+
+        let result = match request {
+            Request::Create { ref target, .. } => {
+                // Authority (D10/D20): the target must be a live webview of
+                // this session whose bridge policy enables message
+                // channels; validation precedes any channel state.
+                if let Some(error) = channel_target_error(&bridge, target) {
+                    return Ok(channel_error_frame(
+                        &owner,
+                        error.code(),
+                        error.envelope.error.message,
+                    ));
+                }
+                let created = registry.borrow_mut().create(
+                    &owner,
+                    opentray_spec::channel::ChannelPeer::host(),
+                    target.clone(),
+                );
+                match created {
+                    Ok((channel_id, push)) => {
+                        self::bridge::deliver_channel_pushes(
+                            &bridge,
+                            std::slice::from_ref(&push),
+                            None,
+                        );
+                        ChannelFrame::CreateResult { owner, channel_id }
+                    }
+                    Err(error) => {
+                        return Ok(channel_error_frame(
+                            &owner,
+                            error.code(),
+                            error.envelope.error.message,
+                        ))
+                    }
+                }
+            }
+            Request::Post {
+                ref channel_id,
+                ref payload,
+                ..
+            } => {
+                let outcome = registry.borrow_mut().post(&owner, sender, channel_id, payload.clone());
+                match outcome {
+                    Ok(receipt) => {
+                        self::bridge::drain_channel_port_for(
+                            &bridge,
+                            channel_id,
+                            &receipt.recipient,
+                            receipt.endpoint,
+                        );
+                        ChannelFrame::PostResult { owner }
+                    }
+                    Err(failure) => {
+                        self::bridge::deliver_channel_pushes(&bridge, &failure.pushes, None);
+                        return Ok(channel_error_frame(
+                            &owner,
+                            failure.error.code(),
+                            failure.error.envelope.error.message,
+                        ));
+                    }
+                }
+            }
+            Request::Close { ref channel_id, .. } => {
+                let outcome = registry.borrow_mut().close(&owner, sender, channel_id);
+                match outcome {
+                    Ok(pushes) => {
+                        self::bridge::deliver_channel_pushes(&bridge, &pushes, None);
+                        ChannelFrame::CloseResult { owner }
+                    }
+                    Err(error) => {
+                        return Ok(channel_error_frame(
+                            &owner,
+                            error.code(),
+                            error.envelope.error.message,
+                        ))
+                    }
+                }
+            }
+            Request::Destroy { ref channel_id, .. } => {
+                let outcome = registry.borrow_mut().destroy(&owner, sender, channel_id);
+                match outcome {
+                    Ok(pushes) => {
+                        self::bridge::deliver_channel_pushes(&bridge, &pushes, None);
+                        ChannelFrame::DestroyResult { owner }
+                    }
+                    Err(error) => {
+                        return Ok(channel_error_frame(
+                            &owner,
+                            error.code(),
+                            error.envelope.error.message,
+                        ))
+                    }
+                }
+            }
+            Request::List { .. } => match registry.borrow().list_for_host(&owner) {
+                Ok(channels) => ChannelFrame::ListResult { owner, channels },
+                Err(error) => {
+                    return Ok(channel_error_frame(
+                        &owner,
+                        error.code(),
+                        error.envelope.error.message,
+                    ))
+                }
+            },
+        };
+        serde_json::to_value(result)
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
+    }
+
+    /// Resolves the window session whose owner tuple matches the frame's
+    /// `(appId, trayId, sessionId)` — channel commands carry no window id,
+    /// the session identity is the addressing scope.
+    fn session_for_owner(
+        &self,
+        owner: &opentray_spec::webview::WebviewOwnerTuple,
+    ) -> Option<&WindowSession> {
+        let entry = self.registry.window(&owner.tray_id)?;
+        let recorded = entry.owner.as_ref()?;
+        if recorded.app_id != owner.app_id
+            || recorded.session_id.as_deref() != Some(owner.session_id.as_str())
+        {
+            return None;
+        }
+        self.sessions.get(&owner.tray_id)
+    }
+
+    /// Drains every live session's host-bound channel events plus events
+    /// staged by sessions destroyed inside the current command.
+    fn flush_channel_events(
+        &mut self,
+    ) -> Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)> {
+        let mut events = std::mem::take(&mut self.pending_channel_events);
+        for session in self.sessions.values() {
+            let channels = session.bridge.borrow().channels.clone();
+            events.extend(channels.borrow_mut().drain_host_events());
+        }
+        events
+    }
+
     /// Resolves the window session addressed by an orchestration command.
     /// Returns `None` for unknown tray/window bindings. Orchestration
     /// commands always carry an attributed owner tuple, so unattributed
@@ -1183,6 +1418,8 @@ impl MacosWebviewRuntime {
         let owner_for_title = window_owner.clone();
         let owner_for_page_load = window_owner.clone();
         let webview_id_for_ipc = webview_id.to_string();
+        let bridge_for_channel_loads = Rc::downgrade(&bridge);
+        let webview_id_for_channel_loads = webview_id.to_string();
         let descriptor = match (&url, &html) {
             (Some(url), None) => WebviewContentDescriptor::Url(url.clone()),
             (None, Some(html)) => WebviewContentDescriptor::Html(html.clone()),
@@ -1199,6 +1436,27 @@ impl MacosWebviewRuntime {
             .with_on_page_load_handler(move |event, url| {
                 if matches!(event, PageLoadEvent::Started) {
                     handle_view_url_started(&events_for_page_load, &outbox_for_page_load, &owner_for_page_load, &url);
+                    // Channel law (D11): a document navigation closes the
+                    // page-side endpoints. The helper discriminates the
+                    // view's very first load (recorded in the bridge
+                    // state) from later navigations, and drops pushes
+                    // held back for a document that is being replaced.
+                    if let Some(bridge) = bridge_for_channel_loads.upgrade() {
+                        self::bridge::handle_view_channel_navigation_started(
+                            &bridge,
+                            &webview_id_for_channel_loads,
+                        );
+                    }
+                }
+                if matches!(event, PageLoadEvent::Finished) {
+                    // The document can now consume channel pushes; flush
+                    // everything held back for it.
+                    if let Some(bridge) = bridge_for_channel_loads.upgrade() {
+                        self::bridge::handle_view_channel_page_finished(
+                            &bridge,
+                            &webview_id_for_channel_loads,
+                        );
+                    }
                 }
             })
             .with_download_started_handler(|_, _| true)
@@ -1209,7 +1467,7 @@ impl MacosWebviewRuntime {
         // Per-webview bridge policy (D2): a policy-less child gets no
         // bootstrap script and no ipc surface — the arbitrary-content webview
         // is bridgeless by default.
-        if let Some(script) = webview_bridge_bootstrap_script(policy) {
+        if let Some(script) = webview_bridge_bootstrap_script(policy, webview_id) {
             let bridge_for_ipc = Rc::clone(&bridge);
             let window_for_ipc = window.clone();
             builder = builder
@@ -1260,8 +1518,28 @@ impl MacosWebviewRuntime {
         webview_id: &str,
     ) {
         if let Some(session) = self.sessions.get_mut(&owner.tray_id) {
+            // Channel law (D11/D20): peer teardown closes the destroyed
+            // view's channels first, while the surviving endpoints' pages
+            // are still live to observe through. The pure registry skips
+            // pushes addressed to the dying view itself.
+            let pushes = session
+                .bridge
+                .borrow()
+                .channels
+                .borrow_mut()
+                .close_channels_of_webview(
+                    webview_id,
+                    opentray_spec::channel::ChannelCloseReason::PeerWebviewDestroyed,
+                );
+            self::bridge::deliver_channel_pushes(&session.bridge, &pushes, None);
             session.focus_tracker.borrow_mut().remove_target(webview_id);
             session.bridge.borrow_mut().remove_view(webview_id);
+            {
+                let mut bridge = session.bridge.borrow_mut();
+                bridge.channel_loaded_views.remove(webview_id);
+                bridge.channel_live_views.remove(webview_id);
+                bridge.pending_channel_pushes.remove(webview_id);
+            }
             if let Some(native) = session.webviews.remove(webview_id) {
                 let wry_view = native.webview.webview();
                 wry_view.removeFromSuperview();
@@ -1541,6 +1819,12 @@ impl MacosWebviewRuntime {
             size_constraints: WindowSizeConstraints::default(),
             layout: WindowLayoutState::default(),
             layout_tracker: Weak::new(),
+            channels: Rc::new(RefCell::new(crate::channels::SessionChannels::new(
+                owner.clone(),
+            ))),
+            channel_loaded_views: HashSet::new(),
+            channel_live_views: HashSet::new(),
+            pending_channel_pushes: HashMap::new(),
         }));
 
         window.contentView().ok_or_else(|| {
@@ -1700,6 +1984,12 @@ impl MacosWebviewRuntime {
                 show_settings.window.sync.icon,
                 &show_settings.native_api_policy,
                 &show_settings.permission_manager_policy,
+                // The primary webview keeps the legacy bridge projection:
+                // message-channel surfaces belong to orchestration-era
+                // children with an explicit policy (primary_bridge_policy).
+                false,
+                false,
+                DEFAULT_WEBVIEW_ID,
             ))
             .with_ipc_handler(move |request| {
                 handle_navigator_window_request(
@@ -1789,6 +2079,24 @@ impl MacosWebviewRuntime {
     fn destroy_window_session(&mut self, tray_id: &str) {
         self.registry.destroy_window(tray_id);
         if let Some(session) = self.sessions.remove(tray_id) {
+            // Channel law (D20): window destruction is a destroy entrance —
+            // open channels close with `window_destroyed`, endpoints still
+            // live observe once, host observations ride this command's
+            // response flush, and no tombstone survives the session.
+            let pushes = session
+                .bridge
+                .borrow()
+                .channels
+                .borrow_mut()
+                .close_all(opentray_spec::channel::ChannelCloseReason::WindowDestroyed);
+            self::bridge::deliver_channel_pushes(&session.bridge, &pushes, None);
+            let events = session
+                .bridge
+                .borrow()
+                .channels
+                .borrow_mut()
+                .drain_host_events();
+            self.pending_channel_events.extend(events);
             session.bridge.borrow_mut().app_region_drag.stop();
             session.window.setDelegate(None);
             session.window.close();
@@ -1933,6 +2241,48 @@ enum ChildCreateError {
 /// data shape (`{ error: { code, message } }`).
 fn typed_rejection(error: OrchestrationError) -> Value {
     serde_json::to_value(&error.envelope).unwrap_or(Value::Null)
+}
+
+/// Frozen `channel.error` frame as the command response data (typed
+/// channel rejections are Ok-data, like orchestration rejections).
+fn channel_error_frame(
+    owner: &opentray_spec::webview::WebviewOwnerTuple,
+    code: opentray_spec::webview::OrchestrationErrorCode,
+    message: impl Into<String>,
+) -> Value {
+    serde_json::to_value(opentray_spec::channel::ChannelFrame::Error {
+        owner: owner.clone(),
+        error: opentray_spec::webview::WebviewErrorBody {
+            code,
+            message: message.into(),
+        },
+    })
+    .unwrap_or(Value::Null)
+}
+
+/// Creation authority (D10/D20) resolved against the live bridge views:
+/// the target must exist (`unknown_view`) and carry the frozen
+/// message-channel bridge policy (`bridge_required`). Returns before any
+/// channel state exists.
+fn channel_target_error(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    target: &str,
+) -> Option<OrchestrationError> {
+    let state = bridge.borrow();
+    let view = state.views.iter().find(|view| view.id == target);
+    let Some(view) = view else {
+        return Some(OrchestrationError::new(
+            opentray_spec::webview::OrchestrationErrorCode::UnknownView,
+            format!("webview id {target} is not registered in this window session"),
+        ));
+    };
+    if !view.policy.message_channels {
+        return Some(OrchestrationError::new(
+            opentray_spec::webview::OrchestrationErrorCode::BridgeRequired,
+            format!("webview {target} has no message-channel page bridge"),
+        ));
+    }
+    None
 }
 
 fn unknown_view_envelope(
@@ -2354,6 +2704,7 @@ impl NavigatorWindowBridge {
             focus_webview: true,
             webview_id: true,
             webview_bridge_policy: true,
+            message_channels: true,
             // geometryChange joins the unified push family with the layout
             // batch (D23): layout commits and overlay metric changes now
             // recompute per-view projections natively.
