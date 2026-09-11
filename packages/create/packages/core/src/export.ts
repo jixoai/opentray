@@ -131,7 +131,9 @@ const toCliFlags = (config: CreateConfigV1): readonly string[] => {
   if (config.window.width !== 1_200 || config.window.height !== 800) {
     flags.push("--window", `${config.window.width}x${config.window.height}`);
   }
-  // Window behavior facts (D12/D13): serialize only deviations from defaults.
+  // Window behavior facts (D12/D13, add-webview-orchestration): serialize
+  // only deviations from defaults. `--toolbar` applies to URL and command
+  // applications alike (window.toolbar is the one canonical toolbar field).
   if (config.window.toolbar === true) {
     flags.push("--toolbar");
   }

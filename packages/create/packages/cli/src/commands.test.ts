@@ -272,7 +272,7 @@ describe("create --url (add-create-url-apps)", () => {
     const packageJson = JSON.parse(await readFile(join(payloadDir, "package.json"), "utf8"));
     expect(packageJson.dependencies["@lydell/node-pty"]).toBeUndefined();
     const entry = await readFile(join(payloadDir, "main.mjs"), "utf8");
-    expect(entry).toContain("url: toolbarUrl ?? config.url");
+    expect(entry).toContain("{ url: config.url }");
     expect(entry).not.toContain("node-pty");
   });
 
@@ -368,16 +368,23 @@ describe("create --url scraped defaults (D10)", () => {
     }
   });
 
-  it("falls back to the direct window when the page forbids embedding", async () => {
+  it("keeps --toolbar against an XFO-DENY page without probing or warning (D14)", async () => {
+    // add-webview-orchestration：嵌入策略构造性无关——不回退、不降级、无警告。
     const code = await run(["create", "--url", `${fixtureUrl}/deny`, "--toolbar", "--app-id", "deny.example"]);
     expect(code, errLines.join("\n")).toBe(0);
-    expect(errLines.join("\n")).toContain("forbids iframe embedding");
+    expect([...outLines, ...errLines].join("\n")).not.toContain("embedding");
     const config = JSON.parse(
       await readFile(join(home, ".opentray", "create", "deny-example", "create-opentray.json"), "utf8"),
     );
-    expect(config.window.toolbar).toBeUndefined();
+    expect(config.window.toolbar).toBe(true);
+    // toolbar 模式的 URL 应用携带 shell host（toolbar 页资产）且仍无 PTY。
     const payloadFiles = await readdir(join(home, ".opentray", "create", "deny-example", "app"));
-    expect(payloadFiles).not.toContain("app-shell-server.mjs");
+    expect(payloadFiles).toContain("app-shell-server.mjs");
+    const packageJson = JSON.parse(await readFile(join(home, ".opentray", "create", "deny-example", "app", "package.json"), "utf8"));
+    expect(packageJson.dependencies["@lydell/node-pty"]).toBeUndefined();
+    const entry = await readFile(join(home, ".opentray", "create", "deny-example", "app", "main.mjs"), "utf8");
+    expect(entry).toContain("attachToolbarCarrier");
+    expect(entry).not.toContain("browse.html");
   });
 
   it("keeps toolbar when the page allows embedding", async () => {
@@ -475,5 +482,42 @@ describe("create --url window behavior flags", () => {
     expect(config.window.titleFollowsDocument).toBe(true);
     expect(config.window.iconFollowsDocument).toBe(false);
     expect(config.window.toolbar).toBeUndefined();
+  });
+});
+
+// add-webview-orchestration D13/D15：--toolbar 对命令应用开放——同一
+// window.toolbar 字段、同一 toolbar 载体（服务窗），edit/export 往返。
+describe("create --toolbar command applications", () => {
+  it("composes the carrier over the service window and round-trips through export", async () => {
+    const code = await run([
+      "create", "--app-id", "toolbar.cmd.example", "--app-name", "Toolbar Cmd",
+      "--exec", "node", "--arg", "serve.js", "--toolbar",
+    ]);
+    expect(code, errLines.join("\n")).toBe(0);
+    const config = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "toolbar-cmd-example", "create-opentray.json"), "utf8"),
+    );
+    expect(config.window.toolbar).toBe(true);
+
+    // 服务窗 = 同一多 webview 载体（无 iframe browse 产物）。
+    const entry = await readFile(join(home, ".opentray", "create", "toolbar-cmd-example", "app", "main.mjs"), "utf8");
+    expect(entry).toContain("attachToolbarCarrier");
+    expect(entry).toContain("toolbarMode && shellPort !== null");
+    expect(entry).toContain("column([fixed(\"toolbar\", 44), grow(\"content\")])");
+    expect(entry).not.toContain("browse.html");
+    expect(entry).not.toContain("<iframe");
+
+    // export 往返携带 --toolbar（命令应用同样适用）。
+    const exportCode = await run(["app", "export", "toolbar.cmd.example", "--format", "command"]);
+    expect(exportCode, errLines.join("\n")).toBe(0);
+    expect(outLines.join("\n")).toContain("--toolbar");
+
+    // app edit 可翻转：--toolbar 缺省继承已提交值，显式 --no-toolbar 清除。
+    const editCode = await run(["app", "edit", "toolbar.cmd.example", "--no-toolbar"]);
+    expect(editCode, errLines.join("\n")).toBe(0);
+    const edited = JSON.parse(
+      await readFile(join(home, ".opentray", "create", "toolbar-cmd-example", "create-opentray.json"), "utf8"),
+    );
+    expect(edited.window.toolbar).toBe(false);
   });
 });

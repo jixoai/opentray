@@ -168,8 +168,14 @@ export interface WizardFormValues {
   readonly force: boolean;
   /** Advanced: render the command PTY in the generated app (default false). */
   readonly showStartupTerminal: boolean;
-  /** Advanced: address-bar service tabs in the generated app (default false). */
-  readonly showAddressBar: boolean;
+  /**
+   * 「导航工具栏」开关 (add-webview-orchestration D15): compose the native
+   * navigation-toolbar carrier over the target/service window — a
+   * desired-state fact compiling into the v1 `window.toolbar` field for BOTH
+   * application flows (default false). Replaces the retired showAddressBar
+   * input (D13); enabling it requires no embedding knowledge.
+   */
+  readonly toolbar: boolean;
   /** Advanced v1 sampling intent: false keeps pixel-art edges (default true). */
   readonly imageSmoothingEnabled: boolean;
   /** Advanced v1 developer mode: only WebView DevTools admission (default false). */
@@ -402,7 +408,7 @@ interface FieldTouched {
   trayIconPath: boolean;
   pm: boolean;
   showStartupTerminal: boolean;
-  showAddressBar: boolean;
+  toolbar: boolean;
   imageSmoothingEnabled: boolean;
   developerMode: boolean;
 }
@@ -437,9 +443,9 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   let currentTokens: readonly string[] = [];
   let currentCommand = "";
   // URL 模式（add-create-url-apps webui 入口）：地址即源，无命令运行/端口
-  // 发现；预设（title/favicon/嵌入策略）一次抓取即冻结为占位默认。
+  // 发现；预设（title/favicon）一次抓取即冻结为占位默认。嵌入策略探测已
+  // 退役（add-webview-orchestration D14）：多 webview 载体下不可达也不需要。
   let urlSource: string | undefined;
-  let urlFrameEmbeddable: boolean | undefined;
   let scrapedTitle: string | undefined;
   let interactive = true; // optimistic until the PTY reports otherwise
   let resolvedVector: LaunchVector | undefined;
@@ -456,7 +462,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
   const iconCompositions = new Map<string, WizardIconComposition>();
   let iconBackground: WizardIconBackground | undefined;
   let iconScale: number | undefined;
-  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, force: false, showStartupTerminal: false, showAddressBar: false, imageSmoothingEnabled: false, developerMode: false };
+  const touched: FieldTouched = { appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, force: false, showStartupTerminal: false, toolbar: false, imageSmoothingEnabled: false, developerMode: false };
   let form: WizardFormValues = {
     appId: "",
     appName: "",
@@ -466,7 +472,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
     trayIconPath: "",
     force: options.force === true,
     showStartupTerminal: false,
-    showAddressBar: false,
+    toolbar: false,
     imageSmoothingEnabled: true,
     developerMode: false,
     pm:
@@ -885,7 +891,6 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       const trimmed = url.trim();
       if (trimmed.length === 0) {
         urlSource = undefined;
-        urlFrameEmbeddable = undefined;
         scrapedTitle = undefined;
         iconCandidates = [];
         iconPort = undefined;
@@ -932,7 +937,6 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
       currentIconPath = scraped.ok ? scraped.icons[0]?.path : undefined;
       currentIconUrl = scraped.ok ? scraped.icons[0]?.url : undefined;
       scrapedTitle = scraped.ok ? scraped.title : undefined;
-      urlFrameEmbeddable = scraped.ok ? scraped.frameEmbeddable : undefined;
       stopTimers();
       setState("discovered");
       emit({ type: "icons", port: 0, icons: iconCandidates, generation: iconGeneration });
@@ -1039,7 +1043,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         ...(touched.force ? { force: form.force } : { force: options.force === true }),
         ...(touched.trayIconPath ? { trayIconPath: form.trayIconPath } : { trayIconPath: "" }),
         ...(touched.showStartupTerminal ? { showStartupTerminal: form.showStartupTerminal } : { showStartupTerminal: false }),
-        ...(touched.showAddressBar ? { showAddressBar: form.showAddressBar } : { showAddressBar: false }),
+        ...(touched.toolbar ? { toolbar: form.toolbar } : { toolbar: false }),
         ...(touched.imageSmoothingEnabled ? { imageSmoothingEnabled: form.imageSmoothingEnabled } : { imageSmoothingEnabled: true }),
         ...(touched.developerMode ? { developerMode: form.developerMode } : { developerMode: false }),
         pm:
@@ -1486,15 +1490,17 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         schemaVersion: 1,
         appId: frozen.appId,
         appName: frozen.appName,
+        // add-webview-orchestration D13/D15: window.toolbar is the one canonical
+        // toolbar field for BOTH flows — the wizard toggle compiles straight
+        // into it (no embedding-policy conditioning, D14) and round-trips
+        // through export exactly like the CLI flag.
         ...(urlSource !== undefined
           ? {
               url: urlSource,
               window: {
                 width: 1_200,
                 height: 800,
-                ...(frozen.showAddressBar === true && urlFrameEmbeddable !== false
-                  ? { toolbar: true }
-                  : {}),
+                ...(frozen.toolbar === true ? { toolbar: true } : {}),
                 titleFollowsDocument: true,
                 iconFollowsDocument: false,
               },
@@ -1506,7 +1512,13 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
                 cwd: vector!.cwd,
                 ...(env === undefined ? {} : { env }),
               },
-              window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
+              window: {
+                width: 1_200,
+                height: 800,
+                ...(frozen.toolbar === true ? { toolbar: true } : {}),
+                titleFollowsDocument: true,
+                iconFollowsDocument: false,
+              },
             }),
         packageManager: frozen.pm,
         icons: {
@@ -1590,17 +1602,11 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
         run = undefined;
       }
 
-      // URL 模式：地址即源——无命令向量需要解析；「地址栏」开关即 toolbar
-      // （嵌入拒绝时自动回退直连并留下日志，同 CLI D12 语义）。
+      // URL 模式：地址即源——无命令向量需要解析；「导航工具栏」开关直接编译
+      // 为 window.toolbar（add-webview-orchestration D13/D15）。不探测、不警
+      // 告、不因目标站点嵌入策略回退（D14：多 webview 载体下嵌入策略构造性
+      // 无关）。
       if (urlSource !== undefined) {
-        const toolbarWanted = frozen.showAddressBar === true;
-        const toolbar = toolbarWanted && urlFrameEmbeddable !== false;
-        if (toolbarWanted && !toolbar) {
-          emit({
-            type: "materialize-log",
-            message: `warning: ${urlSource} forbids iframe embedding (X-Frame-Options / CSP frame-ancestors); the address bar falls back to the direct window`,
-          });
-        }
         try {
           result = await materialize(
             {
@@ -1613,7 +1619,7 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
                 window: {
                   width: 1_200,
                   height: 800,
-                  ...(toolbar ? { toolbar: true } : {}),
+                  ...(frozen.toolbar === true ? { toolbar: true } : {}),
                   titleFollowsDocument: true,
                   iconFollowsDocument: false,
                 },
@@ -1694,7 +1700,15 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               appName: frozen.appName,
               command: resolvedVector,
               service: { port: resolvedServicePort ?? 0 },
-              window: { width: 1_200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
+              // 命令应用获得同等的 toolbar 生成契约（D13 R2-B12）：开关直接
+              // 编译进 window.toolbar，与 URL 模式同一载体、同一行为闭环。
+              window: {
+                width: 1_200,
+                height: 800,
+                ...(frozen.toolbar === true ? { toolbar: true } : {}),
+                titleFollowsDocument: true,
+                iconFollowsDocument: false,
+              },
               ...(frozen.developerMode === true ? { developerMode: true } : {}),
             },
             targetDir: resolvedTargetDir ?? currentDefaults().targetDir,
@@ -1710,9 +1724,10 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
               ? {}
               : { trayIconSourcePath: currentTrayIconPath }),
             ...(trayIconIsSolid ? { trayIconIsSolid: true } : {}),
+            // show-startup-terminal 不受 toolbar 退役影响（D13）；
+            // shell 只保留终端可见性事实。
             shell: {
               showTerminal: frozen.showStartupTerminal,
-              showAddressBar: frozen.showAddressBar,
             },
             ...(frozen.imageSmoothingEnabled === false ? { imageSmoothingEnabled: false } : {}),
             ...(frozen.developerMode === true ? { developerMode: true } : {}),
@@ -1768,5 +1783,5 @@ export const createWizardSession = (options: WizardOptions): WizardSession => {
 
 /** Exposed for tests: the touched-field bookkeeping semantics. */
 export const createFieldTouchedTracker = (): { touched: FieldTouched } => ({
-  touched: { force: false, appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, showStartupTerminal: false, showAddressBar: false, imageSmoothingEnabled: false, developerMode: false },
+  touched: { force: false, appId: false, appName: false, iconPath: false, iconBackground: false, iconScale: false, trayIconPath: false, pm: false, showStartupTerminal: false, toolbar: false, imageSmoothingEnabled: false, developerMode: false },
 });

@@ -1005,8 +1005,9 @@ describe("frozen-parameter sharing (exportFrozen)", () => {
   });
 
 // URL 模式（add-create-url-apps webui 入口）：地址即源——一次抓取预设进
-// discovered，确认生成走同一 materialize 管线；「地址栏」即 toolbar，嵌入
-// 拒绝的目标自动回退直连（同 CLI D12 语义）。
+// discovered，确认生成走同一 materialize 管线；「导航工具栏」开关直接编译
+// 为 window.toolbar（add-webview-orchestration D13/D15），嵌入策略不探测、
+// 不警告、不回退（D14：多 webview 载体构造性无关）。
 describe("URL mode", () => {
   const fakeIcon = (async () => ({
     schemaVersion: 1,
@@ -1057,7 +1058,6 @@ describe("URL mode", () => {
             variant: "original",
           },
         ],
-        frameEmbeddable: true,
       }),
       materializeContext: { generateIcon: fakeIcon, generateDefaultIcon: fakeDefaultIcon, runInstall: async () => {} },
     });
@@ -1085,7 +1085,7 @@ describe("URL mode", () => {
     expect(persisted.appName).toBe("Wiki Title");
   });
 
-  it("keeps the address bar only when the target allows embedding", async () => {
+  it("keeps the toolbar against an embedding-hostile target without probing (D14)", async () => {
     const denyHome = mkdtempSync(join(tmpdir(), "wizard-deny-"));
     const harness = createHarness({
       homeDir: denyHome,
@@ -1094,13 +1094,12 @@ describe("URL mode", () => {
         title: "Denied",
         iconPath: join(denyHome, "scraped.png"),
         icons: [],
-        frameEmbeddable: false,
       }),
       materializeContext: { generateIcon: fakeIcon, generateDefaultIcon: fakeDefaultIcon, runInstall: async () => {} },
     });
     await writeFile(join(denyHome, "scraped.png"), "");
     await harness.session.submitUrl("https://example.com/deny");
-    harness.session.updateForm({ showAddressBar: true });
+    harness.session.updateForm({ toolbar: true });
     harness.session.confirm();
     await harness.session.create();
     expect(harness.session.state).toBe("success");
@@ -1110,11 +1109,38 @@ describe("URL mode", () => {
         "utf8",
       ),
     );
-    // 嵌入拒绝：地址栏回退，窗口直连。
-    expect(persisted.window.toolbar).toBeUndefined();
+    // 不探测、不警告、不回退：开关是 desired-state 事实，直接编译。
+    expect(persisted.window.toolbar).toBe(true);
     expect(harness.events.some(
-      (event) => event.type === "materialize-log" && event.message.includes("forbids iframe embedding"),
-    )).toBe(true);
+      (event) => event.type === "materialize-log" && event.message.includes("embedding"),
+    )).toBe(false);
+  });
+
+  it("defaults the navigation toolbar off and commits it on enable (D15)", async () => {
+    const home2 = mkdtempSync(join(tmpdir(), "wizard-toolbar-default-"));
+    const harness = createHarness({
+      homeDir: home2,
+      scrapeUrl: async (url) => ({
+        ok: true,
+        title: "Wiki Title",
+        iconPath: join(home2, "scraped.png"),
+        icons: [],
+      }),
+      materializeContext: { generateIcon: fakeIcon, generateDefaultIcon: fakeDefaultIcon, runInstall: async () => {} },
+    });
+    await writeFile(join(home2, "scraped.png"), "");
+    await harness.session.submitUrl("https://example.com/wiki");
+    // 默认关：不触碰表单直接确认，冻结配置无 toolbar 字段。
+    harness.session.confirm();
+    await harness.session.create();
+    expect(harness.session.state).toBe("success");
+    const persisted = JSON.parse(
+      await readFile(
+        join(home2, ".opentray", "create", "wiki-com-example", "opentray.app.json"),
+        "utf8",
+      ),
+    );
+    expect(persisted.window.toolbar).toBeUndefined();
   });
 
   it("exits URL mode with an empty url", async () => {
@@ -1197,7 +1223,6 @@ describe("addIconCandidate (browser-derived subject candidates)", () => {
             variant: "original",
           },
         ],
-        frameEmbeddable: true,
       }),
       materializeContext: fakeMaterializeContext,
     });

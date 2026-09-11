@@ -115,6 +115,39 @@ export const openBrowser = async (url: string): Promise<void> => {
   child.unref();
 };
 
+/** Draft form values carry fields across versions — forward only the
+ *  known-safe, type-checked subset. Retired fields (the legacy
+ *  showAddressBar, replaced by `toolbar` in add-webview-orchestration D13)
+ *  are ignored here: a stale draft never resurrects a removed input.
+ *  Exported for tests alongside parseWizardCli. */
+export const normalizeDraftForm = (raw: unknown): Partial<WizardFormValues> | undefined => {
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+  const source = raw as Record<string, unknown>;
+  const patch: Partial<{ -readonly [K in keyof WizardFormValues]: WizardFormValues[K] }> = {};
+  for (const key of ["appId", "appName", "iconPath", "trayIconPath"] as const) {
+    if (typeof source[key] === "string") {
+      patch[key] = source[key] as string;
+    }
+  }
+  if (source.pm === "npm" || source.pm === "pnpm" || source.pm === "bun") {
+    patch.pm = source.pm;
+  }
+  if (source.iconBackground === "black" || source.iconBackground === "white" || source.iconBackground === "transparent") {
+    patch.iconBackground = source.iconBackground;
+  }
+  if (typeof source.iconScale === "number" && source.iconScale >= 0.5 && source.iconScale <= 0.95) {
+    patch.iconScale = source.iconScale;
+  }
+  for (const key of ["showStartupTerminal", "toolbar", "imageSmoothingEnabled", "developerMode", "force"] as const) {
+    if (typeof source[key] === "boolean") {
+      patch[key] = source[key] as boolean;
+    }
+  }
+  return Object.keys(patch).length > 0 ? patch : undefined;
+};
+
 const runWebAdapter = async (options: {
   readonly port?: number;
   readonly open: boolean;
@@ -167,7 +200,7 @@ const normalizeDraftCommandOptions = (
 const readDraft = async (
   port: number | undefined,
 ): Promise<{
-  form: WizardFormValues | undefined;
+  form: Partial<WizardFormValues> | undefined;
   command: string | undefined;
   commandOptions: Partial<WizardCommandOptions> | undefined;
 } | undefined> => {
@@ -175,20 +208,21 @@ const readDraft = async (
     const path = join(tmpdir(), `create-opentray-draft-${port ?? 0}.json`);
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as {
-      form?: WizardFormValues;
+      form?: unknown;
       command?: string;
       commandOptions?: unknown;
     };
     const commandOptions = normalizeDraftCommandOptions(parsed.commandOptions);
+    const form = parsed.form === undefined ? undefined : normalizeDraftForm(parsed.form);
     if (
-      parsed.form === undefined &&
+      form === undefined &&
       parsed.command === undefined &&
       commandOptions === undefined
     ) {
       return undefined;
     }
     return {
-      form: parsed.form,
+      form,
       command: parsed.command,
       commandOptions,
     };

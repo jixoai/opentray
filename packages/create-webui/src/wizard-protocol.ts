@@ -22,7 +22,9 @@ export interface WizardFormValues {
   /** Wipe an existing non-empty target directory before materializing. */
   force: boolean;
   showStartupTerminal: boolean;
-  showAddressBar: boolean;
+  /** 「导航工具栏」 toggle (add-webview-orchestration D15): compiles into the
+   *  v1 `window.toolbar` field for BOTH application flows; default false. */
+  toolbar: boolean;
   imageSmoothingEnabled: boolean;
   developerMode: boolean;
 }

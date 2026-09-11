@@ -160,17 +160,18 @@ export function AppConfigCard({
               </div>
               <div className="flex items-start gap-3 rounded-lg border border-border p-3">
                 <Switch
-                  id="showAddressBar"
-                  checked={values.showAddressBar}
+                  id="toolbar"
+                  checked={values.toolbar}
                   disabled={frozen}
-                  onCheckedChange={(checked) => onPatch({ showAddressBar: checked })}
+                  onCheckedChange={(checked) => onPatch({ toolbar: checked })}
                 />
                 <div>
-                  <Label htmlFor="showAddressBar" className="text-foreground">
-                    显示地址栏
+                  <Label htmlFor="toolbar" className="text-foreground">
+                    导航工具栏
                   </Label>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    服务窗口顶部显示地址栏（Web Navigation API 管理导航）。
+                    在应用窗口顶部组合原生导航工具栏（后退/前进/重载/地址栏），
+                    页面以独立 webview 直接加载；URL 应用与命令应用均可开启。
                   </p>
                 </div>
               </div>

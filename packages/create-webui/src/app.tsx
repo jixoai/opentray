@@ -61,7 +61,7 @@ const EMPTY_VALUES: WizardFormValues = {
   force: false,
   pm: "npm",
   showStartupTerminal: false,
-  showAddressBar: false,
+  toolbar: false,
   imageSmoothingEnabled: true,
   developerMode: false,
 };
@@ -466,6 +466,7 @@ const selectedIconRefStale = (
         appName?: string;
         command?: { executable?: string; args?: string[]; cwd?: string; env?: Record<string, string> };
         icons?: { imageSmoothingEnabled?: boolean };
+        window?: { toolbar?: boolean };
         developerMode?: boolean;
       };
       // v1 schema: command.executable (NOT command.command). A v1 vector is
@@ -475,6 +476,13 @@ const selectedIconRefStale = (
       if (config.command?.args !== undefined) setArgv([...config.command.args]);
       if (config.command?.executable !== undefined) {
         setCommandOptions((prev) => ({ ...prev, argsMode: "array" }));
+      }
+      // add-webview-orchestration D15: window.toolbar round-trips through the
+      // edit prefill exactly like the CLI flag (the toggle is a desired-state
+      // fact; default off needs no explicit write).
+      if (config.window?.toolbar !== undefined) {
+        const toolbar = config.window.toolbar;
+        setValues((prev) => ({ ...prev, toolbar }));
       }
       // Apply directly on top of whatever the form has rendered so far.
       // The form event below merges instead of replacing in edit mode, so

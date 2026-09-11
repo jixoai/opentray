@@ -40,7 +40,8 @@ export interface CreateFlagOptions {
   readonly trayTemplate?: boolean;
   readonly developerMode?: boolean;
   readonly window?: string;
-  /** URL applications: host the address-bar wrapper (D12). */
+  /** Compose the native navigation toolbar over the target/service page
+   *  (add-webview-orchestration D12/D13; URL AND command applications). */
   readonly toolbar?: boolean;
   /** Window title follows document.title; default true (D13). */
   readonly titleFollow?: boolean;

@@ -180,13 +180,15 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
   // anything can be scraped — the address is known up front, so creation
   // adopts the page title and best favicon as DEFAULTS. Bounded fetch,
   // silent fallback, off-switch --no-scrape; explicit flags/config always win.
+  // add-webview-orchestration D14 (2026-09-11): the toolbar request is never
+  // probed, warned about, or stripped for embedding-policy reasons — the
+  // multi-webview carrier loads the target as a top-level browsing context.
   let enrichment: CreateEnrichment | undefined;
   let presetIconPath: string | undefined;
-  let toolbarRequested = args.toolbar === true;
   if (
     args.url !== undefined &&
     args.scrape !== false &&
-    (args.appName === undefined || args.appIcon === undefined || toolbarRequested)
+    (args.appName === undefined || args.appIcon === undefined)
   ) {
     const presets = await deriveUrlPresets(args.url);
     enrichment = presets;
@@ -194,18 +196,6 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
     if (presets.appName !== undefined || presets.appIconPath !== undefined) {
       emitProgress(
         `scraped defaults from ${args.url}: ${[presets.appName !== undefined ? "title" : undefined, presets.appIconPath !== undefined ? "favicon" : undefined].filter(Boolean).join(" + ")} (defaults; explicit flags win)`,
-        context.streams,
-        args.json === true,
-      );
-    }
-    // Toolbar feasibility (D12): the wrapper embeds the target in an iframe;
-    // a page whose response policy forbids embedding cannot be wrapped, so
-    // the request degrades to the direct window with an explicit notice.
-    if (toolbarRequested && presets.frameEmbeddable === false) {
-      toolbarRequested = false;
-      delete flags.toolbar;
-      emitProgress(
-        `warning: ${args.url} forbids iframe embedding (X-Frame-Options / CSP frame-ancestors); falling back to the direct window`,
         context.streams,
         args.json === true,
       );
@@ -291,7 +281,7 @@ const createCommand = (context: CliContext): CommandModule => ({
       .option("tray-template", { type: "boolean", describe: "treat the tray source as a darwin template" })
       .option("developer-mode", { type: "boolean", describe: "admit WebView DevTools in the generated app" })
       .option("window", { type: "string", describe: "window size <width>x<height> (default 1200x800)" })
-      .option("toolbar", { type: "boolean", describe: "URL applications: host the address-bar wrapper (back/forward/reload toolbar)" })
+      .option("toolbar", { type: "boolean", describe: "compose the native navigation toolbar over the target/service page (URL and command applications; back/forward/reload/address bar)" })
       .option("title-follow", { type: "boolean", describe: "window title follows document.title (default true; negate with --no-title-follow)" })
       .option("icon-follow", { type: "boolean", describe: "runtime favicon-to-window-icon following (default off)" })
       .option("force", { type: "boolean", default: false, describe: "replace a VERIFIED existing payload (never adopts user files)" })

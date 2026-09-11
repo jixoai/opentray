@@ -50,7 +50,13 @@ export interface WizardProjectConfig {
   };
   /** URL source projection (add-create-url-apps D7): undefined for command projects. */
   readonly url?: string;
-  readonly window: { readonly width: number; readonly height: number };
+  /**
+   * Window projection: dimensions plus the canonical toolbar fact
+   * (add-webview-orchestration D13). Stale legacy fields (shell
+   * showAddressBar) are ignored by this loose reader — window.toolbar alone
+   * governs the window form.
+   */
+  readonly window: { readonly width: number; readonly height: number; readonly toolbar?: boolean };
   readonly developerMode: boolean;
   /** Inferred from the project's lockfile (scaffold package.json records pm nowhere). */
   readonly packageManager: PackageManagerName;
@@ -102,6 +108,7 @@ export const readWizardProjectConfig = async (
     ? {
         width: Number.isFinite(raw.window.width) ? Number(raw.window.width) : 1_200,
         height: Number.isFinite(raw.window.height) ? Number(raw.window.height) : 800,
+        ...(raw.window.toolbar === true ? { toolbar: true } : {}),
       }
     : { width: 1_200, height: 800 };
   const service = isRecord(raw.service) && Number.isFinite(raw.service.port)

@@ -717,7 +717,7 @@ const handleApi = async (
       if (typeof body.iconScale === "number" && body.iconScale >= 0.5 && body.iconScale <= 0.95) {
         patch.iconScale = body.iconScale;
       }
-      for (const key of ["showStartupTerminal", "showAddressBar", "imageSmoothingEnabled", "developerMode", "force"] as const) {
+      for (const key of ["showStartupTerminal", "toolbar", "imageSmoothingEnabled", "developerMode", "force"] as const) {
         const value = body[key];
         if (typeof value === "boolean") {
           patch[key] = value;
