@@ -761,7 +761,7 @@ pub(crate) fn navigator_window_bootstrap_script(
           return () => {
             if (!active) return;
             active = false;
-            state.closeHandlers = state.closeHandlers.filter((h) !== handler);
+            state.closeHandlers = state.closeHandlers.filter((h) => h !== handler);
           };
         },
         close() {
@@ -1326,6 +1326,71 @@ return await rectPromise;
             false,
             "default",
         )
+    }
+
+    fn channel_bootstrap_script() -> String {
+        webview_bridge_bootstrap_script(
+            WebviewBridgePolicy {
+                webview_id: true,
+                message_channels: true,
+                ..WebviewBridgePolicy::default()
+            },
+            "toolbar",
+        )
+        .expect("channel policy injects the bridge")
+    }
+
+    #[test]
+    fn channel_on_close_unlisten_actually_unsubscribes() {
+        // Final-review B2 regression: the generated unlisten arrow function
+        // lost its `=>` and threw ReferenceError when executed, leaving the
+        // handler subscribed forever.
+        let runtime = run_node_probe(
+            &channel_bootstrap_script(),
+            r#"
+const internals = window.__OPENTRAY_WINDOW_INTERNALS__;
+let observed = null;
+navigator.opentrayWebview.onCreatedMessageChannel((endpoint) => {
+  const unlisten = endpoint.onClose((event) => {
+    observed = event.reason;
+  });
+  unlisten();
+});
+internals.channelCreated("ch-b2");
+internals.channelClosed("ch-b2", "explicit");
+return { observed };
+"#,
+        );
+        assert_eq!(
+            runtime["observed"],
+            Value::Null,
+            "the unsubscribed handler must not observe the close"
+        );
+    }
+
+    #[test]
+    fn channel_on_close_unlisten_keeps_a_surviving_handler() {
+        // The unlisten of one handler must not break a sibling subscription.
+        let runtime = run_node_probe(
+            &channel_bootstrap_script(),
+            r#"
+const internals = window.__OPENTRAY_WINDOW_INTERNALS__;
+let observed = null;
+navigator.opentrayWebview.onCreatedMessageChannel((endpoint) => {
+  const unlisten = endpoint.onClose((event) => {
+    observed = "first:" + event.reason;
+  });
+  unlisten();
+  endpoint.onClose((event) => {
+    observed = "second:" + event.reason;
+  });
+});
+internals.channelCreated("ch-b2b");
+internals.channelClosed("ch-b2b", "peer_webview_destroyed");
+return { observed };
+"#,
+        );
+        assert_eq!(runtime["observed"], Value::from("second:peer_webview_destroyed"));
     }
 
     fn run_node_probe(script: &str, probe: &str) -> Value {

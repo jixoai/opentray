@@ -569,9 +569,19 @@ impl SessionChannels {
     /// entrances: nothing survives as a tombstone.
     pub(crate) fn close_all(&mut self, reason: ChannelCloseReason) -> Vec<ChannelPush> {
         let mut pushes = Vec::new();
-        for index in 0..self.records.len() {
+        // The bound is re-checked every iteration: each close_record may evict
+        // an expired tombstone, which REMOVES a record and shifts the vec —
+        // a fixed 0..len range would index past the shrunk vec once more
+        // than 32 channels close here (final-review B1: broker-crash panic
+        // at 34 open channels).
+        let mut index = 0;
+        while index < self.records.len() {
             if self.records[index].open {
                 pushes.extend(self.close_record(index, reason, None));
+                // The record at `index` is now closed but may have shifted;
+                // do not advance — re-examine the index against the vec.
+            } else {
+                index += 1;
             }
         }
         self.records.clear();
@@ -1256,6 +1266,24 @@ mod tests {
         assert_eq!(outbox.len(), 1);
         assert_eq!(outbox[0].1["type"], "channel.closed");
         assert_eq!(outbox[0].1["reason"], "document_navigated");
+    }
+
+    #[test]
+    fn session_close_survives_beyond_tombstone_capacity() {
+        // Final-review B1 regression: closing more channels than the
+        // tombstone LRU capacity (32) evicts records mid-iteration — a
+        // fixed-range loop indexed past the shrunk vec and panicked at 34.
+        let mut channels = registry();
+        for _ in 0..40 {
+            create_host_channel(&mut channels, "toolbar");
+        }
+        let pushes = channels.close_all(ChannelCloseReason::SessionClosed);
+        // Every one of the 40 toolbar endpoints observes exactly once.
+        assert_eq!(pushes.len(), 40);
+        // Each channel's host observation rode the outbox: 40 events.
+        assert_eq!(channels.drain_host_events().len(), 40);
+        assert!(channels.list_for_host(&owner()).unwrap().is_empty());
+        assert_eq!(channels.tombstone_count(), 0);
     }
 
     #[test]
