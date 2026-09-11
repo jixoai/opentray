@@ -51,11 +51,13 @@
 
 ## 5. Implementation — P2 create 承载切换
 
-- [ ] 5.1 url-entry-template + entry-template 重写：**两种应用** toolbar/地址栏 = toolbar webview（shell 资产）+ content webview（直接 URL/已验证服务地址）+ column 布局；通道导航接口（指令/监听/查询三件套，create 包私有 schema）；托盘 Reload → content 原生重载；titleSync 投影 content 文档；**showAddressBar 字段与旧 iframe 分支删除（wizard.ts / entry-template.ts / config 旧路径；canonical 唯一 = window.toolbar）**。
-- [ ] 5.2 browse-page 改造为 toolbar 页（去 iframe；地址栏真值 = urlChange 推送；快捷键保持；**stable-iframe 预览 tab 不动，仅创作期**）。
-- [ ] 5.3 frameEmbeddable 退役：scrape.ts responseHeadersAllowEmbedding/ScrapeResult 字段/deriveUrlPresets 透传/CLI --toolbar 回退路径删除；**符号级 grep 门：`rg -n "frameEmbeddable|responseHeadersAllowEmbedding" packages/` 零命中**；相关测试更新（/deny fixture 用例改断言「不再回退、不警告」）。
-- [ ] 5.4 向导「导航工具栏」开关（两流程、默认关、config 往返、draft 持久化）；CLI --toolbar 对命令应用开放。
-- [ ] 5.5 关键效果点意图注释（指向 plan.md D1–D23）。
+> **P2 批完成记录（2026-09-12）**：core 193/193 + cli 43/43 + create 275/275 + create-webui 71/71 + typecheck 全绿、ext-webview Rust 134/134（编排者抽验复跑）；**真实 e2e 走查（隔离 HOME，真实 broker+dylib）**：windowOnly 会话 + 双 webview + 布局 + 通道建立、toolbar 页真实上线（get-url）、per-view url/title 事件、navigate/back/forward/reload 原生执行、**HN（XFO DENY）顶层加载实证**、标题投影活体接受。移交 P3：facade 无 host setTitle/titlechange 不可观察（评估项）；entry-template (detached) 调用不存在的 win.setTitle 为既有缺陷（living spec 场景现值存疑，未处理）；发布链 inter-glyph.ttf 源码检出可达性待发布批核查。
+
+- [x] 5.1 双模板重写（2026-09-12 完成，子代理实现 + 编排者抽验；commit a1a8ff7）：toolbar-carrier.ts 共用 carrier 源（toolbar bridge 开/content 无桥/column 布局/通道导航接口 navigate-back-forward-reload + get-url + url 推送）；托盘 Reload → content 原生重载；标题投影 = onTitleChange→show({title,windowOnly})（原生 apply_reused_show_updates，无可见性副作用）；showAddressBar 字段与旧 iframe 分支删除 + 语法门测试；**顺带修复 3.3 缺陷（越界已编排者复核批准，commit 17cce82）**：session_has_no_primary 被 child 污染 → window_only 创建期事实持久化（3 行 + 回归测试）：**两种应用** toolbar/地址栏 = toolbar webview（shell 资产）+ content webview（直接 URL/已验证服务地址）+ column 布局；通道导航接口（指令/监听/查询三件套，create 包私有 schema）；托盘 Reload → content 原生重载；titleSync 投影 content 文档；**showAddressBar 字段与旧 iframe 分支删除（wizard.ts / entry-template.ts / config 旧路径；canonical 唯一 = window.toolbar）**。
+- [x] 5.2 toolbar 页（commit 9caeef7）：toolbar.html/toolbar-page.tsx 44px 无 iframe 条；地址栏真值=通道 url 推送；get-url 连接查询；快捷键保持；无桥静态禁用态；构建链全通；StableIframe 预览不动（D22）（去 iframe；地址栏真值 = urlChange 推送；快捷键保持；**stable-iframe 预览 tab 不动，仅创作期**）。
+- [x] 5.3 frameEmbeddable 退役（commit 4778ea2）：探测函数/ScrapeResult 字段/UrlPresets 透传/headers 死面/CLI 回退全删；**符号门 rg 零命中已验证**；/deny fixture 用例改断言保留 toolbar 无警告：scrape.ts responseHeadersAllowEmbedding/ScrapeResult 字段/deriveUrlPresets 透传/CLI --toolbar 回退路径删除；**符号级 grep 门：`rg -n "frameEmbeddable|responseHeadersAllowEmbedding" packages/` 零命中**；相关测试更新（/deny fixture 用例改断言「不再回退、不警告」）。
+- [x] 5.4 向导开关 + CLI 开放（commit 5173262）：两流程默认关 → window.toolbar；草稿白名单种子（旧 showAddressBar 忽略）；scan/导出/编辑预填/app-edit 往返；CLI --toolbar 对命令应用开放（两流程、默认关、config 往返、draft 持久化）；CLI --toolbar 对命令应用开放。
+- [x] 5.5 意图注释（随各 commit）：carrier/双模板/退役/开关/toolbar 页/shell 导航边界均指向 D12–D15/D22（指向 plan.md D1–D23）。
 
 ## 6. Verification
 
