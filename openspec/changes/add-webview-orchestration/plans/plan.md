@@ -18,8 +18,10 @@
 > 收口，剩三项阻塞全部采纳——本版（plan-v5）收口：geometryChange ↔ 页面桥既有
 > `overlay.geometrychange` 的映射与 payload 冻结（rect DTO/null 语义）、D6 检查点 (3)
 > 的 v1/未来分层写进 requirement 正文、通道 `onClose` 生命周期观测面 + post 超限返回
-> `queue_overflow` 错误并关通道 + wire 帧清单冻结。报告
-> `/tmp/codex-review-add-webview-orchestration{,-r2,-r3,-r4}.md`。
+> `queue_overflow` 错误并关通道 + wire 帧清单冻结；R5 7.4 / R6 7.6——字段级收口
+> （geometryChange host DTO 字段冻结与页面桥同构、七帧 wire 契约、onClose 单观测
+> 基数）+ plan/tasks 全链路同步；**R7 8.2 / 最终判定「可进 Apply」**。报告
+> `/tmp/codex-review-add-webview-orchestration{,-r2,-r3,-r4,-r5,-r6,-r7}.md`。
 > `plans/plan-vN.md` 一律为带横幅的历史备份，非规范非 SSOT。
 
 ## 最终可见效果（operator 视角）
