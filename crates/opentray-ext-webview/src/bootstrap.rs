@@ -1,9 +1,50 @@
+use opentray_spec::webview::WebviewBridgePolicy;
 use serde_json::json;
 
 use crate::{
     MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings,
     WebviewNativeApiPolicy, WebviewNativeApiSource, WebviewPermissionManagerPolicy,
 };
+
+/// Per-webview bridge bootstrap (add-webview-orchestration D2): a child
+/// webview's navigator surfaces are injected only when its frozen
+/// per-webview bridge policy enables them. A policy-less child (every field
+/// defaults to false) gets no script at all — the arbitrary-content webview
+/// is bridgeless by default. The policy is bootstrap-immutable for the
+/// webview's lifetime, mirroring the session compatibility law.
+///
+/// `webviewId`, `messageChannels`, and the `nativeApi` namespace gain their
+/// page surfaces with the message-channel batch; until then any policy with
+/// a true field still attaches the bridge (so those surfaces have a host),
+/// and the script projects the `navigatorWindow`/`navigatorScreen` fields
+/// onto the existing bootstrap.
+pub(crate) fn webview_bridge_bootstrap_script(policy: WebviewBridgePolicy) -> Option<String> {
+    let has_bridge_surface = policy.webview_id
+        || policy.message_channels
+        || policy.navigator_window
+        || policy.navigator_screen
+        || policy.native_api;
+    if !has_bridge_surface {
+        return None;
+    }
+    Some(navigator_window_bootstrap_script(
+        NavigatorWindowSettings {
+            enabled: policy.navigator_window,
+            bind_window_globals: false,
+            window_controls_overlay: false,
+        },
+        false,
+        NavigatorScreenSettings {
+            enabled: policy.navigator_screen,
+            bind_screen_globals: false,
+        },
+        NavigatorTraySettings::default(),
+        MetadataSyncSettings::default(),
+        MetadataSyncSettings::default(),
+        &WebviewNativeApiPolicy::default(),
+        &WebviewPermissionManagerPolicy::default(),
+    ))
+}
 
 pub(crate) fn navigator_window_bootstrap_script(
     window_settings: NavigatorWindowSettings,
