@@ -193,6 +193,33 @@ Validate placement and responsive native-window behavior through the consumer
 application that owns those policies. Use `references/visual-acceptance.md` for
 the package-consumer acceptance matrix.
 
+## Multi-Webview Orchestration
+
+One window session can host several sibling webviews composed through a
+declarative layered layout, connected by targeted message channels with a
+per-webview opt-in bridge policy, and observed through one per-view push event
+family (`urlChange`, `titleChange`, `focused`, `geometryChange`). The public
+contract — sugar builders, bridge policy fields, channel lifecycle and queue
+bounds, and the typed error registry surfaced as `WebviewOrchestrationError` —
+lives in the package README (`@opentray/ext-webview`); the composition pattern
+that exposes backend capabilities to a trusted toolbar page over a channel is
+covered in [`backend-ipc.md`](backend-ipc.md).
+
+Key laws for consumers:
+
+- A window is composed with `windowOnly: true` plus `createWebview(...)`
+  children; `setLayout(column([fixed("toolbar", 44), grow("content")]))` is the
+  canonical toolbar shape, and resize is recomputed natively with no JS
+  relayout.
+- An arbitrary-content webview gets NO bridge policy and is therefore
+  bridgeless; trusted webviews opt in explicitly, e.g.
+  `{ webviewId: true, messageChannels: true }`.
+- A frameless or material window cannot host multi-webview composition
+  (`multiwebview_unsupported_style`); use a framed window for compositions.
+- Channels are created against a target webview and expose
+  `post` / `onMessage` / `onClose` / `close` / `destroy` — there is no port
+  transfer, and a bridgeless target rejects creation (`bridge_required`).
+
 ## Platform Truth
 
 - macOS is the stable human-visible acceptance path.
