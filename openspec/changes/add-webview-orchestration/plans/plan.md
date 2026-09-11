@@ -141,7 +141,7 @@ layer 的 `visible` 开关；通道 id 会话内不透明不可跨会话复用�
 | D3/D8 | webview-layout「declarative layered flex protocol」 | 2.2, 2.4 |
 | D4 | webview-layout「declarative layered flex protocol」（z-order/图层） | 2.2 |
 | D5 | webview-layout「box view paint primitive」 | 2.2, 3.4 |
-| D6 | webview-extension「orchestrate」（不透明重叠合法 + 样式互斥三检查点同错误码） | 2.1, 2.2 |
+| D6 | webview-extension「orchestrate」（不透明重叠合法 + 样式互斥 v1 两检查点同错误码；(3) 为 future guard） | 2.1, 2.2 |
 | D7 | webview-layout「native and resize-authoritative」 | 2.2, 3.4, 4.1 |
 | D9 | webview-messaging「targeted connections」 | 2.3, 2.5 |
 | D10 | webview-messaging「session-scoped and page-access-gated」+「page creator」 | 2.3, 2.5 |
