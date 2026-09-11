@@ -1326,7 +1326,7 @@ impl super::WindowsWebviewRuntime {
         // Per-webview bridge policy (D2): a policy-less child gets no
         // bootstrap script and no ipc surface — the arbitrary-content
         // webview is bridgeless by default.
-        if let Some(script) = crate::bootstrap::webview_bridge_bootstrap_script(policy) {
+        if let Some(script) = crate::bootstrap::webview_bridge_bootstrap_script(policy, &webview_id) {
             let bridge_for_ipc = Rc::clone(&bridge);
             let webview_id_for_ipc = webview_id.to_string();
             builder = builder

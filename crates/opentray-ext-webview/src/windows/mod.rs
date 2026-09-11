@@ -687,7 +687,7 @@ impl WindowsWebviewRuntime {
         // this response. This is the only delivery path for orchestration
         // events; the 16 ms window-event drain never observes them.
         let events = self.flush_pending_events();
-        Ok(crate::HandledCommand { result, events })
+        Ok(crate::HandledCommand { result, events, channel_events: Vec::new() })
     }
 
     /// Records the owning app identity for the D18 owner tuples. Set once at
