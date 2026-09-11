@@ -127,6 +127,14 @@ export interface TrayExtensionMountSpec {
 export interface TrayExtensionContext {
   readonly appId: string;
   readonly trayId: TrayId;
+  /**
+   * Broker session identity extracted from the connection's Ready frame,
+   * when the transport publishes one (the local broker connection sets it
+   * after the handshake). Extensions attribute session-owned native state
+   * with it — e.g. `@opentray/ext-webview` window owner tuples. Transports
+   * without the field stay unattributed and keep legacy semantics.
+   */
+  readonly sessionId?: string;
   readonly name: string;
   readonly artifact: NativeExtensionArtifact;
   readonly mountId: string;
@@ -240,6 +248,10 @@ export function createTrayHandle(
   trayId: TrayId,
   nextRequestId: () => RequestId = createRequestIdFactory("opentray")
 ): TrayHandle | EventfulTrayHandle {
+  // The local broker connection publishes the Ready frame's session id on
+  // the transport itself (after init); read it once here so extension
+  // contexts can attribute session-owned state (ext-webview owner tuples).
+  const sessionId = readTransportSessionId(transport);
   let nextMountOrdinal = 1;
   const nextMountId = (extensionName: string): string => {
     const mountId = `${formatMountIdComponent(
@@ -339,7 +351,8 @@ export function createTrayHandle(
         appId,
         extension,
         options,
-        nextMountId
+        nextMountId,
+        sessionId
       );
       const capability = extension.extend(handle, context, options);
       return Object.assign({}, handle, capability);
@@ -358,14 +371,15 @@ export function createTrayHandle(
   if (!isOpenTrayEventSource(transport)) {
     return handle;
   }
-  return attachEventfulTrayHandle(handle, transport, appId, nextMountId);
-}
+  return attachEventfulTrayHandle(handle, transport, appId, nextMountId, sessionId);
+};
 
 const attachEventfulTrayHandle = (
   handle: TrayHandle,
   source: OpenTrayEventSource,
   appId: string,
-  nextMountId: (extensionName: string) => string
+  nextMountId: (extensionName: string) => string,
+  sessionId: string | undefined
 ): EventfulTrayHandle => {
   const listen: EventfulTrayHandle["listen"] = (event, handler) =>
     source.onEvent((frame) => {
@@ -427,7 +441,8 @@ const attachEventfulTrayHandle = (
         appId,
         extension,
         options,
-        nextMountId
+        nextMountId,
+        sessionId
       );
       const capability = extension.extend(eventful, context, options);
       return Object.assign({}, eventful, capability);
@@ -534,7 +549,8 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
   appId: string,
   extension: TrayExtension<TCapability, TOptions>,
   options: TOptions | undefined,
-  nextMountId: (extensionName: string) => string
+  nextMountId: (extensionName: string) => string,
+  sessionId?: string
 ): TrayExtensionContext => {
   const mount = extension.resolveMount?.(options) ?? {};
   const name = mount.name ?? extension.name;
@@ -558,6 +574,7 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
   return {
     appId,
     trayId: tray.trayId,
+    ...(sessionId === undefined ? {} : { sessionId }),
     name,
     artifact,
     mountId,
@@ -571,6 +588,18 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
       return tray.requestExtension(mountId, data);
     },
   };
+};
+
+/** Structural view of transports that publish the Ready frame's session id. */
+interface SessionIdBearingTransport {
+  readonly sessionId?: unknown;
+}
+
+const readTransportSessionId = (
+  transport: OpenTrayTransport
+): string | undefined => {
+  const { sessionId } = transport as SessionIdBearingTransport;
+  return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
 };
 
 const formatMountIdComponent = (value: string): string => {
