@@ -4,9 +4,11 @@ export type AppId = string;
 export type TrayId = string;
 export type MenuItemId = number;
 
-// RFC 8785 canonical JSON codec (add-webview-orchestration); re-exported
-// flat to keep one public entry surface for consumers.
+// RFC 8785 canonical JSON codec and multi-webview orchestration protocol
+// contracts (add-webview-orchestration); re-exported flat to keep one public
+// entry surface for consumers.
 export * from "./canonical-json";
+export * from "./webview";
 
 export const PROTOCOL_VERSION = 1;
 export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
