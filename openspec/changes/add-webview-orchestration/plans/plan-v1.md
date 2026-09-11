@@ -1,3 +1,6 @@
+> ⚠️ 历史备份（backup-plan 产物）：非规范、非 SSOT，已被 `plans/plan.md` 取代。
+> 本文可能含已废弃语义（旧数值/旧措辞）；一切以当前 `plans/plan.md` 为准。
+
 # add-webview-orchestration — Intent Document (SSOT)
 
 > 原始需求（用户，2026-09-10/11，四轮演进）：

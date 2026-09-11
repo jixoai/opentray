@@ -85,9 +85,9 @@ non-interactive pipe mode with a visible notice instead of failing.
 - **WHEN** the app starts
 - **THEN** it SHALL open a SEPARATE window dedicated to the terminal, reusing the wizard's terminal-page components (command bar + status bar including listened ports), streaming the command's PTY output interactively
 
-#### Scenario: Show-address-bar composes the native toolbar carrier
+#### Scenario: Toolbar-enabled service windows compose the native carrier
 
-- **GIVEN** the advanced option enabled for a generated app
+- **GIVEN** a generated command application with `window.toolbar: true` (the unified navigation-toolbar option; the legacy `showAddressBar` advanced input no longer exists)
 - **WHEN** a listened port opens its own dedicated window
 - **THEN** the window SHALL host the navigation-toolbar carrier — one toolbar webview at a fixed top strip and one content webview loading the verified service URL directly, composed by the WebView extension's declarative layered layout; with the option off, port windows open the service URL directly
 - **AND** no generated window SHALL wrap the service in an iframe browse page
