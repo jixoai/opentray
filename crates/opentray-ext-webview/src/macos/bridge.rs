@@ -24,8 +24,9 @@ use super::{
     screen::screen_details_json,
     style::{apply_window_style, normalize_corner_radius, validate_style_request, SetStylePayload},
     window_state::{window_is_closed, window_is_visible, window_state_json},
-    NavigatorWindowBridge, WindowSizeConstraints, COMMAND_NAMESPACE, PAGE_IPC_NAMESPACE,
-    PERMISSIONS_NAMESPACE, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE,
+    NavigatorWindowBridge, NavigatorWindowListener, WindowSizeConstraints, COMMAND_NAMESPACE,
+    PAGE_IPC_NAMESPACE, PERMISSIONS_NAMESPACE, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE,
+    TRAY_NAMESPACE,
     WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
 };
 
@@ -473,7 +474,9 @@ fn dispatch_navigator_window_command(
                     "window controls overlay is not enabled for this WebView".into(),
                 ));
             }
-            titlebar_area_rect_json(bridge, window)
+            // D23: the safe area is projected into the *requesting*
+            // webview's own viewport coordinates.
+            titlebar_area_rect_json(bridge, window, source_webview)
         }
         "startAppRegionDrag" => {
             let weak_bridge = Rc::downgrade(bridge);
@@ -944,6 +947,37 @@ pub(super) fn emit_window_event(
         evaluate_bridge_script(
             bridge,
             Some(view_id.as_str()),
+            listener_event_script(listener.handler_id, listener.event_id, event, &payload)?,
+        )?;
+    }
+    Ok(())
+}
+
+/// Emits one listener event to exactly one webview's registered listeners
+/// (D23 per-view projection pushes). Views without a listener for the event
+/// are not addressed — the per-view geometry surface must never fan out to
+/// unrelated pages.
+pub(super) fn emit_window_event_to_view(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: &str,
+    event: &str,
+    payload: Value,
+) -> Result<(), WebviewRuntimeError> {
+    let listeners: Vec<NavigatorWindowListener> = {
+        let state = bridge.borrow();
+        state
+            .listeners_for_view(view_id, event)
+            .into_iter()
+            .map(|(_, listener)| listener)
+            .collect()
+    };
+    if listeners.is_empty() {
+        return Ok(());
+    }
+    for listener in listeners {
+        evaluate_bridge_script(
+            bridge,
+            Some(view_id),
             listener_event_script(listener.handler_id, listener.event_id, event, &payload)?,
         )?;
     }

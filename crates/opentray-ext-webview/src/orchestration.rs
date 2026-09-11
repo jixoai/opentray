@@ -135,6 +135,11 @@ pub(crate) struct ViewEvents {
     pub title: String,
     pub title_seq: u64,
     pub focused: bool,
+    /// D23: last recorded overlay/titlebar safe-area projection in view-local
+    /// logical pixels (`None` = no overlay intersection or never computed).
+    /// Change detection only — geometryChange is an edge event with no query
+    /// pair, so this cache never rides a `(value, seq)` response.
+    pub overlay_rect: Option<opentray_spec::webview::WebviewGeometryRect>,
 }
 
 impl ViewEvents {
@@ -149,6 +154,7 @@ impl ViewEvents {
             title: String::new(),
             title_seq: 0,
             focused: false,
+            overlay_rect: None,
         }
     }
 
@@ -245,6 +251,36 @@ impl ViewEvents {
             self.webview_id.clone(),
             seq,
             focused,
+        ))
+    }
+
+    /// Records an overlay/titlebar safe-area projection change (D23) and
+    /// emits a `geometryChange` frame only when the projection actually
+    /// changed and the view subscribes to it. Edge semantics like
+    /// [`Self::focus_edge`]: the cache always refreshes (unsubscribed or
+    /// unattributed views stay silent), so a later subscription cannot
+    /// replay stale geometry and the first recorded change wins the seq.
+    pub(crate) fn note_geometry_change(
+        &mut self,
+        owner: &WindowOwner,
+        window_id: &str,
+        rect: Option<opentray_spec::webview::WebviewGeometryRect>,
+    ) -> Option<WebviewEventFrame> {
+        if self.overlay_rect == rect {
+            return None;
+        }
+        self.overlay_rect = rect;
+        if !self.is_subscribed(WebviewEventKind::GeometryChange) {
+            return None;
+        }
+        let seq = self.allocate_seq();
+        let tuple = owner.owner_tuple()?;
+        Some(WebviewEventFrame::new_geometry_change(
+            tuple,
+            window_id,
+            self.webview_id.clone(),
+            seq,
+            self.overlay_rect,
         ))
     }
 }

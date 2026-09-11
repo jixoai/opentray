@@ -13,10 +13,12 @@
 // AppKit window, observer, and WebKit ownership graph remain one main-thread lifecycle boundary.
 
 mod app_menu;
+mod box_view;
 mod bridge;
 mod demo_html;
 mod downloads;
 mod drag;
+mod layout;
 mod metadata;
 mod overlay;
 mod policy;
@@ -56,10 +58,15 @@ use wry::{
 };
 
 use crate::bootstrap::{navigator_window_bootstrap_script, webview_bridge_bootstrap_script};
+use crate::layout::{
+    apply_sizing_patch, validated_solve, LogicalViewport, WindowLayoutState,
+};
 use crate::orchestration::{
     webview_creation_allowed, OpenOutcome, OrchestrationError, StyleFacts, ViewEvents,
     WindowOwner, WindowRegistry, DEFAULT_WEBVIEW_ID, DEFAULT_WINDOW_ID,
 };
+
+use self::layout::{install_layout_observers, LayoutTracker};
 use crate::{
     should_auto_hide_on_blur, HandledCommand, NavigatorScreenSettings, NavigatorTraySettings,
     NavigatorWindowSettings, WebviewBrowserPermissionPolicy, WebviewCommand,
@@ -120,7 +127,11 @@ struct WindowSession {
     /// Shared with the key-notification observers so per-view focus edges
     /// are reconciled from native callbacks without polling.
     focus_tracker: Rc<RefCell<FocusTracker>>,
+    /// Native layout engine (D3–D8/D23): solve, apply frames, refresh
+    /// per-view overlay projections. Shared with the resize observers.
+    layout_tracker: Rc<RefCell<LayoutTracker>>,
     _focus_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
+    _layout_observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     _window_delegate: Retained<RetainedWindowDelegate>,
     content_descriptor: WebviewContentDescriptor,
     show_settings: WebviewShowSettings,
@@ -332,6 +343,13 @@ pub(super) struct NavigatorWindowBridge {
     page_access: PageCapabilityAccess,
     tray_bounds: Option<opentray_spec::Rect>,
     size_constraints: WindowSizeConstraints,
+    /// Applied declarative-layout state (D7/D23): active document, last
+    /// applied per-view rects, last applied stacking order. The page-bridge
+    /// projection query reads this; the layout tracker writes it.
+    pub(super) layout: WindowLayoutState,
+    /// Native layout engine handle for the query path; the strong owner is
+    /// the window session's `layout_tracker`.
+    pub(super) layout_tracker: Weak<RefCell<LayoutTracker>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -942,11 +960,72 @@ impl MacosWebviewRuntime {
                 }
                 None => return Ok(unknown_view_envelope(&owner, &webview_id)),
             },
-            Command::SetWebviewLayout { .. } | Command::UpdateWebviewLayout { .. } => {
-                return Err(WebviewRuntimeError::Unsupported(
-                    "webview layout commands land with the declarative layout engine batch"
-                        .to_string(),
-                ));
+            Command::SetWebviewLayout {
+                owner,
+                window_id,
+                layout,
+            } => {
+                let Some(session) = self.resolve_window(&owner, &window_id) else {
+                    return Ok(unknown_window_envelope(&owner, &window_id));
+                };
+                // Validation runs before solving and before any state or
+                // native geometry changes: a rejected tree leaves the
+                // previously applied layout fully in effect.
+                let (view_ids, viewport) = session_layout_inputs(session);
+                match validated_solve(&layout, &|id| view_ids.contains(id), viewport) {
+                    Err(error) => return Ok(typed_rejection(error)),
+                    Ok(solution) => {
+                        // One native transaction (D7/D23): store the document
+                        // (authority for resize re-solves), then apply solved
+                        // frames, boxes, stacking, and refresh projections.
+                        session.bridge.borrow_mut().layout.document = Some(layout);
+                        session
+                            .layout_tracker
+                            .borrow_mut()
+                            .apply_solution(&solution);
+                    }
+                }
+                WebviewOrchestrationResult::WebviewAck {
+                    owner,
+                    command: "set-webview-layout".to_string(),
+                }
+            }
+            Command::UpdateWebviewLayout {
+                owner,
+                window_id,
+                view_id,
+                patch,
+            } => {
+                let Some(session) = self.resolve_window(&owner, &window_id) else {
+                    return Ok(unknown_window_envelope(&owner, &window_id));
+                };
+                let first_view = session.bridge.borrow().views.first().map(|view| view.id.clone());
+                // Materialize the effective document (the default layout
+                // becomes explicit on first update), merge the patch, then
+                // re-validate — an inverted patch rejects before any state
+                // changes, leaving the applied layout untouched.
+                let mut document = {
+                    let state = session.bridge.borrow();
+                    state.layout.effective_document(first_view.as_deref())
+                };
+                if !apply_sizing_patch(&mut document, &view_id, &patch) {
+                    return Ok(unknown_view_envelope(&owner, &view_id));
+                }
+                let (view_ids, viewport) = session_layout_inputs(session);
+                match validated_solve(&document, &|id| view_ids.contains(id), viewport) {
+                    Err(error) => return Ok(typed_rejection(error)),
+                    Ok(solution) => {
+                        session.bridge.borrow_mut().layout.document = Some(document);
+                        session
+                            .layout_tracker
+                            .borrow_mut()
+                            .apply_solution(&solution);
+                    }
+                }
+                WebviewOrchestrationResult::WebviewAck {
+                    owner,
+                    command: "update-webview-layout".to_string(),
+                }
             }
         };
         serde_json::to_value(result)
@@ -988,7 +1067,6 @@ impl MacosWebviewRuntime {
             .find(|view| view.borrow().webview_id == webview_id)
             .cloned()
     }
-
     /// Resolves a native webview for mutation; the `Err` value is the typed
     /// rejection envelope to return as the command response.
     fn native_webview_for(
@@ -1055,7 +1133,13 @@ impl MacosWebviewRuntime {
                     .focus_tracker
                     .borrow_mut()
                     .add_target(webview_id, native.webview.as_ref(), Rc::clone(&events));
+                let mut tracker = session.layout_tracker.borrow_mut();
+                tracker.add_webview(webview_id, native.webview.as_ref(), Rc::clone(&events));
                 session.webviews.insert(webview_id.to_string(), native);
+                // The effective layout decides the child's place immediately:
+                // referenced views move, unreferenced views stay hidden until
+                // a layout claims them (default layout = first webview only).
+                tracker.relayout();
                 Ok(())
             }
             Err(error) => {
@@ -1184,6 +1268,10 @@ impl MacosWebviewRuntime {
                 // Dropping the wry handle releases the WKWebView; ext
                 // commands dispatch on the main thread.
             }
+            // The layout document keeps its declaration; the re-solve simply
+            // positions nothing for the destroyed id.
+            session.layout_tracker.borrow_mut().remove_webview(webview_id);
+            session.layout_tracker.borrow_mut().relayout();
         }
         self.registry.remove_view(&owner.tray_id, webview_id);
     }
@@ -1451,6 +1539,8 @@ impl MacosWebviewRuntime {
             page_access: resolve_page_access(&show_settings, &page_source),
             tray_bounds,
             size_constraints: WindowSizeConstraints::default(),
+            layout: WindowLayoutState::default(),
+            layout_tracker: Weak::new(),
         }));
 
         window.contentView().ok_or_else(|| {
@@ -1462,6 +1552,16 @@ impl MacosWebviewRuntime {
             owner.clone(),
             Rc::downgrade(&event_outbox),
         )));
+        // Native layout engine: shares the bridge/outbox ownership graph so
+        // the resize observers can re-run the whole transaction without the
+        // runtime being reachable from AppKit callbacks.
+        let layout_tracker = Rc::new(RefCell::new(LayoutTracker::new(
+            owner.clone(),
+            Rc::downgrade(&bridge),
+            &window,
+            Rc::downgrade(&event_outbox),
+        )));
+        bridge.borrow_mut().layout_tracker = Rc::downgrade(&layout_tracker);
 
         let mut primary: Option<PrimaryWebview> = None;
         if !window_only {
@@ -1496,6 +1596,7 @@ impl MacosWebviewRuntime {
 
         let focus_observers =
             install_focus_observers(&window, &bridge, Rc::downgrade(&focus_tracker));
+        let layout_observers = install_layout_observers(&window, Rc::downgrade(&layout_tracker));
         let window_delegate = RetainedWindowDelegate::install(&window, Rc::downgrade(&bridge), mtm);
 
         let mut session = WindowSession {
@@ -1504,7 +1605,9 @@ impl MacosWebviewRuntime {
             webviews: HashMap::new(),
             event_outbox: event_outbox.clone(),
             focus_tracker: focus_tracker.clone(),
+            layout_tracker: layout_tracker.clone(),
             _focus_observers: focus_observers,
+            _layout_observers: layout_observers,
             _window_delegate: window_delegate,
             content_descriptor: content_descriptor.clone(),
             show_settings,
@@ -1516,6 +1619,9 @@ impl MacosWebviewRuntime {
             focus_tracker
                 .borrow_mut()
                 .add_target(&primary_id, webview.as_ref(), Rc::clone(&primary.events));
+            layout_tracker
+                .borrow_mut()
+                .add_webview(&primary_id, webview.as_ref(), Rc::clone(&primary.events));
             self.registry
                 .add_view(&tray_id, Rc::clone(&primary.events))
                 .map_err(orchestration_error)?;
@@ -1745,6 +1851,31 @@ impl MacosWebviewRuntime {
 
 fn session_has_no_primary(session: &WindowSession) -> bool {
     bridge_primary_id(&session.bridge).is_none()
+}
+
+/// Layout-command inputs: the registered webview id set (the view-id
+/// registry the layout protocol validates against) and the live logical
+/// client-area viewport.
+fn session_layout_inputs(session: &WindowSession) -> (HashSet<String>, LogicalViewport) {
+    let view_ids: HashSet<String> = session
+        .bridge
+        .borrow()
+        .views
+        .iter()
+        .map(|view| view.id.clone())
+        .collect();
+    let size = session
+        .window
+        .contentView()
+        .map(|view| view.frame().size)
+        .unwrap_or_else(|| NSSize::new(0.0, 0.0));
+    (
+        view_ids,
+        LogicalViewport {
+            width: size.width,
+            height: size.height,
+        },
+    )
 }
 
 /// The primary webview's bridge policy, projected from the legacy show
@@ -2223,9 +2354,10 @@ impl NavigatorWindowBridge {
             focus_webview: true,
             webview_id: true,
             webview_bridge_policy: true,
-            // geometryChange joins the capability list with the layout batch
-            // (D23); the three navigation/focus kinds are native now.
-            webview_push_events: vec!["urlChange", "titleChange", "focused"],
+            // geometryChange joins the unified push family with the layout
+            // batch (D23): layout commits and overlay metric changes now
+            // recompute per-view projections natively.
+            webview_push_events: vec!["urlChange", "titleChange", "focused", "geometryChange"],
             platform_capabilities: WindowPlatformCapabilities {
                 macos: MacosWindowCapabilities {
                     background_materials: supported_background_effects()
@@ -2280,6 +2412,10 @@ impl NavigatorWindowBridge {
         }
     }
 
+    /// Test-facing assertion helper: whether any webview holds a listener for
+    /// the event. The runtime emit paths tolerate empty listener sets
+    /// themselves, so nothing outside tests consults this.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn has_listener(&self, event: &str) -> bool {
         self.views
             .iter()
@@ -2296,6 +2432,27 @@ impl NavigatorWindowBridge {
             }
         }
         routed
+    }
+
+    /// Listeners for one event registered by exactly one webview (D23
+    /// per-view projection pushes never fan out to unrelated pages).
+    pub(super) fn listeners_for_view(
+        &self,
+        webview_id: &str,
+        event: &str,
+    ) -> Vec<(String, NavigatorWindowListener)> {
+        self.views
+            .iter()
+            .filter(|view| view.id == webview_id)
+            .flat_map(|view| {
+                view.listeners
+                    .get(event)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |listener| (view.id.clone(), listener))
+            })
+            .collect()
     }
 
     /// Snapshot of the translucency-affecting style facts (D6 checkpoints).
