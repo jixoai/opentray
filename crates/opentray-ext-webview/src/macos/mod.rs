@@ -139,6 +139,14 @@ struct WindowSession {
     _window_delegate: Retained<RetainedWindowDelegate>,
     content_descriptor: WebviewContentDescriptor,
     show_settings: WebviewShowSettings,
+    /// Durable `windowOnly` fact of the session's creation. The show-reuse
+    /// compatibility check must consult THIS, not the bridge view list:
+    /// orchestration children join `bridge.views` in a windowOnly session,
+    /// so "first registered view exists" stops meaning "a primary exists"
+    /// the moment a child is created (add-webview-orchestration P2 walk
+    /// evidence: re-show with windowOnly on a populated session was
+    /// misrejected as a windowOnly change).
+    window_only: bool,
 }
 
 struct NativeWebview {
@@ -1895,6 +1903,7 @@ impl MacosWebviewRuntime {
             _window_delegate: window_delegate,
             content_descriptor: content_descriptor.clone(),
             show_settings,
+            window_only,
         };
         if let Some(primary) = primary {
             let primary_id = primary.webview_id.clone();
@@ -2158,7 +2167,11 @@ impl MacosWebviewRuntime {
 }
 
 fn session_has_no_primary(session: &WindowSession) -> bool {
-    bridge_primary_id(&session.bridge).is_none()
+    // The session's creation-time `windowOnly` fact is authoritative:
+    // `bridge.views.first()` would flip to Some() as soon as an
+    // orchestration child registers, misreading a populated windowOnly
+    // session as primary-bearing.
+    session.window_only
 }
 
 /// Layout-command inputs: the registered webview id set (the view-id

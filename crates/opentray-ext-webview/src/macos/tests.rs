@@ -2083,6 +2083,127 @@ fn runtime_orchestration_smoke_on_main_thread() {
     runtime.session_closed("session-9");
 }
 
+/// add-webview-orchestration P2 walk regression (2026-09-11): a re-show on a
+/// POPULATED windowOnly session (children already registered in the bridge
+/// view list) must stay a compatible re-show, not be misrejected as a
+/// windowOnly change — the toolbar carrier's native title projection
+/// (`show({title, windowOnly})` → `apply_reused_show_updates`) depends on it.
+/// `session_has_no_primary` previously consulted `bridge.views.first()`,
+/// which a child registration flips.
+#[test]
+fn window_only_reshow_with_title_on_populated_session() {
+    use objc2::MainThreadMarker;
+    use opentray_spec::webview::{
+        WebviewBridgePolicy, WebviewOrchestrationCommand,
+    };
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        eprintln!("skipping AppKit windowOnly re-show regression outside the main thread");
+        return;
+    };
+    let _ = mtm;
+    let mut runtime = MacosWebviewRuntime::default();
+    runtime.set_app_id("app-reshow");
+
+    let owner = opentray_spec::webview::WebviewOwnerTuple {
+        app_id: "app-reshow".to_string(),
+        tray_id: "tray-reshow".to_string(),
+        session_id: "session-reshow".to_string(),
+    };
+    // windowOnly bootstrap.
+    runtime
+        .handle(
+            "tray-reshow",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: Some(480.0),
+                height: Some(320.0),
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: crate::WebviewShowSettings::default(),
+                owner_session_id: Some("session-reshow".to_string()),
+                window_id: Some("win-reshow".to_string()),
+                window_only: true,
+            },
+        )
+        .expect("windowOnly show");
+    // Populate the session with children (toolbar + content), so the bridge
+    // view list is non-empty.
+    for (webview_id, policy) in [
+        ("toolbar", Some(WebviewBridgePolicy {
+            webview_id: true,
+            message_channels: true,
+            ..WebviewBridgePolicy::default()
+        })),
+        ("content", None),
+    ] {
+        runtime
+            .handle(
+                "tray-reshow",
+                crate::WebviewCommand::Orchestration(Box::new(
+                    WebviewOrchestrationCommand::CreateWebview {
+                        owner: owner.clone(),
+                        window_id: "win-reshow".to_string(),
+                        webview_id: webview_id.to_string(),
+                        url: Some("about:blank".to_string()),
+                        html: None,
+                        bridge: policy,
+                    },
+                )),
+            )
+            .expect("create child");
+    }
+    // Regression: re-show carrying windowOnly + a title is the compatible
+    // title-projection path and must succeed.
+    let mut title_settings = crate::WebviewShowSettings::default();
+    title_settings.window.title = Some("Projected Title".to_string());
+    runtime
+        .handle(
+            "tray-reshow",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: None,
+                height: None,
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: title_settings,
+                owner_session_id: Some("session-reshow".to_string()),
+                window_id: Some("win-reshow".to_string()),
+                window_only: true,
+            },
+        )
+        .expect("re-show with title on populated windowOnly session");
+    // The native window title actually took the projected value.
+    let session = runtime
+        .sessions
+        .get("tray-reshow")
+        .expect("session alive after re-show");
+    assert_eq!(session.window.title().to_string(), "Projected Title");
+    // The guard direction still holds: a re-show WITHOUT windowOnly on a
+    // windowOnly session is the typed incompatibility.
+    let rejected = runtime
+        .handle(
+            "tray-reshow",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: None,
+                height: None,
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: crate::WebviewShowSettings::default(),
+                owner_session_id: Some("session-reshow".to_string()),
+                window_id: Some("win-reshow".to_string()),
+                window_only: false,
+            },
+        )
+        .expect_err("re-show without windowOnly must stay rejected");
+    assert!(rejected.to_string().contains("windowOnly"));
+    runtime.session_closed("session-reshow");
+}
+
 /// Message-channel bootstrap script with an explicit channel policy
 /// (mirrors what `webview_bridge_bootstrap_script` generates for a
 /// bridged child).
