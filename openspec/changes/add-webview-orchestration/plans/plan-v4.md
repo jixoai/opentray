@@ -1,4 +1,7 @@
-# add-webview-orchestration — Intent Document (SSOT)
+> ⚠️ 历史备份（backup-plan 产物）：非规范、非 SSOT，已被 `plans/plan.md` 取代。
+> 本文可能含已废弃语义；一切以当前 `plans/plan.md` 为准。
+
+# add-webview-orchestration — Historical Backup (superseded by plans/plan.md)
 
 > 原始需求（用户，2026-09-10/11，四轮演进）：
 > 1. 「接下来我们要讨论 toolbar 模式下，使用 iframe 导致无法加载的问题。」
@@ -12,14 +15,10 @@
 > 复核轮记录：Codex（gpt-5.6-terra/xhigh）R1 评分 5.5/10，阻塞 B1–B10 全部采纳——
 > 以 D18–D22 收口；R2 评分 6.2/10（+0.7），阻塞 R2-B1–B19 全部采纳——以 D18–D23 +
 > 增补（并入 D2/D6/D11/D12/D13/D18/D19/D20/D21）收口；R3 评分 7.0/10（+0.8），阻塞
-> R3-B1–B7 全部采纳——plan-v4 收口：事件族统一（geometryChange 入 D19）、D6 第三检查
-> 点定 v1 范围、字节级精确边界、同 tray 拒绝错误码、bridge 策略 DTO 冻结（含示例修正）、
-> canonical 编码采用 RFC 8785、focused 边沿验收；R4 评分 7.2/10（+0.2），确认 B3–B7
-> 收口，剩三项阻塞全部采纳——本版（plan-v5）收口：geometryChange ↔ 页面桥既有
-> `overlay.geometrychange` 的映射与 payload 冻结（rect DTO/null 语义）、D6 检查点 (3)
-> 的 v1/未来分层写进 requirement 正文、通道 `onClose` 生命周期观测面 + post 超限返回
-> `queue_overflow` 错误并关通道 + wire 帧清单冻结。报告
-> `/tmp/codex-review-add-webview-orchestration{,-r2,-r3,-r4}.md`。
+> R3-B1–B7 全部采纳——本版（plan-v4）收口：事件族统一（geometrychange 入 D19）、
+> D6 第三检查点定 v1 范围、字节级精确边界、同 tray 拒绝错误码、bridge 策略 DTO 冻结
+> （含示例修正）、canonical 编码采用 RFC 8785、focused 边沿验收。报告
+> `/tmp/codex-review-add-webview-orchestration{,-r2,-r3}.md`。
 > `plans/plan-vN.md` 一律为带横幅的历史备份，非规范非 SSOT。
 
 ## 最终可见效果（operator 视角）
