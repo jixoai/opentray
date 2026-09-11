@@ -544,6 +544,15 @@ struct WindowCapabilities {
     screen_bindings_supported: bool,
     platform: &'static str,
     background: bool,
+    /// Multi-webview orchestration surface (add-webview-orchestration
+    /// D2/D16). Serialized on both platforms; the values stay `false`/empty
+    /// until the Windows generalization batch implements the surface.
+    multiwebview: bool,
+    webview_navigation: bool,
+    focus_webview: bool,
+    webview_id: bool,
+    webview_bridge_policy: bool,
+    webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
 
@@ -610,6 +619,23 @@ impl WindowsWebviewRuntime {
         &mut self,
         tray_id: &str,
         command: WebviewCommand,
+    ) -> Result<crate::HandledCommand, WebviewRuntimeError> {
+        // The Windows generalization batch (tasks 4.1-4.3) implements the
+        // orchestration surface natively; the dispatch body stays the legacy
+        // single-webview command surface until then.
+        let result = self.dispatch(tray_id, command)?;
+        Ok(crate::HandledCommand::plain(result))
+    }
+
+    /// Records the owning app identity for the D18 owner tuples. The Windows
+    /// orchestration batch consumes it; storing it now keeps both platform
+    /// runtimes on one init contract.
+    pub(crate) fn set_app_id(&mut self, _app_id: &str) {}
+
+    fn dispatch(
+        &mut self,
+        tray_id: &str,
+        command: WebviewCommand,
     ) -> Result<Value, WebviewRuntimeError> {
         match command {
             WebviewCommand::Show {
@@ -620,6 +646,7 @@ impl WindowsWebviewRuntime {
                 tray_bounds,
                 fallback_rect,
                 show_settings,
+                ..
             } => {
                 let was_visible = self
                     .slot
@@ -948,6 +975,15 @@ impl WindowsWebviewRuntime {
                     SizeConstraintKind::Maximum,
                     SizeConstraintPayload { width, height },
                 )
+            }
+            WebviewCommand::Orchestration(_) => {
+                // Compile-surface parity only: the Windows generalization
+                // batch (tasks 4.1-4.3) implements the orchestration surface
+                // natively against the same wire contracts.
+                Err(WebviewRuntimeError::Unsupported(
+                    "multi-webview orchestration lands with the Windows generalization batch"
+                        .into(),
+                ))
             }
         }
     }
@@ -5359,6 +5395,12 @@ impl NavigatorWindowBridge {
             screen_bindings_supported: true,
             platform: "windows",
             background: true,
+            multiwebview: false,
+            webview_navigation: false,
+            focus_webview: false,
+            webview_id: false,
+            webview_bridge_policy: false,
+            webview_push_events: Vec::new(),
             platform_capabilities: WindowPlatformCapabilities {
                 windows: WindowsWindowCapabilities {
                     background_materials: WINDOWS_BACKGROUND_MATERIALS
