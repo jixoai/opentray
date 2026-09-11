@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-for (const page of ["terminal.html", "browse.html"]) {
+for (const page of ["terminal.html", "toolbar.html"]) {
   const path = resolve(root, "dist", page);
   const html = await readFile(path, "utf8");
   const fixed = html
