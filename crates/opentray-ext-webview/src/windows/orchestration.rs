@@ -1291,6 +1291,8 @@ impl super::WindowsWebviewRuntime {
         let events_for_page_load = Rc::clone(&events);
         let owner_for_title = window_owner.clone();
         let owner_for_page_load = window_owner.clone();
+        let bridge_for_channel_loads = Rc::downgrade(&bridge);
+        let webview_id_for_channel_loads = webview_id.to_string();
         let tracker = Rc::clone(&session.focus_tracker);
         let devtools = session.show_settings.window.devtools;
         let host_window: &Win32HostWindow = &session.window;
@@ -1316,6 +1318,27 @@ impl super::WindowsWebviewRuntime {
                             events.note_url_change(owner, window_id, url.to_string())
                         },
                     );
+                    // Channel law (D11): a document navigation closes the
+                    // page-side endpoints. The helper discriminates the
+                    // view's very first load (recorded in the bridge
+                    // state) from later navigations, and drops pushes
+                    // held back for a document that is being replaced.
+                    if let Some(bridge) = bridge_for_channel_loads.upgrade() {
+                        super::channels::handle_view_channel_navigation_started(
+                            &bridge,
+                            &webview_id_for_channel_loads,
+                        );
+                    }
+                }
+                if matches!(event, wry::PageLoadEvent::Finished) {
+                    // The document can now consume channel pushes; flush
+                    // everything held back for it.
+                    if let Some(bridge) = bridge_for_channel_loads.upgrade() {
+                        super::channels::handle_view_channel_page_finished(
+                            &bridge,
+                            &webview_id_for_channel_loads,
+                        );
+                    }
                 }
             })
             .with_devtools(devtools)
@@ -1378,6 +1401,26 @@ impl super::WindowsWebviewRuntime {
         let Some(session) = self.sessions.get_mut(&owner.tray_id) else {
             return;
         };
+        // Channel law (D11/D20): peer teardown closes the destroyed view's
+        // channels first, while the surviving endpoints' pages are still
+        // live to observe through. The pure registry skips pushes
+        // addressed to the dying view itself.
+        let pushes = session
+            .bridge
+            .borrow()
+            .channels
+            .borrow_mut()
+            .close_channels_of_webview(
+                webview_id,
+                opentray_spec::channel::ChannelCloseReason::PeerWebviewDestroyed,
+            );
+        super::channels::deliver_channel_pushes(&session.bridge, &pushes, None);
+        {
+            let mut bridge = session.bridge.borrow_mut();
+            bridge.channel_loaded_views.remove(webview_id);
+            bridge.channel_live_views.remove(webview_id);
+            bridge.pending_channel_pushes.remove(webview_id);
+        }
         let removed = session.unregister_webview(webview_id);
         drop(removed);
         let hwnd = session.window.hwnd;

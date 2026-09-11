@@ -16,7 +16,7 @@
 // HWND/DWM redirection surface, not page pixels. Material hosts paint a complete black native base
 // before WebView2 background/bounds commit; opaque/plain-transparent hosts retain Softbuffer.
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::io::Cursor;
 use std::num::NonZeroIsize;
@@ -91,6 +91,7 @@ use wry::{
 mod appwindow;
 mod appwindow_abi;
 mod box_view;
+mod channels;
 mod downloads;
 mod geometry;
 mod orchestration;
@@ -132,6 +133,11 @@ const PERMISSIONS_NAMESPACE: &str = "opentray.permissions";
 const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
 const PRIVATE_SOFT_RESIZE_NAMESPACE: &str = "opentray.window.internal";
+/// Per-webview message-channel ipc namespace (D9/D11/D20): the page
+/// bridge's `navigator.opentrayWebview` surface rides `window.ipc` under
+/// this namespace, and the webview id rides the ipc transport itself, so
+/// page-originated channel commands cannot spoof their source.
+const WEBVIEW_CHANNEL_NAMESPACE: &str = "opentray.webview";
 const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
 const OPAQUE_BACKGROUND: RGBA = (255, 255, 255, 255);
 const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
@@ -157,6 +163,9 @@ pub(crate) struct WindowsWebviewRuntime {
     /// App identity of the owning extension instance (D18 owner tuple
     /// source), set once at `opentray_ext_init`.
     app_id: Option<String>,
+    /// Host-bound channel events drained from sessions destroyed inside
+    /// the current command (their window is gone before the flush runs).
+    pending_channel_events: Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
 }
 
 #[derive(Clone, Default)]
@@ -283,6 +292,19 @@ pub(super) struct NavigatorWindowBridge {
     page_access: PageCapabilityAccess,
     tray_bounds: Option<Rect>,
     size_constraints: WindowSizeConstraints,
+    /// Session-scoped message-channel registry (D9-D20). Shared with the
+    /// per-webview ipc handlers so page-originated channel commands run
+    /// on the WebView2 callback without reaching the runtime struct.
+    pub(super) channels: Rc<RefCell<crate::channels::SessionChannels>>,
+    /// Views that finished at least one page load (document navigation
+    /// discrimination for `document_navigated` closures).
+    pub(super) channel_loaded_views: HashSet<String>,
+    /// Views whose page can currently consume channel pushes (a push
+    /// before the first finished load cannot land in the document).
+    pub(super) channel_live_views: HashSet<String>,
+    /// Lifecycle push scripts held back for views that are not live yet;
+    /// flushed when the page finishes loading.
+    pub(super) pending_channel_pushes: HashMap<String, Vec<String>>,
 }
 
 /// Per-webview bridge handle: the single-webview pointer of the previous
@@ -613,6 +635,10 @@ struct WindowCapabilities {
     focus_webview: bool,
     webview_id: bool,
     webview_bridge_policy: bool,
+    /// Message-channel surface (D9-D20): channel commands plus the
+    /// `navigator.opentrayWebview` page bridge. Both platforms' DTOs
+    /// serialize this field (D16 parity).
+    message_channels: bool,
     webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
@@ -687,7 +713,15 @@ impl WindowsWebviewRuntime {
         // this response. This is the only delivery path for orchestration
         // events; the 16 ms window-event drain never observes them.
         let events = self.flush_pending_events();
-        Ok(crate::HandledCommand { result, events, channel_events: Vec::new() })
+        // Host-bound channel events ride the same response (v1 flush
+        // ruling, tasks 3.3b/3.5), including events drained from sessions
+        // destroyed by this very command.
+        let channel_events = self.flush_channel_events();
+        Ok(crate::HandledCommand {
+            result,
+            events,
+            channel_events,
+        })
     }
 
     /// Records the owning app identity for the D18 owner tuples. Set once at
@@ -744,15 +778,7 @@ impl WindowsWebviewRuntime {
                 Ok(json!({ "type": "shown" }))
             }
             WebviewCommand::Orchestration(command) => self.handle_orchestration(*command),
-            WebviewCommand::Channel(_) => {
-                // Same compile-surface parity as orchestration: the channel
-                // registry/state core (crate::channels) is platform-neutral;
-                // the WebView2 transport (WebMessageReceived +
-                // ExecuteScript) lands with task 4.2.
-                Err(WebviewRuntimeError::Unsupported(
-                    "message channels land with the Windows generalization batch".into(),
-                ))
-            }
+            WebviewCommand::Channel(request) => self.handle_channel(*request),
             WebviewCommand::Hide => {
                 if let Some(session) = self.session(tray_id) {
                     let was_visible = window_is_visible(session.window.hwnd);
@@ -947,6 +973,27 @@ impl WindowsWebviewRuntime {
         let removed = self.registry.session_closed(session_id);
         for entry in removed {
             if let Some(owner) = entry.owner {
+                // Channel law (D20): session close closes the session's
+                // channels with `session_closed` (distinct from the
+                // `window_destroyed` entrance) and stages the host
+                // observations for the next response flush — the
+                // session-close ABI call itself returns no events.
+                if let Some(session) = self.sessions.get_mut(&owner.tray_id) {
+                    let pushes = session
+                        .bridge
+                        .borrow()
+                        .channels
+                        .borrow_mut()
+                        .close_all(opentray_spec::channel::ChannelCloseReason::SessionClosed);
+                    self::channels::deliver_channel_pushes(&session.bridge, &pushes, None);
+                    let events = session
+                        .bridge
+                        .borrow()
+                        .channels
+                        .borrow_mut()
+                        .drain_host_events();
+                    self.pending_channel_events.extend(events);
+                }
                 self.destroy_window_session(&owner.tray_id);
             }
         }
@@ -960,6 +1007,79 @@ impl WindowsWebviewRuntime {
             frames.extend(session.event_core.borrow_mut().outbox.drain(..));
         }
         frames
+    }
+
+    /// Drains every live session's host-bound channel events plus events
+    /// staged by sessions destroyed inside the current command (v1 flush
+    /// ruling, tasks 3.3b/3.5 — mirrors the macOS runtime).
+    fn flush_channel_events(
+        &mut self,
+    ) -> Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)> {
+        let mut events = std::mem::take(&mut self.pending_channel_events);
+        for session in self.sessions.values() {
+            let channels = session.bridge.borrow().channels.clone();
+            events.extend(channels.borrow_mut().drain_host_events());
+        }
+        events
+    }
+
+    /// Message-channel commands (D9-D20, frozen `channel.*` wire tags).
+    /// The response data is the frozen result frame; typed rejections
+    /// return the `channel.error` envelope as Ok-data, mirroring the
+    /// orchestration convention (the extension ABI's error channel cannot
+    /// carry the typed registry). Push effects are delivered inline:
+    /// page-bound through the bridge script (`ExecuteScript`), host-bound
+    /// through the response flush. The frame dispatch itself lives in
+    /// [`self::channels::dispatch_host_channel_command`] so the host
+    /// command surface is testable against a bridge fixture (the Win32
+    /// session cannot be created inside the cargo-test harness).
+    fn handle_channel(
+        &mut self,
+        request: crate::channels::ChannelRequest,
+    ) -> Result<Value, WebviewRuntimeError> {
+        let owner = request.owner().clone();
+        let Some(bridge) = self
+            .session_for_owner(&owner)
+            .map(|session| Rc::clone(&session.bridge))
+        else {
+            // A tray whose live window belongs to another session is the
+            // typed cross-session rejection; a tray with no window session
+            // at all has nothing addressable (unknown_view).
+            let session_live = self.registry.window(&owner.tray_id).is_some();
+            let code = if session_live {
+                opentray_spec::webview::OrchestrationErrorCode::SessionScope
+            } else {
+                opentray_spec::webview::OrchestrationErrorCode::UnknownView
+            };
+            let message = if session_live {
+                format!(
+                    "channel owner (app {}, tray {}, session {}) does not address the live \
+                     window session of tray {}",
+                    owner.app_id, owner.tray_id, owner.session_id, owner.tray_id
+                )
+            } else {
+                format!("tray {} has no webview window session to address", owner.tray_id)
+            };
+            return Ok(self::channels::channel_error_frame(&owner, code, message));
+        };
+        self::channels::dispatch_host_channel_command(&bridge, request)
+    }
+
+    /// Resolves the window session whose owner tuple matches the frame's
+    /// `(appId, trayId, sessionId)` — channel commands carry no window id,
+    /// the session identity is the addressing scope.
+    fn session_for_owner(
+        &self,
+        owner: &opentray_spec::webview::WebviewOwnerTuple,
+    ) -> Option<&WindowSession> {
+        let entry = self.registry.window(&owner.tray_id)?;
+        let recorded = entry.owner.as_ref()?;
+        if recorded.app_id != owner.app_id
+            || recorded.session_id.as_deref() != Some(owner.session_id.as_str())
+        {
+            return None;
+        }
+        self.sessions.get(&owner.tray_id)
     }
 
     fn session(&self, tray_id: &str) -> Option<&WindowSession> {
@@ -1166,6 +1286,12 @@ impl WindowsWebviewRuntime {
             page_access,
             tray_bounds,
             size_constraints: WindowSizeConstraints::default(),
+            channels: Rc::new(RefCell::new(crate::channels::SessionChannels::new(
+                owner.clone(),
+            ))),
+            channel_loaded_views: HashSet::new(),
+            channel_live_views: HashSet::new(),
+            pending_channel_pushes: HashMap::new(),
         }));
 
         // Cold start is not a retained style transaction. Complete the hidden native material host
@@ -1339,7 +1465,28 @@ impl WindowsWebviewRuntime {
 
     fn destroy_window_session(&mut self, tray_id: &str) {
         self.registry.destroy_window(tray_id);
-        self.sessions.remove(tray_id);
+        if let Some(session) = self.sessions.remove(tray_id) {
+            // Channel law (D20): window destruction is a destroy entrance —
+            // open channels close with `window_destroyed`, endpoints still
+            // live observe once, host observations ride this command's
+            // response flush, and no tombstone survives the session.
+            let pushes = session
+                .bridge
+                .borrow()
+                .channels
+                .borrow_mut()
+                .close_all(opentray_spec::channel::ChannelCloseReason::WindowDestroyed);
+            self::channels::deliver_channel_pushes(&session.bridge, &pushes, None);
+            let events = session
+                .bridge
+                .borrow()
+                .channels
+                .borrow_mut()
+                .drain_host_events();
+            self.pending_channel_events.extend(events);
+            // Dropping the session releases the Win32 host window and its
+            // WebView2 controllers (WebContext last — Profile Law).
+        }
     }
 }
 
@@ -1389,6 +1536,7 @@ fn handle_navigator_window_request(
             | COMMAND_NAMESPACE
             | PRIVATE_SYNC_NAMESPACE
             | PRIVATE_SOFT_RESIZE_NAMESPACE
+            | WEBVIEW_CHANNEL_NAMESPACE
     ) {
         return;
     }
@@ -1435,6 +1583,54 @@ fn handle_navigator_window_request(
         }
         PRIVATE_SOFT_RESIZE_NAMESPACE => {
             dispatch_private_soft_resize_command(bridge, &request.cmd, request.payload)
+        }
+        // The per-webview channel namespace is bridge-policy-gated inside
+        // its dispatcher (not page_access-gated): the surface exists only
+        // in views whose frozen per-child policy enables message channels.
+        WEBVIEW_CHANNEL_NAMESPACE => {
+            match self::channels::dispatch_webview_channel_command(
+                bridge,
+                source_webview,
+                &request.cmd,
+                request.payload,
+            ) {
+                Ok(response) => Ok(response),
+                // Typed channel rejections reject the page promise with
+                // the frozen `{ code, message }` error body, not the
+                // category-level runtime code (mirrors the macOS surface).
+                Err(typed) => {
+                    if request.error == 0 {
+                        eprintln!(
+                            "opentray-ext-webview channel command rejected: {}::{} -> {}",
+                            request.namespace,
+                            request.cmd,
+                            typed.envelope.error.code.as_str()
+                        );
+                        return;
+                    }
+                    match callback_script(
+                        request.error,
+                        &json!({
+                            "code": typed.envelope.error.code.as_str(),
+                            "message": typed.envelope.error.message,
+                        }),
+                    ) {
+                        Ok(script) => {
+                            if let Err(error) =
+                                evaluate_bridge_script(bridge, Some(source_webview), script)
+                            {
+                                eprintln!(
+                                    "opentray-ext-webview channel reject failed: {error}"
+                                );
+                            }
+                        }
+                        Err(error) => eprintln!(
+                            "opentray-ext-webview channel reject script failed: {error}"
+                        ),
+                    }
+                    return;
+                }
+            }
         }
         _ => return,
     };
@@ -2136,8 +2332,10 @@ fn build_webview(
             sync_icon,
             native_api_policy,
             permission_manager_policy,
-            // Message channels land with the Windows generalization batch
-            // (task 4.2); the primary surface stays channel-less.
+            // The primary webview stays channel-less by policy
+            // (`primary_bridge_policy`): the `messageChannels`/
+            // `webviewId` bridge surfaces belong to the orchestration-era
+            // children (D2/D9).
             false,
             false,
             "default",
@@ -5673,6 +5871,7 @@ impl NavigatorWindowBridge {
             focus_webview: true,
             webview_id: true,
             webview_bridge_policy: true,
+            message_channels: true,
             // geometryChange joins the unified push family with the layout
             // batch (D23): layout commits and overlay metric changes
             // recompute per-view projections natively.
@@ -7361,5 +7560,34 @@ mod tests {
     fn windows_theme_registry_value_maps_to_dark_mode() {
         assert!(apps_use_light_theme_to_dark_mode(0));
         assert!(!apps_use_light_theme_to_dark_mode(1));
+    }
+
+    /// Channel commands against a runtime with no window session reject
+    /// with the typed `unknown_view` envelope as Ok-data before any state
+    /// exists. (The full host command-frame smoke lives in
+    /// `windows::channels::tests` against a bridge fixture: creating a
+    /// Win32 window session inside the cargo-test harness is an
+    /// access-violation hazard, so the runtime-level drive stays minimal.)
+    #[test]
+    fn channel_commands_without_a_window_session_reject_unknown_view() {
+        let mut runtime = WindowsWebviewRuntime::default();
+        runtime.set_app_id("app-1");
+        let owner = opentray_spec::webview::WebviewOwnerTuple {
+            app_id: "app-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            session_id: "session-1".to_string(),
+        };
+        let handled = runtime
+            .handle(
+                "tray-1",
+                crate::WebviewCommand::Channel(Box::new(crate::channels::ChannelRequest::Create {
+                    owner,
+                    target: "toolbar".to_string(),
+                })),
+            )
+            .expect("channel command resolves, typed rejection rides Ok-data");
+        assert_eq!(handled.result["type"], "channel.error");
+        assert_eq!(handled.result["error"]["code"], "unknown_view");
+        assert!(handled.channel_events.is_empty());
     }
 }
