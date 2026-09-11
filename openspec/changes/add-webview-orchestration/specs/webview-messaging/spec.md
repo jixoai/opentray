@@ -114,7 +114,7 @@ Queue bounds (exact): each port queue SHALL hold at most 1000 messages AND at mo
 
 ### Requirement: Channel transport SHALL be push-based with typed payloads
 
-A message payload SHALL be a UTF-8 string or an arbitrary JSON value (canonical-encodable per the lifecycle rule); transferables SHALL NOT be part of the protocol. Message delivery SHALL be event-driven push on every hop (page→broker and broker→page); channel traffic SHALL NOT be carried by polling loops. The broker is the transport root: it relays every message and MAY observe payloads — the protocol offers no confidentiality between endpoints against the host application.
+A message payload SHALL be a UTF-8 string or an arbitrary JSON value (canonical-encodable per the lifecycle rule); transferables SHALL NOT be part of the protocol. Wire disambiguation is frozen: a payload whose wire JSON value is a string IS a string payload (counted as raw UTF-8 bytes); any other JSON value follows the RFC 8785 canonical byte count. Message delivery SHALL be event-driven push on every hop (page→broker and broker→page); channel traffic SHALL NOT be carried by polling loops. The broker is the transport root: it relays every message and MAY observe payloads — the protocol offers no confidentiality between endpoints against the host application.
 
 #### Scenario: JSON payloads round-trip without string coercion
 
