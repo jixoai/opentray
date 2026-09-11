@@ -69,6 +69,6 @@
 
 ## 7. Docs
 
-- [ ] 7.1 packages/ext-webview/README：多 webview/布局/通道/事件公开 API 契约（含错误码表）。
-- [ ] 7.2 skills/opentray：「带后端入口的 opentray 程序经 IPC 通道暴露能力」模式 + toolbar 新载体说明；packages/create/README 命令树更新（--toolbar 两应用、嵌入探测退役）。
-- [ ] 7.3 移除 iframe 载体时期关于嵌入限制的文档表述（skill references / README 中的 XFO/sandbox 限制段落），替换为多 webview 载体事实；保留向导预览 iframe 的创作期说明（D22 边界）。
+- [x] 7.1 ext-webview README（commit c93213a）：Multi-Webview Orchestration 契约章节（150 行）——会话法/ChildHandle 全方法面/bridge DTO/分层布局+box/统一事件族/通道语义/十码错误注册表；约 40 个 API 名经 rg 对照代码导出面核实（编排者抽验错误码 10/10）：多 webview/布局/通道/事件公开 API 契约（含错误码表）。
+- [x] 7.2 skills/opentray + create README（commits 66bae4f/cbde1b3）：backend-ipc.md（D12 模式）+ 新载体事实 + create-app.md 向导流程 + --toolbar 命令树改写为原生载体：「带后端入口的 opentray 程序经 IPC 通道暴露能力」模式 + toolbar 新载体说明；packages/create/README 命令树更新（--toolbar 两应用、嵌入探测退役）。
+- [x] 7.3 旧表述清理：4 处 iframe 时代嵌入限制表述清除（create README/skill SKILL/how-it-works/cli-reference；编排者抽验残留 0）；向导预览创作期说明保留（D22）。范围裁示：packages/create/skill/ 超简报点名但属消费者可见 md，纳入合理（子代理摩擦 #2 批准）关于嵌入限制的文档表述（skill references / README 中的 XFO/sandbox 限制段落），替换为多 webview 载体事实；保留向导预览 iframe 的创作期说明（D22 边界）。
