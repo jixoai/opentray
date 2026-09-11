@@ -1,0 +1,851 @@
+// Orthogonal intents (2026-09-11; original user request: add-webview-orchestration
+// task 2.4 — host TS facade over the frozen multi-webview wire protocol):
+// 1. Compile the frozen orchestration/channel wire frames from handle methods.
+// 2. Unwrap typed Ok-data error envelopes into rejections (3.3 friction #3).
+// 3. Route per-view push events and channel notices from the ext-event mirror.
+// 4. Compile layout sugar into the declarative layered-flex document.
+// 5. Own the host ChannelEndpoint lifecycle (single onClose observation,
+//    pre-subscription buffering, idempotent close/destroy).
+// Compromise: one module hosts the whole orchestration surface because the wire
+// families, the frame router, and the endpoint lifecycle share the owner tuple
+// and the request port; splitting them would duplicate the routing tables.
+
+import {
+  isChannelCloseReason,
+  isChannelListEntry,
+  isWebviewEventFrame,
+  isWebviewOrchestrationErrorCode,
+  resolveWebviewBridgePolicy,
+  type ChannelCloseReason,
+  type ChannelId,
+  type ChannelListEntry,
+  type ChannelPayload,
+  type ViewId,
+  type WebviewBridgePolicy,
+  type WebviewErrorEnvelope,
+  type WebviewEventFrame,
+  type WebviewEventKind,
+  type WebviewGeometryRect,
+  type WebviewId,
+  type WebviewListEntry,
+  type WebviewLayoutContainerNode,
+  type WebviewLayoutDocument,
+  type WebviewLayoutLayer,
+  type WebviewLayoutNode,
+  type WebviewLayoutNodePatch,
+  type WebviewLayoutSizing,
+  type WebviewLayoutViewNode,
+  type WebviewOrchestrationCommandFrame,
+  type WebviewOrchestrationErrorCode,
+  type WebviewOwnerTuple,
+  type WebviewTitleQueryResult,
+  type WebviewUrlQueryResult,
+  type WindowId,
+} from "@opentray/spec";
+
+/**
+ * Typed rejection for the whole orchestration/channel surface. The native
+ * extension returns the frozen `{ error: { code, message } }` envelope as
+ * Ok command-response data (the extension ABI's error channel is
+ * category-level and cannot carry the typed registry), so the facade
+ * unwraps that shape into this rejection (3.3 friction #3).
+ */
+export class WebviewOrchestrationError extends Error {
+  readonly code: WebviewOrchestrationErrorCode;
+
+  constructor(code: WebviewOrchestrationErrorCode, message: string) {
+    super(`[${code}] ${message}`);
+    this.name = "WebviewOrchestrationError";
+    this.code = code;
+  }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Shape discrimination for the typed error envelope riding Ok response data.
+ * Covers both namespaces: the bare orchestration envelope
+ * `{ error: { code, message } }` and the `channel.error` frame
+ * `{ type: "channel.error", owner, error }` — both expose `.error`.
+ */
+export const webviewErrorEnvelopeOf = (
+  data: unknown,
+): WebviewErrorEnvelope | undefined => {
+  if (!isRecord(data)) {
+    return undefined;
+  }
+  const body = data.error;
+  if (
+    isRecord(body) &&
+    isWebviewOrchestrationErrorCode(body.code) &&
+    typeof body.message === "string"
+  ) {
+    return { error: { code: body.code, message: body.message } };
+  }
+  return undefined;
+};
+
+/** Default window-session id the native side binds when `show` omits one. */
+export const DEFAULT_WEBVIEW_WINDOW_ID: WindowId = "default";
+
+/**
+ * Per-child content declaration for `createWebview` and the
+ * `createWebviewWindow({ webviews: [...] })` bootstrap sugar. Exactly one
+ * of `url` / `html`; `bridge` is the per-webview policy (partial input,
+ * frozen full DTO on the wire, every field defaulting to false).
+ */
+export interface WebviewChildSpec {
+  id: WebviewId;
+  url?: string;
+  html?: string;
+  bridge?: Partial<WebviewBridgePolicy>;
+}
+
+/** Field-level push payloads with frame identity and the per-view `seq`. */
+export interface WebviewUrlChangePush {
+  windowId: WindowId;
+  webviewId: WebviewId;
+  seq: number;
+  url: string;
+}
+
+export interface WebviewTitleChangePush {
+  windowId: WindowId;
+  webviewId: WebviewId;
+  seq: number;
+  title: string;
+}
+
+export interface WebviewFocusedPush {
+  windowId: WindowId;
+  webviewId: WebviewId;
+  seq: number;
+  focused: boolean;
+}
+
+export interface WebviewGeometryChangePush {
+  windowId: WindowId;
+  webviewId: WebviewId;
+  seq: number;
+  rect: WebviewGeometryRect | null;
+}
+
+type UrlChangeHandler = (event: WebviewUrlChangePush) => void;
+type TitleChangeHandler = (event: WebviewTitleChangePush) => void;
+type FocusedHandler = (event: WebviewFocusedPush) => void;
+type GeometryChangeHandler = (event: WebviewGeometryChangePush) => void;
+
+/** One child webview inside a window session (frozen wire ids only). */
+export interface WebviewChildHandle {
+  readonly id: WebviewId;
+  readonly windowId: WindowId;
+  navigate(url: string): Promise<void>;
+  back(): Promise<void>;
+  forward(): Promise<void>;
+  focus(): Promise<void>;
+  /** Current URL with its sequence number (D19 subscribe-then-query rule). */
+  getUrl(): Promise<WebviewUrlQueryResult>;
+  /** Current title with its sequence number (D19 subscribe-then-query rule). */
+  getTitle(): Promise<WebviewTitleQueryResult>;
+  onUrlChange(handler: UrlChangeHandler): () => void;
+  onTitleChange(handler: TitleChangeHandler): () => void;
+  onFocused(handler: FocusedHandler): () => void;
+  onGeometryChange(handler: GeometryChangeHandler): () => void;
+  /** Same as the parent window handle's `destroyWebview(id)`. */
+  destroy(): Promise<void>;
+}
+
+/** Close notice carried by the single observable `onClose` per endpoint. */
+export interface ChannelEndpointCloseNotice {
+  reason: ChannelCloseReason;
+}
+
+/**
+ * Host-side endpoint of one message channel (D9). Exactly `post`, `onMessage`,
+ * `onClose`, `close`, `destroy`, and the channel id; no port transfer.
+ */
+export interface ChannelEndpoint {
+  readonly id: ChannelId;
+  post(payload: ChannelPayload): Promise<void>;
+  onMessage(handler: (payload: ChannelPayload) => void): () => void;
+  onClose(handler: (notice: ChannelEndpointCloseNotice) => void): () => void;
+  /** Graceful close; tombstone stays listed. Idempotent success. */
+  close(): Promise<void>;
+  /** Removes channel state (and any tombstone). Idempotent no-op. */
+  destroy(): Promise<void>;
+}
+
+/** `channel.created` push observed on the host facade surface. */
+export interface WebviewChannelCreatedNotice {
+  channelId: ChannelId;
+}
+
+/**
+ * Layout sugar inputs: a full document, a bare layer array, or a single root
+ * node (wrapped as the only layer). The bare-array member is mutable so
+ * `Array.isArray` narrows it away from the node union without casts.
+ */
+export type WebviewLayoutTreeInput =
+  | WebviewLayoutDocument
+  | WebviewLayoutLayer[]
+  | WebviewLayoutNode;
+
+export interface WebviewLayoutContainerOptions extends WebviewLayoutSizing {
+  gap?: number;
+}
+
+const sizingFields = [
+  "width",
+  "height",
+  "flex",
+  "minWidth",
+  "minHeight",
+  "maxWidth",
+  "maxHeight",
+] as const;
+
+type SizingField = (typeof sizingFields)[number];
+
+const pickSizing = (sizing: WebviewLayoutSizing | undefined): WebviewLayoutSizing => {
+  const picked: { [K in SizingField]?: number } = {};
+  if (sizing !== undefined) {
+    for (const field of sizingFields) {
+      const value = sizing[field];
+      if (value !== undefined) {
+        picked[field] = value;
+      }
+    }
+  }
+  return picked;
+};
+
+/**
+ * Layout sugar (webview-layout spec): pure syntax that compiles to the
+ * declarative layered-flex object protocol — `row`/`column` containers,
+ * `view` references, `fixed` sizes, and `grow` flex children.
+ */
+export const row = (
+  children: readonly WebviewLayoutNode[],
+  options?: WebviewLayoutContainerOptions,
+): WebviewLayoutContainerNode => ({
+  dir: "row",
+  ...pickSizing(options),
+  ...(options?.gap === undefined ? {} : { gap: options.gap }),
+  children,
+});
+
+export const column = (
+  children: readonly WebviewLayoutNode[],
+  options?: WebviewLayoutContainerOptions,
+): WebviewLayoutContainerNode => ({
+  dir: "column",
+  ...pickSizing(options),
+  ...(options?.gap === undefined ? {} : { gap: options.gap }),
+  children,
+});
+
+export const view = (
+  id: ViewId,
+  sizing?: WebviewLayoutSizing,
+): WebviewLayoutViewNode => ({ id, ...pickSizing(sizing) });
+
+/**
+ * `fixed(id, 44)` sets a fixed height (the canonical column-child toolbar
+ * shape); the object form carries any sizing fields, e.g. `{ width: 200 }`
+ * for row children.
+ */
+export const fixed = (
+  id: ViewId,
+  size: number | WebviewLayoutSizing,
+): WebviewLayoutViewNode =>
+  typeof size === "number" ? { id, height: size } : { id, ...pickSizing(size) };
+
+export const grow = (id: ViewId, flex = 1): WebviewLayoutViewNode => ({ id, flex });
+
+const normalizeLayoutDocument = (tree: WebviewLayoutTreeInput): WebviewLayoutDocument => {
+  if (Array.isArray(tree)) {
+    return { layers: tree };
+  }
+  // Container nodes carry `dir`; view/box nodes carry `id` — both narrow a
+  // bare root node before wrapping it as the only layer.
+  if ("dir" in tree || "id" in tree) {
+    return { layers: [{ root: tree }] };
+  }
+  return tree;
+};
+/**
+ * Transport contract the window facade injects: the owner tuple, one Ok-data
+ * request port (first response envelope's data), and the ext-event frame tap
+ * (the broker mirrors every command-response envelope with a tray scope into
+ * an `ext-event` frame, so the tap is the single, duplicate-free delivery
+ * source for push frames).
+ */
+export interface WebviewOrchestrationPort {
+  readonly owner: WebviewOwnerTuple;
+  request(data: unknown): Promise<unknown>;
+  onFrame(handler: (frame: unknown) => void): () => void;
+}
+
+/** Multi-webview + channel surface bound to one window session id. */
+export interface WebviewWindowOrchestration {
+  readonly windowId: WindowId;
+  createWebview(spec: WebviewChildSpec): Promise<WebviewChildHandle>;
+  destroyWebview(webviewId: WebviewId): Promise<void>;
+  listWebviews(): Promise<WebviewListEntry[]>;
+  setLayout(tree: WebviewLayoutTreeInput): Promise<void>;
+  updateLayout(viewId: ViewId, patch: WebviewLayoutNodePatch): Promise<void>;
+  createMessageChannel(options: { target: WebviewId }): Promise<ChannelEndpoint>;
+  listMessageChannels(): Promise<ChannelListEntry[]>;
+  destroyMessageChannel(channelId: ChannelId): Promise<void>;
+  onCreatedMessageChannel(
+    handler: (notice: WebviewChannelCreatedNotice) => void,
+  ): () => void;
+  /** Local teardown after window destroy: no wire frames (native owns them). */
+  dispose(): void;
+}
+
+interface ChannelEndpointState {
+  channelId: ChannelId;
+  open: boolean;
+  destroyed: boolean;
+  closeObserved: boolean;
+  /** Buffered closure notice awaiting the first `onClose` registration. */
+  closeNotice: ChannelCloseReason | undefined;
+  closeHandlers: Set<(notice: ChannelEndpointCloseNotice) => void>;
+  messageHandlers: Set<(payload: ChannelPayload) => void>;
+  /** Buffered FIFO messages awaiting the first `onMessage` registration. */
+  pendingMessages: ChannelPayload[];
+}
+
+export const createWebviewOrchestration = (
+  port: WebviewOrchestrationPort,
+  windowId: WindowId,
+): WebviewWindowOrchestration => {
+  const { owner } = port;
+
+  const send = async (data: unknown): Promise<Record<string, unknown>> => {
+    const result = await port.request(data);
+    if (!isRecord(result)) {
+      throw new Error(
+        `webview extension returned a non-object response for ${(isRecord(data) ? data.type : "command")}: ${JSON.stringify(result)}`,
+      );
+    }
+    return result;
+  };
+
+  const sendOrThrowEnvelope = async (data: unknown): Promise<Record<string, unknown>> => {
+    const result = await send(data);
+    const envelope = webviewErrorEnvelopeOf(result);
+    if (envelope !== undefined) {
+      throw new WebviewOrchestrationError(envelope.error.code, envelope.error.message);
+    }
+    return result;
+  };
+
+  const expectResult = async (
+    data: unknown,
+    type: string,
+  ): Promise<Record<string, unknown>> => {
+    const result = await sendOrThrowEnvelope(data);
+    if (result.type !== type) {
+      throw new Error(
+        `webview extension returned ${String(result.type)} where ${type} was expected`,
+      );
+    }
+    return result;
+  };
+
+  const sendAck = async (command: WebviewOrchestrationCommandFrame): Promise<void> => {
+    const result = await expectResult(command, "webview-ack");
+    if (result.command !== command.type) {
+      throw new Error(
+        `webview-ack echoed ${String(result.command)} for ${command.type}`,
+      );
+    }
+  };
+
+  // Fire-and-forget wire frames (subscribe/unsubscribe). Observability of a
+  // transport failure rides the existing connection lifecycle; report once.
+  const sendBestEffort = (command: WebviewOrchestrationCommandFrame): void => {
+    void sendOrThrowEnvelope(command).catch((error: unknown) => {
+      console.error("WebView orchestration frame failed:", error);
+    });
+  };
+
+  const urlChangeHandlers = new Map<WebviewId, Set<UrlChangeHandler>>();
+  const titleChangeHandlers = new Map<WebviewId, Set<TitleChangeHandler>>();
+  const focusedHandlers = new Map<WebviewId, Set<FocusedHandler>>();
+  const geometryChangeHandlers = new Map<WebviewId, Set<GeometryChangeHandler>>();
+
+  const channels = new Map<ChannelId, ChannelEndpointState>();
+  const channelCreatedHandlers = new Set<(notice: WebviewChannelCreatedNotice) => void>();
+
+  const subscribeFrame = (
+    type: "subscribe-webview-events" | "unsubscribe-webview-events",
+    webviewId: WebviewId,
+    kind: WebviewEventKind,
+  ): void => {
+    sendBestEffort({
+      owner,
+      type,
+      windowId,
+      webviewId,
+      kinds: [kind],
+    } as WebviewOrchestrationCommandFrame);
+  };
+
+  const addViewListener = <THandler>(
+    handlers: Map<WebviewId, Set<THandler>>,
+    webviewId: WebviewId,
+    kind: WebviewEventKind,
+    handler: THandler,
+  ): (() => void) => {
+    const set = handlers.get(webviewId) ?? new Set<THandler>();
+    const wasEmpty = set.size === 0;
+    set.add(handler);
+    handlers.set(webviewId, set);
+    if (wasEmpty) {
+      subscribeFrame("subscribe-webview-events", webviewId, kind);
+    }
+    return () => {
+      const active = handlers.get(webviewId);
+      if (active === undefined || !active.delete(handler)) {
+        return;
+      }
+      if (active.size === 0) {
+        handlers.delete(webviewId);
+        subscribeFrame("unsubscribe-webview-events", webviewId, kind);
+      }
+    };
+  };
+
+  const dropViewListeners = (webviewId: WebviewId): void => {
+    urlChangeHandlers.delete(webviewId);
+    titleChangeHandlers.delete(webviewId);
+    focusedHandlers.delete(webviewId);
+    geometryChangeHandlers.delete(webviewId);
+  };
+
+  const callHandlers = <TEvent>(
+    handlers: Set<(event: TEvent) => void>,
+    event: TEvent,
+  ): void => {
+    for (const handler of [...handlers]) {
+      handler(event);
+    }
+  };
+
+  const deliverViewEvent = (frame: WebviewEventFrame): void => {
+    if (frame.windowId !== windowId) {
+      return;
+    }
+    const identity = {
+      windowId: frame.windowId,
+      webviewId: frame.webviewId,
+      seq: frame.seq,
+    };
+    switch (frame.kind) {
+      case "urlChange": {
+        const set = urlChangeHandlers.get(frame.webviewId);
+        if (set !== undefined) {
+          callHandlers(set, { ...identity, url: frame.payload.url });
+        }
+        return;
+      }
+      case "titleChange": {
+        const set = titleChangeHandlers.get(frame.webviewId);
+        if (set !== undefined) {
+          callHandlers(set, { ...identity, title: frame.payload.title });
+        }
+        return;
+      }
+      case "focused": {
+        const set = focusedHandlers.get(frame.webviewId);
+        if (set !== undefined) {
+          callHandlers(set, { ...identity, focused: frame.payload.focused });
+        }
+        return;
+      }
+      case "geometryChange": {
+        const set = geometryChangeHandlers.get(frame.webviewId);
+        if (set !== undefined) {
+          callHandlers(set, { ...identity, rect: frame.payload.rect });
+        }
+        return;
+      }
+    }
+  };
+
+  const deliverChannelMessage = (channelId: ChannelId, payload: unknown): void => {
+    const state = channels.get(channelId);
+    if (state === undefined || !state.open) {
+      return;
+    }
+    if (state.messageHandlers.size === 0) {
+      // Pre-subscription buffering (mirrors the page-bridge D11 clearance):
+      // the first onMessage registration drains the FIFO buffer.
+      state.pendingMessages.push(payload as ChannelPayload);
+      return;
+    }
+    for (const handler of [...state.messageHandlers]) {
+      handler(payload as ChannelPayload);
+    }
+  };
+
+  const deliverChannelClosed = (channelId: ChannelId, reason: ChannelCloseReason): void => {
+    const state = channels.get(channelId);
+    if (state === undefined) {
+      return;
+    }
+    state.open = false;
+    if (state.closeObserved) {
+      return;
+    }
+    state.closeObserved = true;
+    state.closeNotice = reason;
+    if (state.closeHandlers.size > 0) {
+      for (const handler of [...state.closeHandlers]) {
+        handler({ reason });
+      }
+    }
+  };
+
+  const routeFrame = (frame: unknown): void => {
+    if (isWebviewEventFrame(frame)) {
+      deliverViewEvent(frame);
+      return;
+    }
+    if (!isRecord(frame)) {
+      return;
+    }
+    switch (frame.type) {
+      case "channel.created":
+        if (typeof frame.channelId === "string") {
+          for (const handler of [...channelCreatedHandlers]) {
+            handler({ channelId: frame.channelId });
+          }
+        }
+        return;
+      case "channel.closed":
+        if (
+          typeof frame.channelId === "string" &&
+          isChannelCloseReason(frame.reason)
+        ) {
+          deliverChannelClosed(frame.channelId, frame.reason);
+        }
+        return;
+      case "channel.message":
+        if (typeof frame.channelId === "string") {
+          deliverChannelMessage(frame.channelId, frame.payload);
+        }
+        return;
+      default:
+        return;
+    }
+  };
+
+  const stopFrameTap = port.onFrame(routeFrame);
+
+  const endpointOf = (state: ChannelEndpointState): ChannelEndpoint => ({
+    get id(): ChannelId {
+      return state.channelId;
+    },
+    async post(payload: ChannelPayload): Promise<void> {
+      if (!state.open) {
+        throw new WebviewOrchestrationError(
+          "not_open",
+          `channel ${state.channelId} is not open`,
+        );
+      }
+      try {
+        await expectResult(
+          {
+            owner,
+            type: "channel.post",
+            channelId: state.channelId,
+            payload,
+          },
+          "channel.post-result",
+        );
+      } catch (error) {
+        // `not_open` and `queue_overflow` both imply the channel is now
+        // closed; record the local transition instead of round-tripping
+        // the next post through the same rejection.
+        if (
+          error instanceof WebviewOrchestrationError &&
+          (error.code === "not_open" || error.code === "queue_overflow")
+        ) {
+          state.open = false;
+        }
+        throw error;
+      }
+    },
+    onMessage(handler: (payload: ChannelPayload) => void): () => void {
+      state.messageHandlers.add(handler);
+      if (state.pendingMessages.length > 0) {
+        const buffered = state.pendingMessages.splice(0);
+        for (const payload of buffered) {
+          handler(payload);
+        }
+      }
+      return () => {
+        state.messageHandlers.delete(handler);
+      };
+    },
+    onClose(handler: (notice: ChannelEndpointCloseNotice) => void): () => void {
+      state.closeHandlers.add(handler);
+      const buffered = state.closeNotice;
+      if (buffered !== undefined && state.closeObserved) {
+        state.closeNotice = undefined;
+        handler({ reason: buffered });
+      }
+      return () => {
+        state.closeHandlers.delete(handler);
+      };
+    },
+    async close(): Promise<void> {
+      if (!state.open) {
+        return;
+      }
+      await expectResult(
+        { owner, type: "channel.close", channelId: state.channelId },
+        "channel.close-result",
+      );
+      state.open = false;
+    },
+    async destroy(): Promise<void> {
+      if (state.destroyed) {
+        return;
+      }
+      await expectResult(
+        { owner, type: "channel.destroy", channelId: state.channelId },
+        "channel.destroy-result",
+      );
+      state.destroyed = true;
+      state.open = false;
+    },
+  });
+
+  const childHandle = (webviewId: WebviewId): WebviewChildHandle => ({
+    id: webviewId,
+    windowId,
+    navigate(url: string): Promise<void> {
+      return sendAck({
+        owner,
+        type: "navigate-webview",
+        windowId,
+        webviewId,
+        url,
+      } as WebviewOrchestrationCommandFrame);
+    },
+    back(): Promise<void> {
+      return sendAck({
+        owner,
+        type: "back-webview",
+        windowId,
+        webviewId,
+      } as WebviewOrchestrationCommandFrame);
+    },
+    forward(): Promise<void> {
+      return sendAck({
+        owner,
+        type: "forward-webview",
+        windowId,
+        webviewId,
+      } as WebviewOrchestrationCommandFrame);
+    },
+    focus(): Promise<void> {
+      return sendAck({
+        owner,
+        type: "focus-webview",
+        windowId,
+        webviewId,
+      } as WebviewOrchestrationCommandFrame);
+    },
+    async getUrl(): Promise<WebviewUrlQueryResult> {
+      const result = await expectResult(
+        { owner, type: "get-webview-url", windowId, webviewId } as WebviewOrchestrationCommandFrame,
+        "get-webview-url-result",
+      );
+      return { url: String(result.url), seq: Number(result.seq) };
+    },
+    async getTitle(): Promise<WebviewTitleQueryResult> {
+      const result = await expectResult(
+        {
+          owner,
+          type: "get-webview-title",
+          windowId,
+          webviewId,
+        } as WebviewOrchestrationCommandFrame,
+        "get-webview-title-result",
+      );
+      return { title: String(result.title), seq: Number(result.seq) };
+    },
+    onUrlChange(handler: UrlChangeHandler): () => void {
+      return addViewListener(urlChangeHandlers, webviewId, "urlChange", handler);
+    },
+    onTitleChange(handler: TitleChangeHandler): () => void {
+      return addViewListener(titleChangeHandlers, webviewId, "titleChange", handler);
+    },
+    onFocused(handler: FocusedHandler): () => void {
+      return addViewListener(focusedHandlers, webviewId, "focused", handler);
+    },
+    onGeometryChange(handler: GeometryChangeHandler): () => void {
+      return addViewListener(geometryChangeHandlers, webviewId, "geometryChange", handler);
+    },
+    destroy(): Promise<void> {
+      return destroyWebview(webviewId);
+    },
+  });
+
+  const createWebview = async (spec: WebviewChildSpec): Promise<WebviewChildHandle> => {
+    if (spec.id.length === 0) {
+      throw new Error("createWebview requires a non-empty webview id");
+    }
+    if (spec.url === undefined === (spec.html === undefined)) {
+      throw new Error("createWebview requires exactly one of url or html");
+    }
+    await sendAck({
+      owner,
+      type: "create-webview",
+      windowId,
+      webviewId: spec.id,
+      ...(spec.url === undefined ? {} : { url: spec.url }),
+      ...(spec.html === undefined ? {} : { html: spec.html }),
+      ...(spec.bridge === undefined ? {} : { bridge: resolveWebviewBridgePolicy(spec.bridge) }),
+    } as WebviewOrchestrationCommandFrame);
+    return childHandle(spec.id);
+  };
+
+  const destroyWebview = async (webviewId: WebviewId): Promise<void> => {
+    await sendAck({
+      owner,
+      type: "destroy-webview",
+      windowId,
+      webviewId,
+    } as WebviewOrchestrationCommandFrame);
+    // The native view state (and its subscriptions) died with the webview;
+    // only the local routing entries need clearing.
+    dropViewListeners(webviewId);
+  };
+
+  const listWebviews = async (): Promise<WebviewListEntry[]> => {
+    const result = await expectResult(
+      { owner, type: "list-webviews", windowId } as WebviewOrchestrationCommandFrame,
+      "list-webviews-result",
+    );
+    const webviews = result.webviews;
+    if (!Array.isArray(webviews) || !webviews.every((entry) => isRecord(entry))) {
+      throw new Error("list-webviews-result carried a malformed webviews array");
+    }
+    return webviews as unknown as WebviewListEntry[];
+  };
+
+  const setLayout = async (tree: WebviewLayoutTreeInput): Promise<void> => {
+    await sendAck({
+      owner,
+      type: "set-webview-layout",
+      windowId,
+      layout: normalizeLayoutDocument(tree),
+    } as WebviewOrchestrationCommandFrame);
+  };
+
+  const updateLayout = async (
+    viewId: ViewId,
+    patch: WebviewLayoutNodePatch,
+  ): Promise<void> => {
+    await sendAck({
+      owner,
+      type: "update-webview-layout",
+      windowId,
+      viewId,
+      patch: pickSizing(patch),
+    } as WebviewOrchestrationCommandFrame);
+  };
+
+  const createMessageChannel = async (options: {
+    target: WebviewId;
+  }): Promise<ChannelEndpoint> => {
+    const result = await expectResult(
+      { owner, type: "channel.create", target: options.target },
+      "channel.create-result",
+    );
+    const channelId = result.channelId;
+    if (typeof channelId !== "string" || channelId.length === 0) {
+      throw new Error("channel.create-result carried a malformed channelId");
+    }
+    const state: ChannelEndpointState = {
+      channelId,
+      open: true,
+      destroyed: false,
+      closeObserved: false,
+      closeNotice: undefined,
+      closeHandlers: new Set(),
+      messageHandlers: new Set(),
+      pendingMessages: [],
+    };
+    channels.set(channelId, state);
+    return endpointOf(state);
+  };
+
+  const listMessageChannels = async (): Promise<ChannelListEntry[]> => {
+    const result = await expectResult(
+      { owner, type: "channel.list" },
+      "channel.list-result",
+    );
+    const entries = result.channels;
+    if (!Array.isArray(entries) || !entries.every((entry) => isChannelListEntry(entry))) {
+      throw new Error("channel.list-result carried a malformed channels array");
+    }
+    return entries;
+  };
+
+  const destroyMessageChannel = async (channelId: ChannelId): Promise<void> => {
+    const state = channels.get(channelId);
+    if (state !== undefined && state.destroyed) {
+      return;
+    }
+    await expectResult(
+      { owner, type: "channel.destroy", channelId },
+      "channel.destroy-result",
+    );
+    if (state !== undefined) {
+      state.destroyed = true;
+      state.open = false;
+    }
+  };
+
+  const onCreatedMessageChannel = (
+    handler: (notice: WebviewChannelCreatedNotice) => void,
+  ): (() => void) => {
+    channelCreatedHandlers.add(handler);
+    return () => {
+      channelCreatedHandlers.delete(handler);
+    };
+  };
+
+  const dispose = (): void => {
+    stopFrameTap();
+    urlChangeHandlers.clear();
+    titleChangeHandlers.clear();
+    focusedHandlers.clear();
+    geometryChangeHandlers.clear();
+    channels.clear();
+    channelCreatedHandlers.clear();
+  };
+
+  return {
+    windowId,
+    createWebview,
+    destroyWebview,
+    listWebviews,
+    setLayout,
+    updateLayout,
+    createMessageChannel,
+    listMessageChannels,
+    destroyMessageChannel,
+    onCreatedMessageChannel,
+    dispose,
+  };
+};
