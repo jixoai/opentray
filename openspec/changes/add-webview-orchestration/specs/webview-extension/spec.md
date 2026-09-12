@@ -98,7 +98,7 @@ Style exclusivity is one rule with one error: a window in a translucency-affecti
 
 Each webview SHALL expose `navigate` (explicit content replacement for that webview only, consistent with the content-replacement law), plus `back` and `forward` over the webview's native session history. URL and title changes SHALL be delivered to the host facade as push events (`urlChange`, `titleChange`), and focus transitions as `focused` edge events, for that webview.
 
-Event wire contract: the unified per-view event family is `kind ∈ { urlChange, titleChange, focused, geometryChange }` (geometryChange carries the overlay safe-area projection and is specified with the overlay requirement). Every event frame SHALL carry `{ owner: {appId, trayId, sessionId}, windowId, webviewId, kind, seq, payload }` — the owner tuple rides the frame so session-scoped ids never collide across sessions; `seq` is a per-view monotonically increasing sequence number. Payload DTOs are frozen field-level: `{ url: string }` for `urlChange`, `{ title: string }` for `titleChange`, `{ focused: boolean }` for `focused` (edge semantics: gained or lost), and for `geometryChange` `{ rect: { x: number, y: number, width: number, height: number } | null }` — view-local logical pixels, `null` meaning no intersection with the overlay region; this rect is field-isomorphic to the page-bridge `overlay.geometrychange` payload (same fields, same null rule, same units — the two surfaces serialize the same projection value in their respective envelopes). Subscription follows the facade handle's listeners, materialized as explicit wire subscribe/unsubscribe frames (fixture-frozen in the codec tests). Events are pure push with no replay: current values are read through the facade query commands `getUrl()` and `getTitle()`, which return `(value, seq)`; consumers subscribe first, then query, and discard events whose `seq` is not greater than the queried `seq`. `focused` and `geometryChange` have no query — consumers track edges and projection updates. The native implementation SHALL push these events from native page-load, title, focus, and layout-projection callbacks directly onto the event channel — reusing the 16 ms window-event drain polling loop as the observation mechanism for these events is prohibited. On broker disconnect, pending event delivery stops and listeners observe the disconnect through the existing connection lifecycle, not through synthetic events.
+Event wire contract: the unified per-view event family is `kind ∈ { urlChange, titleChange, focused, geometryChange, loadState }` (geometryChange carries the overlay safe-area projection and is specified with the overlay requirement; loadState carries the per-view navigation lifecycle). Every event frame SHALL carry `{ owner: {appId, trayId, sessionId}, windowId, webviewId, kind, seq, payload }` — the owner tuple rides the frame so session-scoped ids never collide across sessions; `seq` is a per-view monotonically increasing sequence number. Payload DTOs are frozen field-level: `{ url: string }` for `urlChange`, `{ title: string }` for `titleChange`, `{ focused: boolean }` for `focused` (edge semantics: gained or lost), for `geometryChange` `{ rect: { x: number, y: number, width: number, height: number } | null }`, and for `loadState` `{ phase: "started" | "finished" | "failed", url: string, errorCode?: number, progress?: number }` (progress ∈ [0,1], omitted when the platform cannot report it — consumers render an indeterminate affordance) — view-local logical pixels, `null` meaning no intersection with the overlay region; this rect is field-isomorphic to the page-bridge `overlay.geometrychange` payload (same fields, same null rule, same units — the two surfaces serialize the same projection value in their respective envelopes). Subscription follows the facade handle's listeners, materialized as explicit wire subscribe/unsubscribe frames (fixture-frozen in the codec tests). Events are pure push with no replay: current values are read through the facade query commands `getUrl()` and `getTitle()`, which return `(value, seq)`; consumers subscribe first, then query, and discard events whose `seq` is not greater than the queried `seq`. `focused`, `geometryChange`, and `loadState` have no query — consumers track edges and projection updates. The native implementation SHALL push these events from native page-load, title, focus, and layout-projection callbacks directly onto the event channel — reusing the 16 ms window-event drain polling loop as the observation mechanism for these events is prohibited. On broker disconnect, pending event delivery stops and listeners observe the disconnect through the existing connection lifecycle, not through synthetic events.
 
 #### Scenario: navigate retargets one webview without touching siblings
 
@@ -171,3 +171,29 @@ Projection SHALL be recomputed inside the layout commit transaction (after frame
 - **GIVEN** a frameless overlay window whose only webview fills the client area (the default layout)
 - **WHEN** its page measures the titlebar area before and after this change's implementation
 - **THEN** the reported rect SHALL equal the window-level values a full-window webview reports today
+
+### Requirement: Auxiliary popup windows SHALL open for new-window navigation intents
+
+A webview SHALL route every new-window navigation intent to a native auxiliary popup window: link targets (`a[target]`), `window.open`, middle-click on links, and the native context menu's "open in new window" entry SHALL all open the target URL in a new OS window hosting a single plain webview. On macOS this is the `WKUIDelegate` new-webview callback; on Windows it is `NewWindowRequested` (handled, never delegated to an external browser). Popup windows carry no toolbar and expose no layout surface in v1; window title follows the document one-way.
+
+Popup windows are auxiliary state owned by the creating extension session: they do NOT occupy the tray's window session (the one-session-per-tray law is untouched), any number may be open, and session close or lease cleanup SHALL close every popup owned by that session or lease without touching other owners' popups. The capability is reported through both platforms' capability DTOs (`popup_windows`).
+
+#### Scenario: target=_blank opens a popup owned by the session
+
+- **GIVEN** a running toolbar application whose content webview shows a page with `<a href="https://example.org" target="_blank">`
+- **WHEN** the link is activated
+- **THEN** a new plain window SHALL load `https://example.org` as a top-level context
+- **AND** the original window, its layout, and its toolbar SHALL be unaffected
+- **AND** closing the owning session SHALL close the popup
+
+#### Scenario: Middle-click and the context menu route to the same popup path
+
+- **GIVEN** the content webview showing a plain link
+- **WHEN** the operator middle-clicks the link, or uses the context menu's "open in new window"
+- **THEN** the URL SHALL open in a popup window through the same native path as target=_blank
+
+#### Scenario: Lease cleanup closes owned popups only
+
+- **GIVEN** two sessions each with an open popup
+- **WHEN** one session closes
+- **THEN** only that session's popup SHALL close
