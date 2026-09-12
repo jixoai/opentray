@@ -12,6 +12,7 @@
 #[cfg(target_os = "macos")]
 mod darwin_reopen;
 mod dynamic_extension;
+mod event_hub;
 mod extension_events;
 mod frame_error;
 #[cfg(unix)]
