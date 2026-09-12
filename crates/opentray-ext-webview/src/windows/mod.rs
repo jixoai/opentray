@@ -280,7 +280,15 @@ pub(super) struct NavigatorWindowBridge {
     content_descriptor: WebviewContentDescriptor,
     ipc_messages: VecDeque<Value>,
     permission_messages: VecDeque<Value>,
-    window_events: VecDeque<Value>,
+    /// Owning tray id (D19 batch C): the window-event push producers route
+    /// EventPort records by tray, and the retired 16 ms drain queue they
+    /// replaced was drained per tray; the bridge carries that identity
+    /// directly.
+    tray_id: String,
+    /// Facade interest in the window-event push family (D19 batch C).
+    /// Producers submit through the EventPort only for subscribed event
+    /// names; no facade listener means no native observation record.
+    window_event_subscriptions: HashSet<String>,
     next_ipc_message_id: u32,
     next_permission_message_id: u32,
     style: WindowStyleState,
@@ -926,17 +934,23 @@ impl WindowsWebviewRuntime {
                 Ok(json!({ "type": "permissionMessageResolved", "id": id }))
             }
             WebviewCommand::SubscribeWindowEvents { events } => {
-                // D19 batch C protocol surface: the window-event family's
-                // drain command and native queue were deleted in one
-                // compatibility decision (contract-3). The Windows producer
-                // migration and subscription gating land with the Windows
-                // batch; this arm only keeps the shared protocol dispatch
-                // total and acknowledges the frozen family list.
-                let _ = self.require_session(tray_id, "subscribeWindowEvents")?;
+                // D19 batch C: real producer gating on Windows. The facade's
+                // window-event family interest lands in the bridge; producers
+                // check it before any EventPort submission, so an
+                // unsubscribed event costs no native observation record.
+                let session = self.require_session(tray_id, "subscribeWindowEvents")?;
+                session
+                    .bridge
+                    .borrow_mut()
+                    .subscribe_window_events(&events);
                 Ok(json!({ "type": "windowEventsSubscribed", "events": events }))
             }
             WebviewCommand::UnsubscribeWindowEvents { events } => {
-                let _ = self.require_session(tray_id, "unsubscribeWindowEvents")?;
+                let session = self.require_session(tray_id, "unsubscribeWindowEvents")?;
+                session
+                    .bridge
+                    .borrow_mut()
+                    .unsubscribe_window_events(&events);
                 Ok(json!({ "type": "windowEventsUnsubscribed", "events": events }))
             }
             WebviewCommand::OpenDevtools => {
@@ -1289,7 +1303,8 @@ impl WindowsWebviewRuntime {
             content_descriptor: content_descriptor.clone(),
             ipc_messages: VecDeque::new(),
             permission_messages: VecDeque::new(),
-            window_events: VecDeque::new(),
+            tray_id: tray_id.clone(),
+            window_event_subscriptions: HashSet::new(),
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
             style,
@@ -1845,6 +1860,10 @@ fn hide_bridge_window(bridge: &RefCell<NavigatorWindowBridge>) {
 fn close_bridge_window(bridge: &RefCell<NavigatorWindowBridge>) -> Result<(), WebviewRuntimeError> {
     let was_visible = window_is_visible(bridge.borrow().hwnd);
     hide_bridge_window(bridge);
+    // D19 batch C: `closed` joins the subscription-gated push family (the
+    // macOS window delegate owns the same moment); the page-bridge emission
+    // below stays a separate consumer surface.
+    submit_window_event_push(bridge, "closed", &json!({ "visible": false }));
     emit_window_event(bridge, "closed", json!({ "visible": false }))?;
     emit_visible_change_if_needed(bridge, was_visible)
 }
@@ -1871,10 +1890,10 @@ fn emit_visible_change_if_needed(
         return Ok(());
     }
     let payload = json!({ "visible": visible });
-    bridge
-        .borrow_mut()
-        .window_events
-        .push_back(json!({ "type": "visibleChange", "visible": visible }));
+    // D19 batch C: the retired drain queue entry becomes a
+    // subscription-gated EventPort push in the same wire shape; the
+    // page-bridge emission stays.
+    submit_window_event_push(bridge, "visibleChange", &payload);
     emit_window_event(bridge, "visibleChange", payload)
 }
 
@@ -3826,21 +3845,16 @@ fn emit_soft_resize_geometry_changes(
     let resized = bounds.width != initial_bounds.width || bounds.height != initial_bounds.height;
     if moved {
         let payload = json!({ "x": bounds.x, "y": bounds.y });
-        bridge
-            .borrow_mut()
-            .window_events
-            .push_back(json!({ "type": "moved", "x": bounds.x, "y": bounds.y }));
+        // D19 batch C: `moved`/`resized` were Windows-only drain-queue records
+        // outside the frozen push family; the retired queue took them with
+        // it. The page-bridge emission stays, and the facade geometry surface
+        // is the per-view `geometryChange` push family (D19 batch B).
         if let Err(error) = emit_window_event(bridge, "moved", payload) {
             eprintln!("opentray-ext-webview failed to emit Windows soft-resize move: {error}");
         }
     }
     if resized {
         let payload = json!({ "width": bounds.width, "height": bounds.height });
-        bridge.borrow_mut().window_events.push_back(json!({
-            "type": "resized",
-            "width": bounds.width,
-            "height": bounds.height,
-        }));
         if let Err(error) = emit_window_event(bridge, "resized", payload) {
             eprintln!("opentray-ext-webview failed to emit Windows soft-resize resize: {error}");
         }
@@ -4845,6 +4859,43 @@ fn reject_callback(
     error: &WebviewRuntimeError,
 ) -> Result<(), WebviewRuntimeError> {
     evaluate_bridge_script(bridge, view, error_callback_script(callback_id, error)?)
+}
+
+/// D19 batch C producer half of the legacy window-event family: submits one
+/// record through the EventPort, gated on the facade's subscription for that
+/// event name. The wire shape is frozen from the retired drain queue payloads
+/// (`{ "type": event, ...payload }`), so the facade's `data.type === event`
+/// listener filter matches unchanged. Page-bridge delivery
+/// ([`emit_window_event`]) is a separate consumer surface and is NOT handled
+/// here.
+pub(super) fn submit_window_event_push(
+    bridge: &RefCell<NavigatorWindowBridge>,
+    event: &str,
+    payload: &Value,
+) {
+    let (subscribed, tray_id) = {
+        let state = bridge.borrow();
+        (
+            state.is_window_event_subscribed(event),
+            state.tray_id.clone(),
+        )
+    };
+    if !subscribed {
+        // No facade listener: no native observation record leaves the
+        // producer (batch C producer-gating law).
+        return;
+    }
+    match crate::event_port::submit_window_event(&tray_id, event, payload) {
+        crate::event_port::SubmitStatus::LegacyFlush => {
+            // A port-less host is outside the contract-3 lockstep graph; the
+            // drain queue that used to carry this family is retired with the
+            // poll. Report and drop — never silently.
+            eprintln!(
+                "opentray-ext-webview: window event {event} for tray {tray_id} dropped: no event port attached"
+            );
+        }
+        _ => {}
+    }
 }
 
 pub(super) fn emit_window_event(
@@ -5906,6 +5957,26 @@ fn is_loopback_host(host: &str) -> bool {
 }
 
 impl NavigatorWindowBridge {
+    /// D19 batch C subscription surface: the facade's window-event family
+    /// interest. Producers check [`Self::is_window_event_subscribed`] before
+    /// any EventPort submission, so an unlistened event costs no native
+    /// observation record.
+    fn subscribe_window_events(&mut self, events: &[String]) {
+        for event in events {
+            self.window_event_subscriptions.insert(event.clone());
+        }
+    }
+
+    fn unsubscribe_window_events(&mut self, events: &[String]) {
+        for event in events {
+            self.window_event_subscriptions.remove(event);
+        }
+    }
+
+    fn is_window_event_subscribed(&self, event: &str) -> bool {
+        self.window_event_subscriptions.contains(event)
+    }
+
     fn capabilities_json(&self) -> Result<Value, WebviewRuntimeError> {
         let devtools = self.devtools_enabled;
         serde_json::to_value(WindowCapabilities {
@@ -6668,10 +6739,13 @@ fn emit_window_interaction_change(hwnd: HWND, active: bool) {
     with_window_proc_state(hwnd, |state| {
         if let Some(bridge) = state.bridge {
             let bridge = unsafe { bridge.as_ref() };
-            bridge
-                .borrow_mut()
-                .window_events
-                .push_back(json!({ "type": "windowinteractionchange", "active": active }));
+            // D19 batch C: subscription-gated EventPort push replaces the
+            // retired drain queue entry; the page-bridge emission stays.
+            submit_window_event_push(
+                bridge,
+                "windowinteractionchange",
+                &json!({ "active": active }),
+            );
             if let Err(error) = emit_window_event(
                 bridge,
                 "windowinteractionchange",
@@ -6706,10 +6780,9 @@ fn emit_window_focus_change(hwnd: HWND, focused: bool) {
     with_window_proc_state(hwnd, |state| {
         if let Some(bridge) = state.bridge {
             let bridge = unsafe { bridge.as_ref() };
-            bridge
-                .borrow_mut()
-                .window_events
-                .push_back(json!({ "type": event }));
+            // D19 batch C: subscription-gated EventPort push replaces the
+            // retired drain queue entry; the page-bridge emission stays.
+            submit_window_event_push(bridge, event, &json!({}));
             if let Err(error) = emit_window_event(bridge, event, json!({})) {
                 eprintln!("opentray-ext-webview failed to emit Windows {event} event: {error}");
             }
@@ -6785,6 +6858,106 @@ mod tests {
     use super::*;
     use crate::WebviewBrowserPermissionRule;
     use windows_sys::Win32::UI::WindowsAndMessaging::CS_OWNDC;
+
+    use crate::{
+        MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings,
+        NavigatorWindowSettings, WebviewBrowserPermissionPolicy, WebviewDownloadSettings,
+        WebviewNativeApiPolicy, WebviewPermissionManagerPolicy, WebviewWindowBackground,
+        WebviewWindowControlsOverlaySettings,
+    };
+
+    /// Minimal bridge fixture for the pure window-event push surfaces (D19
+    /// batch C): no native window (hwnd null), no views — visibility truth
+    /// comes from the fake `WindowProcState` operational projection, and the
+    /// fixture is otherwise byte-for-byte the channels-test fixture shape.
+    fn window_event_test_bridge(tray_id: &str) -> Rc<RefCell<NavigatorWindowBridge>> {
+        Rc::new(RefCell::new(NavigatorWindowBridge {
+            hwnd: std::ptr::null_mut(),
+            window: None,
+            views: Vec::new(),
+            layout: WindowLayoutState::default(),
+            boxes: HashMap::new(),
+            event_core: std::rc::Weak::new(),
+            focus_tracker: std::rc::Weak::new(),
+            content_descriptor: WebviewContentDescriptor::DefaultHtml,
+            ipc_messages: VecDeque::new(),
+            permission_messages: VecDeque::new(),
+            tray_id: tray_id.to_string(),
+            window_event_subscriptions: HashSet::new(),
+            next_ipc_message_id: 1,
+            next_permission_message_id: 1,
+            style: WindowStyleState {
+                app_mode: false,
+                frameless: false,
+                resizable: true,
+                resizable_override: None,
+                keep_on_top: false,
+                auto_hide: true,
+                opacity: 1.0,
+                background: WebviewWindowBackground::Opaque,
+                platform: WindowPlatformStyleState {
+                    windows: WindowsWindowStyleState {
+                        corner_preference: None,
+                    },
+                },
+            },
+            window_controls_overlay: WebviewWindowControlsOverlaySettings::default(),
+            navigator_window: NavigatorWindowSettings::default(),
+            navigator_screen: NavigatorScreenSettings::default(),
+            navigator_tray: NavigatorTraySettings::default(),
+            metadata: WindowMetadataState {
+                title: "OpenTray".to_string(),
+                icon: None,
+                native_icon: None,
+                sync_title: MetadataSyncSettings::default(),
+                sync_icon: MetadataSyncSettings::default(),
+            },
+            devtools_enabled: false,
+            download: WebviewDownloadSettings::default(),
+            native_api_policy: WebviewNativeApiPolicy::default(),
+            browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
+            permission_manager_policy: WebviewPermissionManagerPolicy::default(),
+            page_source: PageSourceState::default(),
+            page_access: PageCapabilityAccess::default(),
+            tray_bounds: None,
+            size_constraints: WindowSizeConstraints::default(),
+            channels: Rc::new(RefCell::new(crate::channels::SessionChannels::new(
+                WindowOwner {
+                    app_id: "app-1".to_string(),
+                    tray_id: tray_id.to_string(),
+                    session_id: Some("session-1".to_string()),
+                    window_id: "win-1".to_string(),
+                },
+            ))),
+            channel_loaded_views: HashSet::new(),
+            channel_live_views: HashSet::new(),
+            pending_channel_pushes: HashMap::new(),
+        }))
+    }
+
+    /// Registers one bridge under a fake hwnd in the thread-local
+    /// `WindowProcState` table so the WndProc-level producers
+    /// (`emit_window_focus_change`, `emit_window_interaction_change`, ...)
+    /// find it exactly like a real window would. The state entry MUST be
+    /// removed before the bridge `Rc` drops (the raw pointer borrows it).
+    fn register_test_window_proc_state(hwnd: HWND, bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
+        WINDOW_PROC_STATES.with(|states| {
+            states.borrow_mut().insert(
+                hwnd as isize,
+                WindowProcState {
+                    bridge: Some(NonNull::from(bridge.as_ref())),
+                    operational_visible: Some(true),
+                    ..WindowProcState::default()
+                },
+            );
+        });
+    }
+
+    fn unregister_test_window_proc_state(hwnd: HWND) {
+        WINDOW_PROC_STATES.with(|states| {
+            states.borrow_mut().remove(&(hwnd as isize));
+        });
+    }
 
     #[test]
     fn webview_background_contract_distinguishes_clear_and_opaque() {
@@ -7678,5 +7851,159 @@ mod tests {
         assert_eq!(handled.result["type"], "channel.error");
         assert_eq!(handled.result["error"]["code"], "unknown_view");
         assert!(handled.channel_events.is_empty());
+    }
+
+    // -- D19 batch C: window-event family producer gating ---------------------
+
+    /// WM_ACTIVATE focus/blur edges: no facade listener means no EventPort
+    /// submit at all; a subscribed family member pushes one Edge record per
+    /// native edge in the frozen drained wire shape, routed by the owning
+    /// tray; unsubscribing stops the producer work again (listener
+    /// accounting). Mirrors `macos::tests`
+    /// `window_level_focus_and_blur_events_push_only_when_subscribed`.
+    #[test]
+    fn window_level_focus_and_blur_events_push_only_when_subscribed() {
+        let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+        let hwnd = 0x574E_4556isize as HWND;
+        let bridge = window_event_test_bridge("tray-1");
+        register_test_window_proc_state(hwnd, &bridge);
+
+        // Unsubscribed: no native observation record leaves the producer.
+        emit_window_focus_change(hwnd, true);
+        assert!(port.submits().is_empty(), "focus without a listener is free");
+
+        bridge
+            .borrow_mut()
+            .subscribe_window_events(&["focus".to_string(), "blur".to_string()]);
+        emit_window_focus_change(hwnd, true);
+        emit_window_focus_change(hwnd, false);
+        let submits = port.submits();
+        assert_eq!(submits.len(), 2);
+        assert_eq!(
+            submits
+                .iter()
+                .map(|submit| submit.payload_tag.as_str())
+                .collect::<Vec<_>>(),
+            vec!["focus", "blur"]
+        );
+        assert!(submits.iter().all(|submit| submit.tray_id == "tray-1"));
+        assert!(submits
+            .iter()
+            .all(|submit| submit.class == opentray_spec::ExtEventClassV1::Edge.as_u32()));
+
+        // Unsubscribing stops the producer work again (listener accounting).
+        bridge
+            .borrow_mut()
+            .unsubscribe_window_events(&["focus".to_string(), "blur".to_string()]);
+        emit_window_focus_change(hwnd, true);
+        assert_eq!(port.submits().len(), 2);
+
+        unregister_test_window_proc_state(hwnd);
+        drop(bridge);
+        drop(port);
+    }
+
+    /// WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE interaction edges: subscription-gated
+    /// Edge pushes in the frozen `{ "type": "windowinteractionchange",
+    /// "active": ... }` wire shape; the page transport ids stay untouched.
+    /// Mirrors `macos::tests`
+    /// `app_region_drag_interaction_window_event_conserves_native_source`.
+    #[test]
+    fn window_interaction_change_pushes_only_when_subscribed() {
+        let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+        let hwnd = 0x574E_4557isize as HWND;
+        let bridge = window_event_test_bridge("tray-1");
+        register_test_window_proc_state(hwnd, &bridge);
+
+        emit_window_interaction_change(hwnd, true);
+        assert!(port.submits().is_empty(), "no subscription, no submit");
+        assert_eq!(bridge.borrow().next_ipc_message_id, 1);
+        assert!(bridge.borrow().ipc_messages.is_empty());
+
+        bridge
+            .borrow_mut()
+            .subscribe_window_events(&["windowinteractionchange".to_string()]);
+        emit_window_interaction_change(hwnd, true);
+        emit_window_interaction_change(hwnd, false);
+        let submits = port.submits();
+        assert_eq!(submits.len(), 2);
+        assert!(submits
+            .iter()
+            .all(|submit| submit.payload_tag == "windowinteractionchange"));
+        assert!(submits.iter().all(|submit| submit.tray_id == "tray-1"));
+        assert!(submits
+            .iter()
+            .all(|submit| submit.class == opentray_spec::ExtEventClassV1::Edge.as_u32()));
+
+        unregister_test_window_proc_state(hwnd);
+        drop(bridge);
+        drop(port);
+    }
+
+    /// The WM_SIZE operational-visibility edge drives `visibleChange` pushes
+    /// through the same subscription gate, exactly once per projection
+    /// change (the dedupled operational projection the drain used to carry).
+    #[test]
+    fn window_visible_change_pushes_once_per_operational_edge() {
+        let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+        let hwnd = 0x574E_4558isize as HWND;
+        let bridge = window_event_test_bridge("tray-1");
+        // The visibleChange path derives the lookup hwnd from the bridge
+        // field (unlike the focus/interaction producers, which receive it).
+        bridge.borrow_mut().hwnd = hwnd;
+        register_test_window_proc_state(hwnd, &bridge);
+
+        // Fake hwnd: native visibility reads closed (IsWindowVisible == 0),
+        // so the operational projection flips true -> false exactly once.
+        emit_window_visible_change_from_native_state(hwnd);
+        assert!(
+            port.submits().is_empty(),
+            "visibleChange without a listener is free"
+        );
+
+        bridge
+            .borrow_mut()
+            .subscribe_window_events(&["visibleChange".to_string()]);
+        WINDOW_PROC_STATES.with(|states| {
+            states
+                .borrow_mut()
+                .get_mut(&(hwnd as isize))
+                .expect("registered state")
+                .operational_visible = Some(true);
+        });
+        emit_window_visible_change_from_native_state(hwnd);
+        emit_window_visible_change_from_native_state(hwnd);
+        let submits = port.submits();
+        assert_eq!(submits.len(), 1, "projection edge fires exactly once");
+        assert_eq!(submits[0].payload_tag, "visibleChange");
+        assert_eq!(submits[0].tray_id, "tray-1");
+        assert_eq!(
+            submits[0].class,
+            opentray_spec::ExtEventClassV1::Edge.as_u32()
+        );
+
+        unregister_test_window_proc_state(hwnd);
+        drop(bridge);
+        drop(port);
+    }
+
+    /// H0 legacy host: the drain queue is retired with the poll, so a
+    /// port-less host (outside the contract-3 lockstep graph) drops the
+    /// record after the diagnostic; nothing is queued anywhere.
+    /// Mirrors `macos::tests`
+    /// `window_level_events_on_a_portless_host_report_and_drop`.
+    #[test]
+    fn window_level_events_on_a_portless_host_report_and_drop() {
+        // Serialize against any concurrently running fixture that attaches
+        // the fake port; this test deliberately stays port-less.
+        let _guard = crate::event_port::diagnostics::state_guard();
+        let bridge = window_event_test_bridge("tray-1");
+        bridge
+            .borrow_mut()
+            .subscribe_window_events(&["focus".to_string()]);
+        submit_window_event_push(bridge.as_ref(), "focus", &json!({}));
+        assert!(bridge.borrow().ipc_messages.is_empty());
+        assert!(bridge.borrow().is_window_event_subscribed("focus"));
+        assert!(!bridge.borrow().is_window_event_subscribed("blur"));
     }
 }

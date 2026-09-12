@@ -333,6 +333,11 @@ fn emit_download_event(
     let Some(bridge) = bridge.upgrade() else {
         return;
     };
+    // D19 batch C: the download family pushes through the EventPort under
+    // the facade's subscription (batch C classification: every member Edge
+    // except downloadprogress BestEffort); the page-bridge emission below
+    // stays a separate consumer surface.
+    super::submit_window_event_push(bridge.as_ref(), event, &payload);
     if let Err(error) = emit_window_event(bridge.as_ref(), event, payload) {
         eprintln!("opentray-ext-webview failed to emit Windows {event} event: {error}");
     }
