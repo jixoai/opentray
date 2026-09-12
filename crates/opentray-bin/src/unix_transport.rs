@@ -159,10 +159,10 @@ where
     B: AppBackend + 'static,
 {
     let (sender, receiver) = std::sync::mpsc::channel::<BrokerEvent>();
+    let event_hub = EventHub::new(Box::new(ChannelWake(sender.clone())));
     let listener = spawn_listener(options.clone(), move |event| {
         let _ = sender.send(BrokerEvent::Transport(event));
     })?;
-    let event_hub = EventHub::new(Box::new(ChannelWake(sender.clone())));
     let mut broker = BrokerKernel::with_default_app_options(
         backend,
         DynamicExtensionLoader::from_env(event_hub.clone())?,
