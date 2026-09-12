@@ -8,14 +8,14 @@ Non-toolbar windows SHALL project the config sync defaults: title follows the do
 
 Every URL application's tray menu SHALL offer a `Reload` item that reloads the content webview without restarting the app. Toolbar pages SHALL bind back/forward/reload/address-focus keyboard shortcuts (⌘/Ctrl+←→, ⌘/Ctrl+[ ], ⌘/Ctrl+R, F5, ⌘/Ctrl+L); the documented limitation SHALL state that keystrokes land in whichever webview holds native focus, so the toolbar receives its shortcuts only while it holds focus.
 
-#### Scenario: Embedding-hostile addresses render in toolbar mode
+#### Scenario: Embedding-hostile targets degrade to the direct window
 
 - **GIVEN** `--toolbar` against an address whose response carries `X-Frame-Options: DENY`
 - **WHEN** the toolbar application runs
 - **THEN** the content webview SHALL load the address as a top-level browsing context and render it
 - **AND** creation SHALL NOT probe, warn about, or strip the toolbar request for embedding-policy reasons
 
-#### Scenario: Toolbar composes native webviews without the PTY
+#### Scenario: Toolbar wraps the address without the PTY
 
 - **GIVEN** a URL application generated with `toolbar: true`
 - **WHEN** its payload is written and the entry runs
@@ -36,7 +36,7 @@ Every URL application's tray menu SHALL offer a `Reload` item that reloads the c
 - **WHEN** the tray Reload item is activated
 - **THEN** the target page SHALL reload without the app process restarting
 
-#### Scenario: Sync defaults project into both window forms
+#### Scenario: Sync defaults project into the direct window
 
 - **GIVEN** a URL application with default sync options, generated with or without toolbar
 - **WHEN** its entry runs
