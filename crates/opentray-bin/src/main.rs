@@ -546,7 +546,11 @@ mod native_broker {
     use super::{
         broker_disconnect_action, broker_frame_action,
         dynamic_extension::DynamicExtensionLoader,
-        extension_events::{ExtensionDispatch, ExtensionEventRouter, LoadedExtension},
+        event_hub::{EventHub, RuntimeWake},
+        extension_events::{
+            drain_extension_events as drain_hub_events, ExtensionDispatch, ExtensionEventRouter,
+            LoadedExtension,
+        },
         BrokerDisconnectAction, BrokerOptions,
     };
 
@@ -555,9 +559,22 @@ mod native_broker {
         Transport(broker_transport::TransportEvent),
         Menu(tray_icon::menu::MenuEvent),
         Tray(tray_icon::TrayIconEvent),
+        /// Coalesced EventPort drain request from the D19 hub wake adapter.
+        ExtensionEventsReady,
         #[cfg(target_os = "macos")]
         AppReopenRequested,
         IdleExpired(u64),
+    }
+
+    /// Winit wake adapter: the owner loop is the winit user-event loop on
+    /// macOS and Windows, so a drain request is one proxy user event. This
+    /// is a host adapter; the C ABI never exposes the loop.
+    struct ProxyWake(EventLoopProxy<UserEvent>);
+
+    impl RuntimeWake for ProxyWake {
+        fn wake(&self) -> bool {
+            self.0.send_event(UserEvent::ExtensionEventsReady).is_ok()
+        }
     }
 
     pub fn run(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
@@ -587,14 +604,17 @@ mod native_broker {
             let _ = proxy.send_event(UserEvent::Tray(event));
         }));
 
+        let event_hub = EventHub::new(Box::new(ProxyWake(event_loop.create_proxy())));
+
         let mut app = NativeBrokerApp {
             broker: BrokerKernel::with_default_app_options(
                 TrayIconBackend::with_runtime(NativeTrayIconRuntime::new()),
-                DynamicExtensionLoader::from_env()?,
+                DynamicExtensionLoader::from_env(event_hub.clone())?,
                 options.default_app_options(),
                 options.broker_artifact_identity().clone(),
             ),
             extension_events: ExtensionEventRouter::new(),
+            event_hub,
             sessions: HashMap::new(),
             broker_version: options.package_version.clone(),
             idle_timeout: options.idle_timeout,
@@ -626,6 +646,7 @@ mod native_broker {
     struct NativeBrokerApp {
         broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>, DynamicExtensionLoader>,
         extension_events: ExtensionEventRouter,
+        event_hub: EventHub,
         sessions: HashMap<u64, broker_transport::TransportSession>,
         broker_version: String,
         idle_timeout: Option<Duration>,
@@ -657,6 +678,7 @@ mod native_broker {
                 }
                 UserEvent::Menu(event) => self.handle_menu(event),
                 UserEvent::Tray(event) => self.handle_tray(event),
+                UserEvent::ExtensionEventsReady => self.drain_extension_events(),
                 #[cfg(target_os = "macos")]
                 UserEvent::AppReopenRequested => self.dispatch_app_reopen_requested(),
                 UserEvent::IdleExpired(generation) => {
@@ -676,6 +698,10 @@ mod native_broker {
         }
 
         fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+            // Shutdown law: revoke every source and discard queued records
+            // before the loop stops; there is no flush promise to keep.
+            self.event_hub.revoke_all();
+            self.event_hub.log_shutdown_diagnostics();
             if let Some(listener) = self.listener.take() {
                 listener.shutdown();
             }
@@ -737,22 +763,39 @@ mod native_broker {
                     let session_was_initialized = session.broker.session_id().is_some();
                     let kernel_session_id = session.broker.session_id().map(ToOwned::to_owned);
                     let exit_action = broker_frame_action(&frame, session_was_initialized);
+                    // Lifecycle law: the kernel's Exit dispatch runs session
+                    // cleanup inline, so the closing session's EventPort
+                    // sources must be revoked BEFORE dispatch — its cleanup
+                    // pushes then observe PORT_CLOSED instead of queueing
+                    // across the close.
+                    if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
+                        if let Some(session_id) = kernel_session_id.as_deref() {
+                            self.event_hub.revoke_session(session_id);
+                        }
+                    }
                     let loaded = LoadedExtension::from_frame(&frame);
                     let mut extension_host = self
                         .extension_events
-                        .host(ExtensionDispatch::from_frame(&frame));
+                        .host(ExtensionDispatch::from_frame(&frame), Some(&self.event_hub));
                     let frames = self.broker.handle_frame_with_extension_host(
                         &mut session.broker,
                         frame,
                         &self.broker_version,
                         &mut extension_host,
                     );
-                    let load_acknowledged =
-                        matches!(frames.first(), Some(ServerFrame::Ack { .. }));
+                    let load_acknowledged = matches!(frames.first(), Some(ServerFrame::Ack { .. }));
                     session.write_frames(frames);
                     if let (Some(loaded), Some(owner)) = (loaded, kernel_session_id.as_deref()) {
                         if load_acknowledged {
-                            self.extension_events.note_loaded(loaded, owner.to_string());
+                            self.extension_events
+                                .note_loaded(loaded.clone(), owner.to_string());
+                            // Only a successful LoadExt ACK opens the source
+                            // reserved by the loader.
+                            self.event_hub.note_loaded_and_open(
+                                &loaded.app_id,
+                                &loaded.instance,
+                                owner,
+                            );
                         }
                     }
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
@@ -765,6 +808,9 @@ mod native_broker {
                         }
                     }
                     self.deliver_extension_events(extension_host.take_events());
+                    // Post-response barrier: hub records submitted during the
+                    // dispatch are delivered only after its response frames.
+                    self.drain_extension_events();
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
                         // Windows named-pipe half-close may defer `Disconnected` indefinitely.
                         // `Exit` already performed kernel cleanup above, so the dedicated broker
@@ -781,7 +827,14 @@ mod native_broker {
                     if let Some(mut session) = self.sessions.remove(&id) {
                         was_initialized = session.broker.session_id().is_some();
                         let closing_session_id = session.broker.session_id().map(ToOwned::to_owned);
-                        let mut extension_host = self.extension_events.host(None);
+                        // Lifecycle law: revoke BEFORE core session_closed so
+                        // the closing session's cleanup pushes observe
+                        // PORT_CLOSED and never cross the close.
+                        if let Some(session_id) = closing_session_id.as_deref() {
+                            self.event_hub.revoke_session(session_id);
+                        }
+                        let mut extension_host =
+                            self.extension_events.host(None, Some(&self.event_hub));
                         let _ = self.broker.close_session_with_extension_host(
                             &mut session.broker,
                             &mut extension_host,
@@ -790,6 +843,7 @@ mod native_broker {
                             self.extension_events.forget_session(session_id);
                         }
                         self.deliver_extension_events(extension_host.take_events());
+                        self.drain_extension_events();
                     }
                     self.bump_idle_generation();
                     self.schedule_idle_if_empty();
@@ -848,6 +902,29 @@ mod native_broker {
             self.extension_events.deliver(events, &mut |owner, frame| {
                 let mut delivered = false;
                 for session in self.sessions.values_mut() {
+                    if session.broker.session_id() == Some(owner) {
+                        session.write_frame(frame.clone());
+                        delivered = true;
+                    }
+                }
+                delivered
+            });
+        }
+
+        /// Bounded hub drain (one 64-record/128-KiB round-robin quantum) with
+        /// source-bound route validation; re-wakes itself while drainable
+        /// work remains. Runs on the owner loop only, after response frames.
+        fn drain_extension_events(&mut self) {
+            let Self {
+                event_hub,
+                extension_events,
+                broker,
+                sessions,
+                ..
+            } = self;
+            drain_hub_events(event_hub, extension_events, broker, &mut |owner, frame| {
+                let mut delivered = false;
+                for session in sessions.values_mut() {
                     if session.broker.session_id() == Some(owner) {
                         session.write_frame(frame.clone());
                         delivered = true;
