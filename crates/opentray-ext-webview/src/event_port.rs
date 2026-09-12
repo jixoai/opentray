@@ -357,7 +357,23 @@ pub(crate) mod diagnostics {
     pub(crate) fn rejected_submits() -> u64 {
         REJECTED_SUBMITS.load(Ordering::Relaxed)
     }
+
+    /// Serializes a test with this module's fixture state. Tests outside
+    /// this file that exercise `submit_frame`'s process-global port state
+    /// (e.g. a platform seam routing a frame to the legacy outbox) must hold
+    /// this guard so a concurrently running fixture here can neither attach
+    /// a fake port nor reset it mid-assertion.
+    pub(crate) fn state_guard() -> std::sync::MutexGuard<'static, ()> {
+        super::TEST_STATE_GUARD
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
 }
+
+/// Test-only serializer for the process-global port/retry state (the same
+/// lock the module's own fixtures take through `diagnostics::state_guard`).
+#[cfg(test)]
+static TEST_STATE_GUARD: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
 impl EventPortClass {
@@ -398,11 +414,11 @@ mod tests {
         );
     }
 
-    /// Tests share process-wide statics; this guard serializes them.
-    static GUARD: Mutex<()> = Mutex::new(());
-
+    /// Tests share process-wide statics; serialized through the module-level
+    /// `TEST_STATE_GUARD` (also exposed to sibling module tests through
+    /// `diagnostics::state_guard`).
     fn lock_state() -> std::sync::MutexGuard<'static, ()> {
-        GUARD.lock().unwrap_or_else(|error| error.into_inner())
+        super::diagnostics::state_guard()
     }
 
     fn reset_state() {
