@@ -54,7 +54,13 @@ impl ExtensionErrorSlot {
     }
 
     /// Moves the current error into an extension-owned JSON buffer.
-    pub fn take_json(&self, out: *mut ExtOwnedBytes) -> ExtResultCode {
+    ///
+    /// # Safety
+    ///
+    /// `out` must be null or point to a valid, writable, caller-owned
+    /// `ExtOwnedBytes` (FFI boundary helper; callers live in `unsafe
+    /// extern "C"` bodies).
+    pub unsafe fn take_json(&self, out: *mut ExtOwnedBytes) -> ExtResultCode {
         let detail = self
             .detail
             .lock()
@@ -116,7 +122,13 @@ pub fn build_embedded_extension_manifest(
 }
 
 /// Serializes a value into an extension-owned C buffer.
-pub fn write_owned_json<T: Serialize>(out: *mut ExtOwnedBytes, value: &T) -> ExtResultCode {
+///
+/// # Safety
+///
+/// `out` must be null or point to a valid, writable `ExtOwnedBytes` that the
+/// caller owns — this function dereferences and writes through it (FFI
+/// boundary helper; every caller lives inside an `unsafe extern "C"` body).
+pub unsafe fn write_owned_json<T: Serialize>(out: *mut ExtOwnedBytes, value: &T) -> ExtResultCode {
     if out.is_null() {
         return EXT_ERR_REJECTED;
     }
