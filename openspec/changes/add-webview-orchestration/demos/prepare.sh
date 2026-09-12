@@ -12,7 +12,9 @@ cp -f target/release/libopentray_ext_webview.dylib \
 mkdir -p packages/darwin-arm64/bin packages/darwin-arm64/app
 cp -f target/release/opentray packages/darwin-arm64/bin/opentray
 cp -f packages/darwin-app-carrier/Info.plist packages/darwin-arm64/app/Info.plist
-pnpm -F opentray build
+# Rebuild every packed package's dist BEFORE packing: a stale dist ships an
+# old facade in the tarball (8.5 friction — onLoadState missing crashed apps).
+pnpm -F @opentray/spec -F @opentray/ext-webview -F opentray build
 for p in opentray @opentray/spec @opentray/packaging @opentray/icon \
          @opentray/darwin-arm64 @opentray/ext-webview \
          @opentray/ext-webview-darwin-arm64; do
