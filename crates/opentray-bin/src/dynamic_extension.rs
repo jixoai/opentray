@@ -14,12 +14,15 @@ use opentray_core::{
 #[cfg(test)]
 use opentray_spec::REQUIRED_EXTENSION_SYMBOLS;
 use opentray_spec::{
-    EmbeddedExtensionManifest, ExpectedExtensionIdentity, ExtBytes, ExtContext, ExtHostContext,
-    ExtOwnedBytes, ExtResultCode, ExtensionEnvelope, ExtensionErrorDetail, ExtensionScope, Rect,
-    EXT_ABI_VERSION, EXT_API_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED,
-    EXT_OK, EXT_SYMBOL_ABI_VERSION, EXT_SYMBOL_COMMAND, EXT_SYMBOL_DEINIT, EXT_SYMBOL_FREE_STRING,
+    EmbeddedExtensionManifest, ExpectedExtensionIdentity, ExtAttachEventPortV1Fn, ExtBytes,
+    ExtContext, ExtEventPortV1, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
+    ExtensionErrorDetail, ExtensionScope, Rect, EXT_ABI_VERSION, EXT_API_VERSION, EXT_ERR_INTERNAL,
+    EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED, EXT_EVENT_PORT_ABI_V1, EXT_OK, EXT_SYMBOL_ABI_VERSION,
+    EXT_SYMBOL_ATTACH_EVENT_PORT_V1, EXT_SYMBOL_COMMAND, EXT_SYMBOL_DEINIT, EXT_SYMBOL_FREE_STRING,
     EXT_SYMBOL_INIT, EXT_SYMBOL_MANIFEST, EXT_SYMBOL_SESSION_CLOSED, EXT_SYMBOL_TAKE_ERROR,
 };
+
+use crate::event_hub::{EventHub, SourceHandle, SourceLimitReached};
 
 type ExtAbiVersionFn = unsafe extern "C" fn() -> u32;
 type ExtManifestFn = unsafe extern "C" fn(out_manifest_json: *mut ExtOwnedBytes) -> ExtResultCode;
@@ -45,16 +48,41 @@ type ExtTakeErrorFn = unsafe extern "C" fn(out_error_json: *mut ExtOwnedBytes) -
 
 const ABI_INCOMPATIBLE_CATEGORY: &str = "abi_incompatible";
 const ARTIFACT_IDENTITY_MISMATCH_CATEGORY: &str = "artifact_identity_mismatch";
+const EVENT_PORT_ABI_INCOMPATIBLE_CATEGORY: &str = "event_port_abi_incompatible";
+const EVENT_PORT_SOURCE_LIMIT_CATEGORY: &str = "event_port_source_limit";
+const EVENT_PORT_UNSUPPORTED_CATEGORY: &str = "event_port_unsupported";
+
+/// Delivery capability observed for one load. Recorded on the hub as
+/// capability diagnostics so direct EventPort delivery is distinguishable
+/// from legacy response flushing without inferring it from package versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PortCapability {
+    DirectEventPort,
+    LegacyFlush,
+}
+
+impl PortCapability {
+    fn diagnostic_label(self) -> &'static str {
+        match self {
+            PortCapability::DirectEventPort => "direct-event-port",
+            PortCapability::LegacyFlush => "legacy-flush",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct DynamicExtensionLoader {
     discovery: ExtensionDiscovery,
+    hub: EventHub,
 }
 
 impl DynamicExtensionLoader {
-    pub fn from_env() -> Result<Self, ExtensionError> {
+    /// The loader receives the broker EventHub from runtime composition; it
+    /// never exposes the hub to core.
+    pub fn from_env(hub: EventHub) -> Result<Self, ExtensionError> {
         Ok(Self {
             discovery: ExtensionDiscovery::from_env()?,
+            hub,
         })
     }
 
@@ -66,7 +94,8 @@ impl DynamicExtensionLoader {
             request,
             self.discovery.candidates(request),
             |library_path| {
-                let instance = unsafe { DynamicExtensionInstance::load(request, library_path)? };
+                let instance =
+                    unsafe { DynamicExtensionInstance::load(&self.hub, request, library_path)? };
                 Ok(Box::new(instance) as Box<dyn ExtensionInstance>)
             },
         )
@@ -260,6 +289,9 @@ struct DynamicExtensionInstance {
     deinit: ExtDeinitFn,
     free_string: ExtFreeStringFn,
     take_error: ExtTakeErrorFn,
+    source: Option<SourceHandle>,
+    #[allow(dead_code)] // capability diagnostic is logged at load; batch B probes it
+    event_port: PortCapability,
     _library: Library,
 }
 
@@ -267,6 +299,7 @@ unsafe impl Send for DynamicExtensionInstance {}
 
 impl DynamicExtensionInstance {
     unsafe fn load(
+        hub: &EventHub,
         request: &ExtensionLoadRequest,
         library_path: &Path,
     ) -> Result<Self, ExtensionError> {
@@ -335,6 +368,25 @@ impl DynamicExtensionInstance {
             return Err(result_error(&request.name, result, take_error, free_string));
         }
 
+        // The EventPort attach symbol is optional and singular: absence
+        // means legacy response flushing, presence is validated and invoked
+        // exactly once with a PENDING, host-owned port.
+        let attach = unsafe {
+            library
+                .get::<ExtAttachEventPortV1Fn>(
+                    format!("{EXT_SYMBOL_ATTACH_EVENT_PORT_V1}\0").as_bytes(),
+                )
+                .ok()
+                .map(|symbol| *symbol)
+        };
+        let (source, event_port) =
+            probe_and_attach(hub, request, attach, instance, take_error, free_string)?;
+        eprintln!(
+            "opentray extension {}: event delivery mode: {}",
+            request.instance_name(),
+            event_port.diagnostic_label()
+        );
+
         Ok(Self {
             name: request.instance_name().to_string(),
             instance,
@@ -343,6 +395,8 @@ impl DynamicExtensionInstance {
             deinit,
             free_string,
             take_error,
+            source: Some(source),
+            event_port,
             _library: library,
         })
     }
@@ -462,11 +516,124 @@ impl ExtensionInstance for DynamicExtensionInstance {
 
 impl Drop for DynamicExtensionInstance {
     fn drop(&mut self) {
+        // Lifecycle law: revoke the EventPort source BEFORE deinit and
+        // library drop, so a stale producer thread observes PORT_CLOSED
+        // against process-lifetime state and never races native teardown.
+        if let Some(source) = &self.source {
+            source.revoke();
+        }
         if !self.instance.is_null() {
             unsafe { (self.deinit)(self.instance) };
             self.instance = ptr::null_mut();
         }
     }
+}
+
+/// Reserves one PENDING source slot and, when the optional attach symbol is
+/// present, validates and transfers the immutable port exactly once. Absent
+/// symbol means legacy flush; a malformed port or failed attach rejects the
+/// load with a structured category — never a silent downgrade. The source
+/// limit rejects before any port is handed to the extension.
+fn probe_and_attach(
+    hub: &EventHub,
+    request: &ExtensionLoadRequest,
+    attach: Option<ExtAttachEventPortV1Fn>,
+    instance: *mut c_void,
+    take_error: ExtTakeErrorFn,
+    free_string: ExtFreeStringFn,
+) -> Result<(SourceHandle, PortCapability), ExtensionError> {
+    let handle = hub
+        .reserve_source(request.app_id.clone(), request.instance_name().to_string())
+        .map_err(|SourceLimitReached| ExtensionError::Detailed {
+            category: EVENT_PORT_SOURCE_LIMIT_CATEGORY.to_string(),
+            message: format!(
+                "extension {} cannot reserve an event port source: the broker has retained \
+                 {} source generations and must be restarted before another port can be created",
+                request.instance_name(),
+                crate::event_hub::EVENT_HUB_MAX_SOURCES
+            ),
+        })?;
+
+    let Some(attach) = attach else {
+        hub.note_capability(false);
+        return Ok((handle, PortCapability::LegacyFlush));
+    };
+
+    let port = handle.port();
+    if let Err(error) = validate_port(&port) {
+        handle.revoke();
+        return Err(ExtensionError::Detailed {
+            category: EVENT_PORT_ABI_INCOMPATIBLE_CATEGORY.to_string(),
+            message: format!(
+                "extension {} received a malformed event port: {}",
+                request.instance_name(),
+                match error {
+                    PortValidationError::AbiVersion(actual) => {
+                        format!("abi version {actual}; expected {EXT_EVENT_PORT_ABI_V1}")
+                    }
+                    PortValidationError::StructSize(actual) => {
+                        format!("struct size {actual}; expected {}", port.struct_size)
+                    }
+                    PortValidationError::NullPortData => {
+                        "port_data is null".to_string()
+                    }
+                }
+            ),
+        });
+    }
+
+    let result = unsafe { attach(instance, port) };
+    if result != EXT_OK {
+        handle.revoke();
+        let detail = take_extension_error(take_error, free_string);
+        return Err(match detail {
+            Some(detail) => ExtensionError::Detailed {
+                category: detail.category,
+                message: format!(
+                    "extension {} event port attach failed: {}",
+                    request.instance_name(),
+                    detail.message
+                ),
+            },
+            None if result == EXT_ERR_UNSUPPORTED => ExtensionError::Detailed {
+                category: EVENT_PORT_UNSUPPORTED_CATEGORY.to_string(),
+                message: format!(
+                    "extension {} explicitly does not support the event port and declares no \
+                     legacy fallback",
+                    request.instance_name()
+                ),
+            },
+            None => ExtensionError::Rejected(format!(
+                "extension {} event port attach returned code {result}",
+                request.instance_name()
+            )),
+        });
+    }
+
+    hub.note_capability(true);
+    Ok((handle, PortCapability::DirectEventPort))
+}
+
+enum PortValidationError {
+    AbiVersion(u32),
+    StructSize(u32),
+    NullPortData,
+}
+
+/// Defensive validation of the port the host is about to transfer: exact
+/// nested EventPort ABI version, matching struct size, and non-null host
+/// state. `try_submit` is non-nullable by its Rust function-pointer type.
+fn validate_port(port: &ExtEventPortV1) -> Result<(), PortValidationError> {
+    if port.abi_version != EXT_EVENT_PORT_ABI_V1 {
+        return Err(PortValidationError::AbiVersion(port.abi_version));
+    }
+    if port.struct_size as usize != std::mem::size_of::<ExtEventPortV1>() {
+        return Err(PortValidationError::StructSize(port.struct_size));
+    }
+    if port.port_data.is_null() {
+        return Err(PortValidationError::NullPortData);
+    }
+    Ok(())
 }
 
 unsafe fn get_symbol<T: Copy>(library: &Library, name: &str) -> Result<T, ExtensionError> {
@@ -759,7 +926,9 @@ fn current_arch() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_hub::event_hub_test_support::NoopWake;
     use opentray_core::RecordingExtension;
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
     fn expected_extension_identity(
         extension_name: &str,
@@ -773,6 +942,247 @@ mod tests {
                 arch: "arm64".to_string(),
             },
         }
+    }
+
+    // -- EventPort fixture matrix (task 2.3) --------------------------------
+    //
+    // The optional-attach decision table is exercised through
+    // `probe_and_attach` with stub attach/take_error functions, which is the
+    // exact code the loader runs between `init` and LoadExt ACK. Real
+    // cross-dylib fixtures belong to the ext-webview migration and platform
+    // evidence stages.
+
+    fn test_hub() -> EventHub {
+        EventHub::new(Box::new(NoopWake))
+    }
+
+    fn load_request(name: &str) -> ExtensionLoadRequest {
+        ExtensionLoadRequest {
+            app_id: "app-1".to_string(),
+            name: name.to_string(),
+            path: format!("test://{name}"),
+            expected_identity: expected_extension_identity(name),
+            mount_id: None,
+        }
+    }
+
+    unsafe extern "C" fn stub_take_error(_out: *mut ExtOwnedBytes) -> ExtResultCode {
+        // No structured detail: the loader must synthesize its own category.
+        EXT_ERR_UNSUPPORTED
+    }
+
+    unsafe extern "C" fn stub_free_string(_ptr: *mut std::ffi::c_char, _len: usize) {}
+
+    #[test]
+    fn absent_attach_symbol_loads_legacy_with_a_reserved_source() {
+        let hub = test_hub();
+        let request = load_request("webview");
+
+        let (handle, capability) = probe_and_attach(
+            &hub,
+            &request,
+            None,
+            ptr::null_mut(),
+            stub_take_error,
+            stub_free_string,
+        )
+        .expect("legacy load");
+
+        assert_eq!(capability, PortCapability::LegacyFlush);
+        assert_eq!(capability.diagnostic_label(), "legacy-flush");
+        // A legacy extension still gets a source slot: its command-time
+        // send_event pushes bind to the same hub ingress.
+        assert!(hub.current_source("app-1", "webview").is_some());
+        assert!(hub.note_loaded_and_open("app-1", "webview", "session-1"));
+        assert_eq!(hub.metrics().legacy_sources, 1);
+        assert_eq!(hub.metrics().direct_sources, 0);
+        drop(handle);
+    }
+
+    #[test]
+    fn successful_attach_transfers_one_validated_port() {
+        static ATTACH_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static CAPTURED_ABI: AtomicU32 = AtomicU32::new(0);
+        static CAPTURED_SIZE: AtomicU32 = AtomicU32::new(0);
+        static CAPTURED_PTR_NONNULL: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" fn capture_attach(
+            _instance: *mut c_void,
+            port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            ATTACH_CALLS.fetch_add(1, Ordering::SeqCst);
+            CAPTURED_ABI.store(port.abi_version, Ordering::SeqCst);
+            CAPTURED_SIZE.store(port.struct_size, Ordering::SeqCst);
+            CAPTURED_PTR_NONNULL.store(!port.port_data.is_null(), Ordering::SeqCst);
+            EXT_OK
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let (handle, capability) = probe_and_attach(
+            &hub,
+            &request,
+            Some(capture_attach),
+            0x1 as *mut c_void,
+            stub_take_error,
+            stub_free_string,
+        )
+        .expect("direct load");
+
+        assert_eq!(capability, PortCapability::DirectEventPort);
+        assert_eq!(ATTACH_CALLS.load(Ordering::SeqCst), 1, "attach runs once");
+        assert_eq!(CAPTURED_ABI.load(Ordering::SeqCst), EXT_EVENT_PORT_ABI_V1);
+        assert_eq!(
+            CAPTURED_SIZE.load(Ordering::SeqCst) as usize,
+            std::mem::size_of::<ExtEventPortV1>()
+        );
+        assert!(CAPTURED_PTR_NONNULL.load(Ordering::SeqCst));
+        assert_eq!(hub.metrics().direct_sources, 1);
+        // The transferred source is PENDING until the LoadExt ACK opens it.
+        assert!(
+            hub.note_loaded_and_open("app-1", "webview", "session-1"),
+            "ACK opens the attached source"
+        );
+        drop(handle);
+    }
+
+    #[test]
+    fn failed_attach_revokes_the_source_and_rejects_the_load() {
+        static ATTACH_CALLS: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn failing_attach(
+            _instance: *mut c_void,
+            _port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            ATTACH_CALLS.fetch_add(1, Ordering::SeqCst);
+            EXT_ERR_REJECTED
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let error = probe_and_attach(
+            &hub,
+            &request,
+            Some(failing_attach),
+            ptr::null_mut(),
+            stub_take_error,
+            stub_free_string,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("attach"), "{error}");
+        assert_eq!(ATTACH_CALLS.load(Ordering::SeqCst), 1);
+        // The source is REVOKED, never left openable after a failed load.
+        let current = hub
+            .current_source("app-1", "webview")
+            .expect("retained state");
+        assert!(!hub.note_loaded_and_open("app-1", "webview", "session-1"));
+        assert_eq!(
+            current.submit_push("tray-a", &serde_json::json!({ "type": "x" })),
+            crate::event_hub::SubmitOutcome::Closed
+        );
+        drop(current);
+    }
+
+    #[test]
+    fn explicit_unsupported_attach_rejects_without_a_silent_fallback() {
+        unsafe extern "C" fn unsupported_attach(
+            _instance: *mut c_void,
+            _port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            EXT_ERR_UNSUPPORTED
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let error = probe_and_attach(
+            &hub,
+            &request,
+            Some(unsupported_attach),
+            ptr::null_mut(),
+            stub_take_error,
+            stub_free_string,
+        )
+        .unwrap_err();
+
+        // Phase 1 manifests declare no legacy fallback, so an explicit
+        // unsupported attach rejects the load instead of downgrading.
+        let ExtensionError::Detailed { category, .. } = &error else {
+            panic!("expected structured rejection, got: {error}");
+        };
+        assert_eq!(category, EVENT_PORT_UNSUPPORTED_CATEGORY);
+    }
+
+    #[test]
+    fn malformed_ports_reject_as_event_port_abi_incompatible() {
+        let hub = test_hub();
+        let handle = hub
+            .reserve_source("app-1".to_string(), "webview".to_string())
+            .expect("source slot");
+        let valid = handle.port();
+        assert!(validate_port(&valid).is_ok());
+
+        let mut bad_abi = valid;
+        bad_abi.abi_version = EXT_EVENT_PORT_ABI_V1 + 1;
+        assert!(matches!(
+            validate_port(&bad_abi),
+            Err(PortValidationError::AbiVersion(actual)) if actual == EXT_EVENT_PORT_ABI_V1 + 1
+        ));
+
+        let mut bad_size = valid;
+        bad_size.struct_size = 0;
+        assert!(matches!(
+            validate_port(&bad_size),
+            Err(PortValidationError::StructSize(0))
+        ));
+
+        let mut null_data = valid;
+        null_data.port_data = ptr::null_mut();
+        assert!(matches!(
+            validate_port(&null_data),
+            Err(PortValidationError::NullPortData)
+        ));
+        drop(handle);
+    }
+
+    #[test]
+    fn source_limit_rejects_before_attach_is_invoked() {
+        static ATTACH_CALLS: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn counting_attach(
+            _instance: *mut c_void,
+            _port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            ATTACH_CALLS.fetch_add(1, Ordering::SeqCst);
+            EXT_OK
+        }
+
+        let hub = test_hub();
+        for index in 0..crate::event_hub::EVENT_HUB_MAX_SOURCES {
+            hub.reserve_source("app-1".to_string(), format!("gen{index}"))
+                .expect("source slot");
+        }
+
+        let request = load_request("webview");
+        let error = probe_and_attach(
+            &hub,
+            &request,
+            Some(counting_attach),
+            ptr::null_mut(),
+            stub_take_error,
+            stub_free_string,
+        )
+        .unwrap_err();
+
+        let ExtensionError::Detailed { category, message } = &error else {
+            panic!("expected structured rejection, got: {error}");
+        };
+        assert_eq!(category, EVENT_PORT_SOURCE_LIMIT_CATEGORY);
+        assert!(message.contains("must be restarted"));
+        assert_eq!(
+            ATTACH_CALLS.load(Ordering::SeqCst),
+            0,
+            "no port is handed out after the limit"
+        );
+        assert!(hub.current_source("app-1", "webview").is_none());
     }
 
     #[test]

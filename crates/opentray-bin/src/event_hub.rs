@@ -18,7 +18,9 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering, Ordering::Relaxed};
+use std::sync::atomic::{
+    AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering, Ordering::Relaxed,
+};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -211,7 +213,6 @@ struct SourceQueue {
 
 struct QueuedRecord {
     seq: u64,
-    class: ExtEventClassV1,
     coalesce_key: Option<Vec<u8>>,
     tray_id: String,
     data_json: Vec<u8>,
@@ -234,11 +235,7 @@ struct PreparedRecord {
 
 impl PreparedRecord {
     fn accounted(&self) -> usize {
-        QueuedRecord::accounted_parts(
-            &self.tray_id,
-            &self.data_json,
-            self.coalesce_key.as_deref(),
-        )
+        QueuedRecord::accounted_parts(&self.tray_id, &self.data_json, self.coalesce_key.as_deref())
     }
 }
 
@@ -247,6 +244,14 @@ impl PreparedRecord {
 pub(crate) struct SourceHandle {
     inner: Arc<HubInner>,
     state: Arc<SourceState>,
+}
+
+impl std::fmt::Debug for SourceHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceHandle")
+            .field("key", &self.key())
+            .finish_non_exhaustive()
+    }
 }
 
 impl SourceHandle {
@@ -297,7 +302,11 @@ impl SourceHandle {
         let mut queue = state.queue.lock().unwrap_or_else(|e| e.into_inner());
         if state.phase.load(Ordering::Acquire) == PHASE_REVOKED {
             drop(queue);
-            state.shared.metrics.port_closed_submits.fetch_add(1, Relaxed);
+            state
+                .shared
+                .metrics
+                .port_closed_submits
+                .fetch_add(1, Relaxed);
             return SubmitOutcome::Closed;
         }
         let prepared = PreparedRecord {
@@ -432,7 +441,9 @@ impl EventHub {
     /// Re-arms the wake when drainable work remains (budget-exhausted
     /// drains must continue until empty; PENDING-only work does not wake).
     pub(crate) fn rewake_if_ready(&self) {
-        self.inner.shared.rewake_if_ready(&|slot| self.inner.lookup(slot))
+        self.inner
+            .shared
+            .rewake_if_ready(&|slot| self.inner.lookup(slot))
     }
 
     /// Records the delivery capability the loader observed for one load, so
@@ -450,7 +461,11 @@ impl EventHub {
     /// Counts one drain-time drop whose route was revoked, stale, or not
     /// owned by the source session (source-tagged diagnostic).
     pub(crate) fn note_stale_drop(&self) {
-        self.inner.shared.metrics.dropped_stale.fetch_add(1, Relaxed);
+        self.inner
+            .shared
+            .metrics
+            .dropped_stale
+            .fetch_add(1, Relaxed);
     }
 
     pub(crate) fn metrics(&self) -> HubMetricsSnapshot {
@@ -498,7 +513,10 @@ impl HubInner {
         let mut table = self.sources.lock().unwrap_or_else(|e| e.into_inner());
         if table.reserved >= EVENT_HUB_MAX_SOURCES {
             drop(table);
-            self.shared.metrics.source_limit_rejects.fetch_add(1, Relaxed);
+            self.shared
+                .metrics
+                .source_limit_rejects
+                .fetch_add(1, Relaxed);
             return Err(SourceLimitReached);
         }
         let slot = table.slots.len() as u32;
@@ -552,10 +570,7 @@ impl HubInner {
         else {
             return false;
         };
-        *state
-            .owner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(owner_session_id.to_string());
+        *state.owner.lock().unwrap_or_else(|e| e.into_inner()) = Some(owner_session_id.to_string());
         match state.phase.compare_exchange(
             PHASE_PENDING,
             PHASE_OPEN,
@@ -681,10 +696,13 @@ impl HubShared {
             state.in_ready.store(false, Ordering::Release);
         }
         self.global_records.fetch_sub(1, Ordering::AcqRel);
-        self.global_bytes.fetch_sub(record.accounted, Ordering::AcqRel);
+        self.global_bytes
+            .fetch_sub(record.accounted, Ordering::AcqRel);
         self.metrics.drained.fetch_add(1, Relaxed);
         let latency = record.enqueued_at.elapsed().as_nanos() as u64;
-        self.metrics.drain_latency_max_ns.fetch_max(latency, Relaxed);
+        self.metrics
+            .drain_latency_max_ns
+            .fetch_max(latency, Relaxed);
         let owner = state
             .owner
             .lock()
@@ -796,19 +814,17 @@ impl HubShared {
                         self.metrics.backpressured.fetch_add(1, Relaxed);
                         return SubmitOutcome::Backpressure;
                     }
-                    if delta > 0
-                        && !self.reserve_global_bytes(delta as usize)
-                    {
+                    if delta > 0 && !self.reserve_global_bytes(delta as usize) {
                         self.metrics.backpressured.fetch_add(1, Relaxed);
                         return SubmitOutcome::Backpressure;
                     }
                     if delta < 0 {
-                        self.global_bytes.fetch_sub((-delta) as usize, Ordering::AcqRel);
+                        self.global_bytes
+                            .fetch_sub((-delta) as usize, Ordering::AcqRel);
                     }
                     let seq = queue.records[index].seq;
                     queue.records[index] = QueuedRecord {
                         seq,
-                        class: prepared.class,
                         coalesce_key: prepared.coalesce_key.clone(),
                         tray_id: prepared.tray_id,
                         data_json: prepared.data_json,
@@ -850,7 +866,6 @@ impl HubShared {
         queue.bytes += accounted;
         queue.records.push_back(QueuedRecord {
             seq,
-            class: prepared.class,
             coalesce_key: prepared.coalesce_key,
             tray_id: prepared.tray_id,
             data_json: prepared.data_json,
@@ -910,7 +925,10 @@ impl SourceState {
         if self.phase.load(Ordering::Acquire) == PHASE_REVOKED {
             // Do not dereference input after revoke.
             drop(queue);
-            self.shared.metrics.port_closed_submits.fetch_add(1, Relaxed);
+            self.shared
+                .metrics
+                .port_closed_submits
+                .fetch_add(1, Relaxed);
             return SubmitOutcome::Closed;
         }
         let Some(prepared) = validate_and_copy_bounded(input) else {
@@ -1051,6 +1069,22 @@ pub(crate) struct HubMetricsSnapshot {
     pub(crate) global_bytes: u64,
 }
 
+/// Shared test-support wake adapters for crate-internal tests.
+#[cfg(test)]
+pub(crate) mod event_hub_test_support {
+    use super::RuntimeWake;
+
+    /// A wake adapter that always succeeds without scheduling anything:
+    /// tests drive drains explicitly, deterministically.
+    pub(crate) struct NoopWake;
+
+    impl RuntimeWake for NoopWake {
+        fn wake(&self) -> bool {
+            true
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1188,7 +1222,13 @@ mod tests {
 
         // Raced submit while PENDING: accepted, but private.
         assert_eq!(
-            submit(&port, "tray-a", &payload("pre"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("pre"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
         assert!(drain_all(&hub).is_empty(), "PENDING records stay private");
@@ -1201,7 +1241,13 @@ mod tests {
 
         // Post-revoke submit: closed, no queue mutation, payload unread.
         assert_eq!(
-            submit(&port, "tray-a", &payload("late"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("late"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_ERR_PORT_CLOSED
         );
         assert_eq!(hub.metrics().port_closed_submits, 1);
@@ -1215,7 +1261,13 @@ mod tests {
             .expect("source slot");
         let port = handle.port();
         assert_eq!(
-            submit(&port, "tray-a", &payload("raced"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("raced"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
 
@@ -1244,7 +1296,13 @@ mod tests {
 
         // Outcome 1: accepted and delivered before close.
         assert_eq!(
-            submit(&port, "tray-a", &payload("before"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("before"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
         assert_eq!(drain_all(&hub).len(), 1);
@@ -1252,7 +1310,13 @@ mod tests {
         // Outcome 2: accepted, then discarded by the close (revoke runs
         // before core session cleanup).
         assert_eq!(
-            submit(&port, "tray-a", &payload("discarded"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("discarded"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
         assert_eq!(hub.revoke_session("session-1"), 1);
@@ -1261,13 +1325,25 @@ mod tests {
 
         // Outcome 3: closed outright.
         assert_eq!(
-            submit(&port, "tray-a", &payload("closed"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("closed"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_ERR_PORT_CLOSED
         );
         // Another session's records are untouched by this session's revoke.
         let other = open_source(&hub, "app-b", "webview", "session-2");
         assert_eq!(
-            submit(&other.port(), "tray-b", &payload("other"), ExtEventClassV1::Edge, None),
+            submit(
+                &other.port(),
+                "tray-b",
+                &payload("other"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
         assert_eq!(drain_all(&hub).len(), 1);
@@ -1285,7 +1361,13 @@ mod tests {
 
         // A delayed record from the replaced mount generation.
         assert_eq!(
-            submit(&old_port, "tray-a", &payload("old"), ExtEventClassV1::Edge, None),
+            submit(
+                &old_port,
+                "tray-a",
+                &payload("old"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
 
@@ -1299,11 +1381,23 @@ mod tests {
 
         // The stale producer reaches immortal state and gets PORT_CLOSED.
         assert_eq!(
-            submit(&old_port, "tray-a", &payload("stale"), ExtEventClassV1::Edge, None),
+            submit(
+                &old_port,
+                "tray-a",
+                &payload("stale"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_ERR_PORT_CLOSED
         );
         assert_eq!(
-            submit(&new.port(), "tray-a", &payload("new"), ExtEventClassV1::Edge, None),
+            submit(
+                &new.port(),
+                "tray-a",
+                &payload("new"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
 
@@ -1395,8 +1489,7 @@ mod tests {
             let mut seen = Vec::new();
             for record in &drained {
                 let text = std::str::from_utf8(&record.data_json).expect("utf-8 payload");
-                let value: serde_json::Value =
-                    serde_json::from_str(text).expect("parsed payload");
+                let value: serde_json::Value = serde_json::from_str(text).expect("parsed payload");
                 if value["tag"].as_str().is_some_and(|tag| {
                     tag.strip_prefix('t')
                         .and_then(|rest| rest.split_once("-s"))
@@ -1439,7 +1532,13 @@ mod tests {
             );
         }
         assert_eq!(
-            submit(&quiet.port(), "tray-a", &payload("q0"), ExtEventClassV1::Edge, None),
+            submit(
+                &quiet.port(),
+                "tray-a",
+                &payload("q0"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
 
@@ -1470,16 +1569,32 @@ mod tests {
         let key = b"content/url";
 
         assert_eq!(
-            submit(&port, "tray-a", &payload("v1"), ExtEventClassV1::Latest, Some(key)),
+            submit(
+                &port,
+                "tray-a",
+                &payload("v1"),
+                ExtEventClassV1::Latest,
+                Some(key)
+            ),
             EXT_OK
         );
         assert_eq!(
-            submit(&port, "tray-a", &payload("v2"), ExtEventClassV1::Latest, Some(key)),
+            submit(
+                &port,
+                "tray-a",
+                &payload("v2"),
+                ExtEventClassV1::Latest,
+                Some(key)
+            ),
             EXT_OK
         );
         let drained = drain_all(&hub);
         assert_eq!(drained.len(), 1, "one pending position per key");
-        assert_eq!(drained[0].data_json, payload("v2").as_bytes(), "converges to latest");
+        assert_eq!(
+            drained[0].data_json,
+            payload("v2").as_bytes(),
+            "converges to latest"
+        );
         assert_eq!(hub.metrics().coalesced, 1);
 
         // A replacement that would exceed the per-source byte cap keeps the
@@ -1495,7 +1610,13 @@ mod tests {
             );
         }
         assert_eq!(
-            submit(&port, "tray-a", &payload("small"), ExtEventClassV1::Latest, Some(key)),
+            submit(
+                &port,
+                "tray-a",
+                &payload("small"),
+                ExtEventClassV1::Latest,
+                Some(key)
+            ),
             EXT_OK
         );
         assert_eq!(
@@ -1520,7 +1641,13 @@ mod tests {
 
         // Latest without a bounded key is malformed input.
         assert_eq!(
-            submit(&port, "tray-a", &payload("nokey"), ExtEventClassV1::Latest, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("nokey"),
+                ExtEventClassV1::Latest,
+                None
+            ),
             EXT_ERR_REJECTED
         );
 
@@ -1580,7 +1707,13 @@ mod tests {
             );
         }
         assert_eq!(
-            submit(&port, "tray-a", &payload("overflow"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("overflow"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_ERR_BACKPRESSURE
         );
         let metrics = hub.metrics();
@@ -1588,11 +1721,9 @@ mod tests {
         assert_eq!(metrics.global_records, EVENT_SOURCE_MAX_RECORDS as u64);
         let drained = drain_all(&hub);
         assert_eq!(drained.len(), EVENT_SOURCE_MAX_RECORDS);
-        assert!(
-            drained
-                .iter()
-                .all(|record| record.data_json != payload("overflow").as_bytes())
-        );
+        assert!(drained
+            .iter()
+            .all(|record| record.data_json != payload("overflow").as_bytes()));
     }
 
     #[test]
@@ -1614,7 +1745,13 @@ mod tests {
         }
         let wakes_before = wake_calls.load(Relaxed);
         assert_eq!(
-            submit(&port, "tray-a", &payload("hint"), ExtEventClassV1::BestEffort, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("hint"),
+                ExtEventClassV1::BestEffort,
+                None
+            ),
             EXT_OK,
             "lossy class reports success so it cannot become a hot loop"
         );
@@ -1649,10 +1786,19 @@ mod tests {
         assert_eq!(hub.metrics().global_records, EVENT_HUB_MAX_RECORDS as u64);
         let extra = open_source(&hub, "app-a", "ext-extra", "session-1");
         assert_eq!(
-            submit(&extra.port(), "tray-a", &payload("over"), ExtEventClassV1::Edge, None),
+            submit(
+                &extra.port(),
+                "tray-a",
+                &payload("over"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_ERR_BACKPRESSURE
         );
-        assert_eq!(hub.metrics().high_water_records, EVENT_HUB_MAX_RECORDS as u64);
+        assert_eq!(
+            hub.metrics().high_water_records,
+            EVENT_HUB_MAX_RECORDS as u64
+        );
     }
 
     #[test]
@@ -1768,7 +1914,13 @@ mod tests {
         let oversized = serde_json::to_string(&oversized).unwrap();
         assert!(oversized.len() > EVENT_DATA_MAX_BYTES);
         assert_eq!(
-            submit(&port, "tray-a", oversized.as_str(), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                oversized.as_str(),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_ERR_REJECTED
         );
         invalid += 1;
@@ -1776,7 +1928,13 @@ mod tests {
         // Oversized tray id and coalesce key (128-byte bound each).
         let long_tray = "t".repeat(EVENT_COALESCE_KEY_MAX_BYTES + 1);
         assert_eq!(
-            submit(&port, &long_tray, &payload("x"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                &long_tray,
+                &payload("x"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_ERR_REJECTED
         );
         invalid += 1;
@@ -1848,7 +2006,13 @@ mod tests {
         assert_eq!(wake_calls.load(Relaxed), 1, "empty hub does not re-wake");
 
         assert_eq!(
-            submit(&port, "tray-a", &payload("again"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("again"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
         assert_eq!(wake_calls.load(Relaxed), 2, "a new submit re-arms the wake");
@@ -1893,14 +2057,26 @@ mod tests {
         let port = handle.port();
 
         assert_eq!(
-            submit(&port, "tray-a", &payload("stranded"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("stranded"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK,
             "the record is accepted; the hub never claims it was delivered"
         );
         assert_eq!(hub.metrics().wake_failures, 1);
         let calls_after_first = wake_calls.load(Relaxed);
         assert_eq!(
-            submit(&port, "tray-a", &payload("second"), ExtEventClassV1::Edge, None),
+            submit(
+                &port,
+                "tray-a",
+                &payload("second"),
+                ExtEventClassV1::Edge,
+                None
+            ),
             EXT_OK
         );
         assert_eq!(
@@ -1922,7 +2098,9 @@ mod tests {
     fn command_push_uses_the_same_bounded_ingress() {
         let (hub, _) = hub(false);
         let handle = open_source(&hub, "app-a", "webview", "session-1");
-        let current = hub.current_source("app-a", "webview").expect("current source");
+        let current = hub
+            .current_source("app-a", "webview")
+            .expect("current source");
 
         assert_eq!(
             current.submit_push("tray-a", &serde_json::json!({ "type": "pushed" })),
