@@ -18,7 +18,7 @@ use std::collections::HashSet;
 
 use opentray_spec::webview::{
     OrchestrationErrorCode, WebviewBridgePolicy, WebviewErrorEnvelope, WebviewEventFrame,
-    WebviewEventKind, WebviewOwnerTuple,
+    WebviewEventKind, WebviewLoadPhase, WebviewOwnerTuple,
 };
 
 /// Default window-session id bound when a legacy `show` command carries no
@@ -281,6 +281,36 @@ impl ViewEvents {
             self.webview_id.clone(),
             seq,
             self.overlay_rect,
+        ))
+    }
+
+    /// Records a navigation lifecycle transition (D24 `loadState`). Unlike
+    /// the query-paired caches there is no stored value to dedupe — every
+    /// native navigation callback is a state transition worth one frame —
+    /// so the only gates are the subscription and owner attribution, and
+    /// the per-view sequence still advances only for emitted frames
+    /// (mirroring [`Self::focus_edge`]; `loadState` has no query pair).
+    pub(crate) fn note_load_state(
+        &mut self,
+        owner: &WindowOwner,
+        window_id: &str,
+        phase: WebviewLoadPhase,
+        url: impl Into<String>,
+        error_code: Option<i32>,
+    ) -> Option<WebviewEventFrame> {
+        if !self.is_subscribed(WebviewEventKind::LoadState) {
+            return None;
+        }
+        let tuple = owner.owner_tuple()?;
+        let seq = self.allocate_seq();
+        Some(WebviewEventFrame::new_load_state(
+            tuple,
+            window_id,
+            self.webview_id.clone(),
+            seq,
+            phase,
+            url,
+            error_code,
         ))
     }
 }
@@ -776,5 +806,63 @@ mod tests {
         assert_eq!(error.code(), OrchestrationErrorCode::UnknownView);
         assert!(registry.remove_view("tray-1", "content").is_some());
         assert!(registry.remove_view("tray-1", "content").is_none());
+    }
+
+    #[test]
+    fn load_state_frames_are_subscribed_edges_with_monotonic_seq() {
+        let legacy_owner = owner("tray-legacy", None);
+        let owner = owner("tray-1", Some("session-1"));
+        let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
+
+        // Unsubscribed and unattributed views stay silent.
+        assert!(events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Started, "https://a.example/", None)
+            .is_none());
+        events.subscribe(&[WebviewEventKind::LoadState]);
+        assert!(events
+            .note_load_state(&legacy_owner, "win", WebviewLoadPhase::Started, "https://a.example/", None)
+            .is_none());
+
+        // Every native navigation transition is one edge: no dedupe.
+        let started = events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Started, "https://a.example/", None)
+            .expect("started frame");
+        assert_eq!(started.seq, 1);
+        let finished = events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Finished, "https://a.example/", None)
+            .expect("finished frame");
+        assert_eq!(finished.seq, 2);
+        let failed = events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Failed, "https://b.example/", Some(3))
+            .expect("failed frame");
+        assert_eq!(failed.seq, 3);
+        for frame in [&started, &finished, &failed] {
+            assert_eq!(frame.webview_id, "content");
+            assert_eq!(frame.kind, WebviewEventKind::LoadState);
+            assert!(frame.is_coherent());
+        }
+        assert!(matches!(
+            started.payload,
+            opentray_spec::webview::WebviewEventPayload::LoadState { ref phase, error_code: None, progress: None, .. }
+                if *phase == WebviewLoadPhase::Started
+        ));
+        let wire = serde_json::to_value(&failed).unwrap();
+        assert_eq!(
+            wire["payload"],
+            serde_json::json!({ "phase": "failed", "url": "https://b.example/", "errorCode": 3 }),
+            "failed payload carries the numeric error code and omits progress"
+        );
+        let started_wire = serde_json::to_value(&started).unwrap();
+        assert_eq!(
+            started_wire["payload"],
+            serde_json::json!({ "phase": "started", "url": "https://a.example/" }),
+            "optional fields stay absent when unknown"
+        );
+
+        // Unsubscribing silences later transitions without disturbing seq.
+        events.unsubscribe(&[WebviewEventKind::LoadState]);
+        assert!(events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Started, "https://c.example/", None)
+            .is_none());
     }
 }
