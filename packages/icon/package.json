@@ -1,6 +1,6 @@
 {
   "name": "@opentray/icon",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Shared OpenTray app-icon generation kernel: glyph defaults, composition, squircle tiling, and ICNS/ICO/Linux PNG encoding on a WebAssembly image stack.",
   "keywords": [
     "app-icon",

@@ -1,5 +1,11 @@
 # @create-opentray/cli
 
+## 0.1.8
+
+### Patch Changes
+
+- @create-opentray/core@0.1.8
+
 ## 0.1.7
 
 ### Patch Changes
