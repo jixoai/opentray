@@ -149,6 +149,41 @@ mode directly:
   independent from the reported native height. Consumers subscribe to geometry changes and never
   guess platform control widths or leave a declared overlay permanently on fallback padding.
 
+## Dynamic Extension EventPort Law
+
+Dynamic Extension EventPort Law
+
+An extension may report a host event outside command dispatch only through the
+generic Extension EventPort. The port is bound by the broker to one
+(sessionId, appId, instance generation); extensions submit only a tray route
+and extension-defined JSON data. They must never retain or call ExtHostContext
+outside the FFI invocation that received it.
+
+In phase 1 the host owns the port state until broker process exit. The immutable
+port has no retain/release or detach operation. The broker changes a source to
+REVOKED before session cleanup, instance deinit, reload, or shutdown; later
+submits return `PORT_CLOSED` and never mutate a queue. There is no phase-1
+unload or force-dlclose protocol. A future reclaimable unload must add a new
+optional symbol family and a new contract fingerprint rather than reinterpret
+this law. Shutdown may discard queued events; it must not claim flush.
+
+EventPort ingress is bounded and non-blocking with respect to native UI and
+transport I/O. Extension contracts classify events as latest-state,
+edge/backpressured, or explicit best-effort and provide query/sequence recovery
+where state events may coalesce. No extension may infer global ordering across
+sources. Host wakeup is platform-owned (EventLoopProxy or equivalent); no
+extension ABI exposes AppKit, Win32, CFRunLoop, eventfd, or broker internals.
+
+opentray-core remains product-neutral. EventPort/DLL ownership and native-loop
+adapters live in broker composition; ext-event remains the one Node-facing
+extension push frame. A legacy 16 ms event-drain loop may be removed only after
+its exact event family has a subscribed native EventPort producer and
+macOS/Windows idle-path evidence.
+
+Established by `d19-extension-event-port` (2026-09-13); the change retired the
+16 ms window-event drain after migrating its family to subscribed EventPort
+producers on both platforms.
+
 ## Multi-Webview Orchestration Law
 
 Established by `add-webview-orchestration` (2026-09-12); living specs:

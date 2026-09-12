@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>d19 自审证据</title>
+<style>body{font:14px/1.6 -apple-system,sans-serif;max-width:60rem;margin:2rem auto}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d2d2d7;padding:.4rem .6rem;font-size:.92rem}th{background:#f5f5f7}.pass{color:#1a7f37;font-weight:600}</style>
+</head><body>
+<h1>d19-extension-event-port — 自审证据报告</h1>
+<h2>B'' 落地全景</h2>
+<table><tr><th>层</th><th>交付</th><th>证据</th></tr>
+<tr><td>ABI（spec crate）</td><td>EventPort C 类型 + attach 符号 + 结果码冻结</td><td class="pass">布局冻结测试 48/48</td></tr>
+<tr><td>EventHub（bin）</td><td>有界公平队列/三事件类/合并唤醒/源绑定/三平台接线</td><td class="pass">确定性套件 20 用例（无 sleep）</td></tr>
+<tr><td>ext-webview 五族迁移</td><td>Latest/Edge/BestEffort 规范分类 + Edge 重试 + H0 回退</td><td class="pass">mac 157 / win 171</td></tr>
+<tr><td>窗口族迁移 + 16ms 退役</td><td>全 Edge + 订阅门控 + drain 协议删除</td><td class="pass">drain=0 双平台取证</td></tr>
+<tr><td>facade resync</td><td>url/title seq 跳变→查询取高值</td><td class="pass">TS 71/71（+5）</td></tr></table>
+<h2>空闲推送（Phase 1 验收）</h2>
+<p>mac：T0 后命令=0，drained=12 与 tap 精确吻合（/tmp/d19-smoke-evidence）。win：direct_sources=1、drainWindowEvents=0、3s 空闲命令=0（/tmp/d19c-win-smoke）。</p>
+<h2>16ms 退役（Phase 2 验收）</h2>
+<p>mac 对照：批次 B 2 秒窗口 121 次 drain → 批次 C 零次（家族含 download/visible/closed 直达 listener）。win：drain 命令=0，只写队列写端退役（发版阻塞解除）。</p>
+<h2>遗留</h2>
+<p>Owner 桌面确认：win 交互级空闲推送、双平台 focus/blur live 证据（单测等价性已覆盖）。</p>
+</body></html>
