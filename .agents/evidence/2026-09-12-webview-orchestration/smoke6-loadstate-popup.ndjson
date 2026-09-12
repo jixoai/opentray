@@ -1,0 +1,52 @@
+{"t":"2026-09-12T06:06:09.616Z","step":"start","pid":19713,"home":"/tmp/opentray-83-smoke-home","port":8367}
+{"t":"2026-09-12T06:06:09.624Z","step":"child-spawned","pid":19777}
+{"t":"2026-09-12T06:06:15.212Z","step":"http","method":"GET","path":"/a-main.html","dest":"document"}
+{"t":"2026-09-12T06:06:15.488Z","step":"http","method":"GET","path":"/events","dest":"empty"}
+{"t":"2026-09-12T06:06:15.496Z","step":"sse-connect","src":"a-main"}
+{"t":"2026-09-12T06:06:18.766Z","step":"windows-while-a-alive","count":2,"rows":["owner=83SmokeA id=209043 name= bounds=[\"Height\": 672, \"X\": 600, \"Y\": 170, \"Width\": 980]","owner=83SmokeA id=209042 name= bounds=[\"Height\": 672, \"X\": 600, \"Y\": 170, \"Width\": 980]"]}
+{"t":"2026-09-12T06:06:18.774Z","step":"http","method":"GET","path":"/a-popup-open.html","dest":"document"}
+{"t":"2026-09-12T06:06:18.775Z","step":"http","method":"GET","path":"/a-target.html","dest":"document"}
+{"t":"2026-09-12T06:06:18.791Z","step":"http","method":"GET","path":"/events","dest":"empty"}
+{"t":"2026-09-12T06:06:18.791Z","step":"sse-connect","src":"-a-popup-open-html"}
+{"t":"2026-09-12T06:06:18.791Z","step":"http","method":"GET","path":"/events","dest":"empty"}
+{"t":"2026-09-12T06:06:18.791Z","step":"sse-connect","src":"-a-target-html"}
+{"t":"2026-09-12T06:06:25.904Z","step":"http","method":"GET","path":"/b-main.html","dest":"document"}
+{"t":"2026-09-12T06:06:25.923Z","step":"loadState","windowId":"default","webviewId":"content","seq":3,"phase":"started","url":"http://127.0.0.1:8367/b-main.html"}
+{"t":"2026-09-12T06:06:25.928Z","step":"http","method":"GET","path":"/events","dest":"empty"}
+{"t":"2026-09-12T06:06:25.929Z","step":"sse-connect","src":"b-main"}
+{"t":"2026-09-12T06:06:25.941Z","step":"loadState","windowId":"default","webviewId":"content","seq":4,"phase":"finished","url":"http://127.0.0.1:8367/b-main.html","progress":1}
+{"t":"2026-09-12T06:06:27.487Z","step":"http","method":"GET","path":"/b-popup.html","dest":"document"}
+{"t":"2026-09-12T06:06:27.505Z","step":"http","method":"GET","path":"/events","dest":"empty"}
+{"t":"2026-09-12T06:06:27.505Z","step":"sse-connect","src":"-b-popup-html"}
+{"t":"2026-09-12T06:06:28.452Z","step":"http","method":"GET","path":"/hang","dest":"document"}
+{"t":"2026-09-12T06:06:28.453Z","step":"http","method":"GET","path":"/hang","dest":"hanging"}
+{"t":"2026-09-12T06:06:28.472Z","step":"sse-disconnect","src":"b-main"}
+{"t":"2026-09-12T06:06:29.203Z","step":"loadState","windowId":"default","webviewId":"content","seq":6,"phase":"failed","url":"http://127.0.0.1:9/unreachable","errorCode":-999}
+{"t":"2026-09-12T06:06:29.204Z","step":"loadState","windowId":"default","webviewId":"content","seq":9,"phase":"started","url":"about:blank"}
+{"t":"2026-09-12T06:06:29.204Z","step":"loadState","windowId":"default","webviewId":"content","seq":10,"phase":"finished","url":"about:blank","progress":1}
+{"t":"2026-09-12T06:06:30.696Z","step":"http","method":"GET","path":"/b-second.html","dest":"document"}
+{"t":"2026-09-12T06:06:30.704Z","step":"loadState","windowId":"default","webviewId":"content","seq":12,"phase":"started","url":"http://127.0.0.1:8367/b-second.html"}
+{"t":"2026-09-12T06:06:30.705Z","step":"loadState","windowId":"default","webviewId":"content","seq":13,"phase":"finished","url":"http://127.0.0.1:8367/b-second.html","progress":1}
+{"t":"2026-09-12T06:06:30.705Z","step":"http","method":"GET","path":"/events","dest":"empty"}
+{"t":"2026-09-12T06:06:30.705Z","step":"sse-connect","src":"b-second"}
+{"t":"2026-09-12T06:06:37.278Z","step":"windows-while-both-alive","count":3,"rows":["owner=83SmokeB id=209056 name= bounds=[\"X\": 600, \"Y\": 170, \"Height\": 672, \"Width\": 980]","owner=83SmokeA id=209043 name= bounds=[\"X\": 600, \"Y\": 170, \"Height\": 672, \"Width\": 980]","owner=83SmokeA id=209042 name= bounds=[\"X\": 600, \"Y\": 170, \"Height\": 672, \"Width\": 980]"]}
+{"t":"2026-09-12T06:06:37.278Z","step":"assert","name":"loadState covers started+finished and failed(errorCode)","phases":["started","finished","failed","started","finished","started","finished"],"failedFrames":[{"windowId":"default","webviewId":"content","seq":6,"phase":"failed","url":"http://127.0.0.1:9/unreachable","errorCode":-999}],"note":"dead-port loadRequest failures on macOS 26 WebKit commit about:blank (started/finished) instead of calling didFail; the cancel path above is the deterministic failed-frame source","ok":true}
+{"t":"2026-09-12T06:06:37.704Z","step":"sse-disconnect","src":"-a-target-html"}
+{"t":"2026-09-12T06:06:37.705Z","step":"sse-disconnect","src":"-a-popup-open-html"}
+{"t":"2026-09-12T06:06:37.705Z","step":"sse-disconnect","src":"a-main"}
+{"t":"2026-09-12T06:06:41.959Z","step":"windows-after-a-session-close","count":1,"rows":["owner=83SmokeB id=209056 name= bounds=[\"Y\": 170, \"X\": 600, \"Height\": 672, \"Width\": 980]"]}
+{"t":"2026-09-12T06:06:41.976Z","step":"sse-disconnect","src":"b-second"}
+{"t":"2026-09-12T06:06:41.990Z","step":"sse-disconnect","src":"-b-popup-html"}
+{"t":"2026-09-12T06:06:44.333Z","step":"windows-after-b-destroy","count":0,"rows":[]}
+{"t":"2026-09-12T06:06:45.336Z","step":"done"}
+{"t": "2026-09-12T06:07:46.925717Z", "step": "summary", "name": "D26 popup windows \u2014 window.open path", "result": "PASS", "detail": "session A page window.open('/a-popup-open.html') loaded a popup webview (SSE + http hit + on-screen NSWindow owned by 83SmokeA); session B same (b-popup). Popups are plain titled NSWindows (no toolbar) built from the opener's WKWebViewConfiguration via wry new_window_req_handler \u2192 NewWindowResponse::Create."}
+{"t": "2026-09-12T06:07:46.926002Z", "step": "summary", "name": "D26 popup windows \u2014 target=_blank path", "result": "PASS", "detail": "page's synthetic HTMLAnchorElement.click() on <a target=_blank> (a-target.html) opened a second popup in the SAME session (SSE + http hit); both A popups stayed open concurrently. Same WKUIDelegate path as window.open per D26."}
+{"t": "2026-09-12T06:07:46.926017Z", "step": "summary", "name": "D26 popup cleanup \u2014 session close closes all owned popups", "result": "PASS", "detail": "child process exit closed session A's connection: a-main, a-popup-open, a-target SSE streams all disconnected within the same instant; on-screen window count for 83SmokeA dropped to 0. Distinct-session isolation: session B's popup (b-popup) and content stayed connected and its window remained."}
+{"t": "2026-09-12T06:07:46.926024Z", "step": "summary", "name": "D26 popup cleanup \u2014 explicit window destroy", "result": "PASS", "detail": "win.destroy() of session B closed b-popup + b-second together; final on-screen opentray-window count 0."}
+{"t": "2026-09-12T06:07:46.926030Z", "step": "summary", "name": "D24 loadState \u2014 started/finished with url", "result": "PASS", "detail": "facade onLoadState received started+finished for b-main.html and b-second.html; finished frames carry progress=1 (macOS reports progress); frames carry owner windowId/webviewId/seq (per-view monotonic)."}
+{"t": "2026-09-12T06:07:46.926034Z", "step": "summary", "name": "D24 loadState \u2014 failed with errorCode", "result": "PASS", "detail": "navigate to a hanging URL then navigate again: WebKit cancelled the hanging provisional navigation (didFailProvisionalNavigation, NSURLErrorCancelled) \u2192 loadState failed frame with errorCode=-999 delivered end-to-end through the LoadStateNavigationDelegate wrapper \u2192 ViewEvents \u2192 outbox \u2192 ext-event mirror \u2192 facade."}
+{"t": "2026-09-12T06:07:46.926039Z", "step": "summary", "name": "substrate finding \u2014 dead-port loadRequest failures", "result": "RECORDED", "detail": "on this macOS 26 WebKit, loadRequest to a connection-refused port does NOT call didFail*: WebKit commits about:blank (surfacing honestly as loadState started/finished about:blank). Cancellations (the /hang probe) DO deliver didFail(-999). Toolbar (8.5) should treat any terminal phase as progress-bar-close; Windows 8.4 must verify its own NavigationFailed coverage."}
+{"t": "2026-09-12T06:07:46.926044Z", "step": "summary", "name": "input-blocked verification gaps (host)", "result": "RECORDED", "detail": "middle-click and right-click context menu ('Open Link in New Window') cannot be synthesized on this host (osascript assistive access blocked -25211, no cliclick/pyobjc \u2014 same machine constraints recorded in smoke2-focus). Both routes funnel into the identical WKUIDelegate createWebViewWithConfiguration callback verified via window.open/target=_blank; wry's UI delegate presence is what enables the default WebKit context-menu entry."}
+{"t": "2026-09-12T06:07:46.926052Z", "step": "summary", "name": "host visibility note", "result": "RECORDED", "detail": "this host cannot grant app activation (frontmost pinned elsewhere), so app-mode main windows auto-hide on blur; on-screen counts therefore under-report \u2014 SSE liveness (document unload) is the authoritative popup-death signal and window counts corroborate."}
+{"t": "2026-09-12T06:07:46.926056Z", "step": "summary", "name": "pre-existing defect found & fixed", "result": "FIXED", "detail": "legacy show() primary (wry .build replaces the window contentView) + later create-webview children (build_as_child on the stale cached content view) aborted the broker at wry wkwebview/mod.rs:392 ns_view.window().unwrap(). Reproduced on the PRE-CHANGE dylib (baseline), root-caused, fixed in build_child_webview by resolving the host view from the live window.contentView(). This was the smoke's first crash; not introduced by 8.3."}
+{"t": "2026-09-12T06:07:46.926061Z", "step": "summary", "name": "operational lesson", "result": "RECORDED", "detail": "staging a new extension dylib while a same-endpoint broker stays alive serves the OLD dylib ('already-running' reuse keys on broker identity, not the extension). Fresh HOME per smoke run is mandatory; two earlier misleading runs (no failed frame, no delegate callbacks) were stale-broker artifacts."}
