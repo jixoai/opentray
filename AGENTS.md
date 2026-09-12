@@ -145,6 +145,38 @@ mode directly:
   independent from the reported native height. Consumers subscribe to geometry changes and never
   guess platform control widths or leave a declared overlay permanently on fallback padding.
 
+## Multi-Webview Orchestration Law
+
+Established by `add-webview-orchestration` (2026-09-12); living specs:
+`webview-extension`, `webview-layout`, `webview-messaging`.
+
+- One window session per tray is law; a second is the typed `tray_session_active` rejection. A
+  session hosts N sibling webviews plus the declarative layered layout as ONE owner-scoped unit:
+  every window/webview/layout/channel/popup is tagged with `(appId, trayId, sessionId)` and
+  session/lease cleanup destroys exactly that owner's set.
+- Layout is one JSON document (ordered layers of flex trees), solved natively by Taffy inside a
+  single commit transaction (solve → apply frames → overlay projection → drag re-registration).
+  JS never computes view coordinates and resize never round-trips through JS. Taffy is an
+  ext-webview-only dependency; `opentray-core` stays layout-engine-free.
+- The per-view event family (`urlChange/titleChange/focused/geometryChange/loadState`) is
+  push-only with per-view sequence numbers and explicit subscribe frames. New events MUST NOT
+  ride the 16 ms window-event drain loop. Overlay/titlebar safe areas are per-webview
+  projections recomputed in the layout commit; the page bridge keeps `overlay.geometrychange`
+  with a field-isomorphic payload.
+- Message channels are targeted (`createMessageChannel({ target })`), lifecycle-explicit
+  (`created → open → closed(reason) → destroyed`, single-observation `onClose`, byte-exact
+  1000/1 MiB RFC 8785 bounds, LRU-32 tombstones), and session-scoped: cross-session targets are
+  unexpressible to pages and broker-validated everywhere.
+- Per-webview bridge policy is opt-in (`{webviewId, messageChannels, navigatorWindow,
+  navigatorScreen, nativeApi}` all default false, bootstrap-immutable): a policy-less child is
+  bridgeless, so arbitrary-content webviews never gain channel or id surfaces by default.
+- Auxiliary popup windows (`a[target]`, `window.open`, middle-click, context menu) are plain
+  session-owned windows that never occupy the tray's window session; style exclusivity with
+  multi-webview composition is one rule, one error (`multiwebview_unsupported_style`).
+- Toolbar carriers (URL and command apps) load the target as a top-level content webview.
+  Embedding policy is never consulted and no embedding probing exists in the toolchain; the
+  navigation interface is create-package-private schema over a channel, never shell-server HTTP.
+
 ## App Icon Law
 
 - App name has two projections. Bootstrap `appName` is written into the caller-specific Darwin
