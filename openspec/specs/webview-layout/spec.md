@@ -1,7 +1,7 @@
 # webview-layout Specification
 
 ## Purpose
-TBD - created by archiving change add-webview-orchestration. Update Purpose after archive.
+Declarative window layout for multi-webview windows: one JSON document (ordered layers of flex trees) is the sole layout authority, solved natively by Taffy and applied as a single transaction, so resize never round-trips through JavaScript and the first non-webview paint primitive (box) covers decorative overlays.
 
 ## Requirements
 

@@ -1,7 +1,7 @@
 # webview-messaging Specification
 
 ## Purpose
-TBD - created by archiving change add-webview-orchestration. Update Purpose after archive.
+Message channels: targeted, push-based connections between the host facade and bridged pages inside one extension session — an explicit observable lifecycle with byte-exact bounds instead of the Web MessageChannel's silent drops and transfer semantics.
 
 ## Requirements
 
