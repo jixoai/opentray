@@ -451,6 +451,27 @@ fn session_scope_mismatch(
     None
 }
 
+/// Frozen window-event push family (D19 batch C). Every member that the
+/// retired 16 ms drain queue could deliver, expressed as the wire `type` tags
+/// the EventPort records still carry. The facade mirrors this list
+/// (`packages/ext-webview/src/index.ts`); both sides change together under
+/// one contract fingerprint. `stylechange` has no facade producer on either
+/// platform today (it is a page-bridge-only event) but stays in the family:
+/// the subscription protocol is the frozen surface any future producer uses.
+pub(crate) const WINDOW_EVENT_FAMILY: &[&str] = &[
+    "focus",
+    "blur",
+    "visibleChange",
+    "closed",
+    "stylechange",
+    "windowinteractionchange",
+    "downloadstarted",
+    "downloadprogress",
+    "downloadcompleted",
+    "downloadfailed",
+    "downloadcanceled",
+];
+
 #[derive(Debug, Clone, PartialEq)]
 enum WebviewCommand {
     Show {
@@ -516,7 +537,17 @@ enum WebviewCommand {
         id: u32,
         result: Value,
     },
-    DrainWindowEvents,
+    /// D19 batch C: facade interest in the legacy window-event family. The
+    /// 16 ms `drainWindowEvents` poll was deleted with its native queue; the
+    /// push producers submit through the EventPort only for subscribed event
+    /// names (producer-gating law, same semantics as the per-view
+    /// `subscribe-webview-events` family).
+    SubscribeWindowEvents {
+        events: Vec<String>,
+    },
+    UnsubscribeWindowEvents {
+        events: Vec<String>,
+    },
     OpenDevtools,
     CloseDevtools,
     IsDevtoolsOpen,
@@ -1220,7 +1251,12 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                 result: parsed.result,
             })
         }
-        "drainWindowEvents" => Ok(WebviewCommand::DrainWindowEvents),
+        "subscribeWindowEvents" => Ok(WebviewCommand::SubscribeWindowEvents {
+            events: parse_window_event_family_names("subscribeWindowEvents", data)?,
+        }),
+        "unsubscribeWindowEvents" => Ok(WebviewCommand::UnsubscribeWindowEvents {
+            events: parse_window_event_family_names("unsubscribeWindowEvents", data)?,
+        }),
         "openDevtools" => Ok(WebviewCommand::OpenDevtools),
         "closeDevtools" => Ok(WebviewCommand::CloseDevtools),
         "isDevtoolsOpen" => Ok(WebviewCommand::IsDevtoolsOpen),
@@ -1261,6 +1297,44 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
             "unsupported webview command: {other}"
         ))),
     }
+}
+
+/// Validates the window-event family names riding the batch C subscription
+/// commands: non-empty strings, members of the frozen family, deduplicated.
+/// An unknown name is a facade/native version skew that the lockstep
+/// contract forbids — rejected loudly, never silently never-firing.
+fn parse_window_event_family_names(
+    command: &str,
+    data: &Value,
+) -> Result<Vec<String>, WebviewRuntimeError> {
+    let Some(events) = data.get("events").and_then(Value::as_array) else {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{command} requires an events array"
+        )));
+    };
+    let mut names: Vec<String> = Vec::new();
+    for event in events {
+        let Some(name) = event.as_str() else {
+            return Err(WebviewRuntimeError::Rejected(format!(
+                "{command} requires string event names"
+            )));
+        };
+        if !WINDOW_EVENT_FAMILY.contains(&name) {
+            return Err(WebviewRuntimeError::Rejected(format!(
+                "{command} received {name:?}; the window event family is frozen to \
+                 {WINDOW_EVENT_FAMILY:?}"
+            )));
+        }
+        if !names.iter().any(|existing| existing == name) {
+            names.push(name.to_string());
+        }
+    }
+    if names.is_empty() {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{command} requires at least one event name"
+        )));
+    }
+    Ok(names)
 }
 
 fn validate_size_constraint_patch(

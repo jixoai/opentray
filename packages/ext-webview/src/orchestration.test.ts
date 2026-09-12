@@ -99,8 +99,10 @@ const defaultRespond = (data: unknown): unknown => {
       return fixture(commandFixtures, "get-webview-title-result returns value and seq");
     case "list-webviews":
       return fixture(commandFixtures, "list-webviews-result");
-    case "drainWindowEvents":
-      return { type: "windowEvents", events: [] };
+    case "subscribeWindowEvents":
+      return { type: "windowEventsSubscribed", events: data.events };
+    case "unsubscribeWindowEvents":
+      return { type: "windowEventsUnsubscribed", events: data.events };
     case "drainIpcMessages":
       return { type: "ipcMessages", messages: [] };
     case "drainPermissionMessages":
@@ -112,11 +114,14 @@ const defaultRespond = (data: unknown): unknown => {
   }
 };
 
-/** Internal legacy poll commands the eventful facade issues on its own. */
+/** Internal commands the eventful facade issues on its own: permission/ipc
+ * polls plus the batch C window-event subscription bookkeeping driven by
+ * listener accounting (including the internal app-reopen MRU listeners). */
 const pollInternalCommands = new Set([
-  "drainWindowEvents",
   "drainIpcMessages",
   "drainPermissionMessages",
+  "subscribeWindowEvents",
+  "unsubscribeWindowEvents",
 ]);
 
 class OrchestrationTransport implements OpenTrayConnection {

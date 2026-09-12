@@ -38,6 +38,12 @@ define_class!(
                 "visibleChange",
                 json!({ "visible": false }),
             );
+            // D19 batch C: the drain poll reconciled app-mode membership
+            // after a user-initiated retained-hide; the delegate owns that
+            // moment now (batch C app-reopen law).
+            if let Some(bridge) = self.ivars().bridge.upgrade() {
+                bridge.borrow().reconcile_app_mode(window);
+            }
             false
         }
     }

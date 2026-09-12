@@ -919,11 +919,19 @@ impl WindowsWebviewRuntime {
                 resolve_callback(&session.bridge, None, id, result)?;
                 Ok(json!({ "type": "permissionMessageResolved", "id": id }))
             }
-            WebviewCommand::DrainWindowEvents => {
-                let session = self.require_session(tray_id, "drainWindowEvents")?;
-                let events: Vec<Value> =
-                    session.bridge.borrow_mut().window_events.drain(..).collect();
-                Ok(json!({ "type": "windowEvents", "events": events }))
+            WebviewCommand::SubscribeWindowEvents { events } => {
+                // D19 batch C protocol surface: the window-event family's
+                // drain command and native queue were deleted in one
+                // compatibility decision (contract-3). The Windows producer
+                // migration and subscription gating land with the Windows
+                // batch; this arm only keeps the shared protocol dispatch
+                // total and acknowledges the frozen family list.
+                let _ = self.require_session(tray_id, "subscribeWindowEvents")?;
+                Ok(json!({ "type": "windowEventsSubscribed", "events": events }))
+            }
+            WebviewCommand::UnsubscribeWindowEvents { events } => {
+                let _ = self.require_session(tray_id, "unsubscribeWindowEvents")?;
+                Ok(json!({ "type": "windowEventsUnsubscribed", "events": events }))
             }
             WebviewCommand::OpenDevtools => {
                 let session = self.require_session(tray_id, "openDevtools")?;

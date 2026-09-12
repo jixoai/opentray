@@ -44,7 +44,12 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSResponder, NSScreen,
-    NSView, NSWindow, NSWindowDidBecomeKeyNotification, NSWindowDidResignKeyNotification,
+    NSView,
+    NSWindow,
+    NSWindowDidBecomeKeyNotification,
+    NSWindowDidDeminiaturizeNotification,
+    NSWindowDidMiniaturizeNotification,
+    NSWindowDidResignKeyNotification,
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString};
 use objc2_web_kit::WKWebView;
@@ -80,7 +85,8 @@ use self::app_menu::ensure_standard_edit_menu;
 use self::bridge::{
     apply_window_size_constraint_options, apply_window_style_patch, close_window,
     emit_visible_change_if_needed, emit_window_event, emit_window_state_change,
-    handle_navigator_window_request, to_visible, window_bounds_json, SizeConstraintKind,
+    handle_navigator_window_request, submit_window_event_push, to_visible, window_bounds_json,
+    SizeConstraintKind,
 };
 use self::demo_html::default_webview_html;
 use self::downloads::{install_download_navigation_delegate, DownloadNavigationDelegate};
@@ -378,7 +384,11 @@ pub(crate) struct MacosWebviewRuntime {
     app_id: Option<String>,
     // AppKit activation policy is process-wide. Keep the live app-mode projections explicit so
     // hiding one retained window cannot demote a sibling application window.
-    app_mode_windows: HashSet<String>,
+    // D19 batch C: a shared ledger — the retired 16 ms drain poll used to
+    // reconcile membership on every poll tick; native callbacks (delegate
+    // close, blur auto-hide, miniaturize) now update it directly from the
+    // moments that change visibility.
+    app_mode_windows: AppModeLedger,
     /// D26 auxiliary popup ownership: every popup window hangs off its
     /// creating session's owner tuple and closes with that session (or with
     /// an explicit window destroy). Shared into webview new-window handlers.
@@ -387,6 +397,32 @@ pub(crate) struct MacosWebviewRuntime {
     /// the current command (their window is gone before the flush runs).
     pending_channel_events:
         Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
+}
+
+/// Shared app-mode membership (`Rc<RefCell<HashSet<tray_id>>>`): the runtime
+/// and every window session's native callbacks reconcile the same set, so
+/// the activation policy follows visibility changes that never pass through
+/// a facade command.
+type AppModeLedger = Rc<RefCell<HashSet<String>>>;
+
+/// Reconciles one tray's app-mode membership from a visibility truth and
+/// syncs the process-wide activation policy. Safe from any native main-
+/// thread callback; a no-op for non-app-mode windows whose membership is
+/// already absent.
+fn reconcile_app_mode_membership(
+    ledger: &AppModeLedger,
+    tray_id: &str,
+    is_live_app_mode: bool,
+) {
+    if is_live_app_mode {
+        ledger.borrow_mut().insert(tray_id.to_string());
+    } else {
+        ledger.borrow_mut().remove(tray_id);
+    }
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        set_activation_policy(&app, !ledger.borrow().is_empty());
+    }
 }
 
 /// The primary webview created by a legacy `show`, before it is registered
@@ -400,6 +436,10 @@ struct PrimaryWebview {
 }
 
 pub(super) struct NavigatorWindowBridge {
+    /// Owning tray id (D19 batch C): the window-event push producers route
+    /// EventPort records by tray, and the queue they replaced was drained
+    /// per tray; the bridge now carries that identity directly.
+    pub(super) tray_id: String,
     /// Per-webview bridge state in creation order; index 0 is the primary
     /// webview for legacy single-webview surfaces. Window ownership (the D18
     /// owner tuple) lives in the runtime registry and focus tracker.
@@ -407,7 +447,13 @@ pub(super) struct NavigatorWindowBridge {
     content_view: Option<Retained<NSView>>,
     ipc_messages: VecDeque<Value>,
     permission_messages: VecDeque<Value>,
-    window_events: VecDeque<Value>,
+    /// Facade interest in the window-event push family (batch C). Producers
+    /// submit through the EventPort only for subscribed event names; no
+    /// facade listener means no native observation record.
+    window_event_subscriptions: HashSet<String>,
+    /// Shared app-mode membership ledger (see [`AppModeLedger`]): native
+    /// callbacks reconcile Dock participation from visibility changes.
+    app_mode_ledger: AppModeLedger,
     next_ipc_message_id: u32,
     next_permission_message_id: u32,
     style: WindowStyleState,
@@ -632,7 +678,7 @@ impl MacosWebviewRuntime {
                     session.window.orderOut(None);
                     emit_visible_change_if_needed(&session.bridge, &session.window, was_visible)?;
                 }
-                self.app_mode_windows.remove(tray_id);
+                self.app_mode_windows.borrow_mut().remove(tray_id);
                 self.sync_activation_policy()?;
                 Ok(json!({ "type": "hidden" }))
             }
@@ -640,7 +686,7 @@ impl MacosWebviewRuntime {
                 if let Some(session) = self.session(tray_id) {
                     close_window(&session.bridge, &session.window)?;
                 }
-                self.app_mode_windows.remove(tray_id);
+                self.app_mode_windows.borrow_mut().remove(tray_id);
                 self.sync_activation_policy()?;
                 Ok(json!({ "type": "closed" }))
             }
@@ -765,13 +811,21 @@ impl MacosWebviewRuntime {
                 self::bridge::resolve_callback(&session.bridge, None, id, result)?;
                 Ok(json!({ "type": "permissionMessageResolved", "id": id }))
             }
-            WebviewCommand::DrainWindowEvents => {
-                self.reconcile_app_mode_window(tray_id);
-                self.sync_activation_policy()?;
-                let session = self.require_session(tray_id, "drainWindowEvents")?;
-                let events: Vec<Value> =
-                    session.bridge.borrow_mut().window_events.drain(..).collect();
-                Ok(json!({ "type": "windowEvents", "events": events }))
+            WebviewCommand::SubscribeWindowEvents { events } => {
+                let session = self.require_session(tray_id, "subscribeWindowEvents")?;
+                session
+                    .bridge
+                    .borrow_mut()
+                    .subscribe_window_events(&events);
+                Ok(json!({ "type": "windowEventsSubscribed", "events": events }))
+            }
+            WebviewCommand::UnsubscribeWindowEvents { events } => {
+                let session = self.require_session(tray_id, "unsubscribeWindowEvents")?;
+                session
+                    .bridge
+                    .borrow_mut()
+                    .unsubscribe_window_events(&events);
+                Ok(json!({ "type": "windowEventsUnsubscribed", "events": events }))
             }
             WebviewCommand::OpenDevtools => {
                 let session = self.require_session(tray_id, "openDevtools")?;
@@ -1899,11 +1953,13 @@ impl MacosWebviewRuntime {
         window.center();
 
         let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
+            tray_id: tray_id.clone(),
             views: Vec::new(),
             content_view: None,
             ipc_messages: VecDeque::new(),
             permission_messages: VecDeque::new(),
-            window_events: VecDeque::new(),
+            window_event_subscriptions: HashSet::new(),
+            app_mode_ledger: Rc::clone(&self.app_mode_windows),
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
             style: WindowStyleState {
@@ -2224,7 +2280,7 @@ impl MacosWebviewRuntime {
         })?;
         if let Some(session) = self.session(tray_id) {
             let app = NSApplication::sharedApplication(mtm);
-            set_activation_policy(&app, !self.app_mode_windows.is_empty());
+            set_activation_policy(&app, !self.app_mode_windows.borrow().is_empty());
             #[allow(deprecated)]
             app.activateIgnoringOtherApps(true);
             if let Some(webview) = primary_webview(&session.bridge) {
@@ -2268,7 +2324,7 @@ impl MacosWebviewRuntime {
             session.window.setDelegate(None);
             session.window.close();
         }
-        self.app_mode_windows.remove(tray_id);
+        self.app_mode_windows.borrow_mut().remove(tray_id);
         self.sync_activation_policy_if_available();
     }
 
@@ -2277,14 +2333,14 @@ impl MacosWebviewRuntime {
             WebviewRuntimeError::Unsupported("webview runtime requires the main thread".into())
         })?;
         let app = NSApplication::sharedApplication(mtm);
-        set_activation_policy(&app, !self.app_mode_windows.is_empty());
+        set_activation_policy(&app, !self.app_mode_windows.borrow().is_empty());
         Ok(())
     }
 
     fn sync_activation_policy_if_available(&self) {
         if let Some(mtm) = MainThreadMarker::new() {
             let app = NSApplication::sharedApplication(mtm);
-            set_activation_policy(&app, !self.app_mode_windows.is_empty());
+            set_activation_policy(&app, !self.app_mode_windows.borrow().is_empty());
         }
     }
 
@@ -2295,11 +2351,7 @@ impl MacosWebviewRuntime {
                 session.bridge.borrow().style.app_mode && window_is_visible(&session.window)
             })
             .unwrap_or(false);
-        if is_live_app_mode {
-            self.app_mode_windows.insert(tray_id.to_string());
-        } else {
-            self.app_mode_windows.remove(tray_id);
-        }
+        reconcile_app_mode_membership(&self.app_mode_windows, tray_id, is_live_app_mode);
     }
 
     fn flush_pending_events(&mut self) -> Vec<WebviewEventFrame> {
@@ -2824,6 +2876,35 @@ pub(super) fn devtools_open_state(
 }
 
 impl NavigatorWindowBridge {
+    /// D19 batch C subscription surface: the facade's window-event family
+    /// interest. Producers check [`Self::is_window_event_subscribed`] before
+    /// any EventPort submission, so an unlistened event costs no native
+    /// observation record.
+    pub(super) fn subscribe_window_events(&mut self, events: &[String]) {
+        for event in events {
+            self.window_event_subscriptions.insert(event.clone());
+        }
+    }
+
+    pub(super) fn unsubscribe_window_events(&mut self, events: &[String]) {
+        for event in events {
+            self.window_event_subscriptions.remove(event);
+        }
+    }
+
+    pub(super) fn is_window_event_subscribed(&self, event: &str) -> bool {
+        self.window_event_subscriptions.contains(event)
+    }
+
+    /// Push-driven app-mode reconciliation from a native visibility moment
+    /// (delegate close, blur auto-hide, miniaturize/deminiaturize). The
+    /// retired 16 ms drain poll used to reconcile on every tick; the native
+    /// callbacks that actually change visibility own it now.
+    pub(super) fn reconcile_app_mode(&self, window: &NSWindow) {
+        let is_live = self.style.app_mode && window_is_visible(window);
+        reconcile_app_mode_membership(&self.app_mode_ledger, &self.tray_id, is_live);
+    }
+
     /// Transport pointer of the primary webview (legacy single-webview
     /// surface). `None` while a `windowOnly` session hosts no webview yet.
     pub(super) fn primary_webview(&self) -> Option<NonNull<WebView>> {
@@ -3053,8 +3134,29 @@ fn install_focus_observers(
             if let Err(error) = close_window(&bridge, &blur_window) {
                 eprintln!("opentray-ext-webview failed to auto-hide macOS window: {error}");
             }
+            bridge.borrow().reconcile_app_mode(&blur_window);
         }
     });
+    // D19 batch C: the drain poll reconciled app-mode membership every
+    // 16 ms tick; the native visibility moments own that reconciliation now.
+    // Miniaturize/deminiaturize are the only visibility changes that never
+    // pass through a facade command or the delegate close path.
+    let miniaturize_bridge = Rc::downgrade(bridge);
+    let miniaturize_window = window.clone();
+    let miniaturize_block =
+        RcBlock::new(move |_notification: NonNull<NSNotification>| {
+            if let Some(bridge) = miniaturize_bridge.upgrade() {
+                bridge.borrow().reconcile_app_mode(&miniaturize_window);
+            }
+        });
+    let deminiaturize_bridge = Rc::downgrade(bridge);
+    let deminiaturize_window = window.clone();
+    let deminiaturize_block =
+        RcBlock::new(move |_notification: NonNull<NSNotification>| {
+            if let Some(bridge) = deminiaturize_bridge.upgrade() {
+                bridge.borrow().reconcile_app_mode(&deminiaturize_window);
+            }
+        });
     unsafe {
         vec![
             center.addObserverForName_object_queue_usingBlock(
@@ -3069,6 +3171,18 @@ fn install_focus_observers(
                 None,
                 &blur_block,
             ),
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWindowDidMiniaturizeNotification),
+                Some(window_object),
+                None,
+                &miniaturize_block,
+            ),
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWindowDidDeminiaturizeNotification),
+                Some(window_object),
+                None,
+                &deminiaturize_block,
+            ),
         ]
     }
 }
@@ -3081,23 +3195,13 @@ pub(super) fn queue_window_event(
     let Some(bridge) = bridge.upgrade() else {
         return;
     };
-    bridge
-        .borrow_mut()
-        .window_events
-        .push_back(window_event_payload(event, &payload));
+    // D19 batch C: the retired drain queue is replaced by a
+    // subscription-gated EventPort push in the same wire shape; the
+    // page-bridge emission below stays a separate consumer surface.
+    submit_window_event_push(&bridge, event, &payload);
     if let Err(error) = emit_window_event(&bridge, event, payload) {
         eprintln!("opentray-ext-webview failed to emit macOS {event} event: {error}");
     }
-}
-
-pub(super) fn window_event_payload(event: &str, payload: &Value) -> Value {
-    let mut value = json!({ "type": event });
-    if let (Some(target), Some(source)) = (value.as_object_mut(), payload.as_object()) {
-        for (key, payload_value) in source {
-            target.insert(key.clone(), payload_value.clone());
-        }
-    }
-    value
 }
 
 struct AppKitViewHandle {

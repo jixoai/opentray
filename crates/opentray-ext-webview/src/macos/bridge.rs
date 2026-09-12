@@ -907,6 +907,43 @@ pub(super) fn emit_window_state_change(
     Ok(response)
 }
 
+/// D19 batch C producer half of the legacy window-event family: submits one
+/// record through the EventPort, gated on the facade's subscription for that
+/// event name. The wire shape is frozen from the retired drain queue payloads
+/// (`{ "type": event, ...payload }`), so the facade's `data.type === event`
+/// listener filter matches unchanged. Page-bridge delivery
+/// ([`emit_window_event`]) is a separate consumer surface and is NOT handled
+/// here.
+pub(super) fn submit_window_event_push(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    event: &str,
+    payload: &Value,
+) {
+    let (subscribed, tray_id) = {
+        let state = bridge.borrow();
+        (
+            state.is_window_event_subscribed(event),
+            state.tray_id.clone(),
+        )
+    };
+    if !subscribed {
+        // No facade listener: no native observation record leaves the
+        // producer (batch C producer-gating law).
+        return;
+    }
+    match crate::event_port::submit_window_event(&tray_id, event, payload) {
+        crate::event_port::SubmitStatus::LegacyFlush => {
+            // A port-less host is outside the contract-3 lockstep graph; the
+            // drain queue that used to carry this family is retired with the
+            // poll. Report and drop — never silently.
+            eprintln!(
+                "opentray-ext-webview: window event {event} for tray {tray_id} dropped: no event port attached"
+            );
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn emit_visible_change_if_needed(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     window: &Retained<NSWindow>,
@@ -917,10 +954,7 @@ pub(super) fn emit_visible_change_if_needed(
         return Ok(());
     }
     let payload = json!({ "visible": visible });
-    bridge
-        .borrow_mut()
-        .window_events
-        .push_back(super::window_event_payload("visibleChange", &payload));
+    submit_window_event_push(bridge, "visibleChange", &payload);
     emit_window_event(bridge, "visibleChange", payload)
 }
 

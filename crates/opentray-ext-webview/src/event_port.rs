@@ -1,10 +1,11 @@
-//! D19 Extension EventPort producer side (phase 1, batch B).
+//! D19 Extension EventPort producer side (phase 1 batch B, phase 2 batch C).
 //!
 //! This module is platform-neutral: both the macOS and Windows producers
-//! submit through the same frozen classification table and the same bounded
-//! Edge retry queue. The classification is normative
+//! submit through the same frozen classification tables and the same bounded
+//! Edge retry queue. The classifications are normative
 //! (`openspec/changes/d19-extension-event-port/plans/design-reference.md`,
-//! "Normative WebView Event Class Table"):
+//! "Normative WebView Event Class Table"; batch C adds the legacy
+//! window-event family):
 //!
 //! | Kind / phase                | Class      | Overflow rule                    |
 //! | --------------------------- | ---------- | -------------------------------- |
@@ -14,6 +15,22 @@
 //! | geometryChange              | Edge       | backpressure, producer retries   |
 //! | loadState started/fin/failed| Edge       | backpressure, producer retries   |
 //! | loadState progress obs.     | BestEffort | drop newest, still EXT_OK        |
+//!
+//! Window-event family (batch C; wire shape `{ "type": <event>, ... }`):
+//!
+//! | Event                                    | Class      | Overflow rule                  |
+//! | ---------------------------------------- | ---------- | ------------------------------ |
+//! | focus / blur                             | Edge       | key-state edges, no replay     |
+//! | visibleChange / closed                   | Edge       | operational lifecycle, no query|
+//! | stylechange                              | Edge       | style facts, no query replay   |
+//! | windowinteractionchange                  | Edge       | drag begin/end lifecycle       |
+//! | downloadstarted/completed/failed/canceled| Edge       | download lifecycle             |
+//! | downloadprogress                         | BestEffort | observation; terminal edge owns|
+//!
+//! No window-family member is `Latest`: none of them has a `(value, seq)`
+//! query/resync route in this release, and the design law freezes that
+//! state truth without a replay query must be Edge (a coalesced replace
+//! could silently lose an operational `visibleChange(false)`).
 //!
 //! Discipline (B'' "one standard, four extension shapes"):
 //! - Native callbacks never block on hub capacity and never wait: an Edge
@@ -27,9 +44,16 @@
 //! - When no port was ever attached (legacy H0 host), `submit_frame` reports
 //!   [`SubmitStatus::LegacyFlush`] and the caller keeps the declared legacy
 //!   outbox/response-flush delivery; a frame is never delivered through both
-//!   paths.
-//! - Subscription gating stays in `ViewEvents` (the hub has no subscription
-//!   concept; batch A semantics gate at the producer).
+//!   paths. The window-event family has no legacy fallback: the 16 ms drain
+//!   queue was its only pre-port delivery and is retired with the poll
+//!   (one compatibility decision, contract-3). An H0 host running a
+//!   contract-3 artifact is out of the lockstep graph by manifest identity,
+//!   so `submit_window_event` drops the record and the caller logs.
+//! - Subscription gating stays at the producer: the per-view families gate in
+//!   `ViewEvents` (batch A semantics); the window family gates on the
+//!   per-window `subscribeWindowEvents`/`unsubscribeWindowEvents` protocol
+//!   (batch C, same producer-gating law — no facade listener, no native
+//!   observation record).
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -167,25 +191,83 @@ fn latest_key(webview_id: &str, field: &[u8]) -> EventPortClass {
     }
 }
 
+/// Classifies one legacy window-event family member per the frozen batch C
+/// table above. Unknown names cannot come from a contract-3 facade (the
+/// subscription protocol validates against the family list); a name that
+/// reaches this function anyway degrades to Edge — never a silent drop.
+pub(crate) fn classify_window_event(event: &str) -> EventPortClass {
+    match event {
+        // Progress observations are explicitly non-authoritative: the
+        // terminal download edge carries the truth (mirrors the frozen
+        // loadState.progress ruling).
+        "downloadprogress" => EventPortClass::BestEffort,
+        _ => EventPortClass::Edge,
+    }
+}
+
 /// Submits one frame through the EventPort when attached. Never blocks: the
 /// single FFI call is bounded and lock-free from the producer's view.
 pub(crate) fn submit_frame(frame: &WebviewEventFrame) -> SubmitStatus {
     let Some(port) = current_port() else {
         return SubmitStatus::LegacyFlush;
     };
-    // Opportunistic ordered retry flush: older backpressured Edge records
-    // ride the same wake before the newer record (per-source FIFO).
-    flush_edge_retries(&port);
     let Ok(data_json) = serde_json::to_vec(frame) else {
         REJECTED_SUBMITS.fetch_add(1, Ordering::Relaxed);
         return SubmitStatus::Rejected;
     };
-    let class = classify_frame(frame);
-    let status = submit_bytes(&port, frame.owner.tray_id.as_str(), &data_json, &class);
-    if status == SubmitStatus::Backpressured && class == EventPortClass::Edge {
-        enqueue_edge_retry(frame.owner.tray_id.clone(), data_json);
+    submit_record(&port, frame.owner.tray_id.as_str(), data_json, &classify_frame(frame))
+}
+
+/// Submits one legacy window-event family record (`{ "type": event, ... }`
+/// wire shape, frozen from the retired drain queue payloads) through the
+/// EventPort under the batch C classification table. The caller owns the
+/// subscription gate: an unsubscribed event must not call this.
+pub(crate) fn submit_window_event(
+    tray_id: &str,
+    event: &str,
+    payload: &serde_json::Value,
+) -> SubmitStatus {
+    let Some(port) = current_port() else {
+        return SubmitStatus::LegacyFlush;
+    };
+    let data = window_event_value(event, payload);
+    let Ok(data_json) = serde_json::to_vec(&data) else {
+        REJECTED_SUBMITS.fetch_add(1, Ordering::Relaxed);
+        return SubmitStatus::Rejected;
+    };
+    submit_record(&port, tray_id, data_json, &classify_window_event(event))
+}
+
+/// Shared submit core: ordered retry flush, one classified FFI submission,
+/// Edge retry enqueueing on backpressure.
+fn submit_record(
+    port: &ExtEventPortV1,
+    tray_id: &str,
+    data_json: Vec<u8>,
+    class: &EventPortClass,
+) -> SubmitStatus {
+    // Opportunistic ordered retry flush: older backpressured Edge records
+    // ride the same wake before the newer record (per-source FIFO).
+    flush_edge_retries(port);
+    let status = submit_bytes(port, tray_id, &data_json, class);
+    if status == SubmitStatus::Backpressured && *class == EventPortClass::Edge {
+        enqueue_edge_retry(tray_id.to_string(), data_json);
     }
     status
+}
+
+/// Merges the drained-event wire shape `{ "type": event, ...payload }` —
+/// byte-compatible with the payloads the retired drain queue delivered, so
+/// the facade `listenExtension` filter (`data.type === event`) matches
+/// unchanged.
+fn window_event_value(event: &str, payload: &serde_json::Value) -> serde_json::Value {
+    let mut value = serde_json::json!({ "type": event });
+    if let (Some(target), Some(source)) = (value.as_object_mut(), payload.as_object()) {
+        for (key, payload_value) in source {
+            target.insert(key.clone(), payload_value.clone());
+        }
+    }
+    value
 }
 
 /// Post-command retry flush: gives backpressured Edge records another
@@ -371,6 +453,11 @@ impl EventPortClass {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    pub(crate) use super::tests::install_fake_port_for_module_tests;
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use opentray_spec::ExtResultCode;
@@ -431,12 +518,13 @@ mod tests {
     static FAKE_SUBMITS: Mutex<Vec<FakeSubmit>> = Mutex::new(Vec::new());
 
     #[derive(Debug, Clone, PartialEq, Eq)]
-    struct FakeSubmit {
-        tray_id: String,
-        payload_tag: String,
-        seq: u64,
-        class: u32,
-        coalesce_key: Option<Vec<u8>>,
+    pub(crate) struct FakeSubmit {
+        pub(crate) tray_id: String,
+        /// Wire `type` tag of the submitted record.
+        pub(crate) payload_tag: String,
+        pub(crate) seq: u64,
+        pub(crate) class: u32,
+        pub(crate) coalesce_key: Option<Vec<u8>>,
     }
 
     extern "C" fn fake_try_submit(_data: *mut c_void, input: ExtEventInputV1) -> ExtResultCode {
@@ -456,7 +544,13 @@ mod tests {
             .unwrap_or_else(|error| error.into_inner())
             .push(FakeSubmit {
                 tray_id,
-                payload_tag: value["kind"].as_str().unwrap_or("unknown").to_string(),
+                // Unified frames carry `kind`; window-family records carry the
+                // drained-event wire tag under `type`.
+                payload_tag: value["kind"]
+                    .as_str()
+                    .or_else(|| value["type"].as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
                 seq: value["seq"].as_u64().unwrap_or_default(),
                 class: input.class,
                 coalesce_key: key,
@@ -486,6 +580,11 @@ mod tests {
 
     fn install_fake_port() {
         attach_port(fake_port()).expect("valid fake port");
+        FAKE_RESULT.store(EXT_OK, Ordering::Relaxed);
+        FAKE_SCRIPT
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
         FAKE_SUBMITS
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -497,6 +596,31 @@ mod tests {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
+    }
+
+    pub(crate) fn install_fake_port_for_module_tests() -> ModuleTestPort {
+        let guard = lock_state();
+        reset_state();
+        install_fake_port();
+        ModuleTestPort { _guard: guard }
+    }
+
+    /// Holds the fake port plus the serialization guard for one cross-module
+    /// test; dropping it resets the shared port state.
+    pub(crate) struct ModuleTestPort {
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ModuleTestPort {
+        pub(crate) fn submits(&self) -> Vec<FakeSubmit> {
+            fake_submits()
+        }
+    }
+
+    impl Drop for ModuleTestPort {
+        fn drop(&mut self) {
+            reset_state();
+        }
     }
 
     fn set_fake_result(code: ExtResultCode) {
@@ -608,6 +732,121 @@ mod tests {
             classify_frame(&url_frame(&fitting_id, 1)),
             EventPortClass::Latest { .. }
         ));
+    }
+
+    // -- window-event family (batch C) -----------------------------------
+
+    #[test]
+    fn window_family_classification_is_edge_except_download_progress() {
+        for event in [
+            "focus",
+            "blur",
+            "visibleChange",
+            "closed",
+            "stylechange",
+            "windowinteractionchange",
+            "downloadstarted",
+            "downloadcompleted",
+            "downloadfailed",
+            "downloadcanceled",
+        ] {
+            assert_eq!(
+                classify_window_event(event),
+                EventPortClass::Edge,
+                "{event} has no query/resync route and must never coalesce or drop"
+            );
+        }
+        assert_eq!(
+            classify_window_event("downloadprogress"),
+            EventPortClass::BestEffort
+        );
+        // An unknown name degrades to Edge, never a silent drop.
+        assert_eq!(classify_window_event("anythingelse"), EventPortClass::Edge);
+    }
+
+    #[test]
+    fn window_event_submissions_keep_the_drained_wire_shape() {
+        let _state = lock_state();
+        reset_state();
+        install_fake_port();
+        set_fake_result(EXT_OK);
+
+        assert_eq!(
+            submit_window_event(
+                "tray-1",
+                "visibleChange",
+                &serde_json::json!({ "visible": false })
+            ),
+            SubmitStatus::Direct
+        );
+        assert_eq!(
+            submit_window_event("tray-1", "focus", &serde_json::json!({})),
+            SubmitStatus::Direct
+        );
+        assert_eq!(
+            submit_window_event(
+                "tray-1",
+                "downloadprogress",
+                &serde_json::json!({ "receivedBytes": 10, "totalBytes": 100 })
+            ),
+            SubmitStatus::Direct
+        );
+
+        let submits = fake_submits();
+        assert_eq!(submits.len(), 3);
+        assert!(submits.iter().all(|submit| submit.tray_id == "tray-1"));
+        // Wire tags are exactly the drained-event names, so the facade's
+        // `data.type === event` listener filter matches unchanged.
+        assert_eq!(
+            submits.iter().map(|s| s.payload_tag.as_str()).collect::<Vec<_>>(),
+            vec!["visibleChange", "focus", "downloadprogress"]
+        );
+        assert_eq!(submits[0].class, ExtEventClassV1::Edge.as_u32());
+        assert_eq!(submits[1].class, ExtEventClassV1::Edge.as_u32());
+        assert_eq!(submits[2].class, ExtEventClassV1::BestEffort.as_u32());
+        assert!(submits.iter().all(|submit| submit.coalesce_key.is_none()));
+        reset_state();
+    }
+
+    #[test]
+    fn window_event_edge_backpressure_retries_like_the_five_families() {
+        let _state = lock_state();
+        reset_state();
+        install_fake_port();
+        set_fake_result(EXT_ERR_BACKPRESSURE);
+
+        assert_eq!(
+            submit_window_event("tray-1", "focus", &serde_json::json!({})),
+            SubmitStatus::Backpressured
+        );
+        assert_eq!(retry_queue_len(), 1, "window-family Edge records retry too");
+
+        set_fake_result(EXT_OK);
+        assert_eq!(
+            submit_window_event("tray-1", "blur", &serde_json::json!({})),
+            SubmitStatus::Direct
+        );
+        let submits = fake_submits();
+        let tail = &submits[submits.len() - 2..];
+        assert_eq!(
+            (tail[0].payload_tag.as_str(), tail[1].payload_tag.as_str()),
+            ("focus", "blur"),
+            "the queued focus edge is retried before the newer blur record"
+        );
+        assert_eq!(retry_queue_len(), 0);
+        reset_state();
+    }
+
+    #[test]
+    fn window_event_without_a_port_reports_legacy_flush() {
+        let _state = lock_state();
+        reset_state();
+        assert_eq!(
+            submit_window_event("tray-1", "focus", &serde_json::json!({})),
+            SubmitStatus::LegacyFlush
+        );
+        assert_eq!(retry_queue_len(), 0);
+        reset_state();
     }
 
     // -- attach ----------------------------------------------------------------

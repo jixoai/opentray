@@ -248,28 +248,21 @@ describe("@opentray/ext-webview", () => {
     ]);
   });
 
-  it("routes host operational visibility verbs and polls visibleChange", async () => {
-    let drained = false;
-    const transport = new WebviewResultTransport((command) => {
+  it("routes host operational visibility verbs and receives pushed visibleChange", async () => {
+    const transport = new EventfulWebviewTransport((command) => {
       if (!isWebviewCommand(command)) {
         return { type: "unknown" };
       }
       if (command.type === "isClosed") return true;
       if (command.type === "isVisible") return false;
-      if (command.type === "drainWindowEvents") {
-        if (drained) return { type: "windowEvents", events: [] };
-        drained = true;
-        return {
-          type: "windowEvents",
-          events: [{ type: "visibleChange", visible: true }],
-        };
-      }
       return { type: "ok" };
     });
     const tray = createTrayHandle(transport, "app-1", "tray-1");
-    const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
-      html: "<main />",
-    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+      });
     const events: WebviewWindowEventMap["visibleChange"][] = [];
     const unlisten = webviewWindow.listen("visibleChange", ({ payload }) => {
       events.push(payload);
@@ -281,18 +274,38 @@ describe("@opentray/ext-webview", () => {
     await webviewWindow.toVisible();
     await webviewWindow.focus();
     await webviewWindow.close();
-    await eventually(() => Promise.resolve(events[0]));
+    transport.emit({
+      type: "ext-event",
+      appId: "app-1",
+      trayId: "tray-1",
+      ext: "webview.tray-1",
+      data: { type: "visibleChange", visible: true },
+    });
+    await flushMicrotasks();
     unlisten();
+    await eventually(async () => {
+      const commands = transport.frames.flatMap((frame) =>
+        frame.type === "ext-command" && isWebviewCommand(frame.data)
+          ? [frame.data.type]
+          : []
+      );
+      return commands[commands.length - 1] === "unsubscribeWindowEvents"
+        ? commands
+        : undefined;
+    }).then((commands) => {
+      // The 16 ms window-event drain poll is retired (contract-3): the
+      // facade never sends the command, and unlistening declares the loss
+      // of interest.
+      expect(commands).not.toContain("drainWindowEvents");
+    });
 
     expect(events).toEqual([{ visible: true }]);
-    expect(
-      transport.frames
-        .flatMap((frame) =>
-          frame.type === "ext-command" && isWebviewCommand(frame.data)
-            ? [frame.data.type]
-            : []
-        )
-    ).toEqual(
+    const commands = transport.frames.flatMap((frame) =>
+      frame.type === "ext-command" && isWebviewCommand(frame.data)
+        ? [frame.data.type]
+        : []
+    );
+    expect(commands).toEqual(
       expect.arrayContaining([
         "show",
         "isClosed",
@@ -300,21 +313,18 @@ describe("@opentray/ext-webview", () => {
         "toVisible",
         "focus",
         "close",
-        "drainWindowEvents",
+        "subscribeWindowEvents",
       ])
     );
+    // The 16 ms window-event drain poll is retired (contract-3): the
+    // facade never sends the command, and unlistening declares the loss
+    // of interest.
+    expect(commands).not.toContain("drainWindowEvents");
+    expect(commands[commands.length - 1]).toBe("unsubscribeWindowEvents");
   });
 
   it("reopens a bootstrapped app-mode window from the generic app event", async () => {
-    const transport = new EventfulWebviewTransport((command) => {
-      if (
-        isWebviewCommand(command) &&
-        command.type === "drainWindowEvents"
-      ) {
-        return { type: "windowEvents", events: [] };
-      }
-      return { type: "ok" };
-    });
+    const transport = new EventfulWebviewTransport(() => ({ type: "ok" }));
     const tray = createTrayHandle(transport, "app-reopen", "tray-1");
     const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
       html: "<main />",
@@ -355,38 +365,48 @@ describe("@opentray/ext-webview", () => {
     expect(reopenCommands).toEqual(["toVisible", "focus"]);
   });
 
-  it("stops internal app-mode polling before destroying the native session", async () => {
-    vi.useFakeTimers();
-    try {
-      const transport = new EventfulWebviewTransport((command) =>
-        isWebviewCommand(command) && command.type === "drainWindowEvents"
-          ? { type: "windowEvents", events: [] }
-          : { type: "ok" }
-      );
-      const tray = createTrayHandle(transport, "app-destroy", "tray-1");
-      const webviewWindow = tray.extend(WebviewExt).createWebviewWindow({
+  it("stops internal app-mode listeners before destroying the native session", async () => {
+    const transport = new EventfulWebviewTransport(() => ({ type: "ok" }));
+    const tray = createTrayHandle(transport, "app-destroy", "tray-1");
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
         html: "<main />",
         style: { appMode: true },
       });
 
-      await webviewWindow.show();
-      await flushMicrotasks();
-      transport.frames.length = 0;
+    await webviewWindow.show();
+    await eventually(async () => {
+      const subscribed = transport.frames.some(
+        (frame) =>
+          frame.type === "ext-command" &&
+          isWebviewCommand(frame.data) &&
+          frame.data.type === "subscribeWindowEvents"
+      );
+      return subscribed ? true : undefined;
+    });
+    transport.frames.length = 0;
 
-      await webviewWindow.destroy();
-      await vi.advanceTimersByTimeAsync(64);
+    await webviewWindow.destroy();
 
-      expect(
-        transport.frames.some(
-          (frame) =>
-            frame.type === "ext-command" &&
-            isWebviewCommand(frame.data) &&
-            frame.data.type === "drainWindowEvents"
-        )
-      ).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
+    const commands = transport.frames.flatMap((frame) =>
+      frame.type === "ext-command" && isWebviewCommand(frame.data)
+        ? [frame.data.type]
+        : []
+    );
+    // The internal MRU listeners unsubscribe while the session is still
+    // alive so no producer keeps pushing for this facade afterwards, and
+    // the retired 16 ms drain command never appears.
+    expect(commands).not.toContain("drainWindowEvents");
+    const destroyIndex = commands.indexOf("destroy");
+    expect(destroyIndex).toBeGreaterThan(-1);
+    const unsubscribeCount = commands.filter(
+      (command) => command === "unsubscribeWindowEvents"
+    ).length;
+    expect(unsubscribeCount).toBe(2);
+    expect(commands.lastIndexOf("unsubscribeWindowEvents")).toBeLessThan(
+      destroyIndex
+    );
   });
 
   it("keeps attachWebview on the legacy webview mount and auto-loads once", async () => {
@@ -862,116 +882,118 @@ describe("@opentray/ext-webview", () => {
     });
   });
 
-  it("publishes drained native window interaction events to host-side listeners", async () => {
-    vi.useFakeTimers();
-    try {
-      const events: unknown[] = [];
-      let drained = false;
-      const transport = new WebviewResultTransport((command) => {
-        if (isWebviewCommand(command) && command.type === "drainWindowEvents") {
-          if (drained) {
-            return { type: "windowEvents", events: [] };
-          }
-          drained = true;
-          return {
-            type: "windowEvents",
-            events: [{ type: "windowinteractionchange", active: true }],
-          };
-        }
-        return { type: "ok" };
+  it("publishes pushed native window interaction events to host-side listeners", async () => {
+    const events: unknown[] = [];
+    const transport = new EventfulWebviewTransport(() => ({ type: "ok" }));
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+        width: 300,
+        height: 200,
       });
-      const tray = createTrayHandle(transport, "app-1", "tray-1");
-      const webviewWindow = tray
-        .extend(WebviewExt, { mountId: "webview.tray-1" })
-        .createWebviewWindow({
-          html: "<main />",
-          width: 300,
-          height: 200,
-        });
-      await webviewWindow.isVisible();
+    await webviewWindow.isVisible();
 
-      const unlisten = webviewWindow.listen(
-        "windowinteractionchange",
-        (event) => {
-          events.push(event);
-        }
-      );
-      await vi.advanceTimersByTimeAsync(16);
+    const unlisten = webviewWindow.listen(
+      "windowinteractionchange",
+      (event) => {
+        events.push(event);
+      }
+    );
+    await flushMicrotasks();
+    transport.emit({
+      type: "ext-event",
+      appId: "app-1",
+      trayId: "tray-1",
+      ext: "webview.tray-1",
+      data: { type: "windowinteractionchange", active: true },
+    });
+    await flushMicrotasks();
 
-      expect(events).toEqual([
-        {
-          event: "windowinteractionchange",
-          id: 0,
-          payload: { active: true },
-        },
-      ]);
-      expect(transport.frames.at(-1)).toMatchObject({
-        type: "ext-command",
-        data: { type: "drainWindowEvents" },
-      });
+    expect(events).toEqual([
+      {
+        event: "windowinteractionchange",
+        id: 0,
+        payload: { active: true },
+      },
+    ]);
+    const commands = transport.frames.flatMap((frame) =>
+      frame.type === "ext-command" && isWebviewCommand(frame.data)
+        ? [frame.data.type]
+        : []
+    );
+    expect(commands).toContain("subscribeWindowEvents");
+    expect(commands).not.toContain("drainWindowEvents");
 
-      unlisten();
-    } finally {
-      vi.useRealTimers();
-    }
+    unlisten();
   });
 
-  it("publishes drained native focus and blur events to host-side listeners", async () => {
-    vi.useFakeTimers();
-    try {
-      const events: unknown[] = [];
-      let drained = false;
-      const transport = new WebviewResultTransport((command) => {
-        if (isWebviewCommand(command) && command.type === "drainWindowEvents") {
-          if (drained) {
-            return { type: "windowEvents", events: [] };
-          }
-          drained = true;
-          return {
-            type: "windowEvents",
-            events: [{ type: "focus" }, { type: "blur" }],
-          };
-        }
-        return { type: "ok" };
+  it("publishes pushed native focus and blur events to host-side listeners", async () => {
+    const events: unknown[] = [];
+    const transport = new EventfulWebviewTransport(() => ({ type: "ok" }));
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+        width: 300,
+        height: 200,
       });
-      const tray = createTrayHandle(transport, "app-1", "tray-1");
-      const webviewWindow = tray
-        .extend(WebviewExt, { mountId: "webview.tray-1" })
-        .createWebviewWindow({
-          html: "<main />",
-          width: 300,
-          height: 200,
-        });
-      await webviewWindow.isVisible();
+    await webviewWindow.isVisible();
 
-      const unlistenFocus = webviewWindow.listen("focus", (event) => {
-        events.push(event);
-      });
-      const unlistenBlur = webviewWindow.listen("blur", (event) => {
-        events.push(event);
-      });
-      await vi.advanceTimersByTimeAsync(16);
+    const unlistenFocus = webviewWindow.listen("focus", (event) => {
+      events.push(event);
+    });
+    const unlistenBlur = webviewWindow.listen("blur", (event) => {
+      events.push(event);
+    });
+    await flushMicrotasks();
+    transport.emit({
+      type: "ext-event",
+      appId: "app-1",
+      trayId: "tray-1",
+      ext: "webview.tray-1",
+      data: { type: "focus" },
+    });
+    transport.emit({
+      type: "ext-event",
+      appId: "app-1",
+      trayId: "tray-1",
+      ext: "webview.tray-1",
+      data: { type: "blur" },
+    });
+    await flushMicrotasks();
 
-      expect(events).toEqual([
-        { event: "focus", id: 0, payload: {} },
-        { event: "blur", id: 0, payload: {} },
-      ]);
-      expect(transport.frames.at(-1)).toMatchObject({
-        type: "ext-command",
-        data: { type: "drainWindowEvents" },
-      });
+    expect(events).toEqual([
+      { event: "focus", id: 0, payload: {} },
+      { event: "blur", id: 0, payload: {} },
+    ]);
+    const commands = transport.frames.flatMap((frame) =>
+      frame.type === "ext-command" && isWebviewCommand(frame.data)
+        ? [frame.data.type]
+        : []
+    );
+    expect(commands.filter((command) => command === "subscribeWindowEvents").length)
+      .toBe(2);
+    expect(commands).not.toContain("drainWindowEvents");
 
-      unlistenFocus();
-      unlistenBlur();
-    } finally {
-      vi.useRealTimers();
-    }
+    unlistenFocus();
+    unlistenBlur();
   });
 
-  it("stops shared window event polling after one transport failure", async () => {
+  it("reports window event subscription failures without breaking the listener surface", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
-      const transport = new DeferredWindowEventTransport();
+      const transport = new WebviewResultTransport((command) => {
+        if (
+          isWebviewCommand(command) &&
+          command.type === "subscribeWindowEvents"
+        ) {
+          throw new Error("broker connection closed");
+        }
+        return { type: "ok" };
+      });
       const tray = createTrayHandle(transport, "app-1", "tray-1");
       const webviewWindow = tray
         .extend(WebviewExt, { mountId: "webview.tray-1" })
@@ -980,42 +1002,35 @@ describe("@opentray/ext-webview", () => {
           width: 300,
           height: 200,
         });
+      await webviewWindow.isVisible();
 
       const unlistenFocus = webviewWindow.listen("focus", () => undefined);
-      const unlistenBlur = webviewWindow.listen("blur", () => undefined);
-      // 首个 drain 前置链路包含真实 artifact 解析（fs I/O 宏任务），假计时器
-      // 驱动不了它——曾在 CI 负载下间歇性拿到 0 个请求。真实计时器下有界
-      // 等待首个请求到达（inFlight 单飞保证期间不会产生第二个）。
-      const firstDrainDeadline = Date.now() + 5_000;
-      while (
-        transport.windowEventRequests === 0 &&
-        Date.now() < firstDrainDeadline
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-      expect(transport.windowEventRequests).toBe(1);
+      await eventually(async () => {
+        return errorSpy.mock.calls.length > 0 ? true : undefined;
+      });
 
-      // 冻结时间，断言本测试的主语义：一次传输失败即停止共享轮询。
-      vi.useFakeTimers();
-      transport.rejectWindowEventDrain(new Error("broker connection closed"));
-      await vi.advanceTimersByTimeAsync(0);
-      await flushMicrotasks();
-
-      expect(errorSpy).toHaveBeenCalledTimes(1);
       expect(errorSpy).toHaveBeenCalledWith(
-        "WebView window event polling failed:",
+        "WebView window event subscribeWindowEvents failed for focus:",
         expect.any(Error)
       );
-      await vi.advanceTimersByTimeAsync(160);
-      expect(transport.windowEventRequests).toBe(1);
-
-      // 先恢复真实计时器再解除监听，clearInterval 才能清掉真实 interval。
-      vi.useRealTimers();
+      // The listener surface itself stays intact: unlistening still declares
+      // the lost interest (a later host may accept it).
       unlistenFocus();
-      unlistenBlur();
+      const commands = await eventually(async () => {
+        const list = transport.frames.flatMap((frame) =>
+          frame.type === "ext-command" && isWebviewCommand(frame.data)
+            ? [frame.data.type]
+            : []
+        );
+        return list[list.length - 1] === "unsubscribeWindowEvents"
+          ? list
+          : undefined;
+      });
+      expect(commands.filter((command) => command === "subscribeWindowEvents").length)
+        .toBe(1);
+      expect(commands[commands.length - 1]).toBe("unsubscribeWindowEvents");
     } finally {
       errorSpy.mockRestore();
-      vi.useRealTimers();
     }
   });
 
@@ -2440,35 +2455,6 @@ class EventfulWebviewTransport
     for (const listener of this.#listeners) {
       listener(frame);
     }
-  }
-}
-
-class DeferredWindowEventTransport extends RecordingTransport {
-  windowEventRequests = 0;
-  #rejectWindowEventDrain: ((reason?: unknown) => void) | undefined;
-
-  override request(frame: ClientRequestFrame): Promise<ServerFrame> {
-    this.frames.push(frame);
-    if (
-      frame.type === "ext-command" &&
-      isWebviewCommand(frame.data) &&
-      frame.data.type === "drainWindowEvents"
-    ) {
-      this.windowEventRequests += 1;
-      return new Promise<ServerFrame>((_resolve, reject) => {
-        this.#rejectWindowEventDrain = reject;
-      });
-    }
-    return Promise.resolve({ type: "ack", requestId: frame.requestId });
-  }
-
-  rejectWindowEventDrain(error: Error): void {
-    const reject = this.#rejectWindowEventDrain;
-    if (reject === undefined) {
-      throw new Error("window event drain is not pending");
-    }
-    this.#rejectWindowEventDrain = undefined;
-    reject(error);
   }
 }
 
