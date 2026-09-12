@@ -37,6 +37,10 @@ OpenTray is a Desktop Status Platform for Node/Deno/Bun CLI and AI-skill ecosyst
 
 The product goal is not "show a tray icon". The goal is to give lightweight tools a system-level entry point without forcing users into Electron or a full desktop app framework.
 
+The platform only builds what the web cannot do itself. Anything a page can implement
+in JS with comparable performance and latency stays the page's job (Owner ruling,
+2026-09-12 — it struck native click-level focus observation for exactly this reason).
+
 ## Platform Laws
 
 OpenTray uses the current tray-first model. Application code calls `createTray()` directly and owns its own foreground/background lifetime.
