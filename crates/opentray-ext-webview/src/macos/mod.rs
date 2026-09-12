@@ -19,8 +19,10 @@ mod demo_html;
 mod downloads;
 mod drag;
 mod layout;
+mod load_state;
 mod metadata;
 mod overlay;
+mod popups;
 mod policy;
 mod screen;
 mod style;
@@ -83,12 +85,14 @@ use self::bridge::{
 use self::demo_html::default_webview_html;
 use self::downloads::{install_download_navigation_delegate, DownloadNavigationDelegate};
 use self::drag::AppRegionDragState;
+use self::load_state::{install_load_state_delegate, LoadStateNavigationDelegate};
 use self::metadata::{
     apply_window_icon_from_bridge, handle_document_title_changed, sync_native_metadata_to_page,
     update_window_icon, update_window_title, MetadataSource, WindowMetadataState,
     DEFAULT_WINDOW_TITLE,
 };
 use self::overlay::emit_overlay_geometry_change_if_enabled;
+use self::popups::{new_window_handler, SharedPopupLedger};
 use self::policy::{resolve_page_access, update_page_access_for_url};
 use self::screen::screen_details_json;
 use self::style::{
@@ -152,6 +156,10 @@ struct WindowSession {
 struct NativeWebview {
     webview: Box<WebView>,
     _download_navigation_delegate: Option<Retained<DownloadNavigationDelegate>>,
+    /// D24 loadState observation: outermost navigation-delegate wrapper plus
+    /// the estimatedProgress KVO registration. Retaining the WKWebView in
+    /// its ivars keeps the KVO removal target alive through this drop.
+    _load_state_delegate: Retained<LoadStateNavigationDelegate>,
     content_descriptor: WebviewContentDescriptor,
 }
 
@@ -294,6 +302,45 @@ pub(super) fn handle_view_url_started(
     }
 }
 
+/// D24 loadState `started`: wry's page-load Started (navigation commit)
+/// pushes straight from the native callback into the outbox. Same no-drain
+/// contract as the other unified event family members.
+pub(super) fn handle_view_load_started(
+    events: &Rc<RefCell<ViewEvents>>,
+    outbox: &Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    owner: &WindowOwner,
+    url: &str,
+) {
+    let frame = events.borrow_mut().note_load_state(
+        owner,
+        &owner.window_id,
+        opentray_spec::webview::WebviewLoadPhase::Started,
+        url,
+        None,
+        None,
+    );
+    push_event_frame(outbox, frame);
+}
+
+/// D24 loadState `finished`: a completed navigation is full progress by
+/// definition (macOS reports progress; the value is honest, not measured).
+pub(super) fn handle_view_load_finished(
+    events: &Rc<RefCell<ViewEvents>>,
+    outbox: &Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    owner: &WindowOwner,
+    url: &str,
+) {
+    let frame = events.borrow_mut().note_load_state(
+        owner,
+        &owner.window_id,
+        opentray_spec::webview::WebviewLoadPhase::Finished,
+        url,
+        None,
+        Some(1.0),
+    );
+    push_event_frame(outbox, frame);
+}
+
 /// Per-webview bridge handle: the single-webview pointer of the previous
 /// structure decomposed into one entry per webview. Holds the frozen
 /// per-webview bridge policy, the native transport pointer, and the page
@@ -318,6 +365,10 @@ pub(crate) struct MacosWebviewRuntime {
     // AppKit activation policy is process-wide. Keep the live app-mode projections explicit so
     // hiding one retained window cannot demote a sibling application window.
     app_mode_windows: HashSet<String>,
+    /// D26 auxiliary popup ownership: every popup window hangs off its
+    /// creating session's owner tuple and closes with that session (or with
+    /// an explicit window destroy). Shared into webview new-window handlers.
+    popups: SharedPopupLedger,
     /// Host-bound channel events drained from sessions destroyed inside
     /// the current command (their window is gone before the flush runs).
     pending_channel_events:
@@ -330,6 +381,7 @@ struct PrimaryWebview {
     webview_id: String,
     webview: Box<WebView>,
     download_delegate: Option<Retained<DownloadNavigationDelegate>>,
+    load_state_delegate: Retained<LoadStateNavigationDelegate>,
     events: Rc<RefCell<ViewEvents>>,
 }
 
@@ -439,6 +491,10 @@ struct WindowCapabilities {
     /// `navigator.opentrayWebview` page bridge. Both platforms' DTOs
     /// serialize this field (D16 parity).
     message_channels: bool,
+    /// Auxiliary popup windows (D26): new-window navigation intents open
+    /// session-owned plain popup windows. Both platforms' DTOs serialize
+    /// this field.
+    popup_windows: bool,
     webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
@@ -777,6 +833,12 @@ impl MacosWebviewRuntime {
                         .drain_host_events();
                     self.pending_channel_events.extend(events);
                 }
+                // D26: auxiliary popups owned by the closing session close
+                // with it; other owners' popups stay untouched. Dropping the
+                // PopupWindow entries closes their carrier windows.
+                self.popups
+                    .borrow_mut()
+                    .close_all_of_session(session_id);
                 self.destroy_window_session(&owner.tray_id);
             }
         }
@@ -1406,12 +1468,17 @@ impl MacosWebviewRuntime {
             .sessions
             .get(&window_owner.tray_id)
             .ok_or_else(|| WebviewRuntimeError::Internal("window session missing".into()))?;
+        // Resolve the host view from the live window, never from the cached
+        // bridge snapshot: a legacy `show` builds its primary webview through
+        // wry's non-child path, which REPLACES the window's content view —
+        // the snapshot from session creation stays detached after that and
+        // wry's child-build `ns_view.window().unwrap()` would abort the
+        // broker on the first orchestration child (pre-existing mixed
+        // primary+children defect, evidenced by the 8.3 smoke).
         let host_view = AppKitViewHandle::new(
             session
-                .bridge
-                .borrow()
-                .content_view
-                .clone()
+                .window
+                .contentView()
                 .ok_or_else(|| {
                     WebviewRuntimeError::Internal("webview window has no content view".into())
                 })?,
@@ -1421,10 +1488,13 @@ impl MacosWebviewRuntime {
         let window = session.window.clone();
         let outbox_for_title = Rc::downgrade(&session.event_outbox);
         let outbox_for_page_load = Rc::downgrade(&session.event_outbox);
+        let outbox_for_load_state = Rc::downgrade(&session.event_outbox);
         let events_for_title = Rc::clone(&events);
         let events_for_page_load = Rc::clone(&events);
+        let events_for_load_state = Rc::clone(&events);
         let owner_for_title = window_owner.clone();
         let owner_for_page_load = window_owner.clone();
+        let owner_for_load_state = window_owner.clone();
         let webview_id_for_ipc = webview_id.to_string();
         let bridge_for_channel_loads = Rc::downgrade(&bridge);
         let webview_id_for_channel_loads = webview_id.to_string();
@@ -1444,6 +1514,16 @@ impl MacosWebviewRuntime {
             .with_on_page_load_handler(move |event, url| {
                 if matches!(event, PageLoadEvent::Started) {
                     handle_view_url_started(&events_for_page_load, &outbox_for_page_load, &owner_for_page_load, &url);
+                    // D24: the commit phase starts the per-view load
+                    // lifecycle; failures arrive through the loadState
+                    // navigation delegate wrapper, intermediate progress
+                    // through its estimatedProgress KVO.
+                    handle_view_load_started(
+                        &events_for_load_state,
+                        &outbox_for_load_state,
+                        &owner_for_load_state,
+                        &url,
+                    );
                     // Channel law (D11): a document navigation closes the
                     // page-side endpoints. The helper discriminates the
                     // view's very first load (recorded in the bridge
@@ -1457,6 +1537,12 @@ impl MacosWebviewRuntime {
                     }
                 }
                 if matches!(event, PageLoadEvent::Finished) {
+                    handle_view_load_finished(
+                        &events_for_load_state,
+                        &outbox_for_load_state,
+                        &owner_for_load_state,
+                        &url,
+                    );
                     // The document can now consume channel pushes; flush
                     // everything held back for it.
                     if let Some(bridge) = bridge_for_channel_loads.upgrade() {
@@ -1469,6 +1555,14 @@ impl MacosWebviewRuntime {
             })
             .with_download_started_handler(|_, _| true)
             .with_download_completed_handler(|_, _, _| {})
+            // D26: new-window intents (a[target], window.open, middle-click,
+            // the context menu entry) open an auxiliary popup owned by this
+            // window session's owner tuple.
+            .with_new_window_req_handler(new_window_handler(
+                &self.popups,
+                window_owner,
+                session.show_settings.window.devtools,
+            ))
             .with_devtools(session.show_settings.window.devtools)
             .with_transparent(true);
 
@@ -1512,10 +1606,19 @@ impl MacosWebviewRuntime {
         } else {
             None
         };
+        // D24: install the loadState wrapper last so it is the outermost
+        // navigation delegate (failure observation + progress KVO).
+        let load_state_delegate = install_load_state_delegate(
+            webview.as_ref(),
+            &events,
+            &session.event_outbox,
+            window_owner,
+        )?;
         register_bridge_view(&bridge, webview_id, policy, webview.as_mut());
         Ok(NativeWebview {
             webview,
             _download_navigation_delegate: download_delegate,
+            _load_state_delegate: load_state_delegate,
             content_descriptor: descriptor,
         })
     }
@@ -1862,6 +1965,7 @@ impl MacosWebviewRuntime {
                 &window,
                 &bridge,
                 &event_outbox,
+                &self.popups,
                 html,
                 url,
                 &show_settings,
@@ -1909,6 +2013,7 @@ impl MacosWebviewRuntime {
             let primary_id = primary.webview_id.clone();
             let webview = primary.webview;
             let mut download_delegate = primary.download_delegate;
+            let load_state_delegate = primary.load_state_delegate;
             focus_tracker
                 .borrow_mut()
                 .add_target(&primary_id, webview.as_ref(), Rc::clone(&primary.events));
@@ -1923,6 +2028,7 @@ impl MacosWebviewRuntime {
                 NativeWebview {
                     webview,
                     _download_navigation_delegate: download_delegate.take(),
+                    _load_state_delegate: load_state_delegate,
                     content_descriptor: content_descriptor.clone(),
                 },
             );
@@ -1939,6 +2045,7 @@ impl MacosWebviewRuntime {
         window: &Retained<NSWindow>,
         bridge: &Rc<RefCell<NavigatorWindowBridge>>,
         event_outbox: &Rc<RefCell<VecDeque<WebviewEventFrame>>>,
+        popups: &SharedPopupLedger,
         html: Option<String>,
         url: Option<String>,
         show_settings: &WebviewShowSettings,
@@ -1971,8 +2078,11 @@ impl MacosWebviewRuntime {
         let outbox_for_title = Rc::downgrade(event_outbox);
         let bridge_for_page_load = Rc::clone(bridge);
         let events_for_page_load = Rc::clone(&events);
+        let events_for_load_state = Rc::clone(&events);
         let owner_for_page_load = owner.clone();
+        let owner_for_load_state = owner.clone();
         let outbox_for_page_load = Rc::downgrade(event_outbox);
+        let outbox_for_load_state = Rc::downgrade(event_outbox);
         if std::env::var_os("OPENTRAY_WEBVIEW_DEBUG").is_some() {
             eprintln!(
                 "opentray-ext-webview create window session: tray_id={} url={:?} html={} native_window={} native_screen={}",
@@ -2023,8 +2133,22 @@ impl MacosWebviewRuntime {
                         &owner_for_page_load,
                         &url,
                     );
+                    // D24: the primary webview's load lifecycle pushes into
+                    // the same unified event family.
+                    handle_view_load_started(
+                        &events_for_load_state,
+                        &outbox_for_load_state,
+                        &owner_for_load_state,
+                        &url,
+                    );
                 }
                 if matches!(event, PageLoadEvent::Finished) {
+                    handle_view_load_finished(
+                        &events_for_load_state,
+                        &outbox_for_load_state,
+                        &owner_for_load_state,
+                        &url,
+                    );
                     if let Err(error) = sync_native_metadata_to_page(&bridge_for_page_load) {
                         eprintln!("opentray-ext-webview metadata sync failed: {error}");
                     }
@@ -2032,6 +2156,13 @@ impl MacosWebviewRuntime {
             })
             .with_download_started_handler(|_, _| true)
             .with_download_completed_handler(|_, _, _| {})
+            // D26: the primary webview routes new-window intents into
+            // session-owned auxiliary popups like every other webview.
+            .with_new_window_req_handler(new_window_handler(
+                popups,
+                owner,
+                show_settings.window.devtools,
+            ))
             .with_devtools(show_settings.window.devtools)
             // `style.background` is mutable after the WebView is created. Keep WKWebView
             // alpha-capable from creation time, then let `apply_window_style` choose the
@@ -2054,11 +2185,15 @@ impl MacosWebviewRuntime {
         );
         let download_navigation_delegate =
             install_download_navigation_delegate(webview.as_ref(), bridge)?;
+        // D24: outermost loadState wrapper on the primary webview too.
+        let load_state_delegate =
+            install_load_state_delegate(webview.as_ref(), &events, event_outbox, owner)?;
         register_bridge_view(bridge, &webview_id, policy, webview.as_mut());
         Ok(PrimaryWebview {
             webview_id,
             webview,
             download_delegate: Some(download_navigation_delegate),
+            load_state_delegate,
             events,
         })
     }
@@ -2087,6 +2222,9 @@ impl MacosWebviewRuntime {
 
     fn destroy_window_session(&mut self, tray_id: &str) {
         self.registry.destroy_window(tray_id);
+        // D26: the tray's auxiliary popups go with its window (explicit
+        // destroy); popups owned by other trays are never touched.
+        self.popups.borrow_mut().close_all_of_tray(tray_id);
         if let Some(session) = self.sessions.remove(tray_id) {
             // Channel law (D20): window destruction is a destroy entrance —
             // open channels close with `window_destroyed`, endpoints still
@@ -2718,10 +2856,19 @@ impl NavigatorWindowBridge {
             webview_id: true,
             webview_bridge_policy: true,
             message_channels: true,
+            popup_windows: true,
             // geometryChange joins the unified push family with the layout
             // batch (D23): layout commits and overlay metric changes now
-            // recompute per-view projections natively.
-            webview_push_events: vec!["urlChange", "titleChange", "focused", "geometryChange"],
+            // recompute per-view projections natively. loadState joined with
+            // the D24 batch: native page-load/failure callbacks and
+            // estimatedProgress KVO push straight into the event outbox.
+            webview_push_events: vec![
+                "urlChange",
+                "titleChange",
+                "focused",
+                "geometryChange",
+                "loadState",
+            ],
             platform_capabilities: WindowPlatformCapabilities {
                 macos: MacosWindowCapabilities {
                     background_materials: supported_background_effects()

@@ -1,9 +1,11 @@
 //! Platform-neutral multi-webview orchestration bookkeeping.
 //!
-//! Pure state core for `add-webview-orchestration` decisions D2/D6/D18/D19:
-//! owner-tuple window ownership, precise `session_closed` cleanup, the two
-//! v1 style-exclusivity checkpoints, per-view push-event sequence numbers,
-//! and focus edge transitions. Platform runtimes (macOS today, Windows in
+//! Pure state core for `add-webview-orchestration` decisions D2/D6/D18/D19
+//! plus the owner-walk rounds D24/D26: owner-tuple window ownership, precise
+//! `session_closed` cleanup, the two v1 style-exclusivity checkpoints,
+//! per-view push-event sequence numbers, focus edge transitions, the
+//! `loadState` navigation lifecycle (in-flight gating, progress throttling),
+//! and auxiliary popup ownership. Platform runtimes (macOS today, Windows in
 //! the generalization batch) embed [`ViewEvents`] handles into their native
 //! webview slots and call these functions; nothing here touches AppKit,
 //! Win32, or wry, so the laws are testable without a native window server.
@@ -18,7 +20,7 @@ use std::collections::HashSet;
 
 use opentray_spec::webview::{
     OrchestrationErrorCode, WebviewBridgePolicy, WebviewErrorEnvelope, WebviewEventFrame,
-    WebviewEventKind, WebviewOwnerTuple,
+    WebviewEventKind, WebviewLoadPhase, WebviewOwnerTuple,
 };
 
 /// Default window-session id bound when a legacy `show` command carries no
@@ -140,6 +142,14 @@ pub(crate) struct ViewEvents {
     /// Change detection only — geometryChange is an edge event with no query
     /// pair, so this cache never rides a `(value, seq)` response.
     pub overlay_rect: Option<opentray_spec::webview::WebviewGeometryRect>,
+    /// D24: whether a navigation is currently in flight (between `started`
+    /// and its terminal `finished`/`failed`). Gates the estimatedProgress
+    /// push path so idle KVO ticks and post-failure drift stay silent.
+    pub load_in_flight: bool,
+    /// D24: last progress value that was accepted for a push frame (None
+    /// while no load is in flight). Throttles progress frames so native
+    /// progress observers cannot flood the outbox.
+    pub last_load_progress: Option<f64>,
 }
 
 impl ViewEvents {
@@ -155,6 +165,8 @@ impl ViewEvents {
             title_seq: 0,
             focused: false,
             overlay_rect: None,
+            load_in_flight: false,
+            last_load_progress: None,
         }
     }
 
@@ -281,6 +293,89 @@ impl ViewEvents {
             self.webview_id.clone(),
             seq,
             self.overlay_rect,
+        ))
+    }
+
+    /// Records a navigation lifecycle transition (D24): `started` marks a
+    /// load in flight; `finished`/`failed` terminate it. Every phase change
+    /// allocates a sequence number and updates the in-flight state even while
+    /// unsubscribed (pure push, no replay); a frame is produced only for
+    /// subscribed, owner-attributed views. `failed` carries the platform
+    /// error code when the substrate reports one.
+    pub(crate) fn note_load_state(
+        &mut self,
+        owner: &WindowOwner,
+        window_id: &str,
+        phase: WebviewLoadPhase,
+        url: impl Into<String>,
+        error_code: Option<i64>,
+        progress: Option<f64>,
+    ) -> Option<WebviewEventFrame> {
+        match phase {
+            WebviewLoadPhase::Started => {
+                self.load_in_flight = true;
+                self.last_load_progress = None;
+            }
+            WebviewLoadPhase::Finished | WebviewLoadPhase::Failed => {
+                self.load_in_flight = false;
+                self.last_load_progress = None;
+            }
+        }
+        let seq = self.allocate_seq();
+        if !self.is_subscribed(WebviewEventKind::LoadState) {
+            return None;
+        }
+        let tuple = owner.owner_tuple()?;
+        Some(WebviewEventFrame::new_load_state(
+            tuple,
+            window_id,
+            self.webview_id.clone(),
+            seq,
+            phase,
+            url,
+            error_code,
+            progress,
+        ))
+    }
+
+    /// Records an intermediate progress observation (D24) from a native
+    /// progress source (macOS `estimatedProgress` KVO; Windows has none).
+    /// Frames flow only while a load is in flight, the value advanced by at
+    /// least 0.05 since the last accepted observation, and the value has not
+    /// reached 1.0 — the terminal phase carries full-progress authority. The
+    /// throttle state always refreshes for accepted observations, subscribed
+    /// or not.
+    pub(crate) fn note_load_progress(
+        &mut self,
+        owner: &WindowOwner,
+        window_id: &str,
+        url: impl Into<String>,
+        progress: f64,
+    ) -> Option<WebviewEventFrame> {
+        if !self.load_in_flight || !(0.0..1.0).contains(&progress) {
+            return None;
+        }
+        let advanced = self
+            .last_load_progress
+            .map_or(true, |last| progress - last >= 0.05);
+        if !advanced {
+            return None;
+        }
+        self.last_load_progress = Some(progress);
+        let seq = self.allocate_seq();
+        if !self.is_subscribed(WebviewEventKind::LoadState) {
+            return None;
+        }
+        let tuple = owner.owner_tuple()?;
+        Some(WebviewEventFrame::new_load_state(
+            tuple,
+            window_id,
+            self.webview_id.clone(),
+            seq,
+            WebviewLoadPhase::Started,
+            url,
+            None,
+            Some(progress),
         ))
     }
 }
@@ -481,6 +576,110 @@ impl WindowRegistry {
                 index += 1;
             }
         }
+        removed
+    }
+}
+
+/// Owner identity of one auxiliary popup window (D26): popups hang off the
+/// creating window session's owner tuple, never occupy the tray's window
+/// session slot, and never influence `tray_session_active`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PopupEntry {
+    pub tray_id: String,
+    pub session_id: Option<String>,
+    pub popup_id: String,
+}
+
+/// Auxiliary popup bookkeeping (D26). Pure ownership state, generic over the
+/// native payload a platform stores beside each popup (macOS: the plain
+/// NSWindow+webview carrier). The ledger is the cleanup authority: closing a
+/// session removes exactly that session's popups (with the transitional
+/// unattributed rule of [`WindowRegistry::session_closed`]), an explicit
+/// window destroy removes that tray's popups, and other owners' popups are
+/// never touched.
+#[derive(Debug)]
+pub(crate) struct PopupLedger<T> {
+    popups: Vec<(PopupEntry, T)>,
+}
+
+impl<T> Default for PopupLedger<T> {
+    fn default() -> Self {
+        Self {
+            popups: Vec::new(),
+        }
+    }
+}
+
+impl<T> PopupLedger<T> {
+    /// Records one popup under its creating window session's owner tuple.
+    pub fn record(&mut self, owner: &WindowOwner, popup_id: impl Into<String>, value: T) {
+        self.popups.push((
+            PopupEntry {
+                tray_id: owner.tray_id.clone(),
+                session_id: owner.session_id.clone(),
+                popup_id: popup_id.into(),
+            },
+            value,
+        ));
+    }
+
+    /// Total popup count (diagnostics and tests).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn len(&self) -> usize {
+        self.popups.len()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn is_empty(&self) -> bool {
+        self.popups.is_empty()
+    }
+
+    /// Popup ids owned by one tray (diagnostics and tests).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn popup_ids_of_tray(&self, tray_id: &str) -> Vec<String> {
+        self.popups
+            .iter()
+            .filter(|(entry, _)| entry.tray_id == tray_id)
+            .map(|(entry, _)| entry.popup_id.clone())
+            .collect()
+    }
+
+    /// Removes and returns every popup owned by the closing session (D26:
+    /// session close and lease cleanup close all of that session's popups
+    /// without touching other owners'). Unattributed legacy popups follow
+    /// the transitional rule and close with any session.
+    pub fn close_all_of_session(&mut self, closing_session_id: &str) -> Vec<(PopupEntry, T)> {
+        let mut kept = Vec::new();
+        let mut removed = Vec::new();
+        for pair in self.popups.drain(..) {
+            let matches = pair
+                .0
+                .session_id
+                .as_deref()
+                .map_or(true, |recorded| recorded == closing_session_id);
+            if matches {
+                removed.push(pair);
+            } else {
+                kept.push(pair);
+            }
+        }
+        self.popups = kept;
+        removed
+    }
+
+    /// Removes and returns every popup owned by one tray (explicit window
+    /// destroy): the tray's whole auxiliary set goes with its window.
+    pub fn close_all_of_tray(&mut self, tray_id: &str) -> Vec<(PopupEntry, T)> {
+        let mut kept = Vec::new();
+        let mut removed = Vec::new();
+        for pair in self.popups.drain(..) {
+            if pair.0.tray_id == tray_id {
+                removed.push(pair);
+            } else {
+                kept.push(pair);
+            }
+        }
+        self.popups = kept;
         removed
     }
 }
@@ -776,5 +975,170 @@ mod tests {
         assert_eq!(error.code(), OrchestrationErrorCode::UnknownView);
         assert!(registry.remove_view("tray-1", "content").is_some());
         assert!(registry.remove_view("tray-1", "content").is_none());
+    }
+
+    #[test]
+    fn load_state_lifecycle_frames_follow_subscription_and_seq_semantics() {
+        use opentray_spec::webview::WebviewEventPayload;
+
+        let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
+        let attributed = owner("tray-1", Some("session-1"));
+
+        // Unsubscribed transitions still advance the sequence and flip the
+        // in-flight state.
+        assert!(events
+            .note_load_state(&attributed, "win", WebviewLoadPhase::Started, "https://example.org", None, None)
+            .is_none());
+        assert!(events.load_in_flight);
+        assert_eq!(events.next_seq, 2);
+
+        events.subscribe(&[WebviewEventKind::LoadState]);
+        let started = events
+            .note_load_state(&attributed, "win", WebviewLoadPhase::Started, "https://example.org/a", None, None)
+            .expect("subscribed started emits");
+        assert!(started.is_coherent());
+        assert!(started.payload == WebviewEventPayload::LoadState {
+            phase: WebviewLoadPhase::Started,
+            url: "https://example.org/a".to_string(),
+            error_code: None,
+            progress: None,
+        });
+
+        let finished = events
+            .note_load_state(&attributed, "win", WebviewLoadPhase::Finished, "https://example.org/a", None, Some(1.0))
+            .expect("subscribed finished emits");
+        assert_eq!(finished.seq, 3, "one per-view counter across kinds");
+        assert!(finished.payload == WebviewEventPayload::LoadState {
+            phase: WebviewLoadPhase::Finished,
+            url: "https://example.org/a".to_string(),
+            error_code: None,
+            progress: Some(1.0),
+        });
+        assert!(!events.load_in_flight);
+
+        // Failed frames carry the platform error code.
+        events.note_load_state(&attributed, "win", WebviewLoadPhase::Started, "https://unreachable.example", None, None);
+        let failed = events
+            .note_load_state(&attributed, "win", WebviewLoadPhase::Failed, "https://unreachable.example", Some(-1003), None)
+            .expect("subscribed failure emits");
+        assert!(failed.is_coherent());
+        assert!(failed.payload == WebviewEventPayload::LoadState {
+            phase: WebviewLoadPhase::Failed,
+            url: "https://unreachable.example".to_string(),
+            error_code: Some(-1003),
+            progress: None,
+        });
+        assert!(!events.load_in_flight);
+
+        // Unattributed views stay silent (the frozen frame schema requires a
+        // session id) but the lifecycle state still tracks.
+        let unattributed = owner("tray-1", None);
+        assert!(events
+            .note_load_state(&unattributed, "win", WebviewLoadPhase::Started, "https://example.org", None, None)
+            .is_none());
+        assert!(events.load_in_flight);
+    }
+
+    #[test]
+    fn load_progress_frames_are_throttled_and_in_flight_gated() {
+        let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
+        let attributed = owner("tray-1", Some("session-1"));
+        events.subscribe(&[WebviewEventKind::LoadState]);
+
+        // No load in flight: progress observations stay silent.
+        assert!(events
+            .note_load_progress(&attributed, "win", "https://example.org", 0.1)
+            .is_none());
+
+        events.note_load_state(&attributed, "win", WebviewLoadPhase::Started, "https://example.org", None, None);
+        // First in-flight observation is accepted even at low values.
+        let first = events
+            .note_load_progress(&attributed, "win", "https://example.org", 0.02)
+            .expect("first in-flight progress emits");
+        assert!(first.is_coherent());
+        // Small drift below the 0.05 threshold stays silent.
+        assert!(events
+            .note_load_progress(&attributed, "win", "https://example.org", 0.03)
+            .is_none());
+        // Advancing past the threshold emits again.
+        let second = events
+            .note_load_progress(&attributed, "win", "https://example.org", 0.1)
+            .expect("threshold-crossing progress emits");
+        assert_eq!(second.seq, first.seq + 1);
+        // Reaching 1.0 is the finished frame's authority, not the progress path.
+        assert!(events
+            .note_load_progress(&attributed, "win", "https://example.org", 1.0)
+            .is_none());
+        // After the terminal phase, further KVO drift stays silent.
+        events.note_load_state(&attributed, "win", WebviewLoadPhase::Finished, "https://example.org", None, Some(1.0));
+        assert!(events
+            .note_load_progress(&attributed, "win", "https://example.org", 0.4)
+            .is_none());
+        assert_eq!(events.last_load_progress, None);
+    }
+
+    #[test]
+    fn popup_ledger_session_cleanup_closes_only_the_closing_sessions_popups() {
+        let mut ledger = PopupLedger::<()>::default();
+        let session_one = owner("tray-1", Some("session-1"));
+        let session_two = owner("tray-2", Some("session-2"));
+        ledger.record(&session_one, "popup-a", ());
+        ledger.record(&session_one, "popup-b", ());
+        ledger.record(&session_two, "popup-c", ());
+        assert_eq!(ledger.len(), 3);
+
+        // Closing session-1 closes both of its popups and nothing else.
+        let removed = ledger.close_all_of_session("session-1");
+        assert_eq!(
+            removed.iter().map(|(entry, _)| entry.popup_id.clone()).collect::<Vec<_>>(),
+            vec!["popup-a".to_string(), "popup-b".to_string()]
+        );
+        assert_eq!(ledger.popup_ids_of_tray("tray-2"), vec!["popup-c".to_string()]);
+        assert_eq!(ledger.len(), 1);
+
+        // Closing session-2 drains the ledger.
+        assert_eq!(ledger.close_all_of_session("session-2").len(), 1);
+        assert!(ledger.is_empty());
+
+        // Unattributed legacy popups close with any session (transitional
+        // rule); attributed ones survive a foreign session's close untouched.
+        let legacy = owner("tray-3", None);
+        ledger.record(&legacy, "popup-legacy", ());
+        ledger.record(&session_one, "popup-d", ());
+        let removed = ledger.close_all_of_session("session-9");
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0.popup_id, "popup-legacy");
+        assert_eq!(ledger.popup_ids_of_tray("tray-1"), vec!["popup-d".to_string()]);
+    }
+
+    #[test]
+    fn popup_ledger_tray_destroy_and_tray_session_isolation() {
+        let mut ledger = PopupLedger::<u8>::default();
+        let session_one = owner("tray-1", Some("session-1"));
+        let session_two = owner("tray-2", Some("session-2"));
+        ledger.record(&session_one, "popup-a", 1);
+        ledger.record(&session_two, "popup-b", 2);
+
+        // Explicit destroy of tray-1's window removes exactly tray-1's popup.
+        let removed = ledger.close_all_of_tray("tray-1");
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0.popup_id, "popup-a");
+        assert_eq!(ledger.popup_ids_of_tray("tray-2"), vec!["popup-b".to_string()]);
+
+        // Popups never influence the one-window-session-per-tray law: a tray
+        // with open popups still rejects a second window session, and after
+        // its session closes the registry holds no popup-created phantom.
+        let mut registry = WindowRegistry::new();
+        registry
+            .open_window(owner("tray-2", Some("session-2")))
+            .expect("window");
+        ledger.record(&session_two, "popup-c", 3);
+        let error = registry
+            .open_window(owner("tray-2", Some("session-other")))
+            .expect_err("popups do not relax tray_session_active");
+        assert_eq!(error.code(), OrchestrationErrorCode::TraySessionActive);
+        assert_eq!(registry.session_closed("session-2").len(), 1);
+        assert!(registry.window("tray-2").is_none());
+        assert_eq!(ledger.close_all_of_session("session-2").len(), 2);
     }
 }

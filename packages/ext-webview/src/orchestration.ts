@@ -27,6 +27,7 @@ import {
   type WebviewEventKind,
   type WebviewGeometryRect,
   type WebviewId,
+  type WebviewLoadPhase,
   type WebviewListEntry,
   type WebviewLayoutContainerNode,
   type WebviewLayoutDocument,
@@ -131,10 +132,22 @@ export interface WebviewGeometryChangePush {
   rect: WebviewGeometryRect | null;
 }
 
+/** `loadState` push (D24): phase truth always, `progress`/`errorCode` best-effort. */
+export interface WebviewLoadStatePush {
+  windowId: WindowId;
+  webviewId: WebviewId;
+  seq: number;
+  phase: WebviewLoadPhase;
+  url: string;
+  errorCode?: number;
+  progress?: number;
+}
+
 type UrlChangeHandler = (event: WebviewUrlChangePush) => void;
 type TitleChangeHandler = (event: WebviewTitleChangePush) => void;
 type FocusedHandler = (event: WebviewFocusedPush) => void;
 type GeometryChangeHandler = (event: WebviewGeometryChangePush) => void;
+type LoadStateHandler = (event: WebviewLoadStatePush) => void;
 
 /** One child webview inside a window session (frozen wire ids only). */
 export interface WebviewChildHandle {
@@ -152,6 +165,8 @@ export interface WebviewChildHandle {
   onTitleChange(handler: TitleChangeHandler): () => void;
   onFocused(handler: FocusedHandler): () => void;
   onGeometryChange(handler: GeometryChangeHandler): () => void;
+  /** Navigation lifecycle pushes (D24): no query pair — edges only. */
+  onLoadState(handler: LoadStateHandler): () => void;
   /** Same as the parent window handle's `destroyWebview(id)`. */
   destroy(): Promise<void>;
 }
@@ -377,6 +392,7 @@ export const createWebviewOrchestration = (
   const titleChangeHandlers = new Map<WebviewId, Set<TitleChangeHandler>>();
   const focusedHandlers = new Map<WebviewId, Set<FocusedHandler>>();
   const geometryChangeHandlers = new Map<WebviewId, Set<GeometryChangeHandler>>();
+  const loadStateHandlers = new Map<WebviewId, Set<LoadStateHandler>>();
 
   const channels = new Map<ChannelId, ChannelEndpointState>();
   const channelCreatedHandlers = new Set<(notice: WebviewChannelCreatedNotice) => void>();
@@ -425,6 +441,7 @@ export const createWebviewOrchestration = (
     titleChangeHandlers.delete(webviewId);
     focusedHandlers.delete(webviewId);
     geometryChangeHandlers.delete(webviewId);
+    loadStateHandlers.delete(webviewId);
   };
 
   const callHandlers = <TEvent>(
@@ -471,6 +488,20 @@ export const createWebviewOrchestration = (
         const set = geometryChangeHandlers.get(frame.webviewId);
         if (set !== undefined) {
           callHandlers(set, { ...identity, rect: frame.payload.rect });
+        }
+        return;
+      }
+      case "loadState": {
+        const set = loadStateHandlers.get(frame.webviewId);
+        if (set !== undefined) {
+          const { phase, url, errorCode, progress } = frame.payload;
+          callHandlers(set, {
+            ...identity,
+            phase,
+            url,
+            ...(errorCode === undefined ? {} : { errorCode }),
+            ...(progress === undefined ? {} : { progress }),
+          });
         }
         return;
       }
@@ -694,6 +725,9 @@ export const createWebviewOrchestration = (
     onGeometryChange(handler: GeometryChangeHandler): () => void {
       return addViewListener(geometryChangeHandlers, webviewId, "geometryChange", handler);
     },
+    onLoadState(handler: LoadStateHandler): () => void {
+      return addViewListener(loadStateHandlers, webviewId, "loadState", handler);
+    },
     destroy(): Promise<void> {
       return destroyWebview(webviewId);
     },
@@ -831,6 +865,7 @@ export const createWebviewOrchestration = (
     titleChangeHandlers.clear();
     focusedHandlers.clear();
     geometryChangeHandlers.clear();
+    loadStateHandlers.clear();
     channels.clear();
     channelCreatedHandlers.clear();
   };

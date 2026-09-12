@@ -212,18 +212,28 @@ export type WebviewOrchestrationResultFrame = { owner: WebviewOwnerTuple } &
       } & WebviewTitleQueryResult
   );
 
-/** Unified per-view event family (D19): urlChange, titleChange, focused, geometryChange. */
+/**
+ * Unified per-view event family (D19; `loadState` joined with D24):
+ * urlChange, titleChange, focused, geometryChange, loadState.
+ */
 export const WEBVIEW_EVENT_KINDS = [
   "urlChange",
   "titleChange",
   "focused",
   "geometryChange",
+  "loadState",
 ] as const;
 
 export type WebviewEventKind = (typeof WEBVIEW_EVENT_KINDS)[number];
 
 export const isWebviewEventKind = (value: unknown): value is WebviewEventKind =>
   typeof value === "string" && (WEBVIEW_EVENT_KINDS as readonly unknown[]).includes(value);
+
+/** Navigation lifecycle phase of a `loadState` payload (D24). */
+export type WebviewLoadPhase = "started" | "finished" | "failed";
+
+const isWebviewLoadPhase = (value: unknown): value is WebviewLoadPhase =>
+  value === "started" || value === "finished" || value === "failed";
 
 /** View-local logical-pixel rectangle; same fields as the page-bridge overlay payload. */
 export interface WebviewGeometryRect {
@@ -234,7 +244,20 @@ export interface WebviewGeometryRect {
 }
 
 /**
- * Field-frozen event payloads. Every event frame carries
+ * Field-frozen `loadState` payload (D24): navigation lifecycle phase plus the
+ * target URL; `errorCode` rides failures, `progress` ∈ [0,1] rides phases the
+ * platform can measure and is omitted otherwise (consumers render an
+ * indeterminate affordance).
+ */
+export interface WebviewLoadStatePayload {
+  phase: WebviewLoadPhase;
+  url: string;
+  errorCode?: number;
+  progress?: number;
+}
+
+/**
+ * Field-level frozen event payloads. Every event frame carries
  * `{ owner, windowId, webviewId, kind, seq, payload }`; `seq` is a per-view
  * monotonically increasing sequence number and events are pure push with no
  * replay — current values come from the `(value, seq)` query commands.
@@ -249,6 +272,7 @@ export type WebviewEventFrame = { type: "webview-event" } & {
     | { kind: "titleChange"; payload: { title: string } }
     | { kind: "focused"; payload: { focused: boolean } }
     | { kind: "geometryChange"; payload: { rect: WebviewGeometryRect | null } }
+    | { kind: "loadState"; payload: WebviewLoadStatePayload }
   );
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -296,6 +320,19 @@ export const isWebviewEventFrame = (value: unknown): value is WebviewEventFrame 
       return typeof value.payload.focused === "boolean";
     case "geometryChange":
       return value.payload.rect === null || isGeometryRect(value.payload.rect);
+    case "loadState":
+      return (
+        isWebviewLoadPhase(value.payload.phase) &&
+        typeof value.payload.url === "string" &&
+        (value.payload.errorCode === undefined ||
+          (typeof value.payload.errorCode === "number" &&
+            Number.isSafeInteger(value.payload.errorCode))) &&
+        (value.payload.progress === undefined ||
+          (typeof value.payload.progress === "number" &&
+            Number.isFinite(value.payload.progress) &&
+            value.payload.progress >= 0 &&
+            value.payload.progress <= 1))
+      );
   }
 };
 

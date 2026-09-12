@@ -289,6 +289,42 @@ const eventBuilders: Record<string, () => WebviewEventFrame> = {
     seq: 9,
     payload: { rect: null },
   }),
+  "loadState started with progress": () => ({
+    type: "webview-event",
+    owner,
+    windowId: "win-1",
+    webviewId: "content",
+    kind: "loadState",
+    seq: 5,
+    payload: { phase: "started", url: "https://example.org/articles/1", progress: 0.1 },
+  }),
+  "loadState started without progress": () => ({
+    type: "webview-event",
+    owner,
+    windowId: "win-1",
+    webviewId: "content",
+    kind: "loadState",
+    seq: 6,
+    payload: { phase: "started", url: "https://example.org" },
+  }),
+  "loadState finished carries full progress": () => ({
+    type: "webview-event",
+    owner,
+    windowId: "win-1",
+    webviewId: "content",
+    kind: "loadState",
+    seq: 7,
+    payload: { phase: "finished", url: "https://example.org/articles/1", progress: 1 },
+  }),
+  "loadState failed with errorCode": () => ({
+    type: "webview-event",
+    owner,
+    windowId: "win-1",
+    webviewId: "content",
+    kind: "loadState",
+    seq: 8,
+    payload: { phase: "failed", url: "https://unreachable.example.org", errorCode: -1003 },
+  }),
 };
 
 /**
@@ -507,8 +543,46 @@ describe("registries", () => {
       "titleChange",
       "focused",
       "geometryChange",
+      "loadState",
     ]);
     expect(isWebviewEventKind("geometryChange")).toBe(true);
+    expect(isWebviewEventKind("loadState")).toBe(true);
     expect(isWebviewEventKind("zIndexChange")).toBe(false);
+  });
+
+  it("guards loadState payload fields (phase, errorCode, progress range)", () => {
+    const base = {
+      type: "webview-event",
+      owner,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "loadState",
+      seq: 1,
+    };
+    expect(isWebviewEventFrame({ ...base, payload: { phase: "started", url: "https://x" } })).toBe(
+      true,
+    );
+    expect(
+      isWebviewEventFrame({
+        ...base,
+        payload: { phase: "failed", url: "https://x", errorCode: -1003 },
+      }),
+    ).toBe(true);
+    expect(
+      isWebviewEventFrame({ ...base, payload: { phase: "finished", url: "https://x", progress: 1 } }),
+    ).toBe(true);
+    // Unknown phase, fractional/non-integer codes, and out-of-range progress reject.
+    expect(isWebviewEventFrame({ ...base, payload: { phase: "loading", url: "https://x" } })).toBe(
+      false,
+    );
+    expect(
+      isWebviewEventFrame({ ...base, payload: { phase: "failed", url: "https://x", errorCode: 1.5 } }),
+    ).toBe(false);
+    expect(
+      isWebviewEventFrame({ ...base, payload: { phase: "started", url: "https://x", progress: 1.2 } }),
+    ).toBe(false);
+    expect(
+      isWebviewEventFrame({ ...base, payload: { phase: "started", url: "https://x", progress: -0.1 } }),
+    ).toBe(false);
   });
 });

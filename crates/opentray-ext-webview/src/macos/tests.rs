@@ -1446,12 +1446,23 @@ fn navigator_window_bridge_tracks_listener_ids_per_webview() {
     assert_eq!(capabilities["multiwebview"], Value::Bool(true));
     assert_eq!(capabilities["webviewNavigation"], Value::Bool(true));
     assert_eq!(capabilities["focusWebview"], Value::Bool(true));
+    // D26: auxiliary popup windows are a capability fact on both platforms'
+    // DTOs.
+    assert_eq!(capabilities["popupWindows"], Value::Bool(true));
     assert_eq!(
         capabilities["webviewPushEvents"],
         // geometryChange joined the unified push family with the layout
         // batch (D23): layout commits and overlay metric changes recompute
-        // per-view projections natively.
-        serde_json::json!(["urlChange", "titleChange", "focused", "geometryChange"])
+        // per-view projections natively. loadState joined with D24: native
+        // page-load/failure callbacks and estimatedProgress KVO push
+        // straight into the event outbox.
+        serde_json::json!([
+            "urlChange",
+            "titleChange",
+            "focused",
+            "geometryChange",
+            "loadState"
+        ])
     );
 
     // Listener ids are per webview; routing returns the owning view.

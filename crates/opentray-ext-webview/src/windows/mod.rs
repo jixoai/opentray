@@ -639,6 +639,11 @@ struct WindowCapabilities {
     /// `navigator.opentrayWebview` page bridge. Both platforms' DTOs
     /// serialize this field (D16 parity).
     message_channels: bool,
+    /// Auxiliary popup windows (D26): serialized by both platforms' DTOs.
+    /// Stays `false` until the Windows new-window batch handles
+    /// `NewWindowRequested` (task 8.4), mirroring how the orchestration
+    /// fields stayed false before their Windows generalization batch.
+    popup_windows: bool,
     webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
@@ -5872,9 +5877,14 @@ impl NavigatorWindowBridge {
             webview_id: true,
             webview_bridge_policy: true,
             message_channels: true,
+            // D26: flips to true when the Windows new-window batch (8.4)
+            // handles NewWindowRequested with its own popup carrier.
+            popup_windows: false,
             // geometryChange joins the unified push family with the layout
             // batch (D23): layout commits and overlay metric changes
-            // recompute per-view projections natively.
+            // recompute per-view projections natively. `loadState` joins
+            // the family with the 8.4 batch (NavigationStarting/Completed/
+            // NavigationFailed).
             webview_push_events: vec!["urlChange", "titleChange", "focused", "geometryChange"],
             platform_capabilities: WindowPlatformCapabilities {
                 windows: WindowsWindowCapabilities {

@@ -82,5 +82,53 @@
       "seq": 9,
       "payload": { "rect": null }
     }
+  },
+  {
+    "name": "loadState started with progress",
+    "frame": {
+      "type": "webview-event",
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "loadState",
+      "seq": 5,
+      "payload": { "phase": "started", "url": "https://example.org/articles/1", "progress": 0.1 }
+    }
+  },
+  {
+    "name": "loadState started without progress",
+    "frame": {
+      "type": "webview-event",
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "loadState",
+      "seq": 6,
+      "payload": { "phase": "started", "url": "https://example.org" }
+    }
+  },
+  {
+    "name": "loadState finished carries full progress",
+    "frame": {
+      "type": "webview-event",
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "loadState",
+      "seq": 7,
+      "payload": { "phase": "finished", "url": "https://example.org/articles/1", "progress": 1 }
+    }
+  },
+  {
+    "name": "loadState failed with errorCode",
+    "frame": {
+      "type": "webview-event",
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "loadState",
+      "seq": 8,
+      "payload": { "phase": "failed", "url": "https://unreachable.example.org", "errorCode": -1003 }
+    }
   }
 ]
