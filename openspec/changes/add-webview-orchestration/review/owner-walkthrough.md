@@ -41,7 +41,9 @@ set DEMOS=E:\dev\github\opentray-orch\openspec\changes\add-webview-orchestration
 
 ② 的确认清单同 macOS，Windows 额外看：任务栏图标正常、DPI 缩放下工具栏仍 44 逻辑像素。
 
-> 应用已在两台机器上预先创建并装好依赖（无头验证过）——② 的脚本直接进到启动窗口。
+> 应用使用专属 `walk.*` app-id（避免与历史注册冲突——首版脚本曾静默复用 9 月 9 日旧 HN 注册，
+> 其 toolbar 正是旧嵌入法剥掉的，导致「无工具栏」；已修复并双平台重验）。两台机器均已预创建并装好依赖，② 直接进到启动窗口。
+> 你刚才看到的无工具栏窗口来自旧注册 `com.ycombinator.news`（非本次代码），已被新 walk 注册取代。
 
 ---
 
