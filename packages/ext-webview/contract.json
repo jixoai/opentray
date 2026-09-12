@@ -1,4 +1,22 @@
 {
   "extensionName": "webview",
-  "contractFingerprint": "opentray-ext-webview-contract-1"
+  "contractFingerprint": "opentray-ext-webview-contract-2",
+  "eventPort": {
+    "abiVersion": 1,
+    "attachSymbol": "opentray_ext_attach_event_port_v1",
+    "eventClasses": {
+      "urlChange": "latest",
+      "titleChange": "latest",
+      "focused": "edge",
+      "geometryChange": "edge",
+      "loadState.started": "edge",
+      "loadState.finished": "edge",
+      "loadState.failed": "edge",
+      "loadState.progress": "best-effort"
+    },
+    "latestCoalesceKey": "<webviewId>/<field>",
+    "stateResync": "urlChange/titleChange sequence gaps are repaired by the get-webview-url/get-webview-title (value, seq) query pair",
+    "edgeRetry": "extension-owned bounded retry (FIFO, 64 records) flushed on the next producer callback or after the next handled command; never blocks a native callback",
+    "legacyFallback": "without an attached port, migrated families ride the command-response outbox flush (H0 host compatibility)"
+  }
 }

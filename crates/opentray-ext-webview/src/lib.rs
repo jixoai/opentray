@@ -7,6 +7,7 @@
 mod abi_support;
 mod bootstrap;
 mod channels;
+mod event_port;
 mod layout;
 mod orchestration;
 #[cfg(target_os = "macos")]
@@ -940,6 +941,10 @@ pub unsafe extern "C" fn opentray_ext_command(
             data,
         });
     }
+    // D19 batch B: give backpressured Edge records from native callbacks
+    // another bounded, non-blocking chance after every handled command. The
+    // hub still delivers them only after this response's frames are written.
+    event_port::flush_edge_retries_after_command();
     write_owned_events(out_events_json, &events)
 }
 
@@ -1883,6 +1888,10 @@ mod tests {
             "../../../packages/ext-webview/package.json"
         ))
         .expect("facade package JSON");
+        let contract = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../../packages/ext-webview/contract.json"
+        ))
+        .expect("extension contract JSON");
         assert_eq!(manifest.extension_name, "webview");
         assert_eq!(
             manifest.artifact_set_version,
@@ -1890,7 +1899,10 @@ mod tests {
         );
         assert_eq!(
             manifest.contract_fingerprint,
-            "opentray-ext-webview-contract-1"
+            contract["contractFingerprint"]
+                .as_str()
+                .expect("contract fingerprint"),
+            "the embedded identity must track the facade contract file"
         );
         assert!(!manifest.build_identity.is_empty());
         unsafe { opentray_ext_free_string(output.ptr, output.len) };

@@ -127,10 +127,12 @@ struct WindowSession {
     /// `show` is the primary (`default`); orchestration children join as
     /// siblings.
     webviews: HashMap<String, NativeWebview>,
-    /// D19 push-event outbox. Native page/title/focus observers push frames
-    /// here directly; every command response flushes them into extension
-    /// envelopes. This queue is deliberately separate from the legacy
-    /// `window_events` drain path.
+    /// D19 push-event legacy fallback outbox. On a direct-EventPort host the
+    /// migrated five families (url/title/focus/geometry/loadState) submit
+    /// through `try_submit` and never touch this queue; it stays only as the
+    /// declared legacy delivery for hosts that never attached a port. Every
+    /// command response flushes it into extension envelopes. This queue is
+    /// deliberately separate from the legacy `window_events` drain path.
     event_outbox: Rc<RefCell<VecDeque<WebviewEventFrame>>>,
     /// Shared with the key-notification observers so per-view focus edges
     /// are reconciled from native callbacks without polling.
@@ -256,6 +258,13 @@ impl FocusTracker {
     }
 }
 
+/// D19 batch B routing seam for the five push-event families. When the
+/// broker attached an EventPort, the frame goes straight into the host
+/// EventHub (`try_submit` under the frozen classification table; Edge
+/// backpressure parks in the extension's bounded retry queue) — the
+/// command-response outbox is retired for migrated families so one event can
+/// never ride both paths. When no port was ever attached (legacy host), the
+/// declared legacy fallback keeps the outbox/response-flush delivery.
 fn push_event_frame(
     outbox: &Weak<RefCell<VecDeque<WebviewEventFrame>>>,
     frame: Option<WebviewEventFrame>,
@@ -263,8 +272,13 @@ fn push_event_frame(
     let Some(frame) = frame else {
         return;
     };
-    if let Some(outbox) = outbox.upgrade() {
-        outbox.borrow_mut().push_back(frame);
+    match crate::event_port::submit_frame(&frame) {
+        crate::event_port::SubmitStatus::LegacyFlush => {
+            if let Some(outbox) = outbox.upgrade() {
+                outbox.borrow_mut().push_back(frame);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -548,9 +562,15 @@ impl MacosWebviewRuntime {
         let result = self.dispatch(tray_id, command)?;
         // Flush per-view push events after the command so synchronously
         // triggered native callbacks (focus edges, navigation starts) ride
-        // this response. This is the only delivery path for orchestration
-        // events; the 16 ms window-event drain never observes them.
-        let events = self.flush_pending_events();
+        // this response. On a direct-EventPort host the migrated families
+        // already entered the broker EventHub from their native callbacks,
+        // so the legacy outbox is retired for them (D19 batch B) and this
+        // flush is a no-op reserved for the no-port legacy fallback.
+        let events = if crate::event_port::port_attached() {
+            Vec::new()
+        } else {
+            self.flush_pending_events()
+        };
         // Host-bound channel events ride the same response (v1 flush
         // ruling, tasks 3.3b/3.5), including events drained from sessions
         // destroyed by this very command.

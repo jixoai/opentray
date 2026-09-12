@@ -262,11 +262,10 @@ impl LayoutTracker {
                 &self.owner.window_id,
                 projected,
             );
-            if let Some(frame) = frame {
-                if let Some(outbox) = self.outbox.upgrade() {
-                    outbox.borrow_mut().push_back(frame);
-                }
-            }
+            // D19 batch B: geometryChange is an Edge record through the
+            // EventPort when attached; the outbox is only the legacy
+            // fallback (see `push_event_frame`).
+            super::push_event_frame(&self.outbox, frame);
             if changed && page_bridge_enabled {
                 if let Err(error) =
                     emit_view_geometry_change(&bridge, &target.webview_id, projected)
