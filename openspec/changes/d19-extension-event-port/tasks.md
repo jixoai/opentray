@@ -33,9 +33,9 @@
 
 ## 5. Implementation — 批次 C（Phase 2 退役轮询）
 
-- [ ] 5.1 POLLED_WINDOW_EVENTS 逐成员映射：focus/blur/visible/style → EventPort 推送（订阅控制原生生产者）；reopen 活动追踪改推送。
-- [ ] 5.2 删 drainWindowEvents 命令/native window_events 队列/facade 16ms interval/监听计数定时器（一次兼容性决策）；权限轮询明确保留。
-- [ ] 5.3 双平台空闲取证：常驻 app-mode 窗口静置+原生回调发生时，migrated 家族 drain 命令计数=0。
+- [x] 5.1 POLLED_WINDOW_EVENTS 逐成员映射：focus/blur/visible/closed/stylechange/windowinteractionchange/download*（downloadprogress=BestEffort，其余 Edge——无 query/replay 路由按规范表不得 Latest；stylechange 双平台本就无 facade 生产者，保留在冻结家族内）→ `event_port::submit_window_event`（复用 submit_bytes/Edge 重试，批次 C 分类表写入 event_port.rs 头 + contract-3 eventClasses）；订阅控制原生生产者：新增 subscribeWindowEvents/unsubscribeWindowEvents 协议（对齐 D19 per-view 订阅语义，无订阅者零原生观测记录，macos/tests.rs 三测例证明）；reopen MRU 改推送驱动（facade listen→订阅，app-reopen 回归绿）。
+- [x] 5.2 删 drainWindowEvents 命令（lib.rs 类型+解析）/macos 原生 window_events 队列（bridge 字段+drain 臂+window_event_payload）/facade 16ms interval+监听计数定时器+emit/localListeners 死面（WebviewCommand/TS 类型同步删除）——一次兼容性决策 contract-2→contract-3（drain 队列是该家族唯一 pre-port 通道，H0 回退随之退役并在 contract.json 声明）；windows/mod.rs 仅删分发臂+惰性订阅臂（协议必需最小面，行为迁移留 Windows 批）；权限轮询（PERMISSION_POLL_INTERVAL_MS）明确保留；drain 臂原先承载的 app-mode/激活策略 reconcile 改推送驱动（delegate close/blur auto-hide/miniaturize 观察者 + 共享 AppModeLedger）。
+- [x] 5.3 macOS 空闲取证 PASS（release broker/dylib contract-3，隔离 HOME，windowOnly 双 webview+五族订阅+窗口家族订阅）：空闲窗口（含原生回调：page 自导航 + WKDownload downloadstarted）drain 命令=0、窗口命令=0（唯一 get-webview-url 为批次 B gap-resync 事件因果查询，非定时）；窗口家族推送直达 facade listener（downloadstarted/visibleChange/closed），五族 urlChange/loadState 直达；broker.log direct-event-port + hub drained 指标吻合；零泄漏进程（证据 /tmp/d19c-smoke/{timeline.txt,broker.log,smoke.mjs}；批次 B 对照 121 polls→0）。focus/blur live 证据因 GUI 会话锁定（loginwindow frontmost，App 无法激活、窗口永不成 key）标记 SKIPPED-locked-session——生产者等价性由 macos/tests.rs（同一通知块→订阅门控→Edge 推送）覆盖，解锁会话复验列入移交。Windows 半侧留 win 批次。
 - [ ] 5.4 既有 drain 相关测试更新；app-reopen MRU 行为回归。
 
 ## 6. Verification
