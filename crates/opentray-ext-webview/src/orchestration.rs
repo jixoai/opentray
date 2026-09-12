@@ -296,18 +296,28 @@ impl ViewEvents {
         ))
     }
 
+<<<<<<< HEAD
     /// Records a navigation lifecycle transition (D24): `started` marks a
     /// load in flight; `finished`/`failed` terminate it. Every phase change
     /// allocates a sequence number and updates the in-flight state even while
     /// unsubscribed (pure push, no replay); a frame is produced only for
     /// subscribed, owner-attributed views. `failed` carries the platform
     /// error code when the substrate reports one.
+=======
+    /// Records a navigation lifecycle transition (D24 `loadState`). Unlike
+    /// the query-paired caches there is no stored value to dedupe — every
+    /// native navigation callback is a state transition worth one frame —
+    /// so the only gates are the subscription and owner attribution, and
+    /// the per-view sequence still advances only for emitted frames
+    /// (mirroring [`Self::focus_edge`]; `loadState` has no query pair).
+>>>>>>> orch-win-84
     pub(crate) fn note_load_state(
         &mut self,
         owner: &WindowOwner,
         window_id: &str,
         phase: WebviewLoadPhase,
         url: impl Into<String>,
+<<<<<<< HEAD
         error_code: Option<i64>,
         progress: Option<f64>,
     ) -> Option<WebviewEventFrame> {
@@ -322,10 +332,18 @@ impl ViewEvents {
             }
         }
         let seq = self.allocate_seq();
+=======
+        error_code: Option<i32>,
+    ) -> Option<WebviewEventFrame> {
+>>>>>>> orch-win-84
         if !self.is_subscribed(WebviewEventKind::LoadState) {
             return None;
         }
         let tuple = owner.owner_tuple()?;
+<<<<<<< HEAD
+=======
+        let seq = self.allocate_seq();
+>>>>>>> orch-win-84
         Some(WebviewEventFrame::new_load_state(
             tuple,
             window_id,
@@ -334,6 +352,7 @@ impl ViewEvents {
             phase,
             url,
             error_code,
+<<<<<<< HEAD
             progress,
         ))
     }
@@ -376,6 +395,8 @@ impl ViewEvents {
             url,
             None,
             Some(progress),
+=======
+>>>>>>> orch-win-84
         ))
     }
 }
@@ -978,6 +999,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn load_state_lifecycle_frames_follow_subscription_and_seq_semantics() {
         use opentray_spec::webview::WebviewEventPayload;
 
@@ -1140,5 +1162,62 @@ mod tests {
         assert_eq!(registry.session_closed("session-2").len(), 1);
         assert!(registry.window("tray-2").is_none());
         assert_eq!(ledger.close_all_of_session("session-2").len(), 2);
+=======
+    fn load_state_frames_are_subscribed_edges_with_monotonic_seq() {
+        let legacy_owner = owner("tray-legacy", None);
+        let owner = owner("tray-1", Some("session-1"));
+        let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
+
+        // Unsubscribed and unattributed views stay silent.
+        assert!(events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Started, "https://a.example/", None)
+            .is_none());
+        events.subscribe(&[WebviewEventKind::LoadState]);
+        assert!(events
+            .note_load_state(&legacy_owner, "win", WebviewLoadPhase::Started, "https://a.example/", None)
+            .is_none());
+
+        // Every native navigation transition is one edge: no dedupe.
+        let started = events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Started, "https://a.example/", None)
+            .expect("started frame");
+        assert_eq!(started.seq, 1);
+        let finished = events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Finished, "https://a.example/", None)
+            .expect("finished frame");
+        assert_eq!(finished.seq, 2);
+        let failed = events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Failed, "https://b.example/", Some(3))
+            .expect("failed frame");
+        assert_eq!(failed.seq, 3);
+        for frame in [&started, &finished, &failed] {
+            assert_eq!(frame.webview_id, "content");
+            assert_eq!(frame.kind, WebviewEventKind::LoadState);
+            assert!(frame.is_coherent());
+        }
+        assert!(matches!(
+            started.payload,
+            opentray_spec::webview::WebviewEventPayload::LoadState { ref phase, error_code: None, progress: None, .. }
+                if *phase == WebviewLoadPhase::Started
+        ));
+        let wire = serde_json::to_value(&failed).unwrap();
+        assert_eq!(
+            wire["payload"],
+            serde_json::json!({ "phase": "failed", "url": "https://b.example/", "errorCode": 3 }),
+            "failed payload carries the numeric error code and omits progress"
+        );
+        let started_wire = serde_json::to_value(&started).unwrap();
+        assert_eq!(
+            started_wire["payload"],
+            serde_json::json!({ "phase": "started", "url": "https://a.example/" }),
+            "optional fields stay absent when unknown"
+        );
+
+        // Unsubscribing silences later transitions without disturbing seq.
+        events.unsubscribe(&[WebviewEventKind::LoadState]);
+        assert!(events
+            .note_load_state(&owner, "win", WebviewLoadPhase::Started, "https://c.example/", None)
+            .is_none());
+>>>>>>> orch-win-84
     }
 }

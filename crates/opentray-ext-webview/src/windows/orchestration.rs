@@ -45,10 +45,17 @@ use std::rc::{Rc, Weak};
 
 use opentray_spec::webview::{
     WebviewBoxStyle, WebviewBridgePolicy, WebviewEventFrame, WebviewLayoutDocument,
-    WebviewListEntry, WebviewOrchestrationCommand, WebviewOrchestrationResult,
+    WebviewListEntry, WebviewLoadPhase, WebviewOrchestrationCommand, WebviewOrchestrationResult,
 };
 use serde_json::Value;
-use webview2_com::FocusChangedEventHandler;
+use webview2_com::{
+    take_pwstr, FocusChangedEventHandler, NavigationCompletedEventHandler,
+    NavigationStartingEventHandler,
+};
+use webview2_com::Microsoft::Web::WebView2::Win32::{
+    ICoreWebView2NavigationCompletedEventArgs, ICoreWebView2NavigationStartingEventArgs,
+};
+use windows_core::{BOOL, PWSTR};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetForegroundWindow, SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
@@ -355,6 +362,125 @@ pub(super) fn install_focus_observers(
                 &mut lost_token,
             )
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Installs the per-webview navigation lifecycle observers (D24
+/// `loadState`, push-only). `NavigationStarting` emits `started` with the
+/// navigation's URI; `NavigationCompleted` emits `finished`, or `failed`
+/// with the numeric `WebErrorStatus` in `errorCode` when WebView2 reports
+/// `IsSuccess = false`. Windows has no native navigation progress
+/// surface, so `progress` stays absent (consumers render an
+/// indeterminate affordance from the phase). Both handlers push straight
+/// into the session event outbox — never the 16 ms window-event drain —
+/// and hold the event state weakly so the session can tear down freely.
+pub(super) fn install_load_state_observers(
+    webview: &WebView,
+    events: &Rc<RefCell<ViewEvents>>,
+    outbox: &Weak<RefCell<SessionEventCore>>,
+    owner: &WindowOwner,
+) -> Result<(), WebviewRuntimeError> {
+    let core = webview.webview();
+    // The completed-navigation args carry no URI; the starting handler
+    // records the pending navigation's URL so the completion (or failure)
+    // frame reports the navigation it belongs to.
+    let pending_url = Rc::new(RefCell::new(String::new()));
+
+    let start_events = Rc::clone(events);
+    let start_outbox = Weak::clone(outbox);
+    let start_owner = owner.clone();
+    let start_pending = Rc::clone(&pending_url);
+    let mut start_token = 0i64;
+    unsafe {
+        core.add_NavigationStarting(
+            &NavigationStartingEventHandler::create(Box::new(
+                move |_sender, args: Option<ICoreWebView2NavigationStartingEventArgs>| {
+                    let Some(args) = args else {
+                        return Ok(());
+                    };
+                    let uri = {
+                        let mut pointer = PWSTR::null();
+                        args.Uri(&mut pointer)?;
+                        take_pwstr(pointer)
+                    };
+                    *start_pending.borrow_mut() = uri.clone();
+                    push_view_event(&start_events, &start_outbox, &start_owner, |events,
+                                                                                    owner,
+                                                                                    window_id| {
+                        events.note_load_state(
+                            owner,
+                            window_id,
+                            WebviewLoadPhase::Started,
+                            uri.clone(),
+                            None,
+                        )
+                    });
+                    Ok(())
+                },
+            )),
+            &mut start_token,
+        )
+        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    }
+
+    let done_events = Rc::clone(events);
+    let done_outbox = Weak::clone(outbox);
+    let done_owner = owner.clone();
+    let done_pending = Rc::clone(&pending_url);
+    let mut done_token = 0i64;
+    unsafe {
+        core.add_NavigationCompleted(
+            &NavigationCompletedEventHandler::create(Box::new(
+                move |_sender,
+                      args: Option<ICoreWebView2NavigationCompletedEventArgs>| {
+                    let Some(args) = args else {
+                        return Ok(());
+                    };
+                    let mut success = BOOL::default();
+                    args.IsSuccess(&mut success)?;
+                    let url = done_pending.borrow().clone();
+                    if success.as_bool() {
+                        push_view_event(
+                            &done_events,
+                            &done_outbox,
+                            &done_owner,
+                            |events, owner, window_id| {
+                                events.note_load_state(
+                                    owner,
+                                    window_id,
+                                    WebviewLoadPhase::Finished,
+                                    url.clone(),
+                                    None,
+                                )
+                            },
+                        );
+                    } else {
+                        let mut status =
+                            webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_ERROR_STATUS(0);
+                        args.WebErrorStatus(&mut status)?;
+                        let error_code = status.0;
+                        push_view_event(
+                            &done_events,
+                            &done_outbox,
+                            &done_owner,
+                            |events, owner, window_id| {
+                                events.note_load_state(
+                                    owner,
+                                    window_id,
+                                    WebviewLoadPhase::Failed,
+                                    url.clone(),
+                                    Some(error_code),
+                                )
+                            },
+                        );
+                    }
+                    Ok(())
+                },
+            )),
+            &mut done_token,
+        )
+        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     }
     Ok(())
 }
@@ -1275,6 +1401,10 @@ impl super::WindowsWebviewRuntime {
         policy: WebviewBridgePolicy,
         events: Rc<RefCell<ViewEvents>>,
     ) -> Result<SessionWebview, WebviewRuntimeError> {
+        // D26 popup capture: taken before the session borrow so the
+        // new-window closure holds the tracker weakly (a runtime that is
+        // gone denies popups instead of resurrecting bookkeeping).
+        let popup_tracker = Rc::downgrade(&self.popups);
         let session = self
             .sessions
             .get_mut(&window_owner.tray_id)
@@ -1296,6 +1426,12 @@ impl super::WindowsWebviewRuntime {
         let tracker = Rc::clone(&session.focus_tracker);
         let devtools = session.show_settings.window.devtools;
         let host_window: &Win32HostWindow = &session.window;
+        let event_core = Rc::downgrade(&session.event_core);
+        let popup_session = window_owner
+            .session_id
+            .clone()
+            .unwrap_or_default();
+        let popup_opener_hwnd = host_window.hwnd;
 
         let mut builder = WebViewBuilder::new_with_web_context(&mut session.webview_context)
             .with_document_title_changed_handler(move |title| {
@@ -1344,7 +1480,31 @@ impl super::WindowsWebviewRuntime {
             .with_devtools(devtools)
             // Keep the controller alpha-capable from creation time (the
             // same creation rule as the primary webview).
-            .with_transparent(true);
+            .with_transparent(true)
+            // D26 auxiliary popups: every new-window navigation intent of
+            // this webview (a[target], window.open, middle-click,
+            // context-menu "open in new window") is handled by opening a
+            // plain popup window that shares this session's WebView2
+            // environment. `Create` makes wry set Handled=true and route
+            // the navigation into the popup controller; `Deny` keeps the
+            // request handled (never delegated to an external browser).
+            .with_new_window_req_handler(move |_uri, features| {
+                let Some(tracker) = popup_tracker.upgrade() else {
+                    return wry::NewWindowResponse::Deny;
+                };
+                match super::popups::spawn_popup(
+                    &tracker,
+                    &popup_session,
+                    popup_opener_hwnd,
+                    &features,
+                ) {
+                    Ok(core) => wry::NewWindowResponse::Create { webview: core },
+                    Err(error) => {
+                        eprintln!("opentray-ext-webview popup open failed: {error}");
+                        wry::NewWindowResponse::Deny
+                    }
+                }
+            });
 
         // Per-webview bridge policy (D2): a policy-less child gets no
         // bootstrap script and no ipc surface — the arbitrary-content
@@ -1382,6 +1542,9 @@ impl super::WindowsWebviewRuntime {
                 .map_err(|error| controller_creation_error(&profile_path, error))?,
         );
         install_focus_observers(webview.as_ref(), &tracker, webview_id)?;
+        // D24 loadState: navigation lifecycle pushes from the raw
+        // WebView2 callbacks into the same per-view outbox.
+        install_load_state_observers(webview.as_ref(), &events, &event_core, window_owner)?;
         Ok(SessionWebview {
             id: webview_id.to_string(),
             webview,

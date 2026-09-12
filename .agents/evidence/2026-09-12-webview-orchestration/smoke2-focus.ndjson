@@ -1,0 +1,10 @@
+{"step":"blocked-analysis","when":"2026-09-12","finding":"per-view focused edges require an app-active key window; on this agent host the app could never be activated","chain":[
+ "1. content.focus() / win.focus() return webview-ack (command path executes: activateIgnoringOtherApps + makeKeyAndOrderFront + makeFirstResponder + reconcile)",
+ "2. zero per-view focused frames AND zero window-level focus events observed across 6 attempts (diag-events, diag-focus2, diag-key, diag-key2, probe-hold, smoke2-focus) — NSWindowDidBecomeKey never fired, i.e. the window never became key",
+ "3. activation is machine-blocked: frontmost stays ghostty through open <bundle>, open -a Finder, tell application id ... to activate, and app.activateIgnoringOtherApps(true); a focus-guard pins the session terminal",
+ "4. synthetic input is unavailable: osascript blocked from assistive access (-25211); no cliclick; pyobjc Quartz absent; CGEventPost silently dropped",
+ "5. native unit seam never runs live: runtime_orchestration_smoke_on_main_thread skips off the main thread even under --test-threads=1 (verified: prints 'skipping AppKit orchestration smoke outside the main thread' and passes)"],
+ "delivery-proof":"urlChange per-view pushes DO arrive with full frame identity over the same ext-event tap (diag-events.ndjson: windowId default, webviewId content, seq 2->5 riding command responses) — the delivery pipeline itself is proven",
+ "product-observation":"in an already-key window, first-responder changes caused by plain clicks between sibling webviews have no native reconcile trigger (observers cover only key transitions + explicit focus commands) — spec 2.7b 'Focus transfer both edges' click wording exceeds the native observation surface; owner walkthrough must confirm click behavior visually",
+ "owner-walkthrough-step":"recipe step: launch toolbar app, click into content then into toolbar address field, verify focus ring moves and address bar accepts typing (real click grants activation, which unlocks the edge path for subsequent focus() calls)"
+}

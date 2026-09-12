@@ -1,0 +1,5 @@
+{"step":"bundle","bundle":"/tmp/p36-home/.opentray/apps/p36-smoke/P3 6 Key2.app"}
+{"step":"frontmost-after-open","frontmost":"ghostty"}
+{"step":"after-focus-content","edges":[]}
+{"step":"after-focus-toolbar","edges":[]}
+{"step":"frontmost-final","frontmost":"ghostty"}

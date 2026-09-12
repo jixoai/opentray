@@ -1,0 +1,8 @@
+{"step":"urlChange","windowId":"default","webviewId":"content","seq":2,"url":"about:blank"}
+{"step":"subscribed"}
+{"step":"navigated"}
+{"step":"getUrl-after-navigate","url":"about:blank","seq":2}
+{"step":"urlChange","windowId":"default","webviewId":"content","seq":5,"url":"https://example.com/"}
+{"step":"focused-command-done"}
+{"step":"getUrl-after-focus","url":"https://example.com/","seq":5}
+{"step":"summary","urlEvents":2,"focusedEvents":0}

@@ -288,10 +288,11 @@ pub const WEBVIEW_EVENT_KINDS: &[&str] = &[
     "loadState",
 ];
 
-/// Navigation lifecycle phase of a `loadState` payload (D24). The phases are
-/// platform-obtainable truth; `progress` is best-effort and may be omitted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// Navigation lifecycle phase of a `loadState` event (D24). The phase
+/// vocabulary is cross-platform frozen; `progress` is best-effort and may
+/// be omitted entirely by a platform that cannot report it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum WebviewLoadPhase {
     Started,
     Finished,
@@ -311,10 +312,12 @@ pub struct WebviewGeometryRect {
 
 /// Field-frozen event payloads.
 ///
-/// Untagged decode order is load-bearing: `LoadState` declares a `url` field
-/// that `UrlChange` also matches (untagged structs ignore unknown fields), so
-/// `LoadState` must stay listed first — its required `phase` field lets plain
-/// `{ url }` payloads fall through to `UrlChange`.
+/// Variant order is load-bearing for the `untagged` deserialization:
+/// `LoadState` must come first because its payload carries `url` too —
+/// an untagged `UrlChange` would otherwise swallow `{"phase", "url"}`
+/// frames (unknown fields are ignored), while `LoadState`'s required
+/// `phase` field rejects plain `{"url"}` frames so they still fall
+/// through to `UrlChange`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum WebviewEventPayload {
@@ -322,8 +325,14 @@ pub enum WebviewEventPayload {
     LoadState {
         phase: WebviewLoadPhase,
         url: String,
+        /// Numeric platform error code (WebView2 `WebErrorStatus` /
+        /// WKWebView underlying error domain code) on `failed`; absent
+        /// otherwise.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        error_code: Option<i64>,
+        error_code: Option<i32>,
+        /// Load progress in `[0, 1]` when the platform can report it;
+        /// omitted when it cannot (consumers render an indeterminate
+        /// affordance from the phase alone).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         progress: Option<f64>,
     },
@@ -448,8 +457,7 @@ impl WebviewEventFrame {
         seq: u64,
         phase: WebviewLoadPhase,
         url: impl Into<String>,
-        error_code: Option<i64>,
-        progress: Option<f64>,
+        error_code: Option<i32>,
     ) -> Self {
         Self {
             frame_type: WebviewEventTag::WebviewEvent,
@@ -462,7 +470,9 @@ impl WebviewEventFrame {
                 phase,
                 url: url.into(),
                 error_code,
-                progress,
+                // No Windows-native navigation progress surface exists;
+                // the phase drives the consumer's indeterminate affordance.
+                progress: None,
             },
         }
     }
@@ -1198,45 +1208,32 @@ mod tests {
                 "geometryChange null rect means no overlay intersection" => {
                     WebviewEventFrame::new_geometry_change(owner.clone(), "win-1", "content", 9, None)
                 }
-                "loadState started with progress" => WebviewEventFrame::new_load_state(
+                "loadState started" => WebviewEventFrame::new_load_state(
                     owner.clone(),
                     "win-1",
                     "content",
-                    5,
+                    21,
                     WebviewLoadPhase::Started,
-                    "https://example.org/articles/1",
-                    None,
-                    Some(0.1),
-                ),
-                "loadState started without progress" => WebviewEventFrame::new_load_state(
-                    owner.clone(),
-                    "win-1",
-                    "content",
-                    6,
-                    WebviewLoadPhase::Started,
-                    "https://example.org",
-                    None,
+                    "https://example.org/articles/2",
                     None,
                 ),
-                "loadState finished carries full progress" => WebviewEventFrame::new_load_state(
+                "loadState finished" => WebviewEventFrame::new_load_state(
                     owner.clone(),
                     "win-1",
                     "content",
-                    7,
+                    22,
                     WebviewLoadPhase::Finished,
-                    "https://example.org/articles/1",
+                    "https://example.org/articles/2",
                     None,
-                    Some(1.0),
                 ),
                 "loadState failed with errorCode" => WebviewEventFrame::new_load_state(
                     owner.clone(),
                     "win-1",
                     "content",
-                    8,
+                    23,
                     WebviewLoadPhase::Failed,
-                    "https://unreachable.example.org",
-                    Some(-1003),
-                    None,
+                    "https://example.invalid/",
+                    Some(3),
                 ),
                 other => panic!("missing Rust builder for fixture {other}"),
             };
@@ -1440,7 +1437,16 @@ mod tests {
             serde_json::to_value(OrchestrationErrorCode::QueueOverflow).unwrap(),
             json!("queue_overflow")
         );
-        assert_eq!(WEBVIEW_EVENT_KINDS, &["urlChange", "titleChange", "focused", "geometryChange", "loadState"]);
+        assert_eq!(
+            WEBVIEW_EVENT_KINDS,
+            &[
+                "urlChange",
+                "titleChange",
+                "focused",
+                "geometryChange",
+                "loadState"
+            ]
+        );
         assert_eq!(
             serde_json::to_value(WebviewEventKind::GeometryChange).unwrap(),
             json!("geometryChange")

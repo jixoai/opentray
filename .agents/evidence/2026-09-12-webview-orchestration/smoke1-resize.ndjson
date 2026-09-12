@@ -1,0 +1,13 @@
+{"step":"opened","bounds":{"height":672,"width":980,"x":245,"y":0}}
+{"step":"titles","toolbarTitle":"","contentTitle":""}
+{"step":"resize","w":980,"h":800,"before":{},"after":{"content":"content 980x756"}}
+{"step":"resize","w":1240,"h":800,"before":{"content":"content 980x756"},"after":{"toolbar":"toolbar h=44 w=1240","content":"content 1240x756"}}
+{"step":"resize","w":1240,"h":500,"before":{"toolbar":"toolbar h=44 w=1240","content":"content 1240x756"},"after":{"toolbar":"toolbar h=44 w=1240","content":"content 1240x456"}}
+{"step":"burst-final","finalState":{"toolbar":"toolbar h=44 w=1060","content":"content 1060x641"},"winBounds":{"height":717,"width":1060,"x":245,"y":-45}}
+{"step":"assert","name":"toolbar height pinned at 44 across all resize steps","ok":true,"detail":"[44]"}
+{"step":"content-sizes-observed","contentSizes":[{"w":980,"h":756},{"w":1240,"h":756},{"w":1240,"h":456},{"w":940,"h":611},{"w":1060,"h":641}]}
+{"step":"assert","name":"content tracks window size (final w matches window width)","ok":true,"detail":"content w=1060 window w=1060"}
+{"step":"assert","name":"content height = window content height - 44","ok":true,"detail":"content h=641 expected=641 (frame 717 - titlebar 32 - toolbar 44)"}
+{"step":"assert","name":"content followed both grow and shrink resizes via push events","ok":true,"detail":"756,756,456,611,641"}
+{"step":"assert","name":"final query: toolbar title reports h=44","ok":true,"detail":"toolbar h=44 w=1060"}
+{"step":"summary","ok":true,"results":[{"name":"toolbar height pinned at 44 across all resize steps","ok":true,"detail":"[44]"},{"name":"content tracks window size (final w matches window width)","ok":true,"detail":"content w=1060 window w=1060"},{"name":"content height = window content height - 44","ok":true,"detail":"content h=641 expected=641 (frame 717 - titlebar 32 - toolbar 44)"},{"name":"content followed both grow and shrink resizes via push events","ok":true,"detail":"756,756,456,611,641"},{"name":"final query: toolbar title reports h=44","ok":true,"detail":"toolbar h=44 w=1060"}]}

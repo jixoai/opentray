@@ -1,0 +1,7 @@
+{"step":"pass1-focus-content"}
+{"step":"pump1"}
+{"step":"pass2-focus-content-again"}
+{"step":"pump2"}
+{"step":"pass3-window-focus"}
+{"step":"pump3"}
+{"step":"summary","edges":0}

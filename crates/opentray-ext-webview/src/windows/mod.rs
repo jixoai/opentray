@@ -95,6 +95,7 @@ mod channels;
 mod downloads;
 mod geometry;
 mod orchestration;
+mod popups;
 mod winrt_color_reference;
 
 use self::appwindow::{
@@ -105,6 +106,7 @@ use self::box_view::BoxHostWindow;
 use self::downloads::install_download_handlers;
 use self::geometry::WindowsGeometry;
 use self::orchestration::{orchestration_error, SessionEventCore, WindowSession};
+use self::popups::PopupTracker;
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::layout::WindowLayoutState;
 use crate::orchestration::{
@@ -166,6 +168,10 @@ pub(crate) struct WindowsWebviewRuntime {
     /// Host-bound channel events drained from sessions destroyed inside
     /// the current command (their window is gone before the flush runs).
     pending_channel_events: Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
+    /// Session-owned auxiliary popup windows (D26). Shared weakly with
+    /// the per-webview new-window handlers so popups can register from
+    /// inside WebView2's `NewWindowRequested` callback.
+    popups: Rc<RefCell<PopupTracker>>,
 }
 
 #[derive(Clone, Default)]
@@ -645,6 +651,10 @@ struct WindowCapabilities {
     /// fields stayed false before their Windows generalization batch.
     popup_windows: bool,
     webview_push_events: Vec<&'static str>,
+    /// Auxiliary popup windows (D26): new-window navigation intents open
+    /// session-owned plain popup windows. Both platforms' capability DTOs
+    /// serialize this field.
+    popup_windows: bool,
     platform_capabilities: WindowPlatformCapabilities,
 }
 
@@ -975,6 +985,10 @@ impl WindowsWebviewRuntime {
     /// the transitional rule documented on
     /// [`crate::orchestration::WindowRegistry::session_closed`].
     pub(crate) fn session_closed(&mut self, session_id: &str) {
+        // D26 popups die with their owning session/lease — swept before
+        // (and independently of) the window-session registry cleanup, and
+        // never touching another owner's popups.
+        self::popups::close_session_popups(&self.popups, session_id);
         let removed = self.registry.session_closed(session_id);
         for entry in removed {
             if let Some(owner) = entry.owner {
@@ -1369,6 +1383,7 @@ impl WindowsWebviewRuntime {
                 &owner,
                 &webview_id,
                 Rc::clone(&events),
+                &Rc::downgrade(&self.popups),
                 show_settings.navigator_window,
                 show_settings.navigator_screen,
                 show_settings.navigator_tray,
@@ -2296,6 +2311,7 @@ fn build_webview(
     owner: &crate::orchestration::WindowOwner,
     webview_id: &str,
     events: Rc<RefCell<ViewEvents>>,
+    popups: &std::rc::Weak<RefCell<PopupTracker>>,
     navigator_window: NavigatorWindowSettings,
     navigator_screen: NavigatorScreenSettings,
     navigator_tray: NavigatorTraySettings,
@@ -2385,6 +2401,33 @@ fn build_webview(
         // into a clear-backed mode from an opaque-created controller can leave stale white client
         // regions because the underlying swap chain was allocated without the needed alpha path.
         .with_transparent(true)
+        // D26 auxiliary popups: every new-window navigation intent of the
+        // primary webview (a[target], window.open, middle-click,
+        // context-menu "open in new window") is handled by opening a
+        // plain popup window sharing this session's WebView2 environment;
+        // never delegated to an external browser.
+        .with_new_window_req_handler({
+            let popup_tracker = std::rc::Weak::clone(popups);
+            let popup_session = owner.session_id.clone().unwrap_or_default();
+            let popup_opener_hwnd = bridge.borrow().hwnd;
+            move |_uri, features| {
+                let Some(tracker) = popup_tracker.upgrade() else {
+                    return wry::NewWindowResponse::Deny;
+                };
+                match self::popups::spawn_popup(
+                    &tracker,
+                    &popup_session,
+                    popup_opener_hwnd,
+                    &features,
+                ) {
+                    Ok(core) => wry::NewWindowResponse::Create { webview: core },
+                    Err(error) => {
+                        eprintln!("opentray-ext-webview popup open failed: {error}");
+                        wry::NewWindowResponse::Deny
+                    }
+                }
+            }
+        })
         .with_bounds(bounds);
     let builder = if let Some(url) = url {
         builder.with_url(url)
@@ -2398,6 +2441,16 @@ fn build_webview(
         ))
     })?;
     let webview = Box::new(webview);
+    // D24 loadState: navigation lifecycle pushes (started/finished/failed
+    // with the numeric WebErrorStatus) from the raw WebView2 callbacks
+    // into the session event outbox — same push-only channel as the
+    // title/url observers above.
+    self::orchestration::install_load_state_observers(
+        webview.as_ref(),
+        &events,
+        &bridge.borrow().event_core,
+        owner,
+    )?;
     install_download_handlers(webview.as_ref(), bridge)?;
     Ok(webview)
 }
@@ -5877,15 +5930,23 @@ impl NavigatorWindowBridge {
             webview_id: true,
             webview_bridge_policy: true,
             message_channels: true,
-            // D26: flips to true when the Windows new-window batch (8.4)
-            // handles NewWindowRequested with its own popup carrier.
-            popup_windows: false,
+            // D26: new-window navigation intents open session-owned plain
+            // popup windows (handled, never delegated to an external
+            // browser) — task 8.4.
+            popup_windows: true,
             // geometryChange joins the unified push family with the layout
             // batch (D23): layout commits and overlay metric changes
-            // recompute per-view projections natively. `loadState` joins
-            // the family with the 8.4 batch (NavigationStarting/Completed/
-            // NavigationFailed).
-            webview_push_events: vec!["urlChange", "titleChange", "focused", "geometryChange"],
+            // recompute per-view projections natively. loadState joins
+            // with D24: navigation lifecycle pushes from the raw
+            // WebView2 navigation callbacks (progress is not reportable
+            // on Windows and stays omitted).
+            webview_push_events: vec![
+                "urlChange",
+                "titleChange",
+                "focused",
+                "geometryChange",
+                "loadState",
+            ],
             platform_capabilities: WindowPlatformCapabilities {
                 windows: WindowsWindowCapabilities {
                     background_materials: WINDOWS_BACKGROUND_MATERIALS

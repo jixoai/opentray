@@ -3,132 +3,253 @@
     "name": "urlChange",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "content",
       "kind": "urlChange",
       "seq": 41,
-      "payload": { "url": "https://example.org/articles/1" }
+      "payload": {
+        "url": "https://example.org/articles/1"
+      }
     }
   },
   {
     "name": "titleChange",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "content",
       "kind": "titleChange",
       "seq": 12,
-      "payload": { "title": "Example Article" }
+      "payload": {
+        "title": "Example Article"
+      }
     }
   },
   {
     "name": "focused gained edge",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "toolbar",
       "kind": "focused",
       "seq": 3,
-      "payload": { "focused": true }
+      "payload": {
+        "focused": true
+      }
     }
   },
   {
     "name": "focused lost edge",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "content",
       "kind": "focused",
       "seq": 7,
-      "payload": { "focused": false }
+      "payload": {
+        "focused": false
+      }
     }
   },
   {
     "name": "geometryChange with view-local rect",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "bar",
       "kind": "geometryChange",
       "seq": 2,
-      "payload": { "rect": { "x": 0, "y": 0, "width": 800, "height": 44 } }
+      "payload": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 800,
+          "height": 44
+        }
+      }
     }
   },
   {
     "name": "geometryChange with fractional logical pixels",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "bar",
       "kind": "geometryChange",
       "seq": 3,
-      "payload": { "rect": { "x": 12.5, "y": 0.5, "width": 300.25, "height": 44 } }
+      "payload": {
+        "rect": {
+          "x": 12.5,
+          "y": 0.5,
+          "width": 300.25,
+          "height": 44
+        }
+      }
     }
   },
   {
     "name": "geometryChange null rect means no overlay intersection",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "content",
       "kind": "geometryChange",
       "seq": 9,
-      "payload": { "rect": null }
+      "payload": {
+        "rect": null
+      }
     }
   },
   {
     "name": "loadState started with progress",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "content",
       "kind": "loadState",
       "seq": 5,
-      "payload": { "phase": "started", "url": "https://example.org/articles/1", "progress": 0.1 }
+      "payload": {
+        "phase": "started",
+        "url": "https://example.org/articles/1",
+        "progress": 0.1
+      }
     }
   },
   {
     "name": "loadState started without progress",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "content",
       "kind": "loadState",
       "seq": 6,
-      "payload": { "phase": "started", "url": "https://example.org" }
+      "payload": {
+        "phase": "started",
+        "url": "https://example.org"
+      }
     }
   },
   {
     "name": "loadState finished carries full progress",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "content",
       "kind": "loadState",
       "seq": 7,
-      "payload": { "phase": "finished", "url": "https://example.org/articles/1", "progress": 1 }
+      "payload": {
+        "phase": "finished",
+        "url": "https://example.org/articles/1",
+        "progress": 1
+      }
     }
   },
   {
     "name": "loadState failed with errorCode",
     "frame": {
       "type": "webview-event",
-      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
       "windowId": "win-1",
       "webviewId": "content",
       "kind": "loadState",
       "seq": 8,
-      "payload": { "phase": "failed", "url": "https://unreachable.example.org", "errorCode": -1003 }
+      "payload": {
+        "phase": "failed",
+        "url": "https://unreachable.example.org",
+        "errorCode": -1003
+      }
+    }
+  },
+  {
+    "name": "loadState started",
+    "frame": {
+      "type": "webview-event",
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "loadState",
+      "seq": 21,
+      "payload": {
+        "phase": "started",
+        "url": "https://example.org/articles/2"
+      }
+    }
+  },
+  {
+    "name": "loadState finished",
+    "frame": {
+      "type": "webview-event",
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "loadState",
+      "seq": 22,
+      "payload": {
+        "phase": "finished",
+        "url": "https://example.org/articles/2"
+      }
     }
   }
 ]
