@@ -266,12 +266,20 @@ mod tests {
         assert_eq!(size_of::<ExtBytes>(), 2 * size_of::<usize>());
         assert_eq!(
             size_of::<ExtEventInputV1>(),
-            3 * size_of::<ExtBytes>() + size_of::<u32>() + { size_of::<usize>() - size_of::<u32>() },
+            3 * size_of::<ExtBytes>() + size_of::<u32>() + {
+                size_of::<usize>() - size_of::<u32>()
+            },
             "route + data_json + class (u32 + padding) + coalesce_key"
         );
         assert_eq!(offset_of!(ExtEventInputV1, route), 0);
-        assert_eq!(offset_of!(ExtEventInputV1, data_json), size_of::<ExtBytes>());
-        assert_eq!(offset_of!(ExtEventInputV1, class), 2 * size_of::<ExtBytes>());
+        assert_eq!(
+            offset_of!(ExtEventInputV1, data_json),
+            size_of::<ExtBytes>()
+        );
+        assert_eq!(
+            offset_of!(ExtEventInputV1, class),
+            2 * size_of::<ExtBytes>()
+        );
         assert_eq!(
             offset_of!(ExtEventInputV1, coalesce_key),
             2 * size_of::<ExtBytes>() + size_of::<usize>()
@@ -279,7 +287,9 @@ mod tests {
 
         assert_eq!(
             size_of::<ExtEventPortV1>(),
-            2 * size_of::<u32>() + { size_of::<usize>() - 2 * size_of::<u32>() } + 2 * size_of::<usize>(),
+            2 * size_of::<u32>()
+                + { size_of::<usize>() - 2 * size_of::<u32>() }
+                + 2 * size_of::<usize>(),
             "abi_version + struct_size (+ padding) + port_data + try_submit"
         );
         assert_eq!(offset_of!(ExtEventPortV1, abi_version), 0);
@@ -334,10 +344,7 @@ mod tests {
             port_data: std::ptr::null_mut(),
             try_submit: closed_probe,
         };
-        assert_eq!(
-            probe.struct_size as usize,
-            size_of::<ExtEventPortV1>()
-        );
+        assert_eq!(probe.struct_size as usize, size_of::<ExtEventPortV1>());
         assert_eq!(probe.abi_version, EXT_EVENT_PORT_ABI_V1);
     }
 }
