@@ -394,6 +394,86 @@ export const createWebviewOrchestration = (
   const geometryChangeHandlers = new Map<WebviewId, Set<GeometryChangeHandler>>();
   const loadStateHandlers = new Map<WebviewId, Set<LoadStateHandler>>();
 
+  // D19 batch B gap-resync: one per-view sequence counter is shared across
+  // all event kinds natively, so the facade observes `seq` for every frame
+  // of the view. A jump (> last + 1) means the transport coalesced or lost
+  // records (EventPort `Latest` replacement by contract); urlChange and
+  // titleChange subscribers then re-read state through the frozen
+  // `(value, seq)` query pair and converge on the higher sequence.
+  const lastViewSeq = new Map<WebviewId, number>();
+  const resyncInFlight = new Set<string>();
+
+  /** Observes one wire frame's seq; returns the previous observed seq. */
+  const observeSeq = (webviewId: WebviewId, seq: number): number | undefined => {
+    const previous = lastViewSeq.get(webviewId);
+    if (previous === undefined || seq > previous) {
+      lastViewSeq.set(webviewId, seq);
+    }
+    return previous;
+  };
+
+  /**
+   * Sequence-gap repair for the two Latest-class kinds: queries the current
+   * `(value, seq)` and, when the query outranks the delivered frame,
+   * delivers the higher observation to the view's handlers. Fire-and-forget
+   * observability matches the subscribe frames' transport-failure rule.
+   */
+  const resyncAfterGap = (
+    webviewId: WebviewId,
+    kind: "urlChange" | "titleChange",
+    deliveredSeq: number,
+  ): void => {
+    const inflightKey = `${kind}:${webviewId}`;
+    if (resyncInFlight.has(inflightKey)) {
+      return;
+    }
+    resyncInFlight.add(inflightKey);
+    const isUrl = kind === "urlChange";
+    void expectResult(
+      {
+        owner,
+        type: isUrl ? "get-webview-url" : "get-webview-title",
+        windowId,
+        webviewId,
+      } as WebviewOrchestrationCommandFrame,
+      isUrl ? "get-webview-url-result" : "get-webview-title-result",
+    )
+      .then((result) => {
+        const querySeq = Number(result.seq);
+        if (!Number.isFinite(querySeq) || querySeq <= deliveredSeq) {
+          return;
+        }
+        observeSeq(webviewId, querySeq);
+        if (isUrl) {
+          const set = urlChangeHandlers.get(webviewId);
+          if (set !== undefined) {
+            callHandlers(set, {
+              windowId,
+              webviewId,
+              seq: querySeq,
+              url: String(result.url),
+            });
+          }
+        } else {
+          const set = titleChangeHandlers.get(webviewId);
+          if (set !== undefined) {
+            callHandlers(set, {
+              windowId,
+              webviewId,
+              seq: querySeq,
+              title: String(result.title),
+            });
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("WebView orchestration sequence-gap resync failed:", error);
+      })
+      .finally(() => {
+        resyncInFlight.delete(inflightKey);
+      });
+  };
+
   const channels = new Map<ChannelId, ChannelEndpointState>();
   const channelCreatedHandlers = new Set<(notice: WebviewChannelCreatedNotice) => void>();
 
@@ -442,6 +522,15 @@ export const createWebviewOrchestration = (
     focusedHandlers.delete(webviewId);
     geometryChangeHandlers.delete(webviewId);
     loadStateHandlers.delete(webviewId);
+    // A destroyed webview's per-view sequence counter dies with it; a
+    // re-created id must not inherit a stale high-water mark (its native
+    // ViewEvents restarts at seq 1).
+    lastViewSeq.delete(webviewId);
+    for (const key of [...resyncInFlight]) {
+      if (key.endsWith(`:${webviewId}`)) {
+        resyncInFlight.delete(key);
+      }
+    }
   };
 
   const callHandlers = <TEvent>(
@@ -457,6 +546,7 @@ export const createWebviewOrchestration = (
     if (frame.windowId !== windowId) {
       return;
     }
+    const previousSeq = observeSeq(frame.webviewId, frame.seq);
     const identity = {
       windowId: frame.windowId,
       webviewId: frame.webviewId,
@@ -467,6 +557,9 @@ export const createWebviewOrchestration = (
         const set = urlChangeHandlers.get(frame.webviewId);
         if (set !== undefined) {
           callHandlers(set, { ...identity, url: frame.payload.url });
+          if (previousSeq !== undefined && frame.seq > previousSeq + 1) {
+            resyncAfterGap(frame.webviewId, "urlChange", frame.seq);
+          }
         }
         return;
       }
@@ -474,6 +567,9 @@ export const createWebviewOrchestration = (
         const set = titleChangeHandlers.get(frame.webviewId);
         if (set !== undefined) {
           callHandlers(set, { ...identity, title: frame.payload.title });
+          if (previousSeq !== undefined && frame.seq > previousSeq + 1) {
+            resyncAfterGap(frame.webviewId, "titleChange", frame.seq);
+          }
         }
         return;
       }
@@ -866,6 +962,8 @@ export const createWebviewOrchestration = (
     focusedHandlers.clear();
     geometryChangeHandlers.clear();
     loadStateHandlers.clear();
+    lastViewSeq.clear();
+    resyncInFlight.clear();
     channels.clear();
     channelCreatedHandlers.clear();
   };
