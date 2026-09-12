@@ -75,6 +75,40 @@ describe("@opentray/ext-webview", () => {
     });
   });
 
+  it("setTitle projects through a compatible re-show on an established session", async () => {
+    const transport = new RecordingTransport();
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    const webviewTray = tray.extend(WebviewExt, { mountId: "webview.tray-1" });
+    const webviewWindow = webviewTray.createWebviewWindow({
+      html: "<main />",
+      width: 300,
+      height: 200,
+    });
+
+    await webviewWindow.show();
+    transport.frames.length = 0;
+
+    // The detached-marker path: a plain (non-orchestrated) session re-shows
+    // with ONLY the title override — no html/url, no windowOnly.
+    const echoed = await webviewWindow.setTitle("Port 8137 (detached)");
+    expect(echoed).toBe("Port 8137 (detached)");
+    expect(transport.frames).toEqual([
+      {
+        type: "ext-command",
+        requestId: "opentray-3",
+        appId: "app-1",
+        trayId: "tray-1",
+        ext: "webview.tray-1",
+        data: {
+          type: "show",
+          title: "Port 8137 (detached)",
+        },
+      },
+    ]);
+
+    await expect(webviewWindow.setTitle("")).rejects.toThrow(/non-empty/);
+  });
+
   it("extends a tray with an isolated WebView window mount", async () => {
     const transport = new RecordingTransport();
     const tray = createTrayHandle(transport, "app-1", "tray-1");

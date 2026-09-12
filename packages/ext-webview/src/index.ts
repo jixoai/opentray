@@ -669,6 +669,13 @@ export interface WebviewWindowHandle {
   /** Window-session id this handle addresses (the native default `default`). */
   readonly windowId: string;
   show(command?: Partial<WebviewWindowOptions>): Promise<void>;
+  /**
+   * Projects a new window title through the compatible re-show update path
+   * (`apply_reused_show_updates`): no dedicated set-title wire command
+   * exists in the v1 frozen surface. The command-app service-window
+   * `(detached)` marker is the canonical consumer.
+   */
+  setTitle(title: string): Promise<string>;
   hide(): Promise<void>;
   close(): Promise<void>;
   destroy(): Promise<void>;
@@ -1286,6 +1293,26 @@ const createWebviewWindowHandle = (
           await orchestration.setLayout(bootstrapLayout);
         }
       }
+    },
+    async setTitle(title: string) {
+      if (typeof title !== "string" || title.length === 0) {
+        throw new Error("setTitle requires a non-empty title");
+      }
+      // The v1 frozen wire has no dedicated set-title command; a compatible
+      // re-show projects the title natively (apply_reused_show_updates).
+      // An orchestrated windowOnly session must repeat its bootstrap-immutable
+      // windowOnly fact on every re-show (the same law the toolbar carrier's
+      // title projection relies on).
+      await this.show({
+        title,
+        // Only a window bootstrapped through the orchestrated sugar
+        // (`webviews`) carries the windowOnly session fact; a plain window
+        // re-shows without it (show cannot change windowOnly).
+        ...(declaredWebviews !== undefined
+          ? { windowOnly: true as const }
+          : {}),
+      });
+      return title;
     },
     hide() {
       return endpoint.command<void>({ type: "hide" } satisfies WebviewCommand);
