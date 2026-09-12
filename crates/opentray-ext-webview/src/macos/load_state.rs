@@ -244,7 +244,7 @@ impl LoadStateNavigationDelegate {
             &ivars.owner.window_id,
             WebviewLoadPhase::Failed,
             url,
-            Some(error_code as i64),
+            Some(error_code as i32),
             None,
         );
         super::push_event_frame(&ivars.outbox, frame);

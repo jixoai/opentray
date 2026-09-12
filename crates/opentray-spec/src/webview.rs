@@ -458,6 +458,7 @@ impl WebviewEventFrame {
         phase: WebviewLoadPhase,
         url: impl Into<String>,
         error_code: Option<i32>,
+        progress: Option<f64>,
     ) -> Self {
         Self {
             frame_type: WebviewEventTag::WebviewEvent,
@@ -470,9 +471,10 @@ impl WebviewEventFrame {
                 phase,
                 url: url.into(),
                 error_code,
-                // No Windows-native navigation progress surface exists;
-                // the phase drives the consumer's indeterminate affordance.
-                progress: None,
+                // Windows has no native navigation progress surface (the
+                // phase drives the consumer's indeterminate affordance);
+                // macOS fills estimatedProgress observations here.
+                progress,
             },
         }
     }
@@ -1208,6 +1210,36 @@ mod tests {
                 "geometryChange null rect means no overlay intersection" => {
                     WebviewEventFrame::new_geometry_change(owner.clone(), "win-1", "content", 9, None)
                 }
+                "loadState started with progress" => WebviewEventFrame::new_load_state(
+                    owner.clone(),
+                    "win-1",
+                    "content",
+                    5,
+                    WebviewLoadPhase::Started,
+                    "https://example.org/articles/1",
+                    None,
+                    Some(0.1),
+                ),
+                "loadState started without progress" => WebviewEventFrame::new_load_state(
+                    owner.clone(),
+                    "win-1",
+                    "content",
+                    6,
+                    WebviewLoadPhase::Started,
+                    "https://example.org",
+                    None,
+                    None,
+                ),
+                "loadState finished carries full progress" => WebviewEventFrame::new_load_state(
+                    owner.clone(),
+                    "win-1",
+                    "content",
+                    7,
+                    WebviewLoadPhase::Finished,
+                    "https://example.org/articles/1",
+                    None,
+                    Some(1.0),
+                ),
                 "loadState started" => WebviewEventFrame::new_load_state(
                     owner.clone(),
                     "win-1",
@@ -1215,6 +1247,7 @@ mod tests {
                     21,
                     WebviewLoadPhase::Started,
                     "https://example.org/articles/2",
+                    None,
                     None,
                 ),
                 "loadState finished" => WebviewEventFrame::new_load_state(
@@ -1225,15 +1258,17 @@ mod tests {
                     WebviewLoadPhase::Finished,
                     "https://example.org/articles/2",
                     None,
+                    None,
                 ),
                 "loadState failed with errorCode" => WebviewEventFrame::new_load_state(
                     owner.clone(),
                     "win-1",
                     "content",
-                    23,
+                    8,
                     WebviewLoadPhase::Failed,
-                    "https://example.invalid/",
-                    Some(3),
+                    "https://unreachable.example.org",
+                    Some(-1003),
+                    None,
                 ),
                 other => panic!("missing Rust builder for fixture {other}"),
             };
