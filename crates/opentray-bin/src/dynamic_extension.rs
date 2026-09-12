@@ -1226,6 +1226,16 @@ mod tests {
 
     #[test]
     fn exact_request_never_falls_back_to_diagnostic_candidates() {
+        // The exact-request contract is about absolute paths, and
+        // `Path::is_absolute` is platform truth: a POSIX `/...` literal is
+        // rooted but not absolute on Windows (no drive prefix), so the
+        // fixture builds a path that is absolute on the running host
+        // (Windows real-machine batch C evidence).
+        let exact = if cfg!(windows) {
+            PathBuf::from(r"C:\facade\current\opentray_ext_webview.dll")
+        } else {
+            PathBuf::from("/facade/current/libopentray_ext_webview.dylib")
+        };
         let discovery = ExtensionDiscovery::for_test(
             Some(PathBuf::from("/home/me")),
             vec![PathBuf::from("/diagnostic/libopentray_ext_webview.dylib")],
@@ -1233,17 +1243,12 @@ mod tests {
         let request = ExtensionLoadRequest {
             app_id: "app-1".to_string(),
             name: "webview".to_string(),
-            path: "/facade/current/libopentray_ext_webview.dylib".to_string(),
+            path: exact.to_string_lossy().into_owned(),
             expected_identity: expected_extension_identity("webview"),
             mount_id: None,
         };
 
-        assert_eq!(
-            discovery.candidates(&request),
-            vec![PathBuf::from(
-                "/facade/current/libopentray_ext_webview.dylib"
-            )]
-        );
+        assert_eq!(discovery.candidates(&request), vec![exact]);
     }
 
     #[test]
