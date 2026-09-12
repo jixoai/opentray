@@ -645,16 +645,12 @@ struct WindowCapabilities {
     /// `navigator.opentrayWebview` page bridge. Both platforms' DTOs
     /// serialize this field (D16 parity).
     message_channels: bool,
-    /// Auxiliary popup windows (D26): serialized by both platforms' DTOs.
-    /// Stays `false` until the Windows new-window batch handles
-    /// `NewWindowRequested` (task 8.4), mirroring how the orchestration
-    /// fields stayed false before their Windows generalization batch.
+    /// Auxiliary popup windows (D26): new-window navigation intents open
+    /// session-owned plain popup windows (handled, never delegated to an
+    /// external browser). Both platforms' capability DTOs serialize this
+    /// field.
     popup_windows: bool,
     webview_push_events: Vec<&'static str>,
-    /// Auxiliary popup windows (D26): new-window navigation intents open
-    /// session-owned plain popup windows. Both platforms' capability DTOs
-    /// serialize this field.
-    popup_windows: bool,
     platform_capabilities: WindowPlatformCapabilities,
 }
 

@@ -414,6 +414,7 @@ pub(super) fn install_load_state_observers(
                             WebviewLoadPhase::Started,
                             uri.clone(),
                             None,
+                            None,
                         )
                     });
                     Ok(())
@@ -452,6 +453,7 @@ pub(super) fn install_load_state_observers(
                                     WebviewLoadPhase::Finished,
                                     url.clone(),
                                     None,
+                                    None,
                                 )
                             },
                         );
@@ -471,6 +473,7 @@ pub(super) fn install_load_state_observers(
                                     WebviewLoadPhase::Failed,
                                     url.clone(),
                                     Some(error_code),
+                                    None,
                                 )
                             },
                         );
