@@ -1266,9 +1266,15 @@ mod tests {
             .iter()
             .any(|path| path.starts_with("/extensions")));
         assert!(candidates.iter().any(|path| path.starts_with("/repo/exts")));
-        assert!(candidates
-            .iter()
-            .any(|path| path.starts_with("/home/me/.opentray/extensions/webview")));
+        // Separator-agnostic home-candidate assertion: Path::join emits `\` on
+        // Windows, so compare components instead of the literal POSIX prefix
+        // (real-machine batch B evidence).
+        assert!(candidates.iter().any(|path| path
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .windows(3)
+            .any(|window| window == [".opentray", "extensions", "webview"])));
         assert!(candidates
             .iter()
             .all(|path| !path.to_string_lossy().contains("node_modules")));
