@@ -57,13 +57,13 @@ The WebUI SHALL render the preview command through a real terminal emulator
 SHALL attach the command to a pseudo-terminal so interactive stdin works
 (keystrokes, prompts, TUI output). The pseudo-terminal runtime SHALL be a
 prebuilt per-platform distribution (`@lydell/node-pty`) so a normal
-package-manager install needs no compilation toolchain. Terminal output SHALL
-be transported as raw bytes without any server-side decoding or analysis: the
+package-manager install needs no compilation toolchain. Terminal output SHALL be
+transported as raw bytes without any server-side decoding or analysis: the
 backend SHALL frame PTY output bytes base64-encoded onto the event stream and
 the frontend SHALL decode them to bytes before writing into the terminal, so
-even malformed byte sequences reach the renderer unchanged. Terminal input
-SHALL take the reverse path (bytes from the terminal's data event, base64 to
-the session-guarded input endpoint). The terminal panel SHALL appear
+even malformed byte sequences reach the renderer unchanged. Terminal input SHALL
+take the reverse path (bytes from the terminal's data event, base64 to the
+session-guarded input endpoint). The terminal panel SHALL appear
 immediately when the user triggers Run, before any process output or state
 event arrives, and terminal resize SHALL propagate to the pseudo-terminal.
 When the native PTY dependency is unavailable, the wizard SHALL degrade to
@@ -137,9 +137,10 @@ non-interactive pipe mode with a visible notice instead of failing.
 
 #### Scenario: Show-address-bar wraps service windows with an address bar
 
-- **GIVEN** the advanced option enabled for a generated app
+- **GIVEN** a generated command application with `window.toolbar: true` (the unified navigation-toolbar option; the legacy `showAddressBar` advanced input no longer exists)
 - **WHEN** a listened port opens its own dedicated window
-- **THEN** the window SHALL render an address-bar wrapper page (bar on top, service in an iframe) whose navigation state is managed through the Web Navigation API (`window.navigation`), degrading gracefully where unavailable; with the option off, port windows open the service URL directly
+- **THEN** the window SHALL host the navigation-toolbar carrier — one toolbar webview at a fixed top strip and one content webview loading the verified service URL directly, composed by the WebView extension's declarative layered layout; with the option off, port windows open the service URL directly
+- **AND** no generated window SHALL wrap the service in an iframe browse page
 
 #### Scenario: Every listened port opens its own window
 
@@ -536,3 +537,22 @@ The webui SHALL expose an advanced extraction panel with a model-precision choic
 - **GIVEN** the user has selected the subject candidate and the composition card shows a fused preview
 - **WHEN** a settings change (or URL switch) replaces the bytes under that selected index
 - **THEN** the selection SHALL be re-committed against the new candidate list and the composition preview SHALL re-render from the new bytes without any user action
+
+### Requirement: The wizard SHALL expose the navigation toolbar option
+
+The wizard form SHALL offer an explicit 「导航工具栏」 toggle in the window-options section for both application flows (URL and command), defaulting to off. The toggle SHALL be a desired-state fact: it compiles into the v1 `window.toolbar` field, persists through draft reload, and round-trips through edit/export exactly like the CLI flag. Enabling it SHALL require no embedding knowledge — the wizard SHALL NOT probe, warn about, or condition the toggle on any target-site policy.
+
+Boundary: the wizard's own authoring-time service preview tabs (the stable iframe panel) are a preview-only surface — they SHALL never be the carrier for any materialized application; generated toolbar windows use the multi-webview carrier exclusively.
+
+#### Scenario: The toggle defaults off and commits on enable
+
+- **GIVEN** a wizard session for a URL or command application
+- **WHEN** the window options render
+- **THEN** the 「导航工具栏」 toggle SHALL be visible and default to off
+- **AND** enabling it before confirmation SHALL commit `window.toolbar: true` into the frozen config
+
+#### Scenario: Command applications get the same toggle
+
+- **GIVEN** a wizard session in the command flow with a verified service
+- **WHEN** the operator enables the navigation toolbar
+- **THEN** the generated application SHALL compose the toolbar over the service window with the same carrier as URL applications — the same toolbar page assets and the same entry composition path, not a preview reuse

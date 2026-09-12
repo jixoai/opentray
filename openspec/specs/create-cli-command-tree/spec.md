@@ -93,7 +93,7 @@ Commands that inspect or mutate applications SHALL support structured JSON outpu
 
 ### Requirement: Create SHALL expose window behavior options
 
-`create` (and `app edit`) SHALL accept `--toolbar` (URL applications only: host the address-bar wrapper), `--no-title-follow` (negate the default window-title-follows-document behavior), and `--icon-follow` (opt in to runtime favicon→window-icon following). These compile into the v1 `window` object and round-trip through export.
+`create` (and `app edit`) SHALL accept `--toolbar` (URL and command applications: compose the native navigation toolbar over the target/service page), `--no-title-follow` (negate the default window-title-follows-document behavior), and `--icon-follow` (opt in to runtime favicon→window-icon following). These compile into the v1 `window` object and round-trip through export. The toolbar flag SHALL NOT be dropped or downgraded in response to any target-site embedding policy.
 
 #### Scenario: Toolbar and sync flags compile and round-trip
 
