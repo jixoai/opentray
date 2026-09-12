@@ -201,4 +201,31 @@ describe("readWizardProjectConfig URL project", () => {
     expect(urlEntry.config?.command).toBeUndefined();
     expect(urlEntry.config?.appId).toBe("web.dsh.npx");
   });
+
+  it("projects window.toolbar and ignores the retired legacy shell field (D13 loose-parse)", async () => {
+    // add-webview-orchestration：冻结历史配置里的 shell.showAddressBar 被宽松
+    // 解析忽略——窗口形态只由 window.toolbar 治理；新投影携带 canonical 字段。
+    const home = await mkdtemp(join(tmpdir(), "scan-toolbar-test-"));
+    const root = join(home, ".opentray", "create");
+    await writeWizardProject(join(root, "toolbar-com-example"), {
+      command: undefined,
+      url: "https://example.com/wiki",
+      window: { width: 1200, height: 800, toolbar: true, titleFollowsDocument: true, iconFollowsDocument: false },
+      shell: { showTerminal: false, showAddressBar: true },
+    });
+    await writeWizardProject(join(root, "legacy-com-example"), {
+      command: undefined,
+      url: "https://example.com/legacy",
+      window: { width: 1200, height: 800, titleFollowsDocument: true, iconFollowsDocument: false },
+      shell: { showTerminal: false, showAddressBar: true },
+    });
+    const entries = await listCreateEntries(home);
+    const toolbarEntry = entries.find((entry) => entry.key === "toolbar-com-example");
+    if (toolbarEntry?.source !== "wizard") throw new Error("expected wizard entry");
+    expect(toolbarEntry.config?.window.toolbar).toBe(true);
+    const legacyEntry = entries.find((entry) => entry.key === "legacy-com-example");
+    if (legacyEntry?.source !== "wizard") throw new Error("expected wizard entry");
+    // 旧字段被忽略且不报错：无 toolbar 事实时投影省略该字段。
+    expect(legacyEntry.config?.window.toolbar).toBeUndefined();
+  });
 });

@@ -16,7 +16,7 @@
 // HWND/DWM redirection surface, not page pixels. Material hosts paint a complete black native base
 // before WebView2 background/bounds commit; opaque/plain-transparent hosts retain Softbuffer.
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::io::Cursor;
 use std::num::NonZeroIsize;
@@ -75,7 +75,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     LR_LOADFROMFILE, LWA_ALPHA, MINMAXINFO, NCCALCSIZE_PARAMS, SWP_FRAMECHANGED, SWP_NOACTIVATE,
     SWP_NOCOPYBITS, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
     SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED,
-    WM_CLOSE, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONUP,
+    WM_CLOSE, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
+    WM_LBUTTONUP,
     WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON,
     WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_APPWINDOW,
     WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX,
@@ -89,17 +90,29 @@ use wry::{
 
 mod appwindow;
 mod appwindow_abi;
+mod box_view;
+mod channels;
 mod downloads;
 mod geometry;
+mod orchestration;
+mod popups;
 mod winrt_color_reference;
 
 use self::appwindow::{
     apply_windows_titlebar_overlay, titlebar_metrics as appwindow_titlebar_metrics,
     WindowsTitlebarMetrics,
 };
+use self::box_view::BoxHostWindow;
 use self::downloads::install_download_handlers;
 use self::geometry::WindowsGeometry;
+use self::orchestration::{orchestration_error, SessionEventCore, WindowSession};
+use self::popups::PopupTracker;
 use crate::bootstrap::navigator_window_bootstrap_script;
+use crate::layout::WindowLayoutState;
+use crate::orchestration::{
+    OpenOutcome, StyleFacts, ViewEvents, WindowOwner, WindowRegistry, DEFAULT_WINDOW_ID,
+    DEFAULT_WEBVIEW_ID,
+};
 use crate::{
     normalize_opacity, parse_background_input, should_auto_hide_on_blur, MetadataSyncSettings,
     NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings,
@@ -110,6 +123,7 @@ use crate::{
     WebviewRuntimeError, WebviewSessionBootstrapSettings, WebviewShowSettings,
     WebviewWindowBackground, WebviewWindowControlsOverlaySettings, WebviewWindowIcon,
 };
+use opentray_spec::webview::{WebviewBridgePolicy, WebviewEventFrame};
 
 const CLASS_NAME: &str = "OpenTrayWebViewWindow";
 const DEFAULT_TITLE: &str = "OpenTray WebView";
@@ -121,6 +135,11 @@ const PERMISSIONS_NAMESPACE: &str = "opentray.permissions";
 const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
 const PRIVATE_SOFT_RESIZE_NAMESPACE: &str = "opentray.window.internal";
+/// Per-webview message-channel ipc namespace (D9/D11/D20): the page
+/// bridge's `navigator.opentrayWebview` surface rides `window.ipc` under
+/// this namespace, and the webview id rides the ipc transport itself, so
+/// page-originated channel commands cannot spoof their source.
+const WEBVIEW_CHANNEL_NAMESPACE: &str = "opentray.webview";
 const WINDOW_INTERNALS_GLOBAL: &str = "window.__OPENTRAY_WINDOW_INTERNALS__";
 const OPAQUE_BACKGROUND: RGBA = (255, 255, 255, 255);
 const CLEAR_BACKGROUND: RGBA = (0, 0, 0, 0);
@@ -135,27 +154,34 @@ thread_local! {
     static WINDOW_PROC_STATES: RefCell<HashMap<isize, WindowProcState>> = RefCell::new(HashMap::new());
 }
 
+/// Multi-webview runtime (add-webview-orchestration D18): owner-tuple
+/// authority through the shared [`WindowRegistry`] plus the native window
+/// sessions keyed by tray id. At most one window session per tray; cleanup
+/// is keyed by the closing session id.
 #[derive(Default)]
 pub(crate) struct WindowsWebviewRuntime {
-    slot: Option<WindowsWebviewSlot>,
+    registry: WindowRegistry,
+    sessions: HashMap<String, WindowSession>,
+    /// App identity of the owning extension instance (D18 owner tuple
+    /// source), set once at `opentray_ext_init`.
+    app_id: Option<String>,
+    /// Host-bound channel events drained from sessions destroyed inside
+    /// the current command (their window is gone before the flush runs).
+    pending_channel_events: Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
+    /// Session-owned auxiliary popup windows (D26). Shared weakly with
+    /// the per-webview new-window handlers so popups can register from
+    /// inside WebView2's `NewWindowRequested` callback.
+    popups: Rc<RefCell<PopupTracker>>,
 }
 
-struct WindowsWebviewSlot {
-    tray_id: String,
-    // WebContext must be declared before WebView so it outlives the WebView on drop.
-    _webview_context: WebContext,
-    webview: Box<WebView>,
-    window: Box<Win32HostWindow>,
-    bridge: Rc<RefCell<NavigatorWindowBridge>>,
-    content_descriptor: WebviewContentDescriptor,
-    show_settings: WebviewShowSettings,
-}
-
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct WindowProcState {
     bridge: Option<NonNull<RefCell<NavigatorWindowBridge>>>,
     window: Option<NonNull<Win32HostWindow>>,
-    webview: Option<NonNull<WebView>>,
+    /// Every live controller of the window (primary first, then the
+    /// orchestration children in creation order). WM_SIZE/WM_PAINT resize
+    /// passes cover the whole set in one pass.
+    webviews: Vec<NonNull<WebView>>,
     host_surface_fill_color: Option<u32>,
     native_host_paint: WindowsNativeHostPaint,
     native_material_probe: Option<WindowsNativeMaterialProbeState>,
@@ -233,13 +259,28 @@ struct WindowSizeConstraints {
 pub(super) struct NavigatorWindowBridge {
     hwnd: HWND,
     window: Option<NonNull<Win32HostWindow>>,
-    webview: Option<NonNull<WebView>>,
+    /// Per-webview bridge state in creation order; index 0 is the primary
+    /// webview for legacy single-webview surfaces. Window ownership (the
+    /// D18 owner tuple) lives in the runtime registry and focus tracker.
+    pub(super) views: Vec<WebViewBridgeView>,
+    /// Applied declarative-layout state (D7/D23): active document, last
+    /// applied per-view rects, last applied stacking order. The layout
+    /// transaction writes it; queries and resize re-solves read it.
+    pub(super) layout: WindowLayoutState,
+    /// Native box paint views owned by the layout engine (D5). Keyed by box
+    /// id; the layout transaction creates/updates/removes them.
+    pub(super) boxes: HashMap<String, BoxHostWindow>,
+    /// Shared owner identity + D19 push-event outbox of the owning window
+    /// session (weak: the session owns the strong handle).
+    pub(super) event_core: std::rc::Weak<RefCell<SessionEventCore>>,
+    /// Native focus tracker of the owning window session (weak; the session
+    /// owns the strong handle). WM_ACTIVATE deactivation pushes per-view
+    /// losing edges through it.
+    pub(super) focus_tracker: std::rc::Weak<RefCell<self::orchestration::FocusTracker>>,
     content_descriptor: WebviewContentDescriptor,
-    listeners: HashMap<String, Vec<NavigatorWindowListener>>,
     ipc_messages: VecDeque<Value>,
     permission_messages: VecDeque<Value>,
     window_events: VecDeque<Value>,
-    next_event_id: u32,
     next_ipc_message_id: u32,
     next_permission_message_id: u32,
     style: WindowStyleState,
@@ -257,10 +298,58 @@ pub(super) struct NavigatorWindowBridge {
     page_access: PageCapabilityAccess,
     tray_bounds: Option<Rect>,
     size_constraints: WindowSizeConstraints,
+    /// Session-scoped message-channel registry (D9-D20). Shared with the
+    /// per-webview ipc handlers so page-originated channel commands run
+    /// on the WebView2 callback without reaching the runtime struct.
+    pub(super) channels: Rc<RefCell<crate::channels::SessionChannels>>,
+    /// Views that finished at least one page load (document navigation
+    /// discrimination for `document_navigated` closures).
+    pub(super) channel_loaded_views: HashSet<String>,
+    /// Views whose page can currently consume channel pushes (a push
+    /// before the first finished load cannot land in the document).
+    pub(super) channel_live_views: HashSet<String>,
+    /// Lifecycle push scripts held back for views that are not live yet;
+    /// flushed when the page finishes loading.
+    pub(super) pending_channel_pushes: HashMap<String, Vec<String>>,
+}
+
+/// Per-webview bridge handle: the single-webview pointer of the previous
+/// structure decomposed into one entry per webview (creation order; index 0
+/// is the primary). Holds the frozen per-webview bridge policy, the native
+/// transport pointer, the shared per-view event state, and the page
+/// listeners registered from this webview.
+pub(super) struct WebViewBridgeView {
+    pub(super) id: String,
+    pub(super) policy: WebviewBridgePolicy,
+    pub(super) webview: NonNull<WebView>,
+    pub(super) events: Rc<RefCell<ViewEvents>>,
+    pub(super) listeners: HashMap<String, Vec<NavigatorWindowListener>>,
+    pub(super) next_event_id: u32,
+}
+
+impl WebViewBridgeView {
+    pub(super) fn new(
+        id: &str,
+        policy: WebviewBridgePolicy,
+        webview: NonNull<WebView>,
+        events: Rc<RefCell<ViewEvents>>,
+    ) -> Self {
+        Self {
+            id: id.to_string(),
+            policy,
+            webview,
+            events,
+            listeners: HashMap::new(),
+            next_event_id: 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-struct NavigatorWindowListener {
+/// `pub(crate)`: per-view listener routing hands these across the windows
+/// subtree through crate-visible bridge accessors, so the type's
+/// reachability must match the accessor visibility.
+pub(crate) struct NavigatorWindowListener {
     event_id: u32,
     handler_id: u32,
 }
@@ -544,6 +633,24 @@ struct WindowCapabilities {
     screen_bindings_supported: bool,
     platform: &'static str,
     background: bool,
+    /// Multi-webview orchestration surface (add-webview-orchestration
+    /// D2/D16). Serialized on both platforms; the values stay `false`/empty
+    /// until the Windows generalization batch implements the surface.
+    multiwebview: bool,
+    webview_navigation: bool,
+    focus_webview: bool,
+    webview_id: bool,
+    webview_bridge_policy: bool,
+    /// Message-channel surface (D9-D20): channel commands plus the
+    /// `navigator.opentrayWebview` page bridge. Both platforms' DTOs
+    /// serialize this field (D16 parity).
+    message_channels: bool,
+    /// Auxiliary popup windows (D26): new-window navigation intents open
+    /// session-owned plain popup windows (handled, never delegated to an
+    /// external browser). Both platforms' capability DTOs serialize this
+    /// field.
+    popup_windows: bool,
+    webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
 
@@ -610,6 +717,41 @@ impl WindowsWebviewRuntime {
         &mut self,
         tray_id: &str,
         command: WebviewCommand,
+    ) -> Result<crate::HandledCommand, WebviewRuntimeError> {
+        let result = self.dispatch(tray_id, command)?;
+        // Flush per-view push events after the command so synchronously
+        // triggered native callbacks (focus edges, navigation starts) ride
+        // this response. This is the only delivery path for orchestration
+        // events; the 16 ms window-event drain never observes them.
+        let events = self.flush_pending_events();
+        // Host-bound channel events ride the same response (v1 flush
+        // ruling, tasks 3.3b/3.5), including events drained from sessions
+        // destroyed by this very command.
+        let channel_events = self.flush_channel_events();
+        Ok(crate::HandledCommand {
+            result,
+            events,
+            channel_events,
+        })
+    }
+
+    /// Records the owning app identity for the D18 owner tuples. Set once at
+    /// `opentray_ext_init`; the dispatch layer already rejects commands
+    /// whose envelope app id differs from it.
+    pub(crate) fn set_app_id(&mut self, app_id: &str) {
+        self.app_id = Some(app_id.to_string());
+    }
+
+    fn app_id(&self) -> String {
+        self.app_id
+            .clone()
+            .unwrap_or_else(|| "opentray.default".to_string())
+    }
+
+    fn dispatch(
+        &mut self,
+        tray_id: &str,
+        command: WebviewCommand,
     ) -> Result<Value, WebviewRuntimeError> {
         match command {
             WebviewCommand::Show {
@@ -620,14 +762,15 @@ impl WindowsWebviewRuntime {
                 tray_bounds,
                 fallback_rect,
                 show_settings,
+                owner_session_id,
+                window_id,
+                window_only,
             } => {
                 let was_visible = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .map(|slot| window_is_visible(slot.window.hwnd))
+                    .session(tray_id)
+                    .map(|session| window_is_visible(session.window.hwnd))
                     .unwrap_or(false);
-                self.ensure_slot(
+                self.ensure_session(
                     tray_id,
                     html,
                     url,
@@ -635,29 +778,34 @@ impl WindowsWebviewRuntime {
                     height,
                     tray_bounds.or(fallback_rect),
                     show_settings,
+                    owner_session_id,
+                    window_id,
+                    window_only,
                 )?;
                 self.focus(tray_id)?;
-                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
-                    emit_visible_change_if_needed(&slot.bridge, was_visible)?;
+                if let Some(session) = self.session(tray_id) {
+                    emit_visible_change_if_needed(&session.bridge, was_visible)?;
                 }
                 Ok(json!({ "type": "shown" }))
             }
+            WebviewCommand::Orchestration(command) => self.handle_orchestration(*command),
+            WebviewCommand::Channel(request) => self.handle_channel(*request),
             WebviewCommand::Hide => {
-                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
-                    let was_visible = window_is_visible(slot.window.hwnd);
-                    hide_bridge_window(&slot.bridge);
-                    emit_visible_change_if_needed(&slot.bridge, was_visible)?;
+                if let Some(session) = self.session(tray_id) {
+                    let was_visible = window_is_visible(session.window.hwnd);
+                    hide_bridge_window(&session.bridge);
+                    emit_visible_change_if_needed(&session.bridge, was_visible)?;
                 }
                 Ok(json!({ "type": "hidden" }))
             }
             WebviewCommand::Close => {
-                if let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) {
-                    close_bridge_window(&slot.bridge)?;
+                if let Some(session) = self.session(tray_id) {
+                    close_bridge_window(&session.bridge)?;
                 }
                 Ok(json!({ "type": "closed" }))
             }
             WebviewCommand::Destroy => {
-                self.destroy_slot(tray_id);
+                self.destroy_window_session(tray_id);
                 Ok(json!({ "type": "destroyed" }))
             }
             WebviewCommand::SetContent { html, url } => {
@@ -671,8 +819,13 @@ impl WindowsWebviewRuntime {
             }
             WebviewCommand::Evaluate { js } => {
                 let show_settings = self.active_show_settings(tray_id);
-                let slot = self.ensure_script_slot(tray_id, show_settings)?;
-                slot.webview
+                let session = self.ensure_script_session(tray_id, show_settings)?;
+                let webview = primary_webview_of(&session.bridge).ok_or_else(|| {
+                    WebviewRuntimeError::Rejected(
+                        "evaluate requires an active webview in this window".into(),
+                    )
+                })?;
+                unsafe { webview.as_ref() }
                     .evaluate_script(&js)
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
                 self.focus(tray_id)?;
@@ -680,10 +833,15 @@ impl WindowsWebviewRuntime {
             }
             WebviewCommand::PostMessage { payload } => {
                 let show_settings = self.active_show_settings(tray_id);
-                let slot = self.ensure_script_slot(tray_id, show_settings)?;
+                let session = self.ensure_script_session(tray_id, show_settings)?;
                 let payload_json = serde_json::to_string(&payload)
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
-                slot.webview
+                let webview = primary_webview_of(&session.bridge).ok_or_else(|| {
+                    WebviewRuntimeError::Rejected(
+                        "postMessage requires an active webview in this window".into(),
+                    )
+                })?;
+                unsafe { webview.as_ref() }
                     .evaluate_script(&format!(
                         "window.dispatchEvent(new MessageEvent('message', {{ data: {payload_json} }}));"
                     ))
@@ -692,80 +850,40 @@ impl WindowsWebviewRuntime {
                 Ok(json!({ "type": "message", "payload": payload }))
             }
             WebviewCommand::MoveTo { x, y } => {
-                let slot = self
-                    .slot
-                    .as_mut()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "moveTo requires an active WebView window".into(),
-                        )
-                    })?;
+                let session = self.require_session(tray_id, "moveTo")?;
                 let x = finite_i32(x, "x")?;
                 let y = finite_i32(y, "y")?;
-                set_window_position(slot.window.hwnd, x, y)?;
-                notify_webview_parent_window_position_changed_from_bridge(&slot.bridge)?;
+                set_window_position(session.window.hwnd, x, y)?;
+                notify_webview_parent_window_position_changed_from_bridge(&session.bridge)?;
                 let response = json!({ "x": x, "y": y });
-                emit_window_event(&slot.bridge, "moved", response.clone())?;
+                emit_window_event(&session.bridge, "moved", response.clone())?;
                 Ok(response)
             }
             WebviewCommand::ResizeTo { width, height } => {
-                let slot = self
-                    .slot
-                    .as_mut()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "resizeTo requires an active WebView window".into(),
-                        )
-                    })?;
+                let session = self.require_session(tray_id, "resizeTo")?;
                 let width = finite_i32(width, "width")?;
                 let height = finite_i32(height, "height")?;
-                set_window_size(slot.window.hwnd, width, height)?;
-                refresh_after_explicit_resize(&slot.bridge)?;
+                set_window_size(session.window.hwnd, width, height)?;
+                refresh_after_explicit_resize(&session.bridge)?;
                 let response = json!({ "width": width, "height": height });
-                emit_window_event(&slot.bridge, "resized", response.clone())?;
-                emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
+                emit_window_event(&session.bridge, "resized", response.clone())?;
+                emit_overlay_geometry_change_if_enabled(&session.bridge)?;
                 Ok(response)
             }
             WebviewCommand::IsClosed => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "isClosed requires an active WebView window".into(),
-                        )
-                    })?;
-                Ok(Value::Bool(window_is_closed(slot.window.hwnd)))
+                let session = self.require_session(tray_id, "isClosed")?;
+                Ok(Value::Bool(window_is_closed(session.window.hwnd)))
             }
             WebviewCommand::IsVisible => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "isVisible requires an active WebView window".into(),
-                        )
-                    })?;
-                Ok(Value::Bool(window_is_visible(slot.window.hwnd)))
+                let session = self.require_session(tray_id, "isVisible")?;
+                Ok(Value::Bool(window_is_visible(session.window.hwnd)))
             }
             WebviewCommand::ToVisible => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "toVisible requires an active WebView window".into(),
-                        )
-                    })?;
-                let was_visible = window_is_visible(slot.window.hwnd);
-                show_bridge_window(&slot.bridge, false)?;
-                emit_window_state_change(&slot.bridge, was_visible)?;
-                emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
+                let session = self.require_session(tray_id, "toVisible")?;
+                let was_visible = window_is_visible(session.window.hwnd);
+                show_bridge_window(&session.bridge, false)?;
+                emit_window_state_change(&session.bridge, was_visible)?;
+                emit_overlay_geometry_change_if_enabled(&session.bridge)?;
                 Ok(Value::Null)
             }
             WebviewCommand::Focus => {
@@ -773,54 +891,22 @@ impl WindowsWebviewRuntime {
                 Ok(Value::Null)
             }
             WebviewCommand::GetBounds => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "getBounds requires an active WebView window".into(),
-                        )
-                    })?;
-                window_bounds_json(slot.window.hwnd)
+                let session = self.require_session(tray_id, "getBounds")?;
+                window_bounds_json(session.window.hwnd)
             }
             WebviewCommand::GetScreenDetails => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "getScreenDetails requires an active WebView window".into(),
-                        )
-                    })?;
-                screen_details_json(slot.window.hwnd)
+                let session = self.require_session(tray_id, "getScreenDetails")?;
+                screen_details_json(session.window.hwnd)
             }
             WebviewCommand::DrainIpcMessages => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "drainIpcMessages requires an active WebView window".into(),
-                        )
-                    })?;
+                let session = self.require_session(tray_id, "drainIpcMessages")?;
                 let messages: Vec<Value> =
-                    slot.bridge.borrow_mut().ipc_messages.drain(..).collect();
+                    session.bridge.borrow_mut().ipc_messages.drain(..).collect();
                 Ok(json!({ "type": "ipcMessages", "messages": messages }))
             }
             WebviewCommand::DrainPermissionMessages => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "drainPermissionMessages requires an active WebView window".into(),
-                        )
-                    })?;
-                let messages: Vec<Value> = slot
+                let session = self.require_session(tray_id, "drainPermissionMessages")?;
+                let messages: Vec<Value> = session
                     .bridge
                     .borrow_mut()
                     .permission_messages
@@ -829,122 +915,59 @@ impl WindowsWebviewRuntime {
                 Ok(json!({ "type": "permissionMessages", "messages": messages }))
             }
             WebviewCommand::ResolvePermissionMessage { id, result } => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "resolvePermissionMessage requires an active WebView window".into(),
-                        )
-                    })?;
-                resolve_callback(&slot.bridge, id, result)?;
+                let session = self.require_session(tray_id, "resolvePermissionMessage")?;
+                resolve_callback(&session.bridge, None, id, result)?;
                 Ok(json!({ "type": "permissionMessageResolved", "id": id }))
             }
             WebviewCommand::DrainWindowEvents => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "drainWindowEvents requires an active WebView window".into(),
-                        )
-                    })?;
-                let events: Vec<Value> = slot.bridge.borrow_mut().window_events.drain(..).collect();
+                let session = self.require_session(tray_id, "drainWindowEvents")?;
+                let events: Vec<Value> =
+                    session.bridge.borrow_mut().window_events.drain(..).collect();
                 Ok(json!({ "type": "windowEvents", "events": events }))
             }
             WebviewCommand::OpenDevtools => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "openDevtools requires an active WebView window".into(),
-                        )
-                    })?;
-                open_devtools(&slot.bridge)
+                let session = self.require_session(tray_id, "openDevtools")?;
+                open_devtools(&session.bridge)
             }
             WebviewCommand::CloseDevtools => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "closeDevtools requires an active WebView window".into(),
-                        )
-                    })?;
-                close_devtools(&slot.bridge)
+                let session = self.require_session(tray_id, "closeDevtools")?;
+                close_devtools(&session.bridge)
             }
             WebviewCommand::IsDevtoolsOpen => {
-                let slot = self
-                    .slot
-                    .as_ref()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "isDevtoolsOpen requires an active WebView window".into(),
-                        )
-                    })?;
-                devtools_open_state(&slot.bridge)
+                let session = self.require_session(tray_id, "isDevtoolsOpen")?;
+                devtools_open_state(&session.bridge)
             }
             WebviewCommand::SetStyle { style } => {
-                let slot = self
-                    .slot
-                    .as_mut()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "setStyle requires an active WebView window".into(),
-                        )
-                    })?;
+                let session = self.require_session(tray_id, "setStyle")?;
                 let payload: SetStylePayload = serde_json::from_value(style).map_err(|error| {
                     WebviewRuntimeError::Rejected(format!("setStyle payload is invalid: {error}"))
                 })?;
                 validate_style_request(&payload)?;
-                let previous_background = slot.bridge.borrow().style.background.clone();
-                let changed = apply_style_patch(&slot.bridge, payload)?;
+                let previous_background = session.bridge.borrow().style.background.clone();
+                let changed = apply_style_patch(&session.bridge, payload)?;
                 if changed {
-                    apply_window_style(&slot.bridge, Some(&previous_background))?;
-                    apply_webview_client_bounds_from_bridge(&slot.bridge)?;
+                    apply_window_style(&session.bridge, Some(&previous_background))?;
+                    apply_webview_client_bounds_from_bridge(&session.bridge)?;
                 }
-                let response = slot.bridge.borrow().style_json()?;
+                let response = session.bridge.borrow().style_json()?;
                 if changed {
-                    emit_window_event(&slot.bridge, "stylechange", response.clone())?;
-                    emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
+                    emit_window_event(&session.bridge, "stylechange", response.clone())?;
+                    emit_overlay_geometry_change_if_enabled(&session.bridge)?;
                 }
                 Ok(response)
             }
             WebviewCommand::SetMinimumSize { width, height } => {
-                let slot = self
-                    .slot
-                    .as_mut()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "setMinimumSize requires an active WebView window".into(),
-                        )
-                    })?;
+                let session = self.require_session(tray_id, "setMinimumSize")?;
                 apply_window_size_constraint_patch(
-                    &slot.bridge,
+                    &session.bridge,
                     SizeConstraintKind::Minimum,
                     SizeConstraintPayload { width, height },
                 )
             }
             WebviewCommand::SetMaximumSize { width, height } => {
-                let slot = self
-                    .slot
-                    .as_mut()
-                    .filter(|slot| slot.tray_id == tray_id)
-                    .ok_or_else(|| {
-                        WebviewRuntimeError::Rejected(
-                            "setMaximumSize requires an active WebView window".into(),
-                        )
-                    })?;
+                let session = self.require_session(tray_id, "setMaximumSize")?;
                 apply_window_size_constraint_patch(
-                    &slot.bridge,
+                    &session.bridge,
                     SizeConstraintKind::Maximum,
                     SizeConstraintPayload { width, height },
                 )
@@ -952,19 +975,151 @@ impl WindowsWebviewRuntime {
         }
     }
 
-    pub(crate) fn session_closed(&mut self, _session_id: &str) {
-        self.close();
+    /// Session cleanup keyed by the closing session id (D18): destroys
+    /// exactly the windows whose owner tuple matches, and never touches
+    /// another live session's windows. Unattributed legacy windows follow
+    /// the transitional rule documented on
+    /// [`crate::orchestration::WindowRegistry::session_closed`].
+    pub(crate) fn session_closed(&mut self, session_id: &str) {
+        // D26 popups die with their owning session/lease — swept before
+        // (and independently of) the window-session registry cleanup, and
+        // never touching another owner's popups.
+        self::popups::close_session_popups(&self.popups, session_id);
+        let removed = self.registry.session_closed(session_id);
+        for entry in removed {
+            if let Some(owner) = entry.owner {
+                // Channel law (D20): session close closes the session's
+                // channels with `session_closed` (distinct from the
+                // `window_destroyed` entrance) and stages the host
+                // observations for the next response flush — the
+                // session-close ABI call itself returns no events.
+                if let Some(session) = self.sessions.get_mut(&owner.tray_id) {
+                    let pushes = session
+                        .bridge
+                        .borrow()
+                        .channels
+                        .borrow_mut()
+                        .close_all(opentray_spec::channel::ChannelCloseReason::SessionClosed);
+                    self::channels::deliver_channel_pushes(&session.bridge, &pushes, None);
+                    let events = session
+                        .bridge
+                        .borrow()
+                        .channels
+                        .borrow_mut()
+                        .drain_host_events();
+                    self.pending_channel_events.extend(events);
+                }
+                self.destroy_window_session(&owner.tray_id);
+            }
+        }
+    }
+
+    /// Drains every session's D19 push-event outbox into the command
+    /// response envelope set.
+    fn flush_pending_events(&mut self) -> Vec<WebviewEventFrame> {
+        let mut frames = Vec::new();
+        for session in self.sessions.values() {
+            frames.extend(session.event_core.borrow_mut().outbox.drain(..));
+        }
+        frames
+    }
+
+    /// Drains every live session's host-bound channel events plus events
+    /// staged by sessions destroyed inside the current command (v1 flush
+    /// ruling, tasks 3.3b/3.5 — mirrors the macOS runtime).
+    fn flush_channel_events(
+        &mut self,
+    ) -> Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)> {
+        let mut events = std::mem::take(&mut self.pending_channel_events);
+        for session in self.sessions.values() {
+            let channels = session.bridge.borrow().channels.clone();
+            events.extend(channels.borrow_mut().drain_host_events());
+        }
+        events
+    }
+
+    /// Message-channel commands (D9-D20, frozen `channel.*` wire tags).
+    /// The response data is the frozen result frame; typed rejections
+    /// return the `channel.error` envelope as Ok-data, mirroring the
+    /// orchestration convention (the extension ABI's error channel cannot
+    /// carry the typed registry). Push effects are delivered inline:
+    /// page-bound through the bridge script (`ExecuteScript`), host-bound
+    /// through the response flush. The frame dispatch itself lives in
+    /// [`self::channels::dispatch_host_channel_command`] so the host
+    /// command surface is testable against a bridge fixture (the Win32
+    /// session cannot be created inside the cargo-test harness).
+    fn handle_channel(
+        &mut self,
+        request: crate::channels::ChannelRequest,
+    ) -> Result<Value, WebviewRuntimeError> {
+        let owner = request.owner().clone();
+        let Some(bridge) = self
+            .session_for_owner(&owner)
+            .map(|session| Rc::clone(&session.bridge))
+        else {
+            // A tray whose live window belongs to another session is the
+            // typed cross-session rejection; a tray with no window session
+            // at all has nothing addressable (unknown_view).
+            let session_live = self.registry.window(&owner.tray_id).is_some();
+            let code = if session_live {
+                opentray_spec::webview::OrchestrationErrorCode::SessionScope
+            } else {
+                opentray_spec::webview::OrchestrationErrorCode::UnknownView
+            };
+            let message = if session_live {
+                format!(
+                    "channel owner (app {}, tray {}, session {}) does not address the live \
+                     window session of tray {}",
+                    owner.app_id, owner.tray_id, owner.session_id, owner.tray_id
+                )
+            } else {
+                format!("tray {} has no webview window session to address", owner.tray_id)
+            };
+            return Ok(self::channels::channel_error_frame(&owner, code, message));
+        };
+        self::channels::dispatch_host_channel_command(&bridge, request)
+    }
+
+    /// Resolves the window session whose owner tuple matches the frame's
+    /// `(appId, trayId, sessionId)` — channel commands carry no window id,
+    /// the session identity is the addressing scope.
+    fn session_for_owner(
+        &self,
+        owner: &opentray_spec::webview::WebviewOwnerTuple,
+    ) -> Option<&WindowSession> {
+        let entry = self.registry.window(&owner.tray_id)?;
+        let recorded = entry.owner.as_ref()?;
+        if recorded.app_id != owner.app_id
+            || recorded.session_id.as_deref() != Some(owner.session_id.as_str())
+        {
+            return None;
+        }
+        self.sessions.get(&owner.tray_id)
+    }
+
+    fn session(&self, tray_id: &str) -> Option<&WindowSession> {
+        self.sessions.get(tray_id)
+    }
+
+    fn require_session(
+        &self,
+        tray_id: &str,
+        command: &str,
+    ) -> Result<&WindowSession, WebviewRuntimeError> {
+        self.session(tray_id).ok_or_else(|| {
+            WebviewRuntimeError::Rejected(format!(
+                "{command} requires an active WebView window"
+            ))
+        })
     }
 
     fn active_show_settings(&self, tray_id: &str) -> WebviewShowSettings {
-        self.slot
-            .as_ref()
-            .filter(|slot| slot.tray_id == tray_id)
-            .map(|slot| slot.show_settings.clone())
+        self.session(tray_id)
+            .map(|session| session.show_settings.clone())
             .unwrap_or_else(default_windows_show_settings)
     }
 
-    fn ensure_slot(
+    fn ensure_session(
         &mut self,
         tray_id: &str,
         html: Option<String>,
@@ -973,95 +1128,126 @@ impl WindowsWebviewRuntime {
         height: Option<f64>,
         tray_bounds: Option<Rect>,
         show_settings: WebviewShowSettings,
-    ) -> Result<&mut WindowsWebviewSlot, WebviewRuntimeError> {
+        owner_session_id: Option<String>,
+        window_id: Option<String>,
+        window_only: bool,
+    ) -> Result<(), WebviewRuntimeError> {
         let initial_width = width.unwrap_or(420.0).max(240.0).round() as i32;
         let initial_height = height.unwrap_or(260.0).max(160.0).round() as i32;
         let requested_content = explicit_content_descriptor(html.as_ref(), url.as_ref());
-        let needs_new_slot = self
-            .slot
-            .as_ref()
-            .map(|slot| slot.tray_id != tray_id)
-            .unwrap_or(true);
+        let owner = WindowOwner {
+            app_id: self.app_id(),
+            tray_id: tray_id.to_string(),
+            session_id: owner_session_id,
+            window_id: window_id.unwrap_or_else(|| DEFAULT_WINDOW_ID.to_string()),
+        };
 
-        if needs_new_slot {
-            self.close();
-            self.slot = Some(Self::create_slot(
-                tray_id.to_string(),
-                html,
-                url,
-                initial_width,
-                initial_height,
-                tray_bounds,
-                show_settings,
-            )?);
-            return Ok(self.slot.as_mut().expect("slot created"));
+        // D18: a tray holds at most one window session. A second session for
+        // the same tray is the typed `tray_session_active` rejection before
+        // any window state exists; compatible re-shows reuse the live scope.
+        match self.registry.open_window(owner.clone()) {
+            Ok(OpenOutcome::Created) => {
+                if let Err(error) = self.create_window_session(
+                    owner,
+                    html,
+                    url,
+                    initial_width,
+                    initial_height,
+                    tray_bounds,
+                    show_settings,
+                    window_only,
+                ) {
+                    // Roll the registry entry back so a failed create cannot
+                    // block later shows with a phantom session.
+                    self.registry.destroy_window(tray_id);
+                    return Err(error);
+                }
+                return Ok(());
+            }
+            Ok(OpenOutcome::Reused) => {}
+            Err(error) => {
+                return Err(orchestration_error(error));
+            }
         }
 
-        let slot = self.slot.as_ref().expect("slot exists");
+        let session = self.sessions.get_mut(tray_id).ok_or_else(|| {
+            WebviewRuntimeError::Internal("window registry lost its native session".into())
+        })?;
+        // Re-show is a visibility verb. Do not silently replace the live JS/DOM
+        // runtime through repeated show calls; force callers onto explicit
+        // content or destroy paths instead.
         if show_settings.bootstrap_requested {
             ensure_session_reuse_allowed(
-                slot.show_settings.session_bootstrap_settings(),
+                session.show_settings.session_bootstrap_settings(),
                 show_settings.session_bootstrap_settings(),
-                &slot.content_descriptor,
+                &session.content_descriptor,
                 requested_content.as_ref(),
             )?;
         } else if let Some(requested_content) = requested_content.as_ref() {
-            if &slot.content_descriptor != requested_content {
+            if &session.content_descriptor != requested_content {
                 return Err(WebviewRuntimeError::Rejected(
                     "show cannot replace existing webview content; use setContent, navigate, or destroy then show again".into(),
                 ));
             }
         }
+        if session_has_no_primary(session) != window_only {
+            return Err(WebviewRuntimeError::Rejected(
+                "show cannot change windowOnly; destroy the session and show again".into(),
+            ));
+        }
 
-        let slot = self.slot.as_mut().expect("slot exists");
         if let (Some(width), Some(height)) = (width, height) {
             let width = width.max(240.0).round() as i32;
             let height = height.max(160.0).round() as i32;
-            slot.window.resize_to(width, height)?;
-            slot.window.position_near_tray(width, height, tray_bounds)?;
+            session.window.resize_to(width, height)?;
+            session.window.position_near_tray(width, height, tray_bounds)?;
         }
-        slot.bridge.borrow_mut().tray_bounds = tray_bounds;
-        apply_webview_client_bounds(&slot.webview, slot.window.hwnd)?;
-        apply_reused_show_updates(slot, &show_settings)?;
-        Ok(slot)
+        session.bridge.borrow_mut().tray_bounds = tray_bounds;
+        apply_webview_client_bounds_from_bridge(&session.bridge)?;
+        apply_reused_show_updates(session, &show_settings)?;
+        Ok(())
     }
 
-    fn ensure_script_slot(
+    fn ensure_script_session(
         &mut self,
         tray_id: &str,
         show_settings: WebviewShowSettings,
-    ) -> Result<&mut WindowsWebviewSlot, WebviewRuntimeError> {
-        let needs_new_slot = self
-            .slot
-            .as_ref()
-            .map(|slot| slot.tray_id != tray_id)
-            .unwrap_or(true);
-        if needs_new_slot {
-            return self.ensure_slot(
-                tray_id,
-                None,
-                None,
-                Some(420.0),
-                Some(260.0),
-                None,
-                show_settings,
-            );
+    ) -> Result<&WindowSession, WebviewRuntimeError> {
+        if self.session(tray_id).is_none() {
+            return self
+                .ensure_session(
+                    tray_id,
+                    None,
+                    None,
+                    Some(420.0),
+                    Some(260.0),
+                    None,
+                    show_settings,
+                    None,
+                    None,
+                    false,
+                )
+                .map(|()| self.sessions.get(tray_id).expect("session created"));
         }
-        Ok(self.slot.as_mut().expect("slot exists"))
+        Ok(self.sessions.get(tray_id).expect("session exists"))
     }
 
-    fn create_slot(
-        tray_id: String,
+    #[allow(clippy::too_many_arguments)]
+    fn create_window_session(
+        &mut self,
+        owner: WindowOwner,
         html: Option<String>,
         url: Option<String>,
         width: i32,
         height: i32,
         tray_bounds: Option<Rect>,
         show_settings: WebviewShowSettings,
-    ) -> Result<WindowsWebviewSlot, WebviewRuntimeError> {
+        window_only: bool,
+    ) -> Result<(), WebviewRuntimeError> {
         validate_initial_style(&show_settings)?;
         let content_descriptor = initial_content_descriptor(html.as_ref(), url.as_ref());
         let page_source = page_source_state_for_content(&content_descriptor);
+        let tray_id = owner.tray_id.clone();
         let title = show_settings
             .window
             .title
@@ -1079,13 +1265,15 @@ impl WindowsWebviewRuntime {
         let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
             hwnd: window.hwnd,
             window: Some(NonNull::from(window.as_mut())),
-            webview: None,
+            views: Vec::new(),
+            layout: WindowLayoutState::default(),
+            boxes: HashMap::new(),
+            event_core: std::rc::Weak::new(),
+            focus_tracker: std::rc::Weak::new(),
             content_descriptor: content_descriptor.clone(),
-            listeners: HashMap::new(),
             ipc_messages: VecDeque::new(),
             permission_messages: VecDeque::new(),
             window_events: VecDeque::new(),
-            next_event_id: 1,
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
             style,
@@ -1113,6 +1301,12 @@ impl WindowsWebviewRuntime {
             page_access,
             tray_bounds,
             size_constraints: WindowSizeConstraints::default(),
+            channels: Rc::new(RefCell::new(crate::channels::SessionChannels::new(
+                owner.clone(),
+            ))),
+            channel_loaded_views: HashSet::new(),
+            channel_live_views: HashSet::new(),
+            pending_channel_pushes: HashMap::new(),
         }));
 
         // Cold start is not a retained style transaction. Complete the hidden native material host
@@ -1121,7 +1315,7 @@ impl WindowsWebviewRuntime {
             window.hwnd,
             Some(NonNull::from(bridge.as_ref())),
             Some(NonNull::from(window.as_mut())),
-            None,
+            Vec::new(),
             None,
             native_host_paint_policy(&bridge.borrow().style),
             backdrop_state_policy(&bridge.borrow().style.background),
@@ -1130,14 +1324,6 @@ impl WindowsWebviewRuntime {
         apply_initial_window_host_style(&bridge, width, height, tray_bounds)?;
         apply_window_icon_from_bridge(&bridge)?;
 
-        let webview_bounds = client_webview_bounds(window.hwnd).unwrap_or(WryRect {
-            position: PhysicalPosition::new(0, 0).into(),
-            size: PhysicalSize::new(
-                logical_to_physical_i32(window.hwnd, width.max(1)),
-                logical_to_physical_i32(window.hwnd, height.max(1)),
-            )
-            .into(),
-        });
         let webview_data_directory = resolve_webview_data_directory()?;
         std::fs::create_dir_all(&webview_data_directory).map_err(|error| {
             WebviewRuntimeError::Internal(format!(
@@ -1147,47 +1333,105 @@ impl WindowsWebviewRuntime {
             ))
         })?;
         let mut webview_context = WebContext::new(Some(webview_data_directory));
-        let webview = build_webview(
-            window.as_ref(),
-            &mut webview_context,
-            &bridge,
-            show_settings.navigator_window,
-            show_settings.navigator_screen,
-            show_settings.navigator_tray,
-            show_settings.window.devtools,
-            show_settings.window.sync.title,
-            show_settings.window.sync.icon,
-            &show_settings.native_api_policy,
-            &show_settings.permission_manager_policy,
-            webview_bounds,
-            html,
-            url,
-        )?;
-        let mut slot = WindowsWebviewSlot {
-            tray_id,
-            _webview_context: webview_context,
-            webview,
-            window,
-            bridge,
-            content_descriptor,
-            show_settings,
-        };
-        slot.window.attach_webview(&slot.webview);
-        slot.bridge.borrow_mut().webview = Some(NonNull::from(slot.webview.as_mut()));
-        sync_window_proc_state(
-            slot.window.hwnd,
-            Some(NonNull::from(slot.bridge.as_ref())),
-            Some(NonNull::from(slot.window.as_mut())),
-            Some(NonNull::from(slot.webview.as_mut())),
-            None,
-            native_host_paint_policy(&slot.bridge.borrow().style),
-            backdrop_state_policy(&slot.bridge.borrow().style.background),
-            slot.bridge.borrow().size_constraints,
-        );
-        complete_initial_webview_attachment(&slot.bridge)?;
-        update_native_material_probe_title(slot.window.hwnd);
 
-        Ok(slot)
+        // D18/D19 session core: owner identity + push-event outbox shared
+        // with the per-view observers through the bridge's weak handle.
+        let event_core = Rc::new(RefCell::new(SessionEventCore {
+            owner: owner.clone(),
+            outbox: VecDeque::new(),
+        }));
+        let focus_tracker = Rc::new(RefCell::new(self::orchestration::FocusTracker::new(
+            owner.clone(),
+            Rc::downgrade(&event_core),
+        )));
+        {
+            let mut state = bridge.borrow_mut();
+            state.event_core = Rc::downgrade(&event_core);
+            state.focus_tracker = Rc::downgrade(&focus_tracker);
+        }
+
+        // The primary webview of a legacy `show` (the "default" view): the
+        // single-fill default layout until an explicit layout replaces it.
+        let mut primary: Option<(String, Box<WebView>, Rc<RefCell<ViewEvents>>, WebviewBridgePolicy)> =
+            None;
+        if !window_only {
+            let webview_id = DEFAULT_WEBVIEW_ID.to_string();
+            let policy = primary_bridge_policy(&show_settings);
+            let events = Rc::new(RefCell::new(ViewEvents::new(
+                webview_id.clone(),
+                policy,
+            )));
+            events
+                .borrow_mut()
+                .note_url_change(&owner, &owner.window_id, url.clone().unwrap_or_default());
+            let webview_bounds = client_webview_bounds(window.hwnd).unwrap_or(WryRect {
+                position: PhysicalPosition::new(0, 0).into(),
+                size: PhysicalSize::new(
+                    logical_to_physical_i32(window.hwnd, width.max(1)),
+                    logical_to_physical_i32(window.hwnd, height.max(1)),
+                )
+                .into(),
+            });
+            let webview = build_webview(
+                window.as_ref(),
+                &mut webview_context,
+                &bridge,
+                &owner,
+                &webview_id,
+                Rc::clone(&events),
+                &Rc::downgrade(&self.popups),
+                show_settings.navigator_window,
+                show_settings.navigator_screen,
+                show_settings.navigator_tray,
+                show_settings.window.devtools,
+                show_settings.window.sync.title,
+                show_settings.window.sync.icon,
+                &show_settings.native_api_policy,
+                &show_settings.permission_manager_policy,
+                webview_bounds,
+                html,
+                url,
+            )?;
+            primary = Some((webview_id, webview, events, policy));
+        }
+
+        let mut session = WindowSession {
+            webviews: Vec::new(),
+            event_core,
+            focus_tracker: focus_tracker.clone(),
+            content_descriptor: content_descriptor.clone(),
+            show_settings,
+            window,
+            bridge: bridge.clone(),
+            // Retained WebContext: declared last so it drops after every
+            // controller (shared environment / Profile Law).
+            webview_context,
+        };
+        if let Some((webview_id, webview, events, policy)) = primary {
+            let entry = self::orchestration::SessionWebview {
+                id: webview_id.clone(),
+                webview,
+                events: Rc::clone(&events),
+            };
+            session.register_webview(entry, policy);
+            let primary_view = session.webviews.last().expect("primary registered");
+            session
+                .window
+                .attach_webview(primary_view.webview.as_ref());
+            self::orchestration::install_focus_observers(
+                primary_view.webview.as_ref(),
+                &focus_tracker,
+                &webview_id,
+            )?;
+            self.registry
+                .add_view(&tray_id, events)
+                .map_err(orchestration_error)?;
+        }
+        let hwnd = session.window.hwnd;
+        self.sessions.insert(tray_id.clone(), session);
+        complete_initial_webview_attachment(&bridge)?;
+        update_native_material_probe_title(hwnd);
+        Ok(())
     }
 
     fn set_content(
@@ -1196,65 +1440,101 @@ impl WindowsWebviewRuntime {
         html: Option<String>,
         url: Option<String>,
     ) -> Result<(), WebviewRuntimeError> {
-        let slot = self
-            .slot
-            .as_mut()
-            .filter(|slot| slot.tray_id == tray_id)
-            .ok_or_else(|| {
-                WebviewRuntimeError::Rejected(
-                    "setContent requires an existing webview session; call show first".into(),
-                )
-            })?;
+        let session = self.require_session(tray_id, "setContent").map_err(|_| {
+            WebviewRuntimeError::Rejected(
+                "setContent requires an existing webview session; call show first".into(),
+            )
+        })?;
         let descriptor =
             explicit_content_descriptor(html.as_ref(), url.as_ref()).ok_or_else(|| {
                 WebviewRuntimeError::Rejected("setContent requires html or url".into())
             })?;
-        if slot.content_descriptor == descriptor {
+        if session.content_descriptor == descriptor {
             return Ok(());
         }
-        load_slot_content(slot, html, url, descriptor)
+        let primary_id = session
+            .bridge
+            .borrow()
+            .views
+            .first()
+            .map(|view| view.id.clone())
+            .ok_or_else(|| {
+                WebviewRuntimeError::Rejected(
+                    "setContent requires an active webview in this window".into(),
+                )
+            })?;
+        load_session_content(
+            self.sessions.get_mut(tray_id).expect("session verified"),
+            &primary_id,
+            html,
+            url,
+            descriptor,
+        )
     }
 
     fn focus(&self, tray_id: &str) -> Result<(), WebviewRuntimeError> {
-        let Some(slot) = self.slot.as_ref().filter(|slot| slot.tray_id == tray_id) else {
+        let Some(session) = self.session(tray_id) else {
             return Ok(());
         };
-        show_bridge_window(&slot.bridge, true)
+        show_bridge_window(&session.bridge, true)
     }
 
-    fn destroy_slot(&mut self, tray_id: &str) {
-        let matches_tray = self
-            .slot
-            .as_ref()
-            .map(|slot| slot.tray_id == tray_id)
-            .unwrap_or(false);
-        if matches_tray {
-            self.close();
+    fn destroy_window_session(&mut self, tray_id: &str) {
+        self.registry.destroy_window(tray_id);
+        if let Some(session) = self.sessions.remove(tray_id) {
+            // Channel law (D20): window destruction is a destroy entrance —
+            // open channels close with `window_destroyed`, endpoints still
+            // live observe once, host observations ride this command's
+            // response flush, and no tombstone survives the session.
+            let pushes = session
+                .bridge
+                .borrow()
+                .channels
+                .borrow_mut()
+                .close_all(opentray_spec::channel::ChannelCloseReason::WindowDestroyed);
+            self::channels::deliver_channel_pushes(&session.bridge, &pushes, None);
+            let events = session
+                .bridge
+                .borrow()
+                .channels
+                .borrow_mut()
+                .drain_host_events();
+            self.pending_channel_events.extend(events);
+            // Dropping the session releases the Win32 host window and its
+            // WebView2 controllers (WebContext last — Profile Law).
         }
     }
+}
 
-    fn close(&mut self) {
-        self.slot.take();
+/// Legacy single-webview surfaces (evaluate/postMessage/devtools/primary
+/// content) address the window's first webview.
+fn primary_webview_of(bridge: &Rc<RefCell<NavigatorWindowBridge>>) -> Option<NonNull<WebView>> {
+    bridge.borrow().views.first().map(|view| view.webview)
+}
+
+/// The primary webview's bridge policy, projected from the legacy show
+/// settings so `list-webviews` reports the bridge the primary really has.
+/// `webviewId`/`messageChannels`/`nativeApi` surfaces belong to the
+/// orchestration-era children only.
+fn primary_bridge_policy(show_settings: &WebviewShowSettings) -> WebviewBridgePolicy {
+    WebviewBridgePolicy {
+        webview_id: false,
+        message_channels: false,
+        navigator_window: show_settings.navigator_window.enabled,
+        navigator_screen: show_settings.navigator_screen.enabled,
+        native_api: false,
     }
 }
 
-impl Drop for WindowsWebviewSlot {
-    fn drop(&mut self) {
-        sync_window_proc_state(
-            self.window.hwnd,
-            None,
-            None,
-            None,
-            None,
-            WindowsNativeHostPaint::None,
-            WindowsBackdropStatePolicy::FollowWindowActivation,
-            WindowSizeConstraints::default(),
-        );
-        self.window.detach_webview();
-    }
+fn session_has_no_primary(session: &WindowSession) -> bool {
+    session.webviews.is_empty()
 }
 
-fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
+fn handle_navigator_window_request(
+    message: &str,
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    source_webview: &str,
+) {
     let request = match serde_json::from_str::<NavigatorWindowRequest>(message) {
         Ok(request) => request,
         Err(error) => {
@@ -1272,6 +1552,7 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
             | COMMAND_NAMESPACE
             | PRIVATE_SYNC_NAMESPACE
             | PRIVATE_SOFT_RESIZE_NAMESPACE
+            | WEBVIEW_CHANNEL_NAMESPACE
     ) {
         return;
     }
@@ -1301,6 +1582,7 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
         )),
         WINDOW_NAMESPACE => dispatch_navigator_window_command(
             bridge,
+            source_webview,
             &request.cmd,
             request.payload,
             request.options,
@@ -1318,6 +1600,54 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
         PRIVATE_SOFT_RESIZE_NAMESPACE => {
             dispatch_private_soft_resize_command(bridge, &request.cmd, request.payload)
         }
+        // The per-webview channel namespace is bridge-policy-gated inside
+        // its dispatcher (not page_access-gated): the surface exists only
+        // in views whose frozen per-child policy enables message channels.
+        WEBVIEW_CHANNEL_NAMESPACE => {
+            match self::channels::dispatch_webview_channel_command(
+                bridge,
+                source_webview,
+                &request.cmd,
+                request.payload,
+            ) {
+                Ok(response) => Ok(response),
+                // Typed channel rejections reject the page promise with
+                // the frozen `{ code, message }` error body, not the
+                // category-level runtime code (mirrors the macOS surface).
+                Err(typed) => {
+                    if request.error == 0 {
+                        eprintln!(
+                            "opentray-ext-webview channel command rejected: {}::{} -> {}",
+                            request.namespace,
+                            request.cmd,
+                            typed.envelope.error.code.as_str()
+                        );
+                        return;
+                    }
+                    match callback_script(
+                        request.error,
+                        &json!({
+                            "code": typed.envelope.error.code.as_str(),
+                            "message": typed.envelope.error.message,
+                        }),
+                    ) {
+                        Ok(script) => {
+                            if let Err(error) =
+                                evaluate_bridge_script(bridge, Some(source_webview), script)
+                            {
+                                eprintln!(
+                                    "opentray-ext-webview channel reject failed: {error}"
+                                );
+                            }
+                        }
+                        Err(error) => eprintln!(
+                            "opentray-ext-webview channel reject script failed: {error}"
+                        ),
+                    }
+                    return;
+                }
+            }
+        }
         _ => return,
     };
 
@@ -1327,7 +1657,9 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
                 if request.namespace == PERMISSIONS_NAMESPACE {
                     return;
                 }
-                if let Err(error) = resolve_callback(bridge, request.callback, response) {
+                if let Err(error) =
+                    resolve_callback(bridge, Some(source_webview), request.callback, response)
+                {
                     eprintln!("opentray-ext-webview navigator callback failed: {error}");
                 } else if webview_debug_enabled() {
                     eprintln!(
@@ -1339,7 +1671,9 @@ fn handle_navigator_window_request(message: &str, bridge: &Rc<RefCell<NavigatorW
         }
         Err(error) => {
             if request.error != 0 {
-                if let Err(callback_error) = reject_callback(bridge, request.error, &error) {
+                if let Err(callback_error) =
+                    reject_callback(bridge, Some(source_webview), request.error, &error)
+                {
                     eprintln!("opentray-ext-webview navigator reject failed: {callback_error}");
                 } else if webview_debug_enabled() {
                     eprintln!(
@@ -1615,6 +1949,7 @@ fn without_window_proc_surface_refresh<T>(
 
 fn dispatch_navigator_window_command(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    source_webview: &str,
     cmd: &str,
     payload: Value,
     _options: Option<Value>,
@@ -1626,7 +1961,12 @@ fn dispatch_navigator_window_command(
             })?;
             let event_id = bridge
                 .borrow_mut()
-                .add_listener(payload.event, payload.handler);
+                .add_listener(source_webview, payload.event, payload.handler)
+                .ok_or_else(|| {
+                    WebviewRuntimeError::Rejected(
+                        "listen is not available for this webview's bridge".into(),
+                    )
+                })?;
             Ok(json!({ "eventId": event_id }))
         }
         "unlisten" => {
@@ -1637,7 +1977,7 @@ fn dispatch_navigator_window_command(
             })?;
             bridge
                 .borrow_mut()
-                .remove_listener(&payload.event, payload.event_id);
+                .remove_listener(source_webview, &payload.event, payload.event_id);
             Ok(Value::Null)
         }
         "close" => {
@@ -1755,7 +2095,9 @@ fn dispatch_navigator_window_command(
                     "window controls overlay is not enabled for this WebView".into(),
                 ));
             }
-            titlebar_area_rect_json(bridge.borrow().hwnd)
+            // D23: the safe area is projected into the *requesting*
+            // webview's own viewport coordinates.
+            titlebar_area_rect_json_for_view(bridge, source_webview)
         }
         "startAppRegionDrag" => {
             // SendMessageW enters the native move loop and re-enters WndProc; drop the bridge
@@ -1957,10 +2299,15 @@ fn page_source_state_for_content(content: &WebviewContentDescriptor) -> PageSour
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_webview(
     window: &impl HasWindowHandle,
     webview_context: &mut WebContext,
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    owner: &crate::orchestration::WindowOwner,
+    webview_id: &str,
+    events: Rc<RefCell<ViewEvents>>,
+    popups: &std::rc::Weak<RefCell<PopupTracker>>,
     navigator_window: NavigatorWindowSettings,
     navigator_screen: NavigatorScreenSettings,
     navigator_tray: NavigatorTraySettings,
@@ -1984,6 +2331,14 @@ fn build_webview(
         .data_directory()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "<wry-default>".to_string());
+    // D19 per-view observers: title/url changes push straight into the
+    // window session's event outbox through the bridge's weak core handle —
+    // never through the 16 ms window-event drain.
+    let events_for_title = Rc::clone(&events);
+    let events_for_page_load = Rc::clone(&events);
+    let owner_for_title = owner.clone();
+    let owner_for_page_load = owner.clone();
+    let webview_id_for_ipc = webview_id.to_string();
     let builder = WebViewBuilder::new_with_web_context(webview_context)
         .with_initialization_script(navigator_window_bootstrap_script(
             navigator_window,
@@ -1994,14 +2349,41 @@ fn build_webview(
             sync_icon,
             native_api_policy,
             permission_manager_policy,
+            // The primary webview stays channel-less by policy
+            // (`primary_bridge_policy`): the `messageChannels`/
+            // `webviewId` bridge surfaces belong to the orchestration-era
+            // children (D2/D9).
+            false,
+            false,
+            "default",
         ))
         .with_ipc_handler(move |request| {
-            handle_navigator_window_request(request.body(), &bridge_for_ipc);
+            handle_navigator_window_request(
+                request.body(),
+                &bridge_for_ipc,
+                &webview_id_for_ipc,
+            );
         })
         .with_document_title_changed_handler(move |title| {
+            if let Some(frame) = events_for_title.borrow_mut().note_title_change(
+                &owner_for_title,
+                &owner_for_title.window_id,
+                &title,
+            ) {
+                push_frame_into_event_core(&bridge_for_title, frame);
+            }
             handle_document_title_changed(&bridge_for_title, title);
         })
         .with_on_page_load_handler(move |event, url| {
+            if matches!(event, PageLoadEvent::Started) {
+                if let Some(frame) = events_for_page_load.borrow_mut().note_url_change(
+                    &owner_for_page_load,
+                    &owner_for_page_load.window_id,
+                    url.to_string(),
+                ) {
+                    push_frame_into_event_core(&bridge_for_page_load, frame);
+                }
+            }
             update_page_access_for_url(&bridge_for_page_load, &url);
             if matches!(event, PageLoadEvent::Finished) {
                 if let Err(error) = sync_native_metadata_to_page(&bridge_for_page_load) {
@@ -2015,6 +2397,33 @@ fn build_webview(
         // into a clear-backed mode from an opaque-created controller can leave stale white client
         // regions because the underlying swap chain was allocated without the needed alpha path.
         .with_transparent(true)
+        // D26 auxiliary popups: every new-window navigation intent of the
+        // primary webview (a[target], window.open, middle-click,
+        // context-menu "open in new window") is handled by opening a
+        // plain popup window sharing this session's WebView2 environment;
+        // never delegated to an external browser.
+        .with_new_window_req_handler({
+            let popup_tracker = std::rc::Weak::clone(popups);
+            let popup_session = owner.session_id.clone().unwrap_or_default();
+            let popup_opener_hwnd = bridge.borrow().hwnd;
+            move |_uri, features| {
+                let Some(tracker) = popup_tracker.upgrade() else {
+                    return wry::NewWindowResponse::Deny;
+                };
+                match self::popups::spawn_popup(
+                    &tracker,
+                    &popup_session,
+                    popup_opener_hwnd,
+                    &features,
+                ) {
+                    Ok(core) => wry::NewWindowResponse::Create { webview: core },
+                    Err(error) => {
+                        eprintln!("opentray-ext-webview popup open failed: {error}");
+                        wry::NewWindowResponse::Deny
+                    }
+                }
+            }
+        })
         .with_bounds(bounds);
     let builder = if let Some(url) = url {
         builder.with_url(url)
@@ -2028,8 +2437,30 @@ fn build_webview(
         ))
     })?;
     let webview = Box::new(webview);
+    // D24 loadState: navigation lifecycle pushes (started/finished/failed
+    // with the numeric WebErrorStatus) from the raw WebView2 callbacks
+    // into the session event outbox — same push-only channel as the
+    // title/url observers above.
+    self::orchestration::install_load_state_observers(
+        webview.as_ref(),
+        &events,
+        &bridge.borrow().event_core,
+        owner,
+    )?;
     install_download_handlers(webview.as_ref(), bridge)?;
     Ok(webview)
+}
+
+/// Routes one pushed per-view event frame into the owning session's event
+/// outbox (D19). The bridge holds the session core weakly, so a frame
+/// raised during teardown is dropped rather than resurrecting the session.
+fn push_frame_into_event_core(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    frame: WebviewEventFrame,
+) {
+    if let Some(core) = bridge.borrow().event_core.upgrade() {
+        core.borrow_mut().outbox.push_back(frame);
+    }
 }
 
 fn resolve_webview_data_directory() -> Result<PathBuf, WebviewRuntimeError> {
@@ -2129,23 +2560,6 @@ fn apply_webview_controller_bounds(
     Ok(())
 }
 
-fn apply_webview_client_bounds_from_wm_size(
-    webview: &WebView,
-    hwnd: HWND,
-) -> Result<(), WebviewRuntimeError> {
-    let Some((width, height)) = physical_client_size(hwnd) else {
-        return Ok(());
-    };
-    unsafe {
-        webview
-            .controller()
-            .SetBounds(webview_controller_rect(width, height))
-            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
-    }
-    apply_webview_child_bounds(webview, hwnd)?;
-    notify_webview_parent_window_position_changed(webview)
-}
-
 fn apply_webview_child_bounds(webview: &WebView, hwnd: HWND) -> Result<(), WebviewRuntimeError> {
     let Some((width, height)) = physical_client_size(hwnd) else {
         return Ok(());
@@ -2209,16 +2623,15 @@ fn set_child_window_bounds(hwnd: HWND, width: i32, height: i32) -> Result<(), We
 }
 
 fn apply_webview_client_bounds_from_bridge(
-    bridge: &RefCell<NavigatorWindowBridge>,
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (hwnd, webview) = {
-        let state = bridge.borrow();
-        (state.hwnd, state.webview)
-    };
-    let Some(webview) = webview else {
-        return Ok(());
-    };
-    apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd)
+    // Multi-controller bounds authority is the layout transaction: the
+    // default layout solves the primary (first) webview to the full client
+    // area — the exact legacy single-webview behavior — while an explicit
+    // layout re-solves every controller against the live viewport.
+    let hwnd = bridge.borrow().hwnd;
+    self::orchestration::relayout(hwnd, bridge);
+    Ok(())
 }
 
 fn refresh_after_explicit_resize(
@@ -2392,11 +2805,12 @@ fn notify_webview_parent_window_position_changed(
 fn notify_webview_parent_window_position_changed_from_bridge(
     bridge: &RefCell<NavigatorWindowBridge>,
 ) -> Result<(), WebviewRuntimeError> {
-    let webview = bridge.borrow().webview;
-    let Some(webview) = webview else {
-        return Ok(());
-    };
-    notify_webview_parent_window_position_changed(unsafe { webview.as_ref() })
+    // One pass over every controller of the window (WM_SIZE ordering law:
+    // parent-position notification closes the resize transaction).
+    for webview in bridge.borrow().views.iter().map(|view| view.webview) {
+        notify_webview_parent_window_position_changed(unsafe { webview.as_ref() })?;
+    }
+    Ok(())
 }
 
 fn default_windows_show_settings() -> WebviewShowSettings {
@@ -2407,9 +2821,13 @@ fn ensure_devtools_open_supported(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<NonNull<WebView>, WebviewRuntimeError> {
     let bridge_state = ensure_devtools_requested_and_compiled(bridge)?;
-    bridge_state.webview.ok_or_else(|| {
-        WebviewRuntimeError::Rejected("devtools require an active WebView window".into())
-    })
+    bridge_state
+        .views
+        .first()
+        .map(|view| view.webview)
+        .ok_or_else(|| {
+            WebviewRuntimeError::Rejected("devtools require an active WebView window".into())
+        })
 }
 
 fn ensure_devtools_requested_and_compiled(
@@ -2452,27 +2870,37 @@ fn devtools_open_state(
     ))
 }
 
-fn load_slot_content(
-    slot: &mut WindowsWebviewSlot,
+fn load_session_content(
+    session: &mut WindowSession,
+    primary_id: &str,
     html: Option<String>,
     url: Option<String>,
     descriptor: WebviewContentDescriptor,
 ) -> Result<(), WebviewRuntimeError> {
+    let view = session
+        .webviews
+        .iter_mut()
+        .find(|view| view.id == primary_id)
+        .ok_or_else(|| {
+            WebviewRuntimeError::Rejected(
+                "setContent requires an active webview in this window".into(),
+            )
+        })?;
     match &descriptor {
         WebviewContentDescriptor::Html(_) => {
             let html = html.expect("html descriptor requires html payload");
-            slot.webview
+            view.webview
                 .load_html(&html)
                 .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
         }
         WebviewContentDescriptor::Url(_) => {
             let url = url.expect("url descriptor requires url payload");
-            slot.webview
+            view.webview
                 .load_url(&url)
                 .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
         }
         WebviewContentDescriptor::DefaultHtml => {
-            slot.webview
+            view.webview
                 .load_html(&default_webview_html())
                 .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
         }
@@ -2480,40 +2908,40 @@ fn load_slot_content(
 
     let page_source = page_source_state_for_content(&descriptor);
     {
-        let mut bridge = slot.bridge.borrow_mut();
+        let mut bridge = session.bridge.borrow_mut();
         bridge.page_source = page_source.clone();
         bridge.content_descriptor = descriptor.clone();
         bridge.page_access = resolve_page_access_from_bridge(&bridge);
     }
-    slot.content_descriptor = descriptor;
+    session.content_descriptor = descriptor;
     Ok(())
 }
 
 fn apply_reused_show_updates(
-    slot: &mut WindowsWebviewSlot,
+    session: &mut WindowSession,
     show_settings: &WebviewShowSettings,
 ) -> Result<(), WebviewRuntimeError> {
     if let Some(title) = show_settings.window.title.clone() {
-        update_window_title(&slot.bridge, title.clone(), MetadataSource::Native)?;
-        slot.show_settings.window.title = Some(title);
+        update_window_title(&session.bridge, title.clone(), MetadataSource::Native)?;
+        session.show_settings.window.title = Some(title);
     }
     if let Some(icon) = show_settings.window.icon.clone() {
-        update_window_icon(&slot.bridge, Some(icon.clone()), MetadataSource::Native)?;
-        slot.show_settings.window.icon = Some(icon);
+        update_window_icon(&session.bridge, Some(icon.clone()), MetadataSource::Native)?;
+        session.show_settings.window.icon = Some(icon);
     }
 
     if show_settings.window.style_requested {
         let requested_style = window_style_from_initial(&show_settings.window.style)?;
-        if slot.bridge.borrow().style != requested_style {
-            let previous_background = slot.bridge.borrow().style.background.clone();
-            slot.bridge.borrow_mut().style = requested_style;
-            apply_window_style(&slot.bridge, Some(&previous_background))?;
-            apply_webview_client_bounds_from_bridge(&slot.bridge)?;
-            let response = slot.bridge.borrow().style_json()?;
-            emit_window_event(&slot.bridge, "stylechange", response)?;
-            emit_overlay_geometry_change_if_enabled(&slot.bridge)?;
-            slot.show_settings.window.style = show_settings.window.style.clone();
-            slot.show_settings.window.style_requested = true;
+        if session.bridge.borrow().style != requested_style {
+            let previous_background = session.bridge.borrow().style.background.clone();
+            session.bridge.borrow_mut().style = requested_style;
+            apply_window_style(&session.bridge, Some(&previous_background))?;
+            apply_webview_client_bounds_from_bridge(&session.bridge)?;
+            let response = session.bridge.borrow().style_json()?;
+            emit_window_event(&session.bridge, "stylechange", response)?;
+            emit_overlay_geometry_change_if_enabled(&session.bridge)?;
+            session.show_settings.window.style = show_settings.window.style.clone();
+            session.show_settings.window.style_requested = true;
         }
     }
 
@@ -2713,6 +3141,36 @@ fn apply_style_patch(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     payload: SetStylePayload,
 ) -> Result<bool, WebviewRuntimeError> {
+    // Style-exclusivity checkpoint (2) (add-webview-orchestration D6):
+    // applying a translucency-affecting style to a window hosting more than
+    // one webview rejects with `multiwebview_unsupported_style` before any
+    // state changes, so the previous style survives untouched. The typed
+    // code rides the frozen error envelope inside the rejection message.
+    {
+        let state = bridge.borrow();
+        let mut projected = state.style.clone();
+        if let Some(frameless) = payload.frameless {
+            projected.frameless = frameless;
+        }
+        if let Some(background) = &payload.background {
+            projected.background = parse_background_input(background.clone())?;
+        }
+        let facts = StyleFacts {
+            frameless: projected.frameless,
+            translucent_background: matches!(
+                projected.background,
+                WebviewWindowBackground::Transparent
+                    | WebviewWindowBackground::PlatformMaterial { .. }
+                    | WebviewWindowBackground::Semantic { .. }
+            ),
+        };
+        if let Err(error) = crate::orchestration::style_change_allowed(facts, state.views.len()) {
+            return Err(WebviewRuntimeError::Rejected(
+                serde_json::to_string(&error.envelope)
+                    .unwrap_or_else(|_| error.code().as_str().to_string()),
+            ));
+        }
+    }
     let mut bridge_state = bridge.borrow_mut();
     let mut changed = false;
     if let Some(app_mode) = payload.app_mode {
@@ -2834,7 +3292,7 @@ fn rebuild_host_window_for_background_transition(
     let (
         hwnd,
         window,
-        webview,
+        webviews,
         style,
         title,
         tray_bounds,
@@ -2845,7 +3303,7 @@ fn rebuild_host_window_for_background_transition(
         (
             state.hwnd,
             state.window,
-            state.webview,
+            state.views.iter().map(|view| view.webview).collect::<Vec<_>>(),
             state.style.clone(),
             state.metadata.title.clone(),
             state.tray_bounds,
@@ -2855,8 +3313,6 @@ fn rebuild_host_window_for_background_transition(
     };
     let window =
         window.ok_or_else(|| WebviewRuntimeError::Internal("window bridge is not ready".into()))?;
-    let webview = webview
-        .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
     let snapshot = snapshot_window_host_rebuild_state(hwnd)?;
     let outer_width = (snapshot.rect.right - snapshot.rect.left).max(240);
     let outer_height = (snapshot.rect.bottom - snapshot.rect.top).max(160);
@@ -2877,16 +3333,22 @@ fn rebuild_host_window_for_background_transition(
     unsafe {
         let old_window = replace_boxed_value_in_place(window, rebuilt_window);
         bridge.borrow_mut().hwnd = window.as_ref().hwnd;
-        webview
-            .as_ref()
-            .reparent(window.as_ref().hwnd as isize)
-            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
-        window.as_ref().attach_webview(webview.as_ref());
+        // Reparent every controller of the window into the rebuilt host so
+        // page state survives across sibling webviews.
+        for webview in &webviews {
+            webview
+                .as_ref()
+                .reparent(window.as_ref().hwnd as isize)
+                .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+        }
+        if let Some(primary) = webviews.first() {
+            window.as_ref().attach_webview(primary.as_ref());
+        }
         sync_window_proc_state(
             window.as_ref().hwnd,
             Some(NonNull::from(bridge.as_ref())),
             Some(window),
-            Some(webview),
+            webviews.clone(),
             None,
             native_host_paint_policy(&style),
             backdrop_state_policy(&style.background),
@@ -2895,7 +3357,9 @@ fn rebuild_host_window_for_background_transition(
         sync_transparent_host_surface(bridge, &style)?;
         refresh_native_host_surface(window.as_ref().hwnd)?;
         apply_webview_background_color(bridge, wants_clear_background(&style))?;
-        apply_webview_client_bounds(webview.as_ref(), window.as_ref().hwnd)?;
+        if let Some(primary) = webviews.first() {
+            apply_webview_client_bounds(primary.as_ref(), window.as_ref().hwnd)?;
+        }
         restore_rebuilt_window_host_state(window.as_ref().hwnd, snapshot, was_active);
         drop(old_window);
     }
@@ -2967,14 +3431,9 @@ fn apply_window_style(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     previous_background: Option<&WebviewWindowBackground>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (hwnd, webview, style, window_controls_overlay) = {
+    let (hwnd, style, window_controls_overlay) = {
         let state = bridge.borrow();
-        (
-            state.hwnd,
-            state.webview,
-            state.style.clone(),
-            state.window_controls_overlay,
-        )
+        (state.hwnd, state.style.clone(), state.window_controls_overlay)
     };
     let was_maximized = is_window_maximized(hwnd);
     let native_host_paint = native_host_paint_policy(&style);
@@ -3028,9 +3487,7 @@ fn apply_window_style(
     // erase message as handled.
     refresh_native_host_surface(hwnd)?;
     apply_webview_background_color(bridge, wants_clear_background(&style))?;
-    if let Some(webview) = webview {
-        apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd)?;
-    }
+    self::orchestration::relayout(hwnd, bridge);
     notify_webview_parent_window_position_changed_from_bridge(bridge)?;
     update_native_material_probe_title(hwnd);
     Ok(())
@@ -3101,6 +3558,7 @@ fn sync_soft_resize_enabled(
     };
     evaluate_bridge_script(
         bridge,
+        None,
         format!("{WINDOW_INTERNALS_GLOBAL}.setSoftResizeEnabled({enabled});"),
     )
 }
@@ -3185,11 +3643,15 @@ fn sync_transparent_host_surface(
     } else {
         window.disable_transparent_surface();
     }
+    let webviews: Vec<NonNull<WebView>> = {
+        let state = bridge.borrow();
+        state.views.iter().map(|view| view.webview).collect()
+    };
     sync_window_proc_state(
         window.hwnd,
         Some(NonNull::from(bridge.as_ref())),
         Some(NonNull::from(window)),
-        bridge.borrow().webview,
+        webviews,
         host_surface_fill_color,
         native_host_paint_policy(style),
         backdrop_state_policy(&style.background),
@@ -3211,7 +3673,10 @@ fn apply_webview_background_color(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     clear: bool,
 ) -> Result<(), WebviewRuntimeError> {
-    let webview = bridge.borrow().webview;
+    // The host background family is a window-level fact; the primary
+    // webview carries its visible backing (children keep their
+    // alpha-capable creation backing under the D6 exclusivity guard).
+    let webview = bridge.borrow().views.first().map(|view| view.webview);
     let Some(webview) = webview else {
         return Ok(());
     };
@@ -3241,7 +3706,7 @@ fn sync_window_proc_state(
     hwnd: HWND,
     bridge: Option<NonNull<RefCell<NavigatorWindowBridge>>>,
     window: Option<NonNull<Win32HostWindow>>,
-    webview: Option<NonNull<WebView>>,
+    webviews: Vec<NonNull<WebView>>,
     host_surface_fill_color: Option<u32>,
     native_host_paint: WindowsNativeHostPaint,
     backdrop_state_policy: WindowsBackdropStatePolicy,
@@ -3249,11 +3714,11 @@ fn sync_window_proc_state(
 ) {
     WINDOW_PROC_STATES.with(|states| {
         let mut states = states.borrow_mut();
-        if window.is_none() && webview.is_none() {
+        if window.is_none() && webviews.is_empty() {
             states.remove(&(hwnd as isize));
             return;
         }
-        let previous = states.get(&(hwnd as isize)).copied().unwrap_or_default();
+        let previous = states.get(&(hwnd as isize)).cloned().unwrap_or_default();
         let native_material_probe = previous.native_material_probe.or_else(|| {
             windows_native_material_probe_enabled()
                 .then_some(WindowsNativeMaterialProbeState::default())
@@ -3266,7 +3731,7 @@ fn sync_window_proc_state(
             WindowProcState {
                 bridge,
                 window,
-                webview,
+                webviews,
                 host_surface_fill_color,
                 native_host_paint,
                 native_material_probe,
@@ -3287,7 +3752,7 @@ fn with_window_proc_state<R>(hwnd: HWND, f: impl FnOnce(WindowProcState) -> R) -
         let state = states
             .borrow()
             .get(&(hwnd as isize))
-            .copied()
+            .cloned()
             .unwrap_or_default();
         f(state)
     })
@@ -4268,6 +4733,7 @@ fn sync_title_to_page(
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     evaluate_bridge_script(
         bridge,
+        None,
         format!("{WINDOW_INTERNALS_GLOBAL}.setDocumentTitle({title_json});"),
     )
 }
@@ -4285,6 +4751,7 @@ fn sync_icon_to_page(
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     evaluate_bridge_script(
         bridge,
+        None,
         format!("{WINDOW_INTERNALS_GLOBAL}.setPageIconHref({href_json});"),
     )
 }
@@ -4342,18 +4809,20 @@ fn icon_event_payload(icon: Option<&WebviewWindowIcon>) -> Result<Value, Webview
 
 fn resolve_callback(
     bridge: &RefCell<NavigatorWindowBridge>,
+    view: Option<&str>,
     callback_id: u32,
     payload: Value,
 ) -> Result<(), WebviewRuntimeError> {
-    evaluate_bridge_script(bridge, callback_script(callback_id, &payload)?)
+    evaluate_bridge_script(bridge, view, callback_script(callback_id, &payload)?)
 }
 
 fn reject_callback(
     bridge: &RefCell<NavigatorWindowBridge>,
+    view: Option<&str>,
     callback_id: u32,
     error: &WebviewRuntimeError,
 ) -> Result<(), WebviewRuntimeError> {
-    evaluate_bridge_script(bridge, error_callback_script(callback_id, error)?)
+    evaluate_bridge_script(bridge, view, error_callback_script(callback_id, error)?)
 }
 
 pub(super) fn emit_window_event(
@@ -4361,13 +4830,42 @@ pub(super) fn emit_window_event(
     event: &str,
     payload: Value,
 ) -> Result<(), WebviewRuntimeError> {
-    let listeners = bridge.borrow().listeners_for(event);
+    // Listeners are per-view (D23): each listener's script evaluates in the
+    // page that registered it.
+    let routed = bridge.borrow().listeners_for(event);
+    for (view_id, listener) in routed {
+        evaluate_bridge_script(
+            bridge,
+            Some(&view_id),
+            listener_event_script(listener.handler_id, listener.event_id, event, &payload)?,
+        )?;
+    }
+    Ok(())
+}
+
+/// Emits an event to the listeners of exactly one webview (D23 per-view
+/// projection pushes never fan out to unrelated pages).
+pub(super) fn emit_window_event_to_view(
+    bridge: &RefCell<NavigatorWindowBridge>,
+    webview_id: &str,
+    event: &str,
+    payload: Value,
+) -> Result<(), WebviewRuntimeError> {
+    let listeners: Vec<NavigatorWindowListener> = {
+        let state = bridge.borrow();
+        state
+            .listeners_for_view(webview_id, event)
+            .into_iter()
+            .map(|(_, listener)| listener)
+            .collect()
+    };
     if listeners.is_empty() {
         return Ok(());
     }
     for listener in listeners {
         evaluate_bridge_script(
             bridge,
+            Some(webview_id),
             listener_event_script(listener.handler_id, listener.event_id, event, &payload)?,
         )?;
     }
@@ -4375,22 +4873,21 @@ pub(super) fn emit_window_event(
 }
 
 fn emit_overlay_geometry_change_if_enabled(
-    bridge: &RefCell<NavigatorWindowBridge>,
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
 ) -> Result<(), WebviewRuntimeError> {
-    let should_emit = {
+    // Overlay metric changes (style/size/scale) and layout commits both land
+    // here: refresh every per-view projection through one recompute, which
+    // pushes the unified `geometryChange` frames and the frozen page-bridge
+    // `overlay.geometrychange` `{ rect | null }` payloads (D23).
+    let enabled = {
         let state = bridge.borrow();
         state.navigator_window.window_controls_overlay
-            && state.has_listener("overlay.geometrychange")
     };
-    if !should_emit {
+    if !enabled {
         return Ok(());
     }
-    let rect = titlebar_area_rect_json(bridge.borrow().hwnd)?;
-    emit_window_event(
-        bridge,
-        "overlay.geometrychange",
-        json!({ "titlebarAreaRect": rect }),
-    )
+    self::orchestration::refresh_overlay_projection(bridge.borrow().hwnd, bridge);
+    Ok(())
 }
 
 fn callback_script(callback_id: u32, payload: &Value) -> Result<String, WebviewRuntimeError> {
@@ -4432,12 +4929,22 @@ fn listener_event_script(
 
 fn evaluate_bridge_script(
     bridge: &RefCell<NavigatorWindowBridge>,
+    view: Option<&str>,
     script: String,
 ) -> Result<(), WebviewRuntimeError> {
-    let webview = bridge
-        .borrow()
-        .webview
-        .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
+    let webview = {
+        let state = bridge.borrow();
+        match view {
+            Some(view_id) => state
+                .views
+                .iter()
+                .find(|candidate| candidate.id == view_id)
+                .map(|candidate| candidate.webview),
+            // Legacy window-level surfaces address the primary webview.
+            None => state.views.first().map(|candidate| candidate.webview),
+        }
+    }
+    .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
     unsafe { webview.as_ref() }
         .evaluate_script(&script)
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
@@ -4629,8 +5136,22 @@ fn current_monitor_detail(hwnd: HWND) -> Option<ScreenDetailState> {
     })
 }
 
-fn titlebar_area_rect_json(hwnd: HWND) -> Result<Value, WebviewRuntimeError> {
-    serde_json::to_value(titlebar_area_rect_payload(hwnd)?)
+/// Page-bridge `getTitlebarAreaRect` (D23): the window-level safe area
+/// projected into the *requesting* webview's own viewport coordinates —
+/// the intersection of the overlay region with that webview's current
+/// layout rect, translated into view-local space; no intersection yields
+/// an empty rect. A view with no recorded layout rect fills the client
+/// area (the default single-fill layout), so full-window webviews keep
+/// reporting exactly the window-level values they report today.
+fn titlebar_area_rect_json_for_view(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    source_webview: &str,
+) -> Result<Value, WebviewRuntimeError> {
+    let (hwnd, view_rect) = {
+        let state = bridge.borrow();
+        (state.hwnd, state.layout.rects.get(source_webview).copied())
+    };
+    serde_json::to_value(titlebar_area_rect_payload_for_view(hwnd, view_rect)?)
         .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
 }
 
@@ -4646,10 +5167,18 @@ struct WindowsTitlebarAreaRectPayload {
     client_height: u32,
 }
 
-fn titlebar_area_rect_payload(
+/// AppWindowTitleBar remains the safe-area authority (LeftInset/RightInset/
+/// Height, read synchronously on the HWND-owning STA) through
+/// [`self::orchestration::window_overlay_safe_area`]; this projects the
+/// window-level rect through the receiving view's layout rect. The payload
+/// stays physical with the *view's own* physical viewport as
+/// client_width/client_height so the bootstrap normalizes against the
+/// requesting page's viewport.
+fn titlebar_area_rect_payload_for_view(
     hwnd: HWND,
+    view_rect: Option<crate::layout::LogicalRect>,
 ) -> Result<WindowsTitlebarAreaRectPayload, WebviewRuntimeError> {
-    let Some((client_width, client_height)) = physical_client_size(hwnd) else {
+    if physical_client_size(hwnd).is_none() {
         return Ok(WindowsTitlebarAreaRectPayload {
             unit: "physical",
             x: 0,
@@ -4659,32 +5188,60 @@ fn titlebar_area_rect_payload(
             client_width: 0,
             client_height: 0,
         });
-    };
-    // AppWindowTitleBar owns the overlay safe-area contract. Read it in physical pixels on the
-    // HWND owner; the bootstrap converts the payload to the page's CSS pixels.
-    let metrics = appwindow_titlebar_metrics(hwnd)?;
-    let rect = titlebar_area_rect_from_metrics(client_width, metrics);
-    Ok(WindowsTitlebarAreaRectPayload {
-        unit: "physical",
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        client_width: client_width.max(0) as u32,
-        client_height: client_height.max(0) as u32,
-    })
+    }
+    let scale = windows_geometry(hwnd).scale_factor();
+    let full_rect = self::orchestration::full_client_logical_rect(hwnd);
+    let rect = view_rect.unwrap_or(full_rect);
+    let safe_area = self::orchestration::window_overlay_safe_area(hwnd);
+    Ok(titlebar_area_rect_payload_from_projection(safe_area, rect, scale))
 }
 
-fn titlebar_area_rect_from_metrics(client_width: i32, metrics: WindowsTitlebarMetrics) -> Rect {
-    let x = metrics.left_inset.round().max(0.0) as i32;
-    let width = ((client_width as f64) - metrics.left_inset - metrics.right_inset)
-        .max(0.0)
-        .round() as u32;
-    Rect {
-        x,
-        y: 0,
-        width,
-        height: metrics.height.round().max(1.0) as u32,
+/// Pure per-view payload face (D23): the window-level safe area projected
+/// into one view's rect, scaled to physical pixels with the view's own
+/// physical viewport as `client_width`/`client_height`. No intersection
+/// yields the empty rect (height 0); a degenerate overlay height keeps the
+/// legacy ≥1 physical pixel so full-window webviews keep today's values.
+fn titlebar_area_rect_payload_from_projection(
+    safe_area: Option<crate::layout::LogicalRect>,
+    view_rect: crate::layout::LogicalRect,
+    scale: f64,
+) -> WindowsTitlebarAreaRectPayload {
+    let projected = safe_area
+        .and_then(|safe_area| crate::layout::project_overlay_safe_area(safe_area, view_rect));
+    let (rect, strip_present) = match projected {
+        Some(rect) => (rect, true),
+        None => {
+            // Degenerate-strip clamp (legacy compatibility): when the overlay
+            // strip itself is empty (insets >= client width, or zero height)
+            // but an overlay authority exists, a view anchored at the
+            // client's top-left keeps the legacy clamped values — x = the
+            // left inset, width clamps to 0 — so full-window webviews report
+            // exactly the values they report today. Views genuinely outside
+            // a healthy strip (below it, or beside the caption buttons) keep
+            // the empty rect.
+            let legacy = safe_area.filter(|safe| safe.width <= 0.0 || safe.height <= 0.0);
+            match legacy {
+                Some(safe) if view_rect.y == 0.0 && view_rect.x < safe.x + safe.width => (
+                    crate::layout::LogicalRect::new(safe.x.max(view_rect.x), 0.0, 0.0, 0.0),
+                    true,
+                ),
+                _ => (crate::layout::LogicalRect::default(), false),
+            }
+        }
+    };
+    let height = if strip_present {
+        (rect.height * scale).round().max(1.0)
+    } else {
+        0.0
+    };
+    WindowsTitlebarAreaRectPayload {
+        unit: "physical",
+        x: (rect.x * scale).round().max(0.0) as i32,
+        y: (rect.y * scale).round().max(0.0) as i32,
+        width: (rect.width * scale).max(0.0).round() as u32,
+        height: height as u32,
+        client_width: (view_rect.width * scale).round().clamp(0.0, u32::MAX as f64) as u32,
+        client_height: (view_rect.height * scale).round().clamp(0.0, u32::MAX as f64) as u32,
     }
 }
 
@@ -5359,6 +5916,33 @@ impl NavigatorWindowBridge {
             screen_bindings_supported: true,
             platform: "windows",
             background: true,
+            // Multi-webview orchestration surface (add-webview-orchestration
+            // D2/D16): both platforms' capability DTOs serialize these
+            // fields; Darwin release builds are the cross-platform compiler
+            // gate.
+            multiwebview: true,
+            webview_navigation: true,
+            focus_webview: true,
+            webview_id: true,
+            webview_bridge_policy: true,
+            message_channels: true,
+            // D26: new-window navigation intents open session-owned plain
+            // popup windows (handled, never delegated to an external
+            // browser) — task 8.4.
+            popup_windows: true,
+            // geometryChange joins the unified push family with the layout
+            // batch (D23): layout commits and overlay metric changes
+            // recompute per-view projections natively. loadState joins
+            // with D24: navigation lifecycle pushes from the raw
+            // WebView2 navigation callbacks (progress is not reportable
+            // on Windows and stays omitted).
+            webview_push_events: vec![
+                "urlChange",
+                "titleChange",
+                "focused",
+                "geometryChange",
+                "loadState",
+            ],
             platform_capabilities: WindowPlatformCapabilities {
                 windows: WindowsWindowCapabilities {
                     background_materials: WINDOWS_BACKGROUND_MATERIALS
@@ -5382,38 +5966,91 @@ impl NavigatorWindowBridge {
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
     }
 
-    fn add_listener(&mut self, event: String, handler_id: u32) -> u32 {
-        let event_id = self.next_event_id;
-        self.next_event_id = self.next_event_id.wrapping_add(1);
-        self.listeners
+    fn add_listener(
+        &mut self,
+        webview_id: &str,
+        event: String,
+        handler_id: u32,
+    ) -> Option<u32> {
+        let view = self
+            .views
+            .iter_mut()
+            .find(|view| view.id == webview_id)?;
+        let event_id = view.next_event_id;
+        view.next_event_id = view.next_event_id.wrapping_add(1);
+        view.listeners
             .entry(event)
             .or_default()
             .push(NavigatorWindowListener {
                 event_id,
                 handler_id,
             });
-        event_id
+        Some(event_id)
     }
 
-    fn remove_listener(&mut self, event: &str, event_id: u32) {
-        let Some(listeners) = self.listeners.get_mut(event) else {
+    fn remove_listener(&mut self, webview_id: &str, event: &str, event_id: u32) {
+        let Some(view) = self.views.iter_mut().find(|view| view.id == webview_id) else {
+            return;
+        };
+        let Some(listeners) = view.listeners.get_mut(event) else {
             return;
         };
         listeners.retain(|listener| listener.event_id != event_id);
         if listeners.is_empty() {
-            self.listeners.remove(event);
+            view.listeners.remove(event);
         }
     }
 
-    fn has_listener(&self, event: &str) -> bool {
-        self.listeners
-            .get(event)
-            .map(|listeners| !listeners.is_empty())
-            .unwrap_or(false)
+    /// Listeners for one event across all webviews, tagged with the owning
+    /// webview so the callback evaluates in the page that registered it.
+    fn listeners_for(&self, event: &str) -> Vec<(String, NavigatorWindowListener)> {
+        let mut routed = Vec::new();
+        for view in &self.views {
+            for listener in view.listeners.get(event).cloned().unwrap_or_default() {
+                routed.push((view.id.clone(), listener));
+            }
+        }
+        routed
     }
 
-    fn listeners_for(&self, event: &str) -> Vec<NavigatorWindowListener> {
-        self.listeners.get(event).cloned().unwrap_or_default()
+    /// Listeners for one event registered by exactly one webview (D23
+    /// per-view projection pushes never fan out to unrelated pages).
+    pub(super) fn listeners_for_view(
+        &self,
+        webview_id: &str,
+        event: &str,
+    ) -> Vec<(String, NavigatorWindowListener)> {
+        self.views
+            .iter()
+            .filter(|view| view.id == webview_id)
+            .flat_map(|view| {
+                view.listeners
+                    .get(event)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |listener| (view.id.clone(), listener))
+            })
+            .collect()
+    }
+
+    /// Snapshot of the translucency-affecting style facts (D6 checkpoints).
+    pub(super) fn style_facts(&self) -> StyleFacts {
+        StyleFacts {
+            frameless: self.style.frameless,
+            translucent_background: matches!(
+                self.style.background,
+                WebviewWindowBackground::Transparent
+                    | WebviewWindowBackground::PlatformMaterial { .. }
+                    | WebviewWindowBackground::Semantic { .. }
+            ),
+        }
+    }
+
+    /// Drops one webview's bridge handle (destroy-webview). Listener and
+    /// transport state for that page goes away with it.
+    pub(super) fn remove_view(&mut self, webview_id: &str) {
+        self.views.retain(|view| view.id != webview_id);
     }
 }
 
@@ -5834,6 +6471,9 @@ unsafe extern "system" fn window_proc(
             let focused = (wparam & 0xffff) != WA_INACTIVE as usize;
             emit_window_focus_change(hwnd, focused);
             if !focused {
+                // No view of a deactivated window owns keyboard focus: push
+                // the per-view losing edges from the native observer (D19).
+                window_lost_focus_from_native_state(hwnd);
                 auto_hide_window_after_blur(hwnd);
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -5870,7 +6510,7 @@ unsafe extern "system" fn window_proc(
         WM_WINDOWPOSCHANGED => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
             if !window_proc_surface_refresh_suppressed(hwnd) {
-                notify_attached_webview_parent_position_changed(hwnd);
+                notify_attached_webviews_parent_position_changed(hwnd);
             }
             result
         }
@@ -5886,6 +6526,16 @@ unsafe extern "system" fn window_proc(
             // that requested minimize. Reconcile the shared operational projection after size.
             emit_window_visible_change_from_native_state(hwnd);
             result
+        }
+        WM_DPICHANGED => {
+            // D23: an overlay metric change (scale factor) recomputes the
+            // per-view safe-area projections natively.
+            let bridge = with_window_proc_state(hwnd, |state| state.bridge);
+            if let Some(bridge) = bridge {
+                let bridge = unsafe { bridge.as_ref() };
+                self::orchestration::refresh_overlay_projection(hwnd, bridge);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_PAINT => {
             let native_host_paint = window_proc_native_host_paint(hwnd);
@@ -5940,31 +6590,37 @@ fn refresh_attached_window_surface(hwnd: HWND) {
     if let Err(error) = present_attached_host_surface(hwnd) {
         eprintln!("opentray-ext-webview failed to present Windows host surface: {error}");
     }
-    let webview = with_window_proc_state(hwnd, |state| state.webview);
-    if let Some(webview) = webview {
-        if let Err(error) = apply_webview_client_bounds(unsafe { webview.as_ref() }, hwnd) {
-            eprintln!("opentray-ext-webview failed to resize Windows WebView child: {error}");
-        }
-    }
+    resize_attached_webviews_from_layout(hwnd);
 }
 
 fn refresh_attached_window_surface_from_wm_size(hwnd: HWND) {
+    // WM_SIZE ordering law, generalized to N controllers: finish the native
+    // host paint first, then one layout-driven resize pass covers every
+    // controller (controller bounds → WRY child bounds per view, solved
+    // stacking order), then the parent-position notification closes the
+    // transaction.
     if let Err(error) = refresh_native_host_surface(hwnd) {
         eprintln!("opentray-ext-webview failed to paint Windows host surface: {error}");
     }
-    let webview = with_window_proc_state(hwnd, |state| state.webview);
-    let Some(webview) = webview else {
-        return;
-    };
-    let result = apply_webview_client_bounds_from_wm_size(unsafe { webview.as_ref() }, hwnd);
-    if let Err(error) = result {
-        eprintln!("opentray-ext-webview failed to resize Windows WebView child: {error}");
-    }
+    resize_attached_webviews_from_layout(hwnd);
+    notify_attached_webviews_parent_position_changed(hwnd);
 }
 
-fn notify_attached_webview_parent_position_changed(hwnd: HWND) {
-    let webview = with_window_proc_state(hwnd, |state| state.webview);
-    if let Some(webview) = webview {
+/// One resize pass for every attached controller: re-solves the effective
+/// layout natively against the live viewport and applies it (D7 — the JS
+/// side never computes coordinates; the default layout keeps the
+/// full-client single-webview behavior byte-for-byte).
+fn resize_attached_webviews_from_layout(hwnd: HWND) {
+    let bridge = with_window_proc_state(hwnd, |state| state.bridge);
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let bridge = unsafe { bridge.as_ref() };
+    self::orchestration::relayout(hwnd, bridge);
+}
+
+fn notify_attached_webviews_parent_position_changed(hwnd: HWND) {
+    for webview in with_window_proc_state(hwnd, |state| state.webviews.clone()) {
         if let Err(error) =
             notify_webview_parent_window_position_changed(unsafe { webview.as_ref() })
         {
@@ -5972,6 +6628,17 @@ fn notify_attached_webview_parent_position_changed(hwnd: HWND) {
                 "opentray-ext-webview failed to notify Windows WebView parent position: {error}"
             );
         }
+    }
+}
+
+/// Pushes per-view focus losing edges when the host window deactivates
+/// (the focus tracker lives on the window session; the bridge holds it
+/// weakly).
+fn window_lost_focus_from_native_state(hwnd: HWND) {
+    let tracker = with_window_proc_state(hwnd, |state| state.bridge)
+        .and_then(|bridge| unsafe { bridge.as_ref() }.borrow().focus_tracker.upgrade());
+    if let Some(tracker) = tracker {
+        tracker.borrow_mut().window_lost_focus();
     }
 }
 
@@ -6308,6 +6975,7 @@ mod tests {
     #[test]
     fn semantic_blur_resolves_to_windows_acrylic() {
         let style = WindowStyleState {
+            app_mode: true,
             frameless: false,
             resizable: true,
             resizable_override: None,
@@ -6802,70 +7470,105 @@ mod tests {
         );
     }
 
+    /// Pure projection face helpers: a logical window safe area from the
+    /// physical AppWindowTitleBar insets, then the per-view payload.
+    fn logical_safe_area(left: f64, right: f64, height: f64, width: f64) -> crate::layout::LogicalRect {
+        self::orchestration::overlay_safe_area_from_metrics(
+            WindowsTitlebarMetrics {
+                left_inset: left,
+                right_inset: right,
+                height,
+            },
+            crate::layout::LogicalViewport { width, height: 600.0 },
+            1.0,
+        )
+    }
+
+    fn payload_for_view(
+        safe: Option<crate::layout::LogicalRect>,
+        view: crate::layout::LogicalRect,
+    ) -> WindowsTitlebarAreaRectPayload {
+        titlebar_area_rect_payload_from_projection(safe, view, 1.0)
+    }
+
     #[test]
     fn titlebar_area_rect_reserves_right_caption_control_inset() {
-        let rect = titlebar_area_rect_from_metrics(
-            800,
-            WindowsTitlebarMetrics {
-                left_inset: 0.0,
-                right_inset: 138.0,
-                height: 42.0,
-            },
-        );
-
-        assert_eq!(
-            rect,
-            Rect {
-                x: 0,
-                y: 0,
-                width: 662,
-                height: 42,
-            }
-        );
+        // Full-window view (default layout): exactly the window-level values
+        // a full-window webview reports today (regression contract).
+        let safe = logical_safe_area(0.0, 138.0, 42.0, 800.0);
+        let full = crate::layout::LogicalRect::new(0.0, 0.0, 800.0, 600.0);
+        let payload = payload_for_view(Some(safe), full);
+        assert_eq!(payload.x, 0);
+        assert_eq!(payload.width, 662);
+        assert_eq!(payload.height, 42);
+        assert_eq!(payload.client_width, 800);
+        assert_eq!(payload.client_height, 600);
     }
 
     #[test]
     fn titlebar_area_rect_reserves_left_and_right_titlebar_insets() {
-        let rect = titlebar_area_rect_from_metrics(
-            800,
-            WindowsTitlebarMetrics {
-                left_inset: 24.0,
-                right_inset: 132.0,
-                height: 40.0,
-            },
-        );
-
-        assert_eq!(
-            rect,
-            Rect {
-                x: 24,
-                y: 0,
-                width: 644,
-                height: 40,
-            }
-        );
+        let safe = logical_safe_area(24.0, 132.0, 40.0, 800.0);
+        let full = crate::layout::LogicalRect::new(0.0, 0.0, 800.0, 600.0);
+        let payload = payload_for_view(Some(safe), full);
+        assert_eq!(payload.x, 24);
+        assert_eq!(payload.width, 644);
+        assert_eq!(payload.height, 40);
     }
 
     #[test]
     fn titlebar_area_rect_clamps_oversized_titlebar_insets() {
-        let rect = titlebar_area_rect_from_metrics(
-            120,
-            WindowsTitlebarMetrics {
-                left_inset: 16.0,
-                right_inset: 180.0,
-                height: 0.0,
-            },
-        );
+        let safe = logical_safe_area(16.0, 180.0, 0.0, 120.0);
+        let full = crate::layout::LogicalRect::new(0.0, 0.0, 120.0, 600.0);
+        let payload = payload_for_view(Some(safe), full);
+        assert_eq!(payload.x, 16);
+        assert_eq!(payload.width, 0);
+        assert_eq!(payload.height, 1, "degenerate overlay height keeps the legacy >=1 pixel");
+    }
 
-        assert_eq!(
-            rect,
-            Rect {
-                x: 16,
-                y: 0,
-                width: 0,
-                height: 1,
-            }
-        );
+    /// D23: a view entirely below the overlay region receives an empty rect
+    /// (and never renders titlebar padding); its client size stays its own.
+    #[test]
+    fn per_view_titlebar_projection_is_view_local_and_empty_below_the_strip() {
+        let safe = logical_safe_area(0.0, 138.0, 44.0, 800.0);
+        // toolbar/content column: content sits below the titlebar strip.
+        let content = crate::layout::LogicalRect::new(0.0, 44.0, 800.0, 556.0);
+        let payload = payload_for_view(Some(safe), content);
+        assert_eq!(payload.x, 0);
+        assert_eq!(payload.y, 0);
+        assert_eq!(payload.width, 0);
+        assert_eq!(payload.height, 0, "no overlay intersection yields an empty rect");
+        assert_eq!(payload.client_width, 800);
+        assert_eq!(payload.client_height, 556);
+
+        // The toolbar strip intersecting the caption region receives the
+        // window-level exclusion translated into its own viewport.
+        let toolbar = crate::layout::LogicalRect::new(0.0, 0.0, 800.0, 44.0);
+        let payload = payload_for_view(Some(safe), toolbar);
+        assert_eq!(payload.x, 0);
+        assert_eq!(payload.y, 0);
+        assert_eq!(payload.width, 662);
+        assert_eq!(payload.height, 44);
+        assert_eq!(payload.client_width, 800);
+        assert_eq!(payload.client_height, 44);
+
+        // A moved view (top 20px below the caption strip) reports a clipped,
+        // shifted local rect — projections track layout commits (D23).
+        let moved = crate::layout::LogicalRect::new(0.0, 20.0, 800.0, 44.0);
+        let payload = payload_for_view(Some(safe), moved);
+        assert_eq!(payload.y, 0);
+        assert_eq!(payload.height, 24, "only the intersecting 24 logical pixels remain");
+    }
+
+    /// No safe-area authority (AppWindow runtime unavailable): the payload
+    /// degrades to the empty rect instead of guessing insets.
+    #[test]
+    fn per_view_titlebar_projection_without_metrics_is_empty() {
+        let full = crate::layout::LogicalRect::new(0.0, 0.0, 800.0, 600.0);
+        let payload = payload_for_view(None, full);
+        assert_eq!(payload.x, 0);
+        assert_eq!(payload.width, 0);
+        assert_eq!(payload.height, 0);
+        assert_eq!(payload.client_width, 800);
     }
 
     #[test]
@@ -6924,5 +7627,34 @@ mod tests {
     fn windows_theme_registry_value_maps_to_dark_mode() {
         assert!(apps_use_light_theme_to_dark_mode(0));
         assert!(!apps_use_light_theme_to_dark_mode(1));
+    }
+
+    /// Channel commands against a runtime with no window session reject
+    /// with the typed `unknown_view` envelope as Ok-data before any state
+    /// exists. (The full host command-frame smoke lives in
+    /// `windows::channels::tests` against a bridge fixture: creating a
+    /// Win32 window session inside the cargo-test harness is an
+    /// access-violation hazard, so the runtime-level drive stays minimal.)
+    #[test]
+    fn channel_commands_without_a_window_session_reject_unknown_view() {
+        let mut runtime = WindowsWebviewRuntime::default();
+        runtime.set_app_id("app-1");
+        let owner = opentray_spec::webview::WebviewOwnerTuple {
+            app_id: "app-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            session_id: "session-1".to_string(),
+        };
+        let handled = runtime
+            .handle(
+                "tray-1",
+                crate::WebviewCommand::Channel(Box::new(crate::channels::ChannelRequest::Create {
+                    owner,
+                    target: "toolbar".to_string(),
+                })),
+            )
+            .expect("channel command resolves, typed rejection rides Ok-data");
+        assert_eq!(handled.result["type"], "channel.error");
+        assert_eq!(handled.result["error"]["code"], "unknown_view");
+        assert!(handled.channel_events.is_empty());
     }
 }

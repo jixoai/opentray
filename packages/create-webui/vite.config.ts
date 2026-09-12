@@ -8,8 +8,10 @@ import { defineConfig } from "vite";
 // Two static consumers:
 // - wizard (index.html): served by the create-opentray wizard at / with
 //   absolute /assets/... paths.
-// - terminal.html / browse.html: dedicated generated-app windows served from
+// - terminal.html / toolbar.html: dedicated generated-app windows served from
 //   their local shell server → RELATIVE asset paths are required.
+// toolbar.html is the multi-webview toolbar carrier page
+// (add-webview-orchestration D12/D13): a channel-driven strip with no iframe.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -29,7 +31,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         terminal: resolve(__dirname, "terminal.html"),
-        browse: resolve(__dirname, "browse.html"),
+        toolbar: resolve(__dirname, "toolbar.html"),
       },
       output: {
         assetFileNames: "assets/[name][extname]",

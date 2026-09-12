@@ -51,9 +51,9 @@ copyFileSync(
 copyFileSync(wasmSource, resolve(vendorDir, "ghostty-vt.wasm"));
 console.log(`refreshed vendor assets in ${vendorDir}`);
 
-// Generated-app window pages (terminal / browse wrappers) with relative asset
-// paths, self-contained under dist/shell. terminal.html doubles as the
-// directory index for the shell server's SPA fallback.
+// Generated-app window pages (terminal page + toolbar carrier page, D12/D13)
+// with relative asset paths, self-contained under dist/shell. terminal.html
+// doubles as the directory index for the shell server's SPA fallback.
 const shellTarget = resolve(root, "dist", "shell");
 mkdirSync(shellTarget, { recursive: true });
 for (const entry of readdirSync(webuiDist)) {

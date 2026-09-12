@@ -178,9 +178,8 @@ export const de: Messages = {
     startupTerminal: "Start-Terminal anzeigen",
     startupTerminalHint:
       "Öffnet beim Start der App ein eigenes Terminal-Fenster und streamt die PTY-Ausgabe des Befehls live (interaktiv).",
-    addressBar: "Adressleiste anzeigen",
-    addressBarHint:
-      "Zeigt oben im Dienstfenster eine Adressleiste (Navigation wird von der Web Navigation API verwaltet).",
+    addressBar: "Navigationsleiste",
+      addressBarHint: "Setzt eine native Navigationsleiste (zurück/vor/neu laden/Adressleiste) oben im App-Fenster zusammen; die Seite lädt direkt im eigenen Webview. Für URL- und Command-Apps verfügbar.",
     smoothing: "Weiche Skalierung (imageSmoothingEnabled)",
     smoothingHint:
       "Hochwertige Skalierung ist standardmäßig aktiviert; schalten Sie sie für pixelige Symbole in niedriger Auflösung aus, um harte Kanten zu behalten (gilt für den Vordergrund des App-Symbols und das Tray-Symbol).",
@@ -249,6 +248,8 @@ export const de: Messages = {
     sniffing: "HTTP-Dienste werden ermittelt… (auch ohne Fund lässt sich die App erstellen)",
     portsSniffing: "Lauschende Ports werden ermittelt…",
     urlPlaceholder: "URL zum Navigieren eingeben",
+    siteIconPlaceholder: "Platzhalter des Website-Symbols",
+    siteIconFallback: "Ersatz-Website-Symbol",
   },
   url: {
     fetch: "Voreinstellung abrufen",

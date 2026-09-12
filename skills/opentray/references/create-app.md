@@ -28,11 +28,13 @@ npx create-opentray my-app     # or an explicit target directory
    tabs panel. The backend transports the PTY's chunks verbatim — the renderer
    owns every escape sequence; prompts and TUI output work. If the optional PTY
    dependency is unavailable, the preview degrades to read-only with a notice.
-3. Confirmed services (owned TCP listener + HTTP probe) each open an iframe tab
+3. Confirmed services (owned TCP listener + HTTP probe) each open a preview tab
    with an editable URL, back/forward/reload, and a per-tab history. The
    terminal tab's status bar shows cursor/selection plus clickable service
-   entries that jump to the matching iframe tab by hostname. Unrelated loopback
-   listeners (browser DevTools sockets) are never adopted.
+   entries that jump to the matching service tab by hostname. Unrelated loopback
+   listeners (browser DevTools sockets) are never adopted. These preview tabs
+   are authoring-time-only surfaces — a materialized app never ships them as
+   its window carrier.
 4. The form shows auto-derived defaults (scraped title, derived appId) as
    **placeholders**: an empty field means "use the default" and confirmation
    resolves them; edits win over later scrapes. A dedicated icon input carries
@@ -47,8 +49,9 @@ npx create-opentray my-app     # or an explicit target directory
    应用选项 holds the tray-icon picker (defaults to the app icon choice;
    solid black/white silhouettes derived from every candidate) and the two
    generated-app window options, both off by default: 显示启动终端 and
-   显示地址栏. Service ports are never hard-bound: the generated app sniffs
-   the command's owned listening ports at runtime.
+   导航工具栏 (the unified navigation-toolbar option; it applies to URL
+   applications too). Service ports are never hard-bound: the generated app
+   sniffs the command's owned listening ports at runtime.
 6. 确定创建 freezes the form and shows the confirmation dialog. 确认生成
    streams pipeline logs (scaffold → icon → install → first launch → macOS
    bundle) and ends in a Success dialog with 打开应用 and the platform
@@ -80,9 +83,12 @@ and a 强制覆盖 switch that clears and regenerates it (`--force`).
   never used as App identity.
 - `package.json` — depends on `opentray` and `@opentray/ext-webview`, plus
   `@lydell/node-pty` only when 显示启动终端 is enabled.
-- `app-shell-server.mjs` + `app-shell/` (only when a shell option is enabled) —
-  a local host on `127.0.0.1` serving the prebuilt shell pages, the PTY
-  stream, and live port state.
+- `app-shell-server.mjs` + `app-shell/` (when a shell option is enabled —
+  startup terminal and/or navigation toolbar) — a local host on `127.0.0.1`
+  serving the prebuilt shell pages, the PTY stream, and live port state. In
+  toolbar mode it serves the toolbar page and nothing else on its navigation
+  surface; navigation commands and state flow over the extension message
+  channel, not HTTP.
 
 ### Generated-app window modes
 
@@ -90,11 +96,18 @@ and a 强制覆盖 switch that clears and regenerates it (`--force`).
   window opens beside the service: command bar, the same ghostty renderer the
   wizard uses, and a status bar showing cursor, size, and every listened port.
   Typing flows back to the command through the shell server.
-- **显示地址栏** — each service window renders behind an address bar managed
-  through the Web Navigation API: address entries are same-origin `?url=`
-  pseudo-routes that are intercepted, so only the service iframe navigates and
-  back/forward traverse real Navigation entries (history fallback where the
-  API is absent). Without the option, service windows open the URL directly.
+- **导航工具栏** (`--toolbar`, default off, URL and command applications) —
+  every dedicated service window (or the single URL-app window) composes the
+  native navigation-toolbar carrier: one toolbar webview pinned at a fixed top
+  strip plus one content webview loading the service URL directly as a
+  top-level browsing context, laid out through the WebView extension's
+  declarative layout. Back/forward/reload and the address bar drive the
+  content webview's native history; the address bar follows the content
+  webview's `urlChange` events as its source of truth. Embedding policy is
+  never consulted — an embedding-hostile site renders the same as any other
+  address because the content webview is not an embedded context. The toolbar
+  binds ⌘/Ctrl+←→, ⌘/Ctrl+[], ⌘/Ctrl+R, F5, ⌘/Ctrl+L shortcuts while it holds
+  native focus. Read `references/backend-ipc.md` for the carrier pattern.
 - Every listened HTTP port owned by the command opens its own dedicated window
   automatically. When a port stops listening, that window's title becomes
   `AppName (detached)` until the port returns.

@@ -24,7 +24,9 @@ use opentray_spec::{ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, Se
 use crate::dynamic_extension::DynamicExtensionLoader;
 use crate::BrokerOptions;
 #[cfg(not(target_os = "macos"))]
-use crate::{broker_disconnect_action, BrokerDisconnectAction};
+use crate::extension_events::{ExtensionDispatch, ExtensionEventRouter, LoadedExtension};
+#[cfg(not(target_os = "macos"))]
+use crate::{broker_disconnect_action, broker_frame_action, BrokerDisconnectAction};
 
 pub type Writer = Arc<Mutex<UnixStream>>;
 type EventSender = Arc<dyn Fn(TransportEvent) + Send + Sync>;
@@ -140,6 +142,7 @@ where
         options.default_app_options(),
         options.broker_artifact_identity().clone(),
     );
+    let mut extension_events = ExtensionEventRouter::new();
     let mut sessions = HashMap::<u64, TransportSession>::new();
     let mut idle_since = Some(Instant::now());
 
@@ -183,15 +186,57 @@ where
                 let Some(session) = sessions.get_mut(&id) else {
                     continue;
                 };
-                let frames =
-                    broker.handle_frame(&mut session.broker, frame, &options.package_version);
+                let kernel_session_id = session.broker.session_id().map(ToOwned::to_owned);
+                let exit_action = broker_frame_action(&frame, kernel_session_id.is_some());
+                let loaded = LoadedExtension::from_frame(&frame);
+                let mut extension_host =
+                    extension_events.host(ExtensionDispatch::from_frame(&frame));
+                let frames = broker.handle_frame_with_extension_host(
+                    &mut session.broker,
+                    frame,
+                    &options.package_version,
+                    &mut extension_host,
+                );
+                let load_acknowledged = matches!(frames.first(), Some(ServerFrame::Ack { .. }));
                 session.write_frames(frames);
+                if let (Some(loaded), Some(owner)) = (loaded, kernel_session_id.as_deref()) {
+                    if load_acknowledged {
+                        extension_events.note_loaded(loaded, owner.to_string());
+                    }
+                }
+                if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
+                    // The kernel already took the closing session's id inside
+                    // the Exit dispatch; release its extension ownership before
+                    // delivering cleanup pushes so they drop, never leak to a
+                    // later session.
+                    if let Some(session_id) = kernel_session_id.as_deref() {
+                        extension_events.forget_session(session_id);
+                    }
+                }
+                deliver_extension_events(
+                    &extension_events,
+                    &mut sessions,
+                    extension_host.take_events(),
+                );
             }
             TransportEvent::Disconnected { id } => {
                 let mut was_initialized = false;
                 if let Some(mut session) = sessions.remove(&id) {
                     was_initialized = session.broker.session_id().is_some();
-                    let _ = broker.close_session(&mut session.broker);
+                    let closing_session_id = session.broker.session_id().map(ToOwned::to_owned);
+                    let mut extension_host = extension_events.host(None);
+                    let _ = broker.close_session_with_extension_host(
+                        &mut session.broker,
+                        &mut extension_host,
+                    );
+                    if let Some(session_id) = closing_session_id.as_deref() {
+                        extension_events.forget_session(session_id);
+                    }
+                    deliver_extension_events(
+                        &extension_events,
+                        &mut sessions,
+                        extension_host.take_events(),
+                    );
                 }
                 if matches!(
                     broker_disconnect_action(was_initialized),
@@ -208,6 +253,26 @@ where
 
     listener.shutdown();
     Ok(())
+}
+
+/// Delivers extension-pushed events to the owning client session's existing
+/// ordered frame channel (see `extension_events`).
+#[cfg(not(target_os = "macos"))]
+fn deliver_extension_events(
+    extension_events: &ExtensionEventRouter,
+    sessions: &mut HashMap<u64, TransportSession>,
+    events: Vec<opentray_spec::ExtensionEnvelope>,
+) {
+    extension_events.deliver(events, &mut |owner, frame| {
+        let mut delivered = false;
+        for session in sessions.values_mut() {
+            if session.broker.session_id() == Some(owner) {
+                session.write_frame(frame.clone());
+                delivered = true;
+            }
+        }
+        delivered
+    });
 }
 
 pub fn build_runtime_host_health(

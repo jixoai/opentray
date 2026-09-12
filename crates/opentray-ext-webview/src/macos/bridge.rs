@@ -9,10 +9,13 @@ use dispatch2::DispatchQueue;
 use objc2::{rc::Retained, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSWindow};
 use objc2_foundation::{NSPoint, NSSize};
+use opentray_spec::channel::{ChannelCloseReason, ChannelPeer};
 use opentray_spec::Rect;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::channels::{ChannelPush, ChannelSender};
+use crate::orchestration::OrchestrationError;
 use crate::{WebviewRuntimeError, WebviewWindowIcon};
 
 use super::{
@@ -24,9 +27,9 @@ use super::{
     screen::screen_details_json,
     style::{apply_window_style, normalize_corner_radius, validate_style_request, SetStylePayload},
     window_state::{window_is_closed, window_is_visible, window_state_json},
-    NavigatorWindowBridge, WindowSizeConstraints, COMMAND_NAMESPACE, PAGE_IPC_NAMESPACE,
-    PERMISSIONS_NAMESPACE, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE,
-    WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
+    NavigatorWindowBridge, NavigatorWindowListener, WindowSizeConstraints, COMMAND_NAMESPACE,
+    PAGE_IPC_NAMESPACE, PERMISSIONS_NAMESPACE, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE,
+    TRAY_NAMESPACE, WEBVIEW_CHANNEL_NAMESPACE, WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
 };
 
 struct MainThreadWebView(usize);
@@ -101,6 +104,7 @@ pub(super) fn handle_navigator_window_request(
     message: &str,
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     window: &Retained<NSWindow>,
+    source_webview: &str,
 ) {
     let request = match serde_json::from_str::<NavigatorWindowRequest>(message) {
         Ok(request) => request,
@@ -116,6 +120,7 @@ pub(super) fn handle_navigator_window_request(
             && request.namespace != PERMISSIONS_NAMESPACE
             && request.namespace != COMMAND_NAMESPACE
             && request.namespace != PRIVATE_SYNC_NAMESPACE
+            && request.namespace != WEBVIEW_CHANNEL_NAMESPACE
         {
             return;
         }
@@ -149,6 +154,7 @@ pub(super) fn handle_navigator_window_request(
         WINDOW_NAMESPACE => dispatch_navigator_window_command(
             bridge,
             window,
+            source_webview,
             &request.cmd,
             request.payload,
             request.options,
@@ -163,6 +169,54 @@ pub(super) fn handle_navigator_window_request(
         PRIVATE_SYNC_NAMESPACE => {
             dispatch_private_sync_command(bridge, window, &request.cmd, request.payload)
         }
+        // The per-webview channel namespace is bridge-policy-gated inside
+        // its dispatcher (not page_access-gated): the surface exists only
+        // in views whose frozen per-child policy enables message channels.
+        WEBVIEW_CHANNEL_NAMESPACE => {
+            match dispatch_webview_channel_command(
+                bridge,
+                source_webview,
+                &request.cmd,
+                request.payload,
+            ) {
+                Ok(response) => Ok(response),
+                // Typed channel rejections reject the page promise with
+                // the frozen `{ code, message }` error body, not the
+                // category-level runtime code.
+                Err(typed) => {
+                    if request.error == 0 {
+                        eprintln!(
+                            "opentray-ext-webview channel command rejected: {}::{} -> {}",
+                            request.namespace,
+                            request.cmd,
+                            typed.envelope.error.code.as_str()
+                        );
+                        return;
+                    }
+                    match callback_script(
+                        request.error,
+                        &serde_json::json!({
+                            "code": typed.envelope.error.code.as_str(),
+                            "message": typed.envelope.error.message,
+                        }),
+                    ) {
+                        Ok(script) => {
+                            if let Err(error) =
+                                evaluate_bridge_script(bridge, Some(source_webview), script)
+                            {
+                                eprintln!(
+                                    "opentray-ext-webview channel reject failed: {error}"
+                                );
+                            }
+                        }
+                        Err(error) => eprintln!(
+                            "opentray-ext-webview channel reject script failed: {error}"
+                        ),
+                    }
+                    return;
+                }
+            }
+        }
         _ => return,
     };
     match result {
@@ -173,7 +227,7 @@ pub(super) fn handle_navigator_window_request(
             if request.namespace == PERMISSIONS_NAMESPACE {
                 return;
             }
-            if let Err(error) = resolve_callback(bridge, request.callback, response) {
+            if let Err(error) = resolve_callback(bridge, Some(source_webview), request.callback, response) {
                 eprintln!("opentray-ext-webview navigator callback failed: {error}");
             } else if webview_debug_enabled() {
                 eprintln!(
@@ -187,7 +241,9 @@ pub(super) fn handle_navigator_window_request(
                 eprintln!("opentray-ext-webview navigator request failed: {error}");
                 return;
             }
-            if let Err(callback_error) = reject_callback(bridge, request.error, &error) {
+            if let Err(callback_error) =
+                reject_callback(bridge, Some(source_webview), request.error, &error)
+            {
                 eprintln!("opentray-ext-webview navigator reject failed: {callback_error}");
             } else {
                 eprintln!(
@@ -308,9 +364,327 @@ fn dispatch_page_ipc_command(
     }
 }
 
+/// Page-originated message-channel commands (D9/D11/D20). The transport
+/// supplies the source webview id — the page cannot spoof it — and every
+/// command requires the source view's frozen bridge policy to enable
+/// message channels, so a raw `window.ipc.postMessage` from a bridgeless
+/// page (which never received the surface) rejects as `bridge_required`.
+/// Typed rejections carry the frozen `{ error: { code, message } }`
+/// envelope body to the page promise.
+pub(super) fn dispatch_webview_channel_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    source_webview: &str,
+    cmd: &str,
+    payload: Value,
+) -> Result<Value, OrchestrationError> {
+    let (registry, owner) = {
+        let state = bridge.borrow();
+        let source_policy = state
+            .views
+            .iter()
+            .find(|view| view.id == source_webview)
+            .map(|view| view.policy.message_channels)
+            .unwrap_or(false);
+        if !source_policy {
+            return Err(OrchestrationError::new(
+                opentray_spec::webview::OrchestrationErrorCode::BridgeRequired,
+                format!("webview {source_webview} has no message-channel page bridge"),
+            ));
+        }
+        let registry = Rc::clone(&state.channels);
+        let owner = state.channels.borrow().owner_tuple();
+        (registry, owner)
+    };
+    let Some(owner) = owner else {
+        return Err(OrchestrationError::new(
+            opentray_spec::webview::OrchestrationErrorCode::SessionScope,
+            "message channels require an attributed window session",
+        ));
+    };
+    let sender = ChannelSender::Page(source_webview);
+
+    match cmd {
+        "createMessageChannel" => {
+            let target = payload
+                .get("target")
+                .and_then(Value::as_str)
+                .filter(|target| !target.is_empty())
+                .ok_or_else(|| {
+                    OrchestrationError::new(
+                        opentray_spec::webview::OrchestrationErrorCode::UnknownView,
+                        "createMessageChannel requires a target webview id",
+                    )
+                })?
+                .to_string();
+            // Same creation authority as the host path: the target must be
+            // a live webview with the channel bridge.
+            if let Some(error) = super::channel_target_error(bridge, &target) {
+                return Err(error);
+            }
+            let created = registry
+                .borrow_mut()
+                .create(&owner, ChannelPeer::webview(source_webview), target);
+            match created {
+                Ok((channel_id, push)) => {
+                    deliver_channel_pushes(bridge, std::slice::from_ref(&push), None);
+                    Ok(json!({ "channelId": channel_id }))
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "postMessage" => {
+            let channel_id = required_channel_id(&payload)?;
+            let message = payload.get("payload").cloned().unwrap_or(Value::Null);
+            let outcome = registry.borrow_mut().post(&owner, sender, &channel_id, message);
+            match outcome {
+                Ok(receipt) => {
+                    drain_channel_port_for(
+                        bridge,
+                        &channel_id,
+                        &receipt.recipient,
+                        receipt.endpoint,
+                    );
+                    Ok(Value::Null)
+                }
+                Err(failure) => {
+                    deliver_channel_pushes(bridge, &failure.pushes, None);
+                    Err(failure.error)
+                }
+            }
+        }
+        "closeMessageChannel" => {
+            let channel_id = required_channel_id(&payload)?;
+            match registry.borrow_mut().close(&owner, sender, &channel_id) {
+                Ok(pushes) => {
+                    deliver_channel_pushes(bridge, &pushes, None);
+                    Ok(Value::Null)
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "destroyMessageChannel" => {
+            let channel_id = required_channel_id(&payload)?;
+            match registry.borrow_mut().destroy(&owner, sender, &channel_id) {
+                Ok(pushes) => {
+                    deliver_channel_pushes(bridge, &pushes, None);
+                    Ok(Value::Null)
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "listMessageChannels" => {
+            let listed = registry.borrow().list_for_page(&owner, source_webview)?;
+            Ok(json!({ "channels": listed }))
+        }
+        other => Err(OrchestrationError::new(
+            opentray_spec::webview::OrchestrationErrorCode::UnknownView,
+            format!("unsupported channel command: {other}"),
+        )),
+    }
+}
+
+fn required_channel_id(payload: &Value) -> Result<String, OrchestrationError> {
+    payload
+        .get("channelId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            OrchestrationError::new(
+                opentray_spec::webview::OrchestrationErrorCode::UnknownView,
+                "the channel command requires a channelId",
+            )
+        })
+}
+
+/// Bridge scripts for the page-side channel surface entry points. The
+/// arguments are JSON-encoded so arbitrary payloads ride safely.
+fn channel_created_script(channel_id: &str) -> String {
+    format!(
+        "{WINDOW_INTERNALS_GLOBAL}.channelCreated({});",
+        serde_json::to_string(channel_id).unwrap_or_else(|_| "\"\"".to_string())
+    )
+}
+
+fn channel_message_script(channel_id: &str, payload: &Value) -> String {
+    let payload_json =
+        serde_json::to_string(payload).unwrap_or_else(|_| "null".to_string());
+    format!(
+        "{WINDOW_INTERNALS_GLOBAL}.channelMessage({}, {payload_json});",
+        serde_json::to_string(channel_id).unwrap_or_else(|_| "\"\"".to_string())
+    )
+}
+
+fn channel_closed_script(channel_id: &str, reason: ChannelCloseReason) -> String {
+    format!(
+        "{WINDOW_INTERNALS_GLOBAL}.channelClosed({}, {});",
+        serde_json::to_string(channel_id).unwrap_or_else(|_| "\"\"".to_string()),
+        serde_json::to_string(reason.as_str()).unwrap_or_else(|_| "\"explicit\"".to_string())
+    )
+}
+
+/// Delivers channel pushes to pages: `Created`/`Closed` become bridge
+/// scripts targeted at the endpoint's view — immediately when the view's
+/// document is live, held back until its page finishes loading otherwise.
+/// Host observations never arrive here (the pure registry routes them to
+/// the host outbox). Pushes for views that no longer exist are dropped:
+/// their channels closed with them.
+pub(super) fn deliver_channel_pushes(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    pushes: &[ChannelPush],
+    skip_view: Option<&str>,
+) {
+    for push in pushes {
+        let (view, script) = match push {
+            ChannelPush::Created {
+                target_view,
+                channel_id,
+            } => (
+                target_view.clone(),
+                channel_created_script(channel_id),
+            ),
+            ChannelPush::Closed {
+                view,
+                channel_id,
+                reason,
+            } => {
+                if Some(view.as_str()) == skip_view {
+                    continue;
+                }
+                (view.clone(), channel_closed_script(channel_id, *reason))
+            }
+        };
+        evaluate_channel_script_for_view(bridge, &view, script);
+    }
+}
+
+/// Evaluates one bridge script in a view when its page is live; queues it
+/// for the page-load flush otherwise. A view that is gone drops the
+/// script silently (its document cannot receive anything).
+fn evaluate_channel_script_for_view(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: &str,
+    script: String,
+) {
+    let live = {
+        let state = bridge.borrow();
+        if !state.views.iter().any(|view| view.id == view_id) {
+            return;
+        }
+        state.channel_live_views.contains(view_id)
+    };
+    if live {
+        if let Err(error) = evaluate_bridge_script(bridge, Some(view_id), script) {
+            eprintln!("opentray-ext-webview channel push failed: {error}");
+        }
+    } else {
+        bridge
+            .borrow_mut()
+            .pending_channel_pushes
+            .entry(view_id.to_string())
+            .or_default()
+            .push(script);
+    }
+}
+
+/// Drains the receiving port of a just-delivered message straight into the
+/// recipient page (FIFO push; the queue bounds still applied at enqueue).
+/// Host-recipient queues are left for the response flush.
+pub(super) fn drain_channel_port_for(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    channel_id: &str,
+    recipient: &ChannelPeer,
+    endpoint: opentray_spec::channel::ChannelEndpointSide,
+) {
+    let ChannelPeer::Webview(view) = recipient else {
+        return;
+    };
+    if !bridge.borrow().channel_live_views.contains(view.as_str()) {
+        return;
+    }
+    let owner = bridge.borrow().channels.borrow().owner_tuple();
+    let Some(owner) = owner else {
+        return;
+    };
+    let messages = bridge
+        .borrow_mut()
+        .channels
+        .borrow_mut()
+        .drain_port(&owner, channel_id, endpoint)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    for payload in messages {
+        let script = channel_message_script(channel_id, &payload);
+        if let Err(error) = evaluate_bridge_script(bridge, Some(view), script) {
+            eprintln!("opentray-ext-webview channel delivery failed: {error}");
+        }
+    }
+}
+
+/// Page-load Started hook (D11): after the view's first load, every
+/// navigation closes its page-side endpoints with `document_navigated`
+/// and drops pushes held for the outgoing document (messages are never
+/// replayed into the new document).
+pub(super) fn handle_view_channel_navigation_started(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: &str,
+) {
+    let is_navigation = {
+        let mut state = bridge.borrow_mut();
+        state.channel_live_views.remove(view_id);
+        let first_load = !state.channel_loaded_views.contains(view_id);
+        if first_load {
+            // Still the initial load of a freshly created view.
+            return;
+        }
+        state.pending_channel_pushes.remove(view_id);
+        true
+    };
+    if is_navigation {
+        let pushes = bridge
+            .borrow_mut()
+            .channels
+            .borrow_mut()
+            .close_channels_of_webview(view_id, ChannelCloseReason::DocumentNavigated);
+        deliver_channel_pushes(bridge, &pushes, Some(view_id));
+    }
+}
+
+/// Page-load Finished hook: the document can now consume pushes — flush
+/// everything held back for it, then drain its ports in FIFO order.
+pub(super) fn handle_view_channel_page_finished(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: &str,
+) {
+    let pending: Vec<String> = {
+        let mut state = bridge.borrow_mut();
+        state.channel_loaded_views.insert(view_id.to_string());
+        state.channel_live_views.insert(view_id.to_string());
+        state.pending_channel_pushes.remove(view_id).unwrap_or_default()
+    };
+    for script in pending {
+        if let Err(error) = evaluate_bridge_script(bridge, Some(view_id), script) {
+            eprintln!("opentray-ext-webview channel flush failed: {error}");
+        }
+    }
+    let messages = bridge
+        .borrow_mut()
+        .channels
+        .borrow_mut()
+        .drain_view_ports(view_id);
+    for (channel_id, payload) in messages {
+        let script = channel_message_script(&channel_id, &payload);
+        if let Err(error) = evaluate_bridge_script(bridge, Some(view_id), script) {
+            eprintln!("opentray-ext-webview channel delivery failed: {error}");
+        }
+    }
+}
+
 fn dispatch_navigator_window_command(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     window: &Retained<NSWindow>,
+    source_webview: &str,
     cmd: &str,
     payload: Value,
     _options: Option<Value>,
@@ -322,7 +696,12 @@ fn dispatch_navigator_window_command(
             })?;
             let event_id = bridge
                 .borrow_mut()
-                .add_listener(payload.event, payload.handler);
+                .add_listener(source_webview, payload.event, payload.handler);
+            let event_id = event_id.ok_or_else(|| {
+                WebviewRuntimeError::Rejected(
+                    "listen is not available for this webview's bridge".into(),
+                )
+            })?;
             Ok(json!({ "eventId": event_id }))
         }
         "unlisten" => {
@@ -333,7 +712,7 @@ fn dispatch_navigator_window_command(
             })?;
             bridge
                 .borrow_mut()
-                .remove_listener(&payload.event, payload.event_id);
+                .remove_listener(source_webview, &payload.event, payload.event_id);
             Ok(Value::Null)
         }
         "close" => {
@@ -463,7 +842,9 @@ fn dispatch_navigator_window_command(
                     "window controls overlay is not enabled for this WebView".into(),
                 ));
             }
-            titlebar_area_rect_json(bridge, window)
+            // D23: the safe area is projected into the *requesting*
+            // webview's own viewport coordinates.
+            titlebar_area_rect_json(bridge, window, source_webview)
         }
         "startAppRegionDrag" => {
             let weak_bridge = Rc::downgrade(bridge);
@@ -570,6 +951,38 @@ pub(super) fn apply_window_style_patch(
     validate_style_request(&payload)?;
 
     let mut bridge_state = bridge.borrow_mut();
+
+    // Style-exclusivity checkpoint (2) (add-webview-orchestration D6):
+    // applying a translucency-affecting style to a window hosting more than
+    // one webview rejects with `multiwebview_unsupported_style` before any
+    // state changes, so the previous style survives untouched. The typed
+    // code rides the frozen error envelope inside the rejection message.
+    {
+        let mut projected = bridge_state.style.clone();
+        if let Some(frameless) = payload.frameless {
+            projected.frameless = frameless;
+        }
+        if let Some(background) = &payload.background {
+            projected.background = crate::parse_background_input(background.clone())?;
+        }
+        let facts = crate::orchestration::StyleFacts {
+            frameless: projected.frameless,
+            translucent_background: matches!(
+                projected.background,
+                crate::WebviewWindowBackground::Transparent
+                    | crate::WebviewWindowBackground::PlatformMaterial { .. }
+                    | crate::WebviewWindowBackground::Semantic { .. }
+            ),
+        };
+        if let Err(error) =
+            crate::orchestration::style_change_allowed(facts, bridge_state.views.len())
+        {
+            return Err(WebviewRuntimeError::Rejected(
+                serde_json::to_string(&error.envelope).unwrap_or_else(|_| error.code().as_str().to_string()),
+            ));
+        }
+    }
+
     let mut changed = false;
     if let Some(app_mode) = payload.app_mode {
         if bridge_state.style.app_mode != app_mode {
@@ -873,18 +1286,20 @@ fn dispatch_private_sync_command(
 
 pub(super) fn resolve_callback(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: Option<&str>,
     callback_id: u32,
     payload: Value,
 ) -> Result<(), WebviewRuntimeError> {
-    evaluate_bridge_script(bridge, callback_script(callback_id, &payload)?)
+    evaluate_bridge_script(bridge, view_id, callback_script(callback_id, &payload)?)
 }
 
 pub(super) fn reject_callback(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: Option<&str>,
     callback_id: u32,
     error: &WebviewRuntimeError,
 ) -> Result<(), WebviewRuntimeError> {
-    evaluate_bridge_script(bridge, error_callback_script(callback_id, error)?)
+    evaluate_bridge_script(bridge, view_id, error_callback_script(callback_id, error)?)
 }
 
 pub(super) fn emit_window_event(
@@ -896,9 +1311,41 @@ pub(super) fn emit_window_event(
     if listeners.is_empty() {
         return Ok(());
     }
+    for (view_id, listener) in listeners {
+        evaluate_bridge_script(
+            bridge,
+            Some(view_id.as_str()),
+            listener_event_script(listener.handler_id, listener.event_id, event, &payload)?,
+        )?;
+    }
+    Ok(())
+}
+
+/// Emits one listener event to exactly one webview's registered listeners
+/// (D23 per-view projection pushes). Views without a listener for the event
+/// are not addressed — the per-view geometry surface must never fan out to
+/// unrelated pages.
+pub(super) fn emit_window_event_to_view(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: &str,
+    event: &str,
+    payload: Value,
+) -> Result<(), WebviewRuntimeError> {
+    let listeners: Vec<NavigatorWindowListener> = {
+        let state = bridge.borrow();
+        state
+            .listeners_for_view(view_id, event)
+            .into_iter()
+            .map(|(_, listener)| listener)
+            .collect()
+    };
+    if listeners.is_empty() {
+        return Ok(());
+    }
     for listener in listeners {
         evaluate_bridge_script(
             bridge,
+            Some(view_id),
             listener_event_script(listener.handler_id, listener.event_id, event, &payload)?,
         )?;
     }
@@ -947,13 +1394,20 @@ fn listener_event_script(
 
 pub(super) fn evaluate_bridge_script(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    view_id: Option<&str>,
     script: String,
 ) -> Result<(), WebviewRuntimeError> {
     // Native -> page callbacks stay behind extension-owned internals, not the public navigator API.
-    let webview_ptr = bridge
-        .borrow()
-        .webview
-        .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
+    // With per-webview bridges the script evaluates in the webview whose page
+    // registered the listener; `None` addresses the primary webview.
+    let webview_ptr = {
+        let state = bridge.borrow();
+        match view_id {
+            Some(view_id) => state.view_webview(view_id),
+            None => state.primary_webview(),
+        }
+    }
+    .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
     let webview = MainThreadWebView(webview_ptr.as_ptr() as usize);
     DispatchQueue::main().exec_async(move || {
         if webview_debug_enabled() {

@@ -1,9 +1,58 @@
+use opentray_spec::webview::WebviewBridgePolicy;
 use serde_json::json;
 
 use crate::{
     MetadataSyncSettings, NavigatorScreenSettings, NavigatorTraySettings, NavigatorWindowSettings,
     WebviewNativeApiPolicy, WebviewNativeApiSource, WebviewPermissionManagerPolicy,
 };
+
+/// Per-webview bridge bootstrap (add-webview-orchestration D2): a child
+/// webview's navigator surfaces are injected only when its frozen
+/// per-webview bridge policy enables them. A policy-less child (every field
+/// defaults to false) gets no script at all — the arbitrary-content webview
+/// is bridgeless by default. The policy is bootstrap-immutable for the
+/// webview's lifetime, mirroring the session compatibility law.
+///
+/// The `navigator.opentrayWebview` surface (D9/D2) joins here: `id` when
+/// `webviewId` is enabled, and the message-channel methods
+/// (`createMessageChannel` / `onCreatedMessageChannel` /
+/// `listMessageChannels`, plus the per-endpoint `post` / `onMessage` /
+/// `onClose` / `close` / `destroy` objects) when `messageChannels` is
+/// enabled. The script still projects the `navigatorWindow`/
+/// `navigatorScreen` fields onto the existing bootstrap.
+pub(crate) fn webview_bridge_bootstrap_script(
+    policy: WebviewBridgePolicy,
+    webview_id: &str,
+) -> Option<String> {
+    let has_bridge_surface = policy.webview_id
+        || policy.message_channels
+        || policy.navigator_window
+        || policy.navigator_screen
+        || policy.native_api;
+    if !has_bridge_surface {
+        return None;
+    }
+    Some(navigator_window_bootstrap_script(
+        NavigatorWindowSettings {
+            enabled: policy.navigator_window,
+            bind_window_globals: false,
+            window_controls_overlay: false,
+        },
+        false,
+        NavigatorScreenSettings {
+            enabled: policy.navigator_screen,
+            bind_screen_globals: false,
+        },
+        NavigatorTraySettings::default(),
+        MetadataSyncSettings::default(),
+        MetadataSyncSettings::default(),
+        &WebviewNativeApiPolicy::default(),
+        &WebviewPermissionManagerPolicy::default(),
+        policy.message_channels,
+        policy.webview_id,
+        webview_id,
+    ))
+}
 
 pub(crate) fn navigator_window_bootstrap_script(
     window_settings: NavigatorWindowSettings,
@@ -14,6 +63,9 @@ pub(crate) fn navigator_window_bootstrap_script(
     icon_sync: MetadataSyncSettings,
     native_api_policy: &WebviewNativeApiPolicy,
     permission_manager_policy: &WebviewPermissionManagerPolicy,
+    message_channels_enabled: bool,
+    webview_id_enabled: bool,
+    webview_id: &str,
 ) -> String {
     let window_enabled = js_bool(window_settings.enabled);
     let soft_resize_enabled = js_bool(soft_resize_enabled);
@@ -26,6 +78,10 @@ pub(crate) fn navigator_window_bootstrap_script(
     let title_native_to_page = js_bool(title_sync.native_to_page);
     let icon_page_to_native = js_bool(icon_sync.page_to_native);
     let icon_native_to_page = js_bool(icon_sync.native_to_page);
+    let message_channels_enabled = js_bool(message_channels_enabled);
+    let webview_id_enabled = js_bool(webview_id_enabled);
+    let webview_id_json = serde_json::to_string(webview_id)
+        .expect("webview id serialization should not fail");
     let native_api_policy_json = native_api_policy_json(native_api_policy);
     let permission_manager_policy_json = permission_manager_policy_json(permission_manager_policy);
     r#"(function () {
@@ -40,6 +96,9 @@ pub(crate) fn navigator_window_bootstrap_script(
   const requestedTitleSyncNativeToPage = __OPENTRAY_TITLE_NATIVE_TO_PAGE__;
   const requestedIconSyncPageToNative = __OPENTRAY_ICON_PAGE_TO_NATIVE__;
   const requestedIconSyncNativeToPage = __OPENTRAY_ICON_NATIVE_TO_PAGE__;
+  const requestedMessageChannelsEnabled = __OPENTRAY_MESSAGE_CHANNELS_ENABLED__;
+  const requestedWebviewIdEnabled = __OPENTRAY_WEBVIEW_ID_ENABLED__;
+  const channelWebviewId = __OPENTRAY_WEBVIEW_ID__;
   const capabilityPolicy = __OPENTRAY_NATIVE_API_POLICY__;
   const permissionManagerPolicy = __OPENTRAY_PERMISSION_MANAGER_POLICY__;
   const INTERNALS_KEY = "__OPENTRAY_WINDOW_INTERNALS__";
@@ -618,6 +677,148 @@ pub(crate) fn navigator_window_bootstrap_script(
       };
       return execCommand;
     };
+    // Message channels (D9-D11/D20): page-side endpoint state. The broker
+    // is the transport root; every push arrives through the internals
+    // entry points below so pages never poll. Lifecycle pushes that land
+    // before the page registers its handlers stay buffered (bounded by the
+    // broker-side queue budget) and flush on registration.
+    let channelSurfaceWebviewId = "";
+    const channelEndpoints = new Map();
+    const pendingChannelCreated = [];
+    let channelCreatedHandler;
+    const channelEndpointState = (channelId) => {
+      let state = channelEndpoints.get(channelId);
+      if (!state) {
+        state = {
+          messageHandlers: [],
+          closeHandlers: [],
+          // Port-style buffering (the model D11 rehabilitates from
+          // MessageChannel): pushes that outrun the page's subscription
+          // queue here in FIFO order and flush through the first
+          // onMessage/onClose registration, so a fast peer posting right
+          // after create can never silently drop.
+          pendingMessages: [],
+          pendingClose: null
+        };
+        channelEndpoints.set(channelId, state);
+      }
+      return state;
+    };
+    const deliverChannelMessages = (state) => {
+      if (state.messageHandlers.length === 0 || state.pendingMessages.length === 0) return;
+      const pending = state.pendingMessages.splice(0, state.pendingMessages.length);
+      for (const payload of pending) {
+        const handlers = state.messageHandlers.slice();
+        for (const handler of handlers) {
+          try {
+            handler(payload);
+          } catch (_error) {}
+        }
+      }
+    };
+    // Single-observation cardinality: at most one close notice per
+    // endpoint; handlers registered after the transition observe the
+    // buffered notice exactly once, later transitions stay silent.
+    const settleChannelClose = (channelId, state) => {
+      if (state.pendingClose === null || state.closeHandlers.length === 0) return;
+      const reason = state.pendingClose;
+      state.pendingClose = null;
+      channelEndpoints.delete(channelId);
+      const handlers = state.closeHandlers.slice();
+      for (const handler of handlers) {
+        try {
+          handler({ reason });
+        } catch (_error) {}
+      }
+    };
+    const makeChannelEndpoint = (channelId) => {
+      channelEndpointState(channelId);
+      const invokeChannel = (cmd, payload) =>
+        invokeWithNamespace("opentray.webview", cmd, payload);
+      return Object.freeze({
+        id: channelId,
+        post(payload) {
+          return invokeChannel("postMessage", { channelId, payload });
+        },
+        onMessage(handler) {
+          const state = channelEndpointState(channelId);
+          if (typeof handler !== "function") return () => {};
+          state.messageHandlers.push(handler);
+          deliverChannelMessages(state);
+          let active = true;
+          return () => {
+            if (!active) return;
+            active = false;
+            state.messageHandlers = state.messageHandlers.filter((h) => h !== handler);
+          };
+        },
+        onClose(handler) {
+          const state = channelEndpointState(channelId);
+          if (typeof handler !== "function") return () => {};
+          state.closeHandlers.push(handler);
+          settleChannelClose(channelId, state);
+          let active = true;
+          return () => {
+            if (!active) return;
+            active = false;
+            state.closeHandlers = state.closeHandlers.filter((h) => h !== handler);
+          };
+        },
+        close() {
+          return invokeChannel("closeMessageChannel", { channelId });
+        },
+        destroy() {
+          return invokeChannel("destroyMessageChannel", { channelId });
+        }
+      });
+    };
+    const flushChannelCreated = () => {
+      // Without a registered handler the endpoints stay buffered — a
+      // created push that lands early must not be lost with the drain.
+      if (typeof channelCreatedHandler !== "function") return;
+      while (pendingChannelCreated.length > 0) {
+        const endpoint = pendingChannelCreated.shift();
+        try {
+          channelCreatedHandler(endpoint);
+        } catch (_error) {}
+      }
+    };
+    const createWebviewChannelApi = (config = {}) => {
+      const api = {};
+      if (config.webviewIdEnabled) {
+        Object.defineProperty(api, "id", {
+          get: () => channelSurfaceWebviewId,
+          enumerable: true
+        });
+      }
+      if (config.messageChannelsEnabled) {
+        api.createMessageChannel = (options) => {
+          const target = options && typeof options === "object" ? options.target : options;
+          if (typeof target !== "string" || target.length === 0) {
+            return Promise.reject({
+              code: "unknown_view",
+              message: "createMessageChannel requires a target webview id"
+            });
+          }
+          return invokeWithNamespace("opentray.webview", "createMessageChannel", { target })
+            .then((result) =>
+              makeChannelEndpoint(
+                result && typeof result.channelId === "string" ? result.channelId : ""
+              )
+            );
+        };
+        api.onCreatedMessageChannel = (handler) => {
+          if (typeof handler !== "function") return;
+          channelCreatedHandler = handler;
+          flushChannelCreated();
+        };
+        api.listMessageChannels = () =>
+          invokeWithNamespace("opentray.webview", "listMessageChannels", {}).then((result) =>
+            Array.isArray(result && result.channels) ? result.channels : []
+          );
+      }
+      return Object.freeze(api);
+    };
     const readActiveFaviconHref = () => {
       const links = Array.from(
         document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"]')
@@ -783,6 +984,12 @@ pub(crate) fn navigator_window_bootstrap_script(
         value: createCommandApi(),
         configurable: true
       });
+      if (config && (config.webviewIdEnabled || config.messageChannelsEnabled)) {
+        defineBridgeProperty(navigator, "opentrayWebview", {
+          value: createWebviewChannelApi(config),
+          configurable: true
+        });
+      }
       if (config && config.permissionManagerEnabled) {
         const permissionsApi = createPermissionsApi();
         defineBridgeProperty(navigator, "opentrayPermissions", {
@@ -810,6 +1017,7 @@ pub(crate) fn navigator_window_bootstrap_script(
         delete navigator.opentrayScreen;
         delete navigator.opentray;
         delete navigator.opentrayPermissions;
+        delete navigator.opentrayWebview;
       } catch (_) {}
       teardownFaviconObserver();
       restoreGlobals();
@@ -830,6 +1038,34 @@ pub(crate) fn navigator_window_bootstrap_script(
           if (!softResizeEnabled) setSoftResizeCursor(null);
         },
         setPageIconHref,
+        setChannelSurface(enabled, webviewId) {
+          channelSurfaceWebviewId = typeof webviewId === "string" ? webviewId : "";
+          void enabled;
+        },
+        channelCreated(channelId) {
+          if (typeof channelId !== "string") return;
+          pendingChannelCreated.push(makeChannelEndpoint(channelId));
+          flushChannelCreated();
+        },
+        channelMessage(channelId, payload) {
+          if (typeof channelId !== "string") return;
+          const state = channelEndpointState(channelId);
+          // A closed endpoint never delivers new messages; pre-closure
+          // buffered ones still flush in order on subscription.
+          if (state.pendingClose !== null) return;
+          state.pendingMessages.push(payload);
+          deliverChannelMessages(state);
+        },
+        channelClosed(channelId, reason) {
+          if (typeof channelId !== "string") return;
+          const state = channelEndpointState(channelId);
+          if (state.pendingClose !== null) return;
+          // Buffered pre-closure messages stay queued in order — a late
+          // subscriber still observes `m1, m2, close`; only messages after
+          // the notice (blocked above) never deliver.
+          state.pendingClose = reason;
+          settleChannelClose(channelId, state);
+        },
         install,
         uninstall
       }),
@@ -838,6 +1074,7 @@ pub(crate) fn navigator_window_bootstrap_script(
   }
   const internals = window[INTERNALS_KEY];
   internals.setSoftResizeEnabled(requestedSoftResizeEnabled);
+  internals.setChannelSurface(requestedMessageChannelsEnabled, channelWebviewId);
   if (
     windowEnabled ||
     screenEnabled ||
@@ -846,7 +1083,9 @@ pub(crate) fn navigator_window_bootstrap_script(
     titleSyncPageToNative ||
     titleSyncNativeToPage ||
     iconSyncPageToNative ||
-    iconSyncNativeToPage
+    iconSyncNativeToPage ||
+    requestedMessageChannelsEnabled ||
+    requestedWebviewIdEnabled
   ) {
     internals.install({
       windowEnabled,
@@ -855,7 +1094,9 @@ pub(crate) fn navigator_window_bootstrap_script(
       screenEnabled,
       bindScreenGlobals,
       trayEnabled,
-      permissionManagerEnabled
+      permissionManagerEnabled,
+      messageChannelsEnabled: requestedMessageChannelsEnabled,
+      webviewIdEnabled: requestedWebviewIdEnabled
     });
   } else {
     internals.uninstall();
@@ -872,6 +1113,9 @@ pub(crate) fn navigator_window_bootstrap_script(
         .replace("__OPENTRAY_TITLE_NATIVE_TO_PAGE__", title_native_to_page)
         .replace("__OPENTRAY_ICON_PAGE_TO_NATIVE__", icon_page_to_native)
         .replace("__OPENTRAY_ICON_NATIVE_TO_PAGE__", icon_native_to_page)
+        .replace("__OPENTRAY_MESSAGE_CHANNELS_ENABLED__", message_channels_enabled)
+        .replace("__OPENTRAY_WEBVIEW_ID_ENABLED__", webview_id_enabled)
+        .replace("__OPENTRAY_WEBVIEW_ID__", &webview_id_json)
         .replace("__OPENTRAY_NATIVE_API_POLICY__", &native_api_policy_json)
         .replace(
             "__OPENTRAY_PERMISSION_MANAGER_POLICY__",
@@ -1078,7 +1322,75 @@ return await rectPromise;
             MetadataSyncSettings::default(),
             &WebviewNativeApiPolicy::default(),
             &Default::default(),
+            false,
+            false,
+            "default",
         )
+    }
+
+    fn channel_bootstrap_script() -> String {
+        webview_bridge_bootstrap_script(
+            WebviewBridgePolicy {
+                webview_id: true,
+                message_channels: true,
+                ..WebviewBridgePolicy::default()
+            },
+            "toolbar",
+        )
+        .expect("channel policy injects the bridge")
+    }
+
+    #[test]
+    fn channel_on_close_unlisten_actually_unsubscribes() {
+        // Final-review B2 regression: the generated unlisten arrow function
+        // lost its `=>` and threw ReferenceError when executed, leaving the
+        // handler subscribed forever.
+        let runtime = run_node_probe(
+            &channel_bootstrap_script(),
+            r#"
+const internals = window.__OPENTRAY_WINDOW_INTERNALS__;
+let observed = null;
+navigator.opentrayWebview.onCreatedMessageChannel((endpoint) => {
+  const unlisten = endpoint.onClose((event) => {
+    observed = event.reason;
+  });
+  unlisten();
+});
+internals.channelCreated("ch-b2");
+internals.channelClosed("ch-b2", "explicit");
+return { observed };
+"#,
+        );
+        assert_eq!(
+            runtime["observed"],
+            Value::Null,
+            "the unsubscribed handler must not observe the close"
+        );
+    }
+
+    #[test]
+    fn channel_on_close_unlisten_keeps_a_surviving_handler() {
+        // The unlisten of one handler must not break a sibling subscription.
+        let runtime = run_node_probe(
+            &channel_bootstrap_script(),
+            r#"
+const internals = window.__OPENTRAY_WINDOW_INTERNALS__;
+let observed = null;
+navigator.opentrayWebview.onCreatedMessageChannel((endpoint) => {
+  const unlisten = endpoint.onClose((event) => {
+    observed = "first:" + event.reason;
+  });
+  unlisten();
+  endpoint.onClose((event) => {
+    observed = "second:" + event.reason;
+  });
+});
+internals.channelCreated("ch-b2b");
+internals.channelClosed("ch-b2b", "peer_webview_destroyed");
+return { observed };
+"#,
+        );
+        assert_eq!(runtime["observed"], Value::from("second:peer_webview_destroyed"));
     }
 
     fn run_node_probe(script: &str, probe: &str) -> Value {

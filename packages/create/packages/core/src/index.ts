@@ -71,7 +71,6 @@ export {
   scrapeUrl,
   deriveUrlPresets,
   renderSolidSilhouette,
-  responseHeadersAllowEmbedding,
   writeGlyphIconTemp,
   SOLID_SIZE,
   extractTitle,

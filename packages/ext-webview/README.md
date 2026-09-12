@@ -1,11 +1,14 @@
 <!--
-Orthogonal intents (2026-07-17; original user request):
+Orthogonal intents (2026-07-17; original user request; maintained 2026-09-12 with the
+multi-webview orchestration contract from the add-webview-orchestration change):
 1. Expose native WebView window controls and their measurable overlay geometry.
 2. Let Windows overlay caption controls use explicit opaque background and symbol colors.
 3. Keep macOS controls native and transparent rather than emulating Windows composition.
 4. Keep frameless shell ownership and explicit user-resize intent consistent across macOS and Windows.
 5. Teach retained WebView tray primary actions through operational visibility, not local booleans.
 6. Prevent Windows native host/DWM residue through persistent parent-surface ownership and ordered child commits.
+7. Contract the multi-webview orchestration surface: sibling child webviews, declarative
+   layered layout, targeted message channels, and the unified per-view push event family.
 -->
 
 # @opentray/ext-webview
@@ -471,6 +474,152 @@ Keep the unsupported taxonomy explicit:
 - platform-family mismatch: a Windows/Linux style family is requested on the macOS runtime, macOS material/corner style is requested on Windows, or a platform-specific family is otherwise requested on the wrong substrate
 - declarative gate: the runtime could provide a capability, but the current WebView session did not enable it, such as overlay geometry without `windowControlsOverlay`
 - context unavailable: the capability exists, but the current session has no authoritative data, such as tray bounds when no tray anchor was injected
+
+## Multi-Webview Orchestration
+
+One window session can host multiple webviews as sibling native views (macOS NSView subviews, Windows child HWNDs) — never as separate OS windows. The surface below lives on the `WebviewWindowHandle` and mirrors the frozen wire protocol in `@opentray/spec` (`webview.ts` / `channel.ts`, pinned by the codec fixtures in `fixtures/frames/`).
+
+Lifecycle laws:
+
+- A tray owns at most one active WebView window session. Creating a second window session for the same tray fails at creation with the typed error `tray_session_active`; the existing session stays untouched.
+- Pass `windowOnly: true` to `createWebviewWindow(...)`/first `show(...)` to create the window session without a primary webview, then populate it with `createWebview(...)`. Declaring `html`/`url` alongside `webviews: [...]` on one window is rejected.
+- Webview ids are unique within their window session. Every webview, layout, and channel is owned by the `(appId, trayId, sessionId)` tuple; closing one session never touches another session's state.
+- The facade sugar `createWebviewWindow({ windowOnly: true, webviews: [...], layout })` creates the declared children and commits the first layout after `show()` resolves. `webviews` entries are `WebviewChildSpec` values (`{ id, url | html, bridge? }`) — exactly one of `url`/`html`.
+
+### Child webviews
+
+```ts
+import { WebviewExt, column, fixed, grow } from "@opentray/ext-webview";
+
+const win = tray.createWebviewWindow({ windowOnly: true, width: 1024, height: 720 });
+await win.show();
+
+const toolbar = await win.createWebview({
+  id: "toolbar",
+  url: "http://127.0.0.1:5173/toolbar.html",
+  bridge: { webviewId: true, messageChannels: true },
+});
+const content = await win.createWebview({ id: "content", url: "https://example.com" });
+
+await win.setLayout(column([fixed("toolbar", 44), grow("content")]));
+
+const children = await win.listWebviews(); // [{ webviewId, bridge }, ...]
+await win.destroyWebview("toolbar");       // leaves `content` and its page runtime alive
+```
+
+Each `createWebview` resolves to a `WebviewChildHandle`:
+
+- `navigate(url)` / `back()` / `forward()` — per-view content replacement and native session history; siblings are never touched.
+- `focus()` — raises that webview to native keyboard focus inside its window. This is the per-view command; the window-level `focus()` on `WebviewWindowHandle` is unchanged and independent.
+- `getUrl()` / `getTitle()` — return `{ url | title, seq }` (see the event race rule below).
+- `onUrlChange(handler)` / `onTitleChange(handler)` / `onFocused(handler)` / `onGeometryChange(handler)` — per-view push event listeners; each returns an unlisten function.
+- `destroy()` — same as the parent handle's `destroyWebview(id)`.
+- `id` / `windowId` — frozen identity strings.
+
+### Per-child bridge policy
+
+The page bridge is opt-in per child webview. `bridge` accepts a partial of the frozen boolean field set
+
+```ts
+interface WebviewBridgePolicy {
+  webviewId: boolean;
+  messageChannels: boolean;
+  navigatorWindow: boolean;
+  navigatorScreen: boolean;
+  nativeApi: boolean;
+}
+```
+
+Every field defaults to `false`; omitting `bridge` entirely means no bridge at all. An arbitrary-content webview (a cross-origin site you do not own) stays bridgeless by construction, and trusted webviews (such as a toolbar you serve yourself) opt in explicitly — the toolbar carrier pattern is exactly `{ webviewId: true, messageChannels: true }`. The policy is bootstrap-immutable for that webview's lifetime: it cannot be changed under an existing page runtime, mirroring the session compatibility law. `listWebviews()` reports each child's full resolved policy.
+
+With `messageChannels` enabled, the page receives `navigator.opentrayWebview`; with `webviewId` enabled, that surface also exposes the read-only `id` property holding the same opaque id the host facade uses.
+
+### Declarative layered layout
+
+`setLayout(tree)` submits one JSON document: an ordered array of layers stacking bottom-to-top (array order is the z-order; there is no `zIndex` field anywhere). Each layer owns one independent flex tree. A tree node is either
+
+- a container: `{ dir: "row" | "column", gap?, children }`
+- a view reference: `{ id, kind?: "webview" }` resolved through the View Registry
+- a box: `{ kind: "box", id, background?, border?: { width, color }, cornerRadius? }` — a decorative paint primitive with no web content and input pass-through (pointer events reach the view below)
+
+Node sizing fields are `width`, `height`, `flex`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — logical pixels in client-area coordinates. Padding, align, justify, percent sizes, and flex-basis are deliberately outside the v1 protocol.
+
+The exported builders `row(...)`, `column(...)`, `view(...)`, `fixed(...)`, `grow(...)` are pure syntax sugar that compile to this object protocol — `fixed("toolbar", 44)` is the canonical fixed-height column child and `grow("content")` the flex child filling the remainder. `setLayout` accepts a full document `{ layers: [...] }`, a bare layer array, or a single root node (wrapped as the only layer); an empty or unset layout falls back to one layer with the window's first registered webview filling the window.
+
+Layout is solved natively (Taffy) and resize-authoritative: window resize triggers native re-solve and native frame application, and the JS side never computes view coordinates or participates in relayout. `window.layout.update(viewId, patch)` applies an incremental sizing patch to one node. Replacing a layout preserves browsing contexts: a webview still referenced by id in the new tree moves without its page reloading.
+
+A layout commit is one native transaction: solve, apply frames, then recompute per-webview overlay/titlebar safe-area projections and re-register view-declared drag regions, pushing `geometryChange` events to affected bridged views. No half-applied state is observable to a page.
+
+Style exclusivity is one rule with one error: a window in a translucency-affecting style (frameless or material today) cannot host multi-webview composition, and applying such a style to a window that already hosts more than one webview fails the same way — both reject with `multiwebview_unsupported_style` before any state changes. Opaque cross-layer overlap in a framed window is supported.
+
+### Unified per-view push events
+
+`urlChange`, `titleChange`, `focused`, and `geometryChange` are one event family: pure push, no replay, no polling. Handler events carry `{ windowId, webviewId, seq, ...payload }` with field-frozen payloads:
+
+- `urlChange` → `{ url: string }`
+- `titleChange` → `{ title: string }`
+- `focused` → `{ focused: boolean }` (edge semantics: gained or lost native focus)
+- `geometryChange` → `{ rect: { x, y, width, height } | null }` — the overlay safe-area projection in view-local logical pixels; `null` means no intersection with the overlay region. The rect is field-isomorphic to the page-bridge `overlay.geometrychange` payload: same fields, same units, same projection value.
+
+`seq` is a per-view monotonically increasing sequence number. Events are push-only: current values come from the query commands. Subscribe first, then call `getUrl()`/`getTitle()`, and discard any event whose `seq` is not greater than the queried `seq` — that resolves the subscription race without replay. `focused` and `geometryChange` have no query; track edges and projection updates. Events stop cleanly at broker disconnect (observed through the connection lifecycle, never synthetic events); a fresh session starts fresh subscriptions.
+
+### Message channels
+
+Channels are targeted connections without port transfer. `createMessageChannel({ target: webviewId })` creates one channel; the creator (the host entry is a legal creator) holds one endpoint implicitly, and the target webview's page receives its endpoint through the `onCreatedMessageChannel` event. A target is always a webview — the host cannot be targeted and participates only as creator. `onCreatedMessageChannel(handler)` on the window facade reports `{ channelId }` pushes for the session; pair it with `listMessageChannels()` for full state.
+
+Host-side endpoint:
+
+```ts
+const channel = await win.createMessageChannel({ target: "toolbar" });
+
+const stop = channel.onMessage((payload) => {
+  // payload is the string or JSON value the peer posted — no manual parsing
+});
+const stopClose = channel.onClose(({ reason }) => console.log("closed:", reason));
+
+await channel.post({ kind: "navigate", url: "https://example.org" });
+await channel.close();   // graceful: tombstone stays listed, reason "explicit"
+await channel.destroy(); // removes channel state (and tombstone); idempotent no-op
+```
+
+An endpoint exposes exactly `id`, `post(payload)`, `onMessage(handler)`, `onClose(handler)`, `close()`, and `destroy()`. Delivery is FIFO per endpoint; messages that arrive before the first `onMessage` registration are buffered and flushed on registration. `onClose` observes at most one closure per channel per endpoint — the first transition fires `{ reason }` once and every later transition is silent.
+
+Page side (only for webviews whose bridge policy enables `messageChannels`):
+
+```ts
+const bridge = navigator.opentrayWebview; // absent unless the policy injects it
+bridge.onCreatedMessageChannel((endpoint) => {
+  endpoint.onMessage((payload) => render(payload));
+  void endpoint.post({ kind: "get-url" });
+});
+// or create a channel to a sibling bridged page:
+const mine = await bridge.createMessageChannel({ target: siblingId });
+```
+
+Lifecycle is an explicit observable state machine `created → open → closed(reason) → destroyed`. Close reasons: `explicit` (an endpoint called `close`), `destroyed` (a participant called `destroy`), `peer_webview_destroyed`, `window_destroyed`, `session_closed`, `document_navigated` (a page-side endpoint whose document navigated — messages are never buffered across navigation), and `queue_overflow`.
+
+`close()` and `destroy()` are distinct: `close()` enters `closed(explicit)` and the channel stays listed as a tombstone; `destroy()` (also `destroyMessageChannel(channelId)` on the window facade) removes channel state immediately — on an open channel both endpoints' one `onClose` carries reason `destroyed`, on an already-closed channel it silently removes the tombstone. `listMessageChannels()` returns the session's channels in state `open` or `closed` (closed entries carry their `reason`); destroyed channels are never listed, and each session retains at most its 32 most recently closed channels. The host sees full endpoint descriptors (`{ side: "creator" | "target", peer: webviewId | "host" }`); pages see only their participating channels with peers reduced to side labels.
+
+Queue bounds are exact: each port queue holds at most 1000 messages and at most 1 MiB cumulative payload (boundary values are legal). A payload is a UTF-8 string or any JSON value; string payloads count raw UTF-8 bytes and JSON payloads count the bytes of their RFC 8785 (JCS) canonical serialization — the same value counts identically on every platform. A single message over 1 MiB rejects with `payload_too_large` without entering the queue and without closing the channel; exceeding either cumulative bound closes the channel with reason `queue_overflow` (the posting call also rejects with that code). Values outside the RFC 8785 domain (NaN, Infinity, `undefined`, functions) reject with `invalid_payload`.
+
+Channel authority is session-scoped and page-access-gated: pages can only create channels inside their own extension session (well-formed page input cannot even address another session), and a channel endpoint is only delivered to a webview whose bridge policy enables it — creating a channel to a bridgeless target fails with `bridge_required` before any state exists.
+
+### Typed error codes
+
+Every orchestration/channel rejection surfaces as a `WebviewOrchestrationError` whose `code` comes from this frozen registry (`WEBVIEW_ORCHESTRATION_ERROR_CODES` in `@opentray/spec`):
+
+| Code | Meaning |
+| ---- | ------- |
+| `unknown_view` | A layout tree (or channel creation) references a view id no registered view owns. |
+| `invalid_layout_measure` | A layout measure is NaN/infinite/negative or has `min > max` on an axis; rejected before solving, previous layout stays in effect. |
+| `multiwebview_unsupported_style` | Translucency-affecting window style (frameless/material) combined with multi-webview composition at the v1 checkpoints. |
+| `tray_session_active` | A second window session for the same tray; the existing session is untouched. |
+| `bridge_required` | Channel creation targeted a webview whose bridge policy does not enable message channels. |
+| `session_scope` | A channel creation request whose target resolves outside the creating owner tuple; zero partial state. |
+| `not_open` | `post` on a non-open endpoint; never a silent drop. |
+| `payload_too_large` | A single payload whose canonical byte length exceeds 1 MiB; channel stays open. |
+| `queue_overflow` | Queue bounds exceeded; the posting call rejects and the channel closes with the same-named reason (the one value shared across the error and reason namespaces). |
+| `invalid_payload` | Payload value outside the RFC 8785 canonical domain (NaN/Infinity/`undefined`/functions). |
 
 ## Authority Model
 

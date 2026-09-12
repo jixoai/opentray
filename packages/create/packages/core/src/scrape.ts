@@ -68,11 +68,6 @@ export interface ScrapeResult {
   readonly iconUrl?: string;
   /** All viable candidates ranked by clarity, near-duplicates removed. */
   readonly icons: readonly ScrapedIcon[];
-  /**
-   * Whether the page's response policy allows third-party iframe embedding
-   * (toolbar mode feasibility); undefined when the page could not be fetched.
-   */
-  readonly frameEmbeddable?: boolean;
 }
 
 export interface FaviconCandidate {
@@ -161,7 +156,6 @@ export interface ScrapePage {
   readonly ok: boolean;
   readonly status: number;
   readonly body: string;
-  readonly headers: Record<string, string>;
 }
 
 export interface ScrapeBytes {
@@ -205,14 +199,10 @@ const defaultFetch: ScrapeFetch = {
       "text/html,application/xhtml+xml",
     );
     if (response === undefined) {
-      return { ok: false, status: 0, body: "", headers: {} };
+      return { ok: false, status: 0, body: "" };
     }
     const body = await response.text();
-    const headers: Record<string, string> = {};
-    response.headers.forEach((value, key) => {
-      headers[key.toLowerCase()] = value;
-    });
-    return { ok: response.ok, status: response.status, body, headers };
+    return { ok: response.ok, status: response.status, body };
   },
   async bytes(url, timeoutMs = 5_000) {
     const response = await fetchWithTimeout(url, timeoutMs, "image/*,*/*;q=0.8");
@@ -231,30 +221,6 @@ const defaultFetch: ScrapeFetch = {
 
 /** Cap on downloaded candidates per scrape. */
 const MAX_ICON_DOWNLOADS = 8;
-
-/**
- * Whether the page's response headers permit embedding by a third-party
- * origin (the toolbar wrapper): rejects on X-Frame-Options (except
- * ALLOWALL) and on CSP frame-ancestors without a wildcard. Absent both
- * policies, embedding is allowed by default — same default browsers use.
- */
-export const responseHeadersAllowEmbedding = (headers: Record<string, string>): boolean => {
-  const xfo = (headers["x-frame-options"] ?? "").trim().toUpperCase();
-  if (xfo.length > 0 && !xfo.split(",").map((token) => token.trim()).includes("ALLOWALL")) {
-    return false;
-  }
-  // Multiple CSP headers (and repeated directives) join into one scan: a
-  // frame-ancestors directive exists and none of its sources is a wildcard.
-  const csp = (headers["content-security-policy"] ?? "").toLowerCase();
-  const directive = /frame-ancestors\s+([^;]+)/gu;
-  for (const match of csp.matchAll(directive)) {
-    const sources = (match[1] ?? "").trim();
-    if (sources.length === 0 || !sources.split(/\s+/u).includes("*")) {
-      return false;
-    }
-  }
-  return true;
-};
 
 /**
  * Scrape title and ALL icon candidates from an arbitrary http(s) URL.
@@ -344,7 +310,6 @@ export const scrapeUrl = async (
     iconPath: originals[0]?.path,
     ...(originals[0] === undefined ? {} : { iconUrl: originals[0].url }),
     icons,
-    frameEmbeddable: responseHeadersAllowEmbedding(page.headers),
   };
 }
 
@@ -365,13 +330,15 @@ export const scrapeService = (
 // SVG densified), feeding the same importResource snapshot path the wizard
 // uses. Every failure path degrades to {} — enrichment never blocks or
 // fails creation.
+// add-webview-orchestration D14 (2026-09-11): the embedding-policy probe is
+// RETIRED — the multi-webview toolbar carrier loads the target as a
+// top-level browsing context, so embedding policy is constructively
+// irrelevant and no feasibility signal is derived or transported.
 export interface UrlPresets {
   /** Page `<title>` (whitespace-normalized, length-capped) or undefined. */
   readonly appName?: string;
   /** Normalized temp-file icon source for the app icon, or undefined. */
   readonly appIconPath?: string;
-  /** Page policy allows third-party iframe embedding; undefined when unknown. */
-  readonly frameEmbeddable?: boolean;
 }
 
 /** Upper bound for an adopted page title (display names stay sane). */
@@ -393,7 +360,6 @@ export const deriveUrlPresets = async (
   return {
     ...(appName === undefined ? {} : { appName }),
     ...(scraped.iconPath === undefined ? {} : { appIconPath: scraped.iconPath }),
-    ...(scraped.frameEmbeddable === undefined ? {} : { frameEmbeddable: scraped.frameEmbeddable }),
   };
 };
 

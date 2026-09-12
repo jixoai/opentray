@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>add-webview-orchestration — 自审证据报告</title>
+<style>
+  body { font: 14px/1.6 -apple-system, "SF Pro Text", sans-serif; margin: 2rem auto; max-width: 60rem; color: #1d1d1f; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d2d2d7; padding-bottom: .3rem; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; }
+  th, td { border: 1px solid #d2d2d7; padding: .4rem .6rem; text-align: left; vertical-align: top; font-size: .92rem; }
+  th { background: #f5f5f7; }
+  .pass { color: #1a7f37; font-weight: 600; } .blocked { color: #b25000; font-weight: 600; }
+  code { font-family: ui-monospace, "SF Mono", monospace; font-size: .85em; background: #f5f5f7; padding: .1rem .3rem; border-radius: 4px; }
+  .meta { color: #6e6e73; font-size: .9rem; }
+</style>
+</head>
+<body>
+<h1>add-webview-orchestration — 自审证据报告</h1>
+<p class="meta">评审对象：统一分支 HEAD · 证据目录：<code>.agents/evidence/2026-09-12-webview-orchestration/</code> · Codex 文档复核七轮 5.5→8.2（签收）</p>
+
+<h2>原始问题闭环（真实链路，非 mock）</h2>
+<table>
+  <tr><th>验证</th><th>结果</th><th>证据</th></tr>
+  <tr><td>HN（XFO: DENY）在 toolbar 应用中加载</td><td class="pass">PASS</td><td>P2 e2e / 3.6 walkthrough-verification.ndjson（顶层上下文、标题 "Hacker News"）</td></tr>
+  <tr><td>登录态跨进程重启持久（第一方存储）</td><td class="pass">PASS</td><td>smoke5-cookie-{login,verify}.ndjson（全进程退出后新 broker 读回同 token）</td></tr>
+  <tr><td>地址栏真值跟随页内跳转（urlChange 推送）</td><td class="pass">PASS</td><td>P2 e2e 事件流 + Owner 配方第 2 节观察步</td></tr>
+</table>
+
+<h2>3.6 冒烟矩阵（补充项）</h2>
+<table>
+  <tr><th>项</th><th>结果</th><th>证据</th></tr>
+  <tr><td>resize 跟手（toolbar 恒 44 / content 原生跟随 / 零 JS）</td><td class="pass">PASS 5/5</td><td>smoke1-resize.ndjson + 5×.bounds.json（终值 = frame − 标题栏 − 44 精确吻合）</td></tr>
+  <tr><td>box 布局链 + 下层几何不受影响</td><td class="pass">PASS（机器可证部分）</td><td>smoke3-box.ndjson（像素/点击穿透归 Owner 视觉步；hitTest nil 有 native 单测）</td></tr>
+  <tr><td>不透明跨层重叠 + 样式互斥 (1)(2)</td><td class="pass">PASS 9/9</td><td>smoke4-overlap-style.ndjson（拒绝后样式完整保持）</td></tr>
+  <tr><td>focus 双边沿</td><td class="blocked">环境受阻</td><td>smoke2-focus.ndjson（TCC 无权限 + 焦点钉死；机制链经 urlChange 同 tap 实证；观察步移交 Owner）</td></tr>
+</table>
+
+<h2>测试总量（编排者亲验）</h2>
+<table>
+  <tr><th>套件</th><th>数字</th></tr>
+  <tr><td>@opentray/spec（TS）</td><td>118/118</td></tr>
+  <tr><td>opentray-spec（Rust，canonical/fixtures）</td><td>44/44</td></tr>
+  <tr><td>ext-webview（macOS）</td><td>134/134 · release 零警告</td></tr>
+  <tr><td>ext-webview（Windows 真机）</td><td>142/142 · release 零警告</td></tr>
+  <tr><td>opentray-core / opentray-bin</td><td>33/33 · 37/37</td></tr>
+  <tr><td>cli（含 quit 修复回归）</td><td>124/124</td></tr>
+  <tr><td>create 全套</td><td>276/276 · typecheck</td></tr>
+  <tr><td>create-webui</td><td>71/71 · typecheck · dist 重建</td></tr>
+  <tr><td>frameEmbeddable 符号门</td><td>rg 零命中</td></tr>
+</table>
+
+<h2>偏离与越界（全部经编排者复核）</h2>
+<table>
+  <tr><th>项</th><th>处置</th></tr>
+  <tr><td>Taffy 体积 +136.4 KiB raw</td><td>Owner 裁决接受（档内）</td></tr>
+  <tr><td>P2 越界修 3.3 windowOnly 缺陷（crates/）</td><td>批准（3 行 + 回归测试 + 活体取证）</td></tr>
+  <tr><td>L 修 Quit 脏退出（packages/cli）</td><td>批准（容忍传输哨兵，typed 失败仍抛，+3 回归行）</td></tr>
+  <tr><td>D19 host 方向事件随下一命令 flush</td><td>v1 裁定并文档化（持久句柄留后续 change）</td></tr>
+</table>
+
+<h2>新发现的既有缺陷（main 基线，待 Owner 裁决）</h2>
+<ol>
+  <li>entry-template <code>(detached)</code> 调用不存在的 <code>win.setTitle</code>（静默吞）</li>
+  <li>opentray-spec clippy error 级 lint（not_unsafe_ptr_arg_deref）</li>
+  <li>WebKit 存储不随 HOME 隔离（e2e 收尾清理项）</li>
+</ol>
+
+<h2>Owner 走查</h2>
+<p>命令行文档（macOS + Windows）随本自审交付；Windows 机器就绪态已构建（TS 六包 + broker.exe + dylib 暂存 + 字体资产）。</p>
+</body>
+</html>

@@ -168,8 +168,8 @@ export const zhCN: Messages = {
     title: "高级选项",
     startupTerminal: "显示启动终端",
     startupTerminalHint: "应用启动时打开独立终端窗口，实时显示命令的 PTY 输出（可交互）。",
-    addressBar: "显示地址栏",
-    addressBarHint: "服务窗口顶部显示地址栏（Web Navigation API 管理导航）。",
+    addressBar: "导航工具栏",
+      addressBarHint: "在应用窗口顶部组合原生导航工具栏（后退/前进/重载/地址栏），页面以独立 webview 直接加载；URL 应用与命令应用均可开启。",
     smoothing: "平滑缩放（imageSmoothingEnabled）",
     smoothingHint:
       "默认开启高质量缩放；上传低分辨率像素风图标时关闭可保留硬边锯齿（等比放大应用到应用图标前景与托盘图标）。",
@@ -234,6 +234,8 @@ export const zhCN: Messages = {
     sniffing: "嗅探 HTTP 服务中…（未发现不影响创建应用）",
     portsSniffing: "监听端口嗅探中…",
     urlPlaceholder: "输入 URL 跳转",
+    siteIconPlaceholder: "站点图标占位",
+    siteIconFallback: "站点图标回落",
   },
   url: {
     fetch: "获取预设",

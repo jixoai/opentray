@@ -239,6 +239,8 @@ export interface Messages {
     readonly sniffing: string;
     readonly portsSniffing: string;
     readonly urlPlaceholder: string;
+    readonly siteIconPlaceholder: string;
+    readonly siteIconFallback: string;
   };
   readonly url: {
     readonly fetch: string;

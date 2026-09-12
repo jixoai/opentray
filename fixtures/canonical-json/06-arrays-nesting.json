@@ -1,0 +1,9 @@
+{
+  "name": "arrays keep element order and nest deeply",
+  "input": [
+    [],
+    [0, [-1, 2.5]],
+    { "nested": { "deep": [{ "z": null }] } }
+  ],
+  "expected": "[[],[0,[-1,2.5]],{\"nested\":{\"deep\":[{\"z\":null}]}}]"
+}

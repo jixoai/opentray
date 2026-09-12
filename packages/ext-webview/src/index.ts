@@ -25,6 +25,21 @@ import {
   type AppReopenCoordinator,
 } from "./app-reopen";
 import { WEBVIEW_NATIVE_ARTIFACT } from "./native-artifact";
+import {
+  DEFAULT_WEBVIEW_WINDOW_ID,
+  createWebviewOrchestration,
+  type ChannelEndpoint,
+  type ChannelEndpointCloseNotice,
+  type WebviewChannelCreatedNotice,
+  type WebviewChildHandle,
+  type WebviewChildSpec,
+  type WebviewFocusedPush,
+  type WebviewGeometryChangePush,
+  type WebviewLayoutTreeInput,
+  type WebviewOrchestrationPort,
+  type WebviewTitleChangePush,
+  type WebviewUrlChangePush,
+} from "./orchestration";
 import type {
   WebviewBrowserPermissionFamily,
   WebviewBrowserPermissionPolicy,
@@ -35,8 +50,17 @@ import type {
   WebviewPermissionState,
   WebviewPermissionStore,
 } from "./permission-store";
+import {
+  type ChannelCloseReason,
+  type ChannelId,
+  type ChannelListEntry,
+  type ViewId,
+  type WebviewListEntry,
+  type WebviewLayoutNodePatch,
+} from "@opentray/spec";
 import { createAppScopedWebviewPermissionStore } from "./permission-store";
 
+export * from "./orchestration";
 export * from "./permission-store";
 
 export type WebviewWindowIcon = Icon | { type: "href"; href: string };
@@ -86,6 +110,18 @@ export interface WebviewShowCommand {
   width?: number;
   height?: number;
   fallbackRect?: Rect;
+  /**
+   * Owning broker session identity (D18 owner tuple), extracted by the
+   * facade from the connection's Ready frame. Omitted by legacy transports;
+   * the native side keeps the transitional unattributed cleanup rule for
+   * those clients.
+   */
+  sessionId?: string;
+  /** Window-session id to bind (the native default is `default`). */
+  windowId?: string;
+  /** Create the window session without a primary webview; orchestration
+   *  `create-webview` commands populate it (3.3 friction #2). */
+  windowOnly?: boolean;
   nativeWindowApi?: boolean;
   bindWindowGlobals?: boolean;
   nativeScreenApi?: boolean;
@@ -106,7 +142,19 @@ export interface WebviewShowCommand {
   devtools?: boolean;
 }
 
-export type WebviewWindowOptions = Omit<WebviewShowCommand, "type">;
+/**
+ * Facade-only orchestration declarations on `createWebviewWindow`: the
+ * children to create after a `windowOnly` bootstrap show, and an optional
+ * first layout document to commit after them. They never reach the wire
+ * inside the `show` frame itself.
+ */
+export interface WebviewWindowOrchestrationOptions {
+  webviews?: readonly WebviewChildSpec[];
+  layout?: WebviewLayoutTreeInput;
+}
+
+export type WebviewWindowOptions = Omit<WebviewShowCommand, "type"> &
+  WebviewWindowOrchestrationOptions;
 
 export interface WebviewSetContentCommand {
   type: "setContent";
@@ -618,6 +666,8 @@ export interface WebviewHandle {
 
 export interface WebviewWindowHandle {
   readonly devtools: WebviewWindowDevtools;
+  /** Window-session id this handle addresses (the native default `default`). */
+  readonly windowId: string;
   show(command?: Partial<WebviewWindowOptions>): Promise<void>;
   hide(): Promise<void>;
   close(): Promise<void>;
@@ -663,6 +713,20 @@ export interface WebviewWindowHandle {
   drainIpcMessages(): Promise<WebviewIpcMessage[]>;
   drainPermissionMessages(): Promise<WebviewPermissionIpcMessage[]>;
   startPermissionManager(): () => void;
+  // Multi-webview orchestration surface (add-webview-orchestration 2.4).
+  createWebview(spec: WebviewChildSpec): Promise<WebviewChildHandle>;
+  destroyWebview(webviewId: string): Promise<void>;
+  listWebviews(): Promise<WebviewListEntry[]>;
+  setLayout(tree: WebviewLayoutTreeInput): Promise<void>;
+  readonly layout: {
+    update(viewId: ViewId, patch: WebviewLayoutNodePatch): Promise<void>;
+  };
+  createMessageChannel(options: { target: string }): Promise<ChannelEndpoint>;
+  listMessageChannels(): Promise<ChannelListEntry[]>;
+  destroyMessageChannel(channelId: ChannelId): Promise<void>;
+  onCreatedMessageChannel(
+    handler: (notice: WebviewChannelCreatedNotice) => void
+  ): () => void;
 }
 
 export interface WebviewTrayCapability {
@@ -742,6 +806,8 @@ export const WebviewExt = {
       createWebviewWindow(windowOptions) {
         return createWebviewWindowHandle(endpoint, windowOptions, {
           appId: context.appId,
+          trayId: context.trayId,
+          ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
           permissions: options?.permissions ?? {},
           ...(appReopen === undefined ? {} : { appReopen }),
         });
@@ -775,6 +841,18 @@ interface WebviewEndpoint {
     event: string,
     handler: (event: WebviewWindowEvent<TPayload>) => void
   ): () => void;
+  /**
+   * Raw ext-command request resolving every response envelope (the first is
+   * the command result; the broker mirrors the tray-scoped trailing pushes
+   * into `ext-event` frames, which `onFrame` observes).
+   */
+  requestEnvelopes(data: unknown): Promise<ExtensionEnvelope[]>;
+  /**
+   * Taps every frame the mount pushes through `ext-event` mirrors. Returns
+   * a no-op unlisten on non-eventful trays; pure pushes then stay
+   * unobservable, matching the connection capabilities the caller supplied.
+   */
+  onFrame(handler: (frame: unknown) => void): () => void;
 }
 
 type ExtensionEventSourceTray = TrayHandle & {
@@ -832,6 +910,22 @@ const createWebviewEndpoint = (
       }
       const events = await context.request(command);
       return events[0]?.data as TResult;
+    },
+    async requestEnvelopes(data: unknown): Promise<ExtensionEnvelope[]> {
+      try {
+        await context.ensureLoaded();
+      } catch (error) {
+        throw new WebviewExtensionLoadError(context, error);
+      }
+      return context.request(data);
+    },
+    onFrame(handler: (frame: unknown) => void): () => void {
+      if (!isExtensionEventSourceTray(tray)) {
+        return () => {};
+      }
+      return tray.listenExtension(context.mountId, (envelope) => {
+        handler(envelope.data);
+      });
     },
     emit,
     listen<TPayload = unknown>(
@@ -903,6 +997,13 @@ const createLegacyWebviewHandle = (endpoint: {
 
 interface WebviewWindowRuntimeContext {
   appId: string;
+  trayId: string;
+  /**
+   * Broker session identity from the connection's Ready frame (3.3 friction
+   * #1): rides the `show` data and every orchestration/channel owner tuple.
+   * Undefined on transports that do not publish one (legacy attribution).
+   */
+  sessionId?: string;
   permissions: WebviewPermissionRuntimeOptions;
   appReopen?: AppReopenCoordinator;
 }
@@ -920,6 +1021,30 @@ const createWebviewWindowHandle = (
       ? {}
       : { prompt: runtime.permissions.prompt }),
   };
+  // Facade-only orchestration declarations never ride the `show` frame.
+  const {
+    webviews: declaredWebviews,
+    layout: declaredLayout,
+    ...wireOptions
+  } = options;
+  const orchestrationPort: WebviewOrchestrationPort = {
+    owner: {
+      appId: runtime.appId,
+      trayId: runtime.trayId,
+      sessionId: runtime.sessionId ?? "",
+    },
+    async request(data) {
+      const envelopes = await endpoint.requestEnvelopes(data);
+      const first = envelopes[0]?.data;
+      if (first === undefined) {
+        throw new Error("webview extension returned an empty response");
+      }
+      return first;
+    },
+    onFrame: (handler) => endpoint.onFrame(handler),
+  };
+  const orchestrationWindowId = options.windowId ?? DEFAULT_WEBVIEW_WINDOW_ID;
+  const orchestration = createWebviewOrchestration(orchestrationPort, orchestrationWindowId);
   let bootstrapped = false;
   const listenerCounts = new Map<string, number>();
   let windowEventPoll: ReturnType<typeof setInterval> | undefined;
@@ -1103,12 +1228,39 @@ const createWebviewWindowHandle = (
         } satisfies WebviewCommand);
       },
     },
+    windowId: orchestrationWindowId,
     async show(command = {}) {
       const wasBootstrapped = bootstrapped;
+      const {
+        webviews: commandWebviews,
+        layout: commandLayout,
+        ...commandOverride
+      } = command;
+      const bootstrapChildren = !wasBootstrapped
+        ? (commandWebviews ?? declaredWebviews ?? [])
+        : [];
+      const orchestrating = bootstrapChildren.length > 0;
+      if (
+        orchestrating &&
+        (commandOverride.html !== undefined ||
+          commandOverride.url !== undefined ||
+          wireOptions.html !== undefined ||
+          wireOptions.url !== undefined)
+      ) {
+        throw new Error(
+          "webviews[] and html/url are exclusive: an orchestrated window declares its content per child webview"
+        );
+      }
       const showCommand = {
         type: "show",
-        ...(bootstrapped ? {} : options),
-        ...command,
+        ...(bootstrapped ? {} : wireOptions),
+        ...commandOverride,
+        ...(runtime.sessionId === undefined
+          ? {}
+          : { sessionId: runtime.sessionId }),
+        ...(orchestrating
+          ? { windowOnly: true, windowId: orchestrationWindowId }
+          : {}),
       } satisfies WebviewCommand;
       await endpoint.command<void>(showCommand);
       bootstrapped = true;
@@ -1121,6 +1273,19 @@ const createWebviewWindowHandle = (
       }
       appReopenRegistration?.markActive();
       startAppReopenActivityTracking();
+      if (!wasBootstrapped && orchestrating) {
+        // 3.3 friction #2 formalized: the orchestrated window bootstrap is
+        // show{windowOnly:true} followed by create-webview per child, then
+        // the optional first layout commit — one facade sugar, wire-frozen
+        // in fixtures/frames/facade-bridge-frames.json.
+        for (const child of bootstrapChildren) {
+          await orchestration.createWebview(child);
+        }
+        const bootstrapLayout = commandLayout ?? declaredLayout;
+        if (bootstrapLayout !== undefined) {
+          await orchestration.setLayout(bootstrapLayout);
+        }
+      }
     },
     hide() {
       return endpoint.command<void>({ type: "hide" } satisfies WebviewCommand);
@@ -1135,6 +1300,9 @@ const createWebviewWindowHandle = (
       await endpoint.command<void>({
         type: "destroy",
       } satisfies WebviewCommand);
+      // The destroy response flushes the session's channel.closed pushes;
+      // local orchestration routing dies only after the wire caught up.
+      orchestration.dispose();
       bootstrapped = false;
       appReopenRegistration?.setBootstrapped(false);
       if (permissionPoll !== undefined) {
@@ -1280,6 +1448,35 @@ const createWebviewWindowHandle = (
     },
     drainPermissionMessages,
     startPermissionManager,
+    createWebview(spec) {
+      return orchestration.createWebview(spec);
+    },
+    destroyWebview(webviewId) {
+      return orchestration.destroyWebview(webviewId);
+    },
+    listWebviews() {
+      return orchestration.listWebviews();
+    },
+    setLayout(tree) {
+      return orchestration.setLayout(tree);
+    },
+    layout: {
+      update(viewId, patch) {
+        return orchestration.updateLayout(viewId, patch);
+      },
+    },
+    createMessageChannel(channelOptions) {
+      return orchestration.createMessageChannel(channelOptions);
+    },
+    listMessageChannels() {
+      return orchestration.listMessageChannels();
+    },
+    destroyMessageChannel(channelId) {
+      return orchestration.destroyMessageChannel(channelId);
+    },
+    onCreatedMessageChannel(handler) {
+      return orchestration.onCreatedMessageChannel(handler);
+    },
   };
 };
 

@@ -179,9 +179,8 @@ export const en: Messages = {
     startupTerminal: "Show startup terminal",
     startupTerminalHint:
       "Opens a separate terminal window when the app starts, streaming the command's PTY output live (interactive).",
-    addressBar: "Show address bar",
-    addressBarHint:
-      "Shows an address bar at the top of the service window (navigation managed by the Web Navigation API).",
+    addressBar: "Navigation toolbar",
+      addressBarHint: "Compose a native navigation toolbar (back/forward/reload/address bar) at the top of the app window; the page loads directly in its own webview. Available for both URL and command apps.",
     smoothing: "Smooth scaling (imageSmoothingEnabled)",
     smoothingHint:
       "High-quality scaling is on by default; turn it off for low-resolution pixel-art icons to keep crisp edges (applies to the app icon foreground and the tray icon).",
@@ -251,6 +250,8 @@ export const en: Messages = {
     sniffing: "Sniffing HTTP services… (none found still allows creating the app)",
     portsSniffing: "Sniffing listening ports…",
     urlPlaceholder: "Enter a URL to navigate",
+    siteIconPlaceholder: "Site icon placeholder",
+    siteIconFallback: "Site icon fallback",
   },
   url: {
     fetch: "Fetch preset",

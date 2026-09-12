@@ -178,9 +178,8 @@ export const ja: Messages = {
     startupTerminal: "起動ターミナルを表示",
     startupTerminalHint:
       "アプリ起動時に独立したターミナルウィンドウを開き、コマンドの PTY 出力をライブで流します（対話可）。",
-    addressBar: "アドレスバーを表示",
-    addressBarHint:
-      "サービスウィンドウの上部にアドレスバーを表示します（ナビゲーションは Web Navigation API が管理）。",
+    addressBar: "ナビゲーションツールバー",
+      addressBarHint: "アプリウィンドウ上部にネイティブのナビゲーションツールバー（戻る/進む/再読み込み/アドレスバー）を組み込み、ページは独立 webview で直接読み込みます。URL アプリとコマンドアプリの両方で有効です。",
     smoothing: "スムーズスケーリング（imageSmoothingEnabled）",
     smoothingHint:
       "既定では高品質スケーリングが有効です。低解像度のドット絵アイコンではオフにすると輪郭がシャープに保てます（アプリアイコンの前景とトレイアイコンに適用）。",
@@ -249,6 +248,8 @@ export const ja: Messages = {
     sniffing: "HTTP サービスを検出中…（見つからなくてもアプリは作成できます）",
     portsSniffing: "リスニングポートを検出中…",
     urlPlaceholder: "移動先の URL を入力",
+    siteIconPlaceholder: "サイトアイコンプレースホルダー",
+    siteIconFallback: "サイトアイコンフォールバック",
   },
   url: {
     fetch: "プリセットを取得",

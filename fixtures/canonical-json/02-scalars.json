@@ -1,0 +1,9 @@
+{
+  "name": "scalar literals keep their spellings",
+  "input": {
+    "bools": [true, false],
+    "nul": null,
+    "str": "hello"
+  },
+  "expected": "{\"bools\":[true,false],\"nul\":null,\"str\":\"hello\"}"
+}

@@ -1,24 +1,31 @@
 // Orthogonal intents (2026-09-09, openspec change add-create-url-apps; original
 // user request: create-opentray packages a URL directly as an application;
-// acceptance round 3 adds toolbar mode, tray reload, and durable sync
-// defaults D11–D13):
+// acceptance round 3 adds tray reload and durable sync defaults D11–D13;
+// add-webview-orchestration D12/D13 replace the iframe wrapper carrier with
+// the multi-webview toolbar carrier, 2026-09-11):
 // 1. Render the URL app entry from the frozen config as one real TS template
 //    literal (compile-checked here; no string surgery at build time).
 // 2. Direct mode: one application-mode WebView window targets the frozen URL;
 //    title follows the document one-way by default, icon following is opt-in
 //    (D13). No PTY, no port monitor: a URL application supervises nothing.
-// 3. Toolbar mode (D12): the shell host serves the shared address-bar wrapper
-//    and the window loads browse.html?url=<target> — still no PTY dependency.
-//    Neither sync option is set: the wrapper document's metadata is not the
-//    target page's (same law as command-mode address-bar windows).
-// 4. Tray menu offers Reload (D11): the page reloads through the WebView
-//    evaluate channel without restarting the app.
+// 3. Toolbar mode (D12/D13): the window is a windowOnly session composed of
+//    one toolbar webview (shell-served toolbar page, bridge { webviewId,
+//    messageChannels }) and one content webview loading the recorded URL
+//    directly as a top-level browsing context (no bridge = bridgeless), laid
+//    out by column([fixed("toolbar", 44), grow("content")]). Embedding policy
+//    (X-Frame-Options / CSP frame-ancestors) is not consulted — a top-level
+//    content webview is not an embedded context (D14). The payload carries
+//    the shell server + toolbar assets and still no PTY dependency.
+// 4. Tray menu offers Reload (D11): toolbar mode reloads the CONTENT webview
+//    through the native navigate command; direct mode keeps the evaluate
+//    channel. The app process never restarts for a reload.
 // 5. Quit destroys the window and tray session and exits; there is no child
 //    process tree to sweep (D9).
 // 6. Any startup failure persists its stack to app.log before exit(1).
 import type { ScaffoldAppConfig } from "./scaffold";
+import { toolbarCarrierSource } from "./toolbar-carrier";
 
-/** The generated URL app entry: owns tray + one direct or wrapped window. */
+/** The generated URL app entry: owns tray + one direct or toolbar-carrier window. */
 export const createUrlEntrySource = (config: ScaffoldAppConfig): string => {
   if (config.url === undefined) {
     throw new Error("URL entry template requires a url source");
@@ -32,7 +39,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createTray } from "opentray";
-import { WebviewExt } from "@opentray/ext-webview";
+import { WebviewExt, column, fixed, grow } from "@opentray/ext-webview";
 
 const PROJECT_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -56,8 +63,9 @@ const iconFollows = config.window.iconFollowsDocument === true;
 const appLogPath = resolve(PROJECT_DIR, "app.log");
 await mkdir(dirname(appLogPath), { recursive: true });
 const logSink = appendFile.bind(undefined, appLogPath);
+const logNote = (message) => { void logSink("[create-opentray] " + message + "\\n", "utf8"); };
 
-const main = async () => {
+${toolbarCarrierSource()}const main = async () => {
   let appIcon;
   try {
     const manifest = JSON.parse(await readFile(resolve(PROJECT_DIR, "app-icon", "app-icon.json"), "utf8"));
@@ -107,42 +115,59 @@ const main = async () => {
   // must not request devtools at all — default windows are not inspectable.
   const devtools = config.developerMode === true ? { devtools: true } : {};
 
-  // Toolbar mode (D12): the shell host serves the shared address-bar wrapper;
-  // no PTY is registered because a URL app supervises nothing. The wrapper
-  // carries neither sync option — its document metadata is not the target's.
+  // Toolbar shell host (D12): the shell server serves the toolbar page (and
+  // nothing else for a URL app — its navigation surface is channel-only);
+  // no PTY is registered because a URL app supervises nothing. This is a
+  // LOCAL transport dependency only — never an embedding-policy fallback
+  // (embedding policy is not consulted at all, D14).
   let shellPort = null;
   if (toolbarMode) {
     const shellApi = await import("./app-shell-server.mjs");
     shellPort = await shellApi.listenShell();
     if (shellPort === null) {
-      await logSink("[create-opentray] toolbar shell host failed to listen; falling back to the direct window\\n", "utf8");
+      await logSink("[create-opentray] toolbar shell host failed to listen; opening the direct window\\n", "utf8");
     }
   }
-  const toolbarUrl = toolbarMode && shellPort !== null
-    ? \`http://127.0.0.1:\${shellPort}/browse.html?url=\${encodeURIComponent(config.url)}\`
-    : null;
+  const toolbarReady = toolbarMode && shellPort !== null;
 
+  // Toolbar carrier (D12/D13): windowOnly session composed of the toolbar +
+  // content webviews through attachToolbarCarrier below. Direct mode keeps
+  // the single-webview window with the native sync defaults (D13): the title
+  // follows the document one-way; icon following is opt-in.
   const window = tray.extend(WebviewExt).createWebviewWindow({
-    url: toolbarUrl ?? config.url,
+    ...(toolbarReady ? { windowOnly: true } : { url: config.url }),
     width: config.window.width,
     height: config.window.height,
     title: config.appName,
     style: { appMode: true, autoHide: false, keepOnTop: false },
     ...devtools,
-    // D13 sync defaults project only onto the DIRECT window (toolbar windows
-    // set neither: one-way title following; icon following is opt-in).
-    ...(toolbarUrl === null
-      ? {
-          ...(titleFollows ? { titleSync: { documentToWindow: true } } : {}),
-          ...(iconFollows ? { iconSync: { faviconToWindow: true } } : {}),
-        }
-      : {}),
+    ...(toolbarReady ? {} : {
+      ...(titleFollows ? { titleSync: { documentToWindow: true } } : {}),
+      ...(iconFollows ? { iconSync: { faviconToWindow: true } } : {}),
+    }),
   });
   await window.show().catch(() => {});
 
-  // Tray reload (D11): reload the page in place through the evaluate channel.
+  let content = null;
+  if (toolbarReady) {
+    ({ content } = await attachToolbarCarrier(window, {
+      toolbarUrl: \`http://127.0.0.1:\${shellPort}/toolbar.html\`,
+      contentUrl: config.url,
+      titleFollows,
+      log: logNote,
+    }));
+  }
+
+  // Tray reload (D11): toolbar mode reloads the CONTENT webview natively
+  // (navigate to its current URL — no wrapper evaluate); direct mode reloads
+  // the page in place through the evaluate channel. The app never restarts.
   const reload = async () => {
     try {
+      if (content !== null) {
+        const { url } = await content.getUrl();
+        await content.navigate(url);
+        return;
+      }
       await window.evaluate("location.reload()");
     } catch { /* window gone */ }
   };

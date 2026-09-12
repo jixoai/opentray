@@ -178,9 +178,8 @@ export const es: Messages = {
     startupTerminal: "Mostrar terminal de inicio",
     startupTerminalHint:
       "Abre una ventana de terminal independiente cuando la app arranca, mostrando en vivo la salida PTY del comando (interactiva).",
-    addressBar: "Mostrar barra de direcciones",
-    addressBarHint:
-      "Muestra una barra de direcciones en la parte superior de la ventana del servicio (navegación gestionada por la Web Navigation API).",
+    addressBar: "Barra de navegación",
+      addressBarHint: "Compone una barra de navegación nativa (atrás/adelante/recargar/barra de direcciones) en la parte superior de la ventana; la página se carga directamente en su propio webview. Disponible para apps de URL y de comando.",
     smoothing: "Escalado suave (imageSmoothingEnabled)",
     smoothingHint:
       "El escalado de alta calidad está activado por defecto; desactívalo para iconos pixel-art de baja resolución y conservar bordes nítidos (se aplica al primer plano del icono de la app y al icono de la bandeja).",
@@ -249,6 +248,8 @@ export const es: Messages = {
     sniffing: "Detectando servicios HTTP… (no encontrar ninguno no impide crear la app)",
     portsSniffing: "Detectando puertos de escucha…",
     urlPlaceholder: "Introduce una URL para navegar",
+    siteIconPlaceholder: "Marcador del icono del sitio",
+    siteIconFallback: "Icono del sitio de reserva",
   },
   url: {
     fetch: "Obtener preajuste",

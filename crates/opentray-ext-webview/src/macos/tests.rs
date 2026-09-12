@@ -9,6 +9,8 @@ use super::style::{
     SetStylePlatformPayload, SetStyleWindowsPayload, WindowPlatformStyleState,
 };
 use super::*;
+use crate::bootstrap::webview_bridge_bootstrap_script;
+use crate::orchestration::{StyleFacts, ViewEvents, WindowOwner, DEFAULT_WEBVIEW_ID};
 use crate::{
     MetadataSyncSettings, WebviewBackgroundEffectState, WebviewBackgroundInput,
     WebviewBrowserPermissionDecision, WebviewBrowserPermissionFamily, WebviewBrowserPermissionRule,
@@ -16,6 +18,53 @@ use crate::{
     WebviewWindowIcon,
 };
 use std::process::Command;
+
+/// Minimal window-level bridge for tests that exercise listener routing,
+/// capabilities, and event emission without AppKit.
+fn test_bridge() -> NavigatorWindowBridge {
+    NavigatorWindowBridge {
+        views: Vec::new(),
+        content_view: None,
+        ipc_messages: VecDeque::new(),
+        permission_messages: VecDeque::new(),
+        window_events: VecDeque::new(),
+        next_ipc_message_id: 1,
+        next_permission_message_id: 1,
+        style: WindowStyleState::default(),
+        navigator_window: NavigatorWindowSettings::default(),
+        navigator_screen: NavigatorScreenSettings::default(),
+        navigator_tray: NavigatorTraySettings::default(),
+        metadata: WindowMetadataState {
+            title: DEFAULT_WINDOW_TITLE.to_string(),
+            icon: None,
+            sync_title: MetadataSyncSettings::default(),
+            sync_icon: MetadataSyncSettings::default(),
+        },
+        app_region_drag: AppRegionDragState::default(),
+        devtools_enabled: false,
+        download: WebviewDownloadSettings::default(),
+        native_api_policy: WebviewNativeApiPolicy::default(),
+        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
+        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
+        page_source: PageSourceState::default(),
+        page_access: PageCapabilityAccess::default(),
+        tray_bounds: None,
+        size_constraints: WindowSizeConstraints::default(),
+        layout: crate::layout::WindowLayoutState::default(),
+        layout_tracker: std::rc::Weak::new(),
+        channels: std::rc::Rc::new(std::cell::RefCell::new(crate::channels::SessionChannels::new(
+            crate::orchestration::WindowOwner {
+                app_id: "app-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                session_id: Some("session-1".to_string()),
+                window_id: "win-1".to_string(),
+            },
+        ))),
+        channel_loaded_views: std::collections::HashSet::new(),
+        channel_live_views: std::collections::HashSet::new(),
+        pending_channel_pushes: std::collections::HashMap::new(),
+    }
+}
 
 fn bootstrap_script(
     window_settings: NavigatorWindowSettings,
@@ -50,6 +99,9 @@ fn bootstrap_script_with_policy(
         icon_sync,
         &native_api_policy,
         &Default::default(),
+        false,
+        false,
+        "default",
     )
 }
 
@@ -69,6 +121,9 @@ fn bootstrap_script_with_permission_policy(
             default_src,
             remote_origins,
         },
+        false,
+        false,
+        "default",
     )
 }
 
@@ -1365,72 +1420,95 @@ fn window_style_state_serializes_keep_on_top() {
 }
 
 #[test]
-fn navigator_window_bridge_tracks_listener_ids() {
-    let mut bridge = NavigatorWindowBridge {
-        webview: None,
-        content_view: None,
+fn navigator_window_bridge_tracks_listener_ids_per_webview() {
+    let mut bridge = test_bridge();
+    bridge.views.push(WebViewBridge {
+        id: DEFAULT_WEBVIEW_ID.to_string(),
+        policy: opentray_spec::webview::WebviewBridgePolicy::default(),
+        webview: test_webview_pointer(),
         listeners: HashMap::new(),
-        ipc_messages: VecDeque::new(),
-        permission_messages: VecDeque::new(),
-        window_events: VecDeque::new(),
         next_event_id: 1,
-        next_ipc_message_id: 1,
-        next_permission_message_id: 1,
-        style: WindowStyleState {
-            app_mode: false,
-            frameless: false,
-            resizable: true,
-            resizable_override: None,
-            keep_on_top: false,
-            auto_hide: true,
-            opacity: 1.0,
-            background: WebviewWindowBackground::Opaque,
-            platform: WindowPlatformStyleState {
-                macos: MacosWindowStyleState {
-                    corner_radius: None,
-                },
-            },
-        },
-        navigator_window: NavigatorWindowSettings {
-            enabled: true,
-            bind_window_globals: false,
-            window_controls_overlay: false,
-        },
-        navigator_screen: NavigatorScreenSettings::default(),
-        navigator_tray: NavigatorTraySettings::default(),
-        metadata: WindowMetadataState {
-            title: DEFAULT_WINDOW_TITLE.to_string(),
-            icon: None,
-            sync_title: MetadataSyncSettings::default(),
-            sync_icon: MetadataSyncSettings::default(),
-        },
-        app_region_drag: AppRegionDragState::default(),
-        devtools_enabled: false,
-        download: WebviewDownloadSettings::default(),
-        native_api_policy: WebviewNativeApiPolicy::default(),
-        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
-        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
-        page_source: PageSourceState::default(),
-        page_access: PageCapabilityAccess::default(),
-        tray_bounds: None,
-        size_constraints: WindowSizeConstraints::default(),
-    };
+    });
+    bridge.views.push(WebViewBridge {
+        id: "toolbar".to_string(),
+        policy: opentray_spec::webview::WebviewBridgePolicy::default(),
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
 
     let capabilities = bridge
         .capabilities_json()
         .expect("macOS capabilities should serialize");
     assert_eq!(capabilities["focus"], Value::Bool(true));
     assert_eq!(capabilities["resizable"], Value::Bool(true));
+    // Orchestration capability fields serialize on the page bridge surface.
+    assert_eq!(capabilities["multiwebview"], Value::Bool(true));
+    assert_eq!(capabilities["webviewNavigation"], Value::Bool(true));
+    assert_eq!(capabilities["focusWebview"], Value::Bool(true));
+    // D26: auxiliary popup windows are a capability fact on both platforms'
+    // DTOs.
+    assert_eq!(capabilities["popupWindows"], Value::Bool(true));
+    assert_eq!(
+        capabilities["webviewPushEvents"],
+        // geometryChange joined the unified push family with the layout
+        // batch (D23): layout commits and overlay metric changes recompute
+        // per-view projections natively. loadState joined with D24: native
+        // page-load/failure callbacks and estimatedProgress KVO push
+        // straight into the event outbox.
+        serde_json::json!([
+            "urlChange",
+            "titleChange",
+            "focused",
+            "geometryChange",
+            "loadState"
+        ])
+    );
 
-    let event_id = bridge.add_listener("resized".to_string(), 42);
+    // Listener ids are per webview; routing returns the owning view.
+    let event_id = bridge
+        .add_listener("toolbar", "resized".to_string(), 42)
+        .expect("toolbar listener registers");
+    let other_id = bridge
+        .add_listener(DEFAULT_WEBVIEW_ID, "resized".to_string(), 43)
+        .expect("primary listener registers");
     assert_eq!(event_id, 1);
-    assert_eq!(bridge.listeners_for("resized").len(), 1);
+    assert_eq!(other_id, 1);
+    let routed = bridge.listeners_for("resized");
+    assert_eq!(routed.len(), 2);
+    assert!(routed.iter().any(|(view, _)| view == "toolbar"));
+    // Per-view routing (D23): geometry pushes address exactly one page's
+    // listeners and never fan out to unrelated webviews.
+    let toolbar_only = bridge.listeners_for_view("toolbar", "resized");
+    assert_eq!(toolbar_only.len(), 1);
+    assert!(toolbar_only.iter().all(|(view, _)| view == "toolbar"));
+    assert!(bridge.listeners_for_view("toolbar", "overlay.geometrychange").is_empty());
+    assert!(bridge.listeners_for_view("missing", "resized").is_empty());
     assert!(bridge.has_listener("resized"));
     assert!(!bridge.has_listener("overlay.geometrychange"));
 
-    bridge.remove_listener("resized", event_id);
-    assert!(bridge.listeners_for("resized").is_empty());
+    bridge.remove_listener("toolbar", "resized", event_id);
+    assert_eq!(bridge.listeners_for("resized").len(), 1);
+    assert!(bridge.has_listener("resized"));
+    bridge.remove_listener(DEFAULT_WEBVIEW_ID, "resized", other_id);
     assert!(!bridge.has_listener("resized"));
+
+    // Unknown webviews cannot register listeners.
+    assert_eq!(bridge.add_listener("missing", "resized".to_string(), 44), None);
+
+    // Removing a view drops its listeners and transport entry together.
+    bridge
+        .add_listener("toolbar", "moved".to_string(), 45)
+        .expect("listener");
+    bridge.remove_view("toolbar");
+    assert!(!bridge.has_listener("moved"));
+    assert!(bridge.view_webview("toolbar").is_none());
+}
+
+/// A non-dereferenced stand-in pointer: tests only exercise id routing, not
+/// script evaluation.
+fn test_webview_pointer() -> NonNull<WebView> {
+    NonNull::dangling()
 }
 
 #[test]
@@ -1498,55 +1576,7 @@ fn multiple_downloads_policy_respects_exact_remote_allow_rule_on_macos() {
 
 #[test]
 fn emit_window_event_ignores_unlistened_download_events_on_macos() {
-    let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
-        webview: None,
-        content_view: None,
-        listeners: HashMap::new(),
-        ipc_messages: VecDeque::new(),
-        permission_messages: VecDeque::new(),
-        window_events: VecDeque::new(),
-        next_event_id: 1,
-        next_ipc_message_id: 1,
-        next_permission_message_id: 1,
-        style: WindowStyleState {
-            app_mode: false,
-            frameless: false,
-            resizable: true,
-            resizable_override: None,
-            keep_on_top: false,
-            auto_hide: true,
-            opacity: 1.0,
-            background: WebviewWindowBackground::Opaque,
-            platform: WindowPlatformStyleState {
-                macos: MacosWindowStyleState {
-                    corner_radius: None,
-                },
-            },
-        },
-        navigator_window: NavigatorWindowSettings {
-            enabled: true,
-            bind_window_globals: false,
-            window_controls_overlay: false,
-        },
-        navigator_screen: NavigatorScreenSettings::default(),
-        navigator_tray: NavigatorTraySettings::default(),
-        metadata: WindowMetadataState {
-            title: DEFAULT_WINDOW_TITLE.to_string(),
-            icon: None,
-            sync_title: MetadataSyncSettings::default(),
-            sync_icon: MetadataSyncSettings::default(),
-        },
-        app_region_drag: AppRegionDragState::default(),
-        devtools_enabled: false,
-        download: WebviewDownloadSettings::default(),
-        native_api_policy: WebviewNativeApiPolicy::default(),
-        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
-        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
-        page_source: PageSourceState::default(),
-        page_access: PageCapabilityAccess::default(),
-        tray_bounds: None,
-        size_constraints: WindowSizeConstraints::default(),
-    }));
+    let bridge = Rc::new(RefCell::new(test_bridge()));
 
     emit_window_event(
         &bridge,
@@ -1563,55 +1593,7 @@ fn emit_window_event_ignores_unlistened_download_events_on_macos() {
 
 #[test]
 fn app_region_drag_interaction_window_event_conserves_native_source() {
-    let bridge = Rc::new(RefCell::new(NavigatorWindowBridge {
-        webview: None,
-        content_view: None,
-        listeners: HashMap::new(),
-        ipc_messages: VecDeque::new(),
-        permission_messages: VecDeque::new(),
-        window_events: VecDeque::new(),
-        next_event_id: 1,
-        next_ipc_message_id: 1,
-        next_permission_message_id: 1,
-        style: WindowStyleState {
-            app_mode: false,
-            frameless: false,
-            resizable: true,
-            resizable_override: None,
-            keep_on_top: false,
-            auto_hide: true,
-            opacity: 1.0,
-            background: WebviewWindowBackground::Opaque,
-            platform: WindowPlatformStyleState {
-                macos: MacosWindowStyleState {
-                    corner_radius: None,
-                },
-            },
-        },
-        navigator_window: NavigatorWindowSettings {
-            enabled: true,
-            bind_window_globals: false,
-            window_controls_overlay: false,
-        },
-        navigator_screen: NavigatorScreenSettings::default(),
-        navigator_tray: NavigatorTraySettings::default(),
-        metadata: WindowMetadataState {
-            title: DEFAULT_WINDOW_TITLE.to_string(),
-            icon: None,
-            sync_title: MetadataSyncSettings::default(),
-            sync_icon: MetadataSyncSettings::default(),
-        },
-        app_region_drag: AppRegionDragState::default(),
-        devtools_enabled: false,
-        download: WebviewDownloadSettings::default(),
-        native_api_policy: WebviewNativeApiPolicy::default(),
-        browser_permission_policy: WebviewBrowserPermissionPolicy::default(),
-        permission_manager_policy: WebviewPermissionManagerPolicy::default(),
-        page_source: PageSourceState::default(),
-        page_access: PageCapabilityAccess::default(),
-        tray_bounds: None,
-        size_constraints: WindowSizeConstraints::default(),
-    }));
+    let bridge = Rc::new(RefCell::new(test_bridge()));
 
     queue_window_interaction_event(&Rc::downgrade(&bridge), true);
 
@@ -1688,6 +1670,1363 @@ fn initial_window_origin_clamps_to_visible_frame() {
 
     assert_eq!(origin.x, 1368.0);
     assert_eq!(origin.y, 2234.0);
+}
+
+#[test]
+fn per_webview_bridge_policy_defaults_to_no_bootstrap() {
+    use opentray_spec::webview::WebviewBridgePolicy;
+
+    // A policy-less child (every field false) gets no script at all.
+    assert_eq!(
+        webview_bridge_bootstrap_script(WebviewBridgePolicy::default(), "content"),
+        None
+    );
+
+    // The toolbar carrier policy projects only the surfaces it names.
+    let toolbar = webview_bridge_bootstrap_script(
+        WebviewBridgePolicy {
+            webview_id: true,
+            message_channels: true,
+            ..WebviewBridgePolicy::default()
+        },
+        "toolbar",
+    )
+    .expect("toolbar policy injects the bridge");
+    assert!(toolbar.contains("navigator, \"window\""));
+    assert!(toolbar.contains("\"toolbar\""), "the webview id rides the script");
+    assert!(
+        toolbar.contains("opentrayWebview"),
+        "the message-channel surface is injected"
+    );
+
+    // navigatorWindow/navigatorScreen gate the corresponding surfaces.
+    let window_only = webview_bridge_bootstrap_script(
+        WebviewBridgePolicy {
+            navigator_window: true,
+            ..WebviewBridgePolicy::default()
+        },
+        "content",
+    )
+    .expect("navigator window policy injects");
+    assert!(window_only.contains("navigator, \"window\""));
+    let screen_only = webview_bridge_bootstrap_script(
+        WebviewBridgePolicy {
+            navigator_screen: true,
+            ..WebviewBridgePolicy::default()
+        },
+        "content",
+    )
+    .expect("navigator screen policy injects");
+    assert!(screen_only.contains("opentray.screen"));
+}
+
+#[test]
+fn per_view_event_handlers_push_to_outbox_not_the_drain_queue() {
+    let owner = WindowOwner {
+        app_id: "app-1".to_string(),
+        tray_id: "tray-1".to_string(),
+        session_id: Some("session-1".to_string()),
+        window_id: "win-1".to_string(),
+    };
+    let events = Rc::new(RefCell::new(ViewEvents::new(
+        "content",
+        opentray_spec::webview::WebviewBridgePolicy::default(),
+    )));
+    events.borrow_mut().subscribe(&[
+        opentray_spec::webview::WebviewEventKind::UrlChange,
+        opentray_spec::webview::WebviewEventKind::TitleChange,
+    ]);
+    let outbox = Rc::new(RefCell::new(VecDeque::new()));
+    let bridge = Rc::new(RefCell::new(test_bridge()));
+
+    // Drive the exact handler bodies the native observers call.
+    handle_view_url_started(&events, &Rc::downgrade(&outbox), &owner, "https://example.org/a");
+    handle_view_title_changed(&events, &Rc::downgrade(&outbox), &owner, "Example");
+
+    // Frames landed in the push outbox with the frozen schema.
+    let frames: Vec<_> = outbox.borrow_mut().drain(..).collect();
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0].kind, opentray_spec::webview::WebviewEventKind::UrlChange);
+    assert_eq!(frames[0].webview_id, "content");
+    assert_eq!(frames[0].owner.session_id, "session-1");
+    assert!(frames[0].is_coherent());
+    assert_eq!(frames[1].kind, opentray_spec::webview::WebviewEventKind::TitleChange);
+    assert!(frames[1].is_coherent());
+
+    // The legacy 16 ms window-event drain queue stays empty: the unified
+    // event family never rides the polling path.
+    assert!(bridge.borrow().window_events.is_empty());
+}
+
+#[test]
+fn bridge_style_facts_snapshot_feeds_the_exclusivity_checkpoints() {
+    let mut bridge = test_bridge();
+    assert_eq!(
+        bridge.style_facts(),
+        StyleFacts {
+            frameless: false,
+            translucent_background: false,
+        }
+    );
+
+    bridge.style.frameless = true;
+    assert!(bridge.style_facts().affects_translucency());
+
+    bridge.style.frameless = false;
+    bridge.style.background = WebviewWindowBackground::PlatformMaterial {
+        material: "hudWindow".to_string(),
+        state: WebviewBackgroundEffectState::Active,
+    };
+    assert!(bridge.style_facts().affects_translucency());
+
+    bridge.style.background = WebviewWindowBackground::Transparent;
+    assert!(bridge.style_facts().affects_translucency());
+    bridge.style.background = WebviewWindowBackground::Opaque;
+    assert!(!bridge.style_facts().affects_translucency());
+}
+
+#[test]
+fn style_patch_checkpoint_two_rejects_multiwebview_windows_before_mutation() {
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        eprintln!("skipping AppKit style-patch checkpoint test outside the main thread");
+        return;
+    };
+    let window = unsafe {
+        objc2_app_kit::NSWindow::initWithContentRect_styleMask_backing_defer(
+            objc2_app_kit::NSWindow::alloc(mtm),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(320.0, 200.0)),
+            framed_window_style_mask(false, true, false),
+            objc2_app_kit::NSBackingStoreType::Buffered,
+            true,
+        )
+    };
+    let bridge = Rc::new(RefCell::new(test_bridge()));
+    bridge.borrow_mut().views.push(WebViewBridge {
+        id: "toolbar".to_string(),
+        policy: Default::default(),
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
+    bridge.borrow_mut().views.push(WebViewBridge {
+        id: "content".to_string(),
+        policy: Default::default(),
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
+
+    let error = apply_window_style_patch(
+        &bridge,
+        &window,
+        SetStylePayload {
+            frameless: Some(true),
+            platform: Some(SetStylePlatformPayload {
+                macos: None,
+                windows: Some(SetStyleWindowsPayload::default()),
+                linux: None,
+            }),
+            ..SetStylePayload::default()
+        },
+    )
+    .expect_err("frameless on a multi-webview window must reject");
+    assert!(error.to_string().contains("multiwebview_unsupported_style"));
+    // Rejected before mutation: the framed style survives.
+    assert!(!bridge.borrow().style.frameless);
+
+    let error = apply_window_style_patch(
+        &bridge,
+        &window,
+        SetStylePayload {
+            background: Some(WebviewBackgroundInput::Keyword("hudWindow".to_string())),
+            ..SetStylePayload::default()
+        },
+    )
+    .expect_err("material on a multi-webview window must reject");
+    assert!(error.to_string().contains("multiwebview_unsupported_style"));
+    assert_eq!(
+        bridge.borrow().style.background,
+        WebviewWindowBackground::Opaque
+    );
+}
+
+#[test]
+fn style_patch_checkpoint_allows_single_webview_style_changes() {
+    // The pure decision covers this row (see orchestration tests); single
+    // webview windows keep today's unrestricted style changes.
+    assert!(crate::orchestration::style_change_allowed(
+        crate::orchestration::StyleFacts {
+            frameless: true,
+            translucent_background: true,
+        },
+        1,
+    )
+    .is_ok());
+}
+
+/// Full native orchestration smoke over the real AppKit/wry path: windowOnly
+/// show, sibling children via `build_as_child`, style-exclusivity checkpoint
+/// (1), list/subscribe/focus edges, precise session cleanup. Guarded by the
+/// repo's established pattern: AppKit window creation requires the main
+/// thread, so this test skips under ordinary cargo test threading while the
+/// pure orchestration rows carry the acceptance matrix.
+#[test]
+fn runtime_orchestration_smoke_on_main_thread() {
+    use crate::HandledCommand;
+    use objc2::MainThreadMarker;
+    use opentray_spec::webview::{
+        WebviewBridgePolicy, WebviewEventKind, WebviewOrchestrationCommand,
+    };
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        eprintln!("skipping AppKit orchestration smoke outside the main thread");
+        return;
+    };
+    let _ = mtm;
+    let mut runtime = MacosWebviewRuntime::default();
+    runtime.set_app_id("app-1");
+
+    let owner = opentray_spec::webview::WebviewOwnerTuple {
+        app_id: "app-1".to_string(),
+        tray_id: "tray-1".to_string(),
+        session_id: "session-1".to_string(),
+    };
+    fn show_window_only(
+        runtime: &mut MacosWebviewRuntime,
+        tray_id: &str,
+        session_id: &str,
+        window_id: &str,
+    ) -> crate::HandledCommand {
+        runtime
+            .handle(
+                tray_id,
+                crate::WebviewCommand::Show {
+                    html: None,
+                    url: None,
+                    width: Some(480.0),
+                    height: Some(320.0),
+                    tray_bounds: None,
+                    fallback_rect: None,
+                    show_settings: crate::WebviewShowSettings::default(),
+                    owner_session_id: Some(session_id.to_string()),
+                    window_id: Some(window_id.to_string()),
+                    window_only: true,
+                },
+            )
+            .expect("windowOnly show")
+    }
+    fn orchestrate(
+        runtime: &mut MacosWebviewRuntime,
+        tray_id: &str,
+        command: WebviewOrchestrationCommand,
+    ) -> crate::HandledCommand {
+        runtime
+            .handle(
+                tray_id,
+                crate::WebviewCommand::Orchestration(Box::new(command)),
+            )
+            .expect("orchestration command")
+    }
+
+    let shown = show_window_only(&mut runtime, "tray-1", "session-1", "win-1");
+    assert_eq!(shown.result["type"], "shown");
+
+    // Two sibling webviews compose one window.
+    let toolbar_policy = WebviewBridgePolicy {
+        webview_id: true,
+        message_channels: true,
+        ..WebviewBridgePolicy::default()
+    };
+    let create = |webview_id: &str, url: &str, policy: Option<WebviewBridgePolicy>| {
+        WebviewOrchestrationCommand::CreateWebview {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+            webview_id: webview_id.to_string(),
+            url: Some(url.to_string()),
+            html: None,
+            bridge: policy,
+        }
+    };
+    let created = orchestrate(
+        &mut runtime,
+        "tray-1",
+        create("toolbar", "https://example.org/toolbar", Some(toolbar_policy)),
+    );
+    assert_eq!(created.result["type"], "webview-ack");
+    let created = orchestrate(
+        &mut runtime,
+        "tray-1",
+        create("content", "https://example.org", None),
+    );
+    assert_eq!(created.result["type"], "webview-ack");
+
+    let listed = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::ListWebviews {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+        },
+    );
+    assert_eq!(listed.result["type"], "list-webviews-result");
+    assert_eq!(listed.result["webviews"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        listed.result["webviews"][0]["bridge"]["webviewId"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        listed.result["webviews"][1]["bridge"]["messageChannels"],
+        Value::Bool(false)
+    );
+
+    // Subscribe, establish `content` as the focused view, then focus-toolbar
+    // emits both focus edges with the full frame identity and per-view
+    // sequences (the scenario's precondition is content holding focus).
+    for webview_id in ["toolbar", "content"] {
+        orchestrate(
+            &mut runtime,
+            "tray-1",
+            WebviewOrchestrationCommand::SubscribeWebviewEvents {
+                owner: owner.clone(),
+                window_id: "win-1".to_string(),
+                webview_id: webview_id.to_string(),
+                kinds: vec![WebviewEventKind::Focused],
+            },
+        );
+    }
+    let content_focused = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::FocusWebview {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+            webview_id: "content".to_string(),
+        },
+    );
+    assert!(
+        content_focused.events.iter().any(|frame| frame.webview_id == "content"),
+        "content gains initial focus"
+    );
+    let focused = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::FocusWebview {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+            webview_id: "toolbar".to_string(),
+        },
+    );
+    assert_eq!(focused.result["type"], "webview-ack");
+    let edges: std::collections::HashMap<String, bool> = focused
+        .events
+        .iter()
+        .map(|frame| {
+            (
+                frame.webview_id.clone(),
+                matches!(
+                    frame.payload,
+                    opentray_spec::webview::WebviewEventPayload::Focused { focused: true }
+                ),
+            )
+        })
+        .collect();
+    assert_eq!(edges.get("toolbar"), Some(&true), "toolbar gains focus");
+    assert_eq!(edges.get("content"), Some(&false), "content loses focus");
+
+    // A second window session for the same tray is the typed rejection and
+    // leaves the live session untouched.
+    let rejected = runtime
+        .handle(
+            "tray-1",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: None,
+                height: None,
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: crate::WebviewShowSettings::default(),
+                owner_session_id: Some("session-2".to_string()),
+                window_id: Some("win-2".to_string()),
+                window_only: true,
+            },
+        )
+        .expect_err("second window session must reject at the ABI level");
+    assert!(rejected.to_string().contains("tray_session_active"));
+    let listed = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::ListWebviews {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+        },
+    );
+    assert_eq!(listed.result["webviews"].as_array().map(Vec::len), Some(2));
+
+    // Distinct trays coexist; closing session-1 removes exactly tray-1.
+    show_window_only(&mut runtime, "tray-2", "session-9", "win-9");
+    runtime.session_closed("session-1");
+    // The destroyed session's window is gone: further orchestration on it is
+    // the typed unknown-view rejection.
+    let result = orchestrate(
+        &mut runtime,
+        "tray-1",
+        WebviewOrchestrationCommand::ListWebviews {
+            owner: owner.clone(),
+            window_id: "win-1".to_string(),
+        },
+    );
+    assert_eq!(result.result["error"]["code"], "unknown_view");
+    // session-9's window on tray-2 remains untouched.
+    let HandledCommand { result, .. } = orchestrate(
+        &mut runtime,
+        "tray-2",
+        WebviewOrchestrationCommand::ListWebviews {
+            owner: opentray_spec::webview::WebviewOwnerTuple {
+                app_id: "app-1".to_string(),
+                tray_id: "tray-2".to_string(),
+                session_id: "session-9".to_string(),
+            },
+            window_id: "win-9".to_string(),
+        },
+    );
+    assert_eq!(result["type"], "list-webviews-result");
+    runtime.session_closed("session-9");
+}
+
+/// add-webview-orchestration P2 walk regression (2026-09-11): a re-show on a
+/// POPULATED windowOnly session (children already registered in the bridge
+/// view list) must stay a compatible re-show, not be misrejected as a
+/// windowOnly change — the toolbar carrier's native title projection
+/// (`show({title, windowOnly})` → `apply_reused_show_updates`) depends on it.
+/// `session_has_no_primary` previously consulted `bridge.views.first()`,
+/// which a child registration flips.
+#[test]
+fn window_only_reshow_with_title_on_populated_session() {
+    use objc2::MainThreadMarker;
+    use opentray_spec::webview::{
+        WebviewBridgePolicy, WebviewOrchestrationCommand,
+    };
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        eprintln!("skipping AppKit windowOnly re-show regression outside the main thread");
+        return;
+    };
+    let _ = mtm;
+    let mut runtime = MacosWebviewRuntime::default();
+    runtime.set_app_id("app-reshow");
+
+    let owner = opentray_spec::webview::WebviewOwnerTuple {
+        app_id: "app-reshow".to_string(),
+        tray_id: "tray-reshow".to_string(),
+        session_id: "session-reshow".to_string(),
+    };
+    // windowOnly bootstrap.
+    runtime
+        .handle(
+            "tray-reshow",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: Some(480.0),
+                height: Some(320.0),
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: crate::WebviewShowSettings::default(),
+                owner_session_id: Some("session-reshow".to_string()),
+                window_id: Some("win-reshow".to_string()),
+                window_only: true,
+            },
+        )
+        .expect("windowOnly show");
+    // Populate the session with children (toolbar + content), so the bridge
+    // view list is non-empty.
+    for (webview_id, policy) in [
+        ("toolbar", Some(WebviewBridgePolicy {
+            webview_id: true,
+            message_channels: true,
+            ..WebviewBridgePolicy::default()
+        })),
+        ("content", None),
+    ] {
+        runtime
+            .handle(
+                "tray-reshow",
+                crate::WebviewCommand::Orchestration(Box::new(
+                    WebviewOrchestrationCommand::CreateWebview {
+                        owner: owner.clone(),
+                        window_id: "win-reshow".to_string(),
+                        webview_id: webview_id.to_string(),
+                        url: Some("about:blank".to_string()),
+                        html: None,
+                        bridge: policy,
+                    },
+                )),
+            )
+            .expect("create child");
+    }
+    // Regression: re-show carrying windowOnly + a title is the compatible
+    // title-projection path and must succeed.
+    let mut title_settings = crate::WebviewShowSettings::default();
+    title_settings.window.title = Some("Projected Title".to_string());
+    runtime
+        .handle(
+            "tray-reshow",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: None,
+                height: None,
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: title_settings,
+                owner_session_id: Some("session-reshow".to_string()),
+                window_id: Some("win-reshow".to_string()),
+                window_only: true,
+            },
+        )
+        .expect("re-show with title on populated windowOnly session");
+    // The native window title actually took the projected value.
+    let session = runtime
+        .sessions
+        .get("tray-reshow")
+        .expect("session alive after re-show");
+    assert_eq!(session.window.title().to_string(), "Projected Title");
+    // The guard direction still holds: a re-show WITHOUT windowOnly on a
+    // windowOnly session is the typed incompatibility.
+    let rejected = runtime
+        .handle(
+            "tray-reshow",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: None,
+                height: None,
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: crate::WebviewShowSettings::default(),
+                owner_session_id: Some("session-reshow".to_string()),
+                window_id: Some("win-reshow".to_string()),
+                window_only: false,
+            },
+        )
+        .expect_err("re-show without windowOnly must stay rejected");
+    assert!(rejected.to_string().contains("windowOnly"));
+    runtime.session_closed("session-reshow");
+}
+
+/// Message-channel bootstrap script with an explicit channel policy
+/// (mirrors what `webview_bridge_bootstrap_script` generates for a
+/// bridged child).
+fn channel_bootstrap_script(
+    webview_id: &str,
+    message_channels: bool,
+    webview_id_enabled: bool,
+) -> String {
+    navigator_window_bootstrap_script(
+        NavigatorWindowSettings::default(),
+        false,
+        NavigatorScreenSettings::default(),
+        NavigatorTraySettings::default(),
+        MetadataSyncSettings::default(),
+        MetadataSyncSettings::default(),
+        &WebviewNativeApiPolicy::default(),
+        &Default::default(),
+        message_channels,
+        webview_id_enabled,
+        webview_id,
+    )
+}
+
+#[test]
+fn channel_bootstrap_gates_opentray_webview_on_the_policy() {
+    // No policy at all: the page never sees the surface.
+    let script = channel_bootstrap_script("content", false, false);
+    let exposed = run_node_probe(
+        &script,
+        r#"
+return { surface: typeof navigator.opentrayWebview };
+"#,
+    );
+    assert_eq!(exposed["surface"], Value::String("undefined".to_string()));
+
+    // webviewId only: the id is exposed, channel methods are not.
+    let script = channel_bootstrap_script("toolbar", false, true);
+    let exposed = run_node_probe(
+        &script,
+        r#"
+const bridge = navigator.opentrayWebview;
+return {
+  id: bridge && bridge.id,
+  keys: bridge ? Object.keys(bridge).sort() : null
+};
+"#,
+    );
+    assert_eq!(exposed["id"], Value::String("toolbar".to_string()));
+    assert_eq!(exposed["keys"], serde_json::json!(["id"]));
+}
+
+#[test]
+fn channel_bootstrap_endpoint_surface_and_ipc_shapes() {
+    let script = channel_bootstrap_script("toolbar", true, true);
+    let probe = run_node_probe(
+        &script,
+        r#"
+const takeMessage = (cmd) => {
+  const index = messages.findIndex((message) => message.cmd === cmd);
+  return messages.splice(index, 1)[0];
+};
+const bridge = navigator.opentrayWebview;
+const created = bridge.createMessageChannel({ target: "sidebar" });
+const request = takeMessage("createMessageChannel");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(request.callback, { channelId: "ch-9" });
+const endpoint = await created;
+const postPromise = endpoint.post({ type: "navigate", url: "https://example.com" });
+const postRequest = takeMessage("postMessage");
+const closePromise = endpoint.close();
+const closeRequest = takeMessage("closeMessageChannel");
+const destroyPromise = endpoint.destroy();
+const destroyRequest = takeMessage("destroyMessageChannel");
+const listed = bridge.listMessageChannels();
+const listRequest = takeMessage("listMessageChannels");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(listRequest.callback, { channels: [{ channelId: "ch-9", state: "open", endpoints: [{ side: "creator" }, { side: "target" }] }] });
+return {
+  id: bridge.id,
+  namespace: request.namespace,
+  createPayload: request.payload,
+  endpointKeys: Object.keys(endpoint).sort(),
+  endpointId: endpoint.id,
+  postPayload: postRequest.payload,
+  closePayload: closeRequest.payload,
+  destroyPayload: destroyRequest.payload,
+  listed: await listed,
+  settled: [postPromise, closePromise, destroyPromise].length
+};
+"#,
+    );
+    assert_eq!(probe["id"], Value::String("toolbar".to_string()));
+    assert_eq!(probe["namespace"], Value::String("opentray.webview".to_string()));
+    assert_eq!(
+        probe["createPayload"],
+        serde_json::json!({ "target": "sidebar" })
+    );
+    // The endpoint exposes exactly the frozen surface plus its id.
+    assert_eq!(
+        probe["endpointKeys"],
+        serde_json::json!(["close", "destroy", "id", "onClose", "onMessage", "post"])
+    );
+    assert_eq!(probe["endpointId"], Value::String("ch-9".to_string()));
+    assert_eq!(
+        probe["postPayload"],
+        serde_json::json!({ "channelId": "ch-9", "payload": { "type": "navigate", "url": "https://example.com" } })
+    );
+    assert_eq!(
+        probe["closePayload"],
+        serde_json::json!({ "channelId": "ch-9" })
+    );
+    assert_eq!(
+        probe["destroyPayload"],
+        serde_json::json!({ "channelId": "ch-9" })
+    );
+    assert_eq!(
+        probe["listed"][0]["endpoints"],
+        serde_json::json!([{ "side": "creator" }, { "side": "target" }])
+    );
+}
+
+#[test]
+fn channel_bootstrap_pushes_buffer_until_handlers_register() {
+    let script = channel_bootstrap_script("sidebar", true, true);
+    let probe = run_node_probe(
+        &script,
+        r#"
+const internals = window.__OPENTRAY_WINDOW_INTERNALS__;
+// The created push lands before the page registers its handler.
+internals.channelCreated("ch-1");
+let createdId = null;
+const received = [];
+const closures = [];
+navigator.opentrayWebview.onCreatedMessageChannel((endpoint) => {
+  createdId = endpoint.id;
+  endpoint.onMessage((payload) => received.push(payload));
+  endpoint.onClose((event) => closures.push(event));
+});
+internals.channelMessage("ch-1", { type: "navigate" });
+internals.channelMessage("ch-1", "reload");
+// Exactly one closure observation; later transitions stay silent.
+internals.channelClosed("ch-1", "explicit");
+internals.channelClosed("ch-1", "queue_overflow");
+return { createdId, received, closures };
+"#,
+    );
+    assert_eq!(probe["createdId"], Value::String("ch-1".to_string()));
+    assert_eq!(
+        probe["received"],
+        serde_json::json!([{ "type": "navigate" }, "reload"])
+    );
+    assert_eq!(probe["closures"], serde_json::json!([{ "reason": "explicit" }]));
+}
+
+/// Port-style buffering (D11 anti-silent-drop): pushes that outrun the
+/// page's subscriptions — a fast peer posting immediately after create,
+/// or a closure landing before `onClose` registers — queue in order and
+/// flush through the first subscription. A message arriving after the
+/// closure notice is dropped, never smuggled through a fresh handler.
+#[test]
+fn channel_bootstrap_buffers_pushes_until_the_endpoint_subscribes() {
+    let script = channel_bootstrap_script("sidebar", true, true);
+    let probe = run_node_probe(
+        &script,
+        r#"
+const internals = window.__OPENTRAY_WINDOW_INTERNALS__;
+// Created push plus two messages land before the page registers
+// anything (the peer posted immediately after create).
+internals.channelCreated("ch-2");
+internals.channelMessage("ch-2", "first");
+internals.channelMessage("ch-2", { type: "navigate" });
+// The closure notice also outruns the page.
+internals.channelClosed("ch-2", "peer_webview_destroyed");
+// A late message after the closure notice never delivers.
+internals.channelMessage("ch-2", "ghost");
+let createdId = null;
+const received = [];
+const closures = [];
+navigator.opentrayWebview.onCreatedMessageChannel((endpoint) => {
+  createdId = endpoint.id;
+  endpoint.onMessage((payload) => received.push(payload));
+  endpoint.onClose((event) => closures.push(event));
+});
+// Registering a second message handler later does not replay the
+// already-flushed backlog.
+const second = [];
+internals.channelMessage("ch-2", "after-closure");
+const endpointsHeld = [];
+navigator.opentrayWebview.onCreatedMessageChannel((endpoint) => {
+  endpointsHeld.push(endpoint.id);
+});
+return { createdId, received, closures, second };
+"#,
+    );
+    assert_eq!(probe["createdId"], Value::String("ch-2".to_string()));
+    assert_eq!(
+        probe["received"],
+        serde_json::json!(["first", { "type": "navigate" }]),
+        "messages that outran the subscription flush in FIFO order"
+    );
+    assert_eq!(
+        probe["closures"],
+        serde_json::json!([{ "reason": "peer_webview_destroyed" }]),
+        "the buffered closure notice observes exactly once on registration"
+    );
+    assert_eq!(
+        probe["second"],
+        serde_json::json!([]),
+        "no backlog replays into later subscriptions"
+    );
+}
+
+/// A bridge with three views: `toolbar` and `sidebar` carry the
+/// message-channel policy, `content` is bridgeless (dangling pointers —
+/// these tests never evaluate scripts because no view is page-live).
+fn channel_test_bridge() -> Rc<RefCell<NavigatorWindowBridge>> {
+    use opentray_spec::webview::WebviewBridgePolicy;
+    let mut bridge = test_bridge();
+    for (id, policy) in [
+        (
+            "toolbar",
+            WebviewBridgePolicy {
+                webview_id: true,
+                message_channels: true,
+                ..WebviewBridgePolicy::default()
+            },
+        ),
+        (
+            "sidebar",
+            WebviewBridgePolicy {
+                message_channels: true,
+                ..WebviewBridgePolicy::default()
+            },
+        ),
+        ("content", WebviewBridgePolicy::default()),
+    ] {
+        bridge.views.push(WebViewBridge {
+            id: id.to_string(),
+            policy,
+            webview: test_webview_pointer(),
+            listeners: HashMap::new(),
+            next_event_id: 1,
+        });
+    }
+    Rc::new(RefCell::new(bridge))
+}
+
+fn dispatch_channel(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    source: &str,
+    cmd: &str,
+    payload: Value,
+) -> Result<Value, crate::orchestration::OrchestrationError> {
+    super::bridge::dispatch_webview_channel_command(bridge, source, cmd, payload)
+}
+
+#[test]
+fn page_channel_commands_enforce_bridge_policy_and_target_authority() {
+    use opentray_spec::webview::OrchestrationErrorCode;
+
+    let bridge = channel_test_bridge();
+
+    // A bridgeless page (raw ipc without the surface) rejects with the
+    // typed bridge_required code.
+    let error = dispatch_channel(
+        &bridge,
+        "content",
+        "createMessageChannel",
+        json!({ "target": "toolbar" }),
+    )
+    .expect_err("bridgeless source");
+    assert_eq!(error.code(), OrchestrationErrorCode::BridgeRequired);
+
+    // Unknown target rejects unknown_view with zero channel state.
+    let error = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "createMessageChannel",
+        json!({ "target": "missing" }),
+    )
+    .expect_err("unknown target");
+    assert_eq!(error.code(), OrchestrationErrorCode::UnknownView);
+
+    // The host cannot be targeted: "host" is not a webview id.
+    let error = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "createMessageChannel",
+        json!({ "target": "host" }),
+    )
+    .expect_err("host is not targetable");
+    assert_eq!(error.code(), OrchestrationErrorCode::UnknownView);
+
+    // A bridgeless target rejects bridge_required.
+    let error = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "createMessageChannel",
+        json!({ "target": "content" }),
+    )
+    .expect_err("bridgeless target");
+    assert_eq!(error.code(), OrchestrationErrorCode::BridgeRequired);
+
+    // The registry stayed empty through every rejection.
+    assert!(
+        bridge
+            .borrow()
+            .channels
+            .borrow()
+            .list_for_host(&channel_owner_tuple())
+            .unwrap()
+            .is_empty(),
+        "rejections leave zero partial state"
+    );
+}
+
+fn channel_owner_tuple() -> opentray_spec::webview::WebviewOwnerTuple {
+    opentray_spec::webview::WebviewOwnerTuple {
+        app_id: "app-1".to_string(),
+        tray_id: "tray-1".to_string(),
+        session_id: "session-1".to_string(),
+    }
+}
+
+#[test]
+fn page_created_channel_posts_page_to_page_with_pending_delivery() {
+    use opentray_spec::channel::ChannelEndpointSide;
+
+    let bridge = channel_test_bridge();
+
+    // Page a creates a channel to sibling page b (D10: in-session creation
+    // is legal for bridged pages).
+    let created = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "createMessageChannel",
+        json!({ "target": "sidebar" }),
+    )
+    .expect("page-created channel");
+    let channel_id = created["channelId"].as_str().unwrap().to_string();
+
+    // The created push for the target page is held back until the target
+    // finished its first page load (never in this fixture).
+    let pending = bridge.borrow();
+    assert_eq!(
+        pending
+            .pending_channel_pushes
+            .get("sidebar")
+            .map(Vec::len),
+        Some(1),
+        "the created push queues for the not-yet-live page"
+    );
+    assert!(pending
+        .pending_channel_pushes
+        .get("sidebar")
+        .is_some_and(|scripts| scripts[0].contains("channelCreated")));
+    drop(pending);
+
+    // The creator posts; the message lands on the target port and stays
+    // queued while the target page is not consuming.
+    dispatch_channel(
+        &bridge,
+        "toolbar",
+        "postMessage",
+        json!({ "channelId": channel_id, "payload": "first" }),
+    )
+    .expect("page post");
+    dispatch_channel(
+        &bridge,
+        "toolbar",
+        "postMessage",
+        json!({ "channelId": channel_id, "payload": { "type": "navigate" } }),
+    )
+    .expect("json post");
+    assert_eq!(
+        bridge
+            .borrow()
+            .channels
+            .borrow()
+            .port_len(&channel_id, ChannelEndpointSide::Target),
+        Some(2)
+    );
+
+    // Page-visible list: the creator sees exactly its participating
+    // channel with side labels only.
+    let listed = dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({}))
+        .expect("page list");
+    let listed = listed["channels"].as_array().unwrap().clone();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["channelId"], json!(channel_id));
+    assert_eq!(listed[0]["state"], json!("open"));
+    assert_eq!(
+        listed[0]["endpoints"],
+        json!([{ "side": "creator" }, { "side": "target" }]),
+        "peer webview ids never leak to pages"
+    );
+}
+
+#[test]
+fn page_target_endpoint_posts_back_and_closes() {
+    use opentray_spec::channel::ChannelEndpointSide;
+    use opentray_spec::webview::OrchestrationErrorCode;
+
+    let bridge = channel_test_bridge();
+    let owner = channel_owner_tuple();
+    let created = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "createMessageChannel",
+        json!({ "target": "sidebar" }),
+    )
+    .expect("channel");
+    let channel_id = created["channelId"].as_str().unwrap().to_string();
+
+    // The target endpoint posts back: the message lands on the creator
+    // port (page-to-page direction).
+    dispatch_channel(
+        &bridge,
+        "sidebar",
+        "postMessage",
+        json!({ "channelId": channel_id, "payload": "back" }),
+    )
+    .expect("target posts back");
+    assert_eq!(
+        bridge
+            .borrow()
+            .channels
+            .borrow()
+            .port_len(&channel_id, ChannelEndpointSide::Creator),
+        Some(1)
+    );
+
+    // The bridgeless page holds no endpoints: not_open.
+    let error = dispatch_channel(
+        &bridge,
+        "content",
+        "postMessage",
+        json!({ "channelId": channel_id, "payload": "x" }),
+    )
+    .expect_err("non-participant");
+    assert_eq!(error.code(), OrchestrationErrorCode::BridgeRequired);
+
+    // Graceful close from a participant; the tombstone keeps its reason
+    // in the page list until destroy reaps it.
+    dispatch_channel(
+        &bridge,
+        "sidebar",
+        "closeMessageChannel",
+        json!({ "channelId": channel_id }),
+    )
+    .expect("close");
+    let listed = dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({}))
+        .expect("list");
+    assert_eq!(listed["channels"][0]["state"], json!("closed"));
+    assert_eq!(listed["channels"][0]["reason"], json!("explicit"));
+
+    // Posting on the closed channel is the typed not_open rejection.
+    let error = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "postMessage",
+        json!({ "channelId": channel_id, "payload": "x" }),
+    )
+    .expect_err("closed channel");
+    assert_eq!(error.code(), OrchestrationErrorCode::NotOpen);
+
+    // Destroy reaps the tombstone silently.
+    dispatch_channel(
+        &bridge,
+        "toolbar",
+        "destroyMessageChannel",
+        json!({ "channelId": channel_id }),
+    )
+    .expect("destroy");
+    let listed = dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({}))
+        .expect("list");
+    assert_eq!(listed["channels"].as_array().map(Vec::len), Some(0));
+    assert_eq!(
+        bridge
+            .borrow()
+            .channels
+            .borrow()
+            .list_for_host(&owner)
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn channel_page_load_state_discriminates_document_navigation() {
+    use opentray_spec::webview::OrchestrationErrorCode;
+
+    let bridge = channel_test_bridge();
+    let owner = channel_owner_tuple();
+    let created = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "createMessageChannel",
+        json!({ "target": "sidebar" }),
+    )
+    .expect("channel");
+    let channel_id = created["channelId"].as_str().unwrap().to_string();
+
+    // The target's very first Started is the initial load, not a
+    // navigation: the channel survives.
+    super::bridge::handle_view_channel_navigation_started(&bridge, "sidebar");
+    assert!(
+        bridge
+            .borrow()
+            .channels
+            .borrow()
+            .list_for_host(&owner)
+            .unwrap()
+            .iter()
+            .all(|entry| entry.state == opentray_spec::channel::ChannelState::Open)
+    );
+
+    // Finished makes the page live and flushes the pending created push
+    // (held, because the fake view would queue evaluation forever off the
+    // main run loop — the drain state is what we assert).
+    super::bridge::handle_view_channel_page_finished(&bridge, "sidebar");
+    assert!(
+        bridge
+            .borrow()
+            .channel_live_views
+            .contains("sidebar")
+    );
+
+    // A later Started is a document navigation: the channel closes with
+    // document_navigated and the creator page observes once.
+    super::bridge::handle_view_channel_navigation_started(&bridge, "sidebar");
+    let listed = bridge
+        .borrow()
+        .channels
+        .borrow()
+        .list_for_host(&owner)
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].state, opentray_spec::channel::ChannelState::Closed);
+    assert_eq!(
+        listed[0].reason,
+        Some(opentray_spec::channel::ChannelCloseReason::DocumentNavigated)
+    );
+    // Pending pushes for the navigating document are dropped with it.
+    assert!(
+        bridge
+            .borrow()
+            .pending_channel_pushes
+            .get("sidebar")
+            .is_none()
+            || bridge
+                .borrow()
+                .pending_channel_pushes
+                .get("sidebar")
+                .is_some_and(|scripts| scripts.is_empty())
+    );
+    // The creator page's close observation queued for its own delivery.
+    let toolbar_pending = bridge
+        .borrow()
+        .pending_channel_pushes
+        .get("toolbar")
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        toolbar_pending
+            .iter()
+            .any(|script| script.contains("channelClosed") && script.contains("document_navigated")),
+        "the surviving endpoint observes the navigation closure: {toolbar_pending:?}"
+    );
+    // Messages are never replayed into the new document.
+    let error = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "postMessage",
+        json!({ "channelId": channel_id, "payload": "x" }),
+    )
+    .expect_err("closed by navigation");
+    assert_eq!(error.code(), OrchestrationErrorCode::NotOpen);
+}
+
+/// Host-side channel command smoke on the main thread (real AppKit
+/// session): the frozen command frames round-trip through the runtime,
+/// authority rejections return typed envelopes as Ok-data, and host
+/// observations ride the response flush.
+#[test]
+fn runtime_channel_smoke_on_main_thread() {
+    use crate::channels::ChannelRequest;
+    use objc2::MainThreadMarker;
+    use opentray_spec::webview::WebviewBridgePolicy;
+
+    let Some(_mtm) = MainThreadMarker::new() else {
+        eprintln!("skipping AppKit channel smoke outside the main thread");
+        return;
+    };
+    let mut runtime = MacosWebviewRuntime::default();
+    runtime.set_app_id("app-1");
+    let owner = opentray_spec::webview::WebviewOwnerTuple {
+        app_id: "app-1".to_string(),
+        tray_id: "tray-1".to_string(),
+        session_id: "session-1".to_string(),
+    };
+    runtime
+        .handle(
+            "tray-1",
+            crate::WebviewCommand::Show {
+                html: None,
+                url: None,
+                width: Some(480.0),
+                height: Some(320.0),
+                tray_bounds: None,
+                fallback_rect: None,
+                show_settings: crate::WebviewShowSettings::default(),
+                owner_session_id: Some("session-1".to_string()),
+                window_id: Some("win-1".to_string()),
+                window_only: true,
+            },
+        )
+        .expect("windowOnly show");
+    for (webview_id, policy) in [
+        (
+            "toolbar",
+            Some(WebviewBridgePolicy {
+                webview_id: true,
+                message_channels: true,
+                ..WebviewBridgePolicy::default()
+            }),
+        ),
+        ("content", None),
+    ] {
+        let handled = runtime
+            .handle(
+                "tray-1",
+                crate::WebviewCommand::Orchestration(Box::new(
+                    opentray_spec::webview::WebviewOrchestrationCommand::CreateWebview {
+                        owner: owner.clone(),
+                        window_id: "win-1".to_string(),
+                        webview_id: webview_id.to_string(),
+                        url: Some("about:blank".to_string()),
+                        html: None,
+                        bridge: policy,
+                    },
+                )),
+            )
+            .expect("create-webview");
+        assert_eq!(handled.result["type"], "webview-ack");
+    }
+
+    fn channel_command(
+        runtime: &mut MacosWebviewRuntime,
+        request: ChannelRequest,
+    ) -> crate::HandledCommand {
+        runtime
+            .handle(
+                "tray-1",
+                crate::WebviewCommand::Channel(Box::new(request)),
+            )
+            .expect("channel command")
+    }
+
+    // Host creates a channel to the bridged toolbar.
+    let created = channel_command(
+        &mut runtime,
+        ChannelRequest::Create {
+            owner: owner.clone(),
+            target: "toolbar".to_string(),
+        },
+    );
+    assert_eq!(created.result["type"], "channel.create-result");
+    let channel_id = created.result["channelId"].as_str().unwrap().to_string();
+    assert!(!channel_id.is_empty());
+
+    // Authority rejections are typed envelopes as Ok-data with zero state.
+    let rejected = channel_command(&mut runtime, ChannelRequest::Create {
+        owner: owner.clone(),
+        target: "content".to_string(),
+    });
+    assert_eq!(rejected.result["type"], "channel.error");
+    assert_eq!(rejected.result["error"]["code"], "bridge_required");
+    let rejected = channel_command(&mut runtime, ChannelRequest::Create {
+        owner: owner.clone(),
+        target: "missing".to_string(),
+    });
+    assert_eq!(rejected.result["error"]["code"], "unknown_view");
+    // The host cannot be targeted: "host" is not a webview id.
+    let rejected = channel_command(&mut runtime, ChannelRequest::Create {
+        owner: owner.clone(),
+        target: "host".to_string(),
+    });
+    assert_eq!(rejected.result["error"]["code"], "unknown_view");
+    // Cross-session owner tuples reject session_scope.
+    let rejected = channel_command(&mut runtime, ChannelRequest::Create {
+        owner: opentray_spec::webview::WebviewOwnerTuple {
+            app_id: "app-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            session_id: "session-2".to_string(),
+        },
+        target: "toolbar".to_string(),
+    });
+    assert_eq!(rejected.result["error"]["code"], "session_scope");
+
+    // JSON payloads post without string coercion; posting on an unknown
+    // channel is the typed not_open-family rejection (unknown id →
+    // unknown_view).
+    let posted = channel_command(&mut runtime, ChannelRequest::Post {
+        owner: owner.clone(),
+        channel_id: channel_id.clone(),
+        payload: json!({ "type": "navigate", "url": "https://example.com" }),
+    });
+    assert_eq!(posted.result["type"], "channel.post-result");
+    let rejected = channel_command(&mut runtime, ChannelRequest::Post {
+        owner: owner.clone(),
+        channel_id: "ch-nonexistent".to_string(),
+        payload: json!("x"),
+    });
+    assert_eq!(rejected.result["error"]["code"], "unknown_view");
+
+    // The host list shows the live channel with full endpoint descriptors.
+    let listed = channel_command(&mut runtime, ChannelRequest::List {
+        owner: owner.clone(),
+    });
+    assert_eq!(listed.result["type"], "channel.list-result");
+    let channels = listed.result["channels"].as_array().unwrap().clone();
+    assert_eq!(channels.len(), 1);
+    assert_eq!(channels[0]["channelId"], json!(channel_id));
+    assert_eq!(channels[0]["state"], "open");
+    assert_eq!(
+        channels[0]["endpoints"],
+        json!([{ "side": "creator", "peer": "host" }, { "side": "target", "peer": "toolbar" }])
+    );
+
+    // Graceful close: both endpoints observe exactly once — the host
+    // observation rides this very response's channel event flush.
+    let closed = channel_command(&mut runtime, ChannelRequest::Close {
+        owner: owner.clone(),
+        channel_id: channel_id.clone(),
+    });
+    assert_eq!(closed.result["type"], "channel.close-result");
+    assert!(
+        closed
+            .channel_events
+            .iter()
+            .any(|(_, value)| value["type"] == "channel.closed"
+                && value["channelId"] == json!(channel_id)
+                && value["reason"] == "explicit"),
+        "the host closure observation rides the response flush"
+    );
+    // The tombstone stays listed with its reason.
+    let listed = channel_command(&mut runtime, ChannelRequest::List {
+        owner: owner.clone(),
+    });
+    assert_eq!(listed.result["channels"][0]["state"], "closed");
+    assert_eq!(listed.result["channels"][0]["reason"], "explicit");
+
+    // Destroy reaps the tombstone; repeat destroys are no-op successes.
+    let destroyed = channel_command(&mut runtime, ChannelRequest::Destroy {
+        owner: owner.clone(),
+        channel_id: channel_id.clone(),
+    });
+    assert_eq!(destroyed.result["type"], "channel.destroy-result");
+    assert!(destroyed.channel_events.is_empty(), "no second observation");
+    let destroyed_again = channel_command(&mut runtime, ChannelRequest::Destroy {
+        owner: owner.clone(),
+        channel_id: channel_id.clone(),
+    });
+    assert_eq!(destroyed_again.result["type"], "channel.destroy-result");
+
+    // Peer teardown: a fresh channel closes with peer_webview_destroyed
+    // and the observation rides the destroy-webview response.
+    let created = channel_command(&mut runtime, ChannelRequest::Create {
+        owner: owner.clone(),
+        target: "toolbar".to_string(),
+    });
+    let live_id = created.result["channelId"].as_str().unwrap().to_string();
+    let destroyed_view = runtime
+        .handle(
+            "tray-1",
+            crate::WebviewCommand::Orchestration(Box::new(
+                opentray_spec::webview::WebviewOrchestrationCommand::DestroyWebview {
+                    owner: owner.clone(),
+                    window_id: "win-1".to_string(),
+                    webview_id: "toolbar".to_string(),
+                },
+            )),
+        )
+        .expect("destroy-webview");
+    assert!(
+        destroyed_view
+            .channel_events
+            .iter()
+            .any(|(_, value)| value["type"] == "channel.closed"
+                && value["channelId"] == json!(live_id)
+                && value["reason"] == "peer_webview_destroyed"),
+        "peer teardown closes channels with reason"
+    );
+    let rejected = channel_command(&mut runtime, ChannelRequest::Post {
+        owner: owner.clone(),
+        channel_id: live_id.clone(),
+        payload: json!("x"),
+    });
+    assert_eq!(
+        rejected.result["error"]["code"], "not_open",
+        "a later send fails typed instead of dropping silently"
+    );
+
+    // Session close removes every channel with the window.
+    runtime.session_closed("session-1");
+    let rejected = channel_command(&mut runtime, ChannelRequest::List {
+        owner: owner.clone(),
+    });
+    assert_eq!(
+        rejected.result["error"]["code"], "unknown_view",
+        "the session's window (and channels) are gone"
+    );
 }
 
 fn run_node_probe(script: &str, probe: &str) -> Value {

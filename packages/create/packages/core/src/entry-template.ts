@@ -19,7 +19,15 @@
 // 5. Command teardown sweeps the whole process tree (group signal + PPid
 //    walk, SIGTERM → bounded grace → SIGKILL).
 // 6. Any startup failure persists its stack to app.log before exit(1).
+// 7. Toolbar service windows (add-webview-orchestration D13, 2026-09-11):
+//    `window.toolbar` composes the SAME native navigation-toolbar carrier URL
+//    applications use (toolbar webview + content webview + column layout +
+//    channel navigation) over each dedicated service window. The legacy
+//    showAddressBar iframe wrapper is gone; no generated payload ships an
+//    iframe-wrapped service window, and PTY/port supervision laws are
+//    unchanged (the toolbar composes the window; it never supervises).
 import type { ScaffoldAppConfig } from "./scaffold";
+import { toolbarCarrierSource } from "./toolbar-carrier";
 
 /** The generated app entry: supervises the command, owns tray + window. */
 export const createEntrySource = (config: ScaffoldAppConfig): string => {
@@ -37,7 +45,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createTray } from "opentray";
-import { WebviewExt } from "@opentray/ext-webview";
+import { WebviewExt, column, fixed, grow } from "@opentray/ext-webview";
 
 const PROJECT_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -58,11 +66,20 @@ const config = ${JSON.stringify(config, null, 2)};
 const appLogPath = resolve(PROJECT_DIR, "app.log");
 await mkdir(dirname(appLogPath), { recursive: true });
 const logSink = appendFile.bind(undefined, appLogPath);
+const logNote = (message) => { void logSink("[create-opentray] " + message + "\\n", "utf8"); };
 const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 
 const shellOptions = ${JSON.stringify(config.shell ?? null)};
 const showTerminal = shellOptions !== null && shellOptions.showTerminal === true;
-const showAddressBar = shellOptions !== null && shellOptions.showAddressBar === true;
+// Toolbar carrier (add-webview-orchestration D13): window.toolbar is the one
+// canonical toolbar fact for BOTH application forms; the retired legacy shell
+// address-bar input is deliberately not read (stale frozen occurrences are
+// ignored by loose parsing).
+const toolbarMode = config.window.toolbar === true;
+const titleFollows = config.window.titleFollowsDocument !== false;
+const iconFollows = config.window.iconFollowsDocument === true;
+
+${toolbarCarrierSource()}
 
 // Configured env overlay (advanced command options); empty by default.
 const commandEnv = ${JSON.stringify(config.command.env ?? {})};
@@ -134,7 +151,8 @@ const main = async () => {
   }
 
   // Shell host (D2): unconditional — the terminal window is every app's
-  // abnormal-exit surface, and the address bar consumes it too.
+  // abnormal-exit surface, and the toolbar carrier's page asset is served
+  // from the same host (its navigation surface stays channel-only, D12).
   const shellApi = await import("./app-shell-server.mjs");
   const shellPort = await shellApi.listenShell();
 
@@ -234,11 +252,11 @@ const main = async () => {
   const devtools = config.developerMode === true ? { devtools: true } : {};
 
   // Dedicated windows: one terminal window (always available; initially
-  // visible only under showTerminal), one window per listened port — an
-  // address-bar wrapper page when enabled, the direct service URL otherwise.
-  // Each window gets its OWN extension mount (tray.extend per window): one
-  // mount owns exactly one native webview slot, so dedicated windows never
-  // collide on content.
+  // visible only under showTerminal), one window per listened port — the
+  // native toolbar carrier when window.toolbar is on, the direct service URL
+  // otherwise. Each window gets its OWN extension mount (tray.extend per
+  // window = its own window session), so dedicated windows never collide on
+  // content.
   const serviceWindows = new Map();
   let terminalWindow = null;
 
@@ -271,27 +289,44 @@ const main = async () => {
   const ensureServiceWindow = async (port) => {
     if (serviceWindows.has(port)) return;
     const direct = \`http://127.0.0.1:\${port}\`;
-    const url = showAddressBar && shellPort !== null
-      ? \`http://127.0.0.1:\${shellPort}/browse.html?url=\${encodeURIComponent(direct)}\`
-      : direct;
+    // Toolbar service windows (D13): the SAME native carrier URL applications
+    // use — a windowOnly session whose toolbar webview (shell-served
+    // toolbar page) sits above a content webview loading the verified
+    // service URL directly (no iframe wrapper, no bridge on the content
+    // side, no embedding-policy consultation). Direct service windows keep
+    // the D13 native sync defaults unchanged.
+    if (toolbarMode && shellPort !== null) {
+      const win = tray.extend(WebviewExt).createWebviewWindow({
+        windowOnly: true,
+        width: config.window.width,
+        height: config.window.height,
+        title: baseTitle,
+        style: { appMode: true, autoHide: false, keepOnTop: false },
+        ...devtools,
+      });
+      await win.show().catch(() => {});
+      await attachToolbarCarrier(win, {
+        toolbarUrl: \`http://127.0.0.1:\${shellPort}/toolbar.html\`,
+        contentUrl: direct,
+        titleFollows,
+        log: logNote,
+      });
+      serviceWindows.set(port, { win, detached: false });
+      return;
+    }
     const win = tray.extend(WebviewExt).createWebviewWindow({
-      url,
+      url: direct,
       width: config.window.width,
       height: config.window.height,
       title: baseTitle,
       style: { appMode: true, autoHide: false, keepOnTop: false },
       ...devtools,
-      ...(showAddressBar || !titleFollows ? {} : { titleSync: { documentToWindow: true } }),
-      ...(showAddressBar || !iconFollows ? {} : { iconSync: { faviconToWindow: true } }),
+      ...(!titleFollows ? {} : { titleSync: { documentToWindow: true } }),
+      ...(!iconFollows ? {} : { iconSync: { faviconToWindow: true } }),
     });
     serviceWindows.set(port, { win, detached: false });
     await win.show().catch(() => {});
   };
-
-  // D13 sync defaults (address-bar-less service windows): the title follows
-  // the document one-way; runtime favicon following is opt-in only.
-  const titleFollows = config.window.titleFollowsDocument !== false;
-  const iconFollows = config.window.iconFollowsDocument === true;
 
   if (showTerminal) {
     await ensureTerminalWindow();

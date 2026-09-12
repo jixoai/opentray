@@ -1,0 +1,10 @@
+{"step":"base-layout","contentTitle":"content 960x576"}
+{"step":"box-committed","box":{"w":360,"h":240,"border":{"width":2,"color":"#FF3B30"}}}
+{"step":"assert","name":"border-only box layout commit accepted","ok":true,"detail":"set-webview-layout ack with box layer"}
+{"step":"assert","name":"content geometry unchanged under the box overlay","ok":true,"detail":"undefined -> content 960x576"}
+{"step":"box-updated","box":{"w":240,"h":140,"border":6,"radius":12}}
+{"step":"assert","name":"box update (restyle + resize) commit accepted","ok":true,"detail":"replaced box style committed"}
+{"step":"assert","name":"content geometry still unchanged after box update","ok":true,"detail":"content 960x576"}
+{"step":"box-removed"}
+{"step":"assert","name":"box removal commit accepted","ok":true,"detail":"layout replaced without the box layer"}
+{"step":"summary","ok":true,"results":[{"name":"border-only box layout commit accepted","ok":true,"detail":"set-webview-layout ack with box layer"},{"name":"content geometry unchanged under the box overlay","ok":true,"detail":"undefined -> content 960x576"},{"name":"box update (restyle + resize) commit accepted","ok":true,"detail":"replaced box style committed"},{"name":"content geometry still unchanged after box update","ok":true,"detail":"content 960x576"},{"name":"box removal commit accepted","ok":true,"detail":"layout replaced without the box layer"}],"note":"border pixels + click pass-through = Owner walkthrough visual step (no capture/synthetic input on agent host); hitTest nil covered natively by box_view registry tests"}

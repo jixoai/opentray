@@ -205,6 +205,7 @@ export const handleWorkbenchApi = async (
         window: {
           width: entry.config.window.width,
           height: entry.config.window.height,
+          ...(entry.config.window.toolbar === true ? { toolbar: true } : {}),
           titleFollowsDocument: true,
           iconFollowsDocument: false,
         },
@@ -352,6 +353,7 @@ export const handleWorkbenchApi = async (
         window: {
           width: entry.config.window.width,
           height: entry.config.window.height,
+          ...(entry.config.window.toolbar === true ? { toolbar: true } : {}),
           titleFollowsDocument: true,
           iconFollowsDocument: false,
         },

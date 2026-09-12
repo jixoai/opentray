@@ -1,0 +1,53 @@
+[
+  {
+    "name": "show attributes the window session with the broker Ready sessionId",
+    "frame": {
+      "type": "show",
+      "html": "<main />",
+      "width": 800,
+      "height": 600,
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "name": "show bootstraps a windowOnly session for orchestrated children",
+    "frame": {
+      "type": "show",
+      "windowOnly": true,
+      "windowId": "main-window",
+      "sessionId": "session-1",
+      "width": 800,
+      "height": 600
+    }
+  },
+  {
+    "name": "typed orchestration rejection rides the Ok response data",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "error": {
+        "code": "multiwebview_unsupported_style",
+        "message": "frameless windows cannot host multiple webviews"
+      }
+    }
+  },
+  {
+    "name": "typed channel rejection rides the Ok response data",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.error",
+      "error": {
+        "code": "bridge_required",
+        "message": "target webview has no message-channel bridge policy"
+      }
+    }
+  },
+  {
+    "name": "host channel message rides the internal channel.message envelope",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.message",
+      "channelId": "ch-7f3a",
+      "payload": { "type": "navigate", "url": "https://example.com" }
+    }
+  }
+]

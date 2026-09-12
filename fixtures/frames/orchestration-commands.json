@@ -1,0 +1,261 @@
+[
+  {
+    "name": "create-webview with toolbar bridge policy",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "create-webview",
+      "windowId": "win-1",
+      "webviewId": "toolbar",
+      "url": "http://127.0.0.1:5173/toolbar.html",
+      "bridge": {
+        "webviewId": true,
+        "messageChannels": true,
+        "navigatorWindow": false,
+        "navigatorScreen": false,
+        "nativeApi": false
+      }
+    }
+  },
+  {
+    "name": "create-webview without bridge policy",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "create-webview",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "url": "https://news.ycombinator.com"
+    }
+  },
+  {
+    "name": "create-webview with html content",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "create-webview",
+      "windowId": "win-1",
+      "webviewId": "banner",
+      "html": "<p>offline</p>"
+    }
+  },
+  {
+    "name": "destroy-webview",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "destroy-webview",
+      "windowId": "win-1",
+      "webviewId": "banner"
+    }
+  },
+  {
+    "name": "list-webviews",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "list-webviews",
+      "windowId": "win-1"
+    }
+  },
+  {
+    "name": "list-webviews-result",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "list-webviews-result",
+      "windowId": "win-1",
+      "webviews": [
+        {
+          "webviewId": "toolbar",
+          "bridge": {
+            "webviewId": true,
+            "messageChannels": true,
+            "navigatorWindow": false,
+            "navigatorScreen": false,
+            "nativeApi": false
+          }
+        },
+        {
+          "webviewId": "content",
+          "bridge": {
+            "webviewId": false,
+            "messageChannels": false,
+            "navigatorWindow": false,
+            "navigatorScreen": false,
+            "nativeApi": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "navigate-webview",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "navigate-webview",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "url": "https://example.org"
+    }
+  },
+  {
+    "name": "back-webview",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "back-webview",
+      "windowId": "win-1",
+      "webviewId": "content"
+    }
+  },
+  {
+    "name": "forward-webview",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "forward-webview",
+      "windowId": "win-1",
+      "webviewId": "content"
+    }
+  },
+  {
+    "name": "focus-webview",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "focus-webview",
+      "windowId": "win-1",
+      "webviewId": "toolbar"
+    }
+  },
+  {
+    "name": "get-webview-url",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "get-webview-url",
+      "windowId": "win-1",
+      "webviewId": "content"
+    }
+  },
+  {
+    "name": "get-webview-url-result returns value and seq",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "get-webview-url-result",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "url": "https://example.org/articles/1",
+      "seq": 41
+    }
+  },
+  {
+    "name": "get-webview-title",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "get-webview-title",
+      "windowId": "win-1",
+      "webviewId": "content"
+    }
+  },
+  {
+    "name": "get-webview-title-result returns value and seq",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "get-webview-title-result",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "title": "Example Article",
+      "seq": 12
+    }
+  },
+  {
+    "name": "set-webview-layout toolbar column",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "set-webview-layout",
+      "windowId": "win-1",
+      "layout": {
+        "layers": [
+          {
+            "root": {
+              "dir": "column",
+              "gap": 1,
+              "children": [
+                { "id": "toolbar", "height": 44 },
+                { "id": "content", "flex": 1 }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "set-webview-layout layered box ring",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "set-webview-layout",
+      "windowId": "win-1",
+      "layout": {
+        "layers": [
+          { "root": { "id": "content", "flex": 1 } },
+          {
+            "root": {
+              "kind": "box",
+              "id": "ring",
+              "width": 800,
+              "height": 600,
+              "border": { "width": 2, "color": "#333333AA" },
+              "cornerRadius": 8,
+              "background": "#00000000"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "set-webview-layout explicit webview kind and hidden layer",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "set-webview-layout",
+      "windowId": "win-1",
+      "layout": {
+        "layers": [
+          { "root": { "kind": "webview", "id": "content", "flex": 1 } },
+          { "root": { "id": "banner", "height": 24 }, "visible": false }
+        ]
+      }
+    }
+  },
+  {
+    "name": "update-webview-layout sizing patch",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "update-webview-layout",
+      "windowId": "win-1",
+      "viewId": "toolbar",
+      "patch": { "height": 48, "minHeight": 32, "maxHeight": 64 }
+    }
+  },
+  {
+    "name": "subscribe-webview-events",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "subscribe-webview-events",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kinds": ["urlChange", "titleChange", "focused", "geometryChange"]
+    }
+  },
+  {
+    "name": "unsubscribe-webview-events",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "unsubscribe-webview-events",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kinds": ["urlChange", "titleChange"]
+    }
+  },
+  {
+    "name": "webview-ack echoes the command",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "webview-ack",
+      "command": "navigate-webview"
+    }
+  }
+]

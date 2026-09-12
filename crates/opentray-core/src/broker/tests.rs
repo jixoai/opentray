@@ -785,6 +785,103 @@ fn explicit_exit_uses_extension_host_for_session_cleanup() {
     assert_eq!(host.calls, 1);
 }
 
+#[test]
+fn ext_command_dispatch_forwards_send_event_to_the_caller_host() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::with_extension_loader(
+        backend,
+        SendEventLoader,
+        test_broker_artifact_identity(),
+    );
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_app(&mut broker, &mut session);
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::CreateTray {
+            request_id: "req-tray".to_string(),
+            app: surface.clone(),
+            tray: tray_options("status"),
+        },
+        "0.1.0",
+    );
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::LoadExt {
+            request_id: "req-load".to_string(),
+            app_id: surface.app_id.clone(),
+            name: "webview".to_string(),
+            path: "opentray://send-event".to_string(),
+            expected_identity: expected_extension_identity("webview"),
+            mount_id: None,
+        },
+        "0.1.0",
+    );
+    let mut host = SendEventRecorder::default();
+
+    let frames = broker.handle_frame_with_extension_host(
+        &mut session,
+        ClientFrame::ExtCommand {
+            request_id: "req-ext".to_string(),
+            app_id: surface.app_id,
+            tray_id: "status".to_string(),
+            ext: "webview".to_string(),
+            data: serde_json::json!({ "type": "show" }),
+        },
+        "0.1.0",
+        &mut host,
+    );
+
+    assert!(matches!(
+        &frames[0],
+        ServerFrame::ExtCommandResult { request_id, .. } if request_id == "req-ext"
+    ));
+    assert_eq!(
+        host.events,
+        vec![PUSHED_EVENT.as_bytes().to_vec()],
+        "the scoped host must forward extension pushes byte-exact to the caller host"
+    );
+}
+
+#[test]
+fn session_cleanup_forwards_send_event_to_the_caller_host() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::with_extension_loader(
+        backend,
+        SendEventLoader,
+        test_broker_artifact_identity(),
+    );
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_app(&mut broker, &mut session);
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::LoadExt {
+            request_id: "req-load".to_string(),
+            app_id: surface.app_id,
+            name: "webview".to_string(),
+            path: "opentray://send-event".to_string(),
+            expected_identity: expected_extension_identity("webview"),
+            mount_id: None,
+        },
+        "0.1.0",
+    );
+    let mut host = SendEventRecorder::default();
+
+    let _ = broker.handle_frame_with_extension_host(
+        &mut session,
+        ClientFrame::Exit,
+        "0.1.0",
+        &mut host,
+    );
+
+    assert_eq!(
+        host.events,
+        vec![PUSHED_EVENT.as_bytes().to_vec()],
+        "session cleanup must forward extension pushes to the caller host"
+    );
+}
+
 fn create_app<L: ExtensionLoader>(
     broker: &mut BrokerKernel<FakeBackend, L>,
     session: &mut BrokerSession,
@@ -821,6 +918,67 @@ impl ExtensionHostContext for CountingHost {
         _request_json: &[u8],
     ) -> Result<Vec<u8>, ExtensionError> {
         self.calls += 1;
+        Ok(Vec::new())
+    }
+}
+
+const PUSHED_EVENT: &str =
+    r#"{"scope":{"appId":"app","trayId":"status","ext":"webview"},"data":{"type":"pushed"}}"#;
+
+#[derive(Default)]
+struct SendEventRecorder {
+    events: Vec<Vec<u8>>,
+}
+
+impl ExtensionHostContext for SendEventRecorder {
+    fn invoke_host(
+        &mut self,
+        _capability: &str,
+        _request_json: &[u8],
+    ) -> Result<Vec<u8>, ExtensionError> {
+        Ok(Vec::new())
+    }
+
+    fn send_event(&mut self, event_json: &[u8]) -> Result<(), ExtensionError> {
+        self.events.push(event_json.to_vec());
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct SendEventLoader;
+
+impl ExtensionLoader for SendEventLoader {
+    fn load(
+        &self,
+        _request: &ExtensionLoadRequest,
+    ) -> Result<Box<dyn ExtensionInstance>, ExtensionError> {
+        Ok(Box::new(SendEventExtension))
+    }
+}
+
+struct SendEventExtension;
+
+impl ExtensionInstance for SendEventExtension {
+    fn name(&self) -> &str {
+        "webview"
+    }
+
+    fn command(
+        &mut self,
+        envelope: ExtensionEnvelope,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
+        host.send_event(PUSHED_EVENT.as_bytes())?;
+        Ok(vec![envelope])
+    }
+
+    fn session_closed(
+        &mut self,
+        _session_id: &str,
+        host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
+        host.send_event(PUSHED_EVENT.as_bytes())?;
         Ok(Vec::new())
     }
 }

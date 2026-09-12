@@ -34,6 +34,8 @@ real behavior, and diagnose the installed runtime graph.
 - Packaging through a bundler (Vite/esbuild/tsdown/webpack), generating platform-correct App icons with `openTrayAppIconPlugin`, or writing a custom adapter: read `references/bundling.md`.
 - Consumer-project acceptance matrix: read `references/visual-acceptance.md`.
 - Official WebView extension usage, overlay titlebar safe-area computation, and native drag regions: read `references/ext-webview.md`.
+- Multi-webview windows (toolbar + content composition), declarative layout, message channels, and per-view events: read `references/ext-webview.md` plus `references/backend-ipc.md`.
+- Exposing backend capabilities to a trusted toolbar page over a message channel, or the create-opentray native toolbar carrier (`--toolbar`, both application forms): read `references/backend-ipc.md`.
 - Common local issues and capability limits: read `references/troubleshooting.md`.
 
 ## Consumer Rules

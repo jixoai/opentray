@@ -33,7 +33,7 @@ command flags (`--exec` family) OR `--url`. Options:
 | `--tray-template` | treat the tray source as a darwin template |
 | `--developer-mode` | admit WebView DevTools (default false) |
 | `--window <WxH>` | window size (default 1200x800) |
-| `--toolbar` | URL apps: host the address-bar wrapper (back/forward/reload + shortcuts) |
+| `--toolbar` | URL and command applications: compose the native navigation toolbar over the target/service page (back/forward/reload + address bar; default off; canonical `window.toolbar` field) |
 | `--title-follow <bool>` | window title follows document.title (default true; negate with `--no-title-follow`) |
 | `--icon-follow <bool>` | runtime favicon→window-icon following (default off) |
 | `--force` | replace a VERIFIED existing payload |

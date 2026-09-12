@@ -1,0 +1,22 @@
+{
+  "name": "ecmascript number forms",
+  "input": {
+    "beyondSafe": 9007199254740993,
+    "bigU64": 10000000000000000000,
+    "expNegative": 1e-7,
+    "expPositive": 1e21,
+    "expPositive22": 1e22,
+    "expPositiveNonInteger": 1.5e21,
+    "float": 4.50,
+    "maxSafeInt": 9007199254740991,
+    "milli": 2e-3,
+    "millionth": 0.000001,
+    "negBeyondSafe": -9007199254740993,
+    "negZero": -0,
+    "nextAfterOne": 1.0000000000000002,
+    "onePointZero": 1.0,
+    "smallInt": 42,
+    "tricky": 333333333.33333329
+  },
+  "expected": "{\"beyondSafe\":9007199254740992,\"bigU64\":10000000000000000000,\"expNegative\":1e-7,\"expPositive\":1e+21,\"expPositive22\":1e+22,\"expPositiveNonInteger\":1.5e+21,\"float\":4.5,\"maxSafeInt\":9007199254740991,\"milli\":0.002,\"millionth\":0.000001,\"negBeyondSafe\":-9007199254740992,\"negZero\":0,\"nextAfterOne\":1.0000000000000002,\"onePointZero\":1,\"smallInt\":42,\"tricky\":333333333.3333333}"
+}

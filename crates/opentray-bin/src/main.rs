@@ -12,6 +12,7 @@
 #[cfg(target_os = "macos")]
 mod darwin_reopen;
 mod dynamic_extension;
+mod extension_events;
 mod frame_error;
 #[cfg(unix)]
 mod unix_transport;
@@ -527,8 +528,8 @@ mod native_broker {
     use std::{collections::HashMap, error::Error, time::Duration};
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
-    use opentray_core::{BrokerKernel, BrokerSession, UnsupportedExtensionHostContext};
-    use opentray_spec::{AppEvent, ClientFrame, ServerFrame};
+    use opentray_core::{BrokerKernel, BrokerSession};
+    use opentray_spec::{AppEvent, ClientFrame, ExtensionEnvelope, ServerFrame};
     use winit::application::ApplicationHandler;
     use winit::event::StartCause;
     use winit::event::WindowEvent;
@@ -542,7 +543,9 @@ mod native_broker {
     #[cfg(target_os = "windows")]
     use super::windows_transport as broker_transport;
     use super::{
-        broker_disconnect_action, broker_frame_action, dynamic_extension::DynamicExtensionLoader,
+        broker_disconnect_action, broker_frame_action,
+        dynamic_extension::DynamicExtensionLoader,
+        extension_events::{ExtensionDispatch, ExtensionEventRouter, LoadedExtension},
         BrokerDisconnectAction, BrokerOptions,
     };
 
@@ -590,6 +593,7 @@ mod native_broker {
                 options.default_app_options(),
                 options.broker_artifact_identity().clone(),
             ),
+            extension_events: ExtensionEventRouter::new(),
             sessions: HashMap::new(),
             broker_version: options.package_version.clone(),
             idle_timeout: options.idle_timeout,
@@ -620,6 +624,7 @@ mod native_broker {
 
     struct NativeBrokerApp {
         broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>, DynamicExtensionLoader>,
+        extension_events: ExtensionEventRouter,
         sessions: HashMap<u64, broker_transport::TransportSession>,
         broker_version: String,
         idle_timeout: Option<Duration>,
@@ -729,15 +734,36 @@ mod native_broker {
                         return BrokerDisconnectAction::WaitForIdle;
                     };
                     let session_was_initialized = session.broker.session_id().is_some();
+                    let kernel_session_id = session.broker.session_id().map(ToOwned::to_owned);
                     let exit_action = broker_frame_action(&frame, session_was_initialized);
-                    let mut extension_host = UnsupportedExtensionHostContext;
+                    let loaded = LoadedExtension::from_frame(&frame);
+                    let mut extension_host = self
+                        .extension_events
+                        .host(ExtensionDispatch::from_frame(&frame));
                     let frames = self.broker.handle_frame_with_extension_host(
                         &mut session.broker,
                         frame,
                         &self.broker_version,
                         &mut extension_host,
                     );
+                    let load_acknowledged =
+                        matches!(frames.first(), Some(ServerFrame::Ack { .. }));
                     session.write_frames(frames);
+                    if let (Some(loaded), Some(owner)) = (loaded, kernel_session_id.as_deref()) {
+                        if load_acknowledged {
+                            self.extension_events.note_loaded(loaded, owner.to_string());
+                        }
+                    }
+                    if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
+                        // The kernel already took the closing session's id
+                        // inside the Exit dispatch; release its extension
+                        // ownership before delivering cleanup pushes so they
+                        // drop instead of surviving the close.
+                        if let Some(session_id) = kernel_session_id.as_deref() {
+                            self.extension_events.forget_session(session_id);
+                        }
+                    }
+                    self.deliver_extension_events(extension_host.take_events());
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
                         // Windows named-pipe half-close may defer `Disconnected` indefinitely.
                         // `Exit` already performed kernel cleanup above, so the dedicated broker
@@ -753,11 +779,16 @@ mod native_broker {
                     let mut was_initialized = false;
                     if let Some(mut session) = self.sessions.remove(&id) {
                         was_initialized = session.broker.session_id().is_some();
-                        let mut extension_host = UnsupportedExtensionHostContext;
+                        let closing_session_id = session.broker.session_id().map(ToOwned::to_owned);
+                        let mut extension_host = self.extension_events.host(None);
                         let _ = self.broker.close_session_with_extension_host(
                             &mut session.broker,
                             &mut extension_host,
                         );
+                        if let Some(session_id) = closing_session_id.as_deref() {
+                            self.extension_events.forget_session(session_id);
+                        }
+                        self.deliver_extension_events(extension_host.take_events());
                     }
                     self.bump_idle_generation();
                     self.schedule_idle_if_empty();
@@ -806,6 +837,23 @@ mod native_broker {
                     });
                 }
             }
+        }
+
+        /// Delivers extension-pushed events to the owning client session's
+        /// existing ordered frame channel. Delivery runs after the current
+        /// kernel dispatch returned, so pushes always follow that dispatch's
+        /// response frames and never reenter the kernel.
+        fn deliver_extension_events(&mut self, events: Vec<ExtensionEnvelope>) {
+            self.extension_events.deliver(events, &mut |owner, frame| {
+                let mut delivered = false;
+                for session in self.sessions.values_mut() {
+                    if session.broker.session_id() == Some(owner) {
+                        session.write_frame(frame.clone());
+                        delivered = true;
+                    }
+                }
+                delivered
+            });
         }
 
         #[cfg(target_os = "macos")]

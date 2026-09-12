@@ -272,18 +272,20 @@ pub(super) fn apply_window_style(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     window: &Retained<NSWindow>,
 ) -> Result<(), WebviewRuntimeError> {
-    let (style, content_view, webview_ptr) = {
+    let (style, content_view, webview_ptrs) = {
         let state = bridge.borrow();
         (
             state.style.clone(),
             state.content_view.clone(),
-            state.webview,
+            state
+                .views
+                .iter()
+                .map(|view| view.webview)
+                .collect::<Vec<_>>(),
         )
     };
     let content_view = content_view
         .ok_or_else(|| WebviewRuntimeError::Internal("content view is not ready".into()))?;
-    let webview_ptr = webview_ptr
-        .ok_or_else(|| WebviewRuntimeError::Internal("webview bridge is not ready".into()))?;
     let host_view = AppKitViewHandle::new(content_view);
     let overlay_enabled = {
         let state = bridge.borrow();
@@ -316,13 +318,17 @@ pub(super) fn apply_window_style(
         OPAQUE_BACKGROUND
     });
     window.setBackgroundColor(Some(&background_color));
-    unsafe { webview_ptr.as_ref() }
-        .set_background_color(if wants_clear_background {
-            CLEAR_BACKGROUND
-        } else {
-            OPAQUE_BACKGROUND
-        })
-        .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    // A window may host sibling webviews (or none yet, for a `windowOnly`
+    // session); the backing color projects onto every hosted webview.
+    for webview_ptr in webview_ptrs {
+        unsafe { webview_ptr.as_ref() }
+            .set_background_color(if wants_clear_background {
+                CLEAR_BACKGROUND
+            } else {
+                OPAQUE_BACKGROUND
+            })
+            .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
+    }
     clear_vibrancy(&host_view).map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
     if let Some((effect, state)) = resolve_macos_background_effect(&style.background)? {
         apply_vibrancy(

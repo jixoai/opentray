@@ -4,6 +4,13 @@ export type AppId = string;
 export type TrayId = string;
 export type MenuItemId = number;
 
+// Multi-webview orchestration, message-channel, and canonical JSON protocol
+// contracts (add-webview-orchestration); re-exported flat to keep one public
+// entry surface for consumers.
+export * from "./canonical-json";
+export * from "./channel";
+export * from "./webview";
+
 export const PROTOCOL_VERSION = 1;
 export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
 export const OPENTRAY_PROTOCOL_LINE_MAJOR = 1;

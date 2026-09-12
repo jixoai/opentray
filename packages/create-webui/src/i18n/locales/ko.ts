@@ -178,9 +178,8 @@ export const ko: Messages = {
     startupTerminal: "시작 터미널 표시",
     startupTerminalHint:
       "앱이 시작될 때 별도의 터미널 창을 열어 명령의 PTY 출력을 실시간으로 보여 줍니다(대화형).",
-    addressBar: "주소 표시줄 표시",
-    addressBarHint:
-      "서비스 창 상단에 주소 표시줄을 표시합니다(탐색은 Web Navigation API가 관리).",
+    addressBar: "내비게이션 도구 모음",
+      addressBarHint: "앱 창 상단에 네이티브 내비게이션 도구 모음(뒤로/앞으로/새로 고침/주소창)을 구성하고 페이지는 독립 웹뷰로 직접 로드합니다. URL 앱과 명령 앱 모두에서 사용할 수 있습니다.",
     smoothing: "부드러운 크기 조정(imageSmoothingEnabled)",
     smoothingHint:
       "기본적으로 고품질 크기 조정이 켜져 있습니다. 저해상도 픽셀아트 아이콘에서는 꺼서 선명한 가장자리를 유지하세요(앱 아이콘 전경과 트레이 아이콘에 적용).",
@@ -249,6 +248,8 @@ export const ko: Messages = {
     sniffing: "HTTP 서비스 탐지 중… (없어도 앱 생성 가능)",
     portsSniffing: "수신 포트 탐지 중…",
     urlPlaceholder: "이동할 URL 입력",
+    siteIconPlaceholder: "사이트 아이콘 자리표시자",
+    siteIconFallback: "사이트 아이콘 대체 표시",
   },
   url: {
     fetch: "사전 설정 가져오기",

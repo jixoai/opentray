@@ -1,0 +1,131 @@
+[
+  {
+    "name": "channel.create request",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.create",
+      "target": "toolbar"
+    }
+  },
+  {
+    "name": "channel.create result",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.create-result",
+      "channelId": "ch-7f3a"
+    }
+  },
+  {
+    "name": "channel.post with string payload",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.post",
+      "channelId": "ch-7f3a",
+      "payload": "reload"
+    }
+  },
+  {
+    "name": "channel.post with json payload",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.post",
+      "channelId": "ch-7f3a",
+      "payload": { "type": "navigate", "url": "https://example.com" }
+    }
+  },
+  {
+    "name": "channel.post result ok",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.post-result"
+    }
+  },
+  {
+    "name": "channel.close request",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.close",
+      "channelId": "ch-7f3a"
+    }
+  },
+  {
+    "name": "channel.close result ok (idempotent)",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.close-result"
+    }
+  },
+  {
+    "name": "channel.destroy request",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.destroy",
+      "channelId": "ch-7f3a"
+    }
+  },
+  {
+    "name": "channel.destroy result ok (idempotent)",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.destroy-result"
+    }
+  },
+  {
+    "name": "channel.list request",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.list"
+    }
+  },
+  {
+    "name": "channel.list result with live channel and closed tombstone",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.list-result",
+      "channels": [
+        {
+          "channelId": "ch-7f3a",
+          "state": "open",
+          "endpoints": [
+            { "side": "creator", "peer": "host" },
+            { "side": "target", "peer": "toolbar" }
+          ]
+        },
+        {
+          "channelId": "ch-2b91",
+          "state": "closed",
+          "reason": "explicit",
+          "endpoints": [
+            { "side": "creator", "peer": "toolbar" },
+            { "side": "target", "peer": "content" }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "channel.error typed envelope",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.error",
+      "error": { "code": "queue_overflow", "message": "queue byte budget exceeded" }
+    }
+  },
+  {
+    "name": "channel.created push event to the target webview",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.created",
+      "channelId": "ch-7f3a"
+    }
+  },
+  {
+    "name": "channel.closed push event with reason",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "channel.closed",
+      "channelId": "ch-7f3a",
+      "reason": "peer_webview_destroyed"
+    }
+  }
+]

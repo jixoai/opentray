@@ -178,9 +178,8 @@ export const fr: Messages = {
     startupTerminal: "Afficher le terminal de démarrage",
     startupTerminalHint:
       "Ouvre une fenêtre de terminal distincte au démarrage de l'app, diffusant en direct la sortie PTY de la commande (interactif).",
-    addressBar: "Afficher la barre d'adresse",
-    addressBarHint:
-      "Affiche une barre d'adresse en haut de la fenêtre de service (navigation gérée par la Web Navigation API).",
+    addressBar: "Barre de navigation",
+      addressBarHint: "Compose une barre de navigation native (précédent/suivant/recharger/barre d'adresse) en haut de la fenêtre ; la page se charge directement dans son propre webview. Disponible pour les applications URL et commande.",
     smoothing: "Mise à l'échelle lissée (imageSmoothingEnabled)",
     smoothingHint:
       "La mise à l'échelle de haute qualité est activée par défaut ; désactivez-la pour les icônes pixel-art basse résolution afin de conserver des bords nets (s'applique au premier plan de l'icône d'app et à l'icône de tray).",
@@ -249,6 +248,8 @@ export const fr: Messages = {
     sniffing: "Détection des services HTTP… (aucun trouvé n'empêche pas de créer l'app)",
     portsSniffing: "Détection des ports en écoute…",
     urlPlaceholder: "Saisissez une URL à visiter",
+    siteIconPlaceholder: "Emplacement de l'icône du site",
+    siteIconFallback: "Icône du site de repli",
   },
   url: {
     fetch: "Récupérer le préréglage",

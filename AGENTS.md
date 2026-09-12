@@ -409,6 +409,10 @@ pnpm -r list --depth -1
 
 Before claiming completion, run the narrowest command set that proves the current change.
 
+Machine-bound working instructions for this repository (LAN Windows host, local
+tool prefixes) live in `.zcode/AGENTS.md`, which is gitignored and never syncs
+with the repository.
+
 ## Release Operations
 
 OpenTray uses changesets plus npm Trusted Publishing.

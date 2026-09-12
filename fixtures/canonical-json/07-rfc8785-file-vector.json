@@ -1,0 +1,9 @@
+{
+  "name": "rfc 8785 appendix file vector (finite subset)",
+  "input": {
+    "numbers": [333333333.33333329, 4.50, 2e-3, 0.000000000000000000000000001],
+    "string": "\u20ac$\u000F\u000aA'\u0042\u0022\u005c\\\"/",
+    "literals": [null, true, false]
+  },
+  "expected": "{\"literals\":[null,true,false],\"numbers\":[333333333.3333333,4.5,0.002,1e-27],\"string\":\"€$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}"
+}

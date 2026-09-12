@@ -163,13 +163,13 @@ export function AppConfigCard({
               </div>
               <div className="flex items-start gap-3 rounded-lg border border-border p-3">
                 <Switch
-                  id="showAddressBar"
-                  checked={values.showAddressBar}
+                  id="toolbar"
+                  checked={values.toolbar}
                   disabled={frozen}
-                  onCheckedChange={(checked) => onPatch({ showAddressBar: checked })}
+                  onCheckedChange={(checked) => onPatch({ toolbar: checked })}
                 />
                 <div>
-                  <Label htmlFor="showAddressBar" className="text-foreground">
+                  <Label htmlFor="toolbar" className="text-foreground">
                     {messages.advanced.addressBar}
                   </Label>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
