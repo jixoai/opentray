@@ -5,11 +5,11 @@ setlocal
 set DEMOS=E:\dev\github\opentray-orch\openspec\changes\add-webview-orchestration\demos
 set REPO=E:\dev\github\opentray-orch
 set TGZ=%USERPROFILE%\opentray-owner-walkthrough\tgz
-set APP_DIR=%USERPROFILE%\.opentray\create\com-ycombinator-news\app
+set APP_DIR=%USERPROFILE%\.opentray\create\walk-hn-toolbar\app
 
 if not exist "%APP_DIR%\package.json" (
   cd /d %USERPROFILE%\opentray-owner-walkthrough
-  call pnpm --dir %REPO% create-opentray create --url https://news.ycombinator.com --toolbar --skip-install --pm npm --json
+  call pnpm --dir %REPO% create-opentray create --url https://news.ycombinator.com --app-id walk.hn.toolbar --app-name "HN Walkthrough" --toolbar --skip-install --pm npm --json
 )
 cd /d "%APP_DIR%"
 node "%DEMOS%\inject-overrides.mjs"

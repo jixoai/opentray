@@ -6,14 +6,14 @@ DEMOS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$DEMOS/../../../.." && pwd)"
 SCRATCH_DIR="$HOME/opentray-owner-walkthrough"
 TGZ="$SCRATCH_DIR/tgz"
-APP_DIR="$HOME/.opentray/create/local-cmd-demo/app"
+APP_DIR="$HOME/.opentray/create/walk-cmd-demo/app"
 
 mkdir -p "$SCRATCH_DIR/cmd-content"
 echo '<!doctype html><title>Cmd Service</title><h1>command app service</h1>' \
   > "$SCRATCH_DIR/cmd-content/index.html"
 if [ ! -f "$APP_DIR/package.json" ]; then
   (cd "$SCRATCH_DIR" && pnpm --dir "$REPO" create-opentray create \
-    --app-id local.cmd-demo --app-name "Cmd Demo" \
+    --app-id walk.cmd.demo --app-name "Cmd Walkthrough" \
     --exec python3 --arg=-m --arg=http.server --arg=8137 \
     --cwd "$SCRATCH_DIR/cmd-content" --toolbar --skip-install --pm npm --json)
 fi

@@ -7,12 +7,14 @@ REPO="$(cd "$DEMOS/../../../.." && pwd)"
 SCRATCH_DIR="$HOME/opentray-owner-walkthrough"
 TGZ="$SCRATCH_DIR/tgz"
 URL="${1:-https://news.ycombinator.com}"
-APP_DIR="$HOME/.opentray/create/com-ycombinator-news/app"
+APP_ID="walk.hn.toolbar"
+APP_DIR="$HOME/.opentray/create/walk-hn-toolbar/app"
 
 if [ ! -f "$APP_DIR/package.json" ]; then
   mkdir -p "$SCRATCH_DIR"
   (cd "$SCRATCH_DIR" && pnpm --dir "$REPO" create-opentray create \
-    --url "$URL" --toolbar --skip-install --pm npm --json)
+    --url "$URL" --app-id "$APP_ID" --app-name "HN Walkthrough" \
+    --toolbar --skip-install --pm npm --json)
 fi
 cd "$APP_DIR"
 TGZ="$TGZ" node "$DEMOS/inject-overrides.mjs"
