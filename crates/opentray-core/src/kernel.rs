@@ -304,6 +304,16 @@ impl<B: AppBackend> Kernel<B> {
         }
     }
 
+    /// Read-only tray liveness and session ownership for one `(app, tray)`
+    /// route. Broker composition uses this to validate asynchronous
+    /// extension event routes (the D19 EventPort drain) against host facts
+    /// before constructing any frame; it grants no mutation.
+    pub fn tray_owner(&self, app_id: &str, tray_id: &str) -> Option<SessionId> {
+        self.trays
+            .get(&(app_id.to_string(), tray_id.to_string()))
+            .map(|tray| tray.session_id.clone())
+    }
+
     pub fn ext_command(
         &mut self,
         app_id: AppId,

@@ -120,6 +120,12 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         self.kernel.backend()
     }
 
+    /// Read-only tray liveness and session ownership (generic seam for
+    /// asynchronous route validation; see `Kernel::tray_owner`).
+    pub fn tray_owner(&self, app_id: &str, tray_id: &str) -> Option<SessionId> {
+        self.kernel.tray_owner(app_id, tray_id)
+    }
+
     pub fn handle_frame(
         &mut self,
         session: &mut BrokerSession,
