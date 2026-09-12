@@ -8,20 +8,20 @@
 
 ## 2. BDD Contract
 
-- [ ] 2.1 opentray-spec：ExtEventClassV1/ExtEventRouteV1/ExtEventInputV1/ExtEventPortV1 类型 + attach 符号常量 + EXT_ERR_BACKPRESSURE(4)/EXT_ERR_PORT_CLOSED(5)；单测（repr(C) 布局冻结）。
-- [ ] 2.2 EventHub 确定性套件（crates/opentray-bin/src/event_hub.rs 内嵌测试，fake RuntimeWake）：源绑定/伪造不可表达、PENDING 不外泄、per-source FIFO+多线程线性化、Latest 替换+字节上限重算、Edge BACKPRESSURE、BestEffort 计数、per-source/全局容量、轮转公平、唤醒合并、drain 竞态不留滞、会话关竞态（每个结果要么关前送达要么 PORT_CLOSED，绝不穿会话）、reload 代际（旧端口不能路由到新同名挂载）、超限/坏 UTF-8/坏 JSON/oversized 拒绝、源槽上限结构化拒绝。
-- [ ] 2.3 ABI fixture 矩阵：E0 旧扩展（无符号→legacy flush）、E1 完整（direct）、部分对/坏版本/坏大小→event_port_abi_incompatible、attach 失败→REVOKED、能力诊断报告 direct vs legacy。
-- [ ] 2.4 路由统一：send_event 经同一 hub ingress 挂 post-response barrier；源绑定路由替代自报 scope（重跑既有 router ownership 用例）。
+- [x] 2.1 opentray-spec：ExtEventClassV1/ExtEventRouteV1/ExtEventInputV1/ExtEventPortV1 类型 + attach 符号常量 + EXT_ERR_BACKPRESSURE(4)/EXT_ERR_PORT_CLOSED(5)；单测（repr(C) 布局冻结）。
+- [x] 2.2 EventHub 确定性套件（crates/opentray-bin/src/event_hub.rs 内嵌测试，fake RuntimeWake）：源绑定/伪造不可表达、PENDING 不外泄、per-source FIFO+多线程线性化、Latest 替换+字节上限重算、Edge BACKPRESSURE、BestEffort 计数、per-source/全局容量、轮转公平、唤醒合并、drain 竞态不留滞、会话关竞态（每个结果要么关前送达要么 PORT_CLOSED，绝不穿会话）、reload 代际（旧端口不能路由到新同名挂载）、超限/坏 UTF-8/坏 JSON/oversized 拒绝、源槽上限结构化拒绝。
+- [x] 2.3 ABI fixture 矩阵：E0 旧扩展（无符号→legacy flush）、E1 完整（direct）、部分对/坏版本/坏大小→event_port_abi_incompatible、attach 失败→REVOKED、能力诊断报告 direct vs legacy。
+- [x] 2.4 路由统一：send_event 经同一 hub ingress 挂 post-response barrier；源绑定路由替代自报 scope（重跑既有 router ownership 用例）。
 - [ ] 2.5 facade resync：urlChange/titleChange 序号跳变 → 查询取高值——orchestration.test.ts 增用例。
 
 ## 3. Implementation — 批次 A（broker 侧）
 
-- [ ] 3.1 commit-check research-plan 后提交 OpenSpec artifacts。
-- [ ] 3.2 opentray-spec ABI 类型/常量/结果码（crate 归属：仅 C 兼容声明）。
-- [ ] 3.3 opentray-bin event_hub.rs：SourceKey{generation,owner_session_id,app_id,instance_name}/phase(PENDING→OPEN→REVOKED)/有界队列（容量=design-reference 常量表）/Latest 合并/指标/RuntimeWake 适配（mac+win: Winit UserEvent::ExtensionEventsReady；Linux: mpsc BrokerEvent）。
-- [ ] 3.4 dynamic_extension.rs：可选符号解析（all-or-nothing 单符号）、attach 时机与 PENDING→OPEN（LoadExt ACK）/失败→REVOKED、源槽上限。
-- [ ] 3.5 extension_events.rs：源绑定路由（drain 验证 tray 存活与归属）+ send_event 统一入 hub + 能力诊断。
-- [ ] 3.6 main.rs/unix_transport.rs：UserEvent/`BrokerEvent` 臂 + drain_extension_events（64条/128KB 量子）接入三平台循环。
+- [x] 3.1 commit-check research-plan 后提交 OpenSpec artifacts。
+- [x] 3.2 opentray-spec ABI 类型/常量/结果码（crate 归属：仅 C 兼容声明）。
+- [x] 3.3 opentray-bin event_hub.rs：SourceKey{generation,owner_session_id,app_id,instance_name}/phase(PENDING→OPEN→REVOKED)/有界队列（容量=design-reference 常量表）/Latest 合并/指标/RuntimeWake 适配（mac+win: Winit UserEvent::ExtensionEventsReady；Linux: mpsc BrokerEvent）。
+- [x] 3.4 dynamic_extension.rs：可选符号解析（all-or-nothing 单符号）、attach 时机与 PENDING→OPEN（LoadExt ACK）/失败→REVOKED、源槽上限。
+- [x] 3.5 extension_events.rs：源绑定路由（drain 验证 tray 存活与归属）+ send_event 统一入 hub + 能力诊断。
+- [x] 3.6 main.rs/unix_transport.rs：UserEvent/`BrokerEvent` 臂 + drain_extension_events（64条/128KB 量子）接入三平台循环。
 
 ## 4. Implementation — 批次 B（ext-webview 迁移）
 
