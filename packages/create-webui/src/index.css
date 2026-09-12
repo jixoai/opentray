@@ -243,6 +243,21 @@ body {
 *::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
 *::-webkit-scrollbar-corner { background: transparent; }
 
+/*
+ * Toolbar load bar (add-webview-orchestration D24): the indeterminate sweep
+ * segment travels the 2px strip under the toolbar while a load is in flight
+ * with no known progress fraction (Windows phase-only frames, or before the
+ * first estimatedProgress frame lands). The reduced-motion guard below pins
+ * this animation like every other.
+ */
+@keyframes toolbar-load-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(450%); }
+}
+.toolbar-load-indeterminate {
+  animation: toolbar-load-sweep 1.2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

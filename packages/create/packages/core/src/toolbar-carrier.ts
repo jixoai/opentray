@@ -24,6 +24,10 @@
 //   entry → toolbar page: {kind:"url",url}
 //     (both the urlChange push — the address bar's source of truth — and the
 //      get-url answer use the same shape)
+//   entry → toolbar page: {kind:"load-state",phase,url,progress?,errorCode?}
+//     (D24 loadState forwarding: phase is always one of started/finished/
+//      failed; progress ∈ [0,1] and errorCode are best-effort and omitted
+//      when the native side did not observe them)
 
 /**
  * The generated-entry helper source. The embedding template supplies
@@ -62,6 +66,21 @@ const attachToolbarCarrier = async (shell, options) => {
   };
   content.onUrlChange((event) => {
     void pushUrl(event.url).catch(note);
+  });
+  // Loading affordance input (D24): the content webview's loadState pushes
+  // (phase always; progress/errorCode best-effort) reach the toolbar page
+  // over the same channel. The toolbar page owns the progress-bar state
+  // machine — this carrier forwards verbatim and adds no interpretation, so
+  // a missed "failed" frame (macOS dead-port loads finish about:blank
+  // honestly) is converged by whatever terminal frame does arrive.
+  const pushLoadState = async (event) => {
+    const frame = { kind: "load-state", phase: event.phase, url: String(event.url) };
+    if (typeof event.progress === "number") frame.progress = event.progress;
+    if (typeof event.errorCode === "number") frame.errorCode = event.errorCode;
+    await channel.post(frame);
+  };
+  content.onLoadState((event) => {
+    void pushLoadState(event).catch(note);
   });
   if (options.titleFollows === true) {
     // Sync defaults project onto the CONTENT document (the real target page).

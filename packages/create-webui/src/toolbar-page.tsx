@@ -15,6 +15,10 @@
  *               | {kind:"forward"} | {kind:"reload"} | {kind:"get-url"}
  *   entry → this page: {kind:"url",url} — the address bar's source of truth
  *   is the content webview's urlChange events pushed by the entry.
+ *   entry → this page: {kind:"load-state",phase,url,progress?,errorCode?}
+ *   (D24) — drives the thin load bar at the strip's bottom edge. `progress`
+ *   (∈ [0,1]) and `errorCode` are best-effort; Windows sends phase only, so
+ *   an in-flight load without progress renders indeterminate.
  *
  * Keyboard shortcuts (⌘/Ctrl+←→, ⌘/Ctrl+[ ], ⌘/Ctrl+R, F5, ⌘/Ctrl+L) fire
  * only while THIS webview holds native focus — keystrokes never cross a
@@ -59,11 +63,109 @@ const normalizeUrl = (raw: string): string | undefined => {
   }
 };
 
+/** Channel `load-state` frame (D24) forwarded verbatim by the entry carrier. */
+interface LoadStateFrame {
+  readonly kind: "load-state";
+  readonly phase: "started" | "finished" | "failed";
+  readonly url: string;
+  readonly progress?: number;
+  readonly errorCode?: number;
+}
+
+const isLoadStateFrame = (value: unknown): value is LoadStateFrame => {
+  const frame = value as { kind?: unknown; phase?: unknown; url?: unknown } | null;
+  return (
+    typeof frame === "object" && frame !== null && frame.kind === "load-state" &&
+    (frame.phase === "started" || frame.phase === "finished" || frame.phase === "failed") &&
+    typeof frame.url === "string"
+  );
+};
+
+/** Load-bar projection: `progress === null` renders the indeterminate sweep. */
+interface LoadBarState {
+  readonly active: boolean;
+  readonly progress: number | null;
+}
+
+const LOAD_BAR_IDLE: LoadBarState = { active: false, progress: null };
+/** How long a `finished` flash sits at 100% before the bar collapses. */
+const LOAD_BAR_SETTLE_MS = 240;
+
+const normalizeProgress = (value: unknown): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(Math.max(value, 0), 1);
+};
+
+/**
+ * Favicon derivation (D25): the current origin's `/favicon.ico`, fetched
+ * client-side by the page itself (image rendering ignores CORS). Falls back
+ * to a hostname letter glyph when the image errors or the URL has no
+ * http(s) origin.
+ */
+interface FaviconTarget {
+  readonly src: string;
+  readonly glyph: string;
+}
+
+const deriveFavicon = (raw: string): FaviconTarget | undefined => {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    if (parsed.hostname.length === 0) return undefined;
+    return { src: `${parsed.origin}/favicon.ico`, glyph: parsed.hostname[0]!.toUpperCase() };
+  } catch {
+    return undefined;
+  }
+};
+
 export function ToolbarPage(): React.JSX.Element {
   const endpointRef = React.useRef<ToolbarChannelEndpoint | null>(null);
   const barRef = React.useRef<HTMLInputElement>(null);
+  const settleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bar, setBar] = React.useState("");
+  // The committed navigation target (url pushes only — transient typing in
+  // the address bar never reaches it). Drives the favicon (D25).
+  const [committedUrl, setCommittedUrl] = React.useState("");
   const [connected, setConnected] = React.useState(false);
+  const [loadBar, setLoadBar] = React.useState<LoadBarState>(LOAD_BAR_IDLE);
+  // The src of the last favicon image that errored; any src change retries.
+  const [failedFaviconSrc, setFailedFaviconSrc] = React.useState<string | null>(null);
+
+  const cancelSettle = React.useCallback((): void => {
+    if (settleTimerRef.current !== null) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+  }, []);
+
+  React.useEffect(() => cancelSettle, [cancelSettle]);
+
+  // Load-bar state machine (D24): `started` raises the bar (indeterminate
+  // until a progress-bearing frame arrives); intermediate frames are
+  // `started` frames with progress; ANY terminal frame converges —
+  // `finished` flashes to 100% then settles, `failed` collapses at once
+  // with no error-color storm (the address bar's own state already speaks).
+  // Convergence is idempotent: a terminal frame on an idle bar is a no-op,
+  // and a `started` during the settle window cancels the pending collapse,
+  // so a missing `failed` (macOS dead-port loads finish about:blank
+  // honestly) is always healed by the next terminal or started frame.
+  const applyLoadFrame = React.useCallback((frame: LoadStateFrame): void => {
+    if (frame.phase === "started") {
+      cancelSettle();
+      setLoadBar({ active: true, progress: normalizeProgress(frame.progress) });
+      return;
+    }
+    if (frame.phase === "finished") {
+      setLoadBar((prev) => (prev.active ? { active: true, progress: 1 } : prev));
+      cancelSettle();
+      settleTimerRef.current = setTimeout(() => {
+        settleTimerRef.current = null;
+        setLoadBar(LOAD_BAR_IDLE);
+      }, LOAD_BAR_SETTLE_MS);
+      return;
+    }
+    setLoadBar((prev) => (prev.active ? LOAD_BAR_IDLE : prev));
+  }, [cancelSettle]);
 
   React.useEffect(() => {
     const bridge = pageBridge();
@@ -80,12 +182,17 @@ export function ToolbarPage(): React.JSX.Element {
           message.kind === "url" && typeof message.url === "string"
         ) {
           setBar(message.url);
+          setCommittedUrl(message.url);
+          return;
+        }
+        if (isLoadStateFrame(message)) {
+          applyLoadFrame(message);
         }
       });
       endpoint.onClose(() => setConnected(false));
       endpoint.post({ kind: "get-url" }).catch(() => setConnected(false));
     });
-  }, []);
+  }, [applyLoadFrame]);
 
   const send = React.useCallback((message: Record<string, unknown>): void => {
     const endpoint = endpointRef.current;
@@ -145,8 +252,16 @@ export function ToolbarPage(): React.JSX.Element {
   // Back/forward stay enabled while connected: the content webview's NATIVE
   // history is the authority and the v1 channel surface exposes no
   // history-state query (the entry forwards the commands natively).
+  //
+  // Favicon (D25): the committed origin's /favicon.ico, remounted per src so
+  // a navigation retries the image; an errored fetch falls back to the
+  // hostname's letter glyph, and a non-http(s) or unparseable target keeps
+  // the globe placeholder.
+  const favicon = deriveFavicon(committedUrl);
+  const faviconBroken = favicon !== undefined && failedFaviconSrc === favicon.src;
+
   return (
-    <div className="flex h-11 w-full items-center gap-2 border-b border-border bg-card px-3">
+    <div className="relative flex h-11 w-full items-center gap-2 border-b border-border bg-card px-3">
       <Button variant="ghost" size="icon-sm" disabled={!connected} onClick={back} aria-label="后退">
         <ArrowLeft />
       </Button>
@@ -156,7 +271,26 @@ export function ToolbarPage(): React.JSX.Element {
       <Button variant="ghost" size="icon-sm" disabled={!connected} onClick={reload} aria-label="重新加载">
         <RotateCw />
       </Button>
-      <Globe className="size-4 shrink-0 text-muted-foreground" />
+      {favicon === undefined ? (
+        <Globe className="size-4 shrink-0 text-muted-foreground" aria-label="站点图标占位" />
+      ) : faviconBroken ? (
+        <span
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm bg-muted font-mono text-[10px] leading-none font-semibold text-muted-foreground"
+          aria-label="站点图标回落"
+        >
+          {favicon.glyph}
+        </span>
+      ) : (
+        <img
+          key={favicon.src}
+          src={favicon.src}
+          alt=""
+          className="size-4 shrink-0 rounded-sm"
+          onError={() => {
+            setFailedFaviconSrc(favicon.src);
+          }}
+        />
+      )}
       <Input
         ref={barRef}
         className="h-7 font-mono text-xs"
@@ -168,6 +302,31 @@ export function ToolbarPage(): React.JSX.Element {
           go(bar);
         }}
       />
+      {/* Load bar (D24): a 2px strip on the toolbar's bottom edge — the
+          boundary against the content webview below; the affordance exists
+          only while a load is in flight or flashing done. Indeterminate
+          sweep while progress is unknown (Windows phase-only frames, or
+          before the first estimatedProgress frame lands); positioned width
+          otherwise. Purely presentational — pointer events stay with the
+          strip's controls. */}
+      {loadBar.active ? (
+        <div
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          {...(loadBar.progress === null ? {} : { "aria-valuenow": Math.round(loadBar.progress * 100) })}
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden"
+        >
+          {loadBar.progress === null ? (
+            <div className="toolbar-load-indeterminate h-full w-1/4 bg-primary" />
+          ) : (
+            <div
+              className="h-full bg-primary transition-[width] duration-150 ease-out"
+              style={{ width: `${Math.round(loadBar.progress * 100)}%` }}
+            />
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

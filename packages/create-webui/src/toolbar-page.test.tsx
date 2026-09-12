@@ -2,9 +2,11 @@
 //
 // Toolbar-page channel tests (add-webview-orchestration D12/D13): the strip
 // holds no iframe; navigation commands and url truth flow exclusively over
-// the page-bridge message channel the entry created.
+// the page-bridge message channel the entry created. The D24/D25 block below
+// covers the load-bar state machine (started/progress/finished/failed plus
+// the missing-failed convergence path) and the favicon derivation/fallback.
 import { act, fireEvent, render, cleanup } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToolbarPage } from "./toolbar-page";
 
@@ -68,6 +70,7 @@ const installBridge = (): { readonly deliver: (endpoint: FakeEndpoint) => void }
 /** Render the strip and connect one endpoint; returns scoped queries. */
 const mount = async (): Promise<{
   readonly endpoint: FakeEndpoint;
+  readonly container: () => HTMLElement;
   readonly bar: () => HTMLInputElement;
   readonly buttons: () => NodeListOf<HTMLButtonElement>;
 }> => {
@@ -79,6 +82,7 @@ const mount = async (): Promise<{
   });
   return {
     endpoint,
+    container: () => container,
     bar: () => {
       const input = container.querySelector("input");
       if (input === null) throw new Error("address bar not rendered");
@@ -178,6 +182,202 @@ describe("ToolbarPage (channel navigation interface, D12)", () => {
     const buttons = container.querySelectorAll("button");
     expect(buttons.length).toBe(3);
     expect([...buttons].every((button) => button.disabled)).toBe(true);
+  });
+});
+
+describe("ToolbarPage (load bar state machine, D24)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const loadBar = (container: HTMLElement): HTMLElement | null =>
+    container.querySelector('[role="progressbar"]');
+
+  /** The bar's visible segment (sweep or width fill). */
+  const fill = (container: HTMLElement): HTMLElement | null =>
+    loadBar(container)?.firstElementChild as HTMLElement | null;
+
+  it("raises indeterminate on started, tracks progress frames, flashes finished to full, then settles", async () => {
+    const page = await mount();
+    // started without progress (Windows shape / pre-estimatedProgress):
+    // indeterminate — no aria-valuenow, sweep segment present.
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "started", url: "https://example.com/a" });
+    });
+    expect(loadBar(page.container())).not.toBeNull();
+    expect(loadBar(page.container())?.getAttribute("aria-valuenow")).toBeNull();
+    expect(fill(page.container())?.className).toContain("toolbar-load-indeterminate");
+
+    // Intermediate frames are started frames carrying progress: the bar
+    // becomes determinate at the observed fraction.
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "started", url: "https://example.com/a", progress: 0.3 });
+    });
+    expect(loadBar(page.container())?.getAttribute("aria-valuenow")).toBe("30");
+    expect(fill(page.container())?.style.width).toBe("30%");
+
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "started", url: "https://example.com/a", progress: 0.7 });
+    });
+    expect(loadBar(page.container())?.getAttribute("aria-valuenow")).toBe("70");
+
+    // finished: flash to 100% first (mac finished frames carry progress 1)…
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "finished", url: "https://example.com/a", progress: 1 });
+    });
+    expect(loadBar(page.container())?.getAttribute("aria-valuenow")).toBe("100");
+    expect(fill(page.container())?.style.width).toBe("100%");
+
+    // …then collapse after the settle window.
+    await act(async () => {
+      vi.advanceTimersByTime(240);
+    });
+    expect(loadBar(page.container())).toBeNull();
+  });
+
+  it("collapses immediately on failed with no flash and no error color", async () => {
+    const page = await mount();
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "started", url: "https://example.com/a", progress: 0.4 });
+    });
+    expect(loadBar(page.container())).not.toBeNull();
+
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "failed", url: "https://example.com/a", errorCode: -999 });
+    });
+    expect(loadBar(page.container())).toBeNull();
+    // No pending settle timer resurrects anything later.
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(loadBar(page.container())).toBeNull();
+  });
+
+  it("converges idempotently — terminal frames on an idle bar are no-ops", async () => {
+    const page = await mount();
+    expect(loadBar(page.container())).toBeNull();
+
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "failed", url: "https://example.com/a", errorCode: -999 });
+      page.endpoint.push({ kind: "load-state", phase: "finished", url: "https://example.com/a", progress: 1 });
+    });
+    expect(loadBar(page.container())).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(loadBar(page.container())).toBeNull();
+  });
+
+  it("heals a missing failed frame via the honest finished (macOS dead-port about:blank path)", async () => {
+    const page = await mount();
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "started", url: "http://127.0.0.1:1/x" });
+    });
+    expect(loadBar(page.container())).not.toBeNull();
+
+    // WebKit commits about:blank and finishes honestly; failed never comes.
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "finished", url: "about:blank", progress: 1 });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(240);
+    });
+    expect(loadBar(page.container())).toBeNull();
+  });
+
+  it("cancels the pending collapse when a new started lands inside the settle window", async () => {
+    const page = await mount();
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "started", url: "https://example.com/a" });
+      page.endpoint.push({ kind: "load-state", phase: "finished", url: "https://example.com/a", progress: 1 });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(100); // inside the 240ms flash window
+    });
+    expect(loadBar(page.container())).not.toBeNull();
+
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "started", url: "https://example.com/b" });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1000); // old settle must NOT collapse the new load
+    });
+    expect(loadBar(page.container())).not.toBeNull();
+
+    await act(async () => {
+      page.endpoint.push({ kind: "load-state", phase: "finished", url: "https://example.com/b", progress: 1 });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(240);
+    });
+    expect(loadBar(page.container())).toBeNull();
+  });
+});
+
+describe("ToolbarPage (favicon origin fetch + fallback, D25)", () => {
+  const faviconImg = (container: HTMLElement): HTMLImageElement | null =>
+    container.querySelector("img");
+
+  const glyph = (container: HTMLElement): HTMLElement | null =>
+    container.querySelector('[aria-label="站点图标回落"]');
+
+  const globe = (container: HTMLElement): HTMLElement | null =>
+    container.querySelector('[aria-label="站点图标占位"]');
+
+  it("derives the favicon src from the committed url's origin and follows url pushes", async () => {
+    const page = await mount();
+    await act(async () => {
+      page.endpoint.push({ kind: "url", url: "https://news.ycombinator.com/item?id=1" });
+    });
+    expect(faviconImg(page.container())?.getAttribute("src")).toBe("https://news.ycombinator.com/favicon.ico");
+
+    await act(async () => {
+      page.endpoint.push({ kind: "url", url: "http://127.0.0.1:8123/app" });
+    });
+    expect(faviconImg(page.container())?.getAttribute("src")).toBe("http://127.0.0.1:8123/favicon.ico");
+  });
+
+  it("transient address-bar typing never moves the favicon", async () => {
+    const page = await mount();
+    await act(async () => {
+      page.endpoint.push({ kind: "url", url: "https://news.ycombinator.com/" });
+    });
+    fireEvent.change(page.bar(), { target: { value: "http://elsewhere.example/x" } });
+    expect(faviconImg(page.container())?.getAttribute("src")).toBe("https://news.ycombinator.com/favicon.ico");
+  });
+
+  it("falls back to the hostname letter glyph when the image errors, and retries per navigation", async () => {
+    const page = await mount();
+    await act(async () => {
+      page.endpoint.push({ kind: "url", url: "https://news.ycombinator.com/" });
+    });
+    fireEvent.error(faviconImg(page.container())!);
+    expect(faviconImg(page.container())).toBeNull();
+    expect(glyph(page.container())?.textContent).toBe("N");
+
+    // A navigation to a new origin retries the image (src remount).
+    await act(async () => {
+      page.endpoint.push({ kind: "url", url: "https://example.org/" });
+    });
+    expect(faviconImg(page.container())?.getAttribute("src")).toBe("https://example.org/favicon.ico");
+    expect(glyph(page.container())).toBeNull();
+
+    fireEvent.error(faviconImg(page.container())!);
+    expect(glyph(page.container())?.textContent).toBe("E");
+  });
+
+  it("keeps the globe placeholder for non-http(s) or unparseable targets", async () => {
+    const page = await mount();
+    await act(async () => {
+      page.endpoint.push({ kind: "url", url: "about:blank" });
+    });
+    expect(faviconImg(page.container())).toBeNull();
+    expect(glyph(page.container())).toBeNull();
+    expect(globe(page.container())).not.toBeNull();
   });
 });
 
