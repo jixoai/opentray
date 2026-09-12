@@ -105,7 +105,7 @@ use self::appwindow::{
 use self::box_view::BoxHostWindow;
 use self::downloads::install_download_handlers;
 use self::geometry::WindowsGeometry;
-use self::orchestration::{orchestration_error, SessionEventCore, WindowSession};
+use self::orchestration::{orchestration_error, push_event_frame, SessionEventCore, WindowSession};
 use self::popups::PopupTracker;
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::layout::WindowLayoutState;
@@ -270,8 +270,8 @@ pub(super) struct NavigatorWindowBridge {
     /// Native box paint views owned by the layout engine (D5). Keyed by box
     /// id; the layout transaction creates/updates/removes them.
     pub(super) boxes: HashMap<String, BoxHostWindow>,
-    /// Shared owner identity + D19 push-event outbox of the owning window
-    /// session (weak: the session owns the strong handle).
+    /// Shared owner identity + D19 push-event legacy fallback outbox of the
+    /// owning window session (weak: the session owns the strong handle).
     pub(super) event_core: std::rc::Weak<RefCell<SessionEventCore>>,
     /// Native focus tracker of the owning window session (weak; the session
     /// owns the strong handle). WM_ACTIVATE deactivation pushes per-view
@@ -721,9 +721,15 @@ impl WindowsWebviewRuntime {
         let result = self.dispatch(tray_id, command)?;
         // Flush per-view push events after the command so synchronously
         // triggered native callbacks (focus edges, navigation starts) ride
-        // this response. This is the only delivery path for orchestration
-        // events; the 16 ms window-event drain never observes them.
-        let events = self.flush_pending_events();
+        // this response. On a direct-EventPort host the migrated families
+        // already entered the broker EventHub from their native callbacks,
+        // so the legacy outbox is retired for them (D19 batch B) and this
+        // flush is a no-op reserved for the no-port legacy fallback.
+        let events = if crate::event_port::port_attached() {
+            Vec::new()
+        } else {
+            self.flush_pending_events()
+        };
         // Host-bound channel events ride the same response (v1 flush
         // ruling, tasks 3.3b/3.5), including events drained from sessions
         // destroyed by this very command.
@@ -1023,7 +1029,9 @@ impl WindowsWebviewRuntime {
     }
 
     /// Drains every session's D19 push-event outbox into the command
-    /// response envelope set.
+    /// response envelope set. Legacy-fallback leg of the D19 batch B
+    /// routing seam: on a direct-EventPort host the migrated families never
+    /// reach the outbox and `handle` skips this flush entirely.
     fn flush_pending_events(&mut self) -> Vec<WebviewEventFrame> {
         let mut frames = Vec::new();
         for session in self.sessions.values() {
@@ -1342,8 +1350,10 @@ impl WindowsWebviewRuntime {
         })?;
         let mut webview_context = WebContext::new(Some(webview_data_directory));
 
-        // D18/D19 session core: owner identity + push-event outbox shared
-        // with the per-view observers through the bridge's weak handle.
+        // D18/D19 session core: owner identity + the legacy fallback
+        // push-event outbox, shared with the per-view observers through the
+        // bridge's weak handle (direct-EventPort hosts submit at the batch B
+        // routing seam instead).
         let event_core = Rc::new(RefCell::new(SessionEventCore {
             owner: owner.clone(),
             outbox: VecDeque::new(),
@@ -2339,9 +2349,10 @@ fn build_webview(
         .data_directory()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "<wry-default>".to_string());
-    // D19 per-view observers: title/url changes push straight into the
-    // window session's event outbox through the bridge's weak core handle —
-    // never through the 16 ms window-event drain.
+    // D19 per-view observers: title/url changes push through the batch B
+    // routing seam — `try_submit` into the host EventPort when the broker
+    // attached one, the session event outbox only as the declared legacy
+    // fallback — never through the 16 ms window-event drain.
     let events_for_title = Rc::clone(&events);
     let events_for_page_load = Rc::clone(&events);
     let owner_for_title = owner.clone();
@@ -2447,8 +2458,9 @@ fn build_webview(
     let webview = Box::new(webview);
     // D24 loadState: navigation lifecycle pushes (started/finished/failed
     // with the numeric WebErrorStatus) from the raw WebView2 callbacks
-    // into the session event outbox — same push-only channel as the
-    // title/url observers above.
+    // through the same batch B routing seam as the title/url observers
+    // above — `try_submit` on a direct-EventPort host, the session event
+    // outbox only as the legacy fallback.
     self::orchestration::install_load_state_observers(
         webview.as_ref(),
         &events,
@@ -2459,16 +2471,18 @@ fn build_webview(
     Ok(webview)
 }
 
-/// Routes one pushed per-view event frame into the owning session's event
-/// outbox (D19). The bridge holds the session core weakly, so a frame
-/// raised during teardown is dropped rather than resurrecting the session.
+/// Routes one pushed per-view event frame through the D19 batch B routing
+/// seam ([`self::orchestration::push_event_frame`]): `try_submit` into the
+/// host EventPort when attached, the session event outbox only as the
+/// declared legacy fallback. The bridge holds the session core weakly, so a
+/// frame raised during teardown is dropped rather than resurrecting the
+/// session.
 fn push_frame_into_event_core(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     frame: WebviewEventFrame,
 ) {
-    if let Some(core) = bridge.borrow().event_core.upgrade() {
-        core.borrow_mut().outbox.push_back(frame);
-    }
+    let core = bridge.borrow().event_core.clone();
+    push_event_frame(&core, Some(frame));
 }
 
 fn resolve_webview_data_directory() -> Result<PathBuf, WebviewRuntimeError> {
