@@ -1,0 +1,21 @@
+{"t":"2026-09-12T06:39:01.870Z","step":"start","pid":84813,"home":"/tmp/opentray-85-probe-home","shellDir":"/Users/kzf/Dev/GitHub/jixoai-labs/opentray/.worktree/add-webview-orchestration/packages/create/dist/shell","port":8385}
+{"t":"2026-09-12T06:39:10.926Z","step":"http","method":"GET","path":"/toolbar.html","dest":"document"}
+{"t":"2026-09-12T06:39:10.928Z","step":"http","method":"GET","path":"/slow","dest":"document"}
+{"t":"2026-09-12T06:39:10.981Z","step":"urlChange","url":"http://127.0.0.1:8385/slow"}
+{"t":"2026-09-12T06:39:10.981Z","step":"loadState","windowId":"default","webviewId":"content","seq":3,"phase":"started","url":"http://127.0.0.1:8385/slow"}
+{"t":"2026-09-12T06:39:11.066Z","step":"http","method":"GET","path":"/assets/toolbar.js","dest":"script"}
+{"t":"2026-09-12T06:39:11.074Z","step":"http","method":"GET","path":"/assets/index2.js","dest":"script"}
+{"t":"2026-09-12T06:39:11.075Z","step":"http","method":"GET","path":"/assets/input.js","dest":"script"}
+{"t":"2026-09-12T06:39:11.075Z","step":"http","method":"GET","path":"/assets/index.css","dest":"style"}
+{"t":"2026-09-12T06:39:11.376Z","step":"page-message","payload":{"kind":"get-url"}}
+{"t":"2026-09-12T06:39:11.377Z","step":"http","method":"GET","path":"/favicon.ico","dest":"image"}
+{"t":"2026-09-12T06:39:14.945Z","step":"loadState","windowId":"default","webviewId":"content","seq":5,"phase":"started","url":"http://127.0.0.1:8385/slow","progress":0.10302734375}
+{"t":"2026-09-12T06:39:14.946Z","step":"loadState","windowId":"default","webviewId":"content","seq":6,"phase":"finished","url":"http://127.0.0.1:8385/slow","progress":1}
+{"t":"2026-09-12T06:39:17.358Z","step":"http","method":"GET","path":"/slow2","dest":"document"}
+{"t":"2026-09-12T06:39:17.385Z","step":"urlChange","url":"http://127.0.0.1:8385/slow2"}
+{"t":"2026-09-12T06:39:17.385Z","step":"loadState","windowId":"default","webviewId":"content","seq":9,"phase":"started","url":"http://127.0.0.1:8385/slow2"}
+{"t":"2026-09-12T06:39:21.399Z","step":"loadState","windowId":"default","webviewId":"content","seq":11,"phase":"started","url":"http://127.0.0.1:8385/slow2","progress":0.1030517578125}
+{"t":"2026-09-12T06:39:21.399Z","step":"loadState","windowId":"default","webviewId":"content","seq":12,"phase":"finished","url":"http://127.0.0.1:8385/slow2","progress":1}
+{"t":"2026-09-12T06:39:24.426Z","step":"assert","name":"loadState frames flowed (started + finished with progress=1) and were forwarded over the channel","phases":["started","started","finished","started","started","finished"],"finishedProgress":[1,1],"ok":true,"faviconHits":1}
+{"t":"2026-09-12T06:39:24.474Z","step":"assert","name":"toolbar page handshook over the channel (get-url observed)","ok":true}
+{"t":"2026-09-12T06:39:25.761Z","step":"done"}
