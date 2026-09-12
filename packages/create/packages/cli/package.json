@@ -1,6 +1,6 @@
 {
   "name": "@create-opentray/cli",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "type": "module",
   "description": "yargs command tree for create-opentray: web, non-interactive create, app management, and packaged AI skill access.",

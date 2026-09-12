@@ -1,5 +1,23 @@
 # create-opentray
 
+## 0.25.0
+
+### Minor Changes
+
+- f8e5396: Multi-webview window orchestration: toolbar applications switch from an iframe wrapper to native sibling webviews.
+
+  - **Window orchestration (`@opentray/ext-webview`)**: one window session hosts any number of sibling webviews (`createWebview`/`destroyWebview`/`listWebviews`, per-webview navigation with `back`/`forward`, per-view `focus`, `getUrl`/`getTitle` returning `(value, seq)`), composed through a declarative layered flex layout solved natively by Taffy (`setLayout`/`layout.update`, `row/column/view/fixed/grow` sugar, a `box` paint primitive, resize stays fully native). Stacking is layer order — no zIndex field.
+  - **Per-view push events**: `urlChange`, `titleChange`, `focused`, `geometryChange`, and `loadState` (navigation lifecycle with optional progress) ride one event frame family (owner tuple, per-view sequence numbers, subscribe-then-query race semantics). Overlay/titlebar safe areas are projected per webview and recomputed inside the layout commit.
+  - **Message channels**: targeted connections (`createMessageChannel({ target })`) between the host and bridged pages with an explicit lifecycle (`created → open → closed(reason) → destroyed`), single-observation `onClose`, byte-exact queue bounds (1000 messages / 1 MiB RFC 8785 canonical bytes), bounded tombstones, and page-side peers that never see other participants' ids.
+  - **Toolbar carrier**: URL and command applications with `--toolbar` / the wizard's 导航工具栏 toggle (default off) compose a toolbar webview above a content webview that loads the target as a top-level context — embedding-hostile sites (X-Frame-Options/CSP) simply work, logins persist as first-party storage, and the address bar follows `urlChange` truth with a load progress bar and favicon. New-window intents (`a[target]`, `window.open`, middle-click, context menu) open session-owned popup windows. The iframe browse wrapper and `frameEmbeddable` probing are retired; the legacy `showAddressBar` field is ignored on parse and no longer exported.
+  - Session ownership is keyed by `(appId, trayId, sessionId)`; a second window session for a tray is a typed `tray_session_active` rejection, and session/lease cleanup closes exactly the owned windows, webviews, channels, and popups.
+
+### Patch Changes
+
+- @opentray/spec@0.25.0
+- @opentray/packaging@0.25.0
+- @opentray/vite-plugin@0.25.0
+
 ## 0.24.0
 
 ### Minor Changes
