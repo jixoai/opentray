@@ -1414,7 +1414,6 @@ mod tests {
         assert_eq!(drain_all(&hub).len(), 1);
     }
 
-    #[test]
     /// B4 law: a failed reload (reserved generation revoked before its ACK)
     /// must leave the previous generation current — the still-alive old
     /// instance keeps delivering through both ingress paths. Only a later

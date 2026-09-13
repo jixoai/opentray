@@ -462,12 +462,15 @@ export const createWebviewOrchestration = (
     kind: "urlChange" | "titleChange",
     deliveredSeq: number,
   ): void => {
-    const inflightKey = `${kind}:${webviewId}`;
+    // The in-flight marker is generation-qualified: a destroy/recreate
+    // bumps the generation, so an old promise's finally can never remove a
+    // new generation's marker (final review P2).
+    const generation = viewGenerations.get(webviewId) ?? 0;
+    const inflightKey = `${kind}:${webviewId}#${generation}`;
     if (resyncInFlight.has(inflightKey)) {
       return;
     }
     resyncInFlight.add(inflightKey);
-    const generation = viewGenerations.get(webviewId) ?? 0;
     const isUrl = kind === "urlChange";
     void expectResult(
       {
@@ -579,18 +582,24 @@ export const createWebviewOrchestration = (
     // re-created id must not inherit a stale high-water mark (its native
     // ViewEvents restarts at seq 1).
     lastViewSeq.delete(webviewId);
-    for (const key of [...deliveredKindSeq.keys()]) {
-      if (key.endsWith(`:${webviewId}`)) {
-        deliveredKindSeq.delete(key);
-      }
+    // Exact-kind prefix + suffix match is ambiguous when a webview id
+    // itself contains the separator; scan with a precise per-kind key set
+    // instead (final review P2 opaque-id boundary).
+    for (const kind of ["urlChange", "titleChange"] as const) {
+      deliveredKindSeq.delete(`${kind}:${webviewId}`);
     }
     // D19 final review B6: bump the lifecycle generation so an in-flight
     // resync query issued for the destroyed view cannot deliver into a
     // re-created view under the same id.
     viewGenerations.set(webviewId, (viewGenerations.get(webviewId) ?? 0) + 1);
+    // Generation-qualified markers only: remove every generation of this
+    // (kind, webview) pair; the `#gen` suffix cannot appear ambiguously in a
+    // foreign id's marker because the kind prefix is a fixed enum.
     for (const key of [...resyncInFlight]) {
-      if (key.endsWith(`:${webviewId}`)) {
-        resyncInFlight.delete(key);
+      for (const kind of ["urlChange", "titleChange"] as const) {
+        if (key.startsWith(`${kind}:${webviewId}#`)) {
+          resyncInFlight.delete(key);
+        }
       }
     }
   };
