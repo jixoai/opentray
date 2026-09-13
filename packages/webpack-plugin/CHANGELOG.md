@@ -1,5 +1,11 @@
 # @opentray/webpack-plugin
 
+## 0.27.2
+
+### Patch Changes
+
+- @opentray/packaging@0.27.2
+
 ## 0.27.1
 
 ### Patch Changes
