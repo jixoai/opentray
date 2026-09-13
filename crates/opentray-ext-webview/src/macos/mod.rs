@@ -53,12 +53,14 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString};
 use objc2_web_kit::WKWebView;
+use opentray_spec::webview::WebviewBrowserOptions;
 use opentray_spec::webview::{
     WebviewBridgePolicy, WebviewEventFrame, WebviewListEntry, WebviewOrchestrationCommand,
     WebviewOrchestrationResult,
 };
 use raw_window_handle::{AppKitWindowHandle, HasWindowHandle, RawWindowHandle, WindowHandle};
 use serde_json::{json, Value};
+use wry::WebViewBuilderExtMacos as _;
 use wry::{
     dpi::{LogicalPosition, LogicalSize},
     PageLoadEvent, Rect as WryRect, WebView, WebViewBuilder, WebViewExtMacOS, RGBA,
@@ -961,6 +963,7 @@ impl MacosWebviewRuntime {
                 url,
                 html,
                 bridge,
+                browser,
             } => {
                 let policy = bridge.unwrap_or_default();
                 if self.resolve_window(&owner, &window_id).is_none() {
@@ -985,7 +988,15 @@ impl MacosWebviewRuntime {
                         "create-webview accepts exactly one of url or html".into(),
                     ));
                 }
-                match self.create_child_webview(&owner, &window_id, &webview_id, url, html, policy)
+                match self.create_child_webview(
+                    &owner,
+                    &window_id,
+                    &webview_id,
+                    url,
+                    html,
+                    policy,
+                    browser,
+                )
                 {
                     Ok(()) => WebviewOrchestrationResult::WebviewAck {
                         owner,
@@ -1497,6 +1508,7 @@ impl MacosWebviewRuntime {
         url: Option<String>,
         html: Option<String>,
         policy: WebviewBridgePolicy,
+        browser: Option<WebviewBrowserOptions>,
     ) -> Result<(), ChildCreateError> {
         MainThreadMarker::new().ok_or_else(|| {
             ChildCreateError::Runtime(WebviewRuntimeError::Unsupported(
@@ -1525,6 +1537,7 @@ impl MacosWebviewRuntime {
             url,
             html,
             policy,
+            browser.unwrap_or_default(),
             Rc::clone(&events),
         );
         match build {
@@ -1561,6 +1574,7 @@ impl MacosWebviewRuntime {
         url: Option<String>,
         html: Option<String>,
         policy: WebviewBridgePolicy,
+        browser: WebviewBrowserOptions,
         events: Rc<RefCell<ViewEvents>>,
     ) -> Result<NativeWebview, WebviewRuntimeError> {
         let session = self
@@ -1664,6 +1678,26 @@ impl MacosWebviewRuntime {
             ))
             .with_devtools(session.show_settings.window.devtools)
             .with_transparent(true);
+
+        // Browser-normal defaults (per-webview browser options): the engine
+        // default UA is bare ("…AppleWebKit/… (KHTML, like Gecko)" with no
+        // browser token) and UA-sniffing sites — portal homepages are the
+        // canonical casualty — misbranch or reload-loop on it. The default
+        // projects a standard Safari identity through the public
+        // `applicationNameForUserAgent` hook; an explicit user agent wins
+        // outright; incognito/autoplay map to their wry switches.
+        let browser_options = browser;
+        if let Some(user_agent) = browser_options.resolved_user_agent() {
+            builder = builder.with_user_agent(user_agent);
+        } else if browser_options.browserlike_user_agent() {
+            builder = builder.with_webview_configuration(browserlike_configuration()?);
+        }
+        if browser_options.incognito() {
+            builder = builder.with_incognito(true);
+        }
+        if browser_options.autoplay() {
+            builder = builder.with_autoplay(true);
+        }
 
         // Per-webview bridge policy (D2): a policy-less child gets no
         // bootstrap script and no ipc surface — the arbitrary-content webview
@@ -2483,6 +2517,20 @@ fn register_bridge_view(
         listeners: HashMap::new(),
         next_event_id: 1,
     });
+}
+
+/// Browserlike WKWebView configuration: the engine-default UA plus the
+/// standard Safari tokens appended through the public
+/// `applicationNameForUserAgent` hook (Apple's sanctioned append point — the
+/// engine prefix stays engine-truthful, only the app-name suffix is added).
+fn browserlike_configuration() -> Result<Retained<objc2_web_kit::WKWebViewConfiguration>, WebviewRuntimeError> {
+    let mtm = MainThreadMarker::new().ok_or_else(|| {
+        WebviewRuntimeError::Unsupported("webview runtime requires the main thread".into())
+    })?;
+    let config = unsafe { objc2_web_kit::WKWebViewConfiguration::new(mtm) };
+    let app_name = objc2_foundation::NSString::from_str("Version/26.0 Safari/605.1.15");
+    unsafe { config.setApplicationNameForUserAgent(Some(&app_name)) };
+    Ok(config)
 }
 
 fn orchestration_error(error: OrchestrationError) -> WebviewRuntimeError {

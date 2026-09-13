@@ -42,6 +42,22 @@ export interface WebviewBridgePolicy {
   nativeApi: boolean;
 }
 
+/**
+ * Per-webview browser-behavior options (create-webview). Defaults are
+ * browser-normal: browserlike UA on, persistent storage profile,
+ * gesture-gated autoplay.
+ */
+export interface WebviewBrowserOptions {
+  /** Full User-Agent override; wins over `browserlikeUserAgent`. */
+  userAgent?: string;
+  /** Default `true`. `false` restores the bare engine UA. */
+  browserlikeUserAgent?: boolean;
+  /** Default `false`. Ephemeral (non-persistent) storage profile (macOS). */
+  incognito?: boolean;
+  /** Default `false`. Allow media autoplay without a user gesture. */
+  autoplay?: boolean;
+}
+
 export type WebviewBridgePolicyInput = Partial<WebviewBridgePolicy> | undefined;
 
 const bridgePolicyFields = [
@@ -143,7 +159,10 @@ export type WebviewOrchestrationCommandFrame = { owner: WebviewOwnerTuple } &
         type: "create-webview";
         windowId: WindowId;
         webviewId: WebviewId;
-      } & WebviewContent & { bridge?: WebviewBridgePolicy }
+      } & WebviewContent & {
+        bridge?: WebviewBridgePolicy;
+        browser?: WebviewBrowserOptions;
+      }
     | { type: "destroy-webview"; windowId: WindowId; webviewId: WebviewId }
     | { type: "list-webviews"; windowId: WindowId }
     | { type: "navigate-webview"; windowId: WindowId; webviewId: WebviewId; url: string }

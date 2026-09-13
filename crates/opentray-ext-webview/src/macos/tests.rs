@@ -2093,6 +2093,7 @@ fn runtime_orchestration_smoke_on_main_thread() {
             url: Some(url.to_string()),
             html: None,
             bridge: policy,
+            browser: None,
         }
     };
     let created = orchestrate(
@@ -2308,6 +2309,7 @@ fn window_only_reshow_with_title_on_populated_session() {
                         url: Some("about:blank".to_string()),
                         html: None,
                         bridge: policy,
+                        browser: None,
                     },
                 )),
             )
@@ -3002,6 +3004,7 @@ fn runtime_channel_smoke_on_main_thread() {
                         url: Some("about:blank".to_string()),
                         html: None,
                         bridge: policy,
+                        browser: None,
                     },
                 )),
             )

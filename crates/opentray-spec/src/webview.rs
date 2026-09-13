@@ -128,6 +128,49 @@ impl WebviewErrorEnvelope {
     }
 }
 
+/// Per-webview browser-behavior options (create-webview). Defaults make a
+/// content webview behave like an ordinary browser tab; every field is an
+/// explicit opt-out or override for the application that needs otherwise.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WebviewBrowserOptions {
+    /// Full User-Agent override. When set it wins over `browserlikeUserAgent`
+    /// (which only shapes the engine default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
+    /// Append the standard browser tokens to the engine-default UA (macOS:
+    /// the Safari `Version/… Safari/…` suffix; Windows: the WebView2 default
+    /// UA is already a full Edge UA so this is a no-op). Default `true` —
+    /// UA-sniffing sites (portal homepages) loop or misbranch on the bare
+    /// engine UA. `false` restores the bare engine identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browserlike_user_agent: Option<bool>,
+    /// Ephemeral (non-persistent) storage profile. Default `false` —
+    /// cookies/localStorage persist like a normal browser profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incognito: Option<bool>,
+    /// Allow media autoplay without a user gesture. Default `false` (the
+    /// engine's conservative default; browsers similarly gate audible
+    /// autoplay).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autoplay: Option<bool>,
+}
+
+impl WebviewBrowserOptions {
+    pub fn resolved_user_agent(&self) -> Option<&str> {
+        self.user_agent.as_deref()
+    }
+    pub fn browserlike_user_agent(&self) -> bool {
+        self.browserlike_user_agent.unwrap_or(true)
+    }
+    pub fn incognito(&self) -> bool {
+        self.incognito.unwrap_or(false)
+    }
+    pub fn autoplay(&self) -> bool {
+        self.autoplay.unwrap_or(false)
+    }
+}
+
 /// Host→broker orchestration commands (ext-command data payloads). Tag names
 /// follow the core protocol's kebab-case convention and never collide with
 /// the single-webview command surface (`navigate`, `focus`, ...).
@@ -144,6 +187,11 @@ pub enum WebviewOrchestrationCommand {
         html: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bridge: Option<WebviewBridgePolicy>,
+        /// Browser-behavior options (UA shaping, incognito, autoplay). Absent
+        /// means every default: browserlike UA on, persistent profile,
+        /// gesture-gated autoplay.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        browser: Option<WebviewBrowserOptions>,
     },
     DestroyWebview {
         owner: WebviewOwnerTuple,
@@ -869,6 +917,7 @@ mod tests {
                     message_channels: true,
                     ..WebviewBridgePolicy::default()
                 }),
+                browser: None,
             },
             "create-webview without bridge policy" => WebviewOrchestrationCommand::CreateWebview {
                 owner,
@@ -877,6 +926,7 @@ mod tests {
                 url: Some("https://news.ycombinator.com".to_string()),
                 html: None,
                 bridge: None,
+                browser: None,
             },
             "create-webview with html content" => WebviewOrchestrationCommand::CreateWebview {
                 owner,
@@ -885,6 +935,7 @@ mod tests {
                 url: None,
                 html: Some("<p>offline</p>".to_string()),
                 bridge: None,
+                browser: None,
             },
             "destroy-webview" => WebviewOrchestrationCommand::DestroyWebview {
                 owner,

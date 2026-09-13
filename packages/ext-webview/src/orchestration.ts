@@ -101,6 +101,24 @@ export interface WebviewChildSpec {
   url?: string;
   html?: string;
   bridge?: Partial<WebviewBridgePolicy>;
+  /**
+   * Browser-behavior options. Defaults make the webview behave like an
+   * ordinary browser tab: a browserlike UA (macOS appends the standard
+   * Safari tokens to the bare engine UA — UA-sniffing portal homepages
+   * reload-loop on the bare string; Windows already ships a full Edge UA
+   * so the shaping is a no-op), a persistent storage profile, and
+   * gesture-gated autoplay.
+   */
+  browser?: {
+    /** Full User-Agent override; wins over `browserlikeUserAgent`. */
+    userAgent?: string;
+    /** Default `true`. `false` restores the bare engine UA. */
+    browserlikeUserAgent?: boolean;
+    /** Default `false`. Ephemeral (non-persistent) storage profile (macOS). */
+    incognito?: boolean;
+    /** Default `false`. Allow media autoplay without a user gesture. */
+    autoplay?: boolean;
+  };
 }
 
 /** Field-level push payloads with frame identity and the per-view `seq`. */
@@ -938,6 +956,7 @@ export const createWebviewOrchestration = (
       ...(spec.url === undefined ? {} : { url: spec.url }),
       ...(spec.html === undefined ? {} : { html: spec.html }),
       ...(spec.bridge === undefined ? {} : { bridge: resolveWebviewBridgePolicy(spec.bridge) }),
+      ...(spec.browser === undefined ? {} : { browser: spec.browser }),
     } as WebviewOrchestrationCommandFrame);
     return childHandle(spec.id);
   };

@@ -993,6 +993,7 @@ impl super::WindowsWebviewRuntime {
                 url,
                 html,
                 bridge,
+                browser,
             } => {
                 let policy = bridge.unwrap_or_default();
                 if self.resolve_window(&owner, &window_id).is_none() {
@@ -1017,7 +1018,15 @@ impl super::WindowsWebviewRuntime {
                         "create-webview accepts exactly one of url or html".into(),
                     ));
                 }
-                match self.create_child_webview(&owner, &window_id, &webview_id, url, html, policy)
+                match self.create_child_webview(
+                    &owner,
+                    &window_id,
+                    &webview_id,
+                    url,
+                    html,
+                    policy,
+                    browser,
+                )
                 {
                     Ok(()) => WebviewOrchestrationResult::WebviewAck {
                         owner,
@@ -1353,6 +1362,7 @@ impl super::WindowsWebviewRuntime {
         url: Option<String>,
         html: Option<String>,
         policy: WebviewBridgePolicy,
+        browser: Option<opentray_spec::webview::WebviewBrowserOptions>,
     ) -> Result<(), ChildCreateError> {
         let window_owner = WindowOwner {
             app_id: owner.app_id.clone(),
@@ -1374,6 +1384,7 @@ impl super::WindowsWebviewRuntime {
             url,
             html,
             policy,
+            browser.unwrap_or_default(),
             Rc::clone(&events),
         );
         match build {
@@ -1412,6 +1423,7 @@ impl super::WindowsWebviewRuntime {
         url: Option<String>,
         html: Option<String>,
         policy: WebviewBridgePolicy,
+        browser: opentray_spec::webview::WebviewBrowserOptions,
         events: Rc<RefCell<ViewEvents>>,
     ) -> Result<SessionWebview, WebviewRuntimeError> {
         // D26 popup capture: taken before the session borrow so the
@@ -1445,6 +1457,13 @@ impl super::WindowsWebviewRuntime {
             .clone()
             .unwrap_or_default();
         let popup_opener_hwnd = host_window.hwnd;
+
+        // Browser options (per-webview): Windows' WebView2 default UA is
+        // already a full Edge UA, so browserlike shaping is a no-op here —
+        // only an explicit override or the autoplay switch act on the builder
+        // below. Incognito would require a second ephemeral WebContext and
+        // would change the profile law; absent stays the persistent profile.
+        let browser_options = browser;
 
         let mut builder = WebViewBuilder::new_with_web_context(&mut session.webview_context)
             .with_document_title_changed_handler(move |title| {
@@ -1541,6 +1560,9 @@ impl super::WindowsWebviewRuntime {
             size: wry::dpi::PhysicalSize::new(1, 1).into(),
         });
         builder = builder.with_bounds(initial_bounds);
+        if let Some(user_agent) = browser_options.resolved_user_agent() {
+            builder = builder.with_user_agent(user_agent);
+        }
         let builder = match (url, html) {
             (Some(url), None) => builder.with_url(url),
             (None, Some(html)) => builder.with_html(html),
@@ -1551,6 +1573,7 @@ impl super::WindowsWebviewRuntime {
                 // D1: sibling native view inside the same host HWND. The
                 // effective layout assigns the real bounds immediately
                 // after the build returns.
+                .with_autoplay(browser_options.autoplay())
                 .build_as_child(host_window)
                 .map_err(|error| controller_creation_error(&profile_path, error))?,
         );
