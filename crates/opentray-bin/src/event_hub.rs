@@ -190,9 +190,16 @@ struct SourceTable {
     slots: Vec<Arc<SourceState>>,
     /// Reserved generations, never decremented in phase 1.
     reserved: usize,
-    /// Latest slot per (app, instance); a reload moves the mapping to the
-    /// fresh generation.
+    /// Latest OPENED slot per (app, instance). The mapping switches only at
+    /// the LoadExt ACK (`note_loaded_and_open`): a reload that fails before
+    /// its ACK must leave the previous generation current, so a still-alive
+    /// old instance keeps delivering instead of resolving to the dead new
+    /// source (D19 final review B4).
     current: HashMap<(AppId, String), u32>,
+    /// Latest reserved-but-PENDING candidate per (app, instance), awaiting
+    /// its LoadExt ACK. Each reservation overwrites the previous candidate;
+    /// revoked candidates are never promoted.
+    pending: HashMap<(AppId, String), u32>,
 }
 
 struct SourceState {
@@ -357,13 +364,16 @@ impl EventHub {
                     slots: Vec::new(),
                     reserved: 0,
                     current: HashMap::new(),
+                    pending: HashMap::new(),
                 }),
             }),
         }
     }
 
-    /// Reserves one PENDING source slot for a loading extension instance.
-    /// Fails with a structured source-limit rejection before any port is
+    /// Reserves one PENDING source slot for a loading extension instance,
+    /// staging it as the (app, instance) pending candidate WITHOUT touching
+    /// the current mapping (which switches only at the LoadExt ACK). Fails
+    /// with a structured source-limit rejection before any port is
     /// constructed or attached.
     pub(crate) fn reserve_source(
         &self,
@@ -556,7 +566,9 @@ impl HubInner {
         });
         table.slots.push(state.clone());
         table.reserved += 1;
-        table.current.insert((app_id, instance_name), slot);
+        // A reservation only stages the PENDING candidate; the `current`
+        // mapping switches at the LoadExt ACK, never here.
+        table.pending.insert((app_id, instance_name), slot);
         Ok(SourceHandle {
             inner: Arc::clone(self),
             state,
@@ -581,26 +593,35 @@ impl HubInner {
         instance: &str,
         owner_session_id: &str,
     ) -> bool {
-        let Some(state) = self
-            .current_source(app_id, instance)
-            .map(|handle| handle.state)
-        else {
+        let key = (app_id.to_string(), instance.to_string());
+        let mut table = self.sources.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(&slot) = table.pending.get(&key) else {
             return false;
         };
-        *state.owner.lock().unwrap_or_else(|e| e.into_inner()) = Some(owner_session_id.to_string());
-        match state.phase.compare_exchange(
-            PHASE_PENDING,
-            PHASE_OPEN,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => {
-                // Records may have queued while PENDING; deliver them now.
-                state.shared.request_drain_once();
-                true
-            }
-            Err(_) => false,
+        let Some(state) = table.slots.get(slot as usize).cloned() else {
+            table.pending.remove(&key);
+            return false;
+        };
+        *state.owner.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(owner_session_id.to_string());
+        let opened = state
+            .phase
+            .compare_exchange(PHASE_PENDING, PHASE_OPEN, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
+        table.pending.remove(&key);
+        if !opened {
+            // The candidate was revoked (failed load) or already opened;
+            // never promote it over a live generation.
+            return false;
         }
+        // The LoadExt ACK linearizes this generation as the deliverable
+        // source for (app, instance). A failed load never reaches this
+        // point, so the previous generation stays current through failures.
+        table.current.insert(key, slot);
+        drop(table);
+        // Records may have queued while PENDING; deliver them now.
+        state.shared.request_drain_once();
+        true
     }
 
     fn revoke_session(&self, session_id: &str) -> usize {
@@ -1391,6 +1412,84 @@ mod tests {
             EXT_OK
         );
         assert_eq!(drain_all(&hub).len(), 1);
+    }
+
+    #[test]
+    /// B4 law: a failed reload (reserved generation revoked before its ACK)
+    /// must leave the previous generation current — the still-alive old
+    /// instance keeps delivering through both ingress paths. Only a later
+    /// successful ACK switches the mapping.
+    #[test]
+    fn failed_reload_keeps_the_previous_generation_current() {
+        let (hub, _) = hub(false);
+        let old = open_source(&hub, "app-a", "mount", "session-1");
+        let old_generation = old.key().generation;
+        let old_port = old.port();
+        assert_eq!(
+            submit(&old_port, "tray-a", &payload("pre"), ExtEventClassV1::Edge, None),
+            EXT_OK
+        );
+        assert_eq!(drain_all(&hub).len(), 1);
+
+        // Reload: the loader reserves a fresh PENDING generation, then the
+        // load fails before its ACK — the failed source is revoked.
+        let failed = hub
+            .reserve_source("app-a".to_string(), "mount".to_string())
+            .expect("reserve");
+        assert!(failed.revoke(), "failed load revokes its own source");
+
+        // The current mapping still routes to the live old generation.
+        let current = hub
+            .current_source("app-a", "mount")
+            .expect("old generation stays current");
+        assert_eq!(current.key().generation, old_generation);
+
+        // The old instance keeps delivering: its FFI port and the
+        // command-time push ingress both resolve to the old generation.
+        assert_eq!(
+            submit(&old_port, "tray-a", &payload("old-alive"), ExtEventClassV1::Edge, None),
+            EXT_OK
+        );
+        assert_eq!(
+            current.submit_push("tray-a", &serde_json::json!({ "type": "old-push" })),
+            SubmitOutcome::Enqueued
+        );
+        let drained = drain_all(&hub);
+        assert_eq!(drained.len(), 2);
+        assert!(
+            drained
+                .iter()
+                .all(|record| record.key.generation == old_generation),
+            "both deliveries carry the old generation: {drained:?}"
+        );
+
+        // The failed generation's pending candidate is not openable.
+        assert!(!hub.note_loaded_and_open("app-a", "mount", "session-1"));
+
+        // A later successful reload switches current only at its ACK.
+        let fresh = hub
+            .reserve_source("app-a".to_string(), "mount".to_string())
+            .expect("reserve");
+        assert_eq!(
+            hub.current_source("app-a", "mount")
+                .expect("still routed to the old generation")
+                .key()
+                .generation,
+            old_generation,
+            "a reservation alone must not switch current"
+        );
+        assert!(hub.note_loaded_and_open("app-a", "mount", "session-1"));
+        let switched_generation = hub
+            .current_source("app-a", "mount")
+            .expect("switched at ACK")
+            .key()
+            .generation;
+        assert_eq!(switched_generation, fresh.key().generation);
+        assert_ne!(switched_generation, old_generation);
+        drop(current);
+        drop(old);
+        drop(fresh);
+        drop(failed);
     }
 
     #[test]

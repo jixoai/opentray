@@ -991,9 +991,14 @@ mod tests {
         assert_eq!(capability, PortCapability::LegacyFlush);
         assert_eq!(capability.diagnostic_label(), "legacy-flush");
         // A legacy extension still gets a source slot: its command-time
-        // send_event pushes bind to the same hub ingress.
-        assert!(hub.current_source("app-1", "webview").is_some());
+        // send_event pushes bind to the same hub ingress. The reservation
+        // stages a PENDING candidate; `current` appears only at the ACK.
+        assert!(
+            hub.current_source("app-1", "webview").is_none(),
+            "a reservation alone must not switch the current mapping"
+        );
         assert!(hub.note_loaded_and_open("app-1", "webview", "session-1"));
+        assert!(hub.current_source("app-1", "webview").is_some());
         assert_eq!(hub.metrics().legacy_sources, 1);
         assert_eq!(hub.metrics().direct_sources, 0);
         drop(handle);
@@ -1071,16 +1076,14 @@ mod tests {
 
         assert!(error.to_string().contains("attach"), "{error}");
         assert_eq!(ATTACH_CALLS.load(Ordering::SeqCst), 1);
-        // The source is REVOKED, never left openable after a failed load.
-        let current = hub
-            .current_source("app-1", "webview")
-            .expect("retained state");
-        assert!(!hub.note_loaded_and_open("app-1", "webview", "session-1"));
-        assert_eq!(
-            current.submit_push("tray-a", &serde_json::json!({ "type": "x" })),
-            crate::event_hub::SubmitOutcome::Closed
+        // The source is REVOKED, never left openable after a failed load,
+        // and the current mapping never switched to it: a still-alive old
+        // generation would keep delivering (B4 law).
+        assert!(
+            hub.current_source("app-1", "webview").is_none(),
+            "a failed load must not pollute the current mapping"
         );
-        drop(current);
+        assert!(!hub.note_loaded_and_open("app-1", "webview", "session-1"));
     }
 
     #[test]

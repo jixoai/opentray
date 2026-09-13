@@ -367,7 +367,8 @@ fn submit_source_bound_push(
         ))),
         SubmitOutcome::Closed => {
             eprintln!(
-                "opentray extension event dropped: source {}/{} is revoked (owner session closed or reload)",
+                "opentray extension event dropped: source {}/{} is closed (owner session closed, \
+                 reload, or hub delivery unavailable)",
                 source.key().app_id,
                 source.key().instance_name
             );
@@ -1021,6 +1022,57 @@ mod tests {
                 .iter()
                 .any(|frame| matches!(frame, ServerFrame::ExtEvent { data, .. } if data["type"] == "idle")),
             "idle push delivered without any command: {received:?}"
+        );
+    }
+
+    /// B4 law (D19 final review): a failed reload must leave the previous
+    /// generation current. The loader reserves a fresh generation (PENDING)
+    /// and revokes it when the load fails before its ACK; the still-alive
+    /// old instance's command-time `send_event` keeps delivering instead of
+    /// resolving to the dead new source.
+    #[test]
+    fn failed_reload_keeps_delivering_the_old_generation_send_event() {
+        let mut harness = Harness::new();
+        let session = harness.open_session();
+        harness.create_app_and_tray(session, "app-a");
+        harness.load_push(session, "app-a");
+        let old_generation = harness
+            .hub
+            .current_source("app-a", "push")
+            .expect("open source")
+            .key()
+            .generation;
+
+        // Loader-side failed reload: a fresh generation is reserved and then
+        // revoked before its LoadExt ACK could open it.
+        let failed = harness
+            .hub
+            .reserve_source("app-a".to_string(), "push".to_string())
+            .expect("reserve");
+        assert!(failed.revoke());
+        drop(failed);
+
+        // The current mapping still routes to the old OPEN generation.
+        let current = harness
+            .hub
+            .current_source("app-a", "push")
+            .expect("old generation stays current");
+        assert_eq!(current.key().generation, old_generation);
+        drop(current);
+
+        // The old instance's command-time push still delivers end to end.
+        let frames = harness.ext_command(session, "app-a", "tray-a");
+        assert!(matches!(
+            frames.first(),
+            Some(ServerFrame::ExtCommandResult { .. })
+        ));
+        let received = harness.received(session);
+        assert!(
+            received.iter().any(|frame| matches!(
+                frame,
+                ServerFrame::ExtEvent { data, .. } if data["type"] == "pushed"
+            )),
+            "old instance push still delivers after a failed reload: {received:?}"
         );
     }
 
