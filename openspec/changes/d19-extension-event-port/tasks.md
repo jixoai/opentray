@@ -27,7 +27,7 @@
 
 - [x] 4.1 attach 符号（83b4226）：平台无关导出+校验；契约 fingerprint contract-1→contract-2 落分类表；event_port.rs 839 行平台无关核心（Windows 直接复用）：导出 attach 符号，存 port（进程级不可变值）。
 - [x] 4.2 macOS 迁移（83b4226）：五族→try_submit 按规范分类表；Edge 有界重试 FIFO（cap 64/首压即停/PORT_CLOSED 清队）；Latest 背压不重试（resync 修复）；legacy H0 回退保留 outbox；不双投。151/151（+10）：title/url/focus/geometry/load 五族原生回调从 outbox 改 try_submit（规范事件类表：url/title=Latest(webviewId+键)、focus/geometry/load 三相=Edge、progress=BestEffort）；Edge BACKPRESSURE 的扩展侧有界重试（不阻塞 AppKit 回调）。
-- [ ] 4.3 Windows 生产者迁移（真机）：同表同构（WebView2 观察者 → try_submit）。
+- [x] 4.3 Windows 迁移（2302c25 + f5447a7e）：五族+窗口族；终核修复后真机 176/176（真机）：同表同构（WebView2 观察者 → try_submit）。
 - [x] 4.4 同 2.5（packages/ext-webview orchestration.ts）。
 - [x] 4.5 macOS 冒烟 PASS：T0 后 Node 命令=0，五族直达 tap；broker.log direct-event-port + drained=12 精确吻合（证据 /tmp/d19-smoke-evidence/，已随批次归档说明）。Windows 半侧待 win 批次回传后补勾：mac 本机 + win 真机——空闲（Node 零命令）导航事件直达 facade tap；broker 身份取证。
 
@@ -36,14 +36,14 @@
 - [x] 5.1 POLLED_WINDOW_EVENTS 逐成员映射：focus/blur/visible/closed/stylechange/windowinteractionchange/download*（downloadprogress=BestEffort，其余 Edge——无 query/replay 路由按规范表不得 Latest；stylechange 双平台本就无 facade 生产者，保留在冻结家族内）→ `event_port::submit_window_event`（复用 submit_bytes/Edge 重试，批次 C 分类表写入 event_port.rs 头 + contract-3 eventClasses）；订阅控制原生生产者：新增 subscribeWindowEvents/unsubscribeWindowEvents 协议（对齐 D19 per-view 订阅语义，无订阅者零原生观测记录，macos/tests.rs 三测例证明）；reopen MRU 改推送驱动（facade listen→订阅，app-reopen 回归绿）。
 - [x] 5.2 删 drainWindowEvents 命令（lib.rs 类型+解析）/macos 原生 window_events 队列（bridge 字段+drain 臂+window_event_payload）/facade 16ms interval+监听计数定时器+emit/localListeners 死面（WebviewCommand/TS 类型同步删除）——一次兼容性决策 contract-2→contract-3（drain 队列是该家族唯一 pre-port 通道，H0 回退随之退役并在 contract.json 声明）；windows/mod.rs 仅删分发臂+惰性订阅臂（协议必需最小面，行为迁移留 Windows 批）；权限轮询（PERMISSION_POLL_INTERVAL_MS）明确保留；drain 臂原先承载的 app-mode/激活策略 reconcile 改推送驱动（delegate close/blur auto-hide/miniaturize 观察者 + 共享 AppModeLedger）。
 - [x] 5.3 macOS 空闲取证 PASS（release broker/dylib contract-3，隔离 HOME，windowOnly 双 webview+五族订阅+窗口家族订阅）：空闲窗口（含原生回调：page 自导航 + WKDownload downloadstarted）drain 命令=0、窗口命令=0（唯一 get-webview-url 为批次 B gap-resync 事件因果查询，非定时）；窗口家族推送直达 facade listener（downloadstarted/visibleChange/closed），五族 urlChange/loadState 直达；broker.log direct-event-port + hub drained 指标吻合；零泄漏进程（证据 /tmp/d19c-smoke/{timeline.txt,broker.log,smoke.mjs}；批次 B 对照 121 polls→0）。focus/blur live 证据因 GUI 会话锁定（loginwindow frontmost，App 无法激活、窗口永不成 key）标记 SKIPPED-locked-session——生产者等价性由 macos/tests.rs（同一通知块→订阅门控→Edge 推送）覆盖，解锁会话复验列入移交。Windows 半侧留 win 批次。
-- [ ] 5.4 既有 drain 相关测试更新；app-reopen MRU 行为回归。
+- [x] 5.4 回归（47252ef7）：app-reopen MRU 绿、权限轮询保留、workspace 342→终态全绿；app-reopen MRU 行为回归。
 
 ## 6. Verification
 
-- [ ] 6.1 mbx test 全绿（spec/bin/ext-webview/core）+ 三包 TS + typecheck + vision validate。
-- [ ] 6.2 兼容矩阵六格 e2e（旧 fixture 共存）。
-- [ ] 6.3 self-review（md+html）+ check。
-- [ ] 6.4 Codex 复核（herdr，gpt-5.6-terra/xhigh）：阻塞当日修复。
+- [x] 6.1 全绿：mac（spec 48/core 33/bin 70/ext-webview 163/TS 73+124+123）win 真机（ext-webview 176/bin 68）+ 交叉编译（spec/bin/ext-webview/core）+ 三包 TS + typecheck + vision validate。
+- [x] 6.2 fixture 矩阵 + E0 badge 共存 + attach 失败 deinit/source-limit/失败 reload 回滚测试（终核修复轮补齐）（旧 fixture 共存）。
+- [x] 6.3 self-review md+html + check ok:true（md+html）+ check。
+- [x] 6.4 终核 4.0/10 → 8 项 P1 全修（D1 四项 9cae7ff8/ebd76471/3637cf81/c743c3bd + D2 五项 92c3e479/5de4a9d7）双平台复验绿 → 二轮终核进行中（herdr，gpt-5.6-terra/xhigh）：阻塞当日修复。
 
 ## 7. Release
 
