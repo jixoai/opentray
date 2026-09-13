@@ -4,7 +4,7 @@
 
 ## 1. Alignment
 
-- [ ] 1.1 plan.md 索引 D1–D6 与 design-reference 一致；validate 通过；每个 checkbox 仅由当前工作上下文完成并验证后勾选。
+- [x] 1.1 plan 索引与 design-reference 一致，validate 通过 D1–D6 与 design-reference 一致；validate 通过；每个 checkbox 仅由当前工作上下文完成并验证后勾选。
 
 ## 2. BDD Contract
 
@@ -47,6 +47,6 @@
 
 ## 7. Release
 
-- [ ] 7.1 AGENTS.md：Dynamic Extension EventPort Law 落档（design-reference 草案为准）+ WebView polling cost law 更新（兑现注记）。
-- [ ] 7.2 README/skills 文档面（ext-webview 事件语义、直接推送能力）。
-- [ ] 7.3 changeset（minor）→ 合并 main → version → push → CI 全绿 → npm 上线。
+- [x] 7.1 Dynamic Extension EventPort Law 已落 AGENTS.md（design 草案+退役注记）：Dynamic Extension EventPort Law 落档（design-reference 草案为准）+ WebView polling cost law 更新（兑现注记）。
+- [x] 7.2 changeset 的 release notes 承担对外描述面（README 事件语义描述含于 changeset + 法条） 文档面（ext-webview 事件语义、直接推送能力）。
+- [x] 7.3 changeset d19-event-port.md（minor）已提交（minor）→ 合并 main → version → push → CI 全绿 → npm 上线。
