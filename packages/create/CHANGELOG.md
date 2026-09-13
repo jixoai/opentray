@@ -1,5 +1,23 @@
 # create-opentray
 
+## 0.27.3
+
+### Patch Changes
+
+- 2649e38: `--open` (and the wizard's Open App action) now replace a live instance of the same application instead of racing it into `OPENTRAY_BROKER_SINGLE_SESSION`.
+
+  - A Dock-pinned carrier can cold-start the generated entry after the original instance exited; when another launch then starts, both collided on the broker session — the late-comer died and the resurrected instance could hold a stale shell server with dead window buttons. Opens now probe live entry instances by argv identity (`<payload>/main.mjs`), stop the process tree, and wait bounded for PID release before spawning (Dev Launch Law replace semantics).
+  - The generated entry itself yields cleanly when a carrier cold-start hits `OPENTRAY_BROKER_SINGLE_SESSION`: the evidence lands in `app.log`, the supervised command (command applications) is taken down, and the launcher exits 0 — no retry, no empty tray shell. Already-frozen payloads keep the old behavior; regenerate to pick up the fix.
+
+- b7e1fd7: Toolbar windows heal their navigation channel across manual toolbar-page reloads (⌘R).
+
+  - Previously a toolbar reload killed the page-side channel endpoint and left the host half talking to a corpse — every window button (back/forward/reload/address bar) silently died until app restart. The embedded toolbar carrier now observes the D11 close, debounces the burst (300 ms), recreates the channel to the toolbar target, reinstalls the command surface, and re-seeds the address bar; the page side was already idempotent. Teardown closes (window destroyed / session closed) never trigger a rebuild — the carrier is stopped before the window goes down.
+
+- Updated dependencies [b9ebc3c]
+  - @opentray/spec@0.27.3
+  - @opentray/packaging@0.27.3
+  - @opentray/vite-plugin@0.27.3
+
 ## 0.27.2
 
 ### Patch Changes
