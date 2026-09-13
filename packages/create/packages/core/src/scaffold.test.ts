@@ -81,6 +81,12 @@ describe("writeScaffold", () => {
     // D6: 顶层错误边界把启动失败连同堆栈写入 app.log。
     expect(entry).toContain("startup failed");
     expect(entry).toContain("primaryEvent");
+    // P0 (2026-09-14): a Dock-resurrected cold start yields the broker
+    // session to the live owner — clean exit(0), evidence in app.log, and
+    // the supervised command (started before createTray) is taken down.
+    expect(entry).toContain("OPENTRAY_BROKER_SINGLE_SESSION");
+    expect(entry).toContain("(yield)");
+    expect(entry).toContain("command.killDirect()");
     // The persisted launch vector must be shell-free and absolute.
     expect(entry).toContain("command: nodeRuntime()");
     expect(entry).toContain("start.somecommand.npx");
@@ -184,6 +190,10 @@ describe("writeScaffold URL application", () => {
     // D6 同法：启动失败写入 app.log。
     expect(entry).toContain("startup failed");
     expect(entry).toContain("primaryEvent");
+    // P0 (2026-09-14)：Dock 复活的冷启动把 broker 会话让给活实例——干净
+    // exit(0)，证据落 app.log（URL entry 无被监督命令，无需清理）。
+    expect(entry).toContain("OPENTRAY_BROKER_SINGLE_SESSION");
+    expect(entry).toContain("(yield)");
     // README 呈现 URL 形态。
     const readme = await readFile(join(dir, "README.md"), "utf8");
     expect(readme).toContain("https://example.com");

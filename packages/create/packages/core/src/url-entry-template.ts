@@ -88,28 +88,43 @@ ${toolbarCarrierSource()}const main = async () => {
       ? { "darwin-icon-only": { type: "file", path: resolve(PROJECT_DIR, trayIcon.path), isTemplate: true } }
       : { "icon-only": { type: "file", path: resolve(PROJECT_DIR, trayIcon.path) } };
 
-  const tray = await createTray({
-    id: config.appId,
-    tooltip: { title: config.appName, description: \`\${config.appName} (OpenTray)\` },
-    icon: Object.keys(trayIconCandidates).length > 0
-      ? trayIconCandidates
-      : { "text-only": "${config.appName.replace(/['"\\]/gu, "").slice(0, 2) || "A"}" },
-    menu: { items: [
-      { type: "item", id: 1, title: \`Show \${config.appName}\`, primaryEvent: true },
-      { type: "item", id: 3, title: "Reload" },
-      { type: "separator" },
-      { type: "item", id: 2, title: "Quit" },
-    ] },
-  }, {
-    appId: config.appId,
-    appName: config.appName,
-    ...(appIcon === undefined ? {} : { appIcon }),
-    appLaunch: {
-      command: nodeRuntime(),
-      args: [resolve(PROJECT_DIR, "main.mjs")],
-      cwd: PROJECT_DIR,
-    },
-  });
+  const tray = await (async () => {
+    try {
+      return await createTray({
+        id: config.appId,
+        tooltip: { title: config.appName, description: \`\${config.appName} (OpenTray)\` },
+        icon: Object.keys(trayIconCandidates).length > 0
+          ? trayIconCandidates
+          : { "text-only": "${config.appName.replace(/['"\\]/gu, "").slice(0, 2) || "A"}" },
+        menu: { items: [
+          { type: "item", id: 1, title: \`Show \${config.appName}\`, primaryEvent: true },
+          { type: "item", id: 3, title: "Reload" },
+          { type: "separator" },
+          { type: "item", id: 2, title: "Quit" },
+        ] },
+      }, {
+        appId: config.appId,
+        appName: config.appName,
+        ...(appIcon === undefined ? {} : { appIcon }),
+        appLaunch: {
+          command: nodeRuntime(),
+          args: [resolve(PROJECT_DIR, "main.mjs")],
+          cwd: PROJECT_DIR,
+        },
+      });
+    } catch (error) {
+      // Carrier-resurrection yield: a Dock-pinned carrier can cold-start this
+      // entry while another instance already owns the broker session. The
+      // owner keeps the app open; this launcher exits cleanly (no retry, no
+      // empty tray shell) and the evidence lands in app.log.
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("OPENTRAY_BROKER_SINGLE_SESSION")) {
+        await logSink("[create-opentray] broker session already owned by another instance of this app; this cold-started launcher exits (yield)\\n", "utf8");
+        process.exit(0);
+      }
+      throw error;
+    }
+  })();
 
   // v1 developerMode maps ONLY to per-window DevTools admission. When false it
   // must not request devtools at all — default windows are not inspectable.

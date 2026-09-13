@@ -108,7 +108,16 @@ export {
   type CommandRunOptions,
   type CommandRunTerminalSize,
 } from "./command-run";
-export { openMaterializedApp, pinningHint } from "./open-app";
+export {
+  openMaterializedApp,
+  pinningHint,
+  stopLiveAppInstances,
+  type OpenAppInput,
+  type OpenAppProbeSeams,
+  type OpenAppResult,
+  type StopLiveInstancesOptions,
+  type StopLiveInstancesResult,
+} from "./open-app";
 export {
   isUiLocale,
   ptyUnavailableMessage,

@@ -222,29 +222,48 @@ const main = async () => {
       ? { "darwin-icon-only": { type: "file", path: resolve(PROJECT_DIR, trayIcon.path), isTemplate: true } }
       : { "icon-only": { type: "file", path: resolve(PROJECT_DIR, trayIcon.path) } };
 
-  const tray = await createTray({
-    id: config.appId,
-    tooltip: { title: config.appName, description: \`\${config.appName} (OpenTray)\` },
-    icon: Object.keys(trayIconCandidates).length > 0
-      ? trayIconCandidates
-      : { "text-only": "${config.appName.replace(/['"\\]/gu, "").slice(0, 2) || "A"}" },
-    menu: { items: [
-      { type: "item", id: 1, title: \`Show \${config.appName}\`, primaryEvent: true },
-      { type: "separator" },
-      { type: "item", id: 2, title: "Quit" },
-    ] },
-  }, {
-    appId: config.appId,
-    appName: config.appName,
-    ...(appIcon === undefined ? {} : { appIcon }),
-    appLaunch: {
-      // The generated entry embeds a native PTY (@lydell/node-pty), which
-      // requires a Node host — cold launches must not inherit a Bun execPath.
-      command: nodeRuntime(),
-      args: [resolve(PROJECT_DIR, "main.mjs")],
-      cwd: PROJECT_DIR,
-    },
-  });
+  const tray = await (async () => {
+    try {
+      return await createTray({
+        id: config.appId,
+        tooltip: { title: config.appName, description: \`\${config.appName} (OpenTray)\` },
+        icon: Object.keys(trayIconCandidates).length > 0
+          ? trayIconCandidates
+          : { "text-only": "${config.appName.replace(/['"\\]/gu, "").slice(0, 2) || "A"}" },
+        menu: { items: [
+          { type: "item", id: 1, title: \`Show \${config.appName}\`, primaryEvent: true },
+          { type: "separator" },
+          { type: "item", id: 2, title: "Quit" },
+        ] },
+      }, {
+        appId: config.appId,
+        appName: config.appName,
+        ...(appIcon === undefined ? {} : { appIcon }),
+        appLaunch: {
+          // The generated entry embeds a native PTY (@lydell/node-pty), which
+          // requires a Node host — cold launches must not inherit a Bun execPath.
+          command: nodeRuntime(),
+          args: [resolve(PROJECT_DIR, "main.mjs")],
+          cwd: PROJECT_DIR,
+        },
+      });
+    } catch (error) {
+      // Carrier-resurrection yield: a Dock-pinned carrier can cold-start this
+      // entry while another instance already owns the broker session. The
+      // owner keeps the app open; this launcher exits cleanly (no retry, no
+      // empty tray shell, no orphaned command supervision) and the evidence
+      // lands in app.log. The supervised command started BEFORE createTray,
+      // so the yield takes it down (direct kill; the closing PTY master adds
+      // SIGHUP) — the shell server dies with this process.
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("OPENTRAY_BROKER_SINGLE_SESSION")) {
+        await logSink("[create-opentray] broker session already owned by another instance of this app; this cold-started launcher exits (yield)\\n", "utf8");
+        try { command.killDirect(); } catch { /* already dead */ }
+        process.exit(0);
+      }
+      throw error;
+    }
+  })();
 
   const baseTitle = config.appName;
   // v1 developerMode maps ONLY to per-window DevTools admission. When false it
