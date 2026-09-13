@@ -944,33 +944,33 @@ impl SourceState {
 }
 
 /// Validates and copies one bounded FFI record. Reads foreign memory only
-/// after the caller confirmed the source is not revoked. All rejections are
-/// structured input errors (`EXT_ERR_REJECTED` at the ABI boundary).
+/// after the caller confirmed the source is not revoked, and only after each
+/// byte field's length passes its frozen upper bound: an oversized or
+/// null-with-length borrow is rejected without ever forming the raw slice.
+/// All rejections are structured input errors (`EXT_ERR_REJECTED` at the ABI
+/// boundary).
 fn validate_and_copy_bounded(input: ExtEventInputV1) -> Option<PreparedRecord> {
     let class = ExtEventClassV1::from_u32(input.class)?;
 
-    let tray_bytes = borrowed_bytes(input.route.tray_id)?;
-    if tray_bytes.is_empty() || tray_bytes.len() > EVENT_COALESCE_KEY_MAX_BYTES {
+    let tray_bytes = borrowed_bytes_bounded(input.route.tray_id, EVENT_COALESCE_KEY_MAX_BYTES)?;
+    if tray_bytes.is_empty() {
         return None;
     }
     let tray_id = std::str::from_utf8(tray_bytes).ok()?.to_string();
 
-    let data_bytes = borrowed_bytes(input.data_json)?;
-    if data_bytes.len() > EVENT_DATA_MAX_BYTES {
-        return None;
-    }
-    // Ingress validation: the payload must be a parseable JSON value. The
-    // raw bytes are preserved behind this internal abstraction; routing
-    // parses again only when constructing the frame.
+    let data_bytes = borrowed_bytes_bounded(input.data_json, EVENT_DATA_MAX_BYTES)?;
+    // Ingress validation: the payload must be a parseable JSON value (an
+    // empty borrow fails here). The raw bytes are preserved behind this
+    // internal abstraction; routing parses again only when constructing the
+    // frame.
     serde_json::from_slice::<serde_json::Value>(data_bytes).ok()?;
 
-    let key_bytes = borrowed_bytes(input.coalesce_key);
-    if key_bytes.is_some_and(|key| key.len() > EVENT_COALESCE_KEY_MAX_BYTES) {
-        return None;
-    }
     let coalesce_key = match class {
         ExtEventClassV1::Latest => {
-            let key = key_bytes?;
+            // Only Latest reads the coalesce key. Edge and BestEffort ignore
+            // the field entirely — not even its length is inspected.
+            let key =
+                borrowed_bytes_bounded(input.coalesce_key, EVENT_COALESCE_KEY_MAX_BYTES)?;
             if key.is_empty() {
                 return None;
             }
@@ -988,13 +988,23 @@ fn validate_and_copy_bounded(input: ExtEventInputV1) -> Option<PreparedRecord> {
 }
 
 /// Safety contract (caller `validate_and_copy_bounded`, reached only under
-/// the non-revoked gate): the bytes are borrowed for the duration of the
-/// FFI call only; the returned slice never escapes validation and copying.
-fn borrowed_bytes(bytes: ExtBytes) -> Option<&'static [u8]> {
+/// the non-revoked gate): the bytes are borrowed for the duration of the FFI
+/// call only; the returned slice never escapes validation and copying.
+///
+/// Memory-safety law: the length is checked against `max_len` BEFORE the
+/// slice is constructed. `slice::from_raw_parts` is undefined behavior for a
+/// range that cannot be a valid allocation, so a pathological length (or a
+/// null pointer with a claimed positive length) must be rejected unread —
+/// never first wrapped into a slice. Null with length zero is an empty
+/// borrow; semantic checks reject it where a non-empty field is required.
+fn borrowed_bytes_bounded(bytes: ExtBytes, max_len: usize) -> Option<&'static [u8]> {
     if bytes.ptr.is_null() {
+        return if bytes.len == 0 { Some(&[]) } else { None };
+    }
+    if bytes.len > max_len {
         return None;
     }
-    // Safety: bounded by the FFI borrow documented above.
+    // Safety: bounded by the FFI borrow documented above and by `max_len`.
     Some(unsafe { std::slice::from_raw_parts(bytes.ptr.cast::<u8>(), bytes.len) })
 }
 
@@ -1445,6 +1455,139 @@ mod tests {
             (port.try_submit)(std::ptr::null_mut(), input),
             EXT_ERR_PORT_CLOSED
         );
+    }
+
+    /// The closed fast path above is not the only untrusted-input surface:
+    /// a NON-revoked (open) source must also reject oversized lengths and
+    /// null pointers with claimed lengths BEFORE any raw slice is formed,
+    /// and Edge/BestEffort must not read the coalesce key at all — not even
+    /// its length.
+    #[test]
+    fn open_path_rejects_unborrowable_input_without_forming_slices() {
+        let (hub, _) = hub(false);
+        let handle = open_source(&hub, "app-a", "webview", "session-1");
+        let port = handle.port();
+
+        let tray = std::ffi::CString::new("tray-a").unwrap();
+        let data = std::ffi::CString::new(payload("x")).unwrap();
+        let bytes =
+            |ptr: *const c_char, len: usize| ExtBytes { ptr, len };
+        let input = |tray_id: ExtBytes, data_json: ExtBytes, class: u32, coalesce_key: ExtBytes| {
+            ExtEventInputV1 {
+                route: ExtEventRouteV1 { tray_id },
+                data_json,
+                class,
+                coalesce_key,
+            }
+        };
+        let null_key = ExtBytes {
+            ptr: std::ptr::null(),
+            len: 0,
+        };
+
+        // Oversized lengths with VALID pointers: rejected before the slice
+        // is constructed (the old code wrapped the length first — UB).
+        assert_eq!(
+            (port.try_submit)(
+                port.port_data,
+                input(
+                    bytes(tray.as_ptr(), usize::MAX),
+                    bytes(data.as_ptr(), data.as_bytes().len()),
+                    ExtEventClassV1::Edge.as_u32(),
+                    null_key,
+                ),
+            ),
+            EXT_ERR_REJECTED
+        );
+        assert_eq!(
+            (port.try_submit)(
+                port.port_data,
+                input(
+                    bytes(tray.as_ptr(), tray.as_bytes().len()),
+                    bytes(data.as_ptr(), usize::MAX),
+                    ExtEventClassV1::Edge.as_u32(),
+                    null_key,
+                ),
+            ),
+            EXT_ERR_REJECTED
+        );
+        assert_eq!(
+            (port.try_submit)(
+                port.port_data,
+                input(
+                    bytes(tray.as_ptr(), tray.as_bytes().len()),
+                    bytes(data.as_ptr(), data.as_bytes().len()),
+                    ExtEventClassV1::Latest.as_u32(),
+                    bytes(tray.as_ptr(), usize::MAX),
+                ),
+            ),
+            EXT_ERR_REJECTED,
+            "Latest with an oversized coalesce key is rejected unread"
+        );
+
+        // Null pointers with a claimed positive length can never be borrowed.
+        assert_eq!(
+            (port.try_submit)(
+                port.port_data,
+                input(
+                    bytes(std::ptr::null(), 8),
+                    bytes(data.as_ptr(), data.as_bytes().len()),
+                    ExtEventClassV1::Edge.as_u32(),
+                    null_key,
+                ),
+            ),
+            EXT_ERR_REJECTED
+        );
+        assert_eq!(
+            (port.try_submit)(
+                port.port_data,
+                input(
+                    bytes(tray.as_ptr(), tray.as_bytes().len()),
+                    bytes(std::ptr::null(), 8),
+                    ExtEventClassV1::Edge.as_u32(),
+                    null_key,
+                ),
+            ),
+            EXT_ERR_REJECTED
+        );
+
+        // Null with length zero is an empty borrow; the empty payload is a
+        // semantic rejection (no parseable JSON), not a pointer read.
+        assert_eq!(
+            (port.try_submit)(
+                port.port_data,
+                input(
+                    bytes(tray.as_ptr(), tray.as_bytes().len()),
+                    bytes(std::ptr::null(), 0),
+                    ExtEventClassV1::Edge.as_u32(),
+                    null_key,
+                ),
+            ),
+            EXT_ERR_REJECTED
+        );
+
+        assert_eq!(hub.metrics().invalid_input, 6);
+        assert_eq!(hub.metrics().global_records, 0, "nothing was enqueued");
+
+        // Edge and BestEffort ignore the coalesce key entirely: a garbage
+        // pointer with a pathological length is accepted unread — the field
+        // is not even length-checked for those classes.
+        for class in [ExtEventClassV1::Edge, ExtEventClassV1::BestEffort] {
+            assert_eq!(
+                (port.try_submit)(
+                    port.port_data,
+                    input(
+                        bytes(tray.as_ptr(), tray.as_bytes().len()),
+                        bytes(data.as_ptr(), data.as_bytes().len()),
+                        class.as_u32(),
+                        bytes(0xdead as *const c_char, usize::MAX),
+                    ),
+                ),
+                EXT_OK,
+                "{class:?} must not read the coalesce key"
+            );
+        }
+        assert_eq!(drain_all(&hub).len(), 2, "ignored-key records deliver");
     }
 
     // -- ordering and fairness ---------------------------------------------
