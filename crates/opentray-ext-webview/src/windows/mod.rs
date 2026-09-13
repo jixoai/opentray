@@ -172,6 +172,11 @@ pub(crate) struct WindowsWebviewRuntime {
     /// the per-webview new-window handlers so popups can register from
     /// inside WebView2's `NewWindowRequested` callback.
     popups: Rc<RefCell<PopupTracker>>,
+    /// Per-instance EventPort state (D19 final review B1): set once at init
+    /// from the owning `WebviewExtension`; every window session/bridge this
+    /// runtime creates captures a clone, so producers keep addressing the
+    /// source their instance attached even after another instance mounts.
+    port_state: std::sync::Arc<crate::event_port::InstancePortState>,
 }
 
 #[derive(Clone, Default)]
@@ -285,6 +290,11 @@ pub(super) struct NavigatorWindowBridge {
     /// replaced was drained per tray; the bridge carries that identity
     /// directly.
     tray_id: String,
+    /// Per-instance EventPort state captured at bridge creation (D19 final
+    /// review B1): window-family push producers submit through this handle —
+    /// the source their instance attached — never a process-wide latest
+    /// port, so a reload's attach cannot retarget them.
+    pub(super) port_state: std::sync::Arc<crate::event_port::InstancePortState>,
     /// Facade interest in the window-event push family (D19 batch C).
     /// Producers submit through the EventPort only for subscribed event
     /// names; no facade listener means no native observation record.
@@ -733,7 +743,7 @@ impl WindowsWebviewRuntime {
         // already entered the broker EventHub from their native callbacks,
         // so the legacy outbox is retired for them (D19 batch B) and this
         // flush is a no-op reserved for the no-port legacy fallback.
-        let events = if crate::event_port::port_attached() {
+        let events = if self.port_state.has_port() {
             Vec::new()
         } else {
             self.flush_pending_events()
@@ -754,6 +764,16 @@ impl WindowsWebviewRuntime {
     /// whose envelope app id differs from it.
     pub(crate) fn set_app_id(&mut self, app_id: &str) {
         self.app_id = Some(app_id.to_string());
+    }
+
+    /// Per-instance EventPort state (D19 final review B1): set once at
+    /// `opentray_ext_init` from the owning extension instance; every session
+    /// and bridge this runtime creates captures a clone.
+    pub(crate) fn set_port_state(
+        &mut self,
+        state: std::sync::Arc<crate::event_port::InstancePortState>,
+    ) {
+        self.port_state = state;
     }
 
     fn app_id(&self) -> String {
@@ -979,7 +999,7 @@ impl WindowsWebviewRuntime {
                 }
                 let response = session.bridge.borrow().style_json()?;
                 if changed {
-                    emit_window_event(&session.bridge, "stylechange", response.clone())?;
+                    notify_style_changed(&session.bridge, &response)?;
                     emit_overlay_geometry_change_if_enabled(&session.bridge)?;
                 }
                 Ok(response)
@@ -1304,6 +1324,9 @@ impl WindowsWebviewRuntime {
             ipc_messages: VecDeque::new(),
             permission_messages: VecDeque::new(),
             tray_id: tray_id.clone(),
+            // D19 final review B1: producers address the port captured at
+            // bridge creation, never a process-wide latest.
+            port_state: std::sync::Arc::clone(&self.port_state),
             window_event_subscriptions: HashSet::new(),
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
@@ -1366,12 +1389,14 @@ impl WindowsWebviewRuntime {
         let mut webview_context = WebContext::new(Some(webview_data_directory));
 
         // D18/D19 session core: owner identity + the legacy fallback
-        // push-event outbox, shared with the per-view observers through the
-        // bridge's weak handle (direct-EventPort hosts submit at the batch B
-        // routing seam instead).
+        // push-event outbox plus the owning instance's EventPort state,
+        // shared with the per-view observers through the bridge's weak
+        // handle (direct-EventPort hosts submit at the batch B routing seam
+        // instead — through the port captured at session creation, B1).
         let event_core = Rc::new(RefCell::new(SessionEventCore {
             owner: owner.clone(),
             outbox: VecDeque::new(),
+            port: std::sync::Arc::clone(&self.port_state),
         }));
         let focus_tracker = Rc::new(RefCell::new(self::orchestration::FocusTracker::new(
             owner.clone(),
@@ -2176,7 +2201,7 @@ fn dispatch_navigator_window_command(
             }
             let response = bridge.borrow().style_json()?;
             if changed {
-                emit_window_event(bridge, "stylechange", response.clone())?;
+                notify_style_changed(bridge, &response)?;
                 emit_overlay_geometry_change_if_enabled(bridge)?;
             }
             Ok(response)
@@ -2979,7 +3004,7 @@ fn apply_reused_show_updates(
             apply_window_style(&session.bridge, Some(&previous_background))?;
             apply_webview_client_bounds_from_bridge(&session.bridge)?;
             let response = session.bridge.borrow().style_json()?;
-            emit_window_event(&session.bridge, "stylechange", response)?;
+            notify_style_changed(&session.bridge, &response)?;
             emit_overlay_geometry_change_if_enabled(&session.bridge)?;
             session.show_settings.window.style = show_settings.window.style.clone();
             session.show_settings.window.style_requested = true;
@@ -4873,11 +4898,12 @@ pub(super) fn submit_window_event_push(
     event: &str,
     payload: &Value,
 ) {
-    let (subscribed, tray_id) = {
+    let (subscribed, tray_id, port_state) = {
         let state = bridge.borrow();
         (
             state.is_window_event_subscribed(event),
             state.tray_id.clone(),
+            std::sync::Arc::clone(&state.port_state),
         )
     };
     if !subscribed {
@@ -4885,7 +4911,9 @@ pub(super) fn submit_window_event_push(
         // producer (batch C producer-gating law).
         return;
     }
-    match crate::event_port::submit_window_event(&tray_id, event, payload) {
+    // B1: the record routes through this bridge's captured instance state —
+    // a later attach for another instance cannot retarget it.
+    match port_state.submit_window_event(&tray_id, event, payload) {
         crate::event_port::SubmitStatus::LegacyFlush => {
             // A port-less host is outside the contract-3 lockstep graph; the
             // drain queue that used to carry this family is retired with the
@@ -4896,6 +4924,20 @@ pub(super) fn submit_window_event_push(
         }
         _ => {}
     }
+}
+
+/// D19 final review B7: `stylechange` is a frozen window-family member, so
+/// every native style transition (setStyle command, navigator setStyle,
+/// reused-show restyle) must be an EventPort producer too — the retired
+/// 16 ms poll used to be the only other carrier. Submit first
+/// (subscription-gated, per-instance port captured by the bridge); the
+/// page-bridge emission is a separate consumer surface and stays.
+pub(super) fn notify_style_changed(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    response: &Value,
+) -> Result<(), WebviewRuntimeError> {
+    submit_window_event_push(bridge.as_ref(), "stylechange", response);
+    emit_window_event(bridge.as_ref(), "stylechange", response.clone())
 }
 
 pub(super) fn emit_window_event(
@@ -6871,6 +6913,18 @@ mod tests {
     /// comes from the fake `WindowProcState` operational projection, and the
     /// fixture is otherwise byte-for-byte the channels-test fixture shape.
     fn window_event_test_bridge(tray_id: &str) -> Rc<RefCell<NavigatorWindowBridge>> {
+        window_event_test_bridge_with_port_state(
+            tray_id,
+            std::sync::Arc::new(crate::event_port::InstancePortState::new()),
+        )
+    }
+
+    /// [`window_event_test_bridge`] with an explicit per-instance EventPort
+    /// state (the fake port fixture hands one out for direct-push tests).
+    fn window_event_test_bridge_with_port_state(
+        tray_id: &str,
+        port_state: std::sync::Arc<crate::event_port::InstancePortState>,
+    ) -> Rc<RefCell<NavigatorWindowBridge>> {
         Rc::new(RefCell::new(NavigatorWindowBridge {
             hwnd: std::ptr::null_mut(),
             window: None,
@@ -6883,6 +6937,7 @@ mod tests {
             ipc_messages: VecDeque::new(),
             permission_messages: VecDeque::new(),
             tray_id: tray_id.to_string(),
+            port_state,
             window_event_subscriptions: HashSet::new(),
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
@@ -7865,7 +7920,10 @@ mod tests {
     fn window_level_focus_and_blur_events_push_only_when_subscribed() {
         let port = crate::event_port::test_support::install_fake_port_for_module_tests();
         let hwnd = 0x574E_4556isize as HWND;
-        let bridge = window_event_test_bridge("tray-1");
+        let bridge = window_event_test_bridge_with_port_state(
+            "tray-1",
+            std::sync::Arc::clone(&port.state),
+        );
         register_test_window_proc_state(hwnd, &bridge);
 
         // Unsubscribed: no native observation record leaves the producer.
@@ -7912,7 +7970,10 @@ mod tests {
     fn window_interaction_change_pushes_only_when_subscribed() {
         let port = crate::event_port::test_support::install_fake_port_for_module_tests();
         let hwnd = 0x574E_4557isize as HWND;
-        let bridge = window_event_test_bridge("tray-1");
+        let bridge = window_event_test_bridge_with_port_state(
+            "tray-1",
+            std::sync::Arc::clone(&port.state),
+        );
         register_test_window_proc_state(hwnd, &bridge);
 
         emit_window_interaction_change(hwnd, true);
@@ -7947,7 +8008,10 @@ mod tests {
     fn window_visible_change_pushes_once_per_operational_edge() {
         let port = crate::event_port::test_support::install_fake_port_for_module_tests();
         let hwnd = 0x574E_4558isize as HWND;
-        let bridge = window_event_test_bridge("tray-1");
+        let bridge = window_event_test_bridge_with_port_state(
+            "tray-1",
+            std::sync::Arc::clone(&port.state),
+        );
         // The visibleChange path derives the lookup hwnd from the bridge
         // field (unlike the focus/interaction producers, which receive it).
         bridge.borrow_mut().hwnd = hwnd;
@@ -7985,6 +8049,38 @@ mod tests {
         unregister_test_window_proc_state(hwnd);
         drop(bridge);
         drop(port);
+    }
+
+    /// D19 final review B7: after the poll retirement, `stylechange` needs a
+    /// native EventPort producer on every Windows style transition path
+    /// (setStyle command, navigator setStyle, reused-show restyle); the
+    /// shared `notify_style_changed` is all three paths' seam.
+    #[test]
+    fn style_change_notification_pushes_the_window_family_record_when_subscribed() {
+        let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+        let bridge = window_event_test_bridge_with_port_state(
+            "tray-1",
+            std::sync::Arc::clone(&port.state),
+        );
+
+        // Unsubscribed: no record leaves the producer.
+        notify_style_changed(&bridge, &json!({ "frameless": false }))
+            .expect("stylechange notification succeeds");
+        assert!(port.submits().is_empty(), "no subscription, no submit");
+
+        bridge
+            .borrow_mut()
+            .subscribe_window_events(&["stylechange".to_string()]);
+        notify_style_changed(&bridge, &json!({ "frameless": true }))
+            .expect("stylechange notification succeeds");
+        let submits = port.submits();
+        assert_eq!(submits.len(), 1);
+        assert_eq!(submits[0].tray_id, "tray-1");
+        assert_eq!(submits[0].payload_tag, "stylechange");
+        assert_eq!(
+            submits[0].class,
+            opentray_spec::ExtEventClassV1::Edge.as_u32()
+        );
     }
 
     /// H0 legacy host: the drain queue is retired with the poll, so a

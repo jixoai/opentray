@@ -14,7 +14,6 @@
 
 use std::{
     cell::RefCell,
-    collections::VecDeque,
     ffi::c_void,
     ptr,
     rc::{Rc, Weak},
@@ -34,18 +33,20 @@ use objc2_web_kit::{
     WKDownload, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
     WKNavigationResponse, WKNavigationResponsePolicy, WKWebView,
 };
-use opentray_spec::webview::{WebviewEventFrame, WebviewLoadPhase};
+use opentray_spec::webview::WebviewLoadPhase;
 
 use crate::WebviewRuntimeError;
 use wry::{WebView, WebViewExtMacOS};
 
 use crate::orchestration::{ViewEvents, WindowOwner};
 
+use super::{EventOutbox, WeakEventOutbox};
+
 pub(super) struct LoadStateNavigationDelegateIvars {
     original: Retained<ProtocolObject<dyn WKNavigationDelegate>>,
     webview: Retained<WKWebView>,
     events: Weak<RefCell<ViewEvents>>,
-    outbox: Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    outbox: WeakEventOutbox,
     owner: WindowOwner,
 }
 
@@ -216,7 +217,7 @@ impl LoadStateNavigationDelegate {
         original: Retained<ProtocolObject<dyn WKNavigationDelegate>>,
         webview: Retained<WKWebView>,
         events: Weak<RefCell<ViewEvents>>,
-        outbox: Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+        outbox: WeakEventOutbox,
         owner: WindowOwner,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
@@ -272,7 +273,7 @@ impl Drop for LoadStateNavigationDelegate {
 pub(super) fn install_load_state_delegate(
     webview: &WebView,
     events: &Rc<RefCell<ViewEvents>>,
-    outbox: &Rc<RefCell<VecDeque<WebviewEventFrame>>>,
+    outbox: &EventOutbox,
     owner: &WindowOwner,
 ) -> Result<Retained<LoadStateNavigationDelegate>, WebviewRuntimeError> {
     let mtm = MainThreadMarker::new().ok_or_else(|| {

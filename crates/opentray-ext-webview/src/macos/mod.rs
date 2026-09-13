@@ -133,13 +133,14 @@ struct WindowSession {
     /// `show` is the primary (`default`); orchestration children join as
     /// siblings.
     webviews: HashMap<String, NativeWebview>,
-    /// D19 push-event legacy fallback outbox. On a direct-EventPort host the
-    /// migrated five families (url/title/focus/geometry/loadState) submit
-    /// through `try_submit` and never touch this queue; it stays only as the
+    /// D19 push-event session core. On a direct-EventPort host the migrated
+    /// five families (url/title/focus/geometry/loadState) submit through
+    /// `try_submit` and never touch the fallback queue; it stays only as the
     /// declared legacy delivery for hosts that never attached a port. Every
     /// command response flushes it into extension envelopes. This queue is
-    /// deliberately separate from the legacy `window_events` drain path.
-    event_outbox: Rc<RefCell<VecDeque<WebviewEventFrame>>>,
+    /// deliberately separate from the legacy `window_events` drain path, and
+    /// the port half is the owning instance's state (B1).
+    event_outbox: EventOutbox,
     /// Shared with the key-notification observers so per-view focus edges
     /// are reconciled from native callbacks without polling.
     focus_tracker: Rc<RefCell<FocusTracker>>,
@@ -177,7 +178,7 @@ struct NativeWebview {
 /// responder.
 struct FocusTracker {
     owner: WindowOwner,
-    outbox: Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    outbox: WeakEventOutbox,
     targets: Vec<FocusTarget>,
 }
 
@@ -188,7 +189,7 @@ struct FocusTarget {
 }
 
 impl FocusTracker {
-    fn new(owner: WindowOwner, outbox: Weak<RefCell<VecDeque<WebviewEventFrame>>>) -> Self {
+    fn new(owner: WindowOwner, outbox: WeakEventOutbox) -> Self {
         Self {
             owner,
             outbox,
@@ -270,21 +271,19 @@ impl FocusTracker {
 /// backpressure parks in the extension's bounded retry queue) — the
 /// command-response outbox is retired for migrated families so one event can
 /// never ride both paths. When no port was ever attached (legacy host), the
-/// declared legacy fallback keeps the outbox/response-flush delivery.
-fn push_event_frame(
-    outbox: &Weak<RefCell<VecDeque<WebviewEventFrame>>>,
-    frame: Option<WebviewEventFrame>,
-) {
+/// declared legacy fallback keeps the outbox/response-flush delivery. The
+/// port is the session core's captured instance state (B1), never a
+/// process-wide latest.
+fn push_event_frame(outbox: &WeakEventOutbox, frame: Option<WebviewEventFrame>) {
     let Some(frame) = frame else {
         return;
     };
-    match crate::event_port::submit_frame(&frame) {
-        crate::event_port::SubmitStatus::LegacyFlush => {
-            if let Some(outbox) = outbox.upgrade() {
-                outbox.borrow_mut().push_back(frame);
-            }
-        }
-        _ => {}
+    let Some(core) = outbox.upgrade() else {
+        return;
+    };
+    let status = core.borrow().port.submit_frame(&frame);
+    if matches!(status, crate::event_port::SubmitStatus::LegacyFlush) {
+        core.borrow_mut().outbox.push_back(frame);
     }
 }
 
@@ -294,7 +293,7 @@ fn push_event_frame(
 /// is not an observation mechanism for the unified event family.
 pub(super) fn handle_view_title_changed(
     events: &Rc<RefCell<ViewEvents>>,
-    outbox: &Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    outbox: &WeakEventOutbox,
     owner: &WindowOwner,
     title: &str,
 ) {
@@ -310,7 +309,7 @@ pub(super) fn handle_view_title_changed(
 /// [`handle_view_title_changed`].
 pub(super) fn handle_view_url_started(
     events: &Rc<RefCell<ViewEvents>>,
-    outbox: &Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    outbox: &WeakEventOutbox,
     owner: &WindowOwner,
     url: &str,
 ) {
@@ -327,7 +326,7 @@ pub(super) fn handle_view_url_started(
 /// contract as the other unified event family members.
 pub(super) fn handle_view_load_started(
     events: &Rc<RefCell<ViewEvents>>,
-    outbox: &Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    outbox: &WeakEventOutbox,
     owner: &WindowOwner,
     url: &str,
 ) {
@@ -346,7 +345,7 @@ pub(super) fn handle_view_load_started(
 /// definition (macOS reports progress; the value is honest, not measured).
 pub(super) fn handle_view_load_finished(
     events: &Rc<RefCell<ViewEvents>>,
-    outbox: &Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    outbox: &WeakEventOutbox,
     owner: &WindowOwner,
     url: &str,
 ) {
@@ -397,7 +396,28 @@ pub(crate) struct MacosWebviewRuntime {
     /// the current command (their window is gone before the flush runs).
     pending_channel_events:
         Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
+    /// Per-instance EventPort state (D19 final review B1): set once at init
+    /// from the owning `WebviewExtension`; every window session/bridge this
+    /// runtime creates captures a clone, so producers keep addressing the
+    /// source their instance attached even after another instance mounts.
+    port_state: std::sync::Arc<crate::event_port::InstancePortState>,
 }
+
+/// Per-window-session push-event core (macOS half of the D19 routing seam):
+/// the legacy fallback outbox plus the owning instance's EventPort state.
+/// Native observer handles (focus/layout trackers, navigation delegates)
+/// hold it through a `Weak`, so a frame routes through the EventPort when
+/// attached and falls back to the outbox only on a port-less legacy host —
+/// the port a producer uses is fixed at session creation, never a
+/// process-wide latest (B1).
+pub(crate) struct SessionEventCore {
+    outbox: VecDeque<WebviewEventFrame>,
+    port: std::sync::Arc<crate::event_port::InstancePortState>,
+}
+
+/// Strong/weak handles to one session's push-event core.
+pub(crate) type EventOutbox = Rc<RefCell<SessionEventCore>>;
+pub(crate) type WeakEventOutbox = Weak<RefCell<SessionEventCore>>;
 
 /// Shared app-mode membership (`Rc<RefCell<HashSet<tray_id>>>`): the runtime
 /// and every window session's native callbacks reconcile the same set, so
@@ -440,6 +460,11 @@ pub(super) struct NavigatorWindowBridge {
     /// EventPort records by tray, and the queue they replaced was drained
     /// per tray; the bridge now carries that identity directly.
     pub(super) tray_id: String,
+    /// Per-instance EventPort state captured at bridge creation (D19 final
+    /// review B1): window-family push producers submit through this handle
+    /// — the source their instance attached — never a process-wide latest
+    /// port, so a reload's attach cannot retarget them.
+    pub(super) port_state: std::sync::Arc<crate::event_port::InstancePortState>,
     /// Per-webview bridge state in creation order; index 0 is the primary
     /// webview for legacy single-webview surfaces. Window ownership (the D18
     /// owner tuple) lives in the runtime registry and focus tracker.
@@ -612,7 +637,7 @@ impl MacosWebviewRuntime {
         // already entered the broker EventHub from their native callbacks,
         // so the legacy outbox is retired for them (D19 batch B) and this
         // flush is a no-op reserved for the no-port legacy fallback.
-        let events = if crate::event_port::port_attached() {
+        let events = if self.port_state.has_port() {
             Vec::new()
         } else {
             self.flush_pending_events()
@@ -2004,6 +2029,10 @@ impl MacosWebviewRuntime {
             page_access: resolve_page_access(&show_settings, &page_source),
             tray_bounds,
             size_constraints: WindowSizeConstraints::default(),
+            // Per-instance EventPort state captured at bridge creation (B1):
+            // window-family producers submit through this handle, never a
+            // process-wide latest port.
+            port_state: std::sync::Arc::clone(&self.port_state),
             layout: WindowLayoutState::default(),
             layout_tracker: Weak::new(),
             channels: Rc::new(RefCell::new(crate::channels::SessionChannels::new(
@@ -2018,7 +2047,10 @@ impl MacosWebviewRuntime {
             WebviewRuntimeError::Internal("webview window has no content view".into())
         })?;
         bridge.borrow_mut().content_view = window.contentView();
-        let event_outbox = Rc::new(RefCell::new(VecDeque::new()));
+        let event_outbox: EventOutbox = Rc::new(RefCell::new(SessionEventCore {
+            outbox: VecDeque::new(),
+            port: std::sync::Arc::clone(&self.port_state),
+        }));
         let focus_tracker = Rc::new(RefCell::new(FocusTracker::new(
             owner.clone(),
             Rc::downgrade(&event_outbox),
@@ -2120,7 +2152,7 @@ impl MacosWebviewRuntime {
         owner: &WindowOwner,
         window: &Retained<NSWindow>,
         bridge: &Rc<RefCell<NavigatorWindowBridge>>,
-        event_outbox: &Rc<RefCell<VecDeque<WebviewEventFrame>>>,
+        event_outbox: &EventOutbox,
         popups: &SharedPopupLedger,
         html: Option<String>,
         url: Option<String>,
@@ -2357,7 +2389,7 @@ impl MacosWebviewRuntime {
     fn flush_pending_events(&mut self) -> Vec<WebviewEventFrame> {
         let mut frames = Vec::new();
         for session in self.sessions.values() {
-            frames.extend(session.event_outbox.borrow_mut().drain(..));
+            frames.extend(session.event_outbox.borrow_mut().outbox.drain(..));
         }
         frames
     }
@@ -2367,6 +2399,13 @@ impl MacosWebviewRuntime {
     /// rejects commands whose envelope app id differs from it.
     pub(crate) fn set_app_id(&mut self, app_id: &str) {
         self.app_id = Some(app_id.to_string());
+    }
+
+    /// Per-instance EventPort state (D19 final review B1): set once at
+    /// `opentray_ext_init` from the owning extension instance; every session
+    /// and bridge this runtime creates captures a clone.
+    pub(crate) fn set_port_state(&mut self, state: std::sync::Arc<crate::event_port::InstancePortState>) {
+        self.port_state = state;
     }
 
     fn app_id(&self) -> String {
@@ -2734,7 +2773,9 @@ fn apply_reused_show_updates(
             }
             apply_window_style(&session.bridge, &session.window)?;
             let response = session.bridge.borrow().style_json()?;
-            emit_window_event(&session.bridge, "stylechange", response)?;
+            // D19 final review B7: reused-style changes ride the same direct
+            // `stylechange` producer as setStyle.
+            bridge::notify_style_changed(&session.bridge, &response)?;
             emit_overlay_geometry_change_if_enabled(&session.bridge, &session.window)?;
             session.show_settings.window.style = show_settings.window.style.clone();
             session.show_settings.window.style_requested = true;

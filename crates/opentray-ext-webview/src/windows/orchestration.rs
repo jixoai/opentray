@@ -95,6 +95,10 @@ use super::{
 pub(crate) struct SessionEventCore {
     pub owner: WindowOwner,
     pub outbox: VecDeque<WebviewEventFrame>,
+    /// Owning instance's EventPort state (D19 final review B1): producers
+    /// route through the port captured at session creation, never a
+    /// process-wide latest.
+    pub port: std::sync::Arc<crate::event_port::InstancePortState>,
 }
 
 /// Native focus reconciliation for one window (D19 `focused` edges): the
@@ -1615,12 +1619,16 @@ pub(super) fn push_event_frame(
     let Some(frame) = frame else {
         return;
     };
+    let Some(core) = outbox.upgrade() else {
+        return;
+    };
     // Direct delivery through the hub; every non-legacy outcome consumed the
     // frame (Edge backpressure already parked in the extension retry queue).
-    if let crate::event_port::SubmitStatus::LegacyFlush = crate::event_port::submit_frame(&frame) {
-        if let Some(core) = outbox.upgrade() {
-            core.borrow_mut().outbox.push_back(frame);
-        }
+    // The port is the session core's captured instance state (B1), never a
+    // process-wide latest.
+    let status = core.borrow().port.submit_frame(&frame);
+    if matches!(status, crate::event_port::SubmitStatus::LegacyFlush) {
+        core.borrow_mut().outbox.push_back(frame);
     }
 }
 
@@ -1814,13 +1822,12 @@ mod tests {
 
     /// Focus tracker edges: gaining/losing a view and window deactivation
     /// emit exactly the expected edge frames with per-view sequences. The
-    /// frames route through the batch B seam, which reads the process-global
-    /// EventPort state; holding the port-state guard keeps this test on the
-    /// legacy-flush leg regardless of the event_port fixture tests running
-    /// concurrently in the same binary.
+    /// frames route through the batch B seam, which addresses the session
+    /// core's captured per-instance EventPort state (B1); a fresh port-less
+    /// state keeps this test on the legacy-flush leg regardless of the
+    /// event_port fixture tests running concurrently in the same binary.
     #[test]
     fn focus_tracker_emits_push_edges_without_polling() {
-        let _port_state = crate::event_port::diagnostics::state_guard();
         let owner = WindowOwner {
             app_id: "app".into(),
             tray_id: "tray".into(),
@@ -1830,6 +1837,7 @@ mod tests {
         let core = Rc::new(RefCell::new(SessionEventCore {
             owner: owner.clone(),
             outbox: VecDeque::new(),
+            port: std::sync::Arc::new(crate::event_port::InstancePortState::new()),
         }));
         let mut tracker = FocusTracker::new(owner, Rc::downgrade(&core));
         let toolbar = Rc::new(RefCell::new(ViewEvents::new(

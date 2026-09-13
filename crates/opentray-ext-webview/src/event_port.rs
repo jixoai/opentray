@@ -54,6 +54,20 @@
 //!   per-window `subscribeWindowEvents`/`unsubscribeWindowEvents` protocol
 //!   (batch C, same producer-gating law — no facade listener, no native
 //!   observation record).
+//!
+//! Per-instance state (D19 final review B1): the port and the Edge retry
+//! queue are NOT process globals. Every `opentray_ext_init` instance owns one
+//! [`InstancePortState`]; `opentray_ext_attach_event_port_v1` fills exactly
+//! that instance's state, and every producer handle (window bridge, per-view
+//! event core) captures the `Arc` at creation time. A second mount/reload
+//! attaches its own state and can never retarget the first instance's
+//! producers: an old generation's records keep flowing to the port it
+//! captured, where the hub's revoked source answers `EXT_ERR_PORT_CLOSED`
+//! (the intentional death of that generation's in-flight records — the same
+//! semantics the legacy outbox had when its session closed). Dropping the
+//! instance box drops the last runtime-held `Arc`; producer clones in native
+//! callbacks keep the state allocated but can only observe the closed port,
+//! so unloading cleans the mapping without a process-wide registry.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -87,11 +101,219 @@ struct SharedPort(ExtEventPortV1);
 // No field of the copied value is ever dereferenced as extension memory.
 unsafe impl Send for SharedPort {}
 
-static EVENT_PORT: Mutex<Option<SharedPort>> = Mutex::new(None);
-static EDGE_RETRY_QUEUE: Mutex<Vec<EdgeRetryRecord>> = Mutex::new(Vec::new());
+/// Process-wide diagnostic counters (never routing state): they only count
+/// drops/rejections for observability, so concurrent instances may safely
+/// increment the same atoms.
 static RETRY_OVERFLOW_DROPS: AtomicU64 = AtomicU64::new(0);
 static RETRY_CLOSED_DROPS: AtomicU64 = AtomicU64::new(0);
 static REJECTED_SUBMITS: AtomicU64 = AtomicU64::new(0);
+
+/// Per-loaded-instance EventPort state (B1): the attached port plus that
+/// instance's bounded Edge retry queue. One instance per
+/// `opentray_ext_init`; producers capture an `Arc` clone at creation so a
+/// later attach for a different instance cannot retarget them.
+pub(crate) struct InstancePortState {
+    port: Mutex<Option<SharedPort>>,
+    retry_queue: Mutex<Vec<EdgeRetryRecord>>,
+}
+
+impl Default for InstancePortState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InstancePortState {
+    pub(crate) fn new() -> Self {
+        Self {
+            port: Mutex::new(None),
+            retry_queue: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Stores the immutable port value transferred by the host through the
+    /// attach symbol. The host invokes this exactly once per instance after
+    /// `init`; a hypothetical re-attach replaces the value and retires the
+    /// queued records of the previous source (they can only have belonged to
+    /// the revoked source the old port addressed).
+    pub(crate) fn attach(&self, port: ExtEventPortV1) -> Result<(), String> {
+        if port.abi_version != EXT_EVENT_PORT_ABI_V1 {
+            return Err(format!(
+                "event port abi version {} does not match {EXT_EVENT_PORT_ABI_V1}",
+                port.abi_version
+            ));
+        }
+        if port.struct_size as usize != std::mem::size_of::<ExtEventPortV1>() {
+            return Err(format!(
+                "event port struct size {} does not match host layout {}",
+                port.struct_size,
+                std::mem::size_of::<ExtEventPortV1>()
+            ));
+        }
+        if port.port_data.is_null() {
+            return Err("event port port_data is null".to_string());
+        }
+        let mut slot = self.port.lock().unwrap_or_else(|error| error.into_inner());
+        *slot = Some(SharedPort(port));
+        drop(slot);
+        let mut queue = self
+            .retry_queue
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        queue.clear();
+        Ok(())
+    }
+
+    /// True once this instance's port has been attached (direct EventPort
+    /// delivery mode for the producers that captured this state).
+    pub(crate) fn has_port(&self) -> bool {
+        self.port
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .is_some()
+    }
+
+    fn port_snapshot(&self) -> Option<ExtEventPortV1> {
+        self.port
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .map(|shared| shared.0)
+    }
+
+    /// Submits one frame through the EventPort when attached. Never blocks:
+    /// the single FFI call is bounded and lock-free from the producer's view.
+    pub(crate) fn submit_frame(&self, frame: &WebviewEventFrame) -> SubmitStatus {
+        let Some(port) = self.port_snapshot() else {
+            return SubmitStatus::LegacyFlush;
+        };
+        let Ok(data_json) = serde_json::to_vec(frame) else {
+            REJECTED_SUBMITS.fetch_add(1, Ordering::Relaxed);
+            return SubmitStatus::Rejected;
+        };
+        self.submit_record(&port, frame.owner.tray_id.as_str(), data_json, &classify_frame(frame))
+    }
+
+    /// Submits one legacy window-event family record (`{ "type": event, ... }`
+    /// wire shape, frozen from the retired drain queue payloads) through the
+    /// EventPort under the batch C classification table. The caller owns the
+    /// subscription gate: an unsubscribed event must not call this.
+    pub(crate) fn submit_window_event(
+        &self,
+        tray_id: &str,
+        event: &str,
+        payload: &serde_json::Value,
+    ) -> SubmitStatus {
+        let Some(port) = self.port_snapshot() else {
+            return SubmitStatus::LegacyFlush;
+        };
+        let data = window_event_value(event, payload);
+        let Ok(data_json) = serde_json::to_vec(&data) else {
+            REJECTED_SUBMITS.fetch_add(1, Ordering::Relaxed);
+            return SubmitStatus::Rejected;
+        };
+        self.submit_record(&port, tray_id, data_json, &classify_window_event(event))
+    }
+
+    /// Shared submit core: ordered retry flush, one classified FFI submission,
+    /// Edge retry enqueueing on backpressure.
+    fn submit_record(
+        &self,
+        port: &ExtEventPortV1,
+        tray_id: &str,
+        data_json: Vec<u8>,
+        class: &EventPortClass,
+    ) -> SubmitStatus {
+        // Opportunistic ordered retry flush: older backpressured Edge records
+        // ride the same wake before the newer record (per-source FIFO).
+        self.flush_edge_retries();
+        let status = submit_bytes(port, tray_id, &data_json, class);
+        if status == SubmitStatus::Backpressured && *class == EventPortClass::Edge {
+            self.enqueue_edge_retry(tray_id.to_string(), data_json);
+        }
+        status
+    }
+
+    /// Post-command retry flush: gives backpressured Edge records another
+    /// bounded chance after every handled command without waiting in a
+    /// callback.
+    pub(crate) fn flush_edge_retries_after_command(&self) {
+        self.flush_edge_retries();
+    }
+
+    /// Drains the retry queue in FIFO order. The whole drain holds the retry
+    /// lock (B2): `try_submit` is a bounded thread-safe hub ingress, and
+    /// holding the per-instance lock across the batch linearizes it — a
+    /// concurrent producer cannot submit past the lock, so a new record can
+    /// never overtake the retry batch at the hub. Stops at the first
+    /// backpressured record (per-source linearization must not reorder);
+    /// discards everything on port closure (the source is revoked; the
+    /// records cannot route).
+    fn flush_edge_retries(&self) {
+        let mut queue = self
+            .retry_queue
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if queue.is_empty() {
+            return;
+        }
+        let Some(port) = self.port_snapshot() else {
+            // Unreachable while a queue is non-empty: attach clears the queue
+            // and only attach ever stores a port. Defensive no-op.
+            return;
+        };
+        let mut index = 0;
+        let mut closed_drops = 0u64;
+        while index < queue.len() {
+            let record = &queue[index];
+            match submit_bytes(
+                &port,
+                &record.tray_id,
+                &record.data_json,
+                &EventPortClass::Edge,
+            ) {
+                SubmitStatus::Direct => {
+                    index += 1;
+                }
+                SubmitStatus::Backpressured => break,
+                SubmitStatus::PortClosed => {
+                    // The whole queue belongs to the revoked source.
+                    closed_drops = (queue.len() - index) as u64;
+                    index = queue.len();
+                }
+                SubmitStatus::Rejected | SubmitStatus::LegacyFlush => {
+                    // LegacyFlush is unreachable here (port present); a rejected
+                    // retry is malformed input that can never succeed — drop it.
+                    index += 1;
+                }
+            }
+        }
+        if closed_drops > 0 {
+            RETRY_CLOSED_DROPS.fetch_add(closed_drops, Ordering::Relaxed);
+        }
+        // Retained records (the backpressured head onwards) keep their FIFO
+        // positions; records enqueued concurrently with this drain blocked on
+        // the lock and land strictly after it.
+        queue.drain(..index);
+    }
+
+    fn enqueue_edge_retry(&self, tray_id: String, data_json: Vec<u8>) -> bool {
+        let mut queue = self
+            .retry_queue
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if queue.len() >= EDGE_RETRY_MAX_RECORDS {
+            RETRY_OVERFLOW_DROPS.fetch_add(1, Ordering::Relaxed);
+            eprintln!(
+                "opentray-ext-webview event port: edge retry queue full ({}), dropping newest record",
+                EDGE_RETRY_MAX_RECORDS
+            );
+            return false;
+        }
+        queue.push(EdgeRetryRecord { tray_id, data_json });
+        true
+    }
+}
 
 struct EdgeRetryRecord {
     tray_id: String,
@@ -106,7 +328,7 @@ pub(crate) enum EventPortClass {
     BestEffort,
 }
 
-/// Outcome of one [`submit_frame`] call.
+/// Outcome of one [`InstancePortState::submit_frame`] call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SubmitStatus {
     /// Accepted by the hub (enqueued, coalesced, or a counted BestEffort
@@ -122,41 +344,6 @@ pub(crate) enum SubmitStatus {
     /// No port was ever attached: the caller must keep the declared legacy
     /// response-flush delivery for this frame.
     LegacyFlush,
-}
-
-/// Stores the immutable port value transferred by the optional attach
-/// symbol. Each successful load attaches the current generation's port; the
-/// stored value always addresses the newest source, so stale producers after
-/// a reload observe the previous generation's revoked state only through a
-/// port value they captured earlier — this process-wide view is the live one.
-pub(crate) fn attach_port(port: ExtEventPortV1) -> Result<(), String> {
-    if port.abi_version != EXT_EVENT_PORT_ABI_V1 {
-        return Err(format!(
-            "event port abi version {} does not match {EXT_EVENT_PORT_ABI_V1}",
-            port.abi_version
-        ));
-    }
-    if port.struct_size as usize != std::mem::size_of::<ExtEventPortV1>() {
-        return Err(format!(
-            "event port struct size {} does not match host layout {}",
-            port.struct_size,
-            std::mem::size_of::<ExtEventPortV1>()
-        ));
-    }
-    if port.port_data.is_null() {
-        return Err("event port port_data is null".to_string());
-    }
-    let mut slot = EVENT_PORT.lock().unwrap_or_else(|error| error.into_inner());
-    *slot = Some(SharedPort(port));
-    Ok(())
-}
-
-/// True once a port has been attached (direct EventPort delivery mode).
-pub(crate) fn port_attached() -> bool {
-    EVENT_PORT
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .is_some()
 }
 
 /// Classifies one frame per the normative table. Pure: no port, no state.
@@ -205,57 +392,6 @@ pub(crate) fn classify_window_event(event: &str) -> EventPortClass {
     }
 }
 
-/// Submits one frame through the EventPort when attached. Never blocks: the
-/// single FFI call is bounded and lock-free from the producer's view.
-pub(crate) fn submit_frame(frame: &WebviewEventFrame) -> SubmitStatus {
-    let Some(port) = current_port() else {
-        return SubmitStatus::LegacyFlush;
-    };
-    let Ok(data_json) = serde_json::to_vec(frame) else {
-        REJECTED_SUBMITS.fetch_add(1, Ordering::Relaxed);
-        return SubmitStatus::Rejected;
-    };
-    submit_record(&port, frame.owner.tray_id.as_str(), data_json, &classify_frame(frame))
-}
-
-/// Submits one legacy window-event family record (`{ "type": event, ... }`
-/// wire shape, frozen from the retired drain queue payloads) through the
-/// EventPort under the batch C classification table. The caller owns the
-/// subscription gate: an unsubscribed event must not call this.
-pub(crate) fn submit_window_event(
-    tray_id: &str,
-    event: &str,
-    payload: &serde_json::Value,
-) -> SubmitStatus {
-    let Some(port) = current_port() else {
-        return SubmitStatus::LegacyFlush;
-    };
-    let data = window_event_value(event, payload);
-    let Ok(data_json) = serde_json::to_vec(&data) else {
-        REJECTED_SUBMITS.fetch_add(1, Ordering::Relaxed);
-        return SubmitStatus::Rejected;
-    };
-    submit_record(&port, tray_id, data_json, &classify_window_event(event))
-}
-
-/// Shared submit core: ordered retry flush, one classified FFI submission,
-/// Edge retry enqueueing on backpressure.
-fn submit_record(
-    port: &ExtEventPortV1,
-    tray_id: &str,
-    data_json: Vec<u8>,
-    class: &EventPortClass,
-) -> SubmitStatus {
-    // Opportunistic ordered retry flush: older backpressured Edge records
-    // ride the same wake before the newer record (per-source FIFO).
-    flush_edge_retries(port);
-    let status = submit_bytes(port, tray_id, &data_json, class);
-    if status == SubmitStatus::Backpressured && *class == EventPortClass::Edge {
-        enqueue_edge_retry(tray_id.to_string(), data_json);
-    }
-    status
-}
-
 /// Merges the drained-event wire shape `{ "type": event, ...payload }` —
 /// byte-compatible with the payloads the retired drain queue delivered, so
 /// the facade `listenExtension` filter (`data.type === event`) matches
@@ -270,26 +406,10 @@ fn window_event_value(event: &str, payload: &serde_json::Value) -> serde_json::V
     value
 }
 
-/// Post-command retry flush: gives backpressured Edge records another
-/// bounded chance after every handled command without waiting in a callback.
-pub(crate) fn flush_edge_retries_after_command() {
-    if let Some(port) = current_port() {
-        flush_edge_retries(&port);
-    }
-}
-
-fn current_port() -> Option<ExtEventPortV1> {
-    EVENT_PORT
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .as_ref()
-        .map(|shared| shared.0)
-}
-
 /// Pure FFI submission: no retry bookkeeping, so the flush path can call it
 /// without re-entering the retry queue. Retry enqueueing is owned by
-/// [`submit_frame`] (new producer records) and [`flush_edge_retries`]
-/// (reinsertion of the same records).
+/// [`InstancePortState::submit_record`] (new producer records) and the flush
+/// loop (re-drain of the same records).
 fn submit_bytes(
     port: &ExtEventPortV1,
     tray_id: &str,
@@ -343,86 +463,6 @@ fn submit_bytes(
     }
 }
 
-fn enqueue_edge_retry(tray_id: String, data_json: Vec<u8>) -> bool {
-    let mut queue = EDGE_RETRY_QUEUE
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    if queue.len() >= EDGE_RETRY_MAX_RECORDS {
-        RETRY_OVERFLOW_DROPS.fetch_add(1, Ordering::Relaxed);
-        eprintln!(
-            "opentray-ext-webview event port: edge retry queue full ({}), dropping newest record",
-            EDGE_RETRY_MAX_RECORDS
-        );
-        return false;
-    }
-    queue.push(EdgeRetryRecord { tray_id, data_json });
-    true
-}
-
-/// Drains the retry queue in FIFO order. Stops at the first backpressured
-/// record (per-source linearization must not reorder), discards everything on
-/// port closure (the source is revoked; the records cannot route), and keeps
-/// the queue bounded when records arrived while flushing.
-fn flush_edge_retries(port: &ExtEventPortV1) {
-    let mut batch: Vec<EdgeRetryRecord> = {
-        let mut queue = EDGE_RETRY_QUEUE
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        std::mem::take(&mut *queue)
-    };
-    if batch.is_empty() {
-        return;
-    }
-    let mut index = 0;
-    let mut closed_drops = 0u64;
-    while index < batch.len() {
-        let record = &batch[index];
-        match submit_bytes(
-            port,
-            &record.tray_id,
-            &record.data_json,
-            &EventPortClass::Edge,
-        ) {
-            SubmitStatus::Direct => {
-                index += 1;
-            }
-            SubmitStatus::Backpressured => break,
-            SubmitStatus::PortClosed => {
-                // The whole queue belongs to the revoked source.
-                closed_drops = (batch.len() - index) as u64;
-                index = batch.len();
-            }
-            SubmitStatus::Rejected | SubmitStatus::LegacyFlush => {
-                // LegacyFlush is unreachable here (port present); a rejected
-                // retry is malformed input that can never succeed — drop it.
-                index += 1;
-            }
-        }
-    }
-    if closed_drops > 0 {
-        RETRY_CLOSED_DROPS.fetch_add(closed_drops, Ordering::Relaxed);
-    }
-    let remaining = batch.len() - index;
-    if remaining > 0 {
-        let mut queue = EDGE_RETRY_QUEUE
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        // Final order is [remaining retried records (older), records that a
-        // concurrent producer enqueued while flushing (newer)]; overflow
-        // drops the newest tail against the bounded cap.
-        let mut combined: Vec<EdgeRetryRecord> = batch.drain(index..).collect();
-        combined.extend(queue.drain(..));
-        if combined.len() > EDGE_RETRY_MAX_RECORDS {
-            RETRY_OVERFLOW_DROPS.fetch_add(
-                (combined.len() - EDGE_RETRY_MAX_RECORDS) as u64,
-                Ordering::Relaxed,
-            );
-            combined.truncate(EDGE_RETRY_MAX_RECORDS);
-        }
-        *queue = combined;
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod diagnostics {
     use super::{REJECTED_SUBMITS, RETRY_CLOSED_DROPS, RETRY_OVERFLOW_DROPS};
@@ -440,11 +480,11 @@ pub(crate) mod diagnostics {
         REJECTED_SUBMITS.load(Ordering::Relaxed)
     }
 
-    /// Serializes a test with this module's fixture state. Tests outside
-    /// this file that exercise `submit_frame`'s process-global port state
-    /// (e.g. a platform seam routing a frame to the legacy outbox) must hold
-    /// this guard so a concurrently running fixture here can neither attach
-    /// a fake port nor reset it mid-assertion.
+    /// Serializes a test with this module's fixture state. State is
+    /// per-instance now (B1), so this guard only protects the process-wide
+    /// diagnostic counters tests assert on; sibling module tests that build
+    /// bridges against a fake-attached instance state take it too so counter
+    /// assertions cannot interleave.
     pub(crate) fn state_guard() -> std::sync::MutexGuard<'static, ()> {
         super::TEST_STATE_GUARD
             .lock()
@@ -452,8 +492,8 @@ pub(crate) mod diagnostics {
     }
 }
 
-/// Test-only serializer for the process-global port/retry state (the same
-/// lock the module's own fixtures take through `diagnostics::state_guard`).
+/// Test-only serializer for the diagnostic counters (the same lock the
+/// module's own fixtures take through `diagnostics::state_guard`).
 #[cfg(test)]
 static TEST_STATE_GUARD: Mutex<()> = Mutex::new(());
 
@@ -470,7 +510,48 @@ impl EventPortClass {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    pub(crate) use super::tests::install_fake_port_for_module_tests;
+    use super::tests::{FakePort, reset_diagnostics};
+    use super::{InstancePortState, TEST_STATE_GUARD};
+
+    /// Installs one fresh instance state with a fake port attached, for
+    /// cross-module producer tests (window-bridge submit paths). The guard
+    /// serializes the process-wide diagnostic counters with this module's
+    /// own tests.
+    pub(crate) fn install_fake_port_for_module_tests() -> ModuleTestPort {
+        let guard = TEST_STATE_GUARD
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = std::sync::Arc::new(InstancePortState::new());
+        state.attach(fake.port_value()).expect("valid fake port");
+        ModuleTestPort {
+            _guard: guard,
+            state,
+            fake,
+        }
+    }
+
+    /// Holds one fake-attached instance state plus the serialization guard
+    /// for one cross-module test; dropping it releases the guard.
+    pub(crate) struct ModuleTestPort {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        /// The per-instance EventPort state producers captured (hand this to
+        /// bridge/session fixtures).
+        pub(crate) state: InstancePortStateHandle,
+        pub(crate) fake: FakePort,
+    }
+
+    /// Alias so sibling modules can name the handle without importing the
+    /// private state type through two paths.
+    pub(crate) type InstancePortStateHandle = std::sync::Arc<InstancePortState>;
+
+    impl ModuleTestPort {
+        pub(crate) fn submits(&self) -> Vec<super::tests::FakeSubmit> {
+            self.fake.submits()
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -479,6 +560,8 @@ mod tests {
     use opentray_spec::ExtResultCode;
     use opentray_spec::webview::WebviewOwnerTuple;
     use std::ffi::c_void;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicI32;
 
     /// The private helper stays honest: classification round-trips into the
     /// frozen C discriminants the wire carries.
@@ -501,51 +584,82 @@ mod tests {
         );
     }
 
-    /// Tests share process-wide statics; serialized through the module-level
-    /// `TEST_STATE_GUARD` (also exposed to sibling module tests through
-    /// `diagnostics::state_guard`).
+    /// Tests share the diagnostic-counter statics; serialized through the
+    /// module-level `TEST_STATE_GUARD`.
     fn lock_state() -> std::sync::MutexGuard<'static, ()> {
         super::diagnostics::state_guard()
     }
 
-    fn reset_state() {
-        *EVENT_PORT.lock().unwrap_or_else(|error| error.into_inner()) = None;
-        EDGE_RETRY_QUEUE
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clear();
+    pub(super) fn reset_diagnostics() {
         RETRY_OVERFLOW_DROPS.store(0, Ordering::Relaxed);
         RETRY_CLOSED_DROPS.store(0, Ordering::Relaxed);
         REJECTED_SUBMITS.store(0, Ordering::Relaxed);
     }
 
-    fn retry_queue_len() -> usize {
-        EDGE_RETRY_QUEUE
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .len()
-    }
-
     // -- fake port -----------------------------------------------------------
 
-    static FAKE_RESULT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(EXT_OK);
-    static FAKE_SCRIPT: Mutex<std::collections::VecDeque<ExtResultCode>> =
-        Mutex::new(std::collections::VecDeque::new());
-    static FAKE_SUBMITS: Mutex<Vec<FakeSubmit>> = Mutex::new(Vec::new());
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub(crate) struct FakeSubmit {
-        pub(crate) tray_id: String,
-        /// Wire `type` tag of the submitted record.
-        pub(crate) payload_tag: String,
-        pub(crate) seq: u64,
-        pub(crate) class: u32,
-        pub(crate) coalesce_key: Option<Vec<u8>>,
+    /// Per-port hub fake (B1): `port_data` addresses this recorder, exactly
+    /// like the real hub's per-source port data, so two instances attaching
+    /// two fakes get two isolated submit logs.
+    pub(crate) struct FakePort {
+        inner: Arc<FakePortInner>,
     }
 
-    extern "C" fn fake_try_submit(_data: *mut c_void, input: ExtEventInputV1) -> ExtResultCode {
+    struct FakePortInner {
+        submits: Mutex<Vec<FakeSubmit>>,
+        script: Mutex<std::collections::VecDeque<ExtResultCode>>,
+        default_result: AtomicI32,
+    }
+
+    impl FakePort {
+        pub(crate) fn new() -> Self {
+            Self {
+                inner: Arc::new(FakePortInner {
+                    submits: Mutex::new(Vec::new()),
+                    script: Mutex::new(std::collections::VecDeque::new()),
+                    default_result: AtomicI32::new(EXT_OK),
+                }),
+            }
+        }
+
+        pub(crate) fn port_value(&self) -> ExtEventPortV1 {
+            ExtEventPortV1 {
+                abi_version: EXT_EVENT_PORT_ABI_V1,
+                struct_size: std::mem::size_of::<ExtEventPortV1>() as u32,
+                // `Arc::as_ptr` is stable while the Arc lives; the fixture
+                // outlives every submit through the port value it handed out.
+                port_data: (Arc::as_ptr(&self.inner) as *mut u8).cast::<c_void>(),
+                try_submit: fake_try_submit,
+            }
+        }
+
+        pub(crate) fn set_result(&self, code: ExtResultCode) {
+            self.inner
+                .default_result
+                .store(code, Ordering::Relaxed);
+        }
+
+        pub(crate) fn script(&self, codes: impl IntoIterator<Item = ExtResultCode>) {
+            self.inner
+                .script
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .extend(codes);
+        }
+
+        pub(crate) fn submits(&self) -> Vec<FakeSubmit> {
+            self.inner
+                .submits
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone()
+        }
+    }
+
+    extern "C" fn fake_try_submit(data: *mut c_void, input: ExtEventInputV1) -> ExtResultCode {
         // Copy everything under the call: the input is borrowed only for the
         // duration of try_submit, exactly like the real hub ingress.
+        let inner = unsafe { &*data.cast::<FakePortInner>() };
         let tray = read_bytes(input.route.tray_id);
         let payload = read_bytes(input.data_json);
         let key = if input.coalesce_key.ptr.is_null() {
@@ -555,7 +669,8 @@ mod tests {
         };
         let tray_id = String::from_utf8(tray).expect("utf-8 tray");
         let value: serde_json::Value = serde_json::from_slice(&payload).expect("json payload");
-        FAKE_SUBMITS
+        inner
+            .submits
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .push(FakeSubmit {
@@ -571,11 +686,12 @@ mod tests {
                 class: input.class,
                 coalesce_key: key,
             });
-        let scripted = FAKE_SCRIPT
+        let scripted = inner
+            .script
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .pop_front();
-        scripted.unwrap_or_else(|| FAKE_RESULT.load(Ordering::Relaxed))
+        scripted.unwrap_or_else(|| inner.default_result.load(Ordering::Relaxed))
     }
 
     fn read_bytes(bytes: ExtBytes) -> Vec<u8> {
@@ -583,64 +699,28 @@ mod tests {
         unsafe { std::slice::from_raw_parts(bytes.ptr.cast::<u8>(), bytes.len) }.to_vec()
     }
 
-    fn fake_port() -> ExtEventPortV1 {
-        ExtEventPortV1 {
-            abi_version: EXT_EVENT_PORT_ABI_V1,
-            struct_size: std::mem::size_of::<ExtEventPortV1>() as u32,
-            port_data: std::ptr::NonNull::<u8>::dangling()
-                .as_ptr()
-                .cast::<c_void>(),
-            try_submit: fake_try_submit,
-        }
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) struct FakeSubmit {
+        pub(crate) tray_id: String,
+        /// Wire `type` tag of the submitted record.
+        pub(crate) payload_tag: String,
+        pub(crate) seq: u64,
+        pub(crate) class: u32,
+        pub(crate) coalesce_key: Option<Vec<u8>>,
     }
 
-    fn install_fake_port() {
-        attach_port(fake_port()).expect("valid fake port");
-        FAKE_RESULT.store(EXT_OK, Ordering::Relaxed);
-        FAKE_SCRIPT
+    fn attached_state(fake: &FakePort) -> InstancePortState {
+        let state = InstancePortState::new();
+        state.attach(fake.port_value()).expect("valid fake port");
+        state
+    }
+
+    fn retry_queue_len(state: &InstancePortState) -> usize {
+        state
+            .retry_queue
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .clear();
-        FAKE_SUBMITS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clear();
-    }
-
-    fn fake_submits() -> Vec<FakeSubmit> {
-        FAKE_SUBMITS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-    }
-
-    pub(crate) fn install_fake_port_for_module_tests() -> ModuleTestPort {
-        let guard = lock_state();
-        reset_state();
-        install_fake_port();
-        ModuleTestPort { _guard: guard }
-    }
-
-    /// Holds the fake port plus the serialization guard for one cross-module
-    /// test; dropping it resets the shared port state.
-    pub(crate) struct ModuleTestPort {
-        _guard: std::sync::MutexGuard<'static, ()>,
-    }
-
-    impl ModuleTestPort {
-        pub(crate) fn submits(&self) -> Vec<FakeSubmit> {
-            fake_submits()
-        }
-    }
-
-    impl Drop for ModuleTestPort {
-        fn drop(&mut self) {
-            reset_state();
-        }
-    }
-
-    fn set_fake_result(code: ExtResultCode) {
-        FAKE_RESULT.store(code, Ordering::Relaxed);
+            .len()
     }
 
     // -- fixtures ------------------------------------------------------------
@@ -783,12 +863,13 @@ mod tests {
     #[test]
     fn window_event_submissions_keep_the_drained_wire_shape() {
         let _state = lock_state();
-        reset_state();
-        install_fake_port();
-        set_fake_result(EXT_OK);
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_OK);
 
         assert_eq!(
-            submit_window_event(
+            state.submit_window_event(
                 "tray-1",
                 "visibleChange",
                 &serde_json::json!({ "visible": false })
@@ -796,11 +877,11 @@ mod tests {
             SubmitStatus::Direct
         );
         assert_eq!(
-            submit_window_event("tray-1", "focus", &serde_json::json!({})),
+            state.submit_window_event("tray-1", "focus", &serde_json::json!({})),
             SubmitStatus::Direct
         );
         assert_eq!(
-            submit_window_event(
+            state.submit_window_event(
                 "tray-1",
                 "downloadprogress",
                 &serde_json::json!({ "receivedBytes": 10, "totalBytes": 100 })
@@ -808,7 +889,7 @@ mod tests {
             SubmitStatus::Direct
         );
 
-        let submits = fake_submits();
+        let submits = fake.submits();
         assert_eq!(submits.len(), 3);
         assert!(submits.iter().all(|submit| submit.tray_id == "tray-1"));
         // Wire tags are exactly the drained-event names, so the facade's
@@ -821,48 +902,47 @@ mod tests {
         assert_eq!(submits[1].class, ExtEventClassV1::Edge.as_u32());
         assert_eq!(submits[2].class, ExtEventClassV1::BestEffort.as_u32());
         assert!(submits.iter().all(|submit| submit.coalesce_key.is_none()));
-        reset_state();
     }
 
     #[test]
     fn window_event_edge_backpressure_retries_like_the_five_families() {
         let _state = lock_state();
-        reset_state();
-        install_fake_port();
-        set_fake_result(EXT_ERR_BACKPRESSURE);
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_ERR_BACKPRESSURE);
 
         assert_eq!(
-            submit_window_event("tray-1", "focus", &serde_json::json!({})),
+            state.submit_window_event("tray-1", "focus", &serde_json::json!({})),
             SubmitStatus::Backpressured
         );
-        assert_eq!(retry_queue_len(), 1, "window-family Edge records retry too");
+        assert_eq!(retry_queue_len(&state), 1, "window-family Edge records retry too");
 
-        set_fake_result(EXT_OK);
+        fake.set_result(EXT_OK);
         assert_eq!(
-            submit_window_event("tray-1", "blur", &serde_json::json!({})),
+            state.submit_window_event("tray-1", "blur", &serde_json::json!({})),
             SubmitStatus::Direct
         );
-        let submits = fake_submits();
+        let submits = fake.submits();
         let tail = &submits[submits.len() - 2..];
         assert_eq!(
             (tail[0].payload_tag.as_str(), tail[1].payload_tag.as_str()),
             ("focus", "blur"),
             "the queued focus edge is retried before the newer blur record"
         );
-        assert_eq!(retry_queue_len(), 0);
-        reset_state();
+        assert_eq!(retry_queue_len(&state), 0);
     }
 
     #[test]
     fn window_event_without_a_port_reports_legacy_flush() {
         let _state = lock_state();
-        reset_state();
+        reset_diagnostics();
+        let state = InstancePortState::new();
         assert_eq!(
-            submit_window_event("tray-1", "focus", &serde_json::json!({})),
+            state.submit_window_event("tray-1", "focus", &serde_json::json!({})),
             SubmitStatus::LegacyFlush
         );
-        assert_eq!(retry_queue_len(), 0);
-        reset_state();
+        assert_eq!(retry_queue_len(&state), 0);
     }
 
     // -- attach ----------------------------------------------------------------
@@ -870,25 +950,137 @@ mod tests {
     #[test]
     fn attach_validates_the_nested_port_and_stores_the_value() {
         let _state = lock_state();
-        reset_state();
-        assert!(!port_attached());
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = InstancePortState::new();
+        assert!(!state.has_port());
 
-        let mut bad = fake_port();
+        let mut bad = fake.port_value();
         bad.abi_version = EXT_EVENT_PORT_ABI_V1 + 1;
-        assert!(attach_port(bad).is_err());
+        assert!(state.attach(bad).is_err());
 
-        let mut bad = fake_port();
+        let mut bad = fake.port_value();
         bad.struct_size = 0;
-        assert!(attach_port(bad).is_err());
+        assert!(state.attach(bad).is_err());
 
-        let mut bad = fake_port();
+        let mut bad = fake.port_value();
         bad.port_data = std::ptr::null_mut();
-        assert!(attach_port(bad).is_err());
+        assert!(state.attach(bad).is_err());
 
-        assert!(!port_attached(), "rejected ports are never stored");
-        attach_port(fake_port()).expect("valid port");
-        assert!(port_attached());
-        reset_state();
+        assert!(!state.has_port(), "rejected ports are never stored");
+        state.attach(fake.port_value()).expect("valid port");
+        assert!(state.has_port());
+    }
+
+    // -- per-instance isolation (B1) --------------------------------------
+
+    #[test]
+    fn dual_instances_route_producers_to_their_own_ports() {
+        let _state = lock_state();
+        reset_diagnostics();
+        let fake_a = FakePort::new();
+        let state_a = attached_state(&fake_a);
+        let fake_b = FakePort::new();
+        let state_b = attached_state(&fake_b);
+
+        // Producer of instance A submits through A's captured state: only
+        // A's hub source sees the record — B's attach never retargeted it.
+        assert_eq!(
+            state_a.submit_window_event("tray-a", "focus", &serde_json::json!({})),
+            SubmitStatus::Direct
+        );
+        assert_eq!(fake_a.submits().len(), 1);
+        assert_eq!(fake_a.submits()[0].tray_id, "tray-a");
+        assert!(fake_b.submits().is_empty(), "instance B's source saw nothing");
+
+        assert_eq!(
+            state_b.submit_window_event("tray-b", "blur", &serde_json::json!({})),
+            SubmitStatus::Direct
+        );
+        let b_submits = fake_b.submits();
+        assert_eq!(b_submits.len(), 1);
+        assert_eq!(b_submits[0].tray_id, "tray-b");
+        assert_eq!(fake_a.submits().len(), 1, "instance A's source is unchanged");
+    }
+
+    #[test]
+    fn old_generation_records_never_reach_the_new_source() {
+        let _state = lock_state();
+        reset_diagnostics();
+        // Instance A attaches a port whose hub source will be revoked (reload).
+        let fake_a = FakePort::new();
+        let state_a = attached_state(&fake_a);
+        fake_a.set_result(EXT_ERR_BACKPRESSURE);
+        assert_eq!(
+            state_a.submit_window_event("tray-a", "focus", &serde_json::json!({})),
+            SubmitStatus::Backpressured
+        );
+        assert_eq!(retry_queue_len(&state_a), 1);
+
+        // The reload mounts instance B and attaches B's port. A's producers
+        // still hold A's state.
+        let fake_b = FakePort::new();
+        let state_b = attached_state(&fake_b);
+        fake_b.set_result(EXT_OK);
+
+        // A's source answers PORT_CLOSED now; A's queued record must die in
+        // A's flush — never leak into B's source.
+        fake_a.set_result(EXT_ERR_PORT_CLOSED);
+        state_a.flush_edge_retries_after_command();
+        assert_eq!(retry_queue_len(&state_a), 0);
+        assert!(
+            fake_b.submits().is_empty(),
+            "the old generation's records never reach the new source"
+        );
+        assert_eq!(diagnostics::retry_closed_drops(), 1);
+
+        // And a live producer of A still routes to A's (closed) port only.
+        assert_eq!(
+            state_a.submit_window_event("tray-a", "closed", &serde_json::json!({})),
+            SubmitStatus::PortClosed
+        );
+        assert!(fake_b.submits().is_empty());
+
+        // B keeps working on its own source.
+        assert_eq!(
+            state_b.submit_window_event("tray-b", "focus", &serde_json::json!({})),
+            SubmitStatus::Direct
+        );
+        assert_eq!(fake_b.submits().len(), 1);
+    }
+
+    #[test]
+    fn retry_queues_are_per_instance() {
+        let _state = lock_state();
+        reset_diagnostics();
+        let fake_a = FakePort::new();
+        let state_a = attached_state(&fake_a);
+        let fake_b = FakePort::new();
+        let state_b = attached_state(&fake_b);
+
+        fake_a.set_result(EXT_ERR_BACKPRESSURE);
+        assert_eq!(
+            state_a.submit_window_event("tray-a", "focus", &serde_json::json!({})),
+            SubmitStatus::Backpressured
+        );
+        fake_b.set_result(EXT_ERR_BACKPRESSURE);
+        assert_eq!(
+            state_b.submit_window_event("tray-b", "focus", &serde_json::json!({})),
+            SubmitStatus::Backpressured
+        );
+        assert_eq!(retry_queue_len(&state_a), 1);
+        assert_eq!(retry_queue_len(&state_b), 1);
+
+        // A recovers alone: only A's record is replayed; B's queue stays.
+        fake_a.set_result(EXT_OK);
+        state_a.flush_edge_retries_after_command();
+        assert_eq!(retry_queue_len(&state_a), 0);
+        assert_eq!(retry_queue_len(&state_b), 1);
+        let a_submits = fake_a.submits();
+        // Two attempts on A's port: the seeding submit plus the flush replay.
+        assert_eq!(a_submits.len(), 2);
+        assert!(a_submits.iter().all(|submit| submit.tray_id == "tray-a"));
+        assert!(fake_b.submits().iter().all(|submit| submit.tray_id == "tray-b"));
     }
 
     // -- submit routing ----------------------------------------------------------
@@ -896,32 +1088,34 @@ mod tests {
     #[test]
     fn submit_without_a_port_reports_legacy_flush() {
         let _state = lock_state();
-        reset_state();
+        reset_diagnostics();
+        let state = InstancePortState::new();
         assert_eq!(
-            submit_frame(&url_frame("content", 1)),
+            state.submit_frame(&url_frame("content", 1)),
             SubmitStatus::LegacyFlush
         );
-        assert_eq!(retry_queue_len(), 0);
+        assert_eq!(retry_queue_len(&state), 0);
     }
 
     #[test]
     fn latest_submits_carry_the_coalesce_key_and_edge_records_do_not() {
         let _state = lock_state();
-        reset_state();
-        install_fake_port();
-        set_fake_result(EXT_OK);
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_OK);
 
-        assert_eq!(submit_frame(&url_frame("content", 1)), SubmitStatus::Direct);
+        assert_eq!(state.submit_frame(&url_frame("content", 1)), SubmitStatus::Direct);
         assert_eq!(
-            submit_frame(&focused_frame("content", 2)),
+            state.submit_frame(&focused_frame("content", 2)),
             SubmitStatus::Direct
         );
         assert_eq!(
-            submit_frame(&load_frame("content", 3, Some(0.5))),
+            state.submit_frame(&load_frame("content", 3, Some(0.5))),
             SubmitStatus::Direct
         );
 
-        let submits = fake_submits();
+        let submits = fake.submits();
         assert_eq!(submits.len(), 3);
         // All frames route under the frame's own tray id.
         assert!(submits.iter().all(|submit| submit.tray_id == "tray-1"));
@@ -937,52 +1131,52 @@ mod tests {
         // The serialized payload is the frozen frame JSON.
         assert_eq!(submits[0].payload_tag, "urlChange");
         assert_eq!(diagnostics::rejected_submits(), 0);
-        reset_state();
     }
 
     #[test]
     fn edge_backpressure_queues_for_ordered_retry_and_latest_does_not() {
         let _state = lock_state();
-        reset_state();
-        install_fake_port();
-        set_fake_result(EXT_ERR_BACKPRESSURE);
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_ERR_BACKPRESSURE);
 
         assert_eq!(
-            submit_frame(&focused_frame("content", 1)),
+            state.submit_frame(&focused_frame("content", 1)),
             SubmitStatus::Backpressured
         );
         assert_eq!(
-            retry_queue_len(),
+            retry_queue_len(&state),
             1,
             "Edge record waits in the bounded retry queue"
         );
         // Latest backpressure must NOT be retried: a delayed older snapshot
         // could otherwise replace a newer pending value under the same key.
         assert_eq!(
-            submit_frame(&url_frame("content", 2)),
+            state.submit_frame(&url_frame("content", 2)),
             SubmitStatus::Backpressured
         );
         assert_eq!(
-            retry_queue_len(),
+            retry_queue_len(&state),
             1,
             "Latest records never enter the retry queue"
         );
         // BestEffort backpressure (not producible by the real hub) is simply
         // not retried either.
         assert_eq!(
-            submit_frame(&load_frame("content", 3, Some(0.5))),
+            state.submit_frame(&load_frame("content", 3, Some(0.5))),
             SubmitStatus::Backpressured
         );
-        assert_eq!(retry_queue_len(), 1);
+        assert_eq!(retry_queue_len(&state), 1);
 
         // Recovery: the next callback flushes the queued Edge record first
         // (per-source FIFO), then submits the new record.
-        set_fake_result(EXT_OK);
+        fake.set_result(EXT_OK);
         assert_eq!(
-            submit_frame(&focused_frame("content", 4)),
+            state.submit_frame(&focused_frame("content", 4)),
             SubmitStatus::Direct
         );
-        let submits = fake_submits();
+        let submits = fake.submits();
         // Every earlier call also re-attempted the queued record (constant
         // backpressure); what matters for FIFO law is the final two entries:
         // the older queued record right before the newer callback record.
@@ -994,37 +1188,34 @@ mod tests {
             (1, 4),
             "the older queued record is retried before the newer callback record"
         );
-        assert_eq!(retry_queue_len(), 0);
-        reset_state();
+        assert_eq!(retry_queue_len(&state), 0);
     }
 
     #[test]
     fn retry_flush_stops_at_backpressure_keeping_fifo_order() {
         let _state = lock_state();
-        reset_state();
-        install_fake_port();
-        set_fake_result(EXT_ERR_BACKPRESSURE);
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_ERR_BACKPRESSURE);
         for seq in 1..=3 {
             assert_eq!(
-                submit_frame(&focused_frame("content", seq)),
+                state.submit_frame(&focused_frame("content", seq)),
                 SubmitStatus::Backpressured
             );
         }
-        assert_eq!(retry_queue_len(), 3);
+        assert_eq!(retry_queue_len(&state), 3);
 
         // Script: the first retry succeeds, the second backpressures. The
         // flush must stop there — record 3 and the newest callback record
         // must not jump ahead of the still-queued record 2.
-        FAKE_SCRIPT
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .extend([EXT_OK, EXT_ERR_BACKPRESSURE]);
-        set_fake_result(EXT_ERR_BACKPRESSURE);
+        fake.script([EXT_OK, EXT_ERR_BACKPRESSURE]);
+        fake.set_result(EXT_ERR_BACKPRESSURE);
         assert_eq!(
-            submit_frame(&focused_frame("content", 4)),
+            state.submit_frame(&focused_frame("content", 4)),
             SubmitStatus::Backpressured
         );
-        let submits = fake_submits();
+        let submits = fake.submits();
         // Attempt trace under constant backpressure: submit 1 attempts 1;
         // submit 2's flush re-attempts 1, then 2; submit 3's flush
         // re-attempts 1, then 3. Record 4's flush runs under the scripted
@@ -1035,60 +1226,150 @@ mod tests {
             vec![1, 1, 2, 1, 3, 1, 2, 4]
         );
         assert_eq!(
-            retry_queue_len(),
+            retry_queue_len(&state),
             3,
             "records 2, 3 stay queued in order; the backpressured record 4 joins the tail"
         );
 
         // Full recovery drains 2, 3, 4 in FIFO order before anything new.
-        set_fake_result(EXT_OK);
-        flush_edge_retries_after_command();
-        assert_eq!(retry_queue_len(), 0);
-        let submits = fake_submits();
+        fake.set_result(EXT_OK);
+        state.flush_edge_retries_after_command();
+        assert_eq!(retry_queue_len(&state), 0);
+        let submits = fake.submits();
         assert_eq!(
             submits.iter().map(|submit| submit.seq).collect::<Vec<_>>(),
             vec![1, 1, 2, 1, 3, 1, 2, 4, 2, 3, 4],
             "retries replay 2 then 3 then 4 after the earlier attempts"
         );
-        reset_state();
     }
 
     #[test]
     fn port_closure_discards_the_retry_queue() {
         let _state = lock_state();
-        reset_state();
-        install_fake_port();
-        set_fake_result(EXT_ERR_BACKPRESSURE);
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_ERR_BACKPRESSURE);
         for seq in 1..=2 {
             assert_eq!(
-                submit_frame(&focused_frame("content", seq)),
+                state.submit_frame(&focused_frame("content", seq)),
                 SubmitStatus::Backpressured
             );
         }
-        set_fake_result(EXT_ERR_PORT_CLOSED);
+        fake.set_result(EXT_ERR_PORT_CLOSED);
         assert_eq!(
-            submit_frame(&focused_frame("content", 3)),
+            state.submit_frame(&focused_frame("content", 3)),
             SubmitStatus::PortClosed
         );
-        assert_eq!(retry_queue_len(), 0, "closure clears the whole queue");
+        assert_eq!(retry_queue_len(&state), 0, "closure clears the whole queue");
         assert_eq!(diagnostics::retry_closed_drops(), 2);
-        reset_state();
     }
 
     #[test]
     fn retry_queue_is_bounded_and_counts_overflow() {
         let _state = lock_state();
-        reset_state();
-        install_fake_port();
-        set_fake_result(EXT_ERR_BACKPRESSURE);
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_ERR_BACKPRESSURE);
         for seq in 1..=(EDGE_RETRY_MAX_RECORDS as u64 + 2) {
             assert_eq!(
-                submit_frame(&focused_frame("content", seq)),
+                state.submit_frame(&focused_frame("content", seq)),
                 SubmitStatus::Backpressured
             );
         }
-        assert_eq!(retry_queue_len(), EDGE_RETRY_MAX_RECORDS);
+        assert_eq!(retry_queue_len(&state), EDGE_RETRY_MAX_RECORDS);
         assert_eq!(diagnostics::retry_overflow_drops(), 2);
-        reset_state();
+    }
+
+    // -- concurrent linearization (B2) ------------------------------------
+
+    #[test]
+    fn concurrent_producers_cannot_overtake_the_retry_batch() {
+        let _state = lock_state();
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = Arc::new(attached_state(&fake));
+
+        // Seed the retry queue with a backpressured batch, in order.
+        fake.set_result(EXT_ERR_BACKPRESSURE);
+        const SEEDED: u64 = 8;
+        for seq in 1..=SEEDED {
+            assert_eq!(
+                state.submit_frame(&focused_frame("content", seq)),
+                SubmitStatus::Backpressured
+            );
+        }
+        assert_eq!(retry_queue_len(&state), SEEDED as usize);
+
+        // Recovery: everything the hub sees from now on succeeds. Threads
+        // interleave fresh producer submissions and post-command flushes; a
+        // fresh record must never reach the hub before the seeded retry
+        // batch, and the batch must keep its relative order (per-source FIFO
+        // linearization, B2).
+        fake.set_result(EXT_OK);
+        const THREADS: u64 = 8;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS as usize));
+        let mut handles = Vec::new();
+        for worker in 0..THREADS {
+            let state = Arc::clone(&state);
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                for round in 0..4u64 {
+                    if worker % 2 == 0 {
+                        // Fresh producer record (Edge; flush-first routing).
+                        let frame =
+                            focused_frame("content", 100 + worker * 10 + round);
+                        let _ = state.submit_frame(&frame);
+                    } else {
+                        // Post-command flush of the same instance.
+                        state.flush_edge_retries_after_command();
+                    }
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("worker thread");
+        }
+        assert_eq!(retry_queue_len(&state), 0, "recovery drained the queue");
+
+        let submits = fake.submits();
+        // Seeding under constant backpressure re-attempts earlier queued
+        // records on every seed submit (the documented single-producer
+        // trace); what the linearization law demands is that the recovery
+        // drain replays the whole batch exactly once, in order, as the last
+        // seeded subsequence the hub observed.
+        let seeded_filter: Vec<u64> = submits
+            .iter()
+            .filter(|submit| submit.seq <= SEEDED)
+            .map(|submit| submit.seq)
+            .collect();
+        assert!(seeded_filter.len() >= SEEDED as usize);
+        let drain: Vec<u64> = (1..=SEEDED).collect();
+        assert_eq!(
+            &seeded_filter[seeded_filter.len() - SEEDED as usize..],
+            drain.as_slice(),
+            "the recovery drain replays the retry batch in seeded order"
+        );
+        // Every fresh record observed strictly after the whole seeded batch.
+        let last_seeded_position = submits
+            .iter()
+            .rposition(|submit| submit.seq <= SEEDED)
+            .expect("seeded records were submitted");
+        let fresh_positions: Vec<usize> = submits
+            .iter()
+            .enumerate()
+            .filter(|(_, submit)| submit.seq > SEEDED)
+            .map(|(position, _)| position)
+            .collect();
+        assert!(!fresh_positions.is_empty(), "fresh records were submitted");
+        assert!(
+            fresh_positions.iter().all(|position| *position > last_seeded_position),
+            "a concurrent fresh record overtook the retry batch: {:?}",
+            submits.iter().map(|submit| submit.seq).collect::<Vec<_>>()
+        );
+        // Every fresh record reached the hub exactly once (direct accept).
+        assert_eq!(fresh_positions.len(), 16);
     }
 }

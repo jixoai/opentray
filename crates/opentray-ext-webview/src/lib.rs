@@ -17,6 +17,7 @@ mod windows;
 
 use std::ffi::{c_char, c_void, CString};
 use std::fmt;
+use std::sync::Arc;
 
 use opentray_spec::webview::{
     OrchestrationErrorCode, WebviewErrorEnvelope, WebviewEventFrame, WebviewOrchestrationCommand,
@@ -338,6 +339,12 @@ impl WebviewShowSettings {
 struct WebviewExtension {
     app_id: String,
     runtime: WebviewRuntime,
+    /// Per-instance EventPort state (D19 final review B1): the attach symbol
+    /// fills exactly this instance's state, and the runtime hands clones to
+    /// every producer handle (bridge, session event core) it creates. A
+    /// second mount/reload owns its own state and can never retarget this
+    /// instance's producers.
+    port_state: Arc<event_port::InstancePortState>,
 }
 
 /// One executed command: its response payload plus per-view push events
@@ -393,6 +400,20 @@ impl UnsupportedWebviewRuntime {
     fn session_closed(&mut self, _session_id: &str) {}
 
     fn set_app_id(&mut self, _app_id: &str) {}
+
+    fn set_port_state(&mut self, _state: Arc<event_port::InstancePortState>) {}
+}
+
+/// Attach-symbol backing (B1): stores the transferred port value in exactly
+/// the instance the host addressed. Called from `abi_support` (which cannot
+/// name the private extension struct). Safety mirrors `opentray_ext_command`:
+/// the host guarantees the instance pointer is alive until `deinit`.
+unsafe fn attach_event_port_to_instance(
+    instance: *mut c_void,
+    port: opentray_spec::ExtEventPortV1,
+) -> Result<(), String> {
+    let extension = unsafe { &*instance.cast::<WebviewExtension>() };
+    extension.port_state.attach(port)
 }
 
 /// Owner tuple of an owner-carrying command (`None` for legacy commands):
@@ -849,9 +870,15 @@ pub unsafe extern "C" fn opentray_ext_init(
     let mut runtime = WebviewRuntime::default();
     // D18 owner tuples need the owning app identity inside the runtime.
     runtime.set_app_id(&app_id);
+    // D19 per-instance EventPort state: one per loaded instance; every
+    // producer handle the runtime creates captures a clone, so a later
+    // attach for another instance cannot retarget them (B1).
+    let port_state = Arc::new(event_port::InstancePortState::new());
+    runtime.set_port_state(Arc::clone(&port_state));
     let instance = Box::new(WebviewExtension {
         app_id,
         runtime,
+        port_state,
     });
     unsafe {
         *out_instance = Box::into_raw(instance).cast::<c_void>();
@@ -975,7 +1002,8 @@ pub unsafe extern "C" fn opentray_ext_command(
     // D19 batch B: give backpressured Edge records from native callbacks
     // another bounded, non-blocking chance after every handled command. The
     // hub still delivers them only after this response's frames are written.
-    event_port::flush_edge_retries_after_command();
+    // Per-instance (B1): this command's instance owns the flushed queue.
+    extension.port_state.flush_edge_retries_after_command();
     write_owned_events(out_events_json, &events)
 }
 
@@ -2789,6 +2817,7 @@ mod tests {
         let instance = Box::into_raw(Box::new(WebviewExtension {
             app_id: "surface-1".to_string(),
             runtime: WebviewRuntime::default(),
+            port_state: std::sync::Arc::new(event_port::InstancePortState::new()),
         }))
         .cast::<c_void>();
         let mut output = ExtOwnedBytes {
@@ -2822,6 +2851,7 @@ mod tests {
         let instance = Box::into_raw(Box::new(WebviewExtension {
             app_id: "surface-1".to_string(),
             runtime: WebviewRuntime::default(),
+            port_state: std::sync::Arc::new(event_port::InstancePortState::new()),
         }))
         .cast::<c_void>();
         let envelope = CString::new(
