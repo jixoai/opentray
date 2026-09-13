@@ -1,5 +1,14 @@
 # create-opentray
 
+## 0.27.1
+
+### Patch Changes
+
+- 2c90aa8: `create --open` launches the materialized application after a successful apply — the wizard's Open App action as a CLI flag. The default stays create-only; `--open` with `--dry-run` stays dry.
+  - @opentray/spec@0.27.1
+  - @opentray/packaging@0.27.1
+  - @opentray/vite-plugin@0.27.1
+
 ## 0.27.0
 
 ### Minor Changes
