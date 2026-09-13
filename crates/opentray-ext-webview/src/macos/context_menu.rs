@@ -80,6 +80,7 @@ fn menuless_class(superclass: &AnyClass) -> &'static AnyClass {
 /// `webview` must be a live, main-thread `WryWebView` instance whose class
 /// was NOT already swapped; the subclass adds no ivars, so the instance size
 /// stays equal (the `set_class` debug contract).
+#[allow(dead_code)]
 pub(super) unsafe fn suppress_native_context_menu(webview: &Retained<WryWebView>) {
     // `class` is the universal NSObject message; wry's view class is only
     // known at runtime (WryWebView), so query it instead of naming it.
@@ -96,6 +97,7 @@ pub(super) unsafe fn suppress_native_context_menu(webview: &Retained<WryWebView>
     );
 }
 
+#[allow(dead_code)]
 #[cfg(test)]
 mod tests {
     use super::*;

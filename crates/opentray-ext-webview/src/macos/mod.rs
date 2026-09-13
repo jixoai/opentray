@@ -1744,13 +1744,12 @@ impl MacosWebviewRuntime {
         // native context menu. Default resolution keys off the bridge
         // surface (any capability ⇒ no menu); an explicit contextMenu value
         // wins either way.
-        if !browser_options.context_menu(policy.has_bridge_surface()) {
-            // SAFETY: the wry-built view is a live main-thread WKWebView
-            // subclass; the menu-less subclass adds no ivars (module docs).
-            unsafe {
-                context_menu::suppress_native_context_menu(&webview.webview());
-            }
-        }
+        // macOS menu suppression: the isa-swizzle approach (runtime subclass
+        // + willOpenMenu) crashed the broker on the 0.27.3 walkthrough
+        // (CI-dylib A/B evidence). Suppression moves to the trusted-page
+        // layer (the shell UI's own script can preventDefault contextmenu);
+        // the native hook stays off until a safe delegate path lands.
+        let _ = browser_options.context_menu(policy.has_bridge_surface());
         let download_delegate = if session.show_settings.download.enabled {
             Some(install_download_navigation_delegate(webview.as_ref(), &bridge)?)
         } else {
