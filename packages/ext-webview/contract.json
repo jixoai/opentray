@@ -1,4 +1,38 @@
 {
   "extensionName": "webview",
-  "contractFingerprint": "opentray-ext-webview-contract-1"
+  "contractFingerprint": "opentray-ext-webview-contract-3",
+  "eventPort": {
+    "abiVersion": 1,
+    "attachSymbol": "opentray_ext_attach_event_port_v1",
+    "eventClasses": {
+      "urlChange": "latest",
+      "titleChange": "latest",
+      "focused": "edge",
+      "geometryChange": "edge",
+      "loadState.started": "edge",
+      "loadState.finished": "edge",
+      "loadState.failed": "edge",
+      "loadState.progress": "best-effort",
+      "windowEvent.focus": "edge",
+      "windowEvent.blur": "edge",
+      "windowEvent.visibleChange": "edge",
+      "windowEvent.closed": "edge",
+      "windowEvent.stylechange": "edge",
+      "windowEvent.windowinteractionchange": "edge",
+      "windowEvent.downloadstarted": "edge",
+      "windowEvent.downloadcompleted": "edge",
+      "windowEvent.downloadfailed": "edge",
+      "windowEvent.downloadcanceled": "edge",
+      "windowEvent.downloadprogress": "best-effort"
+    },
+    "latestCoalesceKey": "<webviewId>/<field>",
+    "stateResync": "urlChange/titleChange sequence gaps are repaired by the get-webview-url/get-webview-title (value, seq) query pair",
+    "edgeRetry": "extension-owned bounded retry (FIFO, 64 records) flushed on the next producer callback or after the next handled command; never blocks a native callback",
+    "legacyFallback": "without an attached port, the five unified families ride the command-response outbox flush (H0 host compatibility); the window-event family has no fallback — its 16 ms drain queue was deleted with the poll (contract-3), so a port-less host drops those records with a diagnostic"
+  },
+  "windowEvents": {
+    "subscription": "subscribeWindowEvents/unsubscribeWindowEvents carry frozen family names; producers submit through the EventPort only for subscribed names (no facade listener, no native observation record)",
+    "wireShape": "{ \"type\": <event>, ...payload } — byte-compatible with the retired drainWindowEvents payloads, so host listeners match on the same event names",
+    "retired": "the drainWindowEvents command, its native queue, and the facade 16 ms interval were deleted in one compatibility decision (contract-3); permission draining is a separate request/reply mechanism and is unchanged"
+  }
 }

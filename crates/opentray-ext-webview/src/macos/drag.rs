@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use crate::WebviewRuntimeError;
 
-use super::{bridge::emit_window_event, NavigatorWindowBridge};
+use super::{bridge::emit_window_event, bridge::submit_window_event_push, NavigatorWindowBridge};
 
 #[derive(Clone)]
 pub(super) struct AppRegionDragState {
@@ -102,10 +102,13 @@ pub(super) fn queue_window_interaction_event(
     let Some(bridge) = bridge.upgrade() else {
         return;
     };
-    bridge
-        .borrow_mut()
-        .window_events
-        .push_back(json!({ "type": "windowinteractionchange", "active": active }));
+    // D19 batch C: subscription-gated EventPort push replaces the retired
+    // drain queue entry; the page-bridge emission stays.
+    submit_window_event_push(
+        &bridge,
+        "windowinteractionchange",
+        &json!({ "active": active }),
+    );
     if let Err(error) = emit_window_event(
         &bridge,
         "windowinteractionchange",

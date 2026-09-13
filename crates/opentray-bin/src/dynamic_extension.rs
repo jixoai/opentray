@@ -14,12 +14,15 @@ use opentray_core::{
 #[cfg(test)]
 use opentray_spec::REQUIRED_EXTENSION_SYMBOLS;
 use opentray_spec::{
-    EmbeddedExtensionManifest, ExpectedExtensionIdentity, ExtBytes, ExtContext, ExtHostContext,
-    ExtOwnedBytes, ExtResultCode, ExtensionEnvelope, ExtensionErrorDetail, ExtensionScope, Rect,
-    EXT_ABI_VERSION, EXT_API_VERSION, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED,
-    EXT_OK, EXT_SYMBOL_ABI_VERSION, EXT_SYMBOL_COMMAND, EXT_SYMBOL_DEINIT, EXT_SYMBOL_FREE_STRING,
+    EmbeddedExtensionManifest, ExpectedExtensionIdentity, ExtAttachEventPortV1Fn, ExtBytes,
+    ExtContext, ExtEventPortV1, ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
+    ExtensionErrorDetail, ExtensionScope, Rect, EXT_ABI_VERSION, EXT_API_VERSION, EXT_ERR_INTERNAL,
+    EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED, EXT_EVENT_PORT_ABI_V1, EXT_OK, EXT_SYMBOL_ABI_VERSION,
+    EXT_SYMBOL_ATTACH_EVENT_PORT_V1, EXT_SYMBOL_COMMAND, EXT_SYMBOL_DEINIT, EXT_SYMBOL_FREE_STRING,
     EXT_SYMBOL_INIT, EXT_SYMBOL_MANIFEST, EXT_SYMBOL_SESSION_CLOSED, EXT_SYMBOL_TAKE_ERROR,
 };
+
+use crate::event_hub::{EventHub, SourceHandle, SourceLimitReached};
 
 type ExtAbiVersionFn = unsafe extern "C" fn() -> u32;
 type ExtManifestFn = unsafe extern "C" fn(out_manifest_json: *mut ExtOwnedBytes) -> ExtResultCode;
@@ -45,16 +48,41 @@ type ExtTakeErrorFn = unsafe extern "C" fn(out_error_json: *mut ExtOwnedBytes) -
 
 const ABI_INCOMPATIBLE_CATEGORY: &str = "abi_incompatible";
 const ARTIFACT_IDENTITY_MISMATCH_CATEGORY: &str = "artifact_identity_mismatch";
+const EVENT_PORT_ABI_INCOMPATIBLE_CATEGORY: &str = "event_port_abi_incompatible";
+const EVENT_PORT_SOURCE_LIMIT_CATEGORY: &str = "event_port_source_limit";
+const EVENT_PORT_UNSUPPORTED_CATEGORY: &str = "event_port_unsupported";
+
+/// Delivery capability observed for one load. Recorded on the hub as
+/// capability diagnostics so direct EventPort delivery is distinguishable
+/// from legacy response flushing without inferring it from package versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PortCapability {
+    DirectEventPort,
+    LegacyFlush,
+}
+
+impl PortCapability {
+    fn diagnostic_label(self) -> &'static str {
+        match self {
+            PortCapability::DirectEventPort => "direct-event-port",
+            PortCapability::LegacyFlush => "legacy-flush",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct DynamicExtensionLoader {
     discovery: ExtensionDiscovery,
+    hub: EventHub,
 }
 
 impl DynamicExtensionLoader {
-    pub fn from_env() -> Result<Self, ExtensionError> {
+    /// The loader receives the broker EventHub from runtime composition; it
+    /// never exposes the hub to core.
+    pub fn from_env(hub: EventHub) -> Result<Self, ExtensionError> {
         Ok(Self {
             discovery: ExtensionDiscovery::from_env()?,
+            hub,
         })
     }
 
@@ -66,7 +94,8 @@ impl DynamicExtensionLoader {
             request,
             self.discovery.candidates(request),
             |library_path| {
-                let instance = unsafe { DynamicExtensionInstance::load(request, library_path)? };
+                let instance =
+                    unsafe { DynamicExtensionInstance::load(&self.hub, request, library_path)? };
                 Ok(Box::new(instance) as Box<dyn ExtensionInstance>)
             },
         )
@@ -260,6 +289,9 @@ struct DynamicExtensionInstance {
     deinit: ExtDeinitFn,
     free_string: ExtFreeStringFn,
     take_error: ExtTakeErrorFn,
+    source: Option<SourceHandle>,
+    #[allow(dead_code)] // capability diagnostic is logged at load; batch B probes it
+    event_port: PortCapability,
     _library: Library,
 }
 
@@ -267,6 +299,7 @@ unsafe impl Send for DynamicExtensionInstance {}
 
 impl DynamicExtensionInstance {
     unsafe fn load(
+        hub: &EventHub,
         request: &ExtensionLoadRequest,
         library_path: &Path,
     ) -> Result<Self, ExtensionError> {
@@ -329,11 +362,35 @@ impl DynamicExtensionInstance {
             api_version: EXT_API_VERSION,
             app_id: borrowed_bytes(&app_id),
         };
-        let mut instance = ptr::null_mut();
-        let result = unsafe { init(&context, &mut instance) };
-        if result != EXT_OK || instance.is_null() {
-            return Err(result_error(&request.name, result, take_error, free_string));
-        }
+
+        // The EventPort attach symbol is optional and singular: absence
+        // means legacy response flushing, presence is validated and invoked
+        // exactly once with a PENDING, host-owned port.
+        let attach = unsafe {
+            library
+                .get::<ExtAttachEventPortV1Fn>(
+                    format!("{EXT_SYMBOL_ATTACH_EVENT_PORT_V1}\0").as_bytes(),
+                )
+                .ok()
+                .map(|symbol| *symbol)
+        };
+        let (instance, source, event_port) = unsafe {
+            init_and_attach(
+                hub,
+                request,
+                &context,
+                init,
+                deinit,
+                attach,
+                take_error,
+                free_string,
+            )
+        }?;
+        eprintln!(
+            "opentray extension {}: event delivery mode: {}",
+            request.instance_name(),
+            event_port.diagnostic_label()
+        );
 
         Ok(Self {
             name: request.instance_name().to_string(),
@@ -343,6 +400,8 @@ impl DynamicExtensionInstance {
             deinit,
             free_string,
             take_error,
+            source: Some(source),
+            event_port,
             _library: library,
         })
     }
@@ -462,11 +521,178 @@ impl ExtensionInstance for DynamicExtensionInstance {
 
 impl Drop for DynamicExtensionInstance {
     fn drop(&mut self) {
+        // Lifecycle law: revoke the EventPort source BEFORE deinit and
+        // library drop, so a stale producer thread observes PORT_CLOSED
+        // against process-lifetime state and never races native teardown.
+        if let Some(source) = &self.source {
+            source.revoke();
+        }
         if !self.instance.is_null() {
             unsafe { (self.deinit)(self.instance) };
             self.instance = ptr::null_mut();
         }
     }
+}
+
+/// Reserves the PENDING EventPort source, initializes the extension
+/// instance, and attaches the port.
+///
+/// Failure-cleanup law (D19 final review): the source slot is reserved
+/// BEFORE `init`, so the phase-1 generation limit rejects the load with no
+/// native instance ever created; an `init` failure revokes the reserved
+/// source (init produced no instance, so there is nothing to deinitialize);
+/// and ANY post-init failure (port validation or attach) deterministically
+/// calls the extension's `deinit` and revokes the source before returning.
+/// Without that deinit the initialized C instance would leak, because the
+/// `DynamicExtensionInstance` wrapper — whose `Drop` owns cleanup on the
+/// success path — is never constructed for a failed load.
+unsafe fn init_and_attach(
+    hub: &EventHub,
+    request: &ExtensionLoadRequest,
+    context: &ExtContext,
+    init: ExtInitFn,
+    deinit: ExtDeinitFn,
+    attach: Option<ExtAttachEventPortV1Fn>,
+    take_error: ExtTakeErrorFn,
+    free_string: ExtFreeStringFn,
+) -> Result<(*mut c_void, SourceHandle, PortCapability), ExtensionError> {
+    // Reserve before init: a source-limit rejection means "no instance is
+    // opened" — init never runs.
+    let source = reserve_port_source(hub, request)?;
+
+    let mut instance = ptr::null_mut();
+    let result = unsafe { init(context, &mut instance) };
+    if result != EXT_OK || instance.is_null() {
+        source.revoke();
+        return Err(result_error(&request.name, result, take_error, free_string));
+    }
+
+    match probe_and_attach(hub, request, source, attach, instance, take_error, free_string) {
+        Ok((source, capability)) => Ok((instance, source, capability)),
+        Err(error) => {
+            // probe_and_attach revoked the source on its failure paths; the
+            // initialized instance still needs its deterministic deinit
+            // because no Drop will run for this load. The structured error
+            // is preserved unchanged.
+            unsafe { deinit(instance) };
+            Err(error)
+        }
+    }
+}
+
+/// Maps the phase-1 source-generation limit to the structured rejection the
+/// loader surfaces before any port is constructed or attached.
+fn reserve_port_source(
+    hub: &EventHub,
+    request: &ExtensionLoadRequest,
+) -> Result<SourceHandle, ExtensionError> {
+    hub.reserve_source(request.app_id.clone(), request.instance_name().to_string())
+        .map_err(|SourceLimitReached| ExtensionError::Detailed {
+            category: EVENT_PORT_SOURCE_LIMIT_CATEGORY.to_string(),
+            message: format!(
+                "extension {} cannot reserve an event port source: the broker has retained \
+                 {} source generations and must be restarted before another port can be created",
+                request.instance_name(),
+                crate::event_hub::EVENT_HUB_MAX_SOURCES
+            ),
+        })
+}
+
+/// Validates and transfers the reserved PENDING source's immutable port
+/// exactly once when the optional attach symbol is present. Absent symbol
+/// means legacy flush; a malformed port or failed attach rejects the load
+/// with a structured category — never a silent downgrade. Every failure
+/// path revokes the source it owns. The source limit is enforced earlier,
+/// before `init` (see `init_and_attach`).
+fn probe_and_attach(
+    hub: &EventHub,
+    request: &ExtensionLoadRequest,
+    source: SourceHandle,
+    attach: Option<ExtAttachEventPortV1Fn>,
+    instance: *mut c_void,
+    take_error: ExtTakeErrorFn,
+    free_string: ExtFreeStringFn,
+) -> Result<(SourceHandle, PortCapability), ExtensionError> {
+    let Some(attach) = attach else {
+        hub.note_capability(false);
+        return Ok((source, PortCapability::LegacyFlush));
+    };
+
+    let port = source.port();
+    if let Err(error) = validate_port(&port) {
+        source.revoke();
+        return Err(ExtensionError::Detailed {
+            category: EVENT_PORT_ABI_INCOMPATIBLE_CATEGORY.to_string(),
+            message: format!(
+                "extension {} received a malformed event port: {}",
+                request.instance_name(),
+                match error {
+                    PortValidationError::AbiVersion(actual) => {
+                        format!("abi version {actual}; expected {EXT_EVENT_PORT_ABI_V1}")
+                    }
+                    PortValidationError::StructSize(actual) => {
+                        format!("struct size {actual}; expected {}", port.struct_size)
+                    }
+                    PortValidationError::NullPortData => {
+                        "port_data is null".to_string()
+                    }
+                }
+            ),
+        });
+    }
+
+    let result = unsafe { attach(instance, port) };
+    if result != EXT_OK {
+        source.revoke();
+        let detail = take_extension_error(take_error, free_string);
+        return Err(match detail {
+            Some(detail) => ExtensionError::Detailed {
+                category: detail.category,
+                message: format!(
+                    "extension {} event port attach failed: {}",
+                    request.instance_name(),
+                    detail.message
+                ),
+            },
+            None if result == EXT_ERR_UNSUPPORTED => ExtensionError::Detailed {
+                category: EVENT_PORT_UNSUPPORTED_CATEGORY.to_string(),
+                message: format!(
+                    "extension {} explicitly does not support the event port and declares no \
+                     legacy fallback",
+                    request.instance_name()
+                ),
+            },
+            None => ExtensionError::Rejected(format!(
+                "extension {} event port attach returned code {result}",
+                request.instance_name()
+            )),
+        });
+    }
+
+    hub.note_capability(true);
+    Ok((source, PortCapability::DirectEventPort))
+}
+
+enum PortValidationError {
+    AbiVersion(u32),
+    StructSize(u32),
+    NullPortData,
+}
+
+/// Defensive validation of the port the host is about to transfer: exact
+/// nested EventPort ABI version, matching struct size, and non-null host
+/// state. `try_submit` is non-nullable by its Rust function-pointer type.
+fn validate_port(port: &ExtEventPortV1) -> Result<(), PortValidationError> {
+    if port.abi_version != EXT_EVENT_PORT_ABI_V1 {
+        return Err(PortValidationError::AbiVersion(port.abi_version));
+    }
+    if port.struct_size as usize != std::mem::size_of::<ExtEventPortV1>() {
+        return Err(PortValidationError::StructSize(port.struct_size));
+    }
+    if port.port_data.is_null() {
+        return Err(PortValidationError::NullPortData);
+    }
+    Ok(())
 }
 
 unsafe fn get_symbol<T: Copy>(library: &Library, name: &str) -> Result<T, ExtensionError> {
@@ -759,7 +985,9 @@ fn current_arch() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_hub::event_hub_test_support::NoopWake;
     use opentray_core::RecordingExtension;
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
     fn expected_extension_identity(
         extension_name: &str,
@@ -773,6 +1001,451 @@ mod tests {
                 arch: "arm64".to_string(),
             },
         }
+    }
+
+    // -- EventPort fixture matrix (task 2.3) --------------------------------
+    //
+    // The optional-attach decision table is exercised through
+    // `probe_and_attach` with stub attach/take_error functions, which is the
+    // exact code the loader runs between `init` and LoadExt ACK. Real
+    // cross-dylib fixtures belong to the ext-webview migration and platform
+    // evidence stages.
+
+    fn test_hub() -> EventHub {
+        EventHub::new(Box::new(NoopWake))
+    }
+
+    fn reserved_source(hub: &EventHub) -> SourceHandle {
+        hub.reserve_source("app-1".to_string(), "webview".to_string())
+            .expect("source slot")
+    }
+
+    fn stub_context() -> ExtContext {
+        ExtContext {
+            api_version: EXT_API_VERSION,
+            app_id: ExtBytes {
+                ptr: std::ptr::null(),
+                len: 0,
+            },
+        }
+    }
+
+    fn load_request(name: &str) -> ExtensionLoadRequest {
+        ExtensionLoadRequest {
+            app_id: "app-1".to_string(),
+            name: name.to_string(),
+            path: format!("test://{name}"),
+            expected_identity: expected_extension_identity(name),
+            mount_id: None,
+        }
+    }
+
+    unsafe extern "C" fn stub_take_error(_out: *mut ExtOwnedBytes) -> ExtResultCode {
+        // No structured detail: the loader must synthesize its own category.
+        EXT_ERR_UNSUPPORTED
+    }
+
+    unsafe extern "C" fn stub_free_string(_ptr: *mut std::ffi::c_char, _len: usize) {}
+
+    #[test]
+    fn absent_attach_symbol_loads_legacy_with_a_reserved_source() {
+        let hub = test_hub();
+        let request = load_request("webview");
+
+        let (handle, capability) = probe_and_attach(
+            &hub,
+            &request,
+            reserved_source(&hub),
+            None,
+            ptr::null_mut(),
+            stub_take_error,
+            stub_free_string,
+        )
+        .expect("legacy load");
+
+        assert_eq!(capability, PortCapability::LegacyFlush);
+        assert_eq!(capability.diagnostic_label(), "legacy-flush");
+        // A legacy extension still gets a source slot: its command-time
+        // send_event pushes bind to the same hub ingress. The reservation
+        // stages a PENDING candidate; `current` appears only at the ACK.
+        assert!(
+            hub.current_source("app-1", "webview").is_none(),
+            "a reservation alone must not switch the current mapping"
+        );
+        assert!(hub.note_loaded_and_open("app-1", "webview", "session-1"));
+        assert!(hub.current_source("app-1", "webview").is_some());
+        assert_eq!(hub.metrics().legacy_sources, 1);
+        assert_eq!(hub.metrics().direct_sources, 0);
+        drop(handle);
+    }
+
+    #[test]
+    fn successful_attach_transfers_one_validated_port() {
+        static ATTACH_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static CAPTURED_ABI: AtomicU32 = AtomicU32::new(0);
+        static CAPTURED_SIZE: AtomicU32 = AtomicU32::new(0);
+        static CAPTURED_PTR_NONNULL: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" fn capture_attach(
+            _instance: *mut c_void,
+            port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            ATTACH_CALLS.fetch_add(1, Ordering::SeqCst);
+            CAPTURED_ABI.store(port.abi_version, Ordering::SeqCst);
+            CAPTURED_SIZE.store(port.struct_size, Ordering::SeqCst);
+            CAPTURED_PTR_NONNULL.store(!port.port_data.is_null(), Ordering::SeqCst);
+            EXT_OK
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let (handle, capability) = probe_and_attach(
+            &hub,
+            &request,
+            reserved_source(&hub),
+            Some(capture_attach),
+            0x1 as *mut c_void,
+            stub_take_error,
+            stub_free_string,
+        )
+        .expect("direct load");
+
+        assert_eq!(capability, PortCapability::DirectEventPort);
+        assert_eq!(ATTACH_CALLS.load(Ordering::SeqCst), 1, "attach runs once");
+        assert_eq!(CAPTURED_ABI.load(Ordering::SeqCst), EXT_EVENT_PORT_ABI_V1);
+        assert_eq!(
+            CAPTURED_SIZE.load(Ordering::SeqCst) as usize,
+            std::mem::size_of::<ExtEventPortV1>()
+        );
+        assert!(CAPTURED_PTR_NONNULL.load(Ordering::SeqCst));
+        assert_eq!(hub.metrics().direct_sources, 1);
+        // The transferred source is PENDING until the LoadExt ACK opens it.
+        assert!(
+            hub.note_loaded_and_open("app-1", "webview", "session-1"),
+            "ACK opens the attached source"
+        );
+        drop(handle);
+    }
+
+    #[test]
+    fn failed_attach_revokes_the_source_and_rejects_the_load() {
+        static ATTACH_CALLS: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn failing_attach(
+            _instance: *mut c_void,
+            _port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            ATTACH_CALLS.fetch_add(1, Ordering::SeqCst);
+            EXT_ERR_REJECTED
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let error = probe_and_attach(
+            &hub,
+            &request,
+            reserved_source(&hub),
+            Some(failing_attach),
+            ptr::null_mut(),
+            stub_take_error,
+            stub_free_string,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("attach"), "{error}");
+        assert_eq!(ATTACH_CALLS.load(Ordering::SeqCst), 1);
+        // The source is REVOKED, never left openable after a failed load,
+        // and the current mapping never switched to it: a still-alive old
+        // generation would keep delivering (B4 law).
+        assert!(
+            hub.current_source("app-1", "webview").is_none(),
+            "a failed load must not pollute the current mapping"
+        );
+        assert!(!hub.note_loaded_and_open("app-1", "webview", "session-1"));
+    }
+
+    #[test]
+    fn explicit_unsupported_attach_rejects_without_a_silent_fallback() {
+        unsafe extern "C" fn unsupported_attach(
+            _instance: *mut c_void,
+            _port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            EXT_ERR_UNSUPPORTED
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let error = probe_and_attach(
+            &hub,
+            &request,
+            reserved_source(&hub),
+            Some(unsupported_attach),
+            ptr::null_mut(),
+            stub_take_error,
+            stub_free_string,
+        )
+        .unwrap_err();
+
+        // Phase 1 manifests declare no legacy fallback, so an explicit
+        // unsupported attach rejects the load instead of downgrading.
+        let ExtensionError::Detailed { category, .. } = &error else {
+            panic!("expected structured rejection, got: {error}");
+        };
+        assert_eq!(category, EVENT_PORT_UNSUPPORTED_CATEGORY);
+    }
+
+    #[test]
+    fn malformed_ports_reject_as_event_port_abi_incompatible() {
+        let hub = test_hub();
+        let handle = hub
+            .reserve_source("app-1".to_string(), "webview".to_string())
+            .expect("source slot");
+        let valid = handle.port();
+        assert!(validate_port(&valid).is_ok());
+
+        let mut bad_abi = valid;
+        bad_abi.abi_version = EXT_EVENT_PORT_ABI_V1 + 1;
+        assert!(matches!(
+            validate_port(&bad_abi),
+            Err(PortValidationError::AbiVersion(actual)) if actual == EXT_EVENT_PORT_ABI_V1 + 1
+        ));
+
+        let mut bad_size = valid;
+        bad_size.struct_size = 0;
+        assert!(matches!(
+            validate_port(&bad_size),
+            Err(PortValidationError::StructSize(0))
+        ));
+
+        let mut null_data = valid;
+        null_data.port_data = ptr::null_mut();
+        assert!(matches!(
+            validate_port(&null_data),
+            Err(PortValidationError::NullPortData)
+        ));
+        drop(handle);
+    }
+
+    #[test]
+    fn source_limit_rejects_before_init_opens_any_instance() {
+        static INIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static DEINIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn counting_init(
+            _context: *const ExtContext,
+            out_instance: *mut *mut c_void,
+        ) -> ExtResultCode {
+            INIT_CALLS.fetch_add(1, Ordering::SeqCst);
+            *out_instance = 0x1 as *mut c_void;
+            EXT_OK
+        }
+        unsafe extern "C" fn counting_deinit(_instance: *mut c_void) {
+            DEINIT_CALLS.fetch_add(1, Ordering::SeqCst);
+        }
+
+        let hub = test_hub();
+        for index in 0..crate::event_hub::EVENT_HUB_MAX_SOURCES {
+            hub.reserve_source("app-1".to_string(), format!("gen{index}"))
+                .expect("source slot");
+        }
+
+        let request = load_request("webview");
+        let context = stub_context();
+        let error = unsafe {
+            init_and_attach(
+                &hub,
+                &request,
+                &context,
+                counting_init,
+                counting_deinit,
+                None,
+                stub_take_error,
+                stub_free_string,
+            )
+        }
+        .unwrap_err();
+
+        let ExtensionError::Detailed { category, message } = &error else {
+            panic!("expected structured rejection, got: {error}");
+        };
+        assert_eq!(category, EVENT_PORT_SOURCE_LIMIT_CATEGORY);
+        assert!(message.contains("must be restarted"));
+        assert_eq!(
+            INIT_CALLS.load(Ordering::SeqCst),
+            0,
+            "no instance is opened after the limit"
+        );
+        assert_eq!(DEINIT_CALLS.load(Ordering::SeqCst), 0);
+        assert!(hub.current_source("app-1", "webview").is_none());
+    }
+
+    /// D19 final review leak law: after a successful `init`, any attach
+    /// failure must deterministically call the extension's `deinit` exactly
+    /// once — the `DynamicExtensionInstance` wrapper (whose `Drop` owns that
+    /// call on the success path) is never constructed for a failed load.
+    #[test]
+    fn attach_failure_after_init_deinits_the_instance_exactly_once() {
+        const INSTANCE_SENTINEL: usize = 0xBEEF;
+        static INIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static ATTACH_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static DEINIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static DEINIT_SAW_INSTANCE: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" fn counting_init(
+            _context: *const ExtContext,
+            out_instance: *mut *mut c_void,
+        ) -> ExtResultCode {
+            INIT_CALLS.fetch_add(1, Ordering::SeqCst);
+            *out_instance = INSTANCE_SENTINEL as *mut c_void;
+            EXT_OK
+        }
+        unsafe extern "C" fn failing_attach(
+            _instance: *mut c_void,
+            _port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            ATTACH_CALLS.fetch_add(1, Ordering::SeqCst);
+            EXT_ERR_REJECTED
+        }
+        unsafe extern "C" fn counting_deinit(instance: *mut c_void) {
+            DEINIT_CALLS.fetch_add(1, Ordering::SeqCst);
+            DEINIT_SAW_INSTANCE.store(instance as usize == INSTANCE_SENTINEL, Ordering::SeqCst);
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let context = stub_context();
+        let error = unsafe {
+            init_and_attach(
+                &hub,
+                &request,
+                &context,
+                counting_init,
+                counting_deinit,
+                Some(failing_attach),
+                stub_take_error,
+                stub_free_string,
+            )
+        }
+        .unwrap_err();
+
+        // The structured attach failure is preserved through the deinit path.
+        assert!(error.to_string().contains("attach"), "{error}");
+        assert_eq!(INIT_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(ATTACH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            DEINIT_CALLS.load(Ordering::SeqCst),
+            1,
+            "exactly one deterministic deinit — no native instance leaks"
+        );
+        assert!(
+            DEINIT_SAW_INSTANCE.load(Ordering::SeqCst),
+            "deinit received the initialized instance"
+        );
+        // The reserved source was revoked: not openable and not current.
+        assert!(!hub.note_loaded_and_open("app-1", "webview", "session-1"));
+        assert!(hub.current_source("app-1", "webview").is_none());
+    }
+
+    /// An `init` failure creates no instance: there is nothing to deinit,
+    /// but the reserved source must be revoked so it can never be opened.
+    #[test]
+    fn init_failure_revokes_the_reserved_source_without_deinit() {
+        static INIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static DEINIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn failing_init(
+            _context: *const ExtContext,
+            _out_instance: *mut *mut c_void,
+        ) -> ExtResultCode {
+            INIT_CALLS.fetch_add(1, Ordering::SeqCst);
+            EXT_ERR_INTERNAL
+        }
+        unsafe extern "C" fn counting_deinit(_instance: *mut c_void) {
+            DEINIT_CALLS.fetch_add(1, Ordering::SeqCst);
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let context = stub_context();
+        let error = unsafe {
+            init_and_attach(
+                &hub,
+                &request,
+                &context,
+                failing_init,
+                counting_deinit,
+                None,
+                stub_take_error,
+                stub_free_string,
+            )
+        }
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("internal error"),
+            "init failure surfaces through the structured result: {error}"
+        );
+        assert_eq!(INIT_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            DEINIT_CALLS.load(Ordering::SeqCst),
+            0,
+            "init produced no instance; deinit must not run"
+        );
+        // The reserved source was revoked: the pending candidate is not
+        // openable and nothing is current for the failed load.
+        assert!(!hub.note_loaded_and_open("app-1", "webview", "session-1"));
+        assert!(hub.current_source("app-1", "webview").is_none());
+    }
+
+    /// On the success path the helper must NOT deinit: the constructed
+    /// `DynamicExtensionInstance`'s `Drop` owns revoke-before-deinit for the
+    /// rest of the instance lifetime.
+    #[test]
+    fn successful_init_and_attach_leaves_deinit_to_the_instance_drop() {
+        static INIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static DEINIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn counting_init(
+            _context: *const ExtContext,
+            out_instance: *mut *mut c_void,
+        ) -> ExtResultCode {
+            INIT_CALLS.fetch_add(1, Ordering::SeqCst);
+            *out_instance = 0x1 as *mut c_void;
+            EXT_OK
+        }
+        unsafe extern "C" fn counting_deinit(_instance: *mut c_void) {
+            DEINIT_CALLS.fetch_add(1, Ordering::SeqCst);
+        }
+        unsafe extern "C" fn ok_attach(
+            _instance: *mut c_void,
+            _port: ExtEventPortV1,
+        ) -> ExtResultCode {
+            EXT_OK
+        }
+
+        let hub = test_hub();
+        let request = load_request("webview");
+        let context = stub_context();
+        let (_instance, source, capability) = unsafe {
+            init_and_attach(
+                &hub,
+                &request,
+                &context,
+                counting_init,
+                counting_deinit,
+                Some(ok_attach),
+                stub_take_error,
+                stub_free_string,
+            )
+        }
+        .expect("successful load");
+
+        assert_eq!(capability, PortCapability::DirectEventPort);
+        assert_eq!(INIT_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            DEINIT_CALLS.load(Ordering::SeqCst),
+            0,
+            "the wrapper's Drop owns deinit on the success path"
+        );
+        // Dropping the source handle only revokes the EventPort source.
+        drop(source);
+        assert_eq!(DEINIT_CALLS.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -816,6 +1489,16 @@ mod tests {
 
     #[test]
     fn exact_request_never_falls_back_to_diagnostic_candidates() {
+        // The exact-request contract is about absolute paths, and
+        // `Path::is_absolute` is platform truth: a POSIX `/...` literal is
+        // rooted but not absolute on Windows (no drive prefix), so the
+        // fixture builds a path that is absolute on the running host
+        // (Windows real-machine batch C evidence).
+        let exact = if cfg!(windows) {
+            PathBuf::from(r"C:\facade\current\opentray_ext_webview.dll")
+        } else {
+            PathBuf::from("/facade/current/libopentray_ext_webview.dylib")
+        };
         let discovery = ExtensionDiscovery::for_test(
             Some(PathBuf::from("/home/me")),
             vec![PathBuf::from("/diagnostic/libopentray_ext_webview.dylib")],
@@ -823,17 +1506,12 @@ mod tests {
         let request = ExtensionLoadRequest {
             app_id: "app-1".to_string(),
             name: "webview".to_string(),
-            path: "/facade/current/libopentray_ext_webview.dylib".to_string(),
+            path: exact.to_string_lossy().into_owned(),
             expected_identity: expected_extension_identity("webview"),
             mount_id: None,
         };
 
-        assert_eq!(
-            discovery.candidates(&request),
-            vec![PathBuf::from(
-                "/facade/current/libopentray_ext_webview.dylib"
-            )]
-        );
+        assert_eq!(discovery.candidates(&request), vec![exact]);
     }
 
     #[test]
@@ -856,9 +1534,15 @@ mod tests {
             .iter()
             .any(|path| path.starts_with("/extensions")));
         assert!(candidates.iter().any(|path| path.starts_with("/repo/exts")));
-        assert!(candidates
-            .iter()
-            .any(|path| path.starts_with("/home/me/.opentray/extensions/webview")));
+        // Separator-agnostic home-candidate assertion: Path::join emits `\` on
+        // Windows, so compare components instead of the literal POSIX prefix
+        // (real-machine batch B evidence).
+        assert!(candidates.iter().any(|path| path
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .windows(3)
+            .any(|window| window == [".opentray", "extensions", "webview"])));
         assert!(candidates
             .iter()
             .all(|path| !path.to_string_lossy().contains("node_modules")));

@@ -7,6 +7,7 @@
 mod abi_support;
 mod bootstrap;
 mod channels;
+mod event_port;
 mod layout;
 mod orchestration;
 #[cfg(target_os = "macos")]
@@ -16,6 +17,7 @@ mod windows;
 
 use std::ffi::{c_char, c_void, CString};
 use std::fmt;
+use std::sync::Arc;
 
 use opentray_spec::webview::{
     OrchestrationErrorCode, WebviewErrorEnvelope, WebviewEventFrame, WebviewOrchestrationCommand,
@@ -337,6 +339,12 @@ impl WebviewShowSettings {
 struct WebviewExtension {
     app_id: String,
     runtime: WebviewRuntime,
+    /// Per-instance EventPort state (D19 final review B1): the attach symbol
+    /// fills exactly this instance's state, and the runtime hands clones to
+    /// every producer handle (bridge, session event core) it creates. A
+    /// second mount/reload owns its own state and can never retarget this
+    /// instance's producers.
+    port_state: Arc<event_port::InstancePortState>,
 }
 
 /// One executed command: its response payload plus per-view push events
@@ -392,6 +400,20 @@ impl UnsupportedWebviewRuntime {
     fn session_closed(&mut self, _session_id: &str) {}
 
     fn set_app_id(&mut self, _app_id: &str) {}
+
+    fn set_port_state(&mut self, _state: Arc<event_port::InstancePortState>) {}
+}
+
+/// Attach-symbol backing (B1): stores the transferred port value in exactly
+/// the instance the host addressed. Called from `abi_support` (which cannot
+/// name the private extension struct). Safety mirrors `opentray_ext_command`:
+/// the host guarantees the instance pointer is alive until `deinit`.
+unsafe fn attach_event_port_to_instance(
+    instance: *mut c_void,
+    port: opentray_spec::ExtEventPortV1,
+) -> Result<(), String> {
+    let extension = unsafe { &*instance.cast::<WebviewExtension>() };
+    extension.port_state.attach(port)
 }
 
 /// Owner tuple of an owner-carrying command (`None` for legacy commands):
@@ -449,6 +471,27 @@ fn session_scope_mismatch(
     }
     None
 }
+
+/// Frozen window-event push family (D19 batch C). Every member that the
+/// retired 16 ms drain queue could deliver, expressed as the wire `type` tags
+/// the EventPort records still carry. The facade mirrors this list
+/// (`packages/ext-webview/src/index.ts`); both sides change together under
+/// one contract fingerprint. `stylechange` has no facade producer on either
+/// platform today (it is a page-bridge-only event) but stays in the family:
+/// the subscription protocol is the frozen surface any future producer uses.
+pub(crate) const WINDOW_EVENT_FAMILY: &[&str] = &[
+    "focus",
+    "blur",
+    "visibleChange",
+    "closed",
+    "stylechange",
+    "windowinteractionchange",
+    "downloadstarted",
+    "downloadprogress",
+    "downloadcompleted",
+    "downloadfailed",
+    "downloadcanceled",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 enum WebviewCommand {
@@ -515,7 +558,17 @@ enum WebviewCommand {
         id: u32,
         result: Value,
     },
-    DrainWindowEvents,
+    /// D19 batch C: facade interest in the legacy window-event family. The
+    /// 16 ms `drainWindowEvents` poll was deleted with its native queue; the
+    /// push producers submit through the EventPort only for subscribed event
+    /// names (producer-gating law, same semantics as the per-view
+    /// `subscribe-webview-events` family).
+    SubscribeWindowEvents {
+        events: Vec<String>,
+    },
+    UnsubscribeWindowEvents {
+        events: Vec<String>,
+    },
     OpenDevtools,
     CloseDevtools,
     IsDevtoolsOpen,
@@ -817,9 +870,15 @@ pub unsafe extern "C" fn opentray_ext_init(
     let mut runtime = WebviewRuntime::default();
     // D18 owner tuples need the owning app identity inside the runtime.
     runtime.set_app_id(&app_id);
+    // D19 per-instance EventPort state: one per loaded instance; every
+    // producer handle the runtime creates captures a clone, so a later
+    // attach for another instance cannot retarget them (B1).
+    let port_state = Arc::new(event_port::InstancePortState::new());
+    runtime.set_port_state(Arc::clone(&port_state));
     let instance = Box::new(WebviewExtension {
         app_id,
         runtime,
+        port_state,
     });
     unsafe {
         *out_instance = Box::into_raw(instance).cast::<c_void>();
@@ -940,6 +999,11 @@ pub unsafe extern "C" fn opentray_ext_command(
             data,
         });
     }
+    // D19 batch B: give backpressured Edge records from native callbacks
+    // another bounded, non-blocking chance after every handled command. The
+    // hub still delivers them only after this response's frames are written.
+    // Per-instance (B1): this command's instance owns the flushed queue.
+    extension.port_state.flush_edge_retries_after_command();
     write_owned_events(out_events_json, &events)
 }
 
@@ -1215,7 +1279,12 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                 result: parsed.result,
             })
         }
-        "drainWindowEvents" => Ok(WebviewCommand::DrainWindowEvents),
+        "subscribeWindowEvents" => Ok(WebviewCommand::SubscribeWindowEvents {
+            events: parse_window_event_family_names("subscribeWindowEvents", data)?,
+        }),
+        "unsubscribeWindowEvents" => Ok(WebviewCommand::UnsubscribeWindowEvents {
+            events: parse_window_event_family_names("unsubscribeWindowEvents", data)?,
+        }),
         "openDevtools" => Ok(WebviewCommand::OpenDevtools),
         "closeDevtools" => Ok(WebviewCommand::CloseDevtools),
         "isDevtoolsOpen" => Ok(WebviewCommand::IsDevtoolsOpen),
@@ -1256,6 +1325,44 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
             "unsupported webview command: {other}"
         ))),
     }
+}
+
+/// Validates the window-event family names riding the batch C subscription
+/// commands: non-empty strings, members of the frozen family, deduplicated.
+/// An unknown name is a facade/native version skew that the lockstep
+/// contract forbids — rejected loudly, never silently never-firing.
+fn parse_window_event_family_names(
+    command: &str,
+    data: &Value,
+) -> Result<Vec<String>, WebviewRuntimeError> {
+    let Some(events) = data.get("events").and_then(Value::as_array) else {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{command} requires an events array"
+        )));
+    };
+    let mut names: Vec<String> = Vec::new();
+    for event in events {
+        let Some(name) = event.as_str() else {
+            return Err(WebviewRuntimeError::Rejected(format!(
+                "{command} requires string event names"
+            )));
+        };
+        if !WINDOW_EVENT_FAMILY.contains(&name) {
+            return Err(WebviewRuntimeError::Rejected(format!(
+                "{command} received {name:?}; the window event family is frozen to \
+                 {WINDOW_EVENT_FAMILY:?}"
+            )));
+        }
+        if !names.iter().any(|existing| existing == name) {
+            names.push(name.to_string());
+        }
+    }
+    if names.is_empty() {
+        return Err(WebviewRuntimeError::Rejected(format!(
+            "{command} requires at least one event name"
+        )));
+    }
+    Ok(names)
 }
 
 fn validate_size_constraint_patch(
@@ -1883,6 +1990,10 @@ mod tests {
             "../../../packages/ext-webview/package.json"
         ))
         .expect("facade package JSON");
+        let contract = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../../packages/ext-webview/contract.json"
+        ))
+        .expect("extension contract JSON");
         assert_eq!(manifest.extension_name, "webview");
         assert_eq!(
             manifest.artifact_set_version,
@@ -1890,7 +2001,10 @@ mod tests {
         );
         assert_eq!(
             manifest.contract_fingerprint,
-            "opentray-ext-webview-contract-1"
+            contract["contractFingerprint"]
+                .as_str()
+                .expect("contract fingerprint"),
+            "the embedded identity must track the facade contract file"
         );
         assert!(!manifest.build_identity.is_empty());
         unsafe { opentray_ext_free_string(output.ptr, output.len) };
@@ -2703,6 +2817,7 @@ mod tests {
         let instance = Box::into_raw(Box::new(WebviewExtension {
             app_id: "surface-1".to_string(),
             runtime: WebviewRuntime::default(),
+            port_state: std::sync::Arc::new(event_port::InstancePortState::new()),
         }))
         .cast::<c_void>();
         let mut output = ExtOwnedBytes {
@@ -2736,6 +2851,7 @@ mod tests {
         let instance = Box::into_raw(Box::new(WebviewExtension {
             app_id: "surface-1".to_string(),
             runtime: WebviewRuntime::default(),
+            port_state: std::sync::Arc::new(event_port::InstancePortState::new()),
         }))
         .cast::<c_void>();
         let envelope = CString::new(

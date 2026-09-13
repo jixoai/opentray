@@ -565,7 +565,9 @@ mod tests {
             content_descriptor: WebviewContentDescriptor::DefaultHtml,
             ipc_messages: VecDeque::new(),
             permission_messages: VecDeque::new(),
-            window_events: VecDeque::new(),
+            tray_id: "tray-1".to_string(),
+            port_state: std::sync::Arc::new(crate::event_port::InstancePortState::new()),
+            window_event_subscriptions: HashSet::new(),
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
             style: WindowStyleState {

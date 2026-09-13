@@ -30,8 +30,11 @@
 //!   pass.
 //! - **D19 push events:** per-view `urlChange`/`titleChange` push from the
 //!   wry page-load/title callbacks and `focused` edges from the WebView2
-//!   controller GotFocus/LostFocus handlers, all straight into the session
-//!   event outbox — never through the 16 ms window-event drain.
+//!   controller GotFocus/LostFocus handlers, all through the D19 batch B
+//!   routing seam ([`push_event_frame`]): `try_submit` into the host
+//!   EventPort when the broker attached one, the session event outbox only
+//!   as the declared legacy fallback — never through the 16 ms window-event
+//!   drain.
 //!
 //! Typed orchestration rejections serialize the frozen
 //! `{ error: { code, message } }` envelope as the command response data
@@ -81,17 +84,27 @@ use super::{
     WindowsBackdropStatePolicy, WindowSizeConstraints,
 };
 
-/// Owner identity + D19 push-event outbox shared between the session, the
-/// bridge (through a weak handle), and the native observers.
+/// Owner identity + D19 push-event legacy fallback outbox shared between the
+/// session, the bridge (through a weak handle), and the native observers. On
+/// a direct-EventPort host the migrated five families (url/title/focus/
+/// geometry/loadState) submit through `try_submit` and never touch this
+/// queue; it stays only as the declared legacy delivery for hosts that never
+/// attached a port. Every command response flushes it into extension
+/// envelopes. This queue is deliberately separate from the legacy
+/// `window_events` drain path.
 pub(crate) struct SessionEventCore {
     pub owner: WindowOwner,
     pub outbox: VecDeque<WebviewEventFrame>,
+    /// Owning instance's EventPort state (D19 final review B1): producers
+    /// route through the port captured at session creation, never a
+    /// process-wide latest.
+    pub port: std::sync::Arc<crate::event_port::InstancePortState>,
 }
 
 /// Native focus reconciliation for one window (D19 `focused` edges): the
 /// WebView2 controller GotFocus/LostFocus callbacks update the focused-view
-/// id and emit both edges directly into the event outbox — pure push, no
-/// polling, never the 16 ms drain.
+/// id and emit both edges through the D19 batch B routing seam — pure push,
+/// no polling, never the 16 ms drain.
 pub(crate) struct FocusTracker {
     owner: WindowOwner,
     outbox: Weak<RefCell<SessionEventCore>>,
@@ -130,22 +143,16 @@ impl FocusTracker {
     }
 
     fn emit_edges(&mut self) {
-        let Some(outbox) = self.outbox.upgrade() else {
-            return;
-        };
         let owner = self.owner.clone();
         let window_id = owner.window_id.clone();
         let focused = self.focused_view.clone();
         for target in &self.targets {
             let focused = Some(target.webview_id.as_str()) == focused.as_deref();
-            if let Some(frame) =
-                target
-                    .events
-                    .borrow_mut()
-                    .focus_edge(&owner, &window_id, focused)
-            {
-                outbox.borrow_mut().outbox.push_back(frame);
-            }
+            let frame = target
+                .events
+                .borrow_mut()
+                .focus_edge(&owner, &window_id, focused);
+            push_event_frame(&self.outbox, frame);
         }
     }
 
@@ -372,9 +379,11 @@ pub(super) fn install_focus_observers(
 /// with the numeric `WebErrorStatus` in `errorCode` when WebView2 reports
 /// `IsSuccess = false`. Windows has no native navigation progress
 /// surface, so `progress` stays absent (consumers render an
-/// indeterminate affordance from the phase). Both handlers push straight
-/// into the session event outbox — never the 16 ms window-event drain —
-/// and hold the event state weakly so the session can tear down freely.
+/// indeterminate affordance from the phase). Both handlers push through
+/// the D19 batch B routing seam — `try_submit` on a direct-EventPort
+/// host, the session outbox only as the legacy fallback — and never the
+/// 16 ms window-event drain; they hold the event state weakly so the
+/// session can tear down freely.
 pub(super) fn install_load_state_observers(
     webview: &WebView,
     events: &Rc<RefCell<ViewEvents>>,
@@ -893,8 +902,8 @@ pub(super) fn overlay_safe_area_from_metrics(
 }
 
 /// Recomputes every view's overlay/titlebar projection and pushes both
-/// surfaces from one recompute: the unified `geometryChange` frames into
-/// the session event outbox (subscribed views only, edge semantics), and
+/// surfaces from one recompute: the unified `geometryChange` frames through
+/// the D19 batch B routing seam (subscribed views only, edge semantics), and
 /// the frozen page-bridge `overlay.geometrychange` `{ rect | null }`
 /// payload to the views that listen for it. A view without a recorded
 /// layout rect fills the client area (the single-webview default-layout
@@ -939,9 +948,10 @@ pub(super) fn refresh_overlay_projection(hwnd: HWND, bridge: &RefCell<NavigatorW
         let frame = events
             .borrow_mut()
             .note_geometry_change(&owner, &window_id, projected);
-        if let Some(frame) = frame {
-            core.borrow_mut().outbox.push_back(frame);
-        }
+        // D19 batch B: geometryChange is an Edge record through the
+        // EventPort when attached; the outbox is only the legacy fallback
+        // (see [`push_event_frame`]).
+        push_event_frame(&Rc::downgrade(&core), frame);
         if previous != projected {
             // Frozen per-view page-bridge payload (D23): view-local logical
             // pixels, `null` when the view does not intersect the overlay
@@ -1595,18 +1605,43 @@ impl super::WindowsWebviewRuntime {
     }
 }
 
-/// Pushes one D19 event frame from a native observer into the outbox.
+/// D19 batch B routing seam for the five push-event families. When the
+/// broker attached an EventPort, the frame goes straight into the host
+/// EventHub (`try_submit` under the frozen classification table; Edge
+/// backpressure parks in the extension's bounded retry queue) — the
+/// command-response outbox is retired for migrated families so one event can
+/// never ride both paths. When no port was ever attached (legacy host), the
+/// declared legacy fallback keeps the outbox/response-flush delivery.
+pub(super) fn push_event_frame(
+    outbox: &Weak<RefCell<SessionEventCore>>,
+    frame: Option<WebviewEventFrame>,
+) {
+    let Some(frame) = frame else {
+        return;
+    };
+    let Some(core) = outbox.upgrade() else {
+        return;
+    };
+    // Direct delivery through the hub; every non-legacy outcome consumed the
+    // frame (Edge backpressure already parked in the extension retry queue).
+    // The port is the session core's captured instance state (B1), never a
+    // process-wide latest.
+    let status = core.borrow().port.submit_frame(&frame);
+    if matches!(status, crate::event_port::SubmitStatus::LegacyFlush) {
+        core.borrow_mut().outbox.push_back(frame);
+    }
+}
+
+/// Pushes one D19 event frame from a native observer through the routing
+/// seam ([`push_event_frame`]).
 fn push_view_event(
     events: &Rc<RefCell<ViewEvents>>,
     outbox: &Weak<RefCell<SessionEventCore>>,
     owner: &WindowOwner,
     make: impl FnOnce(&mut ViewEvents, &WindowOwner, &str) -> Option<WebviewEventFrame>,
 ) {
-    if let Some(frame) = make(&mut events.borrow_mut(), owner, &owner.window_id) {
-        if let Some(core) = outbox.upgrade() {
-            core.borrow_mut().outbox.push_back(frame);
-        }
-    }
+    let frame = make(&mut events.borrow_mut(), owner, &owner.window_id);
+    push_event_frame(outbox, frame);
 }
 
 /// Native history navigation through WebView2 (`ICoreWebView2::GoBack` /
@@ -1786,7 +1821,11 @@ mod tests {
     }
 
     /// Focus tracker edges: gaining/losing a view and window deactivation
-    /// emit exactly the expected edge frames with per-view sequences.
+    /// emit exactly the expected edge frames with per-view sequences. The
+    /// frames route through the batch B seam, which addresses the session
+    /// core's captured per-instance EventPort state (B1); a fresh port-less
+    /// state keeps this test on the legacy-flush leg regardless of the
+    /// event_port fixture tests running concurrently in the same binary.
     #[test]
     fn focus_tracker_emits_push_edges_without_polling() {
         let owner = WindowOwner {
@@ -1798,6 +1837,7 @@ mod tests {
         let core = Rc::new(RefCell::new(SessionEventCore {
             owner: owner.clone(),
             outbox: VecDeque::new(),
+            port: std::sync::Arc::new(crate::event_port::InstancePortState::new()),
         }));
         let mut tracker = FocusTracker::new(owner, Rc::downgrade(&core));
         let toolbar = Rc::new(RefCell::new(ViewEvents::new(

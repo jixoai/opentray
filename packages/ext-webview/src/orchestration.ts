@@ -394,6 +394,142 @@ export const createWebviewOrchestration = (
   const geometryChangeHandlers = new Map<WebviewId, Set<GeometryChangeHandler>>();
   const loadStateHandlers = new Map<WebviewId, Set<LoadStateHandler>>();
 
+  // D19 batch B gap-resync: one per-view sequence counter is shared across
+  // all event kinds natively, so the facade observes `seq` for every frame
+  // of the view. A jump (> last + 1) means the transport coalesced or lost
+  // records (EventPort `Latest` replacement by contract); urlChange and
+  // titleChange subscribers then re-read state through the frozen
+  // `(value, seq)` query pair and converge on the higher sequence.
+  const lastViewSeq = new Map<WebviewId, number>();
+  // D19 final review B6: the DELIVERED high-water per (view, kind). The
+  // shared counter above is the native authority for gap detection; the
+  // discard rule is per kind — each kind's stream is monotonic (a
+  // subsequence of the shared native counter), while interleaving kinds
+  // legitimately arrive out of shared order.
+  const deliveredKindSeq = new Map<string, number>();
+  const resyncInFlight = new Set<string>();
+  // D19 final review B6: view lifecycle generations. A destroyed webview's
+  // in-flight resync query must never deliver into a re-created view that
+  // happens to reuse the id (its native ViewEvents restarts at seq 1, so
+  // the old query's higher seq would otherwise look authoritative).
+  const viewGenerations = new Map<WebviewId, number>();
+
+  /** Observes one wire frame's seq; returns the previous observed seq. */
+  const observeSeq = (webviewId: WebviewId, seq: number): number | undefined => {
+    const previous = lastViewSeq.get(webviewId);
+    if (previous === undefined || seq > previous) {
+      lastViewSeq.set(webviewId, seq);
+    }
+    return previous;
+  };
+
+  const kindSeqKey = (webviewId: WebviewId, kind: WebviewEventKind): string =>
+    `${kind}:${webviewId}`;
+
+  /**
+   * Observes one delivered (view, kind) seq; returns the previously
+   * delivered seq of that kind, or undefined when this is the kind's first
+   * delivery for the view.
+   */
+  const observeKindSeq = (
+    webviewId: WebviewId,
+    kind: WebviewEventKind,
+    seq: number,
+  ): number | undefined => {
+    const key = kindSeqKey(webviewId, kind);
+    const previous = deliveredKindSeq.get(key);
+    if (previous === undefined || seq > previous) {
+      deliveredKindSeq.set(key, seq);
+    }
+    return previous;
+  };
+
+  /**
+   * Sequence-gap repair for the two Latest-class kinds: queries the current
+   * `(value, seq)` and, when the query outranks the delivered frame,
+   * delivers the higher observation to the view's handlers. Fire-and-forget
+   * observability matches the subscribe frames' transport-failure rule.
+   *
+   * Completion re-checks (D19 final review B6): the query result is
+   * discarded unless it still outranks the view's CURRENT high-water (a
+   * higher frame may have arrived while the query was in flight — its
+   * result would then be a stale lower observation) and the view's
+   * lifecycle generation still matches the one the query was issued for
+   * (destroy/recreate must not adopt an old generation's answer).
+   */
+  const resyncAfterGap = (
+    webviewId: WebviewId,
+    kind: "urlChange" | "titleChange",
+    deliveredSeq: number,
+  ): void => {
+    // The in-flight marker is generation-qualified: a destroy/recreate
+    // bumps the generation, so an old promise's finally can never remove a
+    // new generation's marker (final review P2).
+    const generation = viewGenerations.get(webviewId) ?? 0;
+    const inflightKey = `${kind}:${webviewId}#${generation}`;
+    if (resyncInFlight.has(inflightKey)) {
+      return;
+    }
+    resyncInFlight.add(inflightKey);
+    const isUrl = kind === "urlChange";
+    void expectResult(
+      {
+        owner,
+        type: isUrl ? "get-webview-url" : "get-webview-title",
+        windowId,
+        webviewId,
+      } as WebviewOrchestrationCommandFrame,
+      isUrl ? "get-webview-url-result" : "get-webview-title-result",
+    )
+      .then((result) => {
+        if ((viewGenerations.get(webviewId) ?? 0) !== generation) {
+          // The view this query was issued for is gone (destroyed and
+          // possibly re-created under the same id); its answer must not
+          // reach the new view's handlers.
+          return;
+        }
+        const querySeq = Number(result.seq);
+        const kind = isUrl ? "urlChange" : "titleChange";
+        const currentKindHighWater = deliveredKindSeq.get(kindSeqKey(webviewId, kind));
+        if (
+          !Number.isFinite(querySeq) ||
+          querySeq <= deliveredSeq ||
+          (currentKindHighWater !== undefined && querySeq <= currentKindHighWater)
+        ) {
+          return;
+        }
+        observeSeq(webviewId, querySeq);
+        observeKindSeq(webviewId, kind, querySeq);
+        if (isUrl) {
+          const set = urlChangeHandlers.get(webviewId);
+          if (set !== undefined) {
+            callHandlers(set, {
+              windowId,
+              webviewId,
+              seq: querySeq,
+              url: String(result.url),
+            });
+          }
+        } else {
+          const set = titleChangeHandlers.get(webviewId);
+          if (set !== undefined) {
+            callHandlers(set, {
+              windowId,
+              webviewId,
+              seq: querySeq,
+              title: String(result.title),
+            });
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("WebView orchestration sequence-gap resync failed:", error);
+      })
+      .finally(() => {
+        resyncInFlight.delete(inflightKey);
+      });
+  };
+
   const channels = new Map<ChannelId, ChannelEndpointState>();
   const channelCreatedHandlers = new Set<(notice: WebviewChannelCreatedNotice) => void>();
 
@@ -442,6 +578,30 @@ export const createWebviewOrchestration = (
     focusedHandlers.delete(webviewId);
     geometryChangeHandlers.delete(webviewId);
     loadStateHandlers.delete(webviewId);
+    // A destroyed webview's per-view sequence counter dies with it; a
+    // re-created id must not inherit a stale high-water mark (its native
+    // ViewEvents restarts at seq 1).
+    lastViewSeq.delete(webviewId);
+    // Exact-kind prefix + suffix match is ambiguous when a webview id
+    // itself contains the separator; scan with a precise per-kind key set
+    // instead (final review P2 opaque-id boundary).
+    for (const kind of ["urlChange", "titleChange"] as const) {
+      deliveredKindSeq.delete(`${kind}:${webviewId}`);
+    }
+    // D19 final review B6: bump the lifecycle generation so an in-flight
+    // resync query issued for the destroyed view cannot deliver into a
+    // re-created view under the same id.
+    viewGenerations.set(webviewId, (viewGenerations.get(webviewId) ?? 0) + 1);
+    // Generation-qualified markers only: remove every generation of this
+    // (kind, webview) pair; the `#gen` suffix cannot appear ambiguously in a
+    // foreign id's marker because the kind prefix is a fixed enum.
+    for (const key of [...resyncInFlight]) {
+      for (const kind of ["urlChange", "titleChange"] as const) {
+        if (key.startsWith(`${kind}:${webviewId}#`)) {
+          resyncInFlight.delete(key);
+        }
+      }
+    }
   };
 
   const callHandlers = <TEvent>(
@@ -457,6 +617,16 @@ export const createWebviewOrchestration = (
     if (frame.windowId !== windowId) {
       return;
     }
+    const previousSeq = observeSeq(frame.webviewId, frame.seq);
+    // D19 final review B6: stale frames are discarded at the entry, before
+    // any handler runs. Within one (view, kind) stream a record whose seq
+    // does not exceed the delivered high-water is an older observation the
+    // transport reordered or a duplicate the coalescing window emitted —
+    // never new truth. Other kinds keep their own monotonic streams.
+    const previousKindSeq = observeKindSeq(frame.webviewId, frame.kind, frame.seq);
+    if (previousKindSeq !== undefined && frame.seq <= previousKindSeq) {
+      return;
+    }
     const identity = {
       windowId: frame.windowId,
       webviewId: frame.webviewId,
@@ -467,6 +637,9 @@ export const createWebviewOrchestration = (
         const set = urlChangeHandlers.get(frame.webviewId);
         if (set !== undefined) {
           callHandlers(set, { ...identity, url: frame.payload.url });
+          if (previousSeq !== undefined && frame.seq > previousSeq + 1) {
+            resyncAfterGap(frame.webviewId, "urlChange", frame.seq);
+          }
         }
         return;
       }
@@ -474,6 +647,9 @@ export const createWebviewOrchestration = (
         const set = titleChangeHandlers.get(frame.webviewId);
         if (set !== undefined) {
           callHandlers(set, { ...identity, title: frame.payload.title });
+          if (previousSeq !== undefined && frame.seq > previousSeq + 1) {
+            resyncAfterGap(frame.webviewId, "titleChange", frame.seq);
+          }
         }
         return;
       }
@@ -699,7 +875,16 @@ export const createWebviewOrchestration = (
         { owner, type: "get-webview-url", windowId, webviewId } as WebviewOrchestrationCommandFrame,
         "get-webview-url-result",
       );
-      return { url: String(result.url), seq: Number(result.seq) };
+      const seq = Number(result.seq);
+      // D19 final review B6: a successful (value, seq) query is itself a
+      // sequence observation — the native counter is at least at `seq`, so
+      // a later-arriving frame at or below it is stale and dropped at the
+      // delivery entry (the subscription-race contract the facade owns).
+      if (Number.isFinite(seq)) {
+        observeSeq(webviewId, seq);
+        observeKindSeq(webviewId, "urlChange", seq);
+      }
+      return { url: String(result.url), seq };
     },
     async getTitle(): Promise<WebviewTitleQueryResult> {
       const result = await expectResult(
@@ -711,7 +896,12 @@ export const createWebviewOrchestration = (
         } as WebviewOrchestrationCommandFrame,
         "get-webview-title-result",
       );
-      return { title: String(result.title), seq: Number(result.seq) };
+      const seq = Number(result.seq);
+      if (Number.isFinite(seq)) {
+        observeSeq(webviewId, seq);
+        observeKindSeq(webviewId, "titleChange", seq);
+      }
+      return { title: String(result.title), seq };
     },
     onUrlChange(handler: UrlChangeHandler): () => void {
       return addViewListener(urlChangeHandlers, webviewId, "urlChange", handler);
@@ -866,6 +1056,8 @@ export const createWebviewOrchestration = (
     focusedHandlers.clear();
     geometryChangeHandlers.clear();
     loadStateHandlers.clear();
+    lastViewSeq.clear();
+    resyncInFlight.clear();
     channels.clear();
     channelCreatedHandlers.clear();
   };

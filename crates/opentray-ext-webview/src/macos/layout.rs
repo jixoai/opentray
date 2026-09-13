@@ -31,7 +31,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     ptr::NonNull,
     rc::{Rc, Weak},
 };
@@ -47,7 +47,7 @@ use objc2_app_kit::{
     NSWindowWillStartLiveResizeNotification,
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter};
-use opentray_spec::webview::{WebviewEventFrame, WebviewLayoutDocument};
+use opentray_spec::webview::WebviewLayoutDocument;
 use wry::{
     dpi::{LogicalPosition, LogicalSize},
     Rect as WryRect, WebView, WebViewExtMacOS,
@@ -60,7 +60,7 @@ use crate::orchestration::{ViewEvents, WindowOwner};
 
 use super::box_view::BoxBackgroundView;
 use super::overlay::{emit_view_geometry_change, window_overlay_safe_area};
-use super::NavigatorWindowBridge;
+use super::{NavigatorWindowBridge, WeakEventOutbox};
 
 /// One native webview target. The `NonNull<WebView>` points into the window
 /// session's `Box<WebView>` allocations, whose addresses are stable for the
@@ -82,7 +82,7 @@ pub(crate) struct LayoutTracker {
     /// returns the live `Retained<NSWindow>` or `None` once the window is
     /// gone, matching the tracker's borrowed-observer role in the session.
     window: objc2::rc::Weak<NSWindow>,
-    outbox: Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+    outbox: WeakEventOutbox,
     webviews: Vec<LayoutWebviewTarget>,
     boxes: HashMap<String, Retained<BoxBackgroundView>>,
     /// Set once an explicit layout takes over bounds ownership: the primary
@@ -99,7 +99,7 @@ impl LayoutTracker {
         owner: WindowOwner,
         bridge: Weak<RefCell<NavigatorWindowBridge>>,
         window: &Retained<NSWindow>,
-        outbox: Weak<RefCell<VecDeque<WebviewEventFrame>>>,
+        outbox: WeakEventOutbox,
     ) -> Self {
         Self {
             owner,
@@ -262,11 +262,10 @@ impl LayoutTracker {
                 &self.owner.window_id,
                 projected,
             );
-            if let Some(frame) = frame {
-                if let Some(outbox) = self.outbox.upgrade() {
-                    outbox.borrow_mut().push_back(frame);
-                }
-            }
+            // D19 batch B: geometryChange is an Edge record through the
+            // EventPort when attached; the outbox is only the legacy
+            // fallback (see `push_event_frame`).
+            super::push_event_frame(&self.outbox, frame);
             if changed && page_bridge_enabled {
                 if let Err(error) =
                     emit_view_geometry_change(&bridge, &target.webview_id, projected)

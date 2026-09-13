@@ -6,12 +6,24 @@
 // happens to dispatch a command. When the owning session is gone, pushed
 // events are dropped with a broker-log diagnostic instead of leaking into
 // another session or stalling the extension call.
+//
+// D19: pushes from loader-created instances submit source-bound records into
+// the same bounded EventHub ingress as native `try_submit` producers, and are
+// delivered after the current dispatch's response frames (post-response
+// barrier). Drain-side routing validates the tray route against the source's
+// host-bound session/app before any `ext-event` frame is constructed.
 
 use std::collections::HashMap;
 
-use opentray_core::{ExtensionError, ExtensionHostContext};
+use opentray_core::{
+    AppBackend, BrokerKernel, ExtensionError, ExtensionHostContext, ExtensionLoader,
+};
 use opentray_spec::{
     AppId, ClientFrame, ExtensionEnvelope, ExtensionScope, ServerFrame, SessionId, TrayId,
+};
+
+use crate::event_hub::{
+    EventHub, SourceKey, SubmitOutcome, EVENT_DRAIN_MAX_BYTES, EVENT_DRAIN_MAX_RECORDS,
 };
 
 /// Scope authority for extension host calls triggered by one client frame.
@@ -34,7 +46,10 @@ impl ExtensionDispatch {
     pub(crate) fn from_frame(frame: &ClientFrame) -> Option<Self> {
         match frame {
             ClientFrame::ExtCommand {
-                app_id, tray_id, ext, ..
+                app_id,
+                tray_id,
+                ext,
+                ..
             } => Some(Self {
                 app_id: app_id.clone(),
                 tray_id: tray_id.clone(),
@@ -63,9 +78,7 @@ impl LoadedExtension {
                 ..
             } => Some(Self {
                 app_id: app_id.clone(),
-                instance: mount_id
-                    .clone()
-                    .unwrap_or_else(|| name.clone()),
+                instance: mount_id.clone().unwrap_or_else(|| name.clone()),
             }),
             _ => None,
         }
@@ -87,12 +100,21 @@ impl ExtensionEventRouter {
     /// Builds the production host context for one broker dispatch.
     ///
     /// `dispatch` is `Some` only for frames the kernel routes to one extension
-    /// instance (`ExtCommand`); kernel-initiated calls such as session cleanup
-    /// receive a scope-free host and trust the envelope's claimed scope, the
-    /// same authority split the kernel applies to returned events.
-    pub(crate) fn host(&self, dispatch: Option<ExtensionDispatch>) -> RoutingExtensionHost {
+    /// instance (`ExtCommand`). `hub` is the broker EventHub: when the
+    /// dispatched instance has a loader-reserved source, `send_event` submits
+    /// a source-bound record to the same bounded ingress as native producers
+    /// instead of buffering a private queue. Kernel-initiated calls such as
+    /// session cleanup receive a scope-free host; their claimed instance
+    /// selects the source, and drain-side tray validation still refuses
+    /// foreign or dead routes.
+    pub(crate) fn host<'hub>(
+        &self,
+        dispatch: Option<ExtensionDispatch>,
+        hub: Option<&'hub EventHub>,
+    ) -> RoutingExtensionHost<'hub> {
         RoutingExtensionHost {
             dispatch,
+            hub,
             events: Vec::new(),
         }
     }
@@ -153,23 +175,95 @@ impl ExtensionEventRouter {
             }
         }
     }
+
+    /// Delivers one drained, source-bound record to its owning session. The
+    /// source key is host truth: `ext` and `app` come from the loader's
+    /// SourceKey, never from event JSON.
+    pub(crate) fn deliver_bound(
+        &self,
+        key: &SourceKey,
+        tray_id: &str,
+        data: serde_json::Value,
+        write: &mut dyn FnMut(&str, ServerFrame) -> bool,
+    ) {
+        let frame = ServerFrame::ExtEvent {
+            app_id: key.app_id.clone(),
+            tray_id: tray_id.to_string(),
+            ext: key.instance_name.clone(),
+            data,
+        };
+        if !write(&key.owner_session_id, frame) {
+            eprintln!(
+                "opentray extension event dropped: owning client session {} is closed (source {}/{} generation {})",
+                key.owner_session_id, key.app_id, key.instance_name, key.generation
+            );
+        }
+    }
 }
 
-/// Production `ExtensionHostContext` handed to extension instances: it buffers
-/// `send_event` pushes so delivery happens after the current kernel dispatch
-/// returns, keeping kernel reentrancy out of the extension ABI.
-pub(crate) struct RoutingExtensionHost {
+/// Owner-loop drain: takes one bounded round-robin quantum from the hub,
+/// validates each record's tray route against the source's host-bound
+/// session/app, and writes `ext-event` frames to the owning session's
+/// ordered channel. Stale, foreign, or revoked routes drop with a
+/// source-tagged diagnostic. Re-wakes when drainable work remains.
+pub(crate) fn drain_extension_events<B: AppBackend, L: ExtensionLoader>(
+    hub: &EventHub,
+    router: &ExtensionEventRouter,
+    broker: &BrokerKernel<B, L>,
+    write: &mut dyn FnMut(&str, ServerFrame) -> bool,
+) {
+    for record in hub.drain_round_robin(EVENT_DRAIN_MAX_RECORDS, EVENT_DRAIN_MAX_BYTES) {
+        let key = &record.key;
+        match broker.tray_owner(&key.app_id, &record.tray_id) {
+            Some(owner) if owner == key.owner_session_id => {
+                match serde_json::from_slice::<serde_json::Value>(&record.data_json) {
+                    Ok(data) => router.deliver_bound(key, &record.tray_id, data, write),
+                    Err(error) => {
+                        // Ingress validated this payload; a parse failure
+                        // here is a hub invariant breach. Drop with a
+                        // source-tagged diagnostic rather than panicking the
+                        // broker loop.
+                        hub.note_stale_drop();
+                        eprintln!(
+                            "opentray extension event dropped: undecodable payload for source {}/{} generation {}: {error}",
+                            key.app_id, key.instance_name, key.generation
+                        );
+                    }
+                }
+            }
+            _ => {
+                hub.note_stale_drop();
+                eprintln!(
+                    "opentray extension event dropped: stale route tray={} not live for source {}/{} generation {} owner {}",
+                    record.tray_id,
+                    key.app_id,
+                    key.instance_name,
+                    key.generation,
+                    key.owner_session_id
+                );
+            }
+        }
+    }
+    hub.rewake_if_ready();
+}
+
+/// Production `ExtensionHostContext` handed to extension instances: it binds
+/// `send_event` pushes to the source-owned EventHub ingress so delivery
+/// happens after the current kernel dispatch returns and its response frames
+/// are written, keeping kernel reentrancy out of the extension ABI.
+pub(crate) struct RoutingExtensionHost<'a> {
     dispatch: Option<ExtensionDispatch>,
+    hub: Option<&'a EventHub>,
     events: Vec<ExtensionEnvelope>,
 }
 
-impl RoutingExtensionHost {
+impl RoutingExtensionHost<'_> {
     pub(crate) fn take_events(&mut self) -> Vec<ExtensionEnvelope> {
         std::mem::take(&mut self.events)
     }
 }
 
-impl ExtensionHostContext for RoutingExtensionHost {
+impl ExtensionHostContext for RoutingExtensionHost<'_> {
     fn invoke_host(
         &mut self,
         capability: &str,
@@ -184,28 +278,102 @@ impl ExtensionHostContext for RoutingExtensionHost {
 
     /// Accepts exactly one `ExtensionEnvelope` JSON object per call.
     ///
-    /// Scope authority mirrors returned events: during an `ExtCommand`
-    /// dispatch the frame's scope wins; during kernel-initiated calls the
-    /// envelope's claimed scope is kept.
+    /// Source binding: the (app, instance) is a host fact — the dispatch
+    /// scope during `ExtCommand`, otherwise the claimed instance (contained
+    /// by single-session admission while the kernel's cleanup broadcast is
+    /// instance-blind). The record carries only the tray route and data;
+    /// drain re-validates the route against the source's owner session.
     fn send_event(&mut self, event_json: &[u8]) -> Result<(), ExtensionError> {
-        let envelope = serde_json::from_slice::<ExtensionEnvelope>(event_json).map_err(|error| {
-            ExtensionError::Rejected(format!(
-                "extension event must be one ExtensionEnvelope JSON object: {error}"
-            ))
-        })?;
-        let scope = match &self.dispatch {
-            Some(dispatch) => ExtensionScope {
+        let envelope =
+            serde_json::from_slice::<ExtensionEnvelope>(event_json).map_err(|error| {
+                ExtensionError::Rejected(format!(
+                    "extension event must be one ExtensionEnvelope JSON object: {error}"
+                ))
+            })?;
+        let (app_id, instance, tray_route) = match &self.dispatch {
+            Some(dispatch) => (
+                dispatch.app_id.clone(),
+                dispatch.ext.clone(),
+                Some(dispatch.tray_id.clone()),
+            ),
+            None => (
+                envelope.scope.app_id.clone(),
+                envelope.scope.ext.clone(),
+                envelope.scope.tray_id.clone(),
+            ),
+        };
+
+        if let Some(hub) = self.hub {
+            if let Some(source) = hub.current_source(&app_id, &instance) {
+                return submit_source_bound_push(&source, tray_route, envelope.data);
+            }
+        }
+
+        // Fallback for instances without a loader-reserved source (test and
+        // non-dynamic instances): the legacy buffered path with dispatch
+        // scope authority.
+        let scope = match (&self.dispatch, tray_route) {
+            (Some(dispatch), _) => ExtensionScope {
                 app_id: dispatch.app_id.clone(),
                 tray_id: Some(dispatch.tray_id.clone()),
                 ext: dispatch.ext.clone(),
             },
-            None => envelope.scope,
+            (None, tray_id) => ExtensionScope {
+                app_id: app_id,
+                tray_id,
+                ext: instance,
+            },
         };
         self.events.push(ExtensionEnvelope {
             scope,
             data: envelope.data,
         });
         Ok(())
+    }
+}
+
+/// Maps one command-time push onto the bounded hub ingress. Backpressure is
+/// surfaced to the extension call; a closed source (its own session is
+/// closing) drops silently with a diagnostic so cleanup broadcasts cannot
+/// abort other instances' session_closed handling.
+fn submit_source_bound_push(
+    source: &crate::event_hub::SourceHandle,
+    tray_route: Option<TrayId>,
+    data: serde_json::Value,
+) -> Result<(), ExtensionError> {
+    let Some(tray_id) = tray_route else {
+        // Mirror parity: tray-less envelopes are not `ext-event` frames.
+        eprintln!(
+            "opentray extension event dropped: source {}/{} pushed an event without a tray route",
+            source.key().app_id,
+            source.key().instance_name
+        );
+        return Ok(());
+    };
+    match source.submit_push(&tray_id, &data) {
+        SubmitOutcome::Enqueued | SubmitOutcome::Coalesced | SubmitOutcome::DroppedBestEffort => {
+            Ok(())
+        }
+        SubmitOutcome::Backpressure => Err(ExtensionError::Rejected(format!(
+            "event port backpressure: the bounded hub queue for source {}/{} is full; the \
+             extension owns bounded retry",
+            source.key().app_id,
+            source.key().instance_name
+        ))),
+        SubmitOutcome::Invalid => Err(ExtensionError::Rejected(format!(
+            "event port rejected the push payload for source {}/{} (oversized data)",
+            source.key().app_id,
+            source.key().instance_name
+        ))),
+        SubmitOutcome::Closed => {
+            eprintln!(
+                "opentray extension event dropped: source {}/{} is closed (owner session closed, \
+                 reload, or hub delivery unavailable)",
+                source.key().app_id,
+                source.key().instance_name
+            );
+            Ok(())
+        }
     }
 }
 
@@ -216,12 +384,13 @@ mod tests {
         ExtensionLoader, FakeBackend,
     };
     use opentray_spec::{
-        BrokerArtifactIdentity, BrokerArtifactTarget, AppOptions, ClientFrame, ExtensionArtifactTarget,
-        ExpectedExtensionIdentity, Icon, Menu, MenuItem, ServerFrame, TrayOptions,
-        PROTOCOL_VERSION,
+        AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame,
+        ExpectedExtensionIdentity, ExtensionArtifactTarget, Icon, Menu, MenuItem, ServerFrame,
+        TrayOptions, PROTOCOL_VERSION,
     };
 
     use super::*;
+    use crate::event_hub::event_hub_test_support::NoopWake;
 
     /// Extension that pushes one host event per call. Command pushes claim a
     /// deliberately wrong scope so tests can assert the dispatch authority;
@@ -250,6 +419,17 @@ mod tests {
                 scope: ExtensionScope {
                     app_id: self.app_id.clone(),
                     tray_id: Some(self.tray_id.clone()),
+                    ext: self.instance.clone(),
+                },
+                data: serde_json::json!({ "type": r#type }),
+            }
+        }
+
+        fn owned_envelope_to(&self, r#type: &str, tray_id: &str) -> ExtensionEnvelope {
+            ExtensionEnvelope {
+                scope: ExtensionScope {
+                    app_id: self.app_id.clone(),
+                    tray_id: Some(tray_id.to_string()),
                     ext: self.instance.clone(),
                 },
                 data: serde_json::json!({ "type": r#type }),
@@ -302,12 +482,14 @@ mod tests {
         }
     }
 
-    /// Mirrors the production broker loops: per-frame routing host, LoadExt
-    /// ownership recording on Ack, ownership release on close, and buffered
-    /// delivery to the owning session's frame channel.
+    /// Mirrors the production broker loops: per-frame routing host with the
+    /// EventHub, LoadExt ownership recording plus source opening on Ack,
+    /// revoke-before-cleanup on close, fallback delivery, and the bounded
+    /// hub drain to the owning session's frame channel.
     struct Harness {
         broker: BrokerKernel<FakeBackend, PushLoader>,
         router: ExtensionEventRouter,
+        hub: EventHub,
         sessions: Vec<(BrokerSession, Vec<ServerFrame>)>,
     }
 
@@ -320,6 +502,7 @@ mod tests {
                     test_broker_artifact_identity(),
                 ),
                 router: ExtensionEventRouter::new(),
+                hub: EventHub::new(Box::new(NoopWake)),
                 sessions: Vec::new(),
             }
         }
@@ -385,12 +568,11 @@ mod tests {
         }
 
         fn frame(&mut self, index: usize, frame: ClientFrame) -> Vec<ServerFrame> {
-            let kernel_session_id = self.sessions[index]
-                .0
-                .session_id()
-                .map(ToOwned::to_owned);
+            let kernel_session_id = self.sessions[index].0.session_id().map(ToOwned::to_owned);
             let loaded = LoadedExtension::from_frame(&frame);
-            let mut host = self.router.host(ExtensionDispatch::from_frame(&frame));
+            let mut host = self
+                .router
+                .host(ExtensionDispatch::from_frame(&frame), Some(&self.hub));
             let frames = {
                 let (broker_session, received) = &mut self.sessions[index];
                 let frames = self.broker.handle_frame_with_extension_host(
@@ -404,19 +586,29 @@ mod tests {
             };
             if let (Some(loaded), Some(owner)) = (loaded, kernel_session_id.as_deref()) {
                 if matches!(frames.first(), Some(ServerFrame::Ack { .. })) {
-                    self.router.note_loaded(loaded, owner.to_string());
+                    self.router.note_loaded(loaded.clone(), owner.to_string());
+                    // Mirror the loader: every acknowledged dynamic load has
+                    // a reserved PENDING source that the ACK opens.
+                    let _ = self
+                        .hub
+                        .reserve_source(loaded.app_id.clone(), loaded.instance.clone());
+                    self.hub
+                        .note_loaded_and_open(&loaded.app_id, &loaded.instance, owner);
                 }
             }
             self.deliver(host.take_events());
+            self.drain();
             frames
         }
 
         fn close(&mut self, index: usize) {
-            let closing_session_id = self.sessions[index]
-                .0
-                .session_id()
-                .map(ToOwned::to_owned);
-            let mut host = self.router.host(None);
+            let closing_session_id = self.sessions[index].0.session_id().map(ToOwned::to_owned);
+            // Lifecycle law: revoke the closing session's sources BEFORE core
+            // session_closed so its own cleanup pushes observe PORT_CLOSED.
+            if let Some(session_id) = closing_session_id.as_deref() {
+                self.hub.revoke_session(session_id);
+            }
+            let mut host = self.router.host(None, Some(&self.hub));
             let _ = self
                 .broker
                 .close_session_with_extension_host(&mut self.sessions[index].0, &mut host);
@@ -424,6 +616,7 @@ mod tests {
                 self.router.forget_session(session_id);
             }
             self.deliver(host.take_events());
+            self.drain();
         }
 
         fn deliver(&mut self, events: Vec<ExtensionEnvelope>) {
@@ -437,6 +630,26 @@ mod tests {
                 }
                 delivered
             });
+        }
+
+        fn drain(&mut self) {
+            let mut sessions = std::mem::take(&mut self.sessions);
+            drain_extension_events(
+                &self.hub,
+                &self.router,
+                &self.broker,
+                &mut |owner, frame| {
+                    let mut delivered = false;
+                    for (broker_session, received) in sessions.iter_mut() {
+                        if broker_session.session_id() == Some(owner) {
+                            received.push(frame.clone());
+                            delivered = true;
+                        }
+                    }
+                    delivered
+                },
+            );
+            self.sessions = sessions;
         }
 
         fn received(&self, index: usize) -> &[ServerFrame] {
@@ -610,7 +823,11 @@ mod tests {
         // own cleanup push must be dropped (owner forgotten); A's instance
         // still routes to A under its claimed scope.
         let events = ext_event_frames(harness.received(session_a));
-        assert_eq!(events.len(), 1, "only session A's instance event: {events:?}");
+        assert_eq!(
+            events.len(),
+            1,
+            "only session A's instance event: {events:?}"
+        );
         assert!(matches!(
             &events[0],
             ServerFrame::ExtEvent { app_id, tray_id, ext, data }
@@ -662,10 +879,13 @@ mod tests {
 
     #[test]
     fn send_event_rejects_payloads_that_are_not_one_envelope() {
-        let mut host = ExtensionEventRouter::new().host(None);
+        let mut host = ExtensionEventRouter::new().host(None, None);
         assert!(host.send_event(b"not json").is_err());
         assert!(host.send_event(b"[]").is_err());
-        assert!(host.send_event(b"{}").is_err(), "a scope and data are required");
+        assert!(
+            host.send_event(b"{}").is_err(),
+            "a scope and data are required"
+        );
         // A tray-less envelope is accepted here; delivery drops it, mirroring
         // the returned-events filter.
         assert!(host
@@ -674,6 +894,186 @@ mod tests {
         let events = host.take_events();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].scope.tray_id, None);
+    }
+
+    /// Command pushes are bound to host facts: the delivered frame carries
+    /// the dispatch (app, tray) and the source's instance name, never the
+    /// envelope's forged scope fields.
+    #[test]
+    fn source_bound_push_routes_by_host_facts_not_claimed_scope() {
+        let mut harness = Harness::new();
+        let session = harness.open_session();
+        harness.create_app_and_tray(session, "app-a");
+        harness.load_push(session, "app-a");
+
+        let frames = harness.ext_command(session, "app-a", "tray-a");
+        assert!(matches!(
+            frames.first(),
+            Some(ServerFrame::ExtCommandResult { .. })
+        ));
+
+        let received = harness.received(session);
+        let pushed = received
+            .iter()
+            .find_map(|frame| match frame {
+                ServerFrame::ExtEvent {
+                    app_id,
+                    tray_id,
+                    ext,
+                    data,
+                } if data["type"] == "pushed" => Some((app_id, tray_id, ext)),
+                _ => None,
+            })
+            .expect("pushed event frame");
+        // claimed-app/claimed-tray/claimed-ext were all forged; host facts won.
+        assert_eq!(
+            serde_json::to_value(pushed).unwrap(),
+            serde_json::json!(["app-a", "tray-a", "push"])
+        );
+    }
+
+    /// A scope-free push claiming a foreign session's tray is dropped at
+    /// drain with a source-tagged diagnostic; it never crosses sessions.
+    #[test]
+    fn foreign_tray_routes_drop_at_drain_with_source_tagged_diagnostics() {
+        let mut harness = Harness::new();
+        let session_a = harness.open_session();
+        harness.create_app_and_tray(session_a, "app-a");
+        harness.load_push(session_a, "app-a");
+        let session_b = harness.open_session();
+        harness.create_app_and_tray(session_b, "app-b");
+        harness.load_push(session_b, "app-b");
+        let baseline_a = harness.received(session_a).len();
+        let baseline_b = harness.received(session_b).len();
+
+        // Session A's instance pushes asynchronously, but claims session B's
+        // tray (and a nonexistent one) as the route.
+        let source = harness
+            .hub
+            .current_source("app-a", "push")
+            .expect("A's source");
+        assert_eq!(
+            source.submit_push(
+                "tray-b",
+                &serde_json::json!({ "type": "claimed-foreign-tray" })
+            ),
+            crate::event_hub::SubmitOutcome::Enqueued
+        );
+        assert_eq!(
+            source.submit_push(
+                "tray-missing",
+                &serde_json::json!({ "type": "claimed-missing-tray" })
+            ),
+            crate::event_hub::SubmitOutcome::Enqueued
+        );
+        harness.drain();
+
+        assert_eq!(
+            harness.received(session_a).len(),
+            baseline_a,
+            "no foreign-routed frame reaches session A"
+        );
+        assert_eq!(
+            harness.received(session_b).len(),
+            baseline_b,
+            "no foreign-routed frame reaches session B"
+        );
+        assert_eq!(harness.hub.metrics().dropped_stale, 2);
+    }
+
+    /// The response barrier survives unification: command-submitted pushes
+    /// drain only after the command's response frames are written, and a
+    /// wake-driven drain between commands delivers records in order.
+    #[test]
+    fn pushed_events_follow_response_frames_and_survive_interleaving() {
+        let mut harness = Harness::new();
+        let session = harness.open_session();
+        harness.create_app_and_tray(session, "app-a");
+        harness.load_push(session, "app-a");
+
+        let _ = harness.ext_command(session, "app-a", "tray-a");
+        let received = harness.received(session).to_vec();
+        let command_index = received
+            .iter()
+            .position(|frame| matches!(frame, ServerFrame::ExtCommandResult { .. }))
+            .expect("command result");
+        let pushed_index = received
+            .iter()
+            .position(|frame| {
+                matches!(frame, ServerFrame::ExtEvent { data, .. } if data["type"] == "pushed")
+            })
+            .expect("pushed event");
+        assert!(
+            pushed_index > command_index,
+            "hub unification keeps the response barrier: {received:?}"
+        );
+
+        // An asynchronous (port-like) submission between commands is
+        // delivered by the next drain without any command in flight.
+        let source = harness.hub.current_source("app-a", "push").expect("source");
+        assert_eq!(
+            source.submit_push("tray-a", &serde_json::json!({ "type": "idle" })),
+            crate::event_hub::SubmitOutcome::Enqueued
+        );
+        harness.drain();
+        let received = harness.received(session);
+        assert!(
+            received
+                .iter()
+                .any(|frame| matches!(frame, ServerFrame::ExtEvent { data, .. } if data["type"] == "idle")),
+            "idle push delivered without any command: {received:?}"
+        );
+    }
+
+    /// B4 law (D19 final review): a failed reload must leave the previous
+    /// generation current. The loader reserves a fresh generation (PENDING)
+    /// and revokes it when the load fails before its ACK; the still-alive
+    /// old instance's command-time `send_event` keeps delivering instead of
+    /// resolving to the dead new source.
+    #[test]
+    fn failed_reload_keeps_delivering_the_old_generation_send_event() {
+        let mut harness = Harness::new();
+        let session = harness.open_session();
+        harness.create_app_and_tray(session, "app-a");
+        harness.load_push(session, "app-a");
+        let old_generation = harness
+            .hub
+            .current_source("app-a", "push")
+            .expect("open source")
+            .key()
+            .generation;
+
+        // Loader-side failed reload: a fresh generation is reserved and then
+        // revoked before its LoadExt ACK could open it.
+        let failed = harness
+            .hub
+            .reserve_source("app-a".to_string(), "push".to_string())
+            .expect("reserve");
+        assert!(failed.revoke());
+        drop(failed);
+
+        // The current mapping still routes to the old OPEN generation.
+        let current = harness
+            .hub
+            .current_source("app-a", "push")
+            .expect("old generation stays current");
+        assert_eq!(current.key().generation, old_generation);
+        drop(current);
+
+        // The old instance's command-time push still delivers end to end.
+        let frames = harness.ext_command(session, "app-a", "tray-a");
+        assert!(matches!(
+            frames.first(),
+            Some(ServerFrame::ExtCommandResult { .. })
+        ));
+        let received = harness.received(session);
+        assert!(
+            received.iter().any(|frame| matches!(
+                frame,
+                ServerFrame::ExtEvent { data, .. } if data["type"] == "pushed"
+            )),
+            "old instance push still delivers after a failed reload: {received:?}"
+        );
     }
 
     #[test]
@@ -742,10 +1142,7 @@ mod tests {
                 mount_id: None,
             },
         );
-        assert!(matches!(
-            frames.first(),
-            Some(ServerFrame::Error { .. })
-        ));
+        assert!(matches!(frames.first(), Some(ServerFrame::Error { .. })));
 
         let mut written = Vec::new();
         harness.router.deliver(

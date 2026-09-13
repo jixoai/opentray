@@ -907,6 +907,46 @@ pub(super) fn emit_window_state_change(
     Ok(response)
 }
 
+/// D19 batch C producer half of the legacy window-event family: submits one
+/// record through the EventPort, gated on the facade's subscription for that
+/// event name. The wire shape is frozen from the retired drain queue payloads
+/// (`{ "type": event, ...payload }`), so the facade's `data.type === event`
+/// listener filter matches unchanged. Page-bridge delivery
+/// ([`emit_window_event`]) is a separate consumer surface and is NOT handled
+/// here.
+pub(super) fn submit_window_event_push(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    event: &str,
+    payload: &Value,
+) {
+    let (subscribed, tray_id, port_state) = {
+        let state = bridge.borrow();
+        (
+            state.is_window_event_subscribed(event),
+            state.tray_id.clone(),
+            std::sync::Arc::clone(&state.port_state),
+        )
+    };
+    if !subscribed {
+        // No facade listener: no native observation record leaves the
+        // producer (batch C producer-gating law).
+        return;
+    }
+    // B1: the record routes through this bridge's captured instance state —
+    // a later attach for another instance cannot retarget it.
+    match port_state.submit_window_event(&tray_id, event, payload) {
+        crate::event_port::SubmitStatus::LegacyFlush => {
+            // A port-less host is outside the contract-3 lockstep graph; the
+            // drain queue that used to carry this family is retired with the
+            // poll. Report and drop — never silently.
+            eprintln!(
+                "opentray-ext-webview: window event {event} for tray {tray_id} dropped: no event port attached"
+            );
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn emit_visible_change_if_needed(
     bridge: &Rc<RefCell<NavigatorWindowBridge>>,
     window: &Retained<NSWindow>,
@@ -917,10 +957,7 @@ pub(super) fn emit_visible_change_if_needed(
         return Ok(());
     }
     let payload = json!({ "visible": visible });
-    bridge
-        .borrow_mut()
-        .window_events
-        .push_back(super::window_event_payload("visibleChange", &payload));
+    submit_window_event_push(bridge, "visibleChange", &payload);
     emit_window_event(bridge, "visibleChange", payload)
 }
 
@@ -931,8 +968,20 @@ pub(super) fn close_window(
     let was_visible = window_is_visible(window);
     bridge.borrow_mut().app_region_drag.stop();
     window.orderOut(None);
-    emit_window_event(bridge, "closed", json!({ "visible": false }))?;
+    notify_window_closed(bridge)?;
     emit_visible_change_if_needed(bridge, window, was_visible)
+}
+
+/// Programmatic close owns the same direct `closed` push as the delegate
+/// close path (D19 final review B8): submit first (subscription-gated
+/// EventPort record), page-bridge emission stays a separate consumer
+/// surface — the same dual-path shape as the Windows `close_bridge_window`.
+pub(super) fn notify_window_closed(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+) -> Result<(), WebviewRuntimeError> {
+    let payload = json!({ "visible": false });
+    submit_window_event_push(bridge, "closed", &payload);
+    emit_window_event(bridge, "closed", payload)
 }
 
 pub(super) fn parse_set_icon_payload(
@@ -1056,10 +1105,23 @@ pub(super) fn apply_window_style_patch(
     }
     let response = bridge.borrow().style_json()?;
     if changed {
-        emit_window_event(bridge, "stylechange", response.clone())?;
+        notify_style_changed(bridge, &response)?;
         emit_overlay_geometry_change_if_enabled(bridge, window)?;
     }
     Ok(response)
+}
+
+/// D19 final review B7: `stylechange` is a frozen window-family member, so
+/// every native style transition must be an EventPort producer too — the
+/// retired 16 ms poll used to be the only other carrier. Submit first
+/// (subscription-gated, per-instance port captured by the bridge); the
+/// page-bridge emission is a separate consumer surface and stays.
+pub(super) fn notify_style_changed(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    response: &Value,
+) -> Result<(), WebviewRuntimeError> {
+    submit_window_event_push(bridge, "stylechange", response);
+    emit_window_event(bridge, "stylechange", response.clone())
 }
 
 #[derive(Debug, Clone, Copy)]

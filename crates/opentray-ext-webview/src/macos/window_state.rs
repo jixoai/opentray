@@ -40,11 +40,14 @@ pub(super) fn window_state_snapshot(window: &Retained<NSWindow>) -> WindowStateS
     }
 }
 
-pub(super) fn window_is_closed(window: &Retained<NSWindow>) -> bool {
+/// `&NSWindow` (not `&Retained<NSWindow>`) so delegate callbacks that own
+/// only a borrowed window can share the same visibility truth (D19 batch C
+/// push-driven app-mode reconciliation); `&Retained` call sites coerce.
+pub(super) fn window_is_closed(window: &NSWindow) -> bool {
     !window.isVisible()
 }
 
-pub(super) fn window_is_visible(window: &Retained<NSWindow>) -> bool {
+pub(super) fn window_is_visible(window: &NSWindow) -> bool {
     !window_is_closed(window) && !window.isMiniaturized()
 }
 

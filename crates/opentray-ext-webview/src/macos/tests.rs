@@ -20,14 +20,31 @@ use crate::{
 use std::process::Command;
 
 /// Minimal window-level bridge for tests that exercise listener routing,
-/// capabilities, and event emission without AppKit.
+/// capabilities, and event emission without AppKit. Producers route through
+/// a fresh per-instance EventPort state (B1): no port attached unless a test
+/// explicitly installs one.
 fn test_bridge() -> NavigatorWindowBridge {
+    test_bridge_with_port_state(std::sync::Arc::new(
+        crate::event_port::InstancePortState::new(),
+    ))
+}
+
+/// [`test_bridge`] with an explicit per-instance EventPort state (the fake
+/// port fixture hands one out for direct-push tests).
+fn test_bridge_with_port_state(
+    port_state: std::sync::Arc<crate::event_port::InstancePortState>,
+) -> NavigatorWindowBridge {
     NavigatorWindowBridge {
+        tray_id: "tray-1".to_string(),
+        port_state,
         views: Vec::new(),
         content_view: None,
         ipc_messages: VecDeque::new(),
         permission_messages: VecDeque::new(),
-        window_events: VecDeque::new(),
+        window_event_subscriptions: std::collections::HashSet::new(),
+        app_mode_ledger: std::rc::Rc::new(std::cell::RefCell::new(
+            std::collections::HashSet::new(),
+        )),
         next_ipc_message_id: 1,
         next_permission_message_id: 1,
         style: WindowStyleState::default(),
@@ -1593,20 +1610,145 @@ fn emit_window_event_ignores_unlistened_download_events_on_macos() {
 
 #[test]
 fn app_region_drag_interaction_window_event_conserves_native_source() {
-    let bridge = Rc::new(RefCell::new(test_bridge()));
+    let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+    let bridge = Rc::new(RefCell::new(test_bridge_with_port_state(
+        std::sync::Arc::clone(&port.state),
+    )));
 
+    // Unsubscribed: no native observation record leaves the producer, and
+    // the page transport ids stay untouched.
     queue_window_interaction_event(&Rc::downgrade(&bridge), true);
+    assert!(port.submits().is_empty(), "no subscription, no submit");
+    assert_eq!(bridge.borrow().next_ipc_message_id, 1);
+    assert!(bridge.borrow().ipc_messages.is_empty());
 
-    let state = bridge.borrow();
-    assert_eq!(state.next_ipc_message_id, 1);
-    assert!(state.ipc_messages.is_empty());
-    assert_eq!(state.window_events.len(), 1);
-    let message = &state.window_events[0];
+    // Subscribed: one Edge record in the frozen drained wire shape.
+    bridge
+        .borrow_mut()
+        .subscribe_window_events(&["windowinteractionchange".to_string()]);
+    queue_window_interaction_event(&Rc::downgrade(&bridge), false);
+    let submits = port.submits();
+    assert_eq!(submits.len(), 1);
+    assert_eq!(submits[0].tray_id, "tray-1");
+    assert_eq!(submits[0].payload_tag, "windowinteractionchange");
     assert_eq!(
-        message["type"],
-        Value::String("windowinteractionchange".to_string())
+        submits[0].class,
+        opentray_spec::ExtEventClassV1::Edge.as_u32()
     );
-    assert_eq!(message["active"], Value::Bool(true));
+}
+
+#[test]
+fn window_level_focus_and_blur_events_push_only_when_subscribed() {
+    let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+    let bridge = Rc::new(RefCell::new(test_bridge_with_port_state(
+        std::sync::Arc::clone(&port.state),
+    )));
+
+    queue_window_event(&Rc::downgrade(&bridge), "focus", serde_json::json!({}));
+    assert!(port.submits().is_empty(), "focus without a listener is free");
+
+    bridge
+        .borrow_mut()
+        .subscribe_window_events(&["focus".to_string(), "blur".to_string()]);
+    queue_window_event(&Rc::downgrade(&bridge), "focus", serde_json::json!({}));
+    queue_window_event(&Rc::downgrade(&bridge), "blur", serde_json::json!({}));
+    let submits = port.submits();
+    assert_eq!(submits.len(), 2);
+    assert_eq!(
+        submits
+            .iter()
+            .map(|submit| submit.payload_tag.as_str())
+            .collect::<Vec<_>>(),
+        vec!["focus", "blur"]
+    );
+    assert!(submits.iter().all(|submit| submit.tray_id == "tray-1"));
+    assert!(submits
+        .iter()
+        .all(|submit| submit.class == opentray_spec::ExtEventClassV1::Edge.as_u32()));
+
+    // Unsubscribing stops the producer work again (listener accounting).
+    bridge
+        .borrow_mut()
+        .unsubscribe_window_events(&["focus".to_string(), "blur".to_string()]);
+    queue_window_event(&Rc::downgrade(&bridge), "focus", serde_json::json!({}));
+    assert_eq!(port.submits().len(), 2);
+}
+
+#[test]
+fn style_change_notification_pushes_the_window_family_record_when_subscribed() {
+    // D19 final review B7: after the poll retirement, `stylechange` needs a
+    // native EventPort producer on every style transition path; the shared
+    // notify helper is the setStyle and reused-style seam.
+    let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+    let bridge = Rc::new(RefCell::new(test_bridge_with_port_state(
+        std::sync::Arc::clone(&port.state),
+    )));
+
+    // Unsubscribed: no record leaves the producer.
+    super::bridge::notify_style_changed(
+        &bridge,
+        &serde_json::json!({ "frameless": false }),
+    )
+    .expect("stylechange notification succeeds");
+    assert!(port.submits().is_empty(), "no subscription, no submit");
+
+    bridge
+        .borrow_mut()
+        .subscribe_window_events(&["stylechange".to_string()]);
+    super::bridge::notify_style_changed(
+        &bridge,
+        &serde_json::json!({ "frameless": true }),
+    )
+    .expect("stylechange notification succeeds");
+    let submits = port.submits();
+    assert_eq!(submits.len(), 1);
+    assert_eq!(submits[0].tray_id, "tray-1");
+    assert_eq!(submits[0].payload_tag, "stylechange");
+    assert_eq!(
+        submits[0].class,
+        opentray_spec::ExtEventClassV1::Edge.as_u32()
+    );
+}
+
+#[test]
+fn programmatic_close_owns_the_direct_closed_push() {
+    // D19 final review B8: macOS programmatic `close()` must submit the same
+    // subscription-gated `closed` record the delegate close path and the
+    // Windows `close_bridge_window` already carry — not page-bridge only.
+    let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+    let bridge = Rc::new(RefCell::new(test_bridge_with_port_state(
+        std::sync::Arc::clone(&port.state),
+    )));
+
+    super::bridge::notify_window_closed(&bridge).expect("closed notification");
+    assert!(port.submits().is_empty(), "no subscription, no submit");
+
+    bridge
+        .borrow_mut()
+        .subscribe_window_events(&["closed".to_string()]);
+    super::bridge::notify_window_closed(&bridge).expect("closed notification");
+    let submits = port.submits();
+    assert_eq!(submits.len(), 1);
+    assert_eq!(submits[0].tray_id, "tray-1");
+    assert_eq!(submits[0].payload_tag, "closed");
+    assert_eq!(
+        submits[0].class,
+        opentray_spec::ExtEventClassV1::Edge.as_u32()
+    );
+}
+
+#[test]
+fn window_level_events_on_a_portless_host_report_and_drop() {
+    // H0 legacy host: the drain queue is retired with the poll, so a
+    // port-less host (outside the contract-3 lockstep graph) drops the
+    // record after the diagnostic; nothing is queued anywhere.
+    let bridge = Rc::new(RefCell::new(test_bridge()));
+    bridge
+        .borrow_mut()
+        .subscribe_window_events(&["focus".to_string()]);
+    queue_window_event(&Rc::downgrade(&bridge), "focus", serde_json::json!({}));
+    assert!(bridge.borrow().ipc_messages.is_empty());
+    assert!(!bridge.borrow().is_window_event_subscribed("blur"));
 }
 
 #[test]
@@ -1736,7 +1878,12 @@ fn per_view_event_handlers_push_to_outbox_not_the_drain_queue() {
         opentray_spec::webview::WebviewEventKind::UrlChange,
         opentray_spec::webview::WebviewEventKind::TitleChange,
     ]);
-    let outbox = Rc::new(RefCell::new(VecDeque::new()));
+    // Port-less instance state (legacy H0 host): the routing seam must fall
+    // back to the session outbox exactly as before the per-instance split.
+    let outbox: EventOutbox = Rc::new(RefCell::new(SessionEventCore {
+        outbox: VecDeque::new(),
+        port: std::sync::Arc::new(crate::event_port::InstancePortState::new()),
+    }));
     let bridge = Rc::new(RefCell::new(test_bridge()));
 
     // Drive the exact handler bodies the native observers call.
@@ -1744,7 +1891,7 @@ fn per_view_event_handlers_push_to_outbox_not_the_drain_queue() {
     handle_view_title_changed(&events, &Rc::downgrade(&outbox), &owner, "Example");
 
     // Frames landed in the push outbox with the frozen schema.
-    let frames: Vec<_> = outbox.borrow_mut().drain(..).collect();
+    let frames: Vec<_> = outbox.borrow_mut().outbox.drain(..).collect();
     assert_eq!(frames.len(), 2);
     assert_eq!(frames[0].kind, opentray_spec::webview::WebviewEventKind::UrlChange);
     assert_eq!(frames[0].webview_id, "content");
@@ -1753,9 +1900,10 @@ fn per_view_event_handlers_push_to_outbox_not_the_drain_queue() {
     assert_eq!(frames[1].kind, opentray_spec::webview::WebviewEventKind::TitleChange);
     assert!(frames[1].is_coherent());
 
-    // The legacy 16 ms window-event drain queue stays empty: the unified
-    // event family never rides the polling path.
-    assert!(bridge.borrow().window_events.is_empty());
+    // The unified event family never rides a window-level push record:
+    // with no window-event subscription, nothing else leaves the bridge.
+    assert!(!bridge.borrow().is_window_event_subscribed("urlChange"));
+    assert!(!bridge.borrow().is_window_event_subscribed("titleChange"));
 }
 
 #[test]

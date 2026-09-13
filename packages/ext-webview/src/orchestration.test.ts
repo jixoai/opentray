@@ -99,8 +99,10 @@ const defaultRespond = (data: unknown): unknown => {
       return fixture(commandFixtures, "get-webview-title-result returns value and seq");
     case "list-webviews":
       return fixture(commandFixtures, "list-webviews-result");
-    case "drainWindowEvents":
-      return { type: "windowEvents", events: [] };
+    case "subscribeWindowEvents":
+      return { type: "windowEventsSubscribed", events: data.events };
+    case "unsubscribeWindowEvents":
+      return { type: "windowEventsUnsubscribed", events: data.events };
     case "drainIpcMessages":
       return { type: "ipcMessages", messages: [] };
     case "drainPermissionMessages":
@@ -112,11 +114,14 @@ const defaultRespond = (data: unknown): unknown => {
   }
 };
 
-/** Internal legacy poll commands the eventful facade issues on its own. */
+/** Internal commands the eventful facade issues on its own: permission/ipc
+ * polls plus the batch C window-event subscription bookkeeping driven by
+ * listener accounting (including the internal app-reopen MRU listeners). */
 const pollInternalCommands = new Set([
-  "drainWindowEvents",
   "drainIpcMessages",
   "drainPermissionMessages",
+  "subscribeWindowEvents",
+  "unsubscribeWindowEvents",
 ]);
 
 class OrchestrationTransport implements OpenTrayConnection {
@@ -553,12 +558,22 @@ describe("webview orchestration facade", () => {
       payload: { url: "https://fresh.example" },
     });
 
-    // Consumer-side D19 rule: discard events whose seq does not exceed the
-    // queried seq — the facade supplies both halves of the contract.
-    const fresh = events.filter((event) => event.seq > queried.seq);
-    expect(fresh).toEqual([
+    // D19 final review B6: the facade itself owns the discard — the stale
+    // (<= queried seq) frame never reaches the handler, and an equal seq is
+    // dropped too; only the genuinely newer observation is delivered.
+    expect(events).toEqual([
       { windowId: "win-1", webviewId: "content", seq: 42, url: "https://fresh.example" },
     ]);
+    transport.emit({
+      type: "webview-event",
+      owner: OWNER,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "urlChange",
+      seq: 42,
+      payload: { url: "https://duplicate.example" },
+    });
+    expect(events).toHaveLength(1);
   });
 
   it("stops synthesis at disconnect and keeps unlisten safe", async () => {
@@ -586,6 +601,380 @@ describe("webview orchestration facade", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it("resyncs urlChange through the (value, seq) query after a sequence gap and converges", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const child = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const events: { url: string; seq: number }[] = [];
+    child.onUrlChange((event) => events.push(event));
+    await flush();
+    transport.frames.length = 0;
+
+    const emitUrl = (seq: number, url: string): void => {
+      transport.emit({
+        type: "webview-event",
+        owner: OWNER,
+        windowId: "win-1",
+        webviewId: "content",
+        kind: "urlChange",
+        seq,
+        payload: { url },
+      });
+    };
+
+    // Contiguous delivery: no gap, no query.
+    emitUrl(2, "https://example.org/a");
+    expect(events).toEqual([
+      { windowId: "win-1", webviewId: "content", seq: 2, url: "https://example.org/a" },
+    ]);
+    expect(
+      transport.extCommands().filter((data) => data.type === "get-webview-url"),
+    ).toEqual([]);
+
+    // Gap (2 -> 5): the resync query returns a higher observation.
+    transport.respondData = (data) =>
+      isRecord(data) && data.type === "get-webview-url"
+        ? { type: "get-webview-url-result", url: "https://example.org/latest", seq: 7 }
+        : defaultRespond(data);
+    emitUrl(5, "https://example.org/c");
+    await flush();
+
+    expect(transport.extCommands().filter((data) => data.type === "get-webview-url")).toEqual([
+      { owner: OWNER, type: "get-webview-url", windowId: "win-1", webviewId: "content" },
+    ]);
+    expect(events).toEqual([
+      { windowId: "win-1", webviewId: "content", seq: 2, url: "https://example.org/a" },
+      { windowId: "win-1", webviewId: "content", seq: 5, url: "https://example.org/c" },
+      // The higher query observation is delivered as a synthesized push.
+      { windowId: "win-1", webviewId: "content", seq: 7, url: "https://example.org/latest" },
+    ]);
+
+    // Convergence: the frame after the resync is contiguous again — no query.
+    emitUrl(8, "https://example.org/d");
+    await flush();
+    expect(events.at(-1)).toEqual({
+      windowId: "win-1",
+      webviewId: "content",
+      seq: 8,
+      url: "https://example.org/d",
+    });
+    expect(
+      transport.extCommands().filter((data) => data.type === "get-webview-url"),
+    ).toHaveLength(1);
+  });
+
+  it("resyncs titleChange after a gap and coalesces concurrent gaps into one query", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const child = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const events: { title: string; seq: number }[] = [];
+    child.onTitleChange((event) => events.push(event));
+    await flush();
+    transport.frames.length = 0;
+
+    transport.respondData = (data) =>
+      isRecord(data) && data.type === "get-webview-title"
+        ? { type: "get-webview-title-result", title: "Latest Title", seq: 9 }
+        : defaultRespond(data);
+
+    const emitTitle = (seq: number, title: string): void => {
+      transport.emit({
+        type: "webview-event",
+        owner: OWNER,
+        windowId: "win-1",
+        webviewId: "content",
+        kind: "titleChange",
+        seq,
+        payload: { title },
+      });
+    };
+
+    emitTitle(3, "Third");
+    // Two gaps fire back-to-back before the in-flight query resolves; the
+    // second must ride the same single query, not start a second one.
+    emitTitle(6, "Sixth");
+    emitTitle(8, "Eighth");
+    await flush();
+
+    const queries = transport
+      .extCommands()
+      .filter((data) => data.type === "get-webview-title");
+    expect(queries).toHaveLength(1);
+    expect(events).toEqual([
+      { windowId: "win-1", webviewId: "content", seq: 3, title: "Third" },
+      { windowId: "win-1", webviewId: "content", seq: 6, title: "Sixth" },
+      { windowId: "win-1", webviewId: "content", seq: 8, title: "Eighth" },
+      { windowId: "win-1", webviewId: "content", seq: 9, title: "Latest Title" },
+    ]);
+  });
+
+  it("reports a failed resync query once without breaking later delivery", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const child = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const events: { url: string; seq: number }[] = [];
+    child.onUrlChange((event) => events.push(event));
+    await flush();
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      transport.respondData = (data) =>
+        isRecord(data) && data.type === "get-webview-url"
+          ? { type: "webview-ack", owner: OWNER, command: "get-webview-url" }
+          : defaultRespond(data);
+      transport.emit({
+        type: "webview-event",
+        owner: OWNER,
+        windowId: "win-1",
+        webviewId: "content",
+        kind: "urlChange",
+        seq: 2,
+        payload: { url: "https://example.org/baseline" },
+      });
+      transport.emit({
+        type: "webview-event",
+        owner: OWNER,
+        windowId: "win-1",
+        webviewId: "content",
+        kind: "urlChange",
+        seq: 4,
+        payload: { url: "https://example.org/gap" },
+      });
+      await flush();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+
+      // The gap frame itself was delivered; delivery continues afterward.
+      transport.emit({
+        type: "webview-event",
+        owner: OWNER,
+        windowId: "win-1",
+        webviewId: "content",
+        kind: "urlChange",
+        seq: 5,
+        payload: { url: "https://example.org/next" },
+      });
+      expect(events.at(-1)).toEqual({
+        windowId: "win-1",
+        webviewId: "content",
+        seq: 5,
+        url: "https://example.org/next",
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("discards an in-flight resync query result that a newer frame already outranks", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const child = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const events: { url: string; seq: number }[] = [];
+    child.onUrlChange((event) => events.push(event));
+    await flush();
+
+    const emitUrl = (seq: number, url: string): void => {
+      transport.emit({
+        type: "webview-event",
+        owner: OWNER,
+        windowId: "win-1",
+        webviewId: "content",
+        kind: "urlChange",
+        seq,
+        payload: { url },
+      });
+    };
+
+    // Baseline contiguous frame.
+    emitUrl(2, "https://example.org/a");
+    expect(events).toHaveLength(1);
+
+    // D19 final review B6: a gap opens a resync query, but a HIGHER frame
+    // (8) is delivered while the query is still in flight. The query then
+    // resolves with the now-stale observation 7 — it must be discarded at
+    // completion, never injected into the handler stream.
+    transport.respondData = (data) =>
+      isRecord(data) && data.type === "get-webview-url"
+        ? { type: "get-webview-url-result", url: "https://example.org/stale-query", seq: 7 }
+        : defaultRespond(data);
+    emitUrl(5, "https://example.org/gap");
+    emitUrl(8, "https://example.org/higher");
+    await flush();
+    await flush();
+
+    expect(events).toEqual([
+      { windowId: "win-1", webviewId: "content", seq: 2, url: "https://example.org/a" },
+      { windowId: "win-1", webviewId: "content", seq: 5, url: "https://example.org/gap" },
+      { windowId: "win-1", webviewId: "content", seq: 8, url: "https://example.org/higher" },
+    ]);
+    expect(
+      events.some((event) => event.url === "https://example.org/stale-query"),
+    ).toBe(false);
+
+    // The discarded stale query did not poison the counter: the next
+    // contiguous frame still delivers.
+    emitUrl(9, "https://example.org/next");
+    expect(events.at(-1)).toEqual({
+      windowId: "win-1",
+      webviewId: "content",
+      seq: 9,
+      url: "https://example.org/next",
+    });
+  });
+
+  it("never delivers a destroyed view's in-flight resync answer into its re-created id", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+
+    // Park every `get-webview-url` query before the tray handle exists (the
+    // mount machinery captures the connection): the resync query for the OLD
+    // generation resolves only after the view was destroyed and re-created
+    // under the same id.
+    const parkedResolvers: Array<() => void> = [];
+    const originalRequest = transport.request.bind(transport);
+    transport.request = (async (frame) => {
+      if (
+        frame.type === "ext-command" &&
+        isRecord(frame.data) &&
+        frame.data.type === "get-webview-url"
+      ) {
+        return new Promise((resolve) => {
+          parkedResolvers.push(() => {
+            resolve({
+              type: "ext-command-result",
+              requestId: frame.requestId,
+              events: [
+                {
+                  scope: { appId: APP_ID, trayId: TRAY_ID, ext: MOUNT_ID },
+                  data: {
+                    type: "get-webview-url-result",
+                    url: "https://old-generation.example",
+                    seq: 70,
+                  },
+                },
+              ],
+            });
+          });
+        });
+      }
+      return originalRequest(frame);
+    }) as typeof transport.request;
+
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const first = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const firstEvents: { url: string; seq: number }[] = [];
+    first.onUrlChange((event) => firstEvents.push(event));
+    await flush();
+
+    const emitUrl = (seq: number, url: string): void => {
+      transport.emit({
+        type: "webview-event",
+        owner: OWNER,
+        windowId: "win-1",
+        webviewId: "content",
+        kind: "urlChange",
+        seq,
+        payload: { url },
+      });
+    };
+
+    emitUrl(2, "https://example.org/a");
+    emitUrl(5, "https://example.org/gap"); // resync query parks in flight
+    await flush(); // let the query reach the parked transport boundary
+    expect(parkedResolvers).toHaveLength(1);
+    expect(firstEvents).toEqual([
+      { windowId: "win-1", webviewId: "content", seq: 2, url: "https://example.org/a" },
+      { windowId: "win-1", webviewId: "content", seq: 5, url: "https://example.org/gap" },
+    ]);
+
+    await first.destroy();
+    const second = await win.createWebview({ id: "content", url: "https://example.org" });
+    const secondEvents: { url: string; seq: number }[] = [];
+    second.onUrlChange((event) => secondEvents.push(event));
+    await flush();
+
+    // Release the old generation's answer: it must NOT hit the new view.
+    for (const release of parkedResolvers.splice(0)) {
+      release();
+    }
+    await flush();
+    await flush();
+    expect(secondEvents).toEqual([]);
+
+    // The re-created view delivers its own fresh sequence normally.
+    emitUrl(1, "https://example.org/fresh");
+    expect(secondEvents).toEqual([
+      { windowId: "win-1", webviewId: "content", seq: 1, url: "https://example.org/fresh" },
+    ]);
+  });
+
+  it("a re-created webview id starts its sequence observation fresh", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const first = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const events: { url: string; seq: number }[] = [];
+    first.onUrlChange((event) => events.push(event));
+    await flush();
+
+    transport.emit({
+      type: "webview-event",
+      owner: OWNER,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "urlChange",
+      seq: 30,
+      payload: { url: "https://example.org/high" },
+    });
+    expect(events).toHaveLength(1);
+
+    await first.destroy();
+    const second = await win.createWebview({ id: "content", url: "https://example.org" });
+    const secondEvents: { url: string; seq: number }[] = [];
+    second.onUrlChange((event) => secondEvents.push(event));
+    await flush();
+    transport.frames.length = 0;
+
+    // The native ViewEvents of a re-created view restarts at seq 1; the
+    // facade must deliver it (no inherited high-water gap detection).
+    transport.emit({
+      type: "webview-event",
+      owner: OWNER,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "urlChange",
+      seq: 1,
+      payload: { url: "https://example.org/fresh" },
+    });
+    expect(secondEvents).toEqual([
+      { windowId: "win-1", webviewId: "content", seq: 1, url: "https://example.org/fresh" },
+    ]);
+    expect(
+      transport.extCommands().filter((data) => data.type === "get-webview-url"),
+    ).toEqual([]);
   });
 
   it("drops routing for destroyed webviews and windows", async () => {

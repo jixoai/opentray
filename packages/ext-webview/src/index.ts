@@ -602,7 +602,8 @@ export type WebviewCommand =
       id: number;
       result: WebviewPermissionState;
     }
-  | { type: "drainWindowEvents" }
+  | { type: "subscribeWindowEvents"; events: string[] }
+  | { type: "unsubscribeWindowEvents"; events: string[] }
   | { type: "openDevtools" }
   | { type: "closeDevtools" }
   | { type: "isDevtoolsOpen" }
@@ -626,7 +627,6 @@ export type WebviewEvent =
   | { type: "ipcMessages"; messages: WebviewIpcMessage[] }
   | { type: "permissionMessages"; messages: WebviewPermissionIpcMessage[] }
   | { type: "permissionMessageResolved"; id: number }
-  | { type: "windowEvents"; events: WebviewHostWindowEvent[] }
   | { type: "message"; payload: unknown }
   | { type: "positionFallback"; strategy: "cursor" | "platformDefault" };
 
@@ -766,11 +766,25 @@ export class WebviewExtensionLoadError extends Error {
 }
 
 const WEBVIEW_EXTENSION_NAME = "webview";
-const WINDOW_EVENT_POLL_INTERVAL_MS = 16;
-const POLLED_WINDOW_EVENTS = new Set([
+/** Permission-manager drain cadence. This 16 ms interval is deliberately
+ * preserved: permission resolution is a separate request/reply mechanism
+ * (design-reference D19 open-question ruling 8), not part of the retired
+ * window-event polling family. */
+const PERMISSION_POLL_INTERVAL_MS = 16;
+/**
+ * Frozen window-event push family (D19 batch C, contract-3): every member
+ * the retired 16 ms `drainWindowEvents` poll could deliver. Producers push
+ * through the EventPort in the same `{ type, ...payload }` wire shape, and
+ * `listen()` interest drives native `subscribeWindowEvents` /
+ * `unsubscribeWindowEvents` — no facade listener means no native observation
+ * record. The list mirrors the native `WINDOW_EVENT_FAMILY` constant; both
+ * change together under one contract fingerprint.
+ */
+const WINDOW_PUSH_EVENT_FAMILY = new Set([
   "focus",
   "blur",
   "visibleChange",
+  "closed",
   "stylechange",
   "windowinteractionchange",
   "downloadstarted",
@@ -840,10 +854,6 @@ export const attachWebview = (
 
 interface WebviewEndpoint {
   command<TResult = unknown>(command: WebviewCommand): Promise<TResult>;
-  emit<TPayload = unknown>(
-    event: string,
-    payload: WebviewWindowEvent<TPayload>["payload"]
-  ): void;
   listen<TPayload = unknown>(
     event: string,
     handler: (event: WebviewWindowEvent<TPayload>) => void
@@ -877,35 +887,6 @@ const createWebviewEndpoint = (
   tray: TrayHandle,
   context: TrayExtensionContext
 ): WebviewEndpoint => {
-  const localListeners = new Map<
-    string,
-    Set<(event: WebviewWindowEvent<unknown>) => void>
-  >();
-
-  const emit = <TPayload = unknown>(
-    event: string,
-    payload: WebviewWindowEvent<TPayload>["payload"]
-  ): void => {
-    for (const handler of localListeners.get(event) ?? []) {
-      handler({ event, id: 0, payload });
-    }
-  };
-
-  const listenLocal = <TPayload = unknown>(
-    event: string,
-    handler: (event: WebviewWindowEvent<TPayload>) => void
-  ): (() => void) => {
-    const handlers = localListeners.get(event) ?? new Set();
-    handlers.add(handler as (event: WebviewWindowEvent<unknown>) => void);
-    localListeners.set(event, handlers);
-    return () => {
-      handlers.delete(handler as (event: WebviewWindowEvent<unknown>) => void);
-      if (handlers.size === 0) {
-        localListeners.delete(event);
-      }
-    };
-  };
-
   return {
     async command<TResult = unknown>(
       command: WebviewCommand
@@ -934,35 +915,29 @@ const createWebviewEndpoint = (
         handler(envelope.data);
       });
     },
-    emit,
+    // D19 batch C: delivery is push-only — window events arrive as
+    // ext-event frames matched on `data.type`; the retired drain's local
+    // fan-out is gone with the poll.
     listen<TPayload = unknown>(
       event: string,
       handler: (event: WebviewWindowEvent<TPayload>) => void
     ): () => void {
-      const unlistenLocal = listenLocal(event, handler);
       if (!isExtensionEventSourceTray(tray)) {
-        return unlistenLocal;
+        return () => {};
       }
-      const unlistenExtension = tray.listenExtension(
-        context.mountId,
-        (envelope) => {
-          const data = envelope.data;
-          if (!isRecord(data) || data.type !== event) {
-            return;
-          }
-          handler({
-            event,
-            id: 0,
-            payload: eventPayload(data) as Parameters<
-              typeof handler
-            >[0]["payload"],
-          });
+      return tray.listenExtension(context.mountId, (envelope) => {
+        const data = envelope.data;
+        if (!isRecord(data) || data.type !== event) {
+          return;
         }
-      );
-      return () => {
-        unlistenLocal();
-        unlistenExtension();
-      };
+        handler({
+          event,
+          id: 0,
+          payload: eventPayload(data) as Parameters<
+            typeof handler
+          >[0]["payload"],
+        });
+      });
     },
   };
 };
@@ -1054,9 +1029,6 @@ const createWebviewWindowHandle = (
   const orchestration = createWebviewOrchestration(orchestrationPort, orchestrationWindowId);
   let bootstrapped = false;
   const listenerCounts = new Map<string, number>();
-  let windowEventPoll: ReturnType<typeof setInterval> | undefined;
-  let windowEventPollInFlight = false;
-  let windowEventPollFailed = false;
   let permissionPoll: ReturnType<typeof setInterval> | undefined;
   const appReopenRegistration = runtime.appReopen?.register({
     toVisible() {
@@ -1068,59 +1040,30 @@ const createWebviewWindowHandle = (
   });
   let stopAppReopenActivityTracking: (() => void) | undefined;
 
-  const drainWindowEvents = async (): Promise<void> => {
-    const response = await endpoint.command<
-      Extract<WebviewEvent, { type: "windowEvents" }>
-    >({
-      type: "drainWindowEvents",
-    } satisfies WebviewCommand);
-    for (const event of response.events) {
-      const { type, ...payload } = event;
-      endpoint.emit(type, payload);
-    }
+  // D19 batch C: the window-event family is push-only (contract-3). The
+  // facade declares listener interest through the subscription commands;
+  // producers then submit through the EventPort with no polling loop. A
+  // failed subscription is reported once per attempt and never blocks the
+  // listener surface — the events simply do not arrive on a host without
+  // the push family.
+  const sendWindowEventSubscription = (
+    type: "subscribeWindowEvents" | "unsubscribeWindowEvents",
+    event: string
+  ): void => {
+    endpoint
+      .command<void>({ type, events: [event] } satisfies WebviewCommand)
+      .catch((error: unknown) => {
+        console.error(
+          `WebView window event ${type} failed for ${event}:`,
+          error
+        );
+      });
   };
 
-  const stopWindowEventPoll = (): void => {
-    if (windowEventPoll === undefined) {
-      return;
+  const resubscribeWindowEvents = (): void => {
+    for (const event of listenerCounts.keys()) {
+      sendWindowEventSubscription("subscribeWindowEvents", event);
     }
-    clearInterval(windowEventPoll);
-    windowEventPoll = undefined;
-  };
-
-  const pollWindowEvents = async (): Promise<void> => {
-    if (windowEventPollInFlight || windowEventPollFailed) {
-      return;
-    }
-    windowEventPollInFlight = true;
-    try {
-      await drainWindowEvents();
-    } catch (error: unknown) {
-      if (!windowEventPollFailed) {
-        windowEventPollFailed = true;
-        stopWindowEventPoll();
-        console.error("WebView window event polling failed:", error);
-      }
-    } finally {
-      windowEventPollInFlight = false;
-    }
-  };
-
-  const startWindowEventPoll = (): void => {
-    if (windowEventPoll !== undefined || windowEventPollFailed) {
-      return;
-    }
-    void pollWindowEvents();
-    windowEventPoll = setInterval(() => {
-      void pollWindowEvents();
-    }, WINDOW_EVENT_POLL_INTERVAL_MS);
-  };
-
-  const stopWindowEventPollIfIdle = (): void => {
-    if (listenerCounts.size > 0) {
-      return;
-    }
-    stopWindowEventPoll();
   };
 
   const drainPermissionMessages = async (): Promise<
@@ -1155,7 +1098,7 @@ const createWebviewWindowHandle = (
         void resolvePermissionMessages().catch((error: unknown) => {
           console.error("WebView permission manager failed:", error);
         });
-      }, WINDOW_EVENT_POLL_INTERVAL_MS);
+      }, PERMISSION_POLL_INTERVAL_MS);
     }
     return () => {
       if (permissionPoll === undefined) {
@@ -1170,9 +1113,13 @@ const createWebviewWindowHandle = (
     event: string,
     unlisten: () => void
   ): (() => void) => {
-    if (POLLED_WINDOW_EVENTS.has(event)) {
-      listenerCounts.set(event, (listenerCounts.get(event) ?? 0) + 1);
-      startWindowEventPoll();
+    if (!WINDOW_PUSH_EVENT_FAMILY.has(event)) {
+      return unlisten;
+    }
+    const count = (listenerCounts.get(event) ?? 0) + 1;
+    listenerCounts.set(event, count);
+    if (count === 1) {
+      sendWindowEventSubscription("subscribeWindowEvents", event);
     }
     let active = true;
     return () => {
@@ -1180,16 +1127,14 @@ const createWebviewWindowHandle = (
         return;
       }
       active = false;
-      if (POLLED_WINDOW_EVENTS.has(event)) {
-        const count = listenerCounts.get(event) ?? 0;
-        if (count <= 1) {
-          listenerCounts.delete(event);
-        } else {
-          listenerCounts.set(event, count - 1);
-        }
+      const remaining = (listenerCounts.get(event) ?? 1) - 1;
+      if (remaining <= 0) {
+        listenerCounts.delete(event);
+        sendWindowEventSubscription("unsubscribeWindowEvents", event);
+      } else {
+        listenerCounts.set(event, remaining);
       }
       unlisten();
-      stopWindowEventPollIfIdle();
     };
   };
 
@@ -1275,6 +1220,9 @@ const createWebviewWindowHandle = (
       if (!wasBootstrapped) {
         const initialStyle = command.style ?? options.style;
         appReopenRegistration?.setAppMode(initialStyle?.appMode ?? false);
+        // Listeners registered before the native session existed could not
+        // subscribe; the first successful show heals their declarations.
+        resubscribeWindowEvents();
       } else if (command.style !== undefined) {
         appReopenRegistration?.setAppMode(command.style.appMode ?? false);
       }
@@ -1321,8 +1269,9 @@ const createWebviewWindowHandle = (
       return endpoint.command<void>({ type: "close" } satisfies WebviewCommand);
     },
     async destroy() {
-      // Stop the internal MRU listeners before native session cleanup. The
-      // event drain loop must never race a broker-side destroy response.
+      // Stop the internal MRU listeners before native session cleanup: their
+      // unsubscribe declarations must reach the live session so no producer
+      // keeps pushing for this facade after the destroy response.
       stopAppReopenActivityTracking?.();
       await endpoint.command<void>({
         type: "destroy",
