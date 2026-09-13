@@ -100,7 +100,7 @@ use self::metadata::{
     DEFAULT_WINDOW_TITLE,
 };
 use self::overlay::emit_overlay_geometry_change_if_enabled;
-use self::popups::{new_window_handler, SharedPopupLedger};
+use self::popups::{new_window_handler, PopupOpenConfig, SharedPopupLedger};
 use self::policy::{resolve_page_access, update_page_access_for_url};
 use self::screen::screen_details_json;
 use self::style::{
@@ -1670,11 +1670,16 @@ impl MacosWebviewRuntime {
             .with_download_completed_handler(|_, _, _| {})
             // D26: new-window intents (a[target], window.open, middle-click,
             // the context menu entry) open an auxiliary popup owned by this
-            // window session's owner tuple.
+            // window session's owner tuple. P1-1: the resolved popup policy
+            // flows through one PopupOpenConfig (future popup configurability
+            // — e.g. toolbar-carrier inheritance — projects there, never into
+            // loose captures).
             .with_new_window_req_handler(new_window_handler(
                 &self.popups,
                 window_owner,
-                session.show_settings.window.devtools,
+                PopupOpenConfig {
+                    devtools: session.show_settings.window.devtools,
+                },
             ))
             .with_devtools(session.show_settings.window.devtools)
             .with_transparent(true);
@@ -2299,11 +2304,14 @@ impl MacosWebviewRuntime {
             .with_download_started_handler(|_, _| true)
             .with_download_completed_handler(|_, _, _| {})
             // D26: the primary webview routes new-window intents into
-            // session-owned auxiliary popups like every other webview.
+            // session-owned auxiliary popups like every other webview (P1-1:
+            // one resolved PopupOpenConfig per session).
             .with_new_window_req_handler(new_window_handler(
                 popups,
                 owner,
-                show_settings.window.devtools,
+                PopupOpenConfig {
+                    devtools: show_settings.window.devtools,
+                },
             ))
             .with_devtools(show_settings.window.devtools)
             // `style.background` is mutable after the WebView is created. Keep WKWebView

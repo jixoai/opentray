@@ -53,17 +53,30 @@ impl Drop for PopupWindow {
 /// session webview's new-window handler through a `Weak` handle.
 pub(super) type SharedPopupLedger = Rc<RefCell<PopupLedger<PopupWindow>>>;
 
+/// Popup materialization policy for one opening window session (P1-1
+/// structurization, 2026-09-14 walkthrough). v1 resolves exactly the
+/// inherited facts: `devtools` follows the opener session's window setting.
+/// Future popup configurability — e.g. inheriting the application's
+/// `window.toolbar` carrier instead of the plain single-webview popup —
+/// projects HERE: the `new_window_handler` resolves one config per session
+/// and every popup field flows through it, never through loose closure
+/// captures. Defaults MUST keep today's plain-popup behavior.
+#[derive(Clone, Copy)]
+pub(super) struct PopupOpenConfig {
+    pub(super) devtools: bool,
+}
+
 /// The new-window handler closure installed on every session webview. The
 /// `Weak` ledger handle denies orphan popups once the runtime is gone.
 pub(super) fn new_window_handler(
     ledger: &SharedPopupLedger,
     owner: &WindowOwner,
-    devtools: bool,
+    config: PopupOpenConfig,
 ) -> impl Fn(String, NewWindowFeatures) -> NewWindowResponse + 'static {
     let ledger = Rc::downgrade(ledger);
     let owner = owner.clone();
     move |url, features| match ledger.upgrade() {
-        Some(ledger) => match open_popup(&url, features, &ledger, &owner, devtools) {
+        Some(ledger) => match open_popup(&url, features, &ledger, &owner, config) {
             Ok(webview) => NewWindowResponse::Create { webview },
             Err(error) => {
                 eprintln!("opentray-ext-webview popup open failed for {url}: {error}");
@@ -82,7 +95,7 @@ fn open_popup(
     features: NewWindowFeatures,
     ledger: &SharedPopupLedger,
     owner: &WindowOwner,
-    devtools: bool,
+    config: PopupOpenConfig,
 ) -> Result<Retained<WKWebView>, WebviewRuntimeError> {
     let mtm = objc2::MainThreadMarker::new().ok_or_else(|| {
         WebviewRuntimeError::Unsupported("webview runtime requires the main thread".into())
@@ -137,14 +150,14 @@ fn open_popup(
         })
         .with_download_started_handler(|_, _| true)
         .with_download_completed_handler(|_, _, _| {})
-        .with_devtools(devtools)
+        .with_devtools(config.devtools)
         .with_transparent(true)
         // Popups are plain webviews: no bridge policy, no ipc surface, no
         // initial content of their own — WebKit loads the navigation
         // request into the returned view. Nested new-window intents route
         // through the same handler, so popups of popups stay owned by the
         // same session.
-        .with_new_window_req_handler(new_window_handler(ledger, owner, devtools))
+        .with_new_window_req_handler(new_window_handler(ledger, owner, config))
         .with_bounds(WryRect {
             position: LogicalPosition::new(0.0, 0.0).into(),
             size: LogicalSize::new(width, height).into(),

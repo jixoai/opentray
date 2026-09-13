@@ -182,6 +182,19 @@ fn detach_popup_slot(hwnd: HWND) {
     });
 }
 
+/// Popup materialization policy resolved once per opening session (P1-1
+/// structurization, 2026-09-14 walkthrough). v1 carries the opener-session
+/// facts the plain popup needs: the owning extension session id and the
+/// opener host HWND (DPI context + popup ownership). Future popup
+/// configurability — e.g. inheriting the application's `window.toolbar`
+/// carrier instead of the plain single-controller popup — projects HERE:
+/// one resolved config per session, never loose handler captures. Defaults
+/// MUST keep today's plain-popup behavior.
+pub(crate) struct PopupOpenContext {
+    pub(crate) session_id: String,
+    pub(crate) opener_hwnd: HWND,
+}
+
 /// Opens one auxiliary popup for a new-window navigation intent.
 ///
 /// The popup window is sized from the request's window features when
@@ -194,10 +207,10 @@ fn detach_popup_slot(hwnd: HWND) {
 /// into the popup as a top-level context.
 pub(crate) fn spawn_popup(
     tracker: &Rc<RefCell<PopupTracker>>,
-    session_id: &str,
-    opener_hwnd: HWND,
+    context: &PopupOpenContext,
     features: &NewWindowFeatures,
 ) -> Result<ICoreWebView2, WebviewRuntimeError> {
+    let opener_hwnd = context.opener_hwnd;
     let scale = window_scale(opener_hwnd);
     let (logical_width, logical_height) = features
         .size
@@ -270,7 +283,7 @@ pub(crate) fn spawn_popup(
     });
     tracker.borrow_mut().popups.push(PopupEntry {
         id: entry_id,
-        session_id: session_id.to_string(),
+        session_id: context.session_id.clone(),
         native: Some(PopupNative { webview, hwnd }),
     });
     unsafe {

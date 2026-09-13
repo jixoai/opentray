@@ -1452,11 +1452,16 @@ impl super::WindowsWebviewRuntime {
         let devtools = session.show_settings.window.devtools;
         let host_window: &Win32HostWindow = &session.window;
         let event_core = Rc::downgrade(&session.event_core);
-        let popup_session = window_owner
-            .session_id
-            .clone()
-            .unwrap_or_default();
-        let popup_opener_hwnd = host_window.hwnd;
+        // P1-1 structurization: one resolved popup policy per session. Future
+        // popup configurability (e.g. window.toolbar carrier inheritance)
+        // projects through PopupOpenContext, never loose captures here.
+        let popup_context = super::popups::PopupOpenContext {
+            session_id: window_owner
+                .session_id
+                .clone()
+                .unwrap_or_default(),
+            opener_hwnd: host_window.hwnd,
+        };
 
         // Browser options (per-webview): Windows' WebView2 default UA is
         // already a full Edge UA, so browserlike shaping is a no-op here —
@@ -1524,12 +1529,7 @@ impl super::WindowsWebviewRuntime {
                 let Some(tracker) = popup_tracker.upgrade() else {
                     return wry::NewWindowResponse::Deny;
                 };
-                match super::popups::spawn_popup(
-                    &tracker,
-                    &popup_session,
-                    popup_opener_hwnd,
-                    &features,
-                ) {
+                match super::popups::spawn_popup(&tracker, &popup_context, &features) {
                     Ok(core) => wry::NewWindowResponse::Create { webview: core },
                     Err(error) => {
                         eprintln!("opentray-ext-webview popup open failed: {error}");

@@ -2464,21 +2464,20 @@ fn build_webview(
         // primary webview (a[target], window.open, middle-click,
         // context-menu "open in new window") is handled by opening a
         // plain popup window sharing this session's WebView2 environment;
-        // never delegated to an external browser.
+        // never delegated to an external browser. P1-1: one resolved
+        // PopupOpenContext per session (future popup configurability — e.g.
+        // window.toolbar carrier inheritance — projects there).
         .with_new_window_req_handler({
             let popup_tracker = std::rc::Weak::clone(popups);
-            let popup_session = owner.session_id.clone().unwrap_or_default();
-            let popup_opener_hwnd = bridge.borrow().hwnd;
+            let popup_context = self::popups::PopupOpenContext {
+                session_id: owner.session_id.clone().unwrap_or_default(),
+                opener_hwnd: bridge.borrow().hwnd,
+            };
             move |_uri, features| {
                 let Some(tracker) = popup_tracker.upgrade() else {
                     return wry::NewWindowResponse::Deny;
                 };
-                match self::popups::spawn_popup(
-                    &tracker,
-                    &popup_session,
-                    popup_opener_hwnd,
-                    &features,
-                ) {
+                match self::popups::spawn_popup(&tracker, &popup_context, &features) {
                     Ok(core) => wry::NewWindowResponse::Create { webview: core },
                     Err(error) => {
                         eprintln!("opentray-ext-webview popup open failed: {error}");
