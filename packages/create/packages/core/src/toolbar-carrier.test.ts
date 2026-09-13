@@ -5,6 +5,9 @@
 // command toolbar, plain direct/command) plus the shell server.
 // The second block (8.5) executes the carrier source itself against fakes
 // and freezes the D24 loadState forwarding shape over the channel.
+// The third block (P1-3, 2026-09-14 walkthrough) freezes the channel
+// self-heal contract: debounced rebuild on close, command-surface reinstall,
+// address-bar re-seed, and never a rebuild after stop().
 import { execFile } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,7 +15,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { toolbarCarrierSource } from "./toolbar-carrier";
 import { writeScaffold, type ScaffoldAppConfig } from "./scaffold";
@@ -84,21 +87,26 @@ describe("generated entry syntax (toolbar carrier embed)", () => {
   });
 });
 
-describe("toolbar carrier loadState forwarding (D24, task 8.5)", () => {
-  /** Materialize the carrier source as a real module and import it. The
-   *  embedding templates supply `column`/`fixed`/`grow` beside the carrier
-   *  (the carrier deliberately imports nothing) — stub them here. */
-  const loadCarrier = async (): Promise<(shell: unknown, options: unknown) => Promise<unknown>> => {
-    const dir = await mkdtemp(join(tmpdir(), "p85-carrier-"));
-    const file = join(dir, "carrier.mjs");
-    const prelude = "const column = (rows) => rows; const fixed = () => {}; const grow = () => {};\n";
-    await writeFile(file, `${prelude}${toolbarCarrierSource()}\nexport { attachToolbarCarrier };\n`, "utf8");
-    const module = await import(pathToFileURL(file).href);
-    return module.attachToolbarCarrier;
-  };
+/** Materialize the carrier source as a real module and import it. The
+ *  embedding templates supply `column`/`fixed`/`grow` beside the carrier
+ *  (the carrier deliberately imports nothing) — stub them here. */
+const loadCarrier = async (): Promise<{
+  attachToolbarCarrier: (
+    shell: Record<string, unknown>,
+    options: Record<string, unknown>,
+  ) => Promise<{ content: unknown; stop: () => void }>;
+}> => {
+  const dir = await mkdtemp(join(tmpdir(), "p85-carrier-"));
+  const file = join(dir, "carrier.mjs");
+  const prelude = "const column = (rows) => rows; const fixed = () => {}; const grow = () => {};\n";
+  await writeFile(file, `${prelude}${toolbarCarrierSource()}\nexport { attachToolbarCarrier };\n`, "utf8");
+  const module = await import(pathToFileURL(file).href);
+  return module;
+};
 
+describe("toolbar carrier loadState forwarding (D24, task 8.5)", () => {
   it("forwards content loadState pushes verbatim as {kind:load-state} channel frames", async () => {
-    const attachToolbarCarrier = await loadCarrier();
+    const { attachToolbarCarrier } = await loadCarrier();
     const posts: unknown[] = [];
     const loadHandlers: ((event: Record<string, unknown>) => void)[] = [];
     const shell = {
@@ -119,6 +127,8 @@ describe("toolbar carrier loadState forwarding (D24, task 8.5)", () => {
           posts.push(payload);
         },
         onMessage: () => () => {},
+        onClose: () => () => {},
+        destroy: async () => {},
       }),
       show: async () => {},
     };
@@ -164,5 +174,181 @@ describe("toolbar carrier loadState forwarding (D24, task 8.5)", () => {
       url: "https://example.com/other",
       errorCode: -999,
     });
+  });
+});
+
+describe("toolbar carrier channel self-heal (P1-3)", () => {
+  /** Fake shell whose message channels are recorded endpoints: each
+   *  createMessageChannel call mints a new endpoint that records posts,
+   *  captures its single onMessage/onClose handler, and records destroy. */
+  const mount = () => {
+    const endpoints: {
+      posts: unknown[];
+      messageHandler: ((payload: unknown) => void) | null;
+      closeHandler: ((notice: unknown) => void) | null;
+      destroyed: boolean;
+    }[] = [];
+    const contentCommands: { navigate: string[]; back: number; forward: number } = {
+      navigate: [],
+      back: 0,
+      forward: 0,
+    };
+    const log: string[] = [];
+    const shell = {
+      createWebview: async (spec: { id: string }) => ({
+        onUrlChange: () => {},
+        onTitleChange: () => {},
+        onLoadState: () => {},
+        getUrl: async () => ({ url: `https://example.com/${endpoints.length}`, seq: 1 }),
+        navigate: async (url: string) => {
+          if (spec.id === "content") contentCommands.navigate.push(url);
+        },
+        back: async () => {
+          contentCommands.back += 1;
+        },
+        forward: async () => {
+          contentCommands.forward += 1;
+        },
+      }),
+      setLayout: async () => {},
+      createMessageChannel: vi.fn(async () => {
+        const endpoint = {
+          posts: [] as unknown[],
+          messageHandler: null as ((payload: unknown) => void) | null,
+          closeHandler: null as ((notice: unknown) => void) | null,
+          destroyed: false,
+        };
+        endpoints.push(endpoint);
+        return {
+          post: async (payload: unknown) => {
+            endpoint.posts.push(payload);
+          },
+          onMessage: (handler: (payload: unknown) => void) => {
+            endpoint.messageHandler = handler;
+            return () => {};
+          },
+          onClose: (handler: (notice: unknown) => void) => {
+            endpoint.closeHandler = handler;
+            return () => {};
+          },
+          destroy: async () => {
+            endpoint.destroyed = true;
+          },
+        };
+      }),
+      show: async () => {},
+    };
+    return { shell, endpoints, contentCommands, log };
+  };
+
+  it("rebuilds after a debounced close: new channel, reinstalled surface, re-seeded address bar, old tombstone destroyed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { attachToolbarCarrier } = await loadCarrier();
+      const { shell, endpoints, contentCommands } = mount();
+      const carrier = await attachToolbarCarrier(shell, {
+        toolbarUrl: "http://127.0.0.1:1/toolbar.html",
+        contentUrl: "https://example.com/start",
+        titleFollows: false,
+        log: async (message: string) => message,
+      });
+      expect(shell.createMessageChannel).toHaveBeenCalledTimes(1);
+      // Seed landed on the first channel (the getUrl fake reports the live
+      // endpoint count — 1 right after the first channel was minted).
+      await vi.advanceTimersByTimeAsync(0);
+      expect(endpoints[0]!.posts).toContainEqual({ kind: "url", url: "https://example.com/1" });
+
+      // A document death (reload) closes the current channel.
+      endpoints[0]!.closeHandler!({ reason: "document_navigated" });
+      // Debounce: no rebuild before the window elapses.
+      await vi.advanceTimersByTimeAsync(150);
+      expect(shell.createMessageChannel).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(200);
+      expect(shell.createMessageChannel).toHaveBeenCalledTimes(2);
+      // Old endpoint's state was destroyed (tombstone cleanup).
+      expect(endpoints[0]!.destroyed).toBe(true);
+      // The rebuilt channel re-seeded the address bar...
+      await vi.advanceTimersByTimeAsync(0);
+      expect(endpoints[1]!.posts).toContainEqual({ kind: "url", url: "https://example.com/2" });
+      // ...and got the full command surface reinstalled.
+      expect(endpoints[1]!.messageHandler).not.toBeNull();
+      endpoints[1]!.messageHandler!({ kind: "navigate", url: "https://example.com/next" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(contentCommands.navigate).toContain("https://example.com/next");
+
+      carrier.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("collapses a close burst into exactly one rebuild", async () => {
+    vi.useFakeTimers();
+    try {
+      const { attachToolbarCarrier } = await loadCarrier();
+      const { shell, endpoints } = mount();
+      const carrier = await attachToolbarCarrier(shell, {
+        toolbarUrl: "http://127.0.0.1:1/toolbar.html",
+        contentUrl: "https://example.com/start",
+        titleFollows: false,
+        log: async (message: string) => message,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      endpoints[0]!.closeHandler!({ reason: "document_navigated" });
+      endpoints[0]!.closeHandler!({ reason: "document_navigated" });
+      await vi.advanceTimersByTimeAsync(50);
+      endpoints[0]!.closeHandler!({ reason: "queue_overflow" });
+      await vi.advanceTimersByTimeAsync(500);
+      expect(shell.createMessageChannel).toHaveBeenCalledTimes(2);
+
+      carrier.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never rebuilds after stop() — teardown closes stay final", async () => {
+    vi.useFakeTimers();
+    try {
+      const { attachToolbarCarrier } = await loadCarrier();
+      const { shell, endpoints } = mount();
+      const carrier = await attachToolbarCarrier(shell, {
+        toolbarUrl: "http://127.0.0.1:1/toolbar.html",
+        contentUrl: "https://example.com/start",
+        titleFollows: false,
+        log: async (message: string) => message,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      carrier.stop();
+      // Window teardown closes the channel AFTER stop(): no rebuild, ever.
+      endpoints[0]!.closeHandler!({ reason: "window_destroyed" });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(shell.createMessageChannel).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stop() cancels an already-armed rebuild timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const { attachToolbarCarrier } = await loadCarrier();
+      const { shell, endpoints } = mount();
+      const carrier = await attachToolbarCarrier(shell, {
+        toolbarUrl: "http://127.0.0.1:1/toolbar.html",
+        contentUrl: "https://example.com/start",
+        titleFollows: false,
+        log: async (message: string) => message,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      // Close arms the timer, then teardown stops the carrier mid-window.
+      endpoints[0]!.closeHandler!({ reason: "document_navigated" });
+      carrier.stop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(shell.createMessageChannel).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

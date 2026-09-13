@@ -165,12 +165,16 @@ ${toolbarCarrierSource()}const main = async () => {
 
   let content = null;
   if (toolbarReady) {
-    ({ content } = await attachToolbarCarrier(window, {
+    const carrier = await attachToolbarCarrier(window, {
       toolbarUrl: \`http://127.0.0.1:\${shellPort}/toolbar.html\`,
       contentUrl: config.url,
       titleFollows,
       log: logNote,
-    }));
+    });
+    ({ content } = carrier);
+    // P1-3 exit race: teardown closes the channel; the carrier must never
+    // rebuild against a dying session. Stop before the window goes down.
+    process.once("exit", carrier.stop);
   }
 
   // Tray reload (D11): toolbar mode reloads the CONTENT webview natively

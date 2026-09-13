@@ -324,12 +324,15 @@ const main = async () => {
         ...devtools,
       });
       await win.show().catch(() => {});
-      await attachToolbarCarrier(win, {
+      const carrier = await attachToolbarCarrier(win, {
         toolbarUrl: \`http://127.0.0.1:\${shellPort}/toolbar.html\`,
         contentUrl: direct,
         titleFollows,
         log: logNote,
       });
+      // P1-3 exit race: teardown closes the channel; the carrier must never
+      // rebuild against a dying session. Stop before the window goes down.
+      process.once("exit", carrier.stop);
       serviceWindows.set(port, { win, detached: false });
       return;
     }
