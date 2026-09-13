@@ -401,7 +401,18 @@ export const createWebviewOrchestration = (
   // titleChange subscribers then re-read state through the frozen
   // `(value, seq)` query pair and converge on the higher sequence.
   const lastViewSeq = new Map<WebviewId, number>();
+  // D19 final review B6: the DELIVERED high-water per (view, kind). The
+  // shared counter above is the native authority for gap detection; the
+  // discard rule is per kind — each kind's stream is monotonic (a
+  // subsequence of the shared native counter), while interleaving kinds
+  // legitimately arrive out of shared order.
+  const deliveredKindSeq = new Map<string, number>();
   const resyncInFlight = new Set<string>();
+  // D19 final review B6: view lifecycle generations. A destroyed webview's
+  // in-flight resync query must never deliver into a re-created view that
+  // happens to reuse the id (its native ViewEvents restarts at seq 1, so
+  // the old query's higher seq would otherwise look authoritative).
+  const viewGenerations = new Map<WebviewId, number>();
 
   /** Observes one wire frame's seq; returns the previous observed seq. */
   const observeSeq = (webviewId: WebviewId, seq: number): number | undefined => {
@@ -412,11 +423,39 @@ export const createWebviewOrchestration = (
     return previous;
   };
 
+  const kindSeqKey = (webviewId: WebviewId, kind: WebviewEventKind): string =>
+    `${kind}:${webviewId}`;
+
+  /**
+   * Observes one delivered (view, kind) seq; returns the previously
+   * delivered seq of that kind, or undefined when this is the kind's first
+   * delivery for the view.
+   */
+  const observeKindSeq = (
+    webviewId: WebviewId,
+    kind: WebviewEventKind,
+    seq: number,
+  ): number | undefined => {
+    const key = kindSeqKey(webviewId, kind);
+    const previous = deliveredKindSeq.get(key);
+    if (previous === undefined || seq > previous) {
+      deliveredKindSeq.set(key, seq);
+    }
+    return previous;
+  };
+
   /**
    * Sequence-gap repair for the two Latest-class kinds: queries the current
    * `(value, seq)` and, when the query outranks the delivered frame,
    * delivers the higher observation to the view's handlers. Fire-and-forget
    * observability matches the subscribe frames' transport-failure rule.
+   *
+   * Completion re-checks (D19 final review B6): the query result is
+   * discarded unless it still outranks the view's CURRENT high-water (a
+   * higher frame may have arrived while the query was in flight — its
+   * result would then be a stale lower observation) and the view's
+   * lifecycle generation still matches the one the query was issued for
+   * (destroy/recreate must not adopt an old generation's answer).
    */
   const resyncAfterGap = (
     webviewId: WebviewId,
@@ -428,6 +467,7 @@ export const createWebviewOrchestration = (
       return;
     }
     resyncInFlight.add(inflightKey);
+    const generation = viewGenerations.get(webviewId) ?? 0;
     const isUrl = kind === "urlChange";
     void expectResult(
       {
@@ -439,11 +479,24 @@ export const createWebviewOrchestration = (
       isUrl ? "get-webview-url-result" : "get-webview-title-result",
     )
       .then((result) => {
+        if ((viewGenerations.get(webviewId) ?? 0) !== generation) {
+          // The view this query was issued for is gone (destroyed and
+          // possibly re-created under the same id); its answer must not
+          // reach the new view's handlers.
+          return;
+        }
         const querySeq = Number(result.seq);
-        if (!Number.isFinite(querySeq) || querySeq <= deliveredSeq) {
+        const kind = isUrl ? "urlChange" : "titleChange";
+        const currentKindHighWater = deliveredKindSeq.get(kindSeqKey(webviewId, kind));
+        if (
+          !Number.isFinite(querySeq) ||
+          querySeq <= deliveredSeq ||
+          (currentKindHighWater !== undefined && querySeq <= currentKindHighWater)
+        ) {
           return;
         }
         observeSeq(webviewId, querySeq);
+        observeKindSeq(webviewId, kind, querySeq);
         if (isUrl) {
           const set = urlChangeHandlers.get(webviewId);
           if (set !== undefined) {
@@ -526,6 +579,15 @@ export const createWebviewOrchestration = (
     // re-created id must not inherit a stale high-water mark (its native
     // ViewEvents restarts at seq 1).
     lastViewSeq.delete(webviewId);
+    for (const key of [...deliveredKindSeq.keys()]) {
+      if (key.endsWith(`:${webviewId}`)) {
+        deliveredKindSeq.delete(key);
+      }
+    }
+    // D19 final review B6: bump the lifecycle generation so an in-flight
+    // resync query issued for the destroyed view cannot deliver into a
+    // re-created view under the same id.
+    viewGenerations.set(webviewId, (viewGenerations.get(webviewId) ?? 0) + 1);
     for (const key of [...resyncInFlight]) {
       if (key.endsWith(`:${webviewId}`)) {
         resyncInFlight.delete(key);
@@ -547,6 +609,15 @@ export const createWebviewOrchestration = (
       return;
     }
     const previousSeq = observeSeq(frame.webviewId, frame.seq);
+    // D19 final review B6: stale frames are discarded at the entry, before
+    // any handler runs. Within one (view, kind) stream a record whose seq
+    // does not exceed the delivered high-water is an older observation the
+    // transport reordered or a duplicate the coalescing window emitted —
+    // never new truth. Other kinds keep their own monotonic streams.
+    const previousKindSeq = observeKindSeq(frame.webviewId, frame.kind, frame.seq);
+    if (previousKindSeq !== undefined && frame.seq <= previousKindSeq) {
+      return;
+    }
     const identity = {
       windowId: frame.windowId,
       webviewId: frame.webviewId,
@@ -795,7 +866,16 @@ export const createWebviewOrchestration = (
         { owner, type: "get-webview-url", windowId, webviewId } as WebviewOrchestrationCommandFrame,
         "get-webview-url-result",
       );
-      return { url: String(result.url), seq: Number(result.seq) };
+      const seq = Number(result.seq);
+      // D19 final review B6: a successful (value, seq) query is itself a
+      // sequence observation — the native counter is at least at `seq`, so
+      // a later-arriving frame at or below it is stale and dropped at the
+      // delivery entry (the subscription-race contract the facade owns).
+      if (Number.isFinite(seq)) {
+        observeSeq(webviewId, seq);
+        observeKindSeq(webviewId, "urlChange", seq);
+      }
+      return { url: String(result.url), seq };
     },
     async getTitle(): Promise<WebviewTitleQueryResult> {
       const result = await expectResult(
@@ -807,7 +887,12 @@ export const createWebviewOrchestration = (
         } as WebviewOrchestrationCommandFrame,
         "get-webview-title-result",
       );
-      return { title: String(result.title), seq: Number(result.seq) };
+      const seq = Number(result.seq);
+      if (Number.isFinite(seq)) {
+        observeSeq(webviewId, seq);
+        observeKindSeq(webviewId, "titleChange", seq);
+      }
+      return { title: String(result.title), seq };
     },
     onUrlChange(handler: UrlChangeHandler): () => void {
       return addViewListener(urlChangeHandlers, webviewId, "urlChange", handler);
