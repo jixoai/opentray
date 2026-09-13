@@ -15,6 +15,7 @@
 mod app_menu;
 mod box_view;
 mod bridge;
+mod context_menu;
 mod demo_html;
 mod downloads;
 mod drag;
@@ -1739,6 +1740,17 @@ impl MacosWebviewRuntime {
                 .build_as_child(&host_view)
                 .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?,
         );
+        // Contract-5 (P1-4): trusted shell UI never shows the engine's
+        // native context menu. Default resolution keys off the bridge
+        // surface (any capability ⇒ no menu); an explicit contextMenu value
+        // wins either way.
+        if !browser_options.context_menu(policy.has_bridge_surface()) {
+            // SAFETY: the wry-built view is a live main-thread WKWebView
+            // subclass; the menu-less subclass adds no ivars (module docs).
+            unsafe {
+                context_menu::suppress_native_context_menu(&webview.webview());
+            }
+        }
         let download_delegate = if session.show_settings.download.enabled {
             Some(install_download_navigation_delegate(webview.as_ref(), &bridge)?)
         } else {

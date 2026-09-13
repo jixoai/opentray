@@ -64,7 +64,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetForegroundWindow, SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     SWP_NOZORDER,
 };
-use wry::{Rect as WryRect, WebContext, WebView, WebViewBuilder, WebViewExtWindows};
+use wry::{
+    Rect as WryRect, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows,
+    WebViewExtWindows,
+};
 
 use crate::layout::{
     project_overlay_safe_area, solve_layout, LogicalRect, LogicalViewport, LayoutSolution,
@@ -1574,6 +1577,12 @@ impl super::WindowsWebviewRuntime {
                 // effective layout assigns the real bounds immediately
                 // after the build returns.
                 .with_autoplay(browser_options.autoplay())
+                // Contract-5 (P1-4): trusted shell UI never shows the
+                // engine's native context menu. Default resolution keys off
+                // the bridge surface (any capability ⇒ no menu via
+                // AreDefaultContextMenusEnabled); an explicit contextMenu
+                // value wins either way.
+                .with_default_context_menus(browser_options.context_menu(policy.has_bridge_surface()))
                 .build_as_child(host_window)
                 .map_err(|error| controller_creation_error(&profile_path, error))?,
         );

@@ -184,7 +184,7 @@ fn open_popup(
     // mask wry applies to its window-filling non-child webviews).
     let popup_ns_view: &NSView =
         unsafe { &*Retained::as_ptr(&webview.webview()).cast::<NSView>() };
-    unsafe { popup_ns_view.setAutoresizingMask(popup_webview_autoresizing_mask()) };
+    popup_ns_view.setAutoresizingMask(popup_webview_autoresizing_mask());
 
     window.makeKeyAndOrderFront(None);
     // Accessory apps do not reliably surface new windows with key-ordering

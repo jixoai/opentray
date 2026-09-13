@@ -1,6 +1,6 @@
 {
   "extensionName": "webview",
-  "contractFingerprint": "opentray-ext-webview-contract-4",
+  "contractFingerprint": "opentray-ext-webview-contract-5",
   "eventPort": {
     "abiVersion": 1,
     "attachSymbol": "opentray_ext_attach_event_port_v1",
@@ -40,14 +40,17 @@
       "userAgent",
       "browserlikeUserAgent",
       "incognito",
-      "autoplay"
+      "autoplay",
+      "contextMenu"
     ],
     "defaults": {
       "browserlikeUserAgent": true,
       "incognito": false,
-      "autoplay": false
+      "autoplay": false,
+      "contextMenu": "!bridgeSurface (any bridge capability ⇒ engine menu hidden; bridgeless child keeps the browser-tab menu; explicit value wins either way)"
     },
     "userAgentPrecedence": "explicit override wins over browserlike shaping",
-    "windowsNotes": "WebView2 default UA is already a full Edge UA; browserlike shaping is a no-op; incognito requires an ephemeral WebContext and stays unimplemented (persistent profile law)"
+    "windowsNotes": "WebView2 default UA is already a full Edge UA; browserlike shaping is a no-op; incognito requires an ephemeral WebContext and stays unimplemented (persistent profile law); contextMenu maps to CoreWebView2Settings.AreDefaultContextMenusEnabled through wry's with_default_context_menus",
+    "macosNotes": "contextMenu=false clears the engine context menu through the AppKit willOpenMenu:withEvent: hook (per-instance class swap adding the NSView override; objc2-web-kit has no generated menu delegate method)"
   }
 }

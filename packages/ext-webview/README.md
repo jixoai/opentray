@@ -516,6 +516,24 @@ Each `createWebview` resolves to a `WebviewChildHandle`:
 - `destroy()` — same as the parent handle's `destroyWebview(id)`.
 - `id` / `windowId` — frozen identity strings.
 
+### Per-child browser options (contract-5)
+
+`createWebview({ ..., browser })` tunes engine browser behavior per child (bootstrap-immutable like the bridge policy):
+
+```ts
+interface WebviewBrowserOptions {
+  userAgent?: string;          // full UA override; wins over browserlikeUserAgent
+  browserlikeUserAgent?: boolean; // default true (macOS appends the standard Safari tokens)
+  incognito?: boolean;         // default false (macOS: ephemeral profile)
+  autoplay?: boolean;          // default false (gesture-gated media)
+  contextMenu?: boolean;       // engine-native right-click menu
+}
+```
+
+`contextMenu` defaults off the bridge surface: a child with ANY bridge capability is trusted shell UI (e.g. your toolbar) and hides the engine's right-click menu (Reload/Inspect must not leak onto shell chrome); a bridgeless content child keeps the ordinary browser-tab menu. An explicit value wins either way — `browser: { contextMenu: true }` re-admits the menu on a bridged child, `false` suppresses it on plain content. macOS implements suppression through AppKit's `willOpenMenu:withEvent:` hook (empty menu, nothing presents); Windows through `AreDefaultContextMenusEnabled`.
+
+The remaining browser options follow contract-4 semantics unchanged.
+
 ### Per-child bridge policy
 
 The page bridge is opt-in per child webview. `bridge` accepts a partial of the frozen boolean field set

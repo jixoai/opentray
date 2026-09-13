@@ -426,6 +426,39 @@ describe("webview orchestration facade", () => {
     ).rejects.toThrow(/exactly one of url or html/);
   });
 
+  it("forwards browser options (contract-5 contextMenu) verbatim into the create-webview frame", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+
+    // Explicit contextMenu rides the browser DTO unchanged; the default
+    // resolution (bridged child → engine menu hidden) is native-side law.
+    await win.createWebview({
+      id: "toolbar",
+      url: "http://127.0.0.1:5173/toolbar.html",
+      bridge: { webviewId: true, messageChannels: true },
+      browser: { contextMenu: true },
+    });
+    expect(transport.extCommands().at(-1)).toMatchObject({
+      type: "create-webview",
+      webviewId: "toolbar",
+      bridge: {
+        webviewId: true,
+        messageChannels: true,
+        navigatorWindow: false,
+        navigatorScreen: false,
+        nativeApi: false,
+      },
+      browser: { contextMenu: true },
+    });
+
+    // Absent browser options stay absent on the wire (defaults are native).
+    await win.createWebview({ id: "content", url: "https://example.org" });
+    expect(transport.extCommands().at(-1)).not.toHaveProperty("browser");
+  });
+
   it("materializes explicit subscribe/unsubscribe wire frames per kind", async () => {
     const transport = new OrchestrationTransport();
     transport.sessionId = "session-1";

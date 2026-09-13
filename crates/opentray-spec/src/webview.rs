@@ -53,6 +53,19 @@ impl Default for WebviewBridgePolicy {
     }
 }
 
+impl WebviewBridgePolicy {
+    /// True when any bridge capability is admitted: the child hosts trusted
+    /// shell UI (bootstrap script installed, bridge surfaces reachable). The
+    /// context-menu default and other trusted-UI facts key off this verdict.
+    pub fn has_bridge_surface(&self) -> bool {
+        self.webview_id
+            || self.message_channels
+            || self.navigator_window
+            || self.navigator_screen
+            || self.native_api
+    }
+}
+
 /// Typed error-code registry for the whole orchestration surface (D20).
 /// `queue_overflow` is shared across two namespaces: it is both a channel
 /// close reason and a `channel.post` error code; every other reason and
@@ -154,6 +167,13 @@ pub struct WebviewBrowserOptions {
     /// autoplay).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autoplay: Option<bool>,
+    /// Engine-native context menu (right-click Reload/Inspect etc.).
+    /// Default depends on the child's bridge policy: disabled for a bridged
+    /// child (trusted shell UI must not leak engine commands), enabled for a
+    /// bridgeless child (ordinary content behaves like a browser tab). An
+    /// explicit value wins either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_menu: Option<bool>,
 }
 
 impl WebviewBrowserOptions {
@@ -168,6 +188,12 @@ impl WebviewBrowserOptions {
     }
     pub fn autoplay(&self) -> bool {
         self.autoplay.unwrap_or(false)
+    }
+    /// Resolved context-menu admission. `bridged` is the opening child's
+    /// [`WebviewBridgePolicy::has_bridge_surface`] verdict: a bridged child
+    /// is trusted shell UI and disables the engine menu by default.
+    pub fn context_menu(&self, bridged: bool) -> bool {
+        self.context_menu.unwrap_or(!bridged)
     }
 }
 
@@ -1564,5 +1590,47 @@ mod tests {
         // Command tags never collide with the single-webview command surface.
         let command = build_command("focus-webview").unwrap();
         assert_eq!(command.command_type(), "focus-webview");
+    }
+
+    /// Contract-5: the context-menu admission default keys off the child's
+    /// bridge surface — trusted shell UI hides the engine menu, ordinary
+    /// content keeps the browser-tab behavior — and an explicit value wins.
+    #[test]
+    fn context_menu_default_depends_on_bridge_surface_and_explicit_wins() {
+        let bridged = WebviewBridgePolicy {
+            webview_id: true,
+            message_channels: true,
+            ..WebviewBridgePolicy::default()
+        };
+        assert!(bridged.has_bridge_surface());
+        let bridgeless = WebviewBridgePolicy::default();
+        assert!(!bridgeless.has_bridge_surface());
+        // Any single capability is enough to make the child trusted shell UI.
+        let navigator_only = WebviewBridgePolicy {
+            navigator_window: true,
+            ..WebviewBridgePolicy::default()
+        };
+        assert!(navigator_only.has_bridge_surface());
+
+        let defaults = WebviewBrowserOptions::default();
+        assert!(!defaults.context_menu(true), "bridged child defaults to no engine menu");
+        assert!(defaults.context_menu(false), "bridgeless child keeps the engine menu");
+
+        assert!(
+            WebviewBrowserOptions {
+                context_menu: Some(true),
+                ..WebviewBrowserOptions::default()
+            }
+            .context_menu(true),
+            "explicit contextMenu=true re-admits the menu on shell UI"
+        );
+        assert!(
+            !WebviewBrowserOptions {
+                context_menu: Some(false),
+                ..WebviewBrowserOptions::default()
+            }
+            .context_menu(false),
+            "explicit contextMenu=false also applies to plain content"
+        );
     }
 }

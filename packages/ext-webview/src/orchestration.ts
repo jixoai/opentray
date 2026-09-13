@@ -118,6 +118,14 @@ export interface WebviewChildSpec {
     incognito?: boolean;
     /** Default `false`. Allow media autoplay without a user gesture. */
     autoplay?: boolean;
+    /**
+     * Engine-native context menu (right-click Reload/Inspect etc.).
+     * Default: DISABLED when the child has any bridge capability (trusted
+     * shell UI must not leak engine commands onto its chrome), ENABLED for
+     * a bridgeless child (browser-tab behavior). Explicit values win
+     * either way. Bootstrap-immutable like the rest of the options.
+     */
+    contextMenu?: boolean;
   };
 }
 

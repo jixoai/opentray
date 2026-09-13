@@ -56,6 +56,14 @@ export interface WebviewBrowserOptions {
   incognito?: boolean;
   /** Default `false`. Allow media autoplay without a user gesture. */
   autoplay?: boolean;
+  /**
+   * Engine-native context menu (right-click Reload/Inspect etc.). Default
+   * depends on the bridge policy: DISABLED for a child with any bridge
+   * capability (trusted shell UI — the engine menu must not leak engine
+   * commands onto it), ENABLED for a bridgeless child (ordinary content
+   * behaves like a browser tab). Explicit values win either way.
+   */
+  contextMenu?: boolean;
 }
 
 export type WebviewBridgePolicyInput = Partial<WebviewBridgePolicy> | undefined;

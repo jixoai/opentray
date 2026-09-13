@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import type {
+  WebviewBrowserOptions,
   WebviewLayoutDocument,
   WebviewLayoutNode,
   WebviewOrchestrationCommandFrame,
@@ -450,6 +451,17 @@ describe("per-child bridge policy", () => {
     expect(isWebviewBridgePolicy(DEFAULT_WEBVIEW_BRIDGE_POLICY)).toBe(true);
     expect(isWebviewBridgePolicy({ webviewId: true })).toBe(false);
     expect(isWebviewBridgePolicy(null)).toBe(false);
+  });
+
+  it("carries the contract-5 contextMenu field on the browser options DTO (wire-only; native side resolves the default)", () => {
+    // The default resolution (bridged child → no engine menu, bridgeless →
+    // browser-tab menu) lives in the native extension; the TS DTO only
+    // freezes that the field serializes as a boolean when present.
+    const options: WebviewBrowserOptions = { contextMenu: false };
+    expect(options.contextMenu).toBe(false);
+    expect(JSON.parse(JSON.stringify({ browser: options }))).toEqual({
+      browser: { contextMenu: false },
+    });
   });
 });
 
