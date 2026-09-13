@@ -11,12 +11,20 @@
 //! their window title follows the document one-way, they never occupy the
 //! tray's window session, and the shared [`PopupLedger`] owns their cleanup
 //! by owner tuple.
+//!
+//! P1-2 resize law (2026-09-14 walkthrough): the popup webview follows
+//! window resizes through AppKit autoresizing (width+height sizable). A
+//! popup never enters a layout transaction — autoresizing owns its bounds
+//! for its whole lifetime, the same default-fill law as wry's non-child
+//! webviews.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use objc2::rc::Retained;
-use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
+use objc2_app_kit::{
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSView, NSWindow, NSWindowStyleMask,
+};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc2_web_kit::WKWebView;
 use wry::{
@@ -167,6 +175,16 @@ fn open_popup(
             .build_as_child(&host_view)
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?,
     );
+    // P1-2: wry builds child webviews as "fixed elements" (autoresizing mask
+    // `ViewMinYMargin`), so without this the popup webview would keep its
+    // creation bounds and never track window resizes. A popup has no layout
+    // engine and never enters a layout transaction, so autoresizing owns its
+    // bounds for its whole lifetime — width/height sizable makes AppKit
+    // resize the view natively with the window's content view (the same
+    // mask wry applies to its window-filling non-child webviews).
+    let popup_ns_view: &NSView =
+        unsafe { &*Retained::as_ptr(&webview.webview()).cast::<NSView>() };
+    unsafe { popup_ns_view.setAutoresizingMask(popup_webview_autoresizing_mask()) };
 
     window.makeKeyAndOrderFront(None);
     // Accessory apps do not reliably surface new windows with key-ordering
@@ -189,4 +207,34 @@ fn open_popup(
     // SAFETY: `WryWebView` subclasses `WKWebView`, so the cast only erases
     // the subclass type of an already-retained object.
     Ok(unsafe { Retained::cast_unchecked(wk_webview) })
+}
+
+/// Autoresizing mask that makes one popup webview fill its window's content
+/// view and follow every resize (P1-2). wry's child build pins the view as a
+/// fixed element, so the popup sets the fill mask explicitly.
+fn popup_webview_autoresizing_mask() -> NSAutoresizingMaskOptions {
+    NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P1-2 law: the popup webview must be flexible in BOTH axes so the
+    /// AppKit autoresizing machinery tracks window resizes (a fixed-element
+    /// child mask — wry's default — would freeze the view at creation size).
+    /// (`ViewNotSizable` is 0, so its absence needs no assertion — a zero
+    /// flag is contained by every mask by definition.)
+    #[test]
+    fn popup_webview_mask_is_sizable_in_both_axes() {
+        let mask = popup_webview_autoresizing_mask();
+        assert!(
+            mask.contains(NSAutoresizingMaskOptions::ViewWidthSizable),
+            "popup webview must be width-sizable"
+        );
+        assert!(
+            mask.contains(NSAutoresizingMaskOptions::ViewHeightSizable),
+            "popup webview must be height-sizable"
+        );
+    }
 }
