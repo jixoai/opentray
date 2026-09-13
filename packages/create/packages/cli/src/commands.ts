@@ -38,6 +38,7 @@ import {
 } from "@create-opentray/core";
 
 import { compileDesiredConfig, type CreateEnrichment, type CreateFlagOptions } from "./options";
+import { openMaterializedApp } from "@create-opentray/core";
 import { CliOutcome, emitOutcome, emitProgress, type CliStreams } from "./output";
 import { listSkillFiles, readSkillFile, resolveSkillRoot, validateSkillPath } from "./skill";
 
@@ -152,6 +153,8 @@ interface CreateArgs {
   readonly stopRunning?: boolean;
   readonly skipInstall?: boolean;
   readonly dryRun?: boolean;
+  /** Opt-in post-apply launch (the wizard's Open App action as a flag). */
+  readonly open?: boolean;
   /** Negated --no-scrape; default true (scrape the URL for defaults). */
   readonly scrape?: boolean;
   readonly json?: boolean;
@@ -250,17 +253,32 @@ const runCreate = async (args: CreateArgs, context: CliContext): Promise<void> =
   }
 
   const applied = await applyCreate(applyOptions);
+  // Opt-in launch (the wizard's Open App action as a flag): only after a
+  // successful apply (dry-run returned above). An open failure is a warning
+  // line, not a failed create — the application exists either way.
+  const openedLine = applied.ok && args.open === true
+    ? await openCreatedApp(applied.value.payloadDir)
+    : "";
   finish(context, asResourceResult(applied), args.json === true, (value) =>
     [
       `created ${value.registrationDir}`,
       `payload: ${value.payloadDir}${value.isLink ? " (linked)" : ""}`,
+      ...(openedLine === "" ? [] : [openedLine]),
     ].join("\n"),
   );
 };
 
+// Opt-in launch (the wizard's Open App action as a flag): only after a
+// successful apply, never for dry-run. An open failure is a warning line,
+// not a failed create — the application exists either way.
+const openCreatedApp = async (payloadDir: string): Promise<string> => {
+  const opened = await openMaterializedApp({ projectDir: payloadDir, bundlePath: undefined });
+  return opened.ok ? `opened: ${payloadDir}` : `  w open failed: ${opened.detail}`;
+};
+
 const createCommand = (context: CliContext): CommandModule => ({
   command: "create",
-  describe: "create a v1 application non-interactively (no browser, no prompts, no sniffing)",
+  describe: "create a v1 application non-interactively (no browser, no prompts, no sniffing; --open launches after apply)",
   builder: (yargs: Argv) =>
     yargs
       .option("config", { type: "string", describe: "base v1 config document (explicit flags override named fields)" })
@@ -287,6 +305,7 @@ const createCommand = (context: CliContext): CommandModule => ({
       .option("force", { type: "boolean", default: false, describe: "replace a VERIFIED existing payload (never adopts user files)" })
       .option("stop-running", { type: "boolean", default: false, describe: "stop a verified running instance before apply" })
       .option("skip-install", { type: "boolean", default: false, describe: "write the project without installing dependencies" })
+      .option("open", { type: "boolean", default: false, describe: "open the created application after a successful apply (opt-in launch; the wizard's Open App action as a flag)" })
       .option("dry-run", { type: "boolean", default: false, describe: "print the Core plan without mutation" })
       .option("json", { type: "boolean", default: false, describe: "machine-readable typed result on stdout" })
       .check((argv: Record<string, unknown>) => {

@@ -65,6 +65,37 @@ describe("create", () => {
     expect(config.command.args).toEqual(["serve.js", "&&"]);
   });
 
+  it("opens the created application when --open is given and skips it on dry-run", async () => {
+    // --open is the wizard's Open App action as a flag: a successful apply
+    // launches the materialized app (cold-start entry spawn — the isolated
+    // test home has no broker), and the output carries the opened line.
+    const code = await run([
+      "create", "--app-id", "open.example", "--app-name", "Open",
+      "--exec", "node", "--arg=-e", "--arg=process.exit(0)",
+    ], );
+    expect(code).toBe(0);
+    // baseline create without --open: no opened line
+    expect(outLines.join("\n")).not.toMatch(/opened:/u);
+
+    outLines = [];
+    const opened = await run([
+      "create", "--app-id", "open.example", "--app-name", "Open",
+      "--exec", "node", "--arg=-e", "--arg=process.exit(0)",
+      "--force", "--open",
+    ]);
+    expect(opened, errLines.join("\n")).toBe(0);
+    expect(outLines.join("\n")).toMatch(/opened: .*open-example/u);
+
+    outLines = [];
+    const dry = await run([
+      "create", "--app-id", "open.example", "--app-name", "Open",
+      "--exec", "node", "--arg=-e", "--arg=process.exit(0)",
+      "--force", "--dry-run", "--open",
+    ]);
+    expect(dry).toBe(0);
+    expect(outLines.join("\n")).not.toMatch(/opened:/u);
+  });
+
   it("rejects unknown options before any Core plan", async () => {
     const code = await run(["create", "--app-id", "x.y", "--app-name", "X", "--exec", "node", "--bogus"]);
     expect(code).toBe(2);
