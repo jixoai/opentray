@@ -15,6 +15,13 @@
 // and observes REVOKED, returning EXT_ERR_PORT_CLOSED before any payload
 // byte is read. The `EVENT_HUB_MAX_SOURCES` cap bounds those retained
 // generations.
+//
+// Wake-failure law (D19 final review): a submit is never accepted while the
+// hub has no active delivery path. When the owner-loop wake fails, ingress
+// rejects new submits with EXT_ERR_PORT_CLOSED (undeliverable); records
+// accepted before the failure are handled by the next drain through any
+// path or by shutdown revocation. The hub never returns "accepted" against
+// a delivery path it knows is dead.
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
@@ -116,7 +123,8 @@ impl SubmitOutcome {
 pub(crate) trait RuntimeWake: Send + Sync {
     /// Requests one owner-loop drain. Returns `false` when the wake could
     /// not be delivered (owner loop gone); the hub then marks ingress
-    /// unavailable instead of spinning.
+    /// unavailable instead of spinning, and subsequent submits reject with
+    /// `EXT_ERR_PORT_CLOSED` (undeliverable) until any drain runs again.
     fn wake(&self) -> bool;
 }
 
@@ -143,8 +151,11 @@ struct HubShared {
     /// Coalesced wake bit: set when a drain has been requested and not yet
     /// consumed by `begin_drain`.
     wake_pending: AtomicBool,
-    /// Set after a failed wake; further submits skip waking (no spin) until
-    /// the owner loop performs a drain again.
+    /// Set after a failed wake: the owner-loop delivery path is unavailable.
+    /// Submits then reject as PORT_CLOSED (undeliverable — the hub must not
+    /// accept records with no active delivery path) until any drain clears
+    /// the marker; records accepted before the failure are handled by that
+    /// drain or by shutdown revocation.
     wake_failed: AtomicBool,
     global_records: AtomicUsize,
     global_bytes: AtomicUsize,
@@ -307,6 +318,12 @@ impl SourceHandle {
                 .metrics
                 .port_closed_submits
                 .fetch_add(1, Relaxed);
+            return SubmitOutcome::Closed;
+        }
+        if state.shared.wake_failed.load(Ordering::Acquire) {
+            // Undeliverable (same law as the FFI ingress): the wake failed,
+            // so accepting this push would strand it without a path.
+            drop(queue);
             return SubmitOutcome::Closed;
         }
         let prepared = PreparedRecord {
@@ -738,15 +755,20 @@ impl HubShared {
 
     fn request_drain_once(&self) {
         if self.wake_failed.load(Ordering::Acquire) {
+            // Delivery path unavailable: new submits already reject as
+            // PORT_CLOSED at admission; accepted records wait for the next
+            // drain through any path or shutdown revocation.
             return;
         }
         if !self.wake_pending.swap(true, Ordering::AcqRel) {
             if self.wake.wake() {
                 self.metrics.wake_calls.fetch_add(1, Relaxed);
             } else {
-                // Ingress unavailable: keep wake_pending set (no spin),
-                // record the failure, and let shutdown revocation handle the
-                // stranded records. Never claim delivery.
+                // Owner loop gone: keep wake_pending set (no spin), record
+                // the failure, and mark ingress unavailable so no further
+                // submit is accepted without an active delivery path.
+                // Records accepted before this point are handled by the
+                // next drain (any path) or shutdown revocation.
                 self.wake_failed.store(true, Ordering::Release);
                 self.metrics.wake_failures.fetch_add(1, Relaxed);
             }
@@ -917,13 +939,25 @@ impl HubShared {
 
 impl SourceState {
     /// The C ingress gate. REVOKED returns PORT_CLOSED before any payload
-    /// byte is read; admitted submits complete their bounded copy and queue
+    /// byte is read; a failed wake (no active delivery path) rejects the
+    /// same way at admission, so the hub never accepts a record it cannot
+    /// deliver. Admitted submits complete their bounded copy and queue
     /// mutation before a concurrent revoke's linearization point (both take
     /// the queue gate).
     fn submit_ffi(&self, input: ExtEventInputV1) -> SubmitOutcome {
         let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         if self.phase.load(Ordering::Acquire) == PHASE_REVOKED {
             // Do not dereference input after revoke.
+            drop(queue);
+            self.shared
+                .metrics
+                .port_closed_submits
+                .fetch_add(1, Relaxed);
+            return SubmitOutcome::Closed;
+        }
+        if self.shared.wake_failed.load(Ordering::Acquire) {
+            // Undeliverable: the owner-loop wake failed, so there is no
+            // active delivery path. Reject without reading the payload.
             drop(queue);
             self.shared
                 .metrics
@@ -2194,45 +2228,128 @@ mod tests {
     }
 
     #[test]
-    fn failed_wake_marks_ingress_unavailable_without_spinning() {
+    fn failed_wake_rejects_new_submits_without_spinning_or_queueing() {
         let (hub, wake_calls) = hub(true);
         let handle = open_source(&hub, "app-a", "webview", "session-1");
-        let port = handle.port();
 
+        // The open transition's drain request already failed: the hub has no
+        // active delivery path, so every submit is rejected as PORT_CLOSED
+        // at admission instead of being accepted into a dead queue.
+        assert_eq!(hub.metrics().wake_failures, 1);
+        let calls_after_open = wake_calls.load(Relaxed);
         assert_eq!(
             submit(
-                &port,
+                &handle.port(),
                 "tray-a",
-                &payload("stranded"),
+                &payload("undeliverable"),
                 ExtEventClassV1::Edge,
                 None
             ),
-            EXT_OK,
-            "the record is accepted; the hub never claims it was delivered"
+            EXT_ERR_PORT_CLOSED,
+            "a submit is never accepted without an active delivery path"
+        );
+        assert_eq!(
+            hub.current_source("app-a", "webview")
+                .expect("current source")
+                .submit_push("tray-a", &serde_json::json!({ "type": "push" })),
+            SubmitOutcome::Closed,
+            "the command-time ingress follows the same law"
+        );
+        assert_eq!(
+            wake_calls.load(Relaxed),
+            calls_after_open,
+            "no wake spin while unavailable"
         );
         assert_eq!(hub.metrics().wake_failures, 1);
-        let calls_after_first = wake_calls.load(Relaxed);
+        assert_eq!(hub.metrics().global_records, 0, "no record was accepted");
+        assert_eq!(hub.metrics().port_closed_submits, 1);
+        assert!(drain_all(&hub).is_empty());
+    }
+
+    /// Records accepted before the failure observation never strand: the
+    /// next drain through any path delivers them, and a recovered wake
+    /// restores admission fully.
+    #[test]
+    fn accepted_records_never_strand_across_wake_failure_and_recovery() {
+        struct SwitchableWake {
+            calls: std::sync::Arc<AtomicU64>,
+            ok: std::sync::Arc<AtomicBool>,
+        }
+        impl RuntimeWake for SwitchableWake {
+            fn wake(&self) -> bool {
+                self.calls.fetch_add(1, Relaxed);
+                self.ok.load(Ordering::SeqCst)
+            }
+        }
+        let calls = std::sync::Arc::new(AtomicU64::new(0));
+        let ok = std::sync::Arc::new(AtomicBool::new(false));
+        let hub = EventHub::new(Box::new(SwitchableWake {
+            calls: calls.clone(),
+            ok: ok.clone(),
+        }));
+
+        // A submit while PENDING is admitted (delivery is armed at open);
+        // its own wake attempt fails, marking ingress unavailable.
+        let handle = hub
+            .reserve_source("app-a".to_string(), "webview".to_string())
+            .expect("source slot");
         assert_eq!(
             submit(
-                &port,
+                &handle.port(),
                 "tray-a",
-                &payload("second"),
+                &payload("accepted"),
                 ExtEventClassV1::Edge,
                 None
             ),
             EXT_OK
         );
-        assert_eq!(
-            wake_calls.load(Relaxed),
-            calls_after_first,
-            "no wake spin while unavailable"
-        );
         assert_eq!(hub.metrics().wake_failures, 1);
+        assert_eq!(hub.metrics().global_records, 1);
 
-        // A later drain (loop alive again through another path) clears the
-        // unavailable marker and delivers the accepted records.
+        // The load itself is fine: the ACK opens the source, but its drain
+        // request is suppressed and every further submit is undeliverable.
+        assert!(hub.note_loaded_and_open("app-a", "webview", "session-1"));
+        assert_eq!(
+            submit(
+                &handle.port(),
+                "tray-a",
+                &payload("rejected"),
+                ExtEventClassV1::Edge,
+                None
+            ),
+            EXT_ERR_PORT_CLOSED
+        );
+        assert_eq!(
+            hub.metrics().global_records,
+            1,
+            "only the pre-failure record is retained"
+        );
+
+        // Recovery: the owner loop drains through another path (e.g. the
+        // post-response barrier) and the wake adapter is healthy again. The
+        // accepted record is delivered — no stranding.
+        ok.store(true, Ordering::SeqCst);
         let drained = drain_all(&hub);
-        assert_eq!(drained.len(), 2);
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].data_json, payload("accepted").as_bytes());
+        assert_eq!(drained[0].key.owner_session_id, "session-1");
+
+        // Admission is fully restored and drains run empty.
+        assert_eq!(
+            submit(
+                &handle.port(),
+                "tray-a",
+                &payload("recovered"),
+                ExtEventClassV1::Edge,
+                None
+            ),
+            EXT_OK
+        );
+        assert_eq!(calls.load(Relaxed), 2, "the recovered wake ran again");
+        let drained = drain_all(&hub);
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].data_json, payload("recovered").as_bytes());
+        assert!(drain_all(&hub).is_empty(), "no stranded records remain");
     }
 
     // -- send_event ingress --------------------------------------------------

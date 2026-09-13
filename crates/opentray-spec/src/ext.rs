@@ -224,7 +224,9 @@ pub type ExtAttachEventPortV1Fn =
 /// accepted (except BestEffort drop-newest, which returns `EXT_OK`).
 pub const EXT_ERR_BACKPRESSURE: ExtResultCode = 4; // frozen (D19 B'')
 /// The port's source is revoked (session close, reload, failed load, or
-/// shutdown). No queue mutation and no payload bytes are read.
+/// shutdown), or the hub's owner-loop delivery path is unavailable after a
+/// failed wake — a submit is never accepted without an active delivery
+/// path. No queue mutation and no payload bytes are read.
 pub const EXT_ERR_PORT_CLOSED: ExtResultCode = 5; // frozen (D19 B'')
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
