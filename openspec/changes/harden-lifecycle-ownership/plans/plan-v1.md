@@ -51,7 +51,7 @@
 ## 5. 意图驱动的计划（specs/tasks 追溯锚）
 
 - **D1 共享锁 helper**：PID+token 写入并 flush 后才视为持有；空/非法/死 PID bounded 回收；release 校验 token（防误删替换后的锁）。落点：`@opentray/packaging`，同修 `app-bundle.ts` + `app-launch.ts` 两处；kill/restart 回归测试（含 kill -9 中途物化）。
-- **D2 session owner 校验贯穿**：销毁类 API 签名升级为携带并校验 `(appId, trayId, sessionId, windowId)`——覆盖 macOS/Windows 的 `session_closed`、`destroy_window_session`、`destroy_child_webview`、registry destroy/remove、unattributed 过渡分支；裸 tray-id 删除在类型上不可表达。测试：reentrancy seam（收集旧条目 → 注入同 tray 新会话 → 执行 destroy → 断言新会话存活）+ 跨会话保活 + channel/popup 清扫断言。（R2 轮升级：kernel 层把 `ext_command_with_host` 从 `require_tray` 升级为 `require_owned_tray`——扩展命令 dispatch 作用域收紧到 tray 属主会话，legacy Destroy 的跨会话绕过在协议层关闭；d19 的事件路由法不变，其跨会话 dispatch 测试改为「非 owner 拒绝」+「owner 路由」两测。kernel-runtime spec delta 同步。）
+- **D2 session owner 校验贯穿**：销毁类 API 签名升级为携带并校验 `(appId, trayId, sessionId, windowId)`——覆盖 macOS/Windows 的 `session_closed`、`destroy_window_session`、`destroy_child_webview`、registry destroy/remove、unattributed 过渡分支；裸 tray-id 删除在类型上不可表达。测试：reentrancy seam（收集旧条目 → 注入同 tray 新会话 → 执行 destroy → 断言新会话存活）+ 跨会话保活 + channel/popup 清扫断言。
 - **D3 transport-dead 全链路**：统一 connection-dead 状态传播；事件订阅 fail-loud（terminal callback）；gap-resync 取消；pending request rejection 维持现状；生成 entry 的 process/session 显式停机。验收必须包含：F2 僵尸形态的可复现测试（broker kill 后 entry 的每个 await 在有界时间内终结）。
 - **D4 appId 即端点身份**：`createTray` 传 `appId` → caller label = appId 规范化 slug；`appName` 移出派生链；`callerLabel` 保持内部/诊断用途，永不进公共 API。一次性端点迁移自清理（旧端点 broker 随旧 entry 退出消亡——F2 轮已实证该生命周期）。诊断/源码示例的临时隔离轴不受影响。
 - **D5 模板不吞错 + bootstrap 结构化日志**：初始 `show()` 失败必须中止 carrier 并写 app.log；carrier 每步（listenShell/createTray/show/createWebview×2/setLayout/openChannel/事件计数）落 app.log。

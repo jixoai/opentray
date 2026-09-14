@@ -765,7 +765,7 @@ mod tests {
     }
 
     #[test]
-    fn command_from_another_session_still_routes_events_to_the_owner() {
+    fn command_from_a_non_owning_session_is_rejected_before_dispatch() {
         let mut harness = Harness::new();
         let session_a = harness.open_session();
         harness.create_app_and_tray(session_a, "app-a");
@@ -774,36 +774,58 @@ mod tests {
         harness.create_app_and_tray(session_b, "app-b");
         harness.load_push(session_b, "app-b");
 
-        // Session B commands session A's extension instance on A's tray. The
-        // kernel allows the dispatch; ownership — not the dispatching session
-        // — decides where pushed events go. Mirrored returned events still
-        // flow to the dispatcher in the command response.
+        // harden-lifecycle-ownership D2: extension commands are scoped to the
+        // tray-owning session. A foreign session cannot dispatch — and so can
+        // never reach a legacy destroy — through another session's tray.
         let frames = harness.ext_command(session_b, "app-a", "tray-a");
+        assert!(
+            frames.iter().any(|frame| matches!(
+                frame,
+                ServerFrame::Error { message, .. } if message.contains("session")
+            )),
+            "the non-owning dispatch is rejected: {frames:?}"
+        );
+        assert!(
+            ext_event_frames(harness.received(session_b)).is_empty(),
+            "the rejected dispatcher receives no events"
+        );
+        assert!(
+            ext_event_frames(harness.received(session_a)).is_empty(),
+            "the owning session observes nothing from the rejected dispatch"
+        );
+    }
+
+    #[test]
+    fn owner_command_routes_pushed_events_to_the_owner_and_mirrors_to_the_dispatcher() {
+        let mut harness = Harness::new();
+        let session_a = harness.open_session();
+        harness.create_app_and_tray(session_a, "app-a");
+        harness.load_push(session_a, "app-a");
+
+        // d19 routing law, exercised through the owning dispatcher: pushed
+        // events route by ownership; mirrored returned events flow back to
+        // the dispatcher in the command response.
+        let frames = harness.ext_command(session_a, "app-a", "tray-a");
         assert!(matches!(
             frames.first(),
             Some(ServerFrame::ExtCommandResult { .. })
         ));
 
-        let dispatcher_events = ext_event_frames(harness.received(session_b));
+        let dispatcher_events = ext_event_frames(harness.received(session_a));
         assert_eq!(
             dispatcher_events.len(),
-            1,
-            "the dispatching session receives only the mirrored event: {dispatcher_events:?}"
+            2,
+            "the owner-dispatcher receives the mirrored and pushed events: {dispatcher_events:?}"
         );
-        assert!(matches!(
-            &dispatcher_events[0],
-            ServerFrame::ExtEvent { data, .. } if data["type"] == "mirrored"
-        ));
-        let owner_events = ext_event_frames(harness.received(session_a));
-        assert_eq!(
-            owner_events.len(),
-            1,
-            "the owning session receives the pushed event: {owner_events:?}"
+        assert!(
+            dispatcher_events
+                .iter()
+                .any(|frame| matches!(&frame, ServerFrame::ExtEvent { data, .. } if data["type"] == "mirrored"))
+                && dispatcher_events
+                    .iter()
+                    .any(|frame| matches!(&frame, ServerFrame::ExtEvent { data, .. } if data["type"] == "pushed")),
+            "both the mirrored (dispatcher copy) and pushed (owner copy) events arrive: {dispatcher_events:?}"
         );
-        assert!(matches!(
-            &owner_events[0],
-            ServerFrame::ExtEvent { data, .. } if data["type"] == "pushed"
-        ));
     }
 
     #[test]

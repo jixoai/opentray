@@ -841,10 +841,10 @@ impl WindowsWebviewRuntime {
             WebviewCommand::Destroy => {
                 // harden-lifecycle-ownership D2: the legacy tray-scoped
                 // destroy resolves the resident owner first so the destroy
-                // stays owner-tuple-typed. The legacy command surface
-                // reaches the runtime only through the live tray scope, so
-                // the resident owner is the commanding session; a vacant
-                // registry tears down at most an orphan native session.
+                // stays owner-tuple-typed. The kernel scopes every extension
+                // command to the tray-owning session, so the commanding
+                // session IS the resident owner here; a vacant registry
+                // tears down at most an orphan native session.
                 match self
                     .registry
                     .window(tray_id)

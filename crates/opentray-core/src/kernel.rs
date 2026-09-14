@@ -316,24 +316,31 @@ impl<B: AppBackend> Kernel<B> {
 
     pub fn ext_command(
         &mut self,
+        session_id: &str,
         app_id: AppId,
         tray_id: TrayId,
         ext: String,
         data: Value,
     ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
         let mut host = UnsupportedExtensionHostContext;
-        self.ext_command_with_host(app_id, tray_id, ext, data, &mut host)
+        self.ext_command_with_host(session_id, app_id, tray_id, ext, data, &mut host)
     }
 
     pub fn ext_command_with_host(
         &mut self,
+        session_id: &str,
         app_id: AppId,
         tray_id: TrayId,
         ext: String,
         data: Value,
         host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
-        self.require_tray(&app_id, &tray_id)?;
+        // harden-lifecycle-ownership D2: extension commands are scoped to the
+        // tray-owning session. A foreign session can neither dispatch nor
+        // destroy through another session's tray — the session-scoped
+        // isolation law is enforced at the dispatch boundary, not left to
+        // per-extension payload identity.
+        self.require_owned_tray(session_id, &app_id, &tray_id)?;
         Ok(self.extensions.command(app_id, tray_id, ext, data, host)?)
     }
 
@@ -808,6 +815,7 @@ mod tests {
 
         let events = kernel
             .ext_command(
+                "session",
                 surface.app_id,
                 "tray".to_string(),
                 "webview".to_string(),

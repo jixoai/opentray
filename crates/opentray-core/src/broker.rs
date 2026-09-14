@@ -429,6 +429,7 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     tray_bounds,
                 };
                 match self.kernel.ext_command_with_host(
+                    &session_id,
                     app_id,
                     tray_id,
                     ext,
