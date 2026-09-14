@@ -4,9 +4,11 @@ description: OpenTray package-consumer guide for installing `opentray`, creating
 ---
 
 <!--
-Orthogonal intents (maintained 2026-07-21; original user requests: publish detailed appMode
-adaptation guidance for projects such as skill-creator-v2, and keep OpenTray source/link
-instructions exclusively in repository-internal .agents skills):
+Orthogonal intents (maintained 2026-09-15; original user requests: publish detailed appMode
+adaptation guidance for projects such as skill-creator-v2, keep OpenTray source/link
+instructions exclusively in repository-internal .agents skills, and route brand App identity
+icon generation through the shared @opentray/icon kernel after a downstream consumer
+hand-rolled a non-compliant iconutil catalog):
 1. Route package consumers to the smallest relevant public reference.
 2. Preserve consumer-facing API and platform-truth rules.
 3. Exclude source checkout, workspace, staging, and contributor-smoke instructions.
@@ -30,8 +32,9 @@ real behavior, and diagnose the installed runtime graph.
 - Public API patterns and examples: read `references/api-patterns.md`.
 - Scenario decision cards for common app shapes: read `references/scenarios.md`.
 - Ordinary application windows versus tray utilities, warm Dock reopen, cold `appLaunch`, and development supervisors: read `references/app-mode.md`.
+- Generating a brand App identity icon with the `@opentray/icon` kernel (`generateOpenTrayAppIcon`, composition semantics, the omitted-`appIcon` glyph default, and why hand-rolled `iconutil`/`sharp` pipelines are rejected): read `references/app-mode.md`.
 - Runtime ownership, application process lifetime, and persistent logs: read `references/runtime-ownership.md`.
-- Packaging through a bundler (Vite/esbuild/tsdown/webpack), generating platform-correct App icons with `openTrayAppIconPlugin`, or writing a custom adapter: read `references/bundling.md`.
+- Packaging through a bundler (Vite/esbuild/tsdown/webpack), generating platform-correct App icons with the Vite `openTrayAppIconPlugin`, or writing a custom adapter: read `references/bundling.md`.
 - Consumer-project acceptance matrix: read `references/visual-acceptance.md`.
 - Official WebView extension usage, overlay titlebar safe-area computation, and native drag regions: read `references/ext-webview.md`.
 - Multi-webview windows (toolbar + content composition), declarative layout, message channels, and per-view events: read `references/ext-webview.md` plus `references/backend-ipc.md`.

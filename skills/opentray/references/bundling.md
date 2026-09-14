@@ -82,6 +82,11 @@ safe-area tile, platform encoders, Linux sizes, cache identity, and ICNS density
 metadata. A favicon or already-rounded platform icon is not a substitute for that
 source contract.
 
+The plugin is a thin shell over the `@opentray/icon` generation kernel.
+Consumers outside Vite call that kernel directly — read
+[`app-mode.md`](app-mode.md) for the kernel-level contract and composition
+semantics.
+
 ## Configuration Examples
 
 Every adapter requires `app` and `runtimeHost`, and accepts optional
