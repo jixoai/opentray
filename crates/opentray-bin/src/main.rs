@@ -578,6 +578,27 @@ mod native_broker {
     }
 
     pub fn run(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
+        // harden-lifecycle-ownership (user walkthrough finding, 2026-09-15):
+        // the broker is a detached, non-LaunchServices process; once idle,
+        // macOS App Naps it and suspends every WKWebView's loads, timers,
+        // and network until a Dock activation revives the app — the exact
+        // "buttons dead until I click the Dock icon" symptom. A tray broker
+        // with live sessions is inherently user-facing, so the process
+        // asserts one activity for its whole lifetime.
+        // UserInitiatedAllowingIdleSystemSleep excludes the broker from App
+        // Nap while keeping display sleep available.
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+            let activity = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
+                NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
+                &NSString::from_str("OpenTray broker serves live tray sessions"),
+            );
+            // The token must outlive the broker; dropping it would end the
+            // activity and re-enable App Nap.
+            std::mem::forget(activity);
+        }
+
         let event_loop = build_event_loop()?;
         event_loop.set_control_flow(ControlFlow::Wait);
 

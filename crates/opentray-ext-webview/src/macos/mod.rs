@@ -1006,10 +1006,29 @@ impl MacosWebviewRuntime {
                     browser,
                 )
                 {
-                    Ok(()) => WebviewOrchestrationResult::WebviewAck {
-                        owner,
-                        command: "create-webview".to_string(),
-                    },
+                    Ok(()) => {
+                        // harden-lifecycle-ownership (user walkthrough finding,
+                        // 2026-09-15): the session-bootstrap activation and
+                        // ordering ran BEFORE any child existed (an empty
+                        // windowOnly shell); WebKit never re-evaluated the
+                        // children's visibility, so their pages suspend
+                        // (loads/timers deferred) until a Dock activation.
+                        // Re-assert ordering and activation once the child
+                        // and the effective layout are in place.
+                        if let Some(mtm) = MainThreadMarker::new() {
+                            if let Some(session) = self.session(&owner.tray_id) {
+                                let app = NSApplication::sharedApplication(mtm);
+                                #[allow(deprecated)]
+                                app.activateIgnoringOtherApps(true);
+                                session.window.makeKeyAndOrderFront(None);
+                                session.window.orderFrontRegardless();
+                            }
+                        }
+                        WebviewOrchestrationResult::WebviewAck {
+                            owner,
+                            command: "create-webview".to_string(),
+                        }
+                    }
                     Err(ChildCreateError::Typed(error)) => return Ok(typed_rejection(error)),
                     Err(ChildCreateError::Runtime(error)) => return Err(error),
                 }

@@ -23,3 +23,15 @@ The extension SHALL expose an internal seam test hook (or equivalent test constr
 - **WHEN** the registry destroy/remove API signatures are consulted
 - **THEN** a bare tray-id-only destroy is not expressible without supplying the owner tuple
 - **AND** the platform twins (macOS and Windows) enforce the same contract.
+
+## ADDED Requirements
+
+### Requirement: Child webview creation SHALL re-assert window ordering and activation
+
+The session-bootstrap ordering and activation run before any child exists (an empty windowOnly shell); WebKit never re-evaluates new children's visibility against that stale state, so their pages can stay suspended until an app activation. After a child webview is attached and the effective layout is solved, the extension SHALL re-assert `makeKeyAndOrderFront`/`orderFrontRegardless` and application activation so the newly framed views get their visibility evaluated.
+
+#### Scenario: Content page executes immediately after bootstrap
+
+- **GIVEN** a windowOnly session whose content webview was just created and laid out
+- **WHEN** the page finishes loading without any Dock interaction
+- **THEN** its scripts run and navigation commands take effect immediately.

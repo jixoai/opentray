@@ -57,8 +57,6 @@
 - **D5 模板不吞错 + bootstrap 结构化日志**：初始 `show()` 失败必须中止 carrier 并写 app.log；carrier 每步（listenShell/createTray/show/createWebview×2/setLayout/openChannel/事件计数）落 app.log。
 - **范围排除**：A+B 架构（entry 单一所有者 + toolbar 控制面简化）另立独立 change。
 
-- **D6 挂起双层修复（走查轮，2026-09-15 用户拍板线索「点 Dock 图标后命令立即执行」）**：(a) broker 进程在启动时断言 `NSProcessInfo.beginActivityWithOptions(UserInitiatedAllowingIdleSystemSleep)` 并持有整个生命周期——非 LS 启动的 detached broker 一旦空闲就会被 macOS App Nap 挂起（WKWebView 的加载/定时器/网络全部暂停，直到 Dock 激活）；d19 退役 16ms 轮询后进程完全空闲，使该进程自 0.27.0 起暴露于此（Owner 最初对 EventPort 的症状级怀疑在此成立）。(b) CreateWebview 成功后（子视图+布局就位）重申 makeKeyAndOrderFront/orderFrontRegardless + app activation——会话引导期的排序发生在空 windowOnly 壳上，WebKit 不会对后加入的子视图重估可见性。
-
 ## 6. 验证策略
 
 - 每项 D 的专项测试（上述）；随后按既有基线命令 + 针对性黑盒：kill -9 矩阵（物化中途/运行中/broker-only）、双启动方式端点一致性、重启后应用可启动、app.log 叙事完整性。
