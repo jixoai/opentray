@@ -37,6 +37,15 @@ export {
   type CreateTrayOptions,
   type OpenTrayRuntimeOptions,
 } from "./sdk";
+export {
+  /**
+   * Transport-close sentinel every request rejects with once the broker
+   * connection dies (socket close, error, or completed graceful close).
+   * Consumers match on this message to treat a dead backend as the desired
+   * end state (e.g. quit paths racing their own teardown).
+   */
+  BROKER_CONNECTION_CLOSED_MESSAGE,
+} from "./local-broker";
 export type {
   OpenTrayAppBundleOptions,
   OpenTrayAppLaunchOptions,

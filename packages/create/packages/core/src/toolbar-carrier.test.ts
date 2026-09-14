@@ -31,6 +31,18 @@ const urlToolbar: ScaffoldAppConfig = {
   window: { width: 1200, height: 800, toolbar: true, titleFollowsDocument: true, iconFollowsDocument: false },
 };
 
+// harden-lifecycle-ownership D5: the direct URL entry embeds the same
+// un-swallowed showWindow gate without the shell/carrier wiring — it must
+// parse like every other emitted shape.
+const urlDirect: ScaffoldAppConfig = {
+  schemaVersion: 1,
+  appId: "direct.example",
+  appName: "Direct Example",
+  url: "https://example.com/direct",
+  service: { port: 0 },
+  window: { width: 1000, height: 700, titleFollowsDocument: true, iconFollowsDocument: false },
+};
+
 const commandToolbar: ScaffoldAppConfig = {
   schemaVersion: 1,
   appId: "cmd.example",
@@ -62,10 +74,16 @@ const checkSyntax = async (file: string): Promise<string | undefined> => {
 describe("generated entry syntax (toolbar carrier embed)", () => {
   it("emits parseable main.mjs for every application shape", async () => {
     const root = await mkdtemp(join(tmpdir(), "p2-syntax-"));
-    const cases: readonly { readonly name: string; readonly config: ScaffoldAppConfig }[] = [
-      { name: "url-toolbar", config: urlToolbar },
-      { name: "command-toolbar", config: commandToolbar },
-      { name: "command-plain", config: commandPlain },
+    const cases: readonly {
+      readonly name: string;
+      readonly config: ScaffoldAppConfig;
+      /** URL direct apps host no shell server; every other shape does. */
+      readonly hostsShell: boolean;
+    }[] = [
+      { name: "url-toolbar", config: urlToolbar, hostsShell: true },
+      { name: "url-direct", config: urlDirect, hostsShell: false },
+      { name: "command-toolbar", config: commandToolbar, hostsShell: true },
+      { name: "command-plain", config: commandPlain, hostsShell: true },
     ];
     for (const testCase of cases) {
       const result = await writeScaffold({
@@ -75,13 +93,17 @@ describe("generated entry syntax (toolbar carrier embed)", () => {
       });
       const entryError = await checkSyntax(result.entryPath);
       expect(entryError, `${testCase.name} main.mjs must parse`).toBeUndefined();
-      // The shell server source only exists when the shell is hosted.
+      // The shell server source only exists when the shell is hosted; a
+      // missing file fails --check with MODULE_NOT_FOUND, which is not a
+      // syntax verdict for the shapes that never host it.
       const shellPath = join(result.projectDir, "app-shell-server.mjs");
       const shellError = await checkSyntax(shellPath);
-      // url-toolbar and command apps host it; a plain URL app does not (file
-      // absent → ENOENT from --check, which is not a syntax verdict).
-      if (testCase.name !== "plain-url") {
-        expect(shellError === undefined || shellError.includes("ENOENT"), `${testCase.name} shell server`).toBe(true);
+      if (testCase.hostsShell) {
+        expect(shellError, `${testCase.name} shell server must parse`).toBeUndefined();
+      } else {
+        expect(shellError, `${testCase.name} must not host a shell server`).toContain(
+          "Cannot find module",
+        );
       }
     }
   });

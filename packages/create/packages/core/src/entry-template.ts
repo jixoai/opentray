@@ -67,6 +67,11 @@ const appLogPath = resolve(PROJECT_DIR, "app.log");
 await mkdir(dirname(appLogPath), { recursive: true });
 const logSink = appendFile.bind(undefined, appLogPath);
 const logNote = (message) => { void logSink("[create-opentray] " + message + "\\n", "utf8"); };
+// Bootstrap milestones (harden-lifecycle-ownership D5): one structured JSON
+// record per startup step — the operator reads session health from app.log
+// alone, and a failed step names itself instead of needing archaeology.
+const errorText = (error) => error instanceof Error ? error.message : String(error);
+const logEvent = (record) => logSink(JSON.stringify({ time: new Date().toISOString(), event: "bootstrap", ...record }) + "\\n", "utf8");
 const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 
 const shellOptions = ${JSON.stringify(config.shell ?? null)};
@@ -155,6 +160,11 @@ const main = async () => {
   // from the same host (its navigation surface stays channel-only, D12).
   const shellApi = await import("./app-shell-server.mjs");
   const shellPort = await shellApi.listenShell();
+  if (shellPort === null) {
+    await logEvent({ step: "listenShell", status: "failed" });
+  } else {
+    void logEvent({ step: "listenShell", status: "ok", port: shellPort });
+  }
 
   // Command supervision state shared by the exit note and teardown.
   let commandExited = false;
@@ -224,7 +234,7 @@ const main = async () => {
 
   const tray = await (async () => {
     try {
-      return await createTray({
+      const created = await createTray({
         id: config.appId,
         tooltip: { title: config.appName, description: \`\${config.appName} (OpenTray)\` },
         icon: Object.keys(trayIconCandidates).length > 0
@@ -247,6 +257,8 @@ const main = async () => {
           cwd: PROJECT_DIR,
         },
       });
+      void logEvent({ step: "createTray", status: "ok", appId: config.appId });
+      return created;
     } catch (error) {
       // Carrier-resurrection yield: a Dock-pinned carrier can cold-start this
       // entry while another instance already owns the broker session. The
@@ -265,6 +277,21 @@ const main = async () => {
     }
   })();
 
+  // harden-lifecycle-ownership D3: broker connection death is a terminal
+  // state. The entry records the milestone and exits non-zero — the
+  // supervised command dies with its supervisor instead of outliving a dead
+  // backend. The quitting flag keeps the graceful quit path (whose transport
+  // close also reaches this terminal state) on its exit(0) course.
+  let quitting = false;
+  tray.onConnectionDead?.((error) => {
+    if (quitting) return;
+    quitting = true;
+    void (async () => {
+      await logEvent({ step: "connectionDead", status: "failed", error: errorText(error) });
+      process.exit(1);
+    })();
+  });
+
   const baseTitle = config.appName;
   // v1 developerMode maps ONLY to per-window DevTools admission. When false it
   // must not request devtools at all — default windows are not inspectable.
@@ -277,11 +304,15 @@ const main = async () => {
   // window = its own window session), so dedicated windows never collide on
   // content.
   const serviceWindows = new Map();
+  // harden-lifecycle-ownership D5: a port whose window bootstrap failed is
+  // recorded once (app.log names the failed milestone) and not retried every
+  // monitor tick — a zombie retry loop would bury the failure record.
+  const failedServiceWindows = new Set();
   let terminalWindow = null;
 
   const ensureTerminalWindow = async () => {
     if (terminalWindow !== null || shellPort === null) return terminalWindow;
-    terminalWindow = tray.extend(WebviewExt).createWebviewWindow({
+    const candidate = tray.extend(WebviewExt).createWebviewWindow({
       url: \`http://127.0.0.1:\${shellPort}/terminal.html\`,
       width: 900,
       height: 560,
@@ -289,7 +320,18 @@ const main = async () => {
       style: { appMode: true, autoHide: false, keepOnTop: false },
       ...devtools,
     });
-    await terminalWindow.show().catch(() => {});
+    // D5: a failed show leaves no session — record it and keep
+    // terminalWindow null so a later abnormal-exit reveal can retry this
+    // surface against a fresh window.
+    try {
+      await candidate.show();
+      void logEvent({ step: "showWindow", status: "ok", target: "terminal" });
+    } catch (error) {
+      await logEvent({ step: "showWindow", status: "failed", target: "terminal", error: errorText(error) });
+      await candidate.destroy().catch(() => {});
+      return null;
+    }
+    terminalWindow = candidate;
     return terminalWindow;
   };
 
@@ -306,7 +348,7 @@ const main = async () => {
   };
 
   const ensureServiceWindow = async (port) => {
-    if (serviceWindows.has(port)) return;
+    if (serviceWindows.has(port) || failedServiceWindows.has(port)) return;
     const direct = \`http://127.0.0.1:\${port}\`;
     // Toolbar service windows (D13): the SAME native carrier URL applications
     // use — a windowOnly session whose toolbar webview (shell-served
@@ -323,16 +365,38 @@ const main = async () => {
         style: { appMode: true, autoHide: false, keepOnTop: false },
         ...devtools,
       });
-      await win.show().catch(() => {});
-      const carrier = await attachToolbarCarrier(win, {
-        toolbarUrl: \`http://127.0.0.1:\${shellPort}/toolbar.html\`,
-        contentUrl: direct,
-        titleFollows,
-        log: logNote,
-      });
-      // P1-3 exit race: teardown closes the channel; the carrier must never
-      // rebuild against a dying session. Stop before the window goes down.
-      process.once("exit", carrier.stop);
+      // harden-lifecycle-ownership D5: the show() before the carrier is a
+      // bootstrap gate — a failure aborts (the carrier never attaches child
+      // webviews against a session that never came up) and the structured
+      // record names the failed milestone in app.log.
+      try {
+        await win.show();
+        void logEvent({ step: "showWindow", status: "ok", target: "service", port });
+      } catch (error) {
+        await logEvent({ step: "showWindow", status: "failed", target: "service", port, error: errorText(error) });
+        failedServiceWindows.add(port);
+        await win.destroy().catch(() => {});
+        return;
+      }
+      try {
+        const carrier = await attachToolbarCarrier(win, {
+          toolbarUrl: \`http://127.0.0.1:\${shellPort}/toolbar.html\`,
+          contentUrl: direct,
+          titleFollows,
+          log: logNote,
+          event: logEvent,
+        });
+        // P1-3 exit race: teardown closes the channel; the carrier must never
+        // rebuild against a dying session. Stop before the window goes down.
+        process.once("exit", carrier.stop);
+      } catch {
+        // D5: the carrier already recorded its failed milestone; this window
+        // is dead, the port is not retried, and the supervised command keeps
+        // running (its terminal remains the abnormal-exit surface).
+        failedServiceWindows.add(port);
+        await win.destroy().catch(() => {});
+        return;
+      }
       serviceWindows.set(port, { win, detached: false });
       return;
     }
@@ -346,8 +410,16 @@ const main = async () => {
       ...(!titleFollows ? {} : { titleSync: { documentToWindow: true } }),
       ...(!iconFollows ? {} : { iconSync: { faviconToWindow: true } }),
     });
+    try {
+      await win.show();
+      void logEvent({ step: "showWindow", status: "ok", target: "service", port });
+    } catch (error) {
+      await logEvent({ step: "showWindow", status: "failed", target: "service", port, error: errorText(error) });
+      failedServiceWindows.add(port);
+      await win.destroy().catch(() => {});
+      return;
+    }
     serviceWindows.set(port, { win, detached: false });
-    await win.show().catch(() => {});
   };
 
   if (showTerminal) {
@@ -462,6 +534,7 @@ const main = async () => {
   }
 
   const quit = async () => {
+    quitting = true;
     for (const { win } of serviceWindows.values()) {
       try { await win.destroy(); } catch {}
     }

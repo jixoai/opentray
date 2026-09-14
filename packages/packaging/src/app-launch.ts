@@ -4,8 +4,10 @@
 // 2. Persist runtime launch state separately from bundle compatibility identity.
 // 3. Atomically replace the descriptor inside the stable caller-owned bundle.
 
-import { access, constants, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, constants, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+
+import { acquireOwnerStampedLock, OwnerStampedLockError } from "./owner-stamped-lock";
 
 export const DARWIN_APP_LAUNCH_DESCRIPTOR = "Contents/Resources/opentray-launch.json";
 const DARWIN_APP_BUNDLE_MANIFEST = "Contents/Resources/opentray-app-bundle.json";
@@ -103,28 +105,22 @@ const invalidDescriptor = (message: string): Error =>
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+// harden-lifecycle-ownership D1: descriptor updates serialize on the SAME
+// shared owner-stamped lock helper as bundle materialization (plan §5 D1) —
+// no second private lock implementation may diverge on this path.
 const acquireDescriptorLock = async (
   lockPath: string,
 ): Promise<{ readonly release: () => Promise<void> }> => {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() <= deadline) {
-    try {
-      const handle = await open(lockPath, "wx");
-      return {
-        async release(): Promise<void> {
-          await handle.close();
-          await rm(lockPath, { force: true });
-        },
-      };
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+  try {
+    return await acquireOwnerStampedLock(lockPath);
+  } catch (error) {
+    if (error instanceof OwnerStampedLockError) {
+      throw new Error(`timed out acquiring Darwin app launch descriptor lock: ${lockPath}`, {
+        cause: error,
+      });
     }
+    throw error;
   }
-  throw new Error(`timed out acquiring Darwin app launch descriptor lock: ${lockPath}`);
 };
-
-const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
-  error instanceof Error && "code" in error;
 
 let temporaryFileCounter = 0;

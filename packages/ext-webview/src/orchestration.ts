@@ -43,6 +43,7 @@ import {
   type WebviewUrlQueryResult,
   type WindowId,
 } from "@opentray/spec";
+import { BROKER_CONNECTION_CLOSED_MESSAGE } from "opentray";
 
 /**
  * Typed rejection for the whole orchestration/channel surface. The native
@@ -326,6 +327,15 @@ export interface WebviewOrchestrationPort {
   readonly owner: WebviewOwnerTuple;
   request(data: unknown): Promise<unknown>;
   onFrame(handler: (frame: unknown) => void): () => void;
+  /**
+   * Terminal transport-death tap (D3, harden-lifecycle-ownership). When the
+   * hosting connection publishes its death, the orchestration stops
+   * delivering, cancels gap-resync bookkeeping, and reports the death through
+   * its own terminal surface. Ports without the tap keep the rejection-
+   * classifier fallback: a transport-terminal rejection still marks the
+   * orchestration dead.
+   */
+  onDead?(handler: (error: Error) => void): () => void;
 }
 
 /** Multi-webview + channel surface bound to one window session id. */
@@ -344,6 +354,20 @@ export interface WebviewWindowOrchestration {
   ): () => void;
   /** Local teardown after window destroy: no wire frames (native owns them). */
   dispose(): void;
+  /**
+   * Terminal connection-death state: true after the broker connection died.
+   * Delivery has stopped, every later command/query rejects instead of
+   * hanging, and fire-and-forget failures are absorbed into `deadFailures`.
+   */
+  readonly connectionDead: boolean;
+  /** Terminal death notification; fires exactly once. */
+  onConnectionDead(handler: (error: Error) => void): () => void;
+  /**
+   * Fire-and-forget failures observed after death (bounded, newest last):
+   * best-effort subscribe/unsubscribe frames and gap-resync queries whose
+   * rejections are explained by the dead transport.
+   */
+  readonly deadFailures: readonly Error[];
 }
 
 interface ChannelEndpointState {
@@ -406,10 +430,79 @@ export const createWebviewOrchestration = (
     }
   };
 
+  // D3 connection-death state (harden-lifecycle-ownership): one terminal
+  // transition per orchestration. Death stops delivery, cancels gap-resync
+  // bookkeeping, closes channel endpoints locally, and absorbs fire-and-forget
+  // failures into an observable state instead of console noise.
+  const deadListeners = new Set<(error: Error) => void>();
+  const deadFailures: Error[] = [];
+  const DEAD_FAILURE_LIMIT = 16;
+  let deadError: Error | undefined;
+
+  const isTransportDeathError = (error: unknown): boolean =>
+    error instanceof Error && error.message === BROKER_CONNECTION_CLOSED_MESSAGE;
+
+  const markDead = (error: Error): void => {
+    if (deadError !== undefined) {
+      return;
+    }
+    deadError = error;
+    // Cancel the gap-resync family: the in-flight (value, seq) queries belong
+    // to a dead transport; their rejections are absorbed as dead failures.
+    resyncInFlight.clear();
+    // Stop delivering: handler maps die with the transport so late frames and
+    // stale subscriptions can never reach application code.
+    urlChangeHandlers.clear();
+    titleChangeHandlers.clear();
+    focusedHandlers.clear();
+    geometryChangeHandlers.clear();
+    loadStateHandlers.clear();
+    channelCreatedHandlers.clear();
+    // Channel endpoints observe a terminal close locally: the broker is gone,
+    // so no wire-side flush will ever arrive.
+    for (const state of channels.values()) {
+      deliverChannelClosed(state.channelId, "session_closed");
+    }
+    channels.clear();
+    for (const listener of [...deadListeners]) {
+      try {
+        listener(error);
+      } catch {
+        // One throwing terminal listener must not block the rest.
+      }
+    }
+  };
+
+  const absorbDeadFailure = (error: unknown): void => {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    deadFailures.push(failure);
+    if (deadFailures.length > DEAD_FAILURE_LIMIT) {
+      deadFailures.splice(0, deadFailures.length - DEAD_FAILURE_LIMIT);
+    }
+    // Ports without an onDead tap still reach the terminal state through the
+    // rejection classifier: a transport-terminal rejection is death evidence.
+    if (deadError === undefined && isTransportDeathError(error)) {
+      markDead(failure);
+    }
+  };
+
+  const stopDeadTap = port.onDead?.((error: Error) => {
+    markDead(error);
+  });
+
   // Fire-and-forget wire frames (subscribe/unsubscribe). Observability of a
   // transport failure rides the existing connection lifecycle; report once.
+  // Death-explained failures merge into the connection-dead state (D3);
+  // only genuinely unexplained failures keep the console channel.
   const sendBestEffort = (command: WebviewOrchestrationCommandFrame): void => {
+    if (deadError !== undefined) {
+      return;
+    }
     void sendOrThrowEnvelope(command).catch((error: unknown) => {
+      if (deadError !== undefined || isTransportDeathError(error)) {
+        absorbDeadFailure(error);
+        return;
+      }
       console.error("WebView orchestration frame failed:", error);
     });
   };
@@ -488,6 +581,9 @@ export const createWebviewOrchestration = (
     kind: "urlChange" | "titleChange",
     deliveredSeq: number,
   ): void => {
+    if (deadError !== undefined) {
+      return;
+    }
     // The in-flight marker is generation-qualified: a destroy/recreate
     // bumps the generation, so an old promise's finally can never remove a
     // new generation's marker (final review P2).
@@ -508,6 +604,9 @@ export const createWebviewOrchestration = (
       isUrl ? "get-webview-url-result" : "get-webview-title-result",
     )
       .then((result) => {
+        if (deadError !== undefined) {
+          return;
+        }
         if ((viewGenerations.get(webviewId) ?? 0) !== generation) {
           // The view this query was issued for is gone (destroyed and
           // possibly re-created under the same id); its answer must not
@@ -549,6 +648,12 @@ export const createWebviewOrchestration = (
         }
       })
       .catch((error: unknown) => {
+        if (deadError !== undefined || isTransportDeathError(error)) {
+          // D3: the resync query died with the transport; its cancellation is
+          // part of the connection-dead state, not console noise.
+          absorbDeadFailure(error);
+          return;
+        }
         console.error("WebView orchestration sequence-gap resync failed:", error);
       })
       .finally(() => {
@@ -640,7 +745,7 @@ export const createWebviewOrchestration = (
   };
 
   const deliverViewEvent = (frame: WebviewEventFrame): void => {
-    if (frame.windowId !== windowId) {
+    if (deadError !== undefined || frame.windowId !== windowId) {
       return;
     }
     const previousSeq = observeSeq(frame.webviewId, frame.seq);
@@ -1078,6 +1183,7 @@ export const createWebviewOrchestration = (
 
   const dispose = (): void => {
     stopFrameTap();
+    stopDeadTap?.();
     urlChangeHandlers.clear();
     titleChangeHandlers.clear();
     focusedHandlers.clear();
@@ -1087,6 +1193,7 @@ export const createWebviewOrchestration = (
     resyncInFlight.clear();
     channels.clear();
     channelCreatedHandlers.clear();
+    deadListeners.clear();
   };
 
   return {
@@ -1101,5 +1208,17 @@ export const createWebviewOrchestration = (
     destroyMessageChannel,
     onCreatedMessageChannel,
     dispose,
+    get connectionDead(): boolean {
+      return deadError !== undefined;
+    },
+    onConnectionDead(handler: (error: Error) => void): () => void {
+      deadListeners.add(handler);
+      return () => {
+        deadListeners.delete(handler);
+      };
+    },
+    get deadFailures(): readonly Error[] {
+      return deadFailures;
+    },
   };
 };

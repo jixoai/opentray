@@ -415,6 +415,22 @@ pub(crate) enum OpenOutcome {
     Created,
 }
 
+/// Outcome of an owner-validated window destroy
+/// (harden-lifecycle-ownership D2). Destroy-style registry APIs are typed
+/// by the full owner tuple; a bare tray-keyed removal is not expressible.
+#[derive(Debug)]
+pub(crate) enum DestroyOutcome {
+    /// The addressed tuple was resident; its entry was removed.
+    Removed,
+    /// No entry is registered under the tray — e.g. the caller's own
+    /// session sweep already collected it. Nothing was removed; teardown
+    /// keyed by the same tuple may proceed.
+    Vacant,
+    /// A different owner is resident under the tray. The destroy is stale:
+    /// it removed nothing and the resident session stays untouched.
+    Superseded,
+}
+
 /// One registered window session: owner identity plus the per-view event
 /// handles. Native webview pointers and NSWindow/Win32 resources stay in
 /// the platform runtime, keyed by the same tray id.
@@ -500,11 +516,41 @@ impl WindowRegistry {
         Ok(OpenOutcome::Created)
     }
 
-    /// Removes the window registration for one tray (explicit destroy).
-    pub fn destroy_window(&mut self, tray_id: &str) -> Option<WindowEntry> {
-        let index = self.entries.iter().position(|(tray, _)| tray == tray_id)?;
-        let (_, entry) = self.entries.remove(index);
-        Some(entry)
+    /// Whether `expected` is the currently resident owner of the tray's
+    /// window session. View-level destroys require a live matching
+    /// registration (harden-lifecycle-ownership D2): a stale tuple must
+    /// never strip state from a session it no longer addresses.
+    pub fn resident_matches(&self, expected: &WindowOwner) -> bool {
+        self.window(&expected.tray_id)
+            .and_then(|entry| entry.owner.as_ref())
+            .is_some_and(|resident| resident == expected)
+    }
+
+    /// Removes the window registration for one tray, validated against the
+    /// full owner tuple (harden-lifecycle-ownership D2): a destroy
+    /// addressing any tuple other than the one currently resident removes
+    /// nothing and never touches the resident session. `Vacant` means the
+    /// tray holds no registration — for a caller that just collected the
+    /// entry through its own session sweep, teardown may proceed; the
+    /// outcome itself proves no newer owner superseded it.
+    pub fn destroy_window(&mut self, expected: &WindowOwner) -> DestroyOutcome {
+        let Some(index) = self
+            .entries
+            .iter()
+            .position(|(tray, _)| *tray == expected.tray_id)
+        else {
+            return DestroyOutcome::Vacant;
+        };
+        if !self.entries[index]
+            .1
+            .owner
+            .as_ref()
+            .is_some_and(|resident| resident == expected)
+        {
+            return DestroyOutcome::Superseded;
+        }
+        self.entries.remove(index);
+        DestroyOutcome::Removed
     }
 
     /// Registers a webview's shared event handle inside a tray's window.
@@ -537,13 +583,19 @@ impl WindowRegistry {
         Ok(())
     }
 
-    /// Removes a webview registration; returns the removed handle.
+    /// Removes a webview registration, validated against the window's full
+    /// owner tuple (harden-lifecycle-ownership D2): a stale destroy can
+    /// never strip a view from a session it no longer addresses. Returns
+    /// the removed handle.
     pub fn remove_view(
         &mut self,
-        tray_id: &str,
+        expected: &WindowOwner,
         webview_id: &str,
     ) -> Option<std::rc::Rc<std::cell::RefCell<ViewEvents>>> {
-        let entry = self.window_mut(tray_id)?;
+        if !self.resident_matches(expected) {
+            return None;
+        }
+        let entry = self.window_mut(&expected.tray_id)?;
         let index = entry
             .views
             .iter()
@@ -555,24 +607,36 @@ impl WindowRegistry {
     /// exactly the windows whose owner tuple matches the closing session and
     /// never touches another live session's windows.
     ///
-    /// Transitional rule: windows created by legacy `show` commands that do
-    /// not carry `sessionId` are unattributed and are removed by any session
-    /// close. This preserves the pre-orchestration single-client lease
-    /// cleanup guarantee; once clients attribute sessions, every window is
-    /// matched exactly and the transitional branch is unreachable.
+    /// Transitional rule (tightened by harden-lifecycle-ownership D2):
+    /// windows created by legacy `show` commands that do not carry
+    /// `sessionId` are unattributed and are swept only when the closing
+    /// session could have owned them — a closing session that holds
+    /// attributed windows is a modern client, and sweeping a legacy
+    /// client's lease on its close would be collateral damage. A closing
+    /// session with no attributed windows may be the legacy client itself,
+    /// which preserves the pre-orchestration single-client lease cleanup
+    /// guarantee; once clients attribute sessions, every window is matched
+    /// exactly and the transitional branch is unreachable.
     pub fn session_closed(&mut self, closing_session_id: &str) -> Vec<WindowEntry> {
+        let closing_owns_attributed = self.entries.iter().any(|(_, entry)| {
+            entry
+                .owner
+                .as_ref()
+                .and_then(|owner| owner.session_id.as_deref())
+                .is_some_and(|recorded| recorded == closing_session_id)
+        });
         let mut removed = Vec::new();
         let mut index = 0;
         while index < self.entries.len() {
             let (_, entry) = &mut self.entries[index];
-            let matches = entry
+            let matches = match entry
                 .owner
                 .as_ref()
-                .map(|owner| match &owner.session_id {
-                    Some(recorded) => recorded == closing_session_id,
-                    None => true,
-                })
-                .unwrap_or(true);
+                .and_then(|owner| owner.session_id.as_deref())
+            {
+                Some(recorded) => recorded == closing_session_id,
+                None => !closing_owns_attributed,
+            };
             if matches {
                 let (_, entry) = self.entries.remove(index);
                 removed.push(entry);
@@ -651,16 +715,22 @@ impl<T> PopupLedger<T> {
     /// Removes and returns every popup owned by the closing session (D26:
     /// session close and lease cleanup close all of that session's popups
     /// without touching other owners'). Unattributed legacy popups follow
-    /// the transitional rule and close with any session.
+    /// the transitional rule tightened by harden-lifecycle-ownership D2:
+    /// they close only when the closing session could have owned them (a
+    /// closing session that holds attributed popups is a modern client and
+    /// must not sweep a legacy lease as collateral).
     pub fn close_all_of_session(&mut self, closing_session_id: &str) -> Vec<(PopupEntry, T)> {
+        let closing_owns_attributed = self
+            .popups
+            .iter()
+            .any(|(entry, _)| entry.session_id.as_deref() == Some(closing_session_id));
         let mut kept = Vec::new();
         let mut removed = Vec::new();
         for pair in self.popups.drain(..) {
-            let matches = pair
-                .0
-                .session_id
-                .as_deref()
-                .map_or(true, |recorded| recorded == closing_session_id);
+            let matches = match pair.0.session_id.as_deref() {
+                Some(recorded) => recorded == closing_session_id,
+                None => !closing_owns_attributed,
+            };
             if matches {
                 removed.push(pair);
             } else {
@@ -783,8 +853,13 @@ mod tests {
         assert!(registry.window("tray-2").is_none());
     }
 
+    /// harden-lifecycle-ownership D2: the transitional unattributed rule
+    /// sweeps a legacy entry only when the closing session could have owned
+    /// it. A closing session that holds attributed windows is a modern
+    /// client — its close must not take a legacy client's lease as
+    /// collateral.
     #[test]
-    fn legacy_unattributed_windows_follow_the_transitional_cleanup_rule() {
+    fn unattributed_windows_are_swept_only_by_a_session_that_could_own_them() {
         let mut registry = WindowRegistry::new();
         registry
             .open_window(owner("tray-legacy", None))
@@ -794,12 +869,23 @@ mod tests {
             .expect("attributed window");
         registry.add_view("tray-legacy", view("default")).expect("view");
 
-        // Any session close removes the unattributed legacy window …
+        // Closing the attributed session-9 removes exactly its own window …
         let removed = registry.session_closed("session-9");
-        assert_eq!(removed.len(), 2);
-        // … and everything is gone afterwards.
+        assert_eq!(removed.len(), 1);
+        // … and leaves the legacy lease alive instead of sweeping it as
+        // collateral.
+        assert_eq!(
+            registry.window("tray-legacy").unwrap().view_ids(),
+            vec!["default"]
+        );
+
+        // A closing session that holds no attributed window could be the
+        // legacy client itself — its close still sweeps the unattributed
+        // lease, preserving the pre-orchestration single-client cleanup
+        // guarantee.
+        let removed = registry.session_closed("session-legacy-client");
+        assert_eq!(removed.len(), 1);
         assert!(registry.window("tray-legacy").is_none());
-        assert!(registry.window("tray-new").is_none());
     }
 
     #[test]
@@ -828,7 +914,10 @@ mod tests {
         registry
             .open_window(owner("tray-2", Some("session-1")))
             .expect("window two");
-        assert!(registry.destroy_window("tray-1").is_some());
+        assert!(matches!(
+            registry.destroy_window(&owner("tray-1", Some("session-1"))),
+            DestroyOutcome::Removed
+        ));
         assert!(registry.window("tray-1").is_none());
         assert!(registry.window("tray-2").is_some());
         // Destroy → new session for the same tray creates from scratch.
@@ -836,6 +925,106 @@ mod tests {
             registry.open_window(owner("tray-1", Some("session-3"))),
             Ok(OpenOutcome::Created)
         );
+    }
+
+    /// harden-lifecycle-ownership D2: destroy/remove discriminate on the
+    /// full owner tuple — a mismatch on any component (app, tray, session,
+    /// window) is `Superseded`/`None` and removes nothing from the resident
+    /// session.
+    #[test]
+    fn destroy_and_remove_are_owner_tuple_validated() {
+        let mut registry = WindowRegistry::new();
+        registry
+            .open_window(owner("tray-1", Some("session-1")))
+            .expect("window");
+        registry.add_view("tray-1", view("content")).expect("view");
+
+        // Wrong session id.
+        assert!(matches!(
+            registry.destroy_window(&owner("tray-1", Some("session-2"))),
+            DestroyOutcome::Superseded
+        ));
+        // Wrong window id (the tuple includes windowId).
+        let mut wrong_window = owner("tray-1", Some("session-1"));
+        wrong_window.window_id = "win-other".to_string();
+        assert!(matches!(
+            registry.destroy_window(&wrong_window),
+            DestroyOutcome::Superseded
+        ));
+        // Wrong app id.
+        let mut wrong_app = owner("tray-1", Some("session-1"));
+        wrong_app.app_id = "app-other".to_string();
+        assert!(matches!(
+            registry.destroy_window(&wrong_app),
+            DestroyOutcome::Superseded
+        ));
+        assert!(registry.window("tray-1").is_some());
+        // A view removal under any stale tuple removes nothing.
+        assert!(registry
+            .remove_view(&owner("tray-1", Some("session-2")), "content")
+            .is_none());
+        assert!(registry.remove_view(&wrong_window, "content").is_none());
+        assert_eq!(
+            registry.window("tray-1").unwrap().view_ids(),
+            vec!["content"]
+        );
+        // A tray with no registration is Vacant, not Superseded: nothing
+        // newer superseded the caller, teardown may proceed.
+        assert!(matches!(
+            registry.destroy_window(&owner("tray-x", Some("session-x"))),
+            DestroyOutcome::Vacant
+        ));
+        // The exact tuple removes.
+        assert!(matches!(
+            registry.destroy_window(&owner("tray-1", Some("session-1"))),
+            DestroyOutcome::Removed
+        ));
+        assert!(registry.window("tray-1").is_none());
+    }
+
+    /// harden-lifecycle-ownership D2 reentrancy seam (registry level):
+    /// `session_closed` collects the closing session's entries first and
+    /// destroys afterwards. A new same-tray session that registers between
+    /// those two steps must survive the stale destroy whole — its window
+    /// registration and its webviews stay untouched.
+    #[test]
+    fn late_destroy_cannot_remove_a_newer_same_tray_session() {
+        let mut registry = WindowRegistry::new();
+        registry
+            .open_window(owner("tray-1", Some("session-old")))
+            .expect("old window");
+        registry.add_view("tray-1", view("old-view")).expect("view");
+
+        // Phase 1: the sweep collects the closing session's entries.
+        let collected = registry.session_closed("session-old");
+        assert_eq!(collected.len(), 1);
+        let stale = collected[0].owner.clone().expect("attributed closing entry");
+
+        // Phase 2: a new same-tray session becomes resident before the
+        // destroy step runs.
+        registry
+            .open_window(owner("tray-1", Some("session-new")))
+            .expect("new window");
+        registry.add_view("tray-1", view("new-view")).expect("view");
+
+        // Phase 3: the stale destroy is Superseded, cannot strip the newer
+        // session's views, and the newer session survives whole.
+        assert!(matches!(
+            registry.destroy_window(&stale),
+            DestroyOutcome::Superseded
+        ));
+        assert!(registry.remove_view(&stale, "new-view").is_none());
+        assert_eq!(
+            registry.window("tray-1").unwrap().view_ids(),
+            vec!["new-view"]
+        );
+        // The newer session still owns its tray afterwards.
+        assert_eq!(
+            registry.session_closed("session-new").len(),
+            1,
+            "the newer session is still the resident owner"
+        );
+        assert!(registry.window("tray-1").is_none());
     }
 
     #[test]
@@ -977,8 +1166,9 @@ mod tests {
             .add_view("tray-1", view("content"))
             .expect_err("duplicate id");
         assert_eq!(error.code(), OrchestrationErrorCode::UnknownView);
-        assert!(registry.remove_view("tray-1", "content").is_some());
-        assert!(registry.remove_view("tray-1", "content").is_none());
+        let window_owner = owner("tray-1", Some("session-1"));
+        assert!(registry.remove_view(&window_owner, "content").is_some());
+        assert!(registry.remove_view(&window_owner, "content").is_none());
     }
 
     #[test]
@@ -1105,15 +1295,44 @@ mod tests {
         assert_eq!(ledger.close_all_of_session("session-2").len(), 1);
         assert!(ledger.is_empty());
 
-        // Unattributed legacy popups close with any session (transitional
-        // rule); attributed ones survive a foreign session's close untouched.
+        // Unattributed legacy popups follow the transitional rule only when
+        // the closing session could have owned them: closing session-9 here
+        // holds no attributed popups, so it may be the legacy client and the
+        // legacy popup closes with it; attributed ones survive a foreign
+        // session's close untouched.
         let legacy = owner("tray-3", None);
         ledger.record(&legacy, "popup-legacy", ());
         ledger.record(&session_one, "popup-d", ());
         let removed = ledger.close_all_of_session("session-9");
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].0.popup_id, "popup-legacy");
-        assert_eq!(ledger.popup_ids_of_tray("tray-1"), vec!["popup-d".to_string()]);
+        assert_eq!(ledger.popup_ids_of_tray("tray-1"), vec!["popup-d"]);
+    }
+
+    /// harden-lifecycle-ownership D2: a closing session that holds
+    /// attributed popups is a modern client — its close must not sweep an
+    /// unattributed legacy popup as collateral.
+    #[test]
+    fn popup_ledger_unattributed_rule_sweeps_only_a_possible_owner() {
+        let mut ledger = PopupLedger::<()>::default();
+        let legacy = owner("tray-legacy", None);
+        let modern = owner("tray-new", Some("session-9"));
+        ledger.record(&legacy, "popup-legacy", ());
+        ledger.record(&modern, "popup-modern", ());
+
+        // Closing the attributed session-9 takes exactly its own popup …
+        let removed = ledger.close_all_of_session("session-9");
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0.popup_id, "popup-modern");
+        // … and the legacy popup survives the modern session's close.
+        assert_eq!(
+            ledger.popup_ids_of_tray("tray-legacy"),
+            vec!["popup-legacy"]
+        );
+
+        // A session owning no attributed popups may be the legacy client.
+        assert_eq!(ledger.close_all_of_session("session-legacy").len(), 1);
+        assert!(ledger.is_empty());
     }
 
     #[test]

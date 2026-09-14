@@ -110,6 +110,14 @@ export interface EventfulTrayHandle extends TrayHandle {
   onAppReopenRequested(
     handler: (event: Extract<AppEvent, { type: "reopenRequested" }>) => void
   ): () => void;
+  /**
+   * Terminal broker-connection-death notification (D3,
+   * harden-lifecycle-ownership). Present when the transport publishes its own
+   * death signal (the local broker connection always does); fires exactly
+   * once, after which pending requests have rejected, event delivery has
+   * stopped, and every later request rejects instead of hanging.
+   */
+  onConnectionDead?(handler: (error: Error) => void): () => void;
 }
 
 export interface ExtensionLoadOptions {
@@ -392,8 +400,16 @@ const attachEventfulTrayHandle = (
       handler(frame.event as TrayEventByType<typeof event>);
     });
 
+  // D3: surface the transport's terminal death signal when it publishes one,
+  // so eventful consumers and extensions observe broker death instead of
+  // silently losing delivery.
+  const onConnectionDead = isConnectionDeadSource(source)
+    ? (handler: (error: Error) => void) => source.onConnectionDead(handler)
+    : undefined;
+
   const eventful: EventfulTrayHandle = {
     ...handle,
+    ...(onConnectionDead === undefined ? {} : { onConnectionDead }),
     listenExtension<TData = unknown>(
       ext: string,
       handler: (event: ExtensionEnvelope<TData>) => void
@@ -462,6 +478,17 @@ const isOpenTrayEventSource = (
   transport: OpenTrayTransport
 ): transport is OpenTrayConnection =>
   "onEvent" in transport && typeof transport.onEvent === "function";
+
+/** Structural view of transports that publish a terminal death signal (D3). */
+interface ConnectionDeadSourceTransport {
+  onConnectionDead(handler: (error: Error) => void): () => void;
+}
+
+const isConnectionDeadSource = (
+  transport: OpenTrayEventSource
+): transport is OpenTrayEventSource & ConnectionDeadSourceTransport =>
+  "onConnectionDead" in transport &&
+  typeof transport.onConnectionDead === "function";
 
 const resolveDefaultAppRef = async (
   transport: OpenTrayTransport,

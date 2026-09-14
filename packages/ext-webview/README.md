@@ -579,7 +579,9 @@ Style exclusivity is one rule with one error: a window in a translucency-affecti
 - `focused` → `{ focused: boolean }` (edge semantics: gained or lost native focus)
 - `geometryChange` → `{ rect: { x, y, width, height } | null }` — the overlay safe-area projection in view-local logical pixels; `null` means no intersection with the overlay region. The rect is field-isomorphic to the page-bridge `overlay.geometrychange` payload: same fields, same units, same projection value.
 
-`seq` is a per-view monotonically increasing sequence number. Events are push-only: current values come from the query commands. Subscribe first, then call `getUrl()`/`getTitle()`, and discard any event whose `seq` is not greater than the queried `seq` — that resolves the subscription race without replay. `focused` and `geometryChange` have no query; track edges and projection updates. Events stop cleanly at broker disconnect (observed through the connection lifecycle, never synthetic events); a fresh session starts fresh subscriptions.
+`seq` is a per-view monotonically increasing sequence number. Events are push-only: current values come from the query commands. Subscribe first, then call `getUrl()`/`getTitle()`, and discard any event whose `seq` is not greater than the queried `seq` — that resolves the subscription race without replay. `focused` and `geometryChange` have no query; track edges and projection updates. A fresh session starts fresh subscriptions.
+
+When the broker connection dies, event delivery stops and the window handle enters an observable terminal state: `win.connectionDead` becomes `true` and `win.onConnectionDead(handler)` fires exactly once with the terminal error (mirrored on the eventful tray handle). Never are synthetic events emitted for the death; every later command or `(value, seq)` query rejects with the transport-close sentinel instead of hanging, in-flight gap resyncs are cancelled, and best-effort subscribe/unsubscribe failures merge into that dead state rather than console noise. Channel endpoints observe the death as a local `session_closed` close notice.
 
 ### Message channels
 

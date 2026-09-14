@@ -64,6 +64,11 @@ const appLogPath = resolve(PROJECT_DIR, "app.log");
 await mkdir(dirname(appLogPath), { recursive: true });
 const logSink = appendFile.bind(undefined, appLogPath);
 const logNote = (message) => { void logSink("[create-opentray] " + message + "\\n", "utf8"); };
+// Bootstrap milestones (harden-lifecycle-ownership D5): one structured JSON
+// record per startup step — the operator reads session health from app.log
+// alone, and a failed step names itself instead of needing archaeology.
+const errorText = (error) => error instanceof Error ? error.message : String(error);
+const logEvent = (record) => logSink(JSON.stringify({ time: new Date().toISOString(), event: "bootstrap", ...record }) + "\\n", "utf8");
 
 ${toolbarCarrierSource()}const main = async () => {
   let appIcon;
@@ -90,7 +95,7 @@ ${toolbarCarrierSource()}const main = async () => {
 
   const tray = await (async () => {
     try {
-      return await createTray({
+      const created = await createTray({
         id: config.appId,
         tooltip: { title: config.appName, description: \`\${config.appName} (OpenTray)\` },
         icon: Object.keys(trayIconCandidates).length > 0
@@ -112,6 +117,8 @@ ${toolbarCarrierSource()}const main = async () => {
           cwd: PROJECT_DIR,
         },
       });
+      void logEvent({ step: "createTray", status: "ok", appId: config.appId });
+      return created;
     } catch (error) {
       // Carrier-resurrection yield: a Dock-pinned carrier can cold-start this
       // entry while another instance already owns the broker session. The
@@ -125,6 +132,21 @@ ${toolbarCarrierSource()}const main = async () => {
       throw error;
     }
   })();
+
+  // harden-lifecycle-ownership D3: broker connection death is a terminal
+  // state. The entry records the milestone and exits non-zero — it never
+  // keeps a live shell server over a dead backend (zombie entry). The
+  // quitting flag keeps the graceful quit path (whose transport close also
+  // reaches this terminal state) on its exit(0) course.
+  let quitting = false;
+  tray.onConnectionDead?.((error) => {
+    if (quitting) return;
+    quitting = true;
+    void (async () => {
+      await logEvent({ step: "connectionDead", status: "failed", error: errorText(error) });
+      process.exit(1);
+    })();
+  });
 
   // v1 developerMode maps ONLY to per-window DevTools admission. When false it
   // must not request devtools at all — default windows are not inspectable.
@@ -140,7 +162,10 @@ ${toolbarCarrierSource()}const main = async () => {
     const shellApi = await import("./app-shell-server.mjs");
     shellPort = await shellApi.listenShell();
     if (shellPort === null) {
+      await logEvent({ step: "listenShell", status: "failed" });
       await logSink("[create-opentray] toolbar shell host failed to listen; opening the direct window\\n", "utf8");
+    } else {
+      void logEvent({ step: "listenShell", status: "ok", port: shellPort });
     }
   }
   const toolbarReady = toolbarMode && shellPort !== null;
@@ -161,7 +186,18 @@ ${toolbarCarrierSource()}const main = async () => {
       ...(iconFollows ? { iconSync: { faviconToWindow: true } } : {}),
     }),
   });
-  await window.show().catch(() => {});
+  // harden-lifecycle-ownership D5: the initial show() is a bootstrap gate. A
+  // failure aborts the carrier (no child webviews attach against a session
+  // that never came up) and reaches the startup boundary — app.log records
+  // the failed milestone, then the top-level handler persists the stack and
+  // exits non-zero. Never swallowed.
+  try {
+    await window.show();
+    void logEvent({ step: "showWindow", status: "ok", mode: toolbarReady ? "toolbar" : "direct" });
+  } catch (error) {
+    await logEvent({ step: "showWindow", status: "failed", mode: toolbarReady ? "toolbar" : "direct", error: errorText(error) });
+    throw error;
+  }
 
   let content = null;
   if (toolbarReady) {
@@ -170,6 +206,7 @@ ${toolbarCarrierSource()}const main = async () => {
       contentUrl: config.url,
       titleFollows,
       log: logNote,
+      event: logEvent,
     });
     ({ content } = carrier);
     // P1-3 exit race: teardown closes the channel; the carrier must never
@@ -192,6 +229,7 @@ ${toolbarCarrierSource()}const main = async () => {
   };
 
   const quit = async () => {
+    quitting = true;
     try { await window.destroy(); } catch {}
     await tray.destroy();
     process.exit(0);

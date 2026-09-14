@@ -10,7 +10,6 @@ import {
   chmod,
   constants,
   mkdir,
-  open,
   readdir,
   readFile,
   rename,
@@ -23,6 +22,8 @@ import { dirname, join, resolve } from "node:path";
 import { build as buildPlist, parse as parsePlist, type PlistValue } from "plist";
 
 import type { AppIcon, AppIconAsset, AppIconSource } from "@opentray/spec";
+
+import { acquireOwnerStampedLock, OwnerStampedLockError } from "./owner-stamped-lock";
 
 const APP_BUNDLE_SCHEMA_VERSION = 1;
 const APP_BUNDLE_MANIFEST = "Contents/Resources/opentray-app-bundle.json";
@@ -658,26 +659,23 @@ const atomicWrite = async (
 const atomicCopy = async (source: string, destination: string, mode?: number): Promise<void> =>
   atomicWrite(destination, await readFile(source), mode);
 
+// harden-lifecycle-ownership D1: the stable-bundle lock is the shared
+// owner-stamped lock (plan §5 D1) — stale shapes (empty, unparseable,
+// dead-owner) are reclaimed inside its bounded budget, so a kill -9 during
+// materialization never requires a manual lock deletion.
 const acquireBundleLock = async (lockPath: string): Promise<{ release(): Promise<void> }> => {
-  const deadline = Date.now() + APP_BUNDLE_LOCK_TIMEOUT_MS;
-  while (Date.now() <= deadline) {
-    try {
-      const handle = await open(lockPath, "wx");
-      return {
-        async release(): Promise<void> {
-          await handle.close();
-          await rm(lockPath, { force: true });
-        },
-      };
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+  try {
+    return await acquireOwnerStampedLock(lockPath, { timeoutMs: APP_BUNDLE_LOCK_TIMEOUT_MS });
+  } catch (error) {
+    if (error instanceof OwnerStampedLockError) {
+      throw new DarwinAppBundleError(
+        "bundle_lock_timeout",
+        `timed out acquiring Darwin app bundle lock: ${lockPath}`,
+        { cause: error },
+      );
     }
+    throw error;
   }
-  throw new DarwinAppBundleError(
-    "bundle_lock_timeout",
-    `timed out acquiring Darwin app bundle lock: ${lockPath}`,
-  );
 };
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>

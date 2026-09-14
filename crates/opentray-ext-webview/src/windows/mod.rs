@@ -110,8 +110,8 @@ use self::popups::PopupTracker;
 use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::layout::WindowLayoutState;
 use crate::orchestration::{
-    OpenOutcome, StyleFacts, ViewEvents, WindowOwner, WindowRegistry, DEFAULT_WINDOW_ID,
-    DEFAULT_WEBVIEW_ID,
+    DestroyOutcome, OpenOutcome, StyleFacts, ViewEvents, WindowOwner, WindowRegistry,
+    DEFAULT_WINDOW_ID, DEFAULT_WEBVIEW_ID,
 };
 use crate::{
     normalize_opacity, parse_background_input, should_auto_hide_on_blur, MetadataSyncSettings,
@@ -839,7 +839,26 @@ impl WindowsWebviewRuntime {
                 Ok(json!({ "type": "closed" }))
             }
             WebviewCommand::Destroy => {
-                self.destroy_window_session(tray_id);
+                // harden-lifecycle-ownership D2: the legacy tray-scoped
+                // destroy resolves the resident owner first so the destroy
+                // stays owner-tuple-typed. The legacy command surface
+                // reaches the runtime only through the live tray scope, so
+                // the resident owner is the commanding session; a vacant
+                // registry tears down at most an orphan native session.
+                match self
+                    .registry
+                    .window(tray_id)
+                    .and_then(|entry| entry.owner.clone())
+                {
+                    Some(resident) => self.destroy_window_session(
+                        &resident,
+                        opentray_spec::channel::ChannelCloseReason::WindowDestroyed,
+                    ),
+                    None => self.teardown_window_session(
+                        tray_id,
+                        opentray_spec::channel::ChannelCloseReason::WindowDestroyed,
+                    ),
+                }
                 Ok(json!({ "type": "destroyed" }))
             }
             WebviewCommand::SetContent { html, url } => {
@@ -1035,30 +1054,18 @@ impl WindowsWebviewRuntime {
         self::popups::close_session_popups(&self.popups, session_id);
         let removed = self.registry.session_closed(session_id);
         for entry in removed {
-            if let Some(owner) = entry.owner {
-                // Channel law (D20): session close closes the session's
-                // channels with `session_closed` (distinct from the
-                // `window_destroyed` entrance) and stages the host
-                // observations for the next response flush — the
-                // session-close ABI call itself returns no events.
-                if let Some(session) = self.sessions.get_mut(&owner.tray_id) {
-                    let pushes = session
-                        .bridge
-                        .borrow()
-                        .channels
-                        .borrow_mut()
-                        .close_all(opentray_spec::channel::ChannelCloseReason::SessionClosed);
-                    self::channels::deliver_channel_pushes(&session.bridge, &pushes, None);
-                    let events = session
-                        .bridge
-                        .borrow()
-                        .channels
-                        .borrow_mut()
-                        .drain_host_events();
-                    self.pending_channel_events.extend(events);
-                }
-                self.destroy_window_session(&owner.tray_id);
-            }
+            let Some(owner) = entry.owner else {
+                continue;
+            };
+            // harden-lifecycle-ownership D2: the destroy step revalidates
+            // the collected owner tuple against the resident registry
+            // state — a same-tray session that registered after this sweep
+            // collected the entry survives whole (window, webviews,
+            // channels, popups).
+            self.destroy_window_session(
+                &owner,
+                opentray_spec::channel::ChannelCloseReason::SessionClosed,
+            );
         }
     }
 
@@ -1198,7 +1205,7 @@ impl WindowsWebviewRuntime {
         match self.registry.open_window(owner.clone()) {
             Ok(OpenOutcome::Created) => {
                 if let Err(error) = self.create_window_session(
-                    owner,
+                    owner.clone(),
                     html,
                     url,
                     initial_width,
@@ -1208,8 +1215,10 @@ impl WindowsWebviewRuntime {
                     window_only,
                 ) {
                     // Roll the registry entry back so a failed create cannot
-                    // block later shows with a phantom session.
-                    self.registry.destroy_window(tray_id);
+                    // block later shows with a phantom session (D2: the
+                    // rollback destroy carries the same owner tuple that
+                    // just registered).
+                    self.registry.destroy_window(&owner);
                     return Err(error);
                 }
                 return Ok(());
@@ -1537,11 +1546,39 @@ impl WindowsWebviewRuntime {
         show_bridge_window(&session.bridge, true)
     }
 
-    fn destroy_window_session(&mut self, tray_id: &str) {
-        self.registry.destroy_window(tray_id);
+    /// harden-lifecycle-ownership D2: destroys the native window session
+    /// only after the resident registry state revalidates the addressed
+    /// owner tuple. `Superseded` means a different session took the tray
+    /// since the caller collected its entry (or since the command was
+    /// issued): the stale destroy removes nothing and the resident session
+    /// stays whole. `channel_close_reason` preserves the channel law's two
+    /// entrances (`session_closed` vs `window_destroyed`, D20).
+    fn destroy_window_session(
+        &mut self,
+        expected: &WindowOwner,
+        channel_close_reason: opentray_spec::channel::ChannelCloseReason,
+    ) {
+        if matches!(
+            self.registry.destroy_window(expected),
+            DestroyOutcome::Superseded
+        ) {
+            return;
+        }
+        self.teardown_window_session(&expected.tray_id, channel_close_reason);
+    }
+
+    /// Unvalidated tray-keyed teardown of the native window session. Only
+    /// reachable behind an owner-tuple validation (or a vacant registry,
+    /// where the teardown sweeps an orphan native session the registry no
+    /// longer knows).
+    fn teardown_window_session(
+        &mut self,
+        tray_id: &str,
+        channel_close_reason: opentray_spec::channel::ChannelCloseReason,
+    ) {
         if let Some(session) = self.sessions.remove(tray_id) {
             // Channel law (D20): window destruction is a destroy entrance —
-            // open channels close with `window_destroyed`, endpoints still
+            // open channels close with the caller's reason, endpoints still
             // live observe once, host observations ride this command's
             // response flush, and no tombstone survives the session.
             let pushes = session
@@ -1549,7 +1586,7 @@ impl WindowsWebviewRuntime {
                 .borrow()
                 .channels
                 .borrow_mut()
-                .close_all(opentray_spec::channel::ChannelCloseReason::WindowDestroyed);
+                .close_all(channel_close_reason);
             self::channels::deliver_channel_pushes(&session.bridge, &pushes, None);
             let events = session
                 .bridge

@@ -1060,7 +1060,7 @@ impl super::WindowsWebviewRuntime {
                 if !known {
                     return Ok(unknown_view_envelope(&owner, &webview_id));
                 }
-                self.destroy_child_webview(&owner, &webview_id);
+                self.destroy_child_webview(&owner, &window_id, &webview_id);
                 WebviewOrchestrationResult::WebviewAck {
                     owner,
                     command: "destroy-webview".to_string(),
@@ -1409,7 +1409,7 @@ impl super::WindowsWebviewRuntime {
                 Ok(())
             }
             Err(error) => {
-                self.registry.remove_view(&owner.tray_id, webview_id);
+                self.registry.remove_view(&window_owner, webview_id);
                 Err(ChildCreateError::Runtime(error))
             }
         }
@@ -1601,12 +1601,27 @@ impl super::WindowsWebviewRuntime {
     /// the controller; the shared environment, profile state, and sibling
     /// controllers stay alive (Profile Law). The layout document keeps its
     /// declaration — the next solve simply positions nothing for the id.
+    /// harden-lifecycle-ownership D2: view teardown is owner-validated —
+    /// the addressed window must still be resident under the exact owner
+    /// tuple, so a stale destroy can never strip a view from a session it
+    /// no longer addresses.
     fn destroy_child_webview(
         &mut self,
         owner: &opentray_spec::webview::WebviewOwnerTuple,
+        window_id: &str,
         webview_id: &str,
     ) {
+        let expected = WindowOwner {
+            app_id: owner.app_id.clone(),
+            tray_id: owner.tray_id.clone(),
+            session_id: Some(owner.session_id.clone()),
+            window_id: window_id.to_string(),
+        };
+        if !self.registry.resident_matches(&expected) {
+            return;
+        }
         let Some(session) = self.sessions.get_mut(&owner.tray_id) else {
+            self.registry.remove_view(&expected, webview_id);
             return;
         };
         // Channel law (D11/D20): peer teardown closes the destroyed view's
@@ -1633,7 +1648,7 @@ impl super::WindowsWebviewRuntime {
         drop(removed);
         let hwnd = session.window.hwnd;
         relayout(hwnd, &session.bridge);
-        self.registry.remove_view(&owner.tray_id, webview_id);
+        self.registry.remove_view(&expected, webview_id);
     }
 }
 
@@ -1915,5 +1930,62 @@ mod tests {
         let frames = core.borrow_mut().outbox.drain(..).collect::<Vec<_>>();
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].webview_id, "toolbar");
+    }
+
+    /// harden-lifecycle-ownership D2, Windows twin of the macOS seam: the
+    /// window registry's destroy/remove APIs are owner-tuple validated, so
+    /// a stale destroy collected by a closing session's sweep cannot
+    /// remove a newer same-tray session that registered before the destroy
+    /// step ran (registry level — the GUI paths run on Windows runners).
+    #[test]
+    fn late_destroy_cannot_remove_a_newer_same_tray_session() {
+        use crate::orchestration::{DestroyOutcome, WindowRegistry, DEFAULT_WINDOW_ID};
+
+        fn owner(tray: &str, session: Option<&str>) -> WindowOwner {
+            WindowOwner {
+                app_id: "app".to_string(),
+                tray_id: tray.to_string(),
+                session_id: session.map(str::to_string),
+                window_id: DEFAULT_WINDOW_ID.to_string(),
+            }
+        }
+        fn view(id: &str) -> Rc<RefCell<ViewEvents>> {
+            Rc::new(RefCell::new(ViewEvents::new(
+                id,
+                opentray_spec::webview::WebviewBridgePolicy::default(),
+            )))
+        }
+
+        let mut registry = WindowRegistry::new();
+        registry
+            .open_window(owner("tray-1", Some("session-old")))
+            .expect("old window");
+        registry.add_view("tray-1", view("old-view")).expect("view");
+
+        // Phase 1: the sweep collects the closing session's entries.
+        let collected = registry.session_closed("session-old");
+        assert_eq!(collected.len(), 1);
+        let stale = collected[0].owner.clone().expect("attributed closing entry");
+
+        // Phase 2: a new same-tray session becomes resident before the
+        // destroy step runs.
+        registry
+            .open_window(owner("tray-1", Some("session-new")))
+            .expect("new window");
+        registry.add_view("tray-1", view("new-view")).expect("view");
+
+        // Phase 3: the stale destroy is Superseded, cannot strip the newer
+        // session's views, and the newer session survives whole.
+        assert!(matches!(
+            registry.destroy_window(&stale),
+            DestroyOutcome::Superseded
+        ));
+        assert!(registry.remove_view(&stale, "new-view").is_none());
+        assert_eq!(
+            registry.window("tray-1").unwrap().view_ids(),
+            vec!["new-view"]
+        );
+        assert_eq!(registry.session_closed("session-new").len(), 1);
+        assert!(registry.window("tray-1").is_none());
     }
 }

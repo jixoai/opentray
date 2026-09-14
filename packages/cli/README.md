@@ -108,7 +108,27 @@ that need exact wire shapes.
 
 `primaryEvent` is a role on a normal menu item and emits the usual `menuClick`.
 Use `tray.onTrayClick(...)` when you want to listen to raw tray-icon clicks
-without making a menu item the primary route.
+without making the menu item the primary route.
+
+### Broker connection death
+
+When the local broker connection dies (socket error, broker exit, or a
+completed graceful close), the SDK reaches a terminal connection-dead state:
+
+- Pending requests reject with the transport-close sentinel message exported
+  as `BROKER_CONNECTION_CLOSED_MESSAGE`; requests issued after death reject
+  immediately with the same message instead of hanging on a dead socket.
+- Event delivery stops. Eventful tray handles expose
+  `tray.onConnectionDead(handler)` — present on local broker transports — which
+  fires exactly once with the terminal error; treat it as the fail-loud signal
+  to exit or supervised-restart an entry whose backend is gone.
+- `destroy()` treats the sentinel as the requested end state, so a Quit issued
+  after broker death still settles.
+
+Endpoint identity is app identity: when `createTray` receives an `appId`, the
+caller label (and therefore the per-caller broker endpoint) is that appId
+normalized to a filesystem-safe slug, stable across every launch method of the
+same app. Display names (`appName`) never participate in endpoint derivation.
 
 ## Darwin App Bundle
 

@@ -130,6 +130,8 @@ class OrchestrationTransport implements OpenTrayConnection {
   closed = false;
   respondData: (data: unknown) => unknown = defaultRespond;
   readonly #listeners = new Set<(frame: OpenTrayEventFrame) => void>();
+  readonly #deadListeners = new Set<(error: Error) => void>();
+  readonly #deathBarriers: Array<(error: Error) => void> = [];
 
   extCommands(): Record<string, unknown>[] {
     return this.frames
@@ -161,19 +163,56 @@ class OrchestrationTransport implements OpenTrayConnection {
     };
   }
 
+  onConnectionDead(listener: (error: Error) => void): () => void {
+    this.#deadListeners.add(listener);
+    return () => {
+      this.#deadListeners.delete(listener);
+    };
+  }
+
+  /** Abrupt broker death: in-flight requests reject, terminal listeners fire. */
+  kill(): void {
+    this.closed = true;
+    const error = new Error("broker connection closed");
+    for (const reject of this.#deathBarriers.splice(0)) {
+      reject(error);
+    }
+    for (const listener of this.#deadListeners) {
+      listener(error);
+    }
+  }
+
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {
     this.frames.push(frame);
     if (this.closed) {
       throw new Error("broker connection closed");
     }
     if (frame.type === "ext-command") {
+      // A death barrier races the responder so an in-flight query can hang
+      // until kill(), exactly like a request pending on a dying socket.
+      let releaseBarrier: () => void = () => {};
+      const barrier = new Promise<never>((_, reject) => {
+        this.#deathBarriers.push(reject);
+        releaseBarrier = () => {
+          const index = this.#deathBarriers.indexOf(reject);
+          if (index >= 0) {
+            this.#deathBarriers.splice(index, 1);
+          }
+        };
+      });
+      let data: unknown;
+      try {
+        data = await Promise.race([this.respondData(frame.data), barrier]);
+      } finally {
+        releaseBarrier();
+      }
       return {
         type: "ext-command-result",
         requestId: frame.requestId,
         events: [
           {
             scope: { appId: frame.appId, trayId: frame.trayId, ext: frame.ext },
-            data: this.respondData(frame.data),
+            data,
           },
         ],
       };
@@ -634,6 +673,131 @@ describe("webview orchestration facade", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it("notifies terminal death, stops delivery, and absorbs late subscriptions into the dead state (D3)", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const child = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const events: unknown[] = [];
+    child.onUrlChange((event) => events.push(event));
+    await flush();
+
+    const deaths: Error[] = [];
+    win.onConnectionDead((error) => deaths.push(error));
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      transport.kill();
+      await flush();
+
+      // Terminal notification fired exactly once and the handle is observably dead.
+      expect(deaths).toHaveLength(1);
+      expect(deaths[0]?.message).toBe("broker connection closed");
+      expect(win.connectionDead).toBe(true);
+
+      // Delivery stopped: a late frame never reaches handlers.
+      transport.emit({
+        type: "webview-event",
+        owner: OWNER,
+        windowId: "win-1",
+        webviewId: "content",
+        kind: "urlChange",
+        seq: 50,
+        payload: { url: "https://dead.example" },
+      });
+      await flush();
+      expect(events).toEqual([]);
+
+      // (value, seq) queries after death reject, never hang.
+      await expect(child.getUrl()).rejects.toThrow("broker connection closed");
+      await expect(child.getTitle()).rejects.toThrow("broker connection closed");
+
+      // A best-effort subscribe after death is absorbed into the dead state
+      // (no frame leaves, no console noise, no silent exception).
+      const late = child.onFocused(() => events.push("late"));
+      late();
+      await flush();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("cancels an in-flight gap resync at connection death instead of reporting console noise (D3)", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const child = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const events: unknown[] = [];
+    child.onUrlChange((event) => events.push(event));
+    await flush();
+    transport.frames.length = 0;
+
+    // The resync query hangs in flight (pending on the dying transport).
+    transport.respondData = (data) =>
+      isRecord(data) && data.type === "get-webview-url"
+        ? new Promise(() => {})
+        : defaultRespond(data);
+
+    transport.emit({
+      type: "webview-event",
+      owner: OWNER,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "urlChange",
+      seq: 5,
+      payload: { url: "https://example.org/c" },
+    });
+    await flush();
+    expect(events).toEqual([
+      { windowId: "win-1", webviewId: "content", seq: 5, url: "https://example.org/c" },
+    ]);
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      transport.kill();
+      await flush();
+      await flush();
+
+      // The cancelled resync rejection merged into the connection-dead state:
+      // no synthesized event, no console.error, observable dead state.
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(events).toEqual([
+        { windowId: "win-1", webviewId: "content", seq: 5, url: "https://example.org/c" },
+      ]);
+      expect(win.connectionDead).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("closes channel endpoints locally with session_closed at connection death (D3)", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const child = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const channel = await win.createMessageChannel({ target: "content" });
+    const closeReasons: string[] = [];
+    channel.onClose((notice) => closeReasons.push(notice.reason));
+
+    transport.kill();
+    await flush();
+
+    expect(closeReasons).toEqual(["session_closed"]);
+    await expect(channel.post({ hello: true })).rejects.toThrow("not_open");
+    expect(win.connectionDead).toBe(true);
   });
 
   it("resyncs urlChange through the (value, seq) query after a sequence gap and converges", async () => {
@@ -1200,7 +1364,7 @@ describe("webview orchestration facade", () => {
     expect(created).toEqual([{ channelId: "ch-7f3a" }]);
   });
 
-  it("reports subscribe transport failures once without synthesizing events", async () => {
+  it("routes death-explained subscribe failures into the connection-dead state without synthesizing events (D3)", async () => {
     const transport = new OrchestrationTransport();
     transport.sessionId = "session-1";
     const webviewTray = createOrchestrationTray(transport);
@@ -1215,6 +1379,43 @@ describe("webview orchestration facade", () => {
       child.onUrlChange((event) => events.push(event));
       await flush();
       expect(events).toEqual([]);
+      // D3: a transport-terminal rejection on a best-effort subscribe merges
+      // into the observable connection-dead state instead of console noise.
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(win.connectionDead).toBe(true);
+
+      // Once dead, later best-effort frames are not sent at all.
+      transport.closed = false;
+      const events2: unknown[] = [];
+      child.onFocused((event) => events2.push(event));
+      await flush();
+      expect(events2).toEqual([]);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("keeps the once-per-attempt console channel for non-death subscribe failures on a live transport", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const child = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    transport.respondData = () => ({
+      type: "webview-error",
+      error: { code: "unknown_view", message: "subscribe target missing" },
+    });
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const events: unknown[] = [];
+      child.onUrlChange((event) => events.push(event));
+      await flush();
+      expect(events).toEqual([]);
+      expect(win.connectionDead).toBe(false);
       expect(errorSpy).toHaveBeenCalledTimes(1);
       expect(String(errorSpy.mock.calls[0]?.[0])).toContain(
         "WebView orchestration frame failed",

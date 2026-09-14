@@ -58,6 +58,18 @@ export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
   readonly callerLabel: string;
   readonly sessionId: string;
+  /**
+   * Terminal connection-death state (D3, harden-lifecycle-ownership): true
+   * once the broker socket errored or closed. Pending and future requests
+   * reject; event delivery has stopped.
+   */
+  readonly connectionDead: boolean;
+  /**
+   * Terminal connection-death notification; fires exactly once, either for a
+   * transport error or the transport-close sentinel, and also after a
+   * caller-initiated graceful `close()` completes.
+   */
+  onConnectionDead(listener: (error: Error) => void): () => void;
   onEvent(listener: (frame: LocalRuntimeEventFrame) => void): () => void;
   close(): Promise<void>;
 }
@@ -104,7 +116,11 @@ export const connectLocalBroker = async (
   const clientVersion = options.clientVersion ?? packageVersion;
   const appId = normalizeAppIdentityField(options.appId);
   const appName = normalizeAppIdentityField(options.appName);
-  const callerLabel = options.callerLabel ?? appName ?? appId ?? resolveCallerLabel();
+  // Endpoint identity precedence (D4, harden-lifecycle-ownership): internal
+  // diagnostic override > appId slug > tool fallbacks. `appName` never
+  // participates: display names are not filesystem-safe endpoint segments.
+  const callerLabel =
+    options.callerLabel ?? resolveCallerLabel(appId === undefined ? {} : { appId });
   const paths = resolveDaemonPaths({
     homeDir: options.homeDir ?? process.env.OPENTRAY_HOME ?? homedir(),
     packageVersion,
@@ -232,6 +248,8 @@ class LocalBrokerConnection implements LocalBrokerClient {
   private buffer = "";
   private readonly listeners = new Set<(frame: LocalRuntimeEventFrame) => void>();
   private readonly pending = new Map<RequestId, PendingRequest>();
+  private readonly deadListeners = new Set<(error: Error) => void>();
+  private deadError: Error | undefined;
   private ready:
     | {
         resolve(frame: Extract<ServerFrame, { type: "ready" }>): void;
@@ -251,11 +269,22 @@ class LocalBrokerConnection implements LocalBrokerClient {
       this.consume(String(chunk));
     });
     socket.on("error", (error) => {
-      this.rejectAll(error);
+      this.markDead(error);
     });
     socket.on("close", () => {
-      this.rejectAll(new Error(BROKER_CONNECTION_CLOSED_MESSAGE));
+      this.markDead(new Error(BROKER_CONNECTION_CLOSED_MESSAGE));
     });
+  }
+
+  get connectionDead(): boolean {
+    return this.deadError !== undefined;
+  }
+
+  onConnectionDead(listener: (error: Error) => void): () => void {
+    this.deadListeners.add(listener);
+    return () => {
+      this.deadListeners.delete(listener);
+    };
   }
 
   async init(
@@ -286,6 +315,14 @@ class LocalBrokerConnection implements LocalBrokerClient {
     if (this.pending.has(frame.requestId)) {
       throw new Error(`duplicate requestId: ${frame.requestId}`);
     }
+    // Requests issued after transport death reject immediately: a destroyed
+    // socket swallows writes without a terminal event, so the request map
+    // would otherwise hold them forever (F2 zombie-entry finding, 2026-09-14:
+    // post-death getUrl/destroy stayed pending indefinitely in both Node and
+    // Bun because write-after-close only returns false).
+    if (this.deadError !== undefined) {
+      throw new Error(this.deadError.message);
+    }
 
     const response = new Promise<ServerFrame>((resolve, reject) => {
       this.pending.set(frame.requestId, { resolve, reject });
@@ -302,6 +339,12 @@ class LocalBrokerConnection implements LocalBrokerClient {
   }
 
   async close(): Promise<void> {
+    if (this.deadError !== undefined) {
+      // The transport already reached its terminal state; there is nothing
+      // left to end. Resolving keeps explicit teardown paths (e.g. generated
+      // app Quit after broker death) finite.
+      return;
+    }
     this.write({ type: "exit" });
     await new Promise<void>((resolve) => {
       this.socket.end(resolve);
@@ -391,6 +434,27 @@ class LocalBrokerConnection implements LocalBrokerClient {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  /**
+   * Terminal connection-death transition (D3): first socket error/close wins,
+   * rejects everything pending, and notifies every terminal listener exactly
+   * once. Later terminal events are no-ops.
+   */
+  private markDead(error: Error): void {
+    if (this.deadError !== undefined) {
+      return;
+    }
+    this.deadError = error;
+    this.rejectAll(error);
+    for (const listener of [...this.deadListeners]) {
+      try {
+        listener(error);
+      } catch {
+        // A throwing terminal listener must not block death propagation to
+        // the remaining listeners.
+      }
+    }
   }
 }
 

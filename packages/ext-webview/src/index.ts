@@ -734,6 +734,16 @@ export interface WebviewWindowHandle {
   onCreatedMessageChannel(
     handler: (notice: WebviewChannelCreatedNotice) => void
   ): () => void;
+  /**
+   * Terminal broker-connection-death state (D3,
+   * harden-lifecycle-ownership): true once the connection died. Listener and
+   * channel delivery has stopped, every later command/query rejects instead
+   * of hanging, and best-effort failures are absorbed into the orchestration's
+   * dead state.
+   */
+  readonly connectionDead: boolean;
+  /** Terminal death notification; fires exactly once. */
+  onConnectionDead(handler: (error: Error) => void): () => void;
 }
 
 export interface WebviewTrayCapability {
@@ -870,6 +880,11 @@ interface WebviewEndpoint {
    * unobservable, matching the connection capabilities the caller supplied.
    */
   onFrame(handler: (frame: unknown) => void): () => void;
+  /**
+   * Terminal broker-connection-death tap (D3): no-op when the hosting tray
+   * does not publish one, matching the other structural capability taps.
+   */
+  onConnectionDead(handler: (error: Error) => void): () => void;
 }
 
 type ExtensionEventSourceTray = TrayHandle & {
@@ -882,6 +897,15 @@ type ExtensionEventSourceTray = TrayHandle & {
 type AppReopenEventSourceTray = TrayHandle & {
   onAppReopenRequested(handler: () => void): () => void;
 };
+
+type ConnectionDeadEventSourceTray = TrayHandle & {
+  onConnectionDead(handler: (error: Error) => void): () => void;
+};
+
+const isConnectionDeadEventSourceTray = (
+  tray: TrayHandle
+): tray is ConnectionDeadEventSourceTray =>
+  "onConnectionDead" in tray && typeof tray.onConnectionDead === "function";
 
 const createWebviewEndpoint = (
   tray: TrayHandle,
@@ -914,6 +938,12 @@ const createWebviewEndpoint = (
       return tray.listenExtension(context.mountId, (envelope) => {
         handler(envelope.data);
       });
+    },
+    onConnectionDead(handler: (error: Error) => void): () => void {
+      if (!isConnectionDeadEventSourceTray(tray)) {
+        return () => {};
+      }
+      return tray.onConnectionDead(handler);
     },
     // D19 batch C: delivery is push-only — window events arrive as
     // ext-event frames matched on `data.type`; the retired drain's local
@@ -1024,6 +1054,7 @@ const createWebviewWindowHandle = (
       return first;
     },
     onFrame: (handler) => endpoint.onFrame(handler),
+    onDead: (handler) => endpoint.onConnectionDead(handler),
   };
   const orchestrationWindowId = options.windowId ?? DEFAULT_WEBVIEW_WINDOW_ID;
   const orchestration = createWebviewOrchestration(orchestrationPort, orchestrationWindowId);
@@ -1452,6 +1483,12 @@ const createWebviewWindowHandle = (
     },
     onCreatedMessageChannel(handler) {
       return orchestration.onCreatedMessageChannel(handler);
+    },
+    get connectionDead(): boolean {
+      return orchestration.connectionDead;
+    },
+    onConnectionDead(handler: (error: Error) => void): () => void {
+      return orchestration.onConnectionDead(handler);
     },
   };
 };

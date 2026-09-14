@@ -2365,6 +2365,195 @@ fn window_only_reshow_with_title_on_populated_session() {
     runtime.session_closed("session-reshow");
 }
 
+/// harden-lifecycle-ownership D2 reentrancy seam: `session_closed` collects
+/// the closing session's registry entries first and runs the destroy step
+/// afterwards. When a NEW same-tray session (new sessionId) becomes
+/// resident between those two steps, the stale destroy must remove only its
+/// own bookkeeping and leave the resident session's window, webviews, and
+/// channels intact.
+#[test]
+fn session_close_seam_protects_a_newer_same_tray_session() {
+    use objc2::MainThreadMarker;
+    use opentray_spec::webview::{WebviewBridgePolicy, WebviewOrchestrationCommand};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        eprintln!("skipping AppKit session-close seam outside the main thread");
+        return;
+    };
+    let _ = mtm;
+    let mut runtime = MacosWebviewRuntime::default();
+    runtime.set_app_id("app-seam");
+
+    let old_owner = opentray_spec::webview::WebviewOwnerTuple {
+        app_id: "app-seam".to_string(),
+        tray_id: "tray-seam".to_string(),
+        session_id: "session-old".to_string(),
+    };
+    let new_owner = opentray_spec::webview::WebviewOwnerTuple {
+        app_id: "app-seam".to_string(),
+        tray_id: "tray-seam".to_string(),
+        session_id: "session-new".to_string(),
+    };
+
+    fn show_window_only(
+        runtime: &mut MacosWebviewRuntime,
+        session_id: &str,
+        window_id: &str,
+    ) -> crate::HandledCommand {
+        runtime
+            .handle(
+                "tray-seam",
+                crate::WebviewCommand::Show {
+                    html: None,
+                    url: None,
+                    width: Some(480.0),
+                    height: Some(320.0),
+                    tray_bounds: None,
+                    fallback_rect: None,
+                    show_settings: crate::WebviewShowSettings::default(),
+                    owner_session_id: Some(session_id.to_string()),
+                    window_id: Some(window_id.to_string()),
+                    window_only: true,
+                },
+            )
+            .expect("windowOnly show")
+    }
+
+    fn create_children(
+        runtime: &mut MacosWebviewRuntime,
+        owner: &opentray_spec::webview::WebviewOwnerTuple,
+        window_id: &str,
+    ) {
+        for (webview_id, policy) in [
+            (
+                "toolbar",
+                Some(WebviewBridgePolicy {
+                    webview_id: true,
+                    message_channels: true,
+                    ..WebviewBridgePolicy::default()
+                }),
+            ),
+            ("content", None),
+        ] {
+            let handled = runtime
+                .handle(
+                    "tray-seam",
+                    crate::WebviewCommand::Orchestration(Box::new(
+                        WebviewOrchestrationCommand::CreateWebview {
+                            owner: owner.clone(),
+                            window_id: window_id.to_string(),
+                            webview_id: webview_id.to_string(),
+                            url: Some("about:blank".to_string()),
+                            html: None,
+                            bridge: policy,
+                            browser: None,
+                        },
+                    )),
+                )
+                .expect("create-webview");
+            assert_eq!(handled.result["type"], "webview-ack");
+        }
+    }
+
+    fn channel_command(
+        runtime: &mut MacosWebviewRuntime,
+        request: crate::channels::ChannelRequest,
+    ) -> crate::HandledCommand {
+        runtime
+            .handle(
+                "tray-seam",
+                crate::WebviewCommand::Channel(Box::new(request)),
+            )
+            .expect("channel command")
+    }
+
+    // The closing (old) session: window plus two children, with one live
+    // channel to the bridged toolbar.
+    show_window_only(&mut runtime, "session-old", "win-old");
+    create_children(&mut runtime, &old_owner, "win-old");
+    let created = channel_command(
+        &mut runtime,
+        crate::channels::ChannelRequest::Create {
+            owner: old_owner.clone(),
+            target: "toolbar".to_string(),
+        },
+    );
+    assert_eq!(created.result["type"], "channel.create-result");
+
+    // Phase 1 — exactly what `session_closed` does first: the sweep
+    // collects the closing session's registry entries.
+    let collected = runtime.registry.session_closed("session-old");
+    assert_eq!(collected.len(), 1);
+
+    // Phase 2 — the seam: a new same-tray session registers before the
+    // destroy step runs.
+    show_window_only(&mut runtime, "session-new", "win-new");
+    create_children(&mut runtime, &new_owner, "win-new");
+    let created = channel_command(
+        &mut runtime,
+        crate::channels::ChannelRequest::Create {
+            owner: new_owner.clone(),
+            target: "toolbar".to_string(),
+        },
+    );
+    let new_channel_id = created.result["channelId"].as_str().unwrap().to_string();
+
+    // Phase 3 — run the collected destroy exactly as `session_closed`
+    // would: the old entry's owner tuple addresses the tray.
+    for entry in collected {
+        let stale_owner = entry.owner.expect("attributed closing entry");
+        runtime.popups.borrow_mut().close_all_of_session("session-old");
+        runtime.destroy_window_session(
+            &stale_owner,
+            opentray_spec::channel::ChannelCloseReason::SessionClosed,
+        );
+    }
+
+    // The resident session survives whole: its window session resolves,
+    // both webviews still list …
+    let listed = runtime
+        .handle(
+            "tray-seam",
+            crate::WebviewCommand::Orchestration(Box::new(
+                WebviewOrchestrationCommand::ListWebviews {
+                    owner: new_owner.clone(),
+                    window_id: "win-new".to_string(),
+                },
+            )),
+        )
+        .expect("list-webviews after stale destroy");
+    assert_eq!(
+        listed.result["webviews"].as_array().map(Vec::len),
+        Some(2),
+        "the newer session keeps both webviews"
+    );
+    // … its channel is still open with the exact id …
+    let listed_channels = channel_command(
+        &mut runtime,
+        crate::channels::ChannelRequest::List {
+            owner: new_owner.clone(),
+        },
+    );
+    assert_eq!(listed_channels.result["type"], "channel.list-result");
+    let channels = listed_channels.result["channels"].as_array().unwrap().clone();
+    assert_eq!(channels.len(), 1);
+    assert_eq!(channels[0]["channelId"], json!(new_channel_id));
+    assert_eq!(channels[0]["state"], "open");
+    // … and the registry's resident owner is still the new session.
+    assert_eq!(
+        runtime
+            .registry
+            .window("tray-seam")
+            .and_then(|entry| entry.owner.as_ref())
+            .and_then(|owner| owner.session_id.clone()),
+        Some("session-new".to_string())
+    );
+
+    // Cleanup: the new session still closes normally.
+    runtime.session_closed("session-new");
+    assert!(runtime.registry.window("tray-seam").is_none());
+}
+
 /// Message-channel bootstrap script with an explicit channel policy
 /// (mirrors what `webview_bridge_bootstrap_script` generates for a
 /// bridged child).

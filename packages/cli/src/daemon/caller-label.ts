@@ -5,6 +5,14 @@ import { sanitizeCallerLabel } from "@opentray/spec";
 export interface CallerLabelSources {
   /** Explicit developer-provided label, highest precedence. */
   readonly explicit?: string;
+  /**
+   * Caller-supplied app identity (`createTray` runtime `appId`). Endpoint
+   * identity for app-style consumers: same app, same broker, every launch
+   * method. Normalized to the same filesystem-safe slug space as the other
+   * sources. Display names (`appName`) never participate (D4,
+   * harden-lifecycle-ownership).
+   */
+  readonly appId?: string;
   /** `npm_package_name` environment value. */
   readonly npmPackageName?: string;
   /** Script path resolved from `process.argv[1]` or equivalent. */
@@ -17,10 +25,10 @@ export interface ResolveCallerLabelOptions extends Partial<CallerLabelSources> {
 }
 
 /**
- * Derives a caller label using the precedence: explicit > npm_package_name >
- * script basename > neutral default. The result is always sanitized to a
- * filesystem- and process-safe component, so callers can use it directly in
- * endpoint identity, runtime directories, and process titles.
+ * Derives a caller label using the precedence: explicit > appId slug >
+ * npm_package_name > script basename > neutral default. The result is always
+ * sanitized to a filesystem- and process-safe component, so callers can use it
+ * directly in endpoint identity, runtime directories, and process titles.
  */
 export const resolveCallerLabel = (options: ResolveCallerLabelOptions = {}): string => {
   const env = options.env ?? process.env;
@@ -29,6 +37,9 @@ export const resolveCallerLabel = (options: ResolveCallerLabelOptions = {}): str
   const candidates: string[] = [];
   if (options.explicit !== undefined && options.explicit.length > 0) {
     candidates.push(options.explicit);
+  }
+  if (options.appId !== undefined && options.appId.length > 0) {
+    candidates.push(options.appId);
   }
   const npmName = options.npmPackageName ?? env.npm_package_name;
   if (typeof npmName === "string" && npmName.length > 0) {

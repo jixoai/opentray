@@ -23,6 +23,11 @@
 //    channel, reinstalling the command surface, and re-seeding the address
 //    bar. The page side is already idempotent (onCreatedMessageChannel
 //    re-subscription with pre-registration buffering).
+// 6. Bootstrap milestones (harden-lifecycle-ownership D5): one structured
+//    record per step (createWebviewToolbar/createWebviewContent/setLayout/
+//    openChannel) flows through options.event into app.log — a healthy
+//    narrative and the exact failed step are both attributable from the log
+//    alone, and a failed step aborts the bootstrap (no later steps run).
 //
 // Channel payload schema (create-private, JSON over the channel payload —
 // D12 deliberately keeps this schema OUT of @opentray/spec):
@@ -43,7 +48,9 @@ const TOOLBAR_CHANNEL_REBUILD_DEBOUNCE_MS = 300;
  * The generated-entry helper source. The embedding template supplies
  * `column`/`fixed`/`grow` (imported from "@opentray/ext-webview" beside
  * `WebviewExt`) — the carrier deliberately performs no imports of its own so
- * both templates stay single-import consumers of the facade.
+ * both templates stay single-import consumers of the facade. The template
+ * also injects `options.log` (runtime notes) and `options.event` (structured
+ * bootstrap-milestone sink into app.log, harden-lifecycle-ownership D5).
  */
 export const toolbarCarrierSource = (): string => `// Toolbar navigation carrier (add-webview-orchestration plan D12/D13):
 // composes the native navigation toolbar over one content webview and drives
@@ -53,18 +60,37 @@ export const toolbarCarrierSource = (): string => `// Toolbar navigation carrier
 const TOOLBAR_CHANNEL_REBUILD_DEBOUNCE_MS = ${TOOLBAR_CHANNEL_REBUILD_DEBOUNCE_MS};
 
 const attachToolbarCarrier = async (shell, options) => {
+  // Bootstrap milestones (harden-lifecycle-ownership D5): one structured
+  // record per carrier step through the embedding template's event sink
+  // (app.log). Failure records are awaited so the failed step is durable
+  // before the error aborts the bootstrap; ok records are best-effort.
+  const event = typeof options.event === "function" ? options.event : () => {};
+  const milestone = async (step, run) => {
+    try {
+      const value = await run();
+      void event({ step, status: "ok" });
+      return value;
+    } catch (error) {
+      await event({
+        step,
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  };
   // Per-child bridge policy (D2): the toolbar page is trusted shell UI and
   // gets exactly the channel surface; the content webview gets NO policy, so
   // it is bridgeless regardless of what it loads.
-  await shell.createWebview({
+  await milestone("createWebviewToolbar", () => shell.createWebview({
     id: "toolbar",
     url: options.toolbarUrl,
     bridge: { webviewId: true, messageChannels: true },
-  });
-  const content = await shell.createWebview({ id: "content", url: options.contentUrl });
+  }));
+  const content = await milestone("createWebviewContent", () => shell.createWebview({ id: "content", url: options.contentUrl }));
   // Declarative layered layout (D8 sugar): toolbar pinned at a fixed 44px
   // height, content filling the remainder; resize is recomputed natively.
-  await shell.setLayout(column([fixed("toolbar", 44), grow("content")]));
+  await milestone("setLayout", () => shell.setLayout(column([fixed("toolbar", 44), grow("content")])));
   const note = (error) => {
     const message = error instanceof Error ? error.message : String(error);
     void options.log("toolbar carrier: " + message);
@@ -192,7 +218,9 @@ const attachToolbarCarrier = async (shell, options) => {
     }, TOOLBAR_CHANNEL_REBUILD_DEBOUNCE_MS);
   };
 
-  await openChannel();
+  // The bootstrap channel gets the milestone record; self-heal rebuilds above
+  // stay unrecorded (P1-3 steady-state, not bootstrap).
+  await milestone("openChannel", openChannel);
   return {
     content,
     stop: () => {

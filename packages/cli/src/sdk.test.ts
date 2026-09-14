@@ -40,7 +40,7 @@ vi.mock("./local-broker", () => ({
   BROKER_CONNECTION_CLOSED_MESSAGE: "broker connection closed",
 }));
 
-import { createTray, PROTOCOL_VERSION } from "./index";
+import { createTray, BROKER_CONNECTION_CLOSED_MESSAGE, PROTOCOL_VERSION } from "./index";
 
 const crossPlatformAppIcon = (): AppIcon => [
   {
@@ -231,6 +231,19 @@ describe("opentray ergonomic createTray", () => {
     expect(transport.closeCount).toBe(1);
   });
 
+  it("resolves destroy issued after the connection already died (D3 post-death quit path)", async () => {
+    // F2 zombie mechanics: a Quit issued after broker death used to hang on
+    // a destroyed socket. The dead transport now rejects every request with
+    // the sentinel and the destroy contract treats it as the requested end
+    // state, so a generated app's Quit stays finite.
+    const tray = await createTray({ id: "status" });
+    transport.connectionDead = true;
+
+    await expect(tray.destroy()).resolves.toBeUndefined();
+
+    expect(transport.closeCount).toBe(1);
+  });
+
   it("still surfaces typed destroy failures that are not the transport-close sentinel", async () => {
     const tray = await createTray({ id: "status" });
     transport.failNextDestroyTyped = true;
@@ -403,6 +416,8 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
   failNextDestroyTyped = false;
   /** Next close() rejects with the transport-close sentinel. */
   failNextCloseWithConnectionClosed = false;
+  /** Simulates a dead broker connection: every request rejects immediately. */
+  connectionDead = false;
   appName = "Test";
   appIcon: AppIcon | undefined;
   appIconVariant: string | undefined;
@@ -410,6 +425,9 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
 
   async request(frame: ClientRequestFrame): Promise<ServerFrame> {
     this.frames.push(frame);
+    if (this.connectionDead) {
+      throw new Error(BROKER_CONNECTION_CLOSED_MESSAGE);
+    }
     switch (frame.type) {
       case "resolve-default-app":
         return {

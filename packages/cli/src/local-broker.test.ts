@@ -20,6 +20,7 @@ import {
 import { readDarwinAppLaunchDescriptor } from "@opentray/packaging";
 
 import { connectLocalBroker } from "./local-broker";
+import { resolveCallerLabel } from "./daemon/caller-label";
 import type { DaemonDriver } from "./daemon/lifecycle";
 import type { DaemonPaths } from "./daemon/paths";
 import { resolveDaemonPaths } from "./daemon/paths";
@@ -52,7 +53,7 @@ describe("local broker client", () => {
     await connection.close();
   });
 
-  it("passes explicit app identity to the spawned debug runtime", async () => {
+  it("derives the caller label from the appId slug, never the display name (D4)", async () => {
     const homeDir = await makeTempHome();
     const driver = createSocketBrokerDriver();
     cleanup.push(driver.close);
@@ -61,15 +62,36 @@ describe("local broker client", () => {
       homeDir,
       packageVersion: "0.1.0",
       appId: "com.example.build",
-      appName: "Example Build",
+      appName: "Example Build, 実験",
       daemonDriver: driver,
     });
 
     expect(driver.spawnedPaths[0]).toMatchObject({
-      callerLabel: "example-build",
+      callerLabel: "com-example-build",
       appId: "com.example.build",
-      appName: "Example Build",
+      appName: "Example Build, 実験",
     });
+    expect(connection.callerLabel).toBe("com-example-build");
+
+    await connection.close();
+  });
+
+  it("keeps display names out of the label chain when no appId exists (D4)", async () => {
+    const homeDir = await makeTempHome();
+    const driver = createSocketBrokerDriver();
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      appName: "Example Build",
+      daemonDriver: driver,
+    });
+
+    // No appId: the tool fallback chain owns the label; the display name
+    // must not leak into any endpoint segment.
+    expect(connection.callerLabel).not.toBe("example-build");
+    expect(connection.callerLabel).toBe(resolveCallerLabel());
 
     await connection.close();
   });
@@ -83,17 +105,18 @@ describe("local broker client", () => {
     const staleBundle = join(homeDir, ".opentray/apps/webui/Example App.app");
     const legacyBundle = join(
       homeDir,
-      ".opentray/0.1.0/example-app/runtime/darwin-carrier/OpenTray.app",
+      ".opentray/0.1.0/com-example-reuse/runtime/darwin-carrier/OpenTray.app",
     );
     await Promise.all([
-      prepareBundle(bundlePath, "example-app"),
-      prepareBundle(staleBundle, "example-app"),
-      prepareLegacyBundle(legacyBundle, "example-app"),
+      prepareBundle(bundlePath, "com.example.reuse"),
+      prepareBundle(staleBundle, "com.example.reuse"),
+      prepareLegacyBundle(legacyBundle, "com.example.reuse"),
     ]);
 
     const first = await connectLocalBroker({
       homeDir,
       packageVersion: "0.1.0",
+      appId: "com.example.reuse",
       appName: "Example App",
       packageName: "@example/app",
       packageRoot: homeDir,
@@ -110,6 +133,7 @@ describe("local broker client", () => {
     const second = await connectLocalBroker({
       homeDir,
       packageVersion: "0.1.0",
+      appId: "com.example.reuse",
       appName: "Example App",
       packageName: "@example/app",
       packageRoot: homeDir,
@@ -126,7 +150,10 @@ describe("local broker client", () => {
       expect(driver.spawned).toBe(1);
       await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(access(legacyBundle)).rejects.toMatchObject({ code: "ENOENT" });
-      const brokerLog = join(homeDir, ".opentray/0.1.0/example-app/runtime/broker.log");
+      const brokerLog = join(
+        homeDir,
+        ".opentray/0.1.0/com-example-reuse/runtime/broker.log",
+      );
       expect(await readFile(brokerLog, "utf8")).toContain("bundle-identity-convergence");
       expect(await readDarwinAppLaunchDescriptor(bundlePath)).toEqual({
         schemaVersion: 1,
@@ -260,6 +287,79 @@ describe("local broker client", () => {
     });
     await connection.close();
   });
+
+  it("rejects in-flight and post-death requests and reports the terminal state when the broker dies (D3)", async () => {
+    const homeDir = await makeTempHome();
+    // get-tray-bounds is never answered: the request stays pending until death.
+    const driver = createSocketBrokerDriver();
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+
+    const terminalErrors: Error[] = [];
+    connection.onConnectionDead((error) => terminalErrors.push(error));
+
+    const inflight = connection.request({
+      type: "get-tray-bounds",
+      requestId: "bounds-death",
+      appId: "space-a",
+      trayId: "tray-a",
+    });
+    driver.killConnections();
+    await expect(inflight).rejects.toThrow("broker connection closed");
+
+    expect(connection.connectionDead).toBe(true);
+    expect(terminalErrors).toHaveLength(1);
+    expect(terminalErrors[0]?.message).toBe("broker connection closed");
+
+    // A request issued after death rejects immediately instead of hanging
+    // on a destroyed socket (F2 zombie-entry root mechanics).
+    await expect(
+      connection.request({
+        type: "get-tray-bounds",
+        requestId: "bounds-post-death",
+        appId: "space-a",
+        trayId: "tray-a",
+      }),
+    ).rejects.toThrow("broker connection closed");
+
+    // Explicit teardown after death stays finite.
+    await expect(connection.close()).resolves.toBeUndefined();
+  });
+
+  it("kills only its own broker-side sockets when simulating death (D3 harness)", async () => {
+    const homeDir = await makeTempHome();
+    const driver = createSocketBrokerDriver();
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+    expect(connection.sessionId).toBe("session-test");
+
+    driver.killConnections();
+    // Let the client socket observe the close so the terminal state settles
+    // before the post-death request classifies against the sentinel.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    await expect(
+      connection.request({
+        type: "get-tray-bounds",
+        requestId: "bounds-after-kill",
+        appId: "space-a",
+        trayId: "tray-a",
+      }),
+    ).rejects.toThrow("broker connection closed");
+    expect(connection.connectionDead).toBe(true);
+  });
 });
 
 const makeTempHome = async (): Promise<string> => {
@@ -293,11 +393,13 @@ const createSocketBrokerDriver = (
 ): DaemonDriver & {
   readonly spawned: number;
   readonly spawnedPaths: DaemonPaths[];
+  killConnections(): void;
   close(): Promise<void>;
 } => {
   const pid = 20_000;
   let spawned = 0;
   const spawnedPaths: DaemonPaths[] = [];
+  const sockets = new Set<Socket>();
   let server: Server | undefined;
 
   return {
@@ -305,6 +407,12 @@ const createSocketBrokerDriver = (
       return spawned;
     },
     spawnedPaths,
+    killConnections() {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+      sockets.clear();
+    },
     async resolveBroker(paths) {
       return resolvedBroker(paths);
     },
@@ -314,7 +422,7 @@ const createSocketBrokerDriver = (
     async spawnBroker(paths, broker) {
       spawned += 1;
       spawnedPaths.push(paths);
-      server = createReadyServer(paths, readyFrameIdentity ?? broker.artifactIdentity, onFrame);
+      server = createReadyServer(paths, readyFrameIdentity ?? broker.artifactIdentity, onFrame, sockets);
       await listen(server, paths.endpoint);
       await writeReadyMetadata(paths, pid, broker.artifactIdentity);
       return pid;
@@ -334,8 +442,13 @@ const createReadyServer = (
   paths: DaemonPaths,
   brokerArtifactIdentity: BrokerArtifactIdentity,
   onFrame?: (frame: ClientFrame, socket: Socket) => void,
+  sockets?: Set<Socket>,
 ): Server =>
   createServer((socket) => {
+    sockets?.add(socket);
+    socket.on("close", () => {
+      sockets?.delete(socket);
+    });
     socket.setEncoding("utf8");
     let initialized = false;
     let buffer = "";
