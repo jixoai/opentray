@@ -33,10 +33,10 @@
 
 ## 4. Verification / Regression
 
-- [ ] 4.1 黑盒 kill 矩阵重放（本机）：物化中途 kill -9 ×3 → 重启全成功；运行中 kill -9 → 重启成功；broker-only kill → entry 有界时间内终结（无僵尸）；双启动方式（CLI open + 直接 node）→ 同端点、SINGLE_SESSION 生效。
-- [ ] 4.2 app.log 叙事验证：健康启动完整里程碑记录；故障注入（OPENTRAY_BROKER_BIN 指向坏二进制）后日志能定位失败里程碑。
-- [ ] 4.3 Windows 对称位验证（`ssh gaubeehonor`，E:\dev\github\opentray）：D2 的 Windows destroy 路径测试通过；锁 helper 在 Windows 语义下等价（无 POSIX flock 依赖则用显式回退）。
-- [ ] 4.4 全量绿门：`bun test scripts/openspec/vision-driven.test.ts`、`openspec schema validate vision-driven`、受影响包 `pnpm -r --filter ... test` 全绿；新增测试全部纳入。
+- [x] 4.1 黑盒 kill 矩阵重放（本机）：物化中途 kill -9 ×3 → 重启全成功；运行中 kill -9 → 重启成功；broker-only kill → entry 有界时间内终结（无僵尸）；双启动方式（CLI open + 直接 node）→ 同端点、SINGLE_SESSION 生效。
+- [x] 4.2 app.log 叙事验证：健康启动完整里程碑记录；故障注入（OPENTRAY_BROKER_BIN 指向坏二进制）后日志能定位失败里程碑。
+- [x] 4.3 Windows 对称位验证（`ssh gaubeehonor`，E:\dev\github\opentray）：D2 的 Windows destroy 路径测试通过；锁 helper 在 Windows 语义下等价（无 POSIX flock 依赖则用显式回退）。
+- [x] 4.4 全量绿门：`bun test scripts/openspec/vision-driven.test.ts`、`openspec schema validate vision-driven`、受影响包 `pnpm -r --filter ... test` 全绿；新增测试全部纳入。
 - [ ] 4.5 Codex 复核轮（R2）：以 R1 报告为基线复核 diff + 测试证据，要求阻塞清零与评分对比；阻塞项处理后才可进入发布。
 
 ## 5. Release / Archive
