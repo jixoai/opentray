@@ -631,14 +631,20 @@ describe("template milestone isomorphism (D5)", () => {
       // Shared structured-record writer and identical template milestones.
       expect(entry, name).toContain('const logEvent = (record) => logSink(JSON.stringify({ time:');
       // The serial append queue (Codex R2 P1) plus the bounded output channel
-      // (Codex R3) are embedded identically in both templates: ordered
-      // milestone records, coalesced/capped child output, exits awaiting the
-      // drain, jitter seam.
+      // (Codex R3, hardened R4) are embedded identically in both templates:
+      // ordered milestone records, coalesced/capped child output, exits
+      // awaiting the drain, jitter seam.
       expect(entry, name).toContain("let logQueueTail = Promise.resolve();");
       expect(entry, name).toContain("const logOutputChunk = (text) => {");
       expect(entry, name).toContain("const OUTPUT_CAP_BYTES = 262144;");
       expect(entry, name).toContain("const flushLogQueue = async () => {");
       expect(entry, name).toContain("OPENTRAY_TEST_LOG_JITTER");
+      // Codex R4 hardening is embedded identically: reservation-safe drop
+      // accounting (pending vs in-flight), the output quiescence barrier,
+      // and the bounded wall-clock output append.
+      expect(entry, name).toContain("let outputDroppedBytesPending = 0;");
+      expect(entry, name).toContain("const beginOutputShutdown = () => {");
+      expect(entry, name).toContain("const OUTPUT_APPEND_TIMEOUT_MS =");
       expect(entry, name).toContain("await flushLogQueue();");
       expect(entry, name).toContain('step: "listenShell"');
       expect(entry, name).toContain('step: "createTray"');
@@ -661,6 +667,15 @@ describe("template milestone isomorphism (D5)", () => {
     // The URL entry supervises no command: the channel is defined by the
     // shared queue source but never invoked there.
     expect(urlEntry).not.toContain("logOutputChunk(chunk)");
+    // Codex R4: the COMMAND entry raises the output quiescence barrier
+    // BEFORE its kill sweep, so post-shutdown chunks are counted drops the
+    // final flush marker carries; the URL entry supervises nothing and never
+    // raises the barrier.
+    expect(commandEntry).toContain("beginOutputShutdown();");
+    expect(commandEntry.indexOf("beginOutputShutdown();")).toBeLessThan(
+      commandEntry.indexOf("await killCommand();"),
+    );
+    expect(urlEntry).not.toContain("beginOutputShutdown();");
   });
 });
 

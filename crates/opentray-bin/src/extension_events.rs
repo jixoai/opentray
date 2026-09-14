@@ -784,12 +784,15 @@ mod tests {
             frames.iter().any(|frame| matches!(
                 frame,
                 ServerFrame::Error {
+                    request_id: Some(request_id),
                     code,
                     message,
                     ..
-                } if code == "session-mismatch" && message.contains("does not own tray")
+                } if request_id == "req-ext-app-a-tray-a"
+                    && code == "session-mismatch"
+                    && message.contains("does not own tray")
             )),
-            "the non-owning dispatch is rejected with the stable code: {frames:?}"
+            "the non-owning dispatch is rejected with the stable code and request correlation: {frames:?}"
         );
         assert!(
             ext_event_frames(harness.received(session_b)).is_empty(),
@@ -798,6 +801,20 @@ mod tests {
         assert!(
             ext_event_frames(harness.received(session_a)).is_empty(),
             "the owning session observes nothing from the rejected dispatch"
+        );
+
+        // Owner state is unchanged by the rejected dispatch: the owning
+        // session still commands its own tray and observes its routing.
+        let owner_frames = harness.ext_command(session_a, "app-a", "tray-a");
+        assert!(
+            matches!(owner_frames.first(), Some(ServerFrame::ExtCommandResult { .. })),
+            "the owner still dispatches after the rejection: {owner_frames:?}"
+        );
+        assert!(
+            ext_event_frames(harness.received(session_a))
+                .iter()
+                .any(|frame| matches!(&frame, ServerFrame::ExtEvent { data, .. } if data["type"] == "pushed")),
+            "the owner still receives its pushed events"
         );
     }
 

@@ -26,14 +26,15 @@
 // 4. Terminal window: `showTerminal` controls initial visibility only; an
 //    abnormal command exit (non-zero/signal code, or exit before any verified
 //    service) force-reveals it with the retained output replay.
-// 5. Observability (Codex R2 P1 + R3, 2026-09-15): bootstrap milestone and
+// 5. Observability (Codex R2 P1 + R3 + R4, 2026-09-15): bootstrap milestone and
 //    error records flow through the embedded serial append queue — app.log
 //    receives milestones in execution order and every exit path awaits the
 //    drain (no reordering between concurrent appendFile completions, no
 //    record lost to a fast process.exit) — supervised-command output chunks
 //    flow through the bounded coalescing output channel instead of that
-//    chain, and any startup failure persists its stack to app.log before
-//    exit(1).
+//    chain (lossy-by-design with every loss counted and reported), the quit
+//    path raises the channel's quiescence barrier before the kill sweep, and
+//    any startup failure persists its stack to app.log before exit(1).
 import type { ScaffoldAppConfig } from "./scaffold";
 import { toolbarCarrierSource } from "./toolbar-carrier";
 import { logQueueSource } from "./log-queue";
@@ -556,6 +557,11 @@ const main = async () => {
       try { await terminalWindow.destroy(); } catch {}
     }
     await tray.destroy();
+    // Codex R4 quiescence barrier: from here the output channel can only
+    // drain. Chunks the dying child emits during the kill sweep are counted
+    // into the final drop marker instead of scheduling post-flush commits a
+    // fast process.exit would orphan.
+    beginOutputShutdown();
     await killCommand();
     await flushLogQueue();
     process.exit(0);
