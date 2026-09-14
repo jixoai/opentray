@@ -494,7 +494,7 @@ fn get_tray_bounds_rejects_non_owner_session() {
             request_id: Some(request_id),
             code,
             ..
-        } if request_id == "req-bounds" && code == "kernel-error"
+        } if request_id == "req-bounds" && code == "session-mismatch"
     ));
 }
 

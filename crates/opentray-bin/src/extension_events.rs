@@ -776,14 +776,20 @@ mod tests {
 
         // harden-lifecycle-ownership D2: extension commands are scoped to the
         // tray-owning session. A foreign session cannot dispatch — and so can
-        // never reach a legacy destroy — through another session's tray.
+        // never reach a legacy destroy — through another session's tray. The
+        // rejection carries the stable `session-mismatch` code with request
+        // correlation, so consumers never parse the human message.
         let frames = harness.ext_command(session_b, "app-a", "tray-a");
         assert!(
             frames.iter().any(|frame| matches!(
                 frame,
-                ServerFrame::Error { message, .. } if message.contains("session")
+                ServerFrame::Error {
+                    code,
+                    message,
+                    ..
+                } if code == "session-mismatch" && message.contains("does not own tray")
             )),
-            "the non-owning dispatch is rejected: {frames:?}"
+            "the non-owning dispatch is rejected with the stable code: {frames:?}"
         );
         assert!(
             ext_event_frames(harness.received(session_b)).is_empty(),

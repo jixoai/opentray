@@ -553,6 +553,18 @@ fn kernel_error(request_id: Option<RequestId>, error: KernelError) -> ServerFram
             "app-icon-variant-not-found",
             format!("app icon variant not found for {app_id}: {variant}"),
         ),
+        // harden-lifecycle-ownership D2: ownership rejections are a stable,
+        // consumable protocol code — consumers must never parse the human
+        // message to distinguish an authorization failure.
+        KernelError::SessionMismatch {
+            session_id,
+            app_id,
+            tray_id,
+        } => protocol_error(
+            request_id,
+            "session-mismatch",
+            format!("session {session_id} does not own tray {tray_id} of app {app_id}"),
+        ),
         KernelError::Extension(ExtensionError::Detailed { category, message }) => {
             protocol_error(request_id, category, message)
         }
