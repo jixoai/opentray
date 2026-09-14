@@ -323,6 +323,50 @@ const materializeUrlToolbarApp = async (): Promise<string> => {
   return dir;
 };
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/** Materialize a command app whose supervised child floods stdout (~16 KB
+ * every 1 ms for `noiseMs`, then stays alive for the quit-path teardown). */
+const materializeNoisyCommandApp = async (): Promise<{ readonly dir: string; readonly noiseMs: number }> => {
+  const dir = remember(await mkdtemp(join(tmpdir(), "r3-noisy-")));
+  const noiseMs = 1200;
+  const noisy = join(dir, "noisy.mjs");
+  await writeFile(
+    noisy,
+    [
+      "// Stress child (Codex R3): ~16 KB of stdout every 1 ms for a bounded",
+      "// window, then idle alive until the supervisor's quit path tears it down.",
+      'const block = "x".repeat(16384);',
+      `const deadline = Date.now() + ${noiseMs};`,
+      "const tick = () => {",
+      "  process.stdout.write(block);",
+      "  if (Date.now() < deadline) { setTimeout(tick, 1); }",
+      "};",
+      "tick();",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const config: ScaffoldAppConfig = {
+    schemaVersion: 1,
+    appId: "stress.noisy.example",
+    appName: "Noisy Stress",
+    command: { command: process.execPath, args: [noisy], cwd: dir },
+    service: { port: 0 },
+    window: {
+      width: 900,
+      height: 560,
+      toolbar: false,
+      titleFollowsDocument: true,
+      iconFollowsDocument: false,
+    },
+    shell: { showTerminal: false },
+  };
+  await writeScaffold({ config, targetDir: dir, dependencyRange: "^0.27.0" });
+  await writeFakeModules(dir);
+  return { dir, noiseMs };
+};
+
 describe("executed URL toolbar entry bootstrap (D5)", () => {
   it(
     "healthy startup writes one structured milestone record per step to app.log",
@@ -510,6 +554,63 @@ describe("executed URL toolbar entry bootstrap (D5)", () => {
   );
 });
 
+describe("executed command entry noisy-output stress (Codex R3)", () => {
+  it(
+    "a noisy supervised command keeps milestones ordered, bounds app.log, and exits in bounded time",
+    { timeout: 60_000 },
+    async () => {
+      const { dir, noiseMs } = await materializeNoisyCommandApp();
+      // The jitter seam is the slow consumer: every physical append takes a
+      // random 0-30 ms, so the output drain rate (~1 MB/s) falls far below
+      // the ~16 MB/s production rate and the 256 KB cap MUST drop output. A
+      // fast local disk would drain everything and prove nothing about the
+      // bound.
+      const child = spawnEntry(dir, {
+        FAKE_OPENTRAY_TRACE: join(dir, "fake-trace.jsonl"),
+        OPENTRAY_TEST_LOG_JITTER: "1",
+      });
+      const stderrSink = { text: "" };
+      collectStderr(child, stderrSink);
+
+      const deadline = Date.now() + 20_000;
+      let events: BootstrapEvent[] = [];
+      while (Date.now() < deadline) {
+        events = await readAppLogEvents(dir);
+        if (events.some((event) => event.step === "createTray" && event.status === "ok")) break;
+        await sleep(100);
+      }
+      // Let the noisy child saturate the output channel past the cap.
+      await sleep(noiseMs + 300);
+
+      const killStarted = Date.now();
+      child.kill("SIGTERM");
+      const outcome = await new Promise<RunOutcome>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (exitCode, signal) => resolve({ exitCode, signal, stderr: stderrSink.text }));
+      });
+      const quitMs = Date.now() - killStarted;
+
+      // Milestone order survives the storm: listenShell -> createTray (no
+      // service ports, so no showWindow records), exactly once each — the
+      // output storm never touches the milestone chain.
+      const steps = events.filter((event) => event.status === "ok").map((event) => event.step);
+      expect(steps, `app.log narrative was: ${JSON.stringify(events)}`).toEqual([
+        "listenShell",
+        "createTray",
+      ]);
+      // SIGTERM -> quit -> teardown -> bounded flush -> exit(0).
+      expect(outcome.exitCode).toBe(0);
+      expect(quitMs).toBeLessThan(10_000);
+      // The cap dropped output and said so in readable records; the file is
+      // drain-bounded (~2 MB), not production-bounded (~19 MB written).
+      const appLogFile = join(dir, "app.log");
+      const appLog = await readFile(appLogFile, "utf8");
+      expect(appLog).toContain("[log-queue] dropped ");
+      expect(appLog.length).toBeLessThan(4_000_000);
+    },
+  );
+});
+
 describe("template milestone isomorphism (D5)", () => {
   it("both templates log the same milestones and never swallow the initial show()", async () => {
     const urlDir = remember(await mkdtemp(join(tmpdir(), "d5-iso-url-")));
@@ -529,16 +630,20 @@ describe("template milestone isomorphism (D5)", () => {
     ] as const) {
       // Shared structured-record writer and identical template milestones.
       expect(entry, name).toContain('const logEvent = (record) => logSink(JSON.stringify({ time:');
-      // The serial append queue (Codex R2 P1) is embedded identically in both
-      // templates: ordered records, exits awaiting the drain, jitter seam.
+      // The serial append queue (Codex R2 P1) plus the bounded output channel
+      // (Codex R3) are embedded identically in both templates: ordered
+      // milestone records, coalesced/capped child output, exits awaiting the
+      // drain, jitter seam.
       expect(entry, name).toContain("let logQueueTail = Promise.resolve();");
-      expect(entry, name).toContain("const flushLogQueue = () => logQueueTail;");
+      expect(entry, name).toContain("const logOutputChunk = (text) => {");
+      expect(entry, name).toContain("const OUTPUT_CAP_BYTES = 262144;");
+      expect(entry, name).toContain("const flushLogQueue = async () => {");
       expect(entry, name).toContain("OPENTRAY_TEST_LOG_JITTER");
       expect(entry, name).toContain("await flushLogQueue();");
       expect(entry, name).toContain('step: "listenShell"');
       expect(entry, name).toContain('step: "createTray"');
       expect(entry, name).toContain('step: "showWindow"');
-      // The carrier receives the same structured sink in both templates.
+        // The carrier receives the same structured sink in both templates.
       expect(entry, name).toContain("event: logEvent");
       // The swallowed initial show is gone; failures are recorded, then abort.
       expect(entry, name).not.toContain(".show().catch(() => {})");
@@ -549,6 +654,13 @@ describe("template milestone isomorphism (D5)", () => {
     // The carrier milestones live once, in the shared carrier source.
     expect(urlEntry).toContain('milestone("createWebviewToolbar"');
     expect(commandEntry).toContain('milestone("createWebviewToolbar"');
+    // Codex R3: the COMMAND entry routes every child-output chunk through
+    // the bounded output channel; no raw chunk rides the milestone chain.
+    expect(commandEntry).toContain("logOutputChunk(chunk);");
+    expect(commandEntry).not.toContain('logSink(chunk, "utf8")');
+    // The URL entry supervises no command: the channel is defined by the
+    // shared queue source but never invoked there.
+    expect(urlEntry).not.toContain("logOutputChunk(chunk)");
   });
 });
 

@@ -1,36 +1,39 @@
-// Orthogonal intents (2026-08-16, updated 2026-08-19; owner round-9 demands:
-// startup terminal PTY streaming, shell window, tray icon wiring, multi-port
-// monitor with (detached) title marking; 2026-08-19 decisions D1–D6 in
+// Orthogonal intents (2026-08-16, updated 2026-08-19 and 2026-09-11; owner
+// round-9 demands: startup terminal PTY streaming, shell window, tray icon
+// wiring, multi-port monitor with (detached) title marking; 2026-08-19
+// decisions D1–D6 in
 // openspec/changes/create-no-first-launch-force-terminal/plans/plan.md made
 // the PTY unconditional, removed the blocking service-port gate, made service
 // discovery an unbounded adaptive monitor, and turned the terminal window
-// into the abnormal-exit surface):
+// into the abnormal-exit surface; add-webview-orchestration D13, 2026-09-11,
+// composed toolbar service windows over that base):
 // 1. Render the generated app entry from the frozen config as one real TS
 //    template literal (compile-checked here; no string surgery at build time).
-// 2. The command ALWAYS runs through a PTY (preview-parity TTY environment);
-//    a failed PTY load degrades to pipes and logs the degradation.
+// 2. Command supervision: the command ALWAYS runs through a PTY
+//    (preview-parity TTY environment; a failed PTY load degrades to pipes and
+//    logs the degradation), and teardown sweeps the whole process tree
+//    (group signal + PPid walk, SIGTERM → bounded grace → SIGKILL).
 // 3. Service windows are driven exclusively by the continuous adaptive port
 //    monitor — one window per HTTP-verified port, no startup gate, no
 //    deadline; polling cost is bounded by cadence (≈1s active, ≤5s quiet or
-//    under load), never by a time limit.
+//    under load), never by a time limit. Toolbar service windows (D13)
+//    compose the SAME native navigation-toolbar carrier URL applications use
+//    (toolbar webview + content webview + column layout + channel
+//    navigation) over each dedicated service window; the legacy
+//    showAddressBar iframe wrapper is gone, no generated payload ships an
+//    iframe-wrapped service window, and PTY/port supervision laws are
+//    unchanged (the toolbar composes the window; it never supervises).
 // 4. Terminal window: `showTerminal` controls initial visibility only; an
 //    abnormal command exit (non-zero/signal code, or exit before any verified
 //    service) force-reveals it with the retained output replay.
-// 5. Command teardown sweeps the whole process tree (group signal + PPid
-//    walk, SIGTERM → bounded grace → SIGKILL).
-// 6. Any startup failure persists its stack to app.log before exit(1).
-// 7. Toolbar service windows (add-webview-orchestration D13, 2026-09-11):
-//    `window.toolbar` composes the SAME native navigation-toolbar carrier URL
-//    applications use (toolbar webview + content webview + column layout +
-//    channel navigation) over each dedicated service window. The legacy
-//    showAddressBar iframe wrapper is gone; no generated payload ships an
-//    iframe-wrapped service window, and PTY/port supervision laws are
-//    unchanged (the toolbar composes the window; it never supervises).
-// 8. Bootstrap milestone records are serialized through one append queue
-//    (Codex R2 P1, 2026-09-15): app.log receives milestones in execution
-//    order, and every exit path awaits the queue drain — no reordering
-//    between concurrent appendFile completions, no record lost to a fast
-//    process.exit.
+// 5. Observability (Codex R2 P1 + R3, 2026-09-15): bootstrap milestone and
+//    error records flow through the embedded serial append queue — app.log
+//    receives milestones in execution order and every exit path awaits the
+//    drain (no reordering between concurrent appendFile completions, no
+//    record lost to a fast process.exit) — supervised-command output chunks
+//    flow through the bounded coalescing output channel instead of that
+//    chain, and any startup failure persists its stack to app.log before
+//    exit(1).
 import type { ScaffoldAppConfig } from "./scaffold";
 import { toolbarCarrierSource } from "./toolbar-carrier";
 import { logQueueSource } from "./log-queue";
@@ -196,7 +199,9 @@ const main = async () => {
     });
     shellApi.registerPty(pty);
     pty.onData((chunk) => {
-      void logSink(chunk, "utf8");
+      // Child output is bounded-channel data (Codex R3), never a milestone
+      // record — a noisy command must not tax the serial chain.
+      logOutputChunk(chunk);
       shellApi.pushOutput(chunk);
     });
     const exited = new Promise((resolvePromise) => {
@@ -219,8 +224,8 @@ const main = async () => {
     });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { void logSink(chunk, "utf8"); shellApi.pushOutput(chunk); });
-    child.stderr.on("data", (chunk) => { void logSink(chunk, "utf8"); shellApi.pushOutput(chunk); });
+    child.stdout.on("data", (chunk) => { logOutputChunk(chunk); shellApi.pushOutput(chunk); });
+    child.stderr.on("data", (chunk) => { logOutputChunk(chunk); shellApi.pushOutput(chunk); });
     const exited = new Promise((resolvePromise) => {
       child.once("exit", (code, signal) => resolvePromise({ code, signal }));
     });

@@ -16,17 +16,18 @@
 //    (X-Frame-Options / CSP frame-ancestors) is not consulted — a top-level
 //    content webview is not an embedded context (D14). The payload carries
 //    the shell server + toolbar assets and still no PTY dependency.
-// 4. Tray menu offers Reload (D11): toolbar mode reloads the CONTENT webview
-//    through the native navigate command; direct mode keeps the evaluate
-//    channel. The app process never restarts for a reload.
-// 5. Quit destroys the window and tray session and exits; there is no child
+// 4. Lifecycle: the tray menu offers Reload (D11; toolbar mode reloads the
+//    CONTENT webview through the native navigate command, direct mode keeps
+//    the evaluate channel, and the app process never restarts for a reload);
+//    Quit destroys the window and tray session and exits — there is no child
 //    process tree to sweep (D9).
-// 6. Any startup failure persists its stack to app.log before exit(1).
-// 7. Bootstrap milestone records are serialized through one append queue
-//    (Codex R2 P1, 2026-09-15): app.log receives milestones in execution
-//    order, and every exit path awaits the queue drain — no reordering
-//    between concurrent appendFile completions, no record lost to a fast
-//    process.exit.
+// 5. Observability (Codex R2 P1 + R3, 2026-09-15): milestone and error
+//    records flow through the embedded serial append queue — app.log
+//    receives milestones in execution order and every exit path awaits the
+//    drain (no reordering between concurrent appendFile completions, no
+//    record lost to a fast process.exit; a URL app has no child output, so
+//    the bounded output channel stays defined-but-unused) — and any startup
+//    failure persists its stack to app.log before exit(1).
 import type { ScaffoldAppConfig } from "./scaffold";
 import { toolbarCarrierSource } from "./toolbar-carrier";
 import { logQueueSource } from "./log-queue";
