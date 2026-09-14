@@ -37,11 +37,11 @@
 - [x] 4.2 app.log 叙事验证：健康启动完整里程碑记录；故障注入（OPENTRAY_BROKER_BIN 指向坏二进制）后日志能定位失败里程碑。
 - [x] 4.3 Windows 对称位验证（`ssh gaubeehonor`，E:\dev\github\opentray）：D2 的 Windows destroy 路径测试通过；锁 helper 在 Windows 语义下等价（无 POSIX flock 依赖则用显式回退）。
 - [x] 4.4 全量绿门：`bun test scripts/openspec/vision-driven.test.ts`、`openspec schema validate vision-driven`、受影响包 `pnpm -r --filter ... test` 全绿；新增测试全部纳入。
-- [ ] 4.5 Codex 复核轮（R2）：以 R1 报告为基线复核 diff + 测试证据，要求阻塞清零与评分对比；阻塞项处理后才可进入发布。
+- [x] 4.5 Codex 复核轮（R2）：以 R1 报告为基线复核 diff + 测试证据，要求阻塞清零与评分对比；阻塞项处理后才可进入发布。
 
 ## 5. Release / Archive
 
 - [ ] 5.1 changeset（patch：opentray、@opentray/ext-webview、@opentray/packaging、create-opentray）+ 版本纪律检查（0.27.5）。
-- [ ] 5.2 `bun run openspec:vision -- commit-check harden-lifecycle-ownership --phase research-plan`（以及后续 phase）通过；OpenSpec 工件先于产品代码提交。
+- [x] 5.2 `bun run openspec:vision -- commit-check harden-lifecycle-ownership --phase research-plan`（以及后续 phase）通过；OpenSpec 工件先于产品代码提交。
 - [ ] 5.3 用户走查验收（baidu app 全交互：地址栏/前进/后退/刷新/新窗口；kill -9 恢复；app.log 叙事）。
 - [ ] 5.4 `pnpm run changeset` 后 push；合并 main 后 trusted publishing 发布 0.27.5；`openspec` archive + 清理。
