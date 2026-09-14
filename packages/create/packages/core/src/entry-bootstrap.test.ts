@@ -370,6 +370,57 @@ describe("executed URL toolbar entry bootstrap (D5)", () => {
   );
 
   it(
+    "milestone records keep execution order under randomized append delays (serial queue, Codex R2 P1)",
+    { timeout: 30_000 },
+    async () => {
+      // Happens-before gate: every physical app.log append is delayed by a
+      // random 0-30 ms (OPENTRAY_TEST_LOG_JITTER), so the old
+      // fire-and-forget appendFile writer would scramble record order
+      // (listenShell racing ahead of createTray was observed in the wild).
+      // The generated entry's serial append queue must keep one record per
+      // milestone, exactly in execution order, with no duplicates.
+      const projectDir = await materializeUrlToolbarApp();
+      const env = {
+        FAKE_OPENTRAY_TRACE: join(projectDir, "fake-trace.jsonl"),
+        OPENTRAY_TEST_LOG_JITTER: "1",
+      };
+      const child = spawnEntry(projectDir, env);
+      const stderrSink = { text: "" };
+      collectStderr(child, stderrSink);
+
+      const deadline = Date.now() + 20_000;
+      let events: BootstrapEvent[] = [];
+      while (Date.now() < deadline) {
+        events = await readAppLogEvents(projectDir);
+        if (events.some((event) => event.step === "openChannel" && event.status === "ok")) break;
+        await new Promise((resolve) => {
+          setTimeout(resolve, 100);
+        });
+      }
+      child.kill("SIGTERM");
+      const outcome = await new Promise<RunOutcome>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (exitCode, signal) => resolve({ exitCode, signal, stderr: stderrSink.text }));
+      });
+
+      const steps = events.filter((event) => event.status === "ok").map((event) => event.step);
+      // The exact 7-milestone narrative (toEqual also fails on duplicates
+      // and on out-of-order records).
+      expect(steps, `app.log narrative was: ${JSON.stringify(events)}`).toEqual([
+        "createTray",
+        "listenShell",
+        "showWindow",
+        "createWebviewToolbar",
+        "createWebviewContent",
+        "setLayout",
+        "openChannel",
+      ]);
+      expect(new Set(steps).size).toBe(steps.length);
+      expect(outcome.exitCode).toBe(0);
+    },
+  );
+
+  it(
     "a failed initial show() aborts the carrier, attaches no child webviews, and exits non-zero",
     { timeout: 30_000 },
     async () => {
@@ -478,6 +529,12 @@ describe("template milestone isomorphism (D5)", () => {
     ] as const) {
       // Shared structured-record writer and identical template milestones.
       expect(entry, name).toContain('const logEvent = (record) => logSink(JSON.stringify({ time:');
+      // The serial append queue (Codex R2 P1) is embedded identically in both
+      // templates: ordered records, exits awaiting the drain, jitter seam.
+      expect(entry, name).toContain("let logQueueTail = Promise.resolve();");
+      expect(entry, name).toContain("const flushLogQueue = () => logQueueTail;");
+      expect(entry, name).toContain("OPENTRAY_TEST_LOG_JITTER");
+      expect(entry, name).toContain("await flushLogQueue();");
       expect(entry, name).toContain('step: "listenShell"');
       expect(entry, name).toContain('step: "createTray"');
       expect(entry, name).toContain('step: "showWindow"');

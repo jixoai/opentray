@@ -22,8 +22,14 @@
 // 5. Quit destroys the window and tray session and exits; there is no child
 //    process tree to sweep (D9).
 // 6. Any startup failure persists its stack to app.log before exit(1).
+// 7. Bootstrap milestone records are serialized through one append queue
+//    (Codex R2 P1, 2026-09-15): app.log receives milestones in execution
+//    order, and every exit path awaits the queue drain — no reordering
+//    between concurrent appendFile completions, no record lost to a fast
+//    process.exit.
 import type { ScaffoldAppConfig } from "./scaffold";
 import { toolbarCarrierSource } from "./toolbar-carrier";
+import { logQueueSource } from "./log-queue";
 
 /** The generated URL app entry: owns tray + one direct or toolbar-carrier window. */
 export const createUrlEntrySource = (config: ScaffoldAppConfig): string => {
@@ -62,7 +68,7 @@ const iconFollows = config.window.iconFollowsDocument === true;
 
 const appLogPath = resolve(PROJECT_DIR, "app.log");
 await mkdir(dirname(appLogPath), { recursive: true });
-const logSink = appendFile.bind(undefined, appLogPath);
+${logQueueSource()}
 const logNote = (message) => { void logSink("[create-opentray] " + message + "\\n", "utf8"); };
 // Bootstrap milestones (harden-lifecycle-ownership D5): one structured JSON
 // record per startup step — the operator reads session health from app.log
@@ -127,6 +133,7 @@ ${toolbarCarrierSource()}const main = async () => {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("OPENTRAY_BROKER_SINGLE_SESSION")) {
         await logSink("[create-opentray] broker session already owned by another instance of this app; this cold-started launcher exits (yield)\\n", "utf8");
+        await flushLogQueue();
         process.exit(0);
       }
       throw error;
@@ -144,6 +151,7 @@ ${toolbarCarrierSource()}const main = async () => {
     quitting = true;
     void (async () => {
       await logEvent({ step: "connectionDead", status: "failed", error: errorText(error) });
+      await flushLogQueue();
       process.exit(1);
     })();
   });
@@ -232,6 +240,7 @@ ${toolbarCarrierSource()}const main = async () => {
     quitting = true;
     try { await window.destroy(); } catch {}
     await tray.destroy();
+    await flushLogQueue();
     process.exit(0);
   };
 
@@ -257,6 +266,7 @@ main().catch(async (error) => {
     await logSink(\`[create-opentray] startup failed: \${error instanceof Error ? error.stack ?? error.message : String(error)}\\n\`, "utf8");
   } catch { /* app.log unwritable; stderr below is the remaining surface */ }
   console.error(error);
+  await flushLogQueue();
   process.exit(1);
 });
 

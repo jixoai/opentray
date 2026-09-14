@@ -28,6 +28,10 @@
 //    openChannel) flows through options.event into app.log — a healthy
 //    narrative and the exact failed step are both attributable from the log
 //    alone, and a failed step aborts the bootstrap (no later steps run).
+//    The event sink is the embedding template's serial append queue (Codex
+//    R2 P1, 2026-09-15): carrier records share the entry's one happens-before
+//    chain, so a void submission still lands after every earlier record and
+//    the entry's exit flush drains them with the rest of app.log.
 //
 // Channel payload schema (create-private, JSON over the channel payload —
 // D12 deliberately keeps this schema OUT of @opentray/spec):
@@ -63,7 +67,12 @@ const attachToolbarCarrier = async (shell, options) => {
   // Bootstrap milestones (harden-lifecycle-ownership D5): one structured
   // record per carrier step through the embedding template's event sink
   // (app.log). Failure records are awaited so the failed step is durable
-  // before the error aborts the bootstrap; ok records are best-effort.
+  // before the error aborts the bootstrap; ok records are best-effort but
+  // still ordered — the sink is the template's serial append queue (Codex R2
+  // P1), whose submission is synchronous, so a void call enters the same
+  // happens-before chain and lands after every earlier record. Keep the ok
+  // path void: the carrier's awaited per-step bootstrap structure is
+  // unchanged and the queue owns the ordering.
   const event = typeof options.event === "function" ? options.event : () => {};
   const milestone = async (step, run) => {
     try {
