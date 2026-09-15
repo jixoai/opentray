@@ -19,8 +19,10 @@
 use std::collections::HashSet;
 
 use opentray_spec::webview::{
-    OrchestrationErrorCode, WebviewBridgePolicy, WebviewErrorEnvelope, WebviewEventFrame,
-    WebviewEventKind, WebviewLoadPhase, WebviewOwnerTuple,
+    matches_webview_navigation_pattern, OrchestrationErrorCode, WebviewBridgePolicy,
+    WebviewErrorEnvelope, WebviewEventFrame, WebviewEventKind, WebviewLoadPhase,
+    WebviewNavigationRule, WebviewNavigationType, WebviewOwnerTuple,
+    WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE,
 };
 
 /// Default window-session id bound when a legacy `show` command carries no
@@ -94,7 +96,10 @@ impl StyleFacts {
 
 /// Style-exclusivity checkpoint (1): may a window in this style state host
 /// one more webview? Rejected before any child state exists.
-pub(crate) fn webview_creation_allowed(facts: StyleFacts, existing_webviews: usize) -> Result<(), OrchestrationError> {
+pub(crate) fn webview_creation_allowed(
+    facts: StyleFacts,
+    existing_webviews: usize,
+) -> Result<(), OrchestrationError> {
     if existing_webviews >= 1 && facts.affects_translucency() {
         return Err(OrchestrationError::new(
             OrchestrationErrorCode::MultiwebviewUnsupportedStyle,
@@ -150,6 +155,16 @@ pub(crate) struct ViewEvents {
     /// while no load is in flight). Throttles progress frames so native
     /// progress observers cannot flood the outbox.
     pub last_load_progress: Option<f64>,
+    /// Latest-class favicon cache (`faviconChange`): the settled absolute
+    /// href and the seq it was last recorded at, feeding the
+    /// `get-webview-favicon` `(value, seq)` query. `None` until the first
+    /// observation.
+    pub favicon: Option<String>,
+    pub favicon_seq: u64,
+    /// Declarative navigation rules, evaluated synchronously at every
+    /// native navigation decision point (create option or
+    /// `set-webview-navigation-rules`).
+    pub navigation_rules: Vec<WebviewNavigationRule>,
 }
 
 impl ViewEvents {
@@ -167,6 +182,9 @@ impl ViewEvents {
             overlay_rect: None,
             load_in_flight: false,
             last_load_progress: None,
+            favicon: None,
+            favicon_seq: 0,
+            navigation_rules: Vec::new(),
         }
     }
 
@@ -382,6 +400,86 @@ impl ViewEvents {
             Some(progress),
         ))
     }
+
+    /// Records a navigation decision observation (`navigationAction`, Edge
+    /// class): every native decision point is one edge worth one frame, so
+    /// like [`Self::note_load_state`] the only gates are subscription and
+    /// owner attribution and the seq advances only for emitted frames.
+    /// Platform runtimes call this from their navigation delegates with the
+    /// platform-projected [`WebviewNavigationType`] and optional
+    /// user-initiated flag, then apply [`Self::navigation_blocked`] to
+    /// decide cancellation.
+    pub(crate) fn note_navigation_action(
+        &mut self,
+        owner: &WindowOwner,
+        window_id: &str,
+        url: impl Into<String>,
+        navigation_type: WebviewNavigationType,
+        is_user_initiated: Option<bool>,
+    ) -> Option<WebviewEventFrame> {
+        if !self.is_subscribed(WebviewEventKind::NavigationAction) {
+            return None;
+        }
+        let tuple = owner.owner_tuple()?;
+        let seq = self.allocate_seq();
+        Some(WebviewEventFrame::new_navigation_action(
+            tuple,
+            window_id,
+            self.webview_id.clone(),
+            seq,
+            url,
+            navigation_type,
+            is_user_initiated,
+        ))
+    }
+
+    /// Records a settled favicon href (`faviconChange`, Latest class): the
+    /// cache and its seq refresh on every observation even while
+    /// unsubscribed (the `get-webview-favicon` query must converge), but a
+    /// repeated href is not a state change and produces neither a seq nor a
+    /// frame.
+    pub(crate) fn note_favicon_change(
+        &mut self,
+        owner: &WindowOwner,
+        window_id: &str,
+        href: impl Into<String>,
+    ) -> Option<WebviewEventFrame> {
+        let href = href.into();
+        // An empty href is never favicon state (the page bridge filters
+        // null/empty reports; the frame guard rejects them on the wire).
+        if href.is_empty() || self.favicon.as_deref() == Some(href.as_str()) {
+            return None;
+        }
+        self.favicon = Some(href);
+        let seq = self.allocate_seq();
+        self.favicon_seq = seq;
+        if !self.is_subscribed(WebviewEventKind::FaviconChange) {
+            return None;
+        }
+        let tuple = owner.owner_tuple()?;
+        Some(WebviewEventFrame::new_favicon_change(
+            tuple,
+            window_id,
+            self.webview_id.clone(),
+            seq,
+            self.favicon.clone().expect("just set"),
+        ))
+    }
+
+    /// Synchronous rule evaluation for one navigation decision: any `block`
+    /// rule whose pattern matches the full URL cancels the navigation.
+    /// Platform runtimes call this on the UI thread inside their navigation
+    /// delegates — it never awaits IPC, so the veto is race-free.
+    pub(crate) fn navigation_blocked(&self, url: &str) -> bool {
+        self.navigation_rules.iter().any(|rule| {
+            rule.action == opentray_spec::webview::WebviewNavigationRuleAction::Block
+                && matches_webview_navigation_pattern(&rule.pattern, url)
+        })
+    }
+
+    /// The stable `loadState failed` error code a rule-blocked navigation
+    /// reports, exposed for platform delegates building the failed frame.
+    pub(crate) const BLOCKED_ERROR_CODE: i32 = WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE;
 }
 
 /// Applies a new focus owner to every view of one window and returns the
@@ -672,9 +770,7 @@ pub(crate) struct PopupLedger<T> {
 
 impl<T> Default for PopupLedger<T> {
     fn default() -> Self {
-        Self {
-            popups: Vec::new(),
-        }
+        Self { popups: Vec::new() }
     }
 }
 
@@ -815,16 +911,21 @@ mod tests {
             })
         );
         // The live session is untouched.
-        assert_eq!(registry.window("tray-1").unwrap().view_ids(), Vec::<String>::new());
-        assert!(registry
-            .window("tray-1")
-            .unwrap()
-            .owner
-            .as_ref()
-            .unwrap()
-            .session_id
-            .as_deref()
-            == Some("session-1"));
+        assert_eq!(
+            registry.window("tray-1").unwrap().view_ids(),
+            Vec::<String>::new()
+        );
+        assert!(
+            registry
+                .window("tray-1")
+                .unwrap()
+                .owner
+                .as_ref()
+                .unwrap()
+                .session_id
+                .as_deref()
+                == Some("session-1")
+        );
     }
 
     #[test]
@@ -867,7 +968,9 @@ mod tests {
         registry
             .open_window(owner("tray-new", Some("session-9")))
             .expect("attributed window");
-        registry.add_view("tray-legacy", view("default")).expect("view");
+        registry
+            .add_view("tray-legacy", view("default"))
+            .expect("view");
 
         // Closing the attributed session-9 removes exactly its own window …
         let removed = registry.session_closed("session-9");
@@ -998,7 +1101,10 @@ mod tests {
         // Phase 1: the sweep collects the closing session's entries.
         let collected = registry.session_closed("session-old");
         assert_eq!(collected.len(), 1);
-        let stale = collected[0].owner.clone().expect("attributed closing entry");
+        let stale = collected[0]
+            .owner
+            .clone()
+            .expect("attributed closing entry");
 
         // Phase 2: a new same-tray session becomes resident before the
         // destroy step runs.
@@ -1032,10 +1138,16 @@ mod tests {
         // Checkpoint (1): creating a second webview in a translucent-style window.
         let error = webview_creation_allowed(style(true, false), 1)
             .expect_err("frameless window cannot gain a second webview");
-        assert_eq!(error.code(), OrchestrationErrorCode::MultiwebviewUnsupportedStyle);
+        assert_eq!(
+            error.code(),
+            OrchestrationErrorCode::MultiwebviewUnsupportedStyle
+        );
         let error = webview_creation_allowed(style(false, true), 1)
             .expect_err("material window cannot gain a second webview");
-        assert_eq!(error.code(), OrchestrationErrorCode::MultiwebviewUnsupportedStyle);
+        assert_eq!(
+            error.code(),
+            OrchestrationErrorCode::MultiwebviewUnsupportedStyle
+        );
         // First webview in such a window is legal (single webview stays supported).
         assert!(webview_creation_allowed(style(true, false), 0).is_ok());
         // Framed opaque windows accept multiple webviews.
@@ -1044,10 +1156,16 @@ mod tests {
         // Checkpoint (2): applying a translucent style to a multi-webview window.
         let error = style_change_allowed(style(true, false), 2)
             .expect_err("multi-webview window cannot become frameless");
-        assert_eq!(error.code(), OrchestrationErrorCode::MultiwebviewUnsupportedStyle);
+        assert_eq!(
+            error.code(),
+            OrchestrationErrorCode::MultiwebviewUnsupportedStyle
+        );
         let error = style_change_allowed(style(false, true), 2)
             .expect_err("multi-webview window cannot become material");
-        assert_eq!(error.code(), OrchestrationErrorCode::MultiwebviewUnsupportedStyle);
+        assert_eq!(
+            error.code(),
+            OrchestrationErrorCode::MultiwebviewUnsupportedStyle
+        );
         // Single-webview windows may still change style freely.
         assert!(style_change_allowed(style(true, true), 1).is_ok());
         // Framed-opaque style changes on multi-webview windows stay legal.
@@ -1079,11 +1197,17 @@ mod tests {
             .map(|frame| (frame.webview_id.as_str(), frame))
             .collect();
         let lost = by_id.get("content").expect("content loses focus");
-        assert_eq!(lost.payload, opentray_spec::webview::WebviewEventPayload::Focused { focused: false });
+        assert_eq!(
+            lost.payload,
+            opentray_spec::webview::WebviewEventPayload::Focused { focused: false }
+        );
         assert_eq!(lost.owner.session_id, "session-1");
         assert_eq!(lost.window_id, "win-1");
         let gained = by_id.get("toolbar").expect("toolbar gains focus");
-        assert_eq!(gained.payload, opentray_spec::webview::WebviewEventPayload::Focused { focused: true });
+        assert_eq!(
+            gained.payload,
+            opentray_spec::webview::WebviewEventPayload::Focused { focused: true }
+        );
 
         // Both views' counters moved; per-view monotonicity continues.
         assert_eq!(views[0].next_seq, 2);
@@ -1101,13 +1225,17 @@ mod tests {
         let attributed = owner("tray-1", Some("session-1"));
         let unattributed = owner("tray-1", None);
         // No subscription: no frames, but the tracked flag still updates.
-        assert!(focus_owner_transition(&mut views, &unattributed, "win", Some("content")).is_empty());
+        assert!(
+            focus_owner_transition(&mut views, &unattributed, "win", Some("content")).is_empty()
+        );
         assert!(views[0].focused);
         // Subscribed but unattributed: still no frame (frame schema requires
         // a session id).
         views[0].subscribe(&[WebviewEventKind::Focused]);
         views[0].focused = false;
-        assert!(focus_owner_transition(&mut views, &unattributed, "win", Some("content")).is_empty());
+        assert!(
+            focus_owner_transition(&mut views, &unattributed, "win", Some("content")).is_empty()
+        );
         assert!(views[0].focused);
         // Subscribed and attributed: the frame flows.
         views[0].focused = false;
@@ -1121,7 +1249,9 @@ mod tests {
         let owner = owner("tray-1", Some("session-1"));
 
         // Unsubscribed changes still advance the sequence and refresh the cache.
-        assert!(events.note_url_change(&owner, "win", "https://example.org").is_none());
+        assert!(events
+            .note_url_change(&owner, "win", "https://example.org")
+            .is_none());
         assert_eq!(events.url, "https://example.org");
         assert_eq!(events.url_seq, 1);
 
@@ -1132,9 +1262,12 @@ mod tests {
         assert_eq!(frame.seq, 2);
         assert_eq!(frame.kind, WebviewEventKind::UrlChange);
         assert!(frame.is_coherent());
-        assert_eq!(frame.payload, opentray_spec::webview::WebviewEventPayload::UrlChange {
-            url: "https://example.org/articles/1".to_string(),
-        });
+        assert_eq!(
+            frame.payload,
+            opentray_spec::webview::WebviewEventPayload::UrlChange {
+                url: "https://example.org/articles/1".to_string(),
+            }
+        );
 
         let title_frame = events
             .note_title_change(&owner, "win", "Example Article")
@@ -1145,7 +1278,9 @@ mod tests {
 
         // The query pair returns the latest value with its own sequence.
         events.unsubscribe(&[WebviewEventKind::UrlChange]);
-        assert!(events.note_url_change(&owner, "win", "https://example.org/next").is_none());
+        assert!(events
+            .note_url_change(&owner, "win", "https://example.org/next")
+            .is_none());
         assert_eq!(events.url, "https://example.org/next");
         assert_eq!(events.url_seq, 4, "cache and seq advance without delivery");
     }
@@ -1172,6 +1307,103 @@ mod tests {
     }
 
     #[test]
+    fn navigation_action_frames_follow_subscription_and_carry_the_projection() {
+        use opentray_spec::webview::WebviewEventPayload;
+
+        let attributed = owner("tray-1", Some("session-1"));
+        let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
+        // Unsubscribed: no frame, no seq burn (Edge class, no query pair).
+        assert!(
+            events
+                .note_navigation_action(&attributed, "win", "https://example.org/a", WebviewNavigationType::Link, Some(true))
+                .is_none()
+        );
+        events.subscribe(&[WebviewEventKind::NavigationAction]);
+        let frame = events
+            .note_navigation_action(&attributed, "win", "https://example.org/a", WebviewNavigationType::Link, Some(true))
+            .expect("subscribed view emits");
+        assert_eq!(frame.seq, 1);
+        assert!(frame.is_coherent());
+        let WebviewEventPayload::NavigationAction { url, navigation_type, is_user_initiated } = &frame.payload else {
+            panic!("payload variant");
+        };
+        assert_eq!(url, "https://example.org/a");
+        assert_eq!(*navigation_type, WebviewNavigationType::Link);
+        assert_eq!(*is_user_initiated, Some(true));
+        // The optional flag serializes away when the platform cannot
+        // attribute a gesture (macOS truth).
+        let redirect = events
+            .note_navigation_action(&attributed, "win", "https://example.org/login", WebviewNavigationType::Redirect, None)
+            .expect("subscribed view emits");
+        let value = serde_json::to_value(&redirect).expect("serialize");
+        assert!(value["payload"].get("isUserInitiated").is_none());
+        // Unattributed legacy owner: state-only, no frame.
+        let legacy = WindowOwner { app_id: "app-1".into(), tray_id: "tray-1".into(), session_id: None, window_id: "win".into() };
+        assert!(
+            events
+                .note_navigation_action(&legacy, "win", "https://example.org/b", WebviewNavigationType::Other, None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn favicon_change_is_latest_with_dedupe_and_query_pair() {
+        let attributed = owner("tray-1", Some("session-1"));
+        let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
+        // Cache refreshes while unsubscribed so the query converges.
+        assert!(
+            events
+                .note_favicon_change(&attributed, "win", "https://example.org/favicon.ico")
+                .is_none()
+        );
+        assert_eq!(events.favicon.as_deref(), Some("https://example.org/favicon.ico"));
+        assert_eq!(events.favicon_seq, 1);
+        events.subscribe(&[WebviewEventKind::FaviconChange]);
+        // A repeated href is not a state change: no seq, no frame.
+        assert!(
+            events
+                .note_favicon_change(&attributed, "win", "https://example.org/favicon.ico")
+                .is_none()
+        );
+        assert_eq!(events.favicon_seq, 1);
+        let frame = events
+            .note_favicon_change(&attributed, "win", "https://example.org/favicon-2.ico")
+            .expect("changed href emits");
+        assert_eq!(frame.seq, 2);
+        assert!(frame.is_coherent());
+        assert_eq!(events.favicon.as_deref(), Some("https://example.org/favicon-2.ico"));
+        assert_eq!(events.favicon_seq, 2);
+        // An empty href never reaches the state (the interceptor filters;
+        // the core would mark it incoherent anyway).
+        let empty = events.note_favicon_change(&attributed, "win", "");
+        assert!(empty.is_none());
+        assert!(matches!(empty, None));
+        assert_eq!(events.favicon.as_deref(), Some("https://example.org/favicon-2.ico"));
+    }
+
+    #[test]
+    fn navigation_rules_block_synchronously_and_drive_the_failed_code() {
+        let attributed = owner("tray-1", Some("session-1"));
+        let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
+        assert!(!events.navigation_blocked("https://example.org/ads"));
+        events.navigation_rules = vec![WebviewNavigationRule {
+            pattern: "*://*.tracker.example/*".to_string(),
+            action: opentray_spec::webview::WebviewNavigationRuleAction::Block,
+        }];
+        assert!(events.navigation_blocked("https://cdn.tracker.example/pixel.gif"));
+        assert!(!events.navigation_blocked("https://example.org/ok"));
+        // The terminal frame a blocked navigation reports carries the
+        // stable code, not a platform status.
+        events.subscribe(&[WebviewEventKind::LoadState]);
+        let frame = events
+            .note_load_state(&attributed, "win", WebviewLoadPhase::Failed, "https://cdn.tracker.example/pixel.gif".to_string(), Some(ViewEvents::BLOCKED_ERROR_CODE), None)
+            .expect("subscribed failed frame");
+        let value = serde_json::to_value(&frame).expect("serialize");
+        assert_eq!(value["payload"]["errorCode"], ViewEvents::BLOCKED_ERROR_CODE);
+        assert_eq!(ViewEvents::BLOCKED_ERROR_CODE, WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE);
+    }
+
+    #[test]
     fn load_state_lifecycle_frames_follow_subscription_and_seq_semantics() {
         use opentray_spec::webview::WebviewEventPayload;
 
@@ -1182,54 +1414,105 @@ mod tests {
         // advance the sequence — the focus_edge family convention: seq
         // advances only for emitted frames.
         assert!(events
-            .note_load_state(&attributed, "win", WebviewLoadPhase::Started, "https://example.org", None, None)
+            .note_load_state(
+                &attributed,
+                "win",
+                WebviewLoadPhase::Started,
+                "https://example.org",
+                None,
+                None
+            )
             .is_none());
         assert!(events.load_in_flight);
         assert_eq!(events.next_seq, 1);
 
         events.subscribe(&[WebviewEventKind::LoadState]);
         let started = events
-            .note_load_state(&attributed, "win", WebviewLoadPhase::Started, "https://example.org/a", None, None)
+            .note_load_state(
+                &attributed,
+                "win",
+                WebviewLoadPhase::Started,
+                "https://example.org/a",
+                None,
+                None,
+            )
             .expect("subscribed started emits");
         assert!(started.is_coherent());
-        assert!(started.payload == WebviewEventPayload::LoadState {
-            phase: WebviewLoadPhase::Started,
-            url: "https://example.org/a".to_string(),
-            error_code: None,
-            progress: None,
-        });
+        assert!(
+            started.payload
+                == WebviewEventPayload::LoadState {
+                    phase: WebviewLoadPhase::Started,
+                    url: "https://example.org/a".to_string(),
+                    error_code: None,
+                    progress: None,
+                }
+        );
 
         let finished = events
-            .note_load_state(&attributed, "win", WebviewLoadPhase::Finished, "https://example.org/a", None, Some(1.0))
+            .note_load_state(
+                &attributed,
+                "win",
+                WebviewLoadPhase::Finished,
+                "https://example.org/a",
+                None,
+                Some(1.0),
+            )
             .expect("subscribed finished emits");
         assert_eq!(finished.seq, 2, "one per-view counter across kinds");
-        assert!(finished.payload == WebviewEventPayload::LoadState {
-            phase: WebviewLoadPhase::Finished,
-            url: "https://example.org/a".to_string(),
-            error_code: None,
-            progress: Some(1.0),
-        });
+        assert!(
+            finished.payload
+                == WebviewEventPayload::LoadState {
+                    phase: WebviewLoadPhase::Finished,
+                    url: "https://example.org/a".to_string(),
+                    error_code: None,
+                    progress: Some(1.0),
+                }
+        );
         assert!(!events.load_in_flight);
 
         // Failed frames carry the platform error code.
-        events.note_load_state(&attributed, "win", WebviewLoadPhase::Started, "https://unreachable.example", None, None);
+        events.note_load_state(
+            &attributed,
+            "win",
+            WebviewLoadPhase::Started,
+            "https://unreachable.example",
+            None,
+            None,
+        );
         let failed = events
-            .note_load_state(&attributed, "win", WebviewLoadPhase::Failed, "https://unreachable.example", Some(-1003), None)
+            .note_load_state(
+                &attributed,
+                "win",
+                WebviewLoadPhase::Failed,
+                "https://unreachable.example",
+                Some(-1003),
+                None,
+            )
             .expect("subscribed failure emits");
         assert!(failed.is_coherent());
-        assert!(failed.payload == WebviewEventPayload::LoadState {
-            phase: WebviewLoadPhase::Failed,
-            url: "https://unreachable.example".to_string(),
-            error_code: Some(-1003),
-            progress: None,
-        });
+        assert!(
+            failed.payload
+                == WebviewEventPayload::LoadState {
+                    phase: WebviewLoadPhase::Failed,
+                    url: "https://unreachable.example".to_string(),
+                    error_code: Some(-1003),
+                    progress: None,
+                }
+        );
         assert!(!events.load_in_flight);
 
         // Unattributed views stay silent (the frozen frame schema requires a
         // session id) but the lifecycle state still tracks.
         let unattributed = owner("tray-1", None);
         assert!(events
-            .note_load_state(&unattributed, "win", WebviewLoadPhase::Started, "https://example.org", None, None)
+            .note_load_state(
+                &unattributed,
+                "win",
+                WebviewLoadPhase::Started,
+                "https://example.org",
+                None,
+                None
+            )
             .is_none());
         assert!(events.load_in_flight);
     }
@@ -1245,7 +1528,14 @@ mod tests {
             .note_load_progress(&attributed, "win", "https://example.org", 0.1)
             .is_none());
 
-        events.note_load_state(&attributed, "win", WebviewLoadPhase::Started, "https://example.org", None, None);
+        events.note_load_state(
+            &attributed,
+            "win",
+            WebviewLoadPhase::Started,
+            "https://example.org",
+            None,
+            None,
+        );
         // First in-flight observation is accepted even at low values.
         let first = events
             .note_load_progress(&attributed, "win", "https://example.org", 0.02)
@@ -1265,7 +1555,14 @@ mod tests {
             .note_load_progress(&attributed, "win", "https://example.org", 1.0)
             .is_none());
         // After the terminal phase, further KVO drift stays silent.
-        events.note_load_state(&attributed, "win", WebviewLoadPhase::Finished, "https://example.org", None, Some(1.0));
+        events.note_load_state(
+            &attributed,
+            "win",
+            WebviewLoadPhase::Finished,
+            "https://example.org",
+            None,
+            Some(1.0),
+        );
         assert!(events
             .note_load_progress(&attributed, "win", "https://example.org", 0.4)
             .is_none());
@@ -1285,10 +1582,16 @@ mod tests {
         // Closing session-1 closes both of its popups and nothing else.
         let removed = ledger.close_all_of_session("session-1");
         assert_eq!(
-            removed.iter().map(|(entry, _)| entry.popup_id.clone()).collect::<Vec<_>>(),
+            removed
+                .iter()
+                .map(|(entry, _)| entry.popup_id.clone())
+                .collect::<Vec<_>>(),
             vec!["popup-a".to_string(), "popup-b".to_string()]
         );
-        assert_eq!(ledger.popup_ids_of_tray("tray-2"), vec!["popup-c".to_string()]);
+        assert_eq!(
+            ledger.popup_ids_of_tray("tray-2"),
+            vec!["popup-c".to_string()]
+        );
         assert_eq!(ledger.len(), 1);
 
         // Closing session-2 drains the ledger.
@@ -1347,7 +1650,10 @@ mod tests {
         let removed = ledger.close_all_of_tray("tray-1");
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].0.popup_id, "popup-a");
-        assert_eq!(ledger.popup_ids_of_tray("tray-2"), vec!["popup-b".to_string()]);
+        assert_eq!(
+            ledger.popup_ids_of_tray("tray-2"),
+            vec!["popup-b".to_string()]
+        );
 
         // Popups never influence the one-window-session-per-tray law: a tray
         // with open popups still rejects a second window session, and after

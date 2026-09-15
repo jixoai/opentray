@@ -23,6 +23,7 @@ use crate::{
 pub(crate) fn webview_bridge_bootstrap_script(
     policy: WebviewBridgePolicy,
     webview_id: &str,
+    favicon_observer: bool,
 ) -> Option<String> {
     let has_bridge_surface = policy.webview_id
         || policy.message_channels
@@ -51,7 +52,63 @@ pub(crate) fn webview_bridge_bootstrap_script(
         policy.message_channels,
         policy.webview_id,
         webview_id,
+        favicon_observer,
     ))
+}
+
+/// Favicon observation for a bridgeless webview whose create options enable
+/// `favicon`: a self-contained initialization script that only watches the
+/// icon link elements and reports through the private sync namespace. It
+/// exposes no bridge surface — no `navigator.opentray*` property, no channel
+/// or id surface — so the arbitrary-content default of the per-view bridge
+/// policy is preserved; the host opted into exactly one observation.
+pub(crate) fn favicon_observe_only_script() -> String {
+    r#"(function () {
+  let faviconObserver;
+  let faviconDomReadyListener;
+  let lastObservedFaviconHref;
+  const readActiveFaviconHref = () => {
+    const links = Array.from(
+      document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"]')
+    );
+    const iconLink = links[links.length - 1];
+    if (!iconLink) return null;
+    return iconLink.href || iconLink.getAttribute("href") || null;
+  };
+  const reportFavicon = () => {
+    const href = readActiveFaviconHref();
+    if (href === lastObservedFaviconHref) return;
+    lastObservedFaviconHref = href;
+    window.ipc.postMessage(JSON.stringify({
+      namespace: "opentray.window.sync",
+      cmd: "pageIconChanged",
+      callback: 0,
+      error: 0,
+      payload: { href }
+    }));
+  };
+  const start = () => {
+    reportFavicon();
+    if (faviconObserver) return;
+    faviconObserver = new MutationObserver(reportFavicon);
+    faviconObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["rel", "href"]
+    });
+  };
+  if (document.readyState === "loading") {
+    faviconDomReadyListener = () => {
+      faviconDomReadyListener = undefined;
+      start();
+    };
+    document.addEventListener("DOMContentLoaded", faviconDomReadyListener, { once: true });
+    return;
+  }
+  start();
+})();"#
+        .to_string()
 }
 
 pub(crate) fn navigator_window_bootstrap_script(
@@ -66,6 +123,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     message_channels_enabled: bool,
     webview_id_enabled: bool,
     webview_id: &str,
+    favicon_observer: bool,
 ) -> String {
     let window_enabled = js_bool(window_settings.enabled);
     let soft_resize_enabled = js_bool(soft_resize_enabled);
@@ -78,10 +136,11 @@ pub(crate) fn navigator_window_bootstrap_script(
     let title_native_to_page = js_bool(title_sync.native_to_page);
     let icon_page_to_native = js_bool(icon_sync.page_to_native);
     let icon_native_to_page = js_bool(icon_sync.native_to_page);
+    let favicon_observer = js_bool(favicon_observer);
     let message_channels_enabled = js_bool(message_channels_enabled);
     let webview_id_enabled = js_bool(webview_id_enabled);
-    let webview_id_json = serde_json::to_string(webview_id)
-        .expect("webview id serialization should not fail");
+    let webview_id_json =
+        serde_json::to_string(webview_id).expect("webview id serialization should not fail");
     let native_api_policy_json = native_api_policy_json(native_api_policy);
     let permission_manager_policy_json = permission_manager_policy_json(permission_manager_policy);
     r#"(function () {
@@ -96,6 +155,7 @@ pub(crate) fn navigator_window_bootstrap_script(
   const requestedTitleSyncNativeToPage = __OPENTRAY_TITLE_NATIVE_TO_PAGE__;
   const requestedIconSyncPageToNative = __OPENTRAY_ICON_PAGE_TO_NATIVE__;
   const requestedIconSyncNativeToPage = __OPENTRAY_ICON_NATIVE_TO_PAGE__;
+  const requestedFaviconObserver = __OPENTRAY_FAVICON_OBSERVER__;
   const requestedMessageChannelsEnabled = __OPENTRAY_MESSAGE_CHANNELS_ENABLED__;
   const requestedWebviewIdEnabled = __OPENTRAY_WEBVIEW_ID_ENABLED__;
   const channelWebviewId = __OPENTRAY_WEBVIEW_ID__;
@@ -163,6 +223,11 @@ pub(crate) fn navigator_window_bootstrap_script(
     requestedTitleSyncNativeToPage && directiveAllows("titleSync");
   const iconSyncPageToNative =
     requestedIconSyncPageToNative && directiveAllows("iconSync");
+  // add-navigation-favicon-surface: the per-view `favicon` create option is
+  // an explicit host opt-in independent of the window-icon metadata sync
+  // (and of any page directive): it only reports the observation, never
+  // mutates the window icon.
+  const faviconObserverEnabled = requestedFaviconObserver;
   const iconSyncNativeToPage =
     requestedIconSyncNativeToPage && directiveAllows("iconSync");
   const permissionManagerEnabled = permissionManagerAllows();
@@ -848,7 +913,7 @@ pub(crate) fn navigator_window_bootstrap_script(
       iconLink.setAttribute("href", href);
     };
     const emitPageIconIfNeeded = () => {
-      if (!iconSyncPageToNative) return;
+      if (!iconSyncPageToNative && !faviconObserverEnabled) return;
       const href = readActiveFaviconHref();
       if (href === lastObservedFaviconHref) return;
       lastObservedFaviconHref = href;
@@ -865,7 +930,7 @@ pub(crate) fn navigator_window_bootstrap_script(
       }
     };
     const ensureFaviconObserver = () => {
-      if (!iconSyncPageToNative) {
+      if (!iconSyncPageToNative && !faviconObserverEnabled) {
         teardownFaviconObserver();
         return;
       }
@@ -1113,6 +1178,7 @@ pub(crate) fn navigator_window_bootstrap_script(
         .replace("__OPENTRAY_TITLE_NATIVE_TO_PAGE__", title_native_to_page)
         .replace("__OPENTRAY_ICON_PAGE_TO_NATIVE__", icon_page_to_native)
         .replace("__OPENTRAY_ICON_NATIVE_TO_PAGE__", icon_native_to_page)
+        .replace("__OPENTRAY_FAVICON_OBSERVER__", favicon_observer)
         .replace("__OPENTRAY_MESSAGE_CHANNELS_ENABLED__", message_channels_enabled)
         .replace("__OPENTRAY_WEBVIEW_ID_ENABLED__", webview_id_enabled)
         .replace("__OPENTRAY_WEBVIEW_ID__", &webview_id_json)
@@ -1325,6 +1391,7 @@ return await rectPromise;
             false,
             false,
             "default",
+            false,
         )
     }
 
@@ -1336,6 +1403,7 @@ return await rectPromise;
                 ..WebviewBridgePolicy::default()
             },
             "toolbar",
+            false,
         )
         .expect("channel policy injects the bridge")
     }
@@ -1390,7 +1458,10 @@ internals.channelClosed("ch-b2b", "peer_webview_destroyed");
 return { observed };
 "#,
         );
-        assert_eq!(runtime["observed"], Value::from("second:peer_webview_destroyed"));
+        assert_eq!(
+            runtime["observed"],
+            Value::from("second:peer_webview_destroyed")
+        );
     }
 
     fn run_node_probe(script: &str, probe: &str) -> Value {

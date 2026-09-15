@@ -213,5 +213,62 @@
         "errorCode": -1003
       }
     }
+  },
+  {
+    "name": "navigationAction link user initiated",
+    "frame": {
+      "type": "webview-event",
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "navigationAction",
+      "seq": 61,
+      "payload": {
+        "url": "https://example.org/articles/2",
+        "navigationType": "link",
+        "isUserInitiated": true
+      }
+    }
+  },
+  {
+    "name": "navigationAction redirect without user flag",
+    "frame": {
+      "type": "webview-event",
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "navigationAction",
+      "seq": 62,
+      "payload": {
+        "url": "https://example.org/login",
+        "navigationType": "redirect"
+      }
+    }
+  },
+  {
+    "name": "faviconChange settled href",
+    "frame": {
+      "type": "webview-event",
+      "owner": {
+        "appId": "app-1",
+        "trayId": "tray-1",
+        "sessionId": "session-1"
+      },
+      "windowId": "win-1",
+      "webviewId": "content",
+      "kind": "faviconChange",
+      "seq": 71,
+      "payload": {
+        "href": "https://example.org/favicon.ico"
+      }
+    }
   }
 ]

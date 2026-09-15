@@ -201,7 +201,11 @@ impl WebviewBrowserOptions {
 /// follow the core protocol's kebab-case convention and never collide with
 /// the single-webview command surface (`navigate`, `focus`, ...).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
 pub enum WebviewOrchestrationCommand {
     CreateWebview {
         owner: WebviewOwnerTuple,
@@ -218,6 +222,15 @@ pub enum WebviewOrchestrationCommand {
         /// gesture-gated autoplay.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         browser: Option<WebviewBrowserOptions>,
+        /// Opt in to native favicon observation (`faviconChange` events plus
+        /// the `getFavicon` query). Absent means off.
+        #[serde(default = "default_false", skip_serializing_if = "is_false")]
+        favicon: bool,
+        /// Declarative navigation rules evaluated synchronously on the
+        /// platform UI thread at every navigation decision point. Absent
+        /// means no rules.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        navigation_rules: Option<Vec<WebviewNavigationRule>>,
     },
     DestroyWebview {
         owner: WebviewOwnerTuple,
@@ -282,6 +295,17 @@ pub enum WebviewOrchestrationCommand {
         webview_id: WebviewId,
         kinds: Vec<WebviewEventKind>,
     },
+    GetWebviewFavicon {
+        owner: WebviewOwnerTuple,
+        window_id: WindowId,
+        webview_id: WebviewId,
+    },
+    SetWebviewNavigationRules {
+        owner: WebviewOwnerTuple,
+        window_id: WindowId,
+        webview_id: WebviewId,
+        rules: Vec<WebviewNavigationRule>,
+    },
 }
 
 impl WebviewOrchestrationCommand {
@@ -301,6 +325,8 @@ impl WebviewOrchestrationCommand {
             Self::GetWebviewTitle { .. } => "get-webview-title",
             Self::SubscribeWebviewEvents { .. } => "subscribe-webview-events",
             Self::UnsubscribeWebviewEvents { .. } => "unsubscribe-webview-events",
+            Self::GetWebviewFavicon { .. } => "get-webview-favicon",
+            Self::SetWebviewNavigationRules { .. } => "set-webview-navigation-rules",
         }
     }
 }
@@ -316,7 +342,11 @@ pub struct WebviewListEntry {
 /// Broker→host result frames for the orchestration commands. The url/title
 /// results carry the `(value, seq)` query pair (D19 race rule).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
 pub enum WebviewOrchestrationResult {
     WebviewAck {
         owner: WebviewOwnerTuple,
@@ -341,6 +371,16 @@ pub enum WebviewOrchestrationResult {
         title: String,
         seq: u64,
     },
+    GetWebviewFaviconResult {
+        owner: WebviewOwnerTuple,
+        window_id: WindowId,
+        webview_id: WebviewId,
+        /// `None` until the first settled favicon is observed (and for
+        /// webviews created without the `favicon` option).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        href: Option<String>,
+        seq: u64,
+    },
 }
 
 /// Unified per-view event family (D19; `loadState` joined with D24).
@@ -352,6 +392,8 @@ pub enum WebviewEventKind {
     Focused,
     GeometryChange,
     LoadState,
+    NavigationAction,
+    FaviconChange,
 }
 
 pub const WEBVIEW_EVENT_KINDS: &[&str] = &[
@@ -360,6 +402,8 @@ pub const WEBVIEW_EVENT_KINDS: &[&str] = &[
     "focused",
     "geometryChange",
     "loadState",
+    "navigationAction",
+    "faviconChange",
 ];
 
 /// Navigation lifecycle phase of a `loadState` event (D24). The phase
@@ -371,6 +415,75 @@ pub enum WebviewLoadPhase {
     Started,
     Finished,
     Failed,
+}
+
+/// Navigation action attribution (add-navigation-favicon-surface). The
+/// platform projection is documented truth: Windows maps `IsRedirected` to
+/// Redirect exactly and cannot separate link from form (user-initiated
+/// projects as Link); macOS maps `WKNavigationAction.navigationType` and
+/// does not distinguish redirect from Other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WebviewNavigationType {
+    Link,
+    Form,
+    BackForward,
+    Reload,
+    Redirect,
+    Other,
+}
+
+/// Stable numeric `loadState failed` code for a navigation cancelled by a
+/// declarative navigation rule. Outside platform ranges by construction
+/// (WebView2 `WebErrorStatus` and WebKit domain codes are small integers).
+pub const WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE: i32 = 4500001;
+
+/// One declarative navigation rule; v1 actions: block only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebviewNavigationRule {
+    /// Glob over the full URL; `*` matches any run of characters including
+    /// separators. Everything else is literal.
+    pub pattern: String,
+    pub action: WebviewNavigationRuleAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WebviewNavigationRuleAction {
+    #[serde(rename = "block")]
+    Block,
+}
+
+/// Shared URL-glob semantics, mirroring the TypeScript facade contract in
+/// `@opentray/spec` exactly: matched against the full absolute URL; every
+/// character is literal except `*`, which matches any character run.
+/// Classic star-backtracking matcher — no regex dependency, linear-ish,
+/// no pathological backtracking beyond consecutive-star runs.
+pub fn matches_webview_navigation_pattern(pattern: &str, url: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let url: Vec<char> = url.chars().collect();
+    let (mut pi, mut ui) = (0usize, 0usize);
+    let (mut star, mut mark) = (usize::MAX, 0usize);
+    while ui < url.len() {
+        if pi < pattern.len() && pattern[pi] == '*' {
+            star = pi;
+            mark = ui;
+            pi += 1;
+        } else if pi < pattern.len() && pattern[pi] == url[ui] {
+            pi += 1;
+            ui += 1;
+        } else if star != usize::MAX {
+            pi = star + 1;
+            mark += 1;
+            ui = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < pattern.len() && pattern[pi] == '*' {
+        pi += 1;
+    }
+    pi == pattern.len()
 }
 
 /// View-local logical-pixel rectangle; same fields as the page-bridge
@@ -395,6 +508,18 @@ pub struct WebviewGeometryRect {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum WebviewEventPayload {
+    #[serde(rename_all = "camelCase")]
+    NavigationAction {
+        url: String,
+        navigation_type: WebviewNavigationType,
+        /// Omitted when the platform cannot attribute a gesture (macOS).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        is_user_initiated: Option<bool>,
+    },
+    #[serde(rename_all = "camelCase")]
+    FaviconChange {
+        href: String,
+    },
     #[serde(rename_all = "camelCase")]
     LoadState {
         phase: WebviewLoadPhase,
@@ -481,7 +606,9 @@ impl WebviewEventFrame {
             webview_id: webview_id.into(),
             kind: WebviewEventKind::TitleChange,
             seq,
-            payload: WebviewEventPayload::TitleChange { title: title.into() },
+            payload: WebviewEventPayload::TitleChange {
+                title: title.into(),
+            },
         }
     }
 
@@ -553,19 +680,81 @@ impl WebviewEventFrame {
         }
     }
 
+    /// `navigationAction` frame: every native navigation decision point,
+    /// before the load surfaces as `loadState` phases.
+    pub fn new_navigation_action(
+        owner: WebviewOwnerTuple,
+        window_id: impl Into<String>,
+        webview_id: impl Into<String>,
+        seq: u64,
+        url: impl Into<String>,
+        navigation_type: WebviewNavigationType,
+        is_user_initiated: Option<bool>,
+    ) -> Self {
+        Self {
+            frame_type: WebviewEventTag::WebviewEvent,
+            owner,
+            window_id: window_id.into(),
+            webview_id: webview_id.into(),
+            kind: WebviewEventKind::NavigationAction,
+            seq,
+            payload: WebviewEventPayload::NavigationAction {
+                url: url.into(),
+                navigation_type: navigation_type,
+                is_user_initiated: is_user_initiated,
+            },
+        }
+    }
+
+    /// `faviconChange` frame: the settled, resolved favicon href.
+    pub fn new_favicon_change(
+        owner: WebviewOwnerTuple,
+        window_id: impl Into<String>,
+        webview_id: impl Into<String>,
+        seq: u64,
+        href: impl Into<String>,
+    ) -> Self {
+        Self {
+            frame_type: WebviewEventTag::WebviewEvent,
+            owner,
+            window_id: window_id.into(),
+            webview_id: webview_id.into(),
+            kind: WebviewEventKind::FaviconChange,
+            seq,
+            payload: WebviewEventPayload::FaviconChange { href: href.into() },
+        }
+    }
+
     /// True when the payload variant matches the declared `kind`.
     pub fn is_coherent(&self) -> bool {
-        matches!(
-            (self.kind, &self.payload),
-            (WebviewEventKind::UrlChange, WebviewEventPayload::UrlChange { .. })
-                | (WebviewEventKind::TitleChange, WebviewEventPayload::TitleChange { .. })
-                | (WebviewEventKind::Focused, WebviewEventPayload::Focused { .. })
-                | (
+        match (self.kind, &self.payload) {
+            (
+                WebviewEventKind::NavigationAction,
+                WebviewEventPayload::NavigationAction { url, .. },
+            ) => !url.is_empty(),
+            (WebviewEventKind::FaviconChange, WebviewEventPayload::FaviconChange { href }) => {
+                !href.is_empty()
+            }
+            _ => matches!(
+                (self.kind, &self.payload),
+                (
+                    WebviewEventKind::UrlChange,
+                    WebviewEventPayload::UrlChange { .. }
+                ) | (
+                    WebviewEventKind::TitleChange,
+                    WebviewEventPayload::TitleChange { .. }
+                ) | (
+                    WebviewEventKind::Focused,
+                    WebviewEventPayload::Focused { .. }
+                ) | (
                     WebviewEventKind::GeometryChange,
                     WebviewEventPayload::GeometryChange { .. }
+                ) | (
+                    WebviewEventKind::LoadState,
+                    WebviewEventPayload::LoadState { .. }
                 )
-                | (WebviewEventKind::LoadState, WebviewEventPayload::LoadState { .. })
-        )
+            ),
+        }
     }
 }
 
@@ -586,6 +775,14 @@ pub struct WebviewLayoutLayer {
     /// Layer visibility switch (implementation-reserved detail; default true).
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub visible: bool,
+}
+
+fn default_false() -> bool {
+    false
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn default_true() -> bool {
@@ -932,19 +1129,23 @@ mod tests {
         let owner = owner();
         let window = "win-1".to_string();
         let command = match name {
-            "create-webview with toolbar bridge policy" => WebviewOrchestrationCommand::CreateWebview {
-                owner,
-                window_id: window,
-                webview_id: "toolbar".to_string(),
-                url: Some("http://127.0.0.1:5173/toolbar.html".to_string()),
-                html: None,
-                bridge: Some(WebviewBridgePolicy {
-                    webview_id: true,
-                    message_channels: true,
-                    ..WebviewBridgePolicy::default()
-                }),
-                browser: None,
-            },
+            "create-webview with toolbar bridge policy" => {
+                WebviewOrchestrationCommand::CreateWebview {
+                    owner,
+                    window_id: window,
+                    webview_id: "toolbar".to_string(),
+                    url: Some("http://127.0.0.1:5173/toolbar.html".to_string()),
+                    html: None,
+                    bridge: Some(WebviewBridgePolicy {
+                        webview_id: true,
+                        message_channels: true,
+                        ..WebviewBridgePolicy::default()
+                    }),
+                    browser: None,
+                    favicon: false,
+                    navigation_rules: None,
+                }
+            }
             "create-webview without bridge policy" => WebviewOrchestrationCommand::CreateWebview {
                 owner,
                 window_id: window,
@@ -953,6 +1154,8 @@ mod tests {
                 html: None,
                 bridge: None,
                 browser: None,
+                favicon: false,
+                navigation_rules: None,
             },
             "create-webview with html content" => WebviewOrchestrationCommand::CreateWebview {
                 owner,
@@ -962,6 +1165,8 @@ mod tests {
                 html: Some("<p>offline</p>".to_string()),
                 bridge: None,
                 browser: None,
+                favicon: false,
+                navigation_rules: None,
             },
             "destroy-webview" => WebviewOrchestrationCommand::DestroyWebview {
                 owner,
@@ -972,6 +1177,38 @@ mod tests {
                 owner,
                 window_id: window,
             },
+            "create-webview with favicon and navigation rules" => {
+                WebviewOrchestrationCommand::CreateWebview {
+                    owner,
+                    window_id: window,
+                    webview_id: "content".to_string(),
+                    url: Some("https://example.org".to_string()),
+                    html: None,
+                    bridge: None,
+                    browser: None,
+                    favicon: true,
+                    navigation_rules: Some(vec![WebviewNavigationRule {
+                        pattern: "*://*.tracker.example/*".to_string(),
+                        action: WebviewNavigationRuleAction::Block,
+                    }]),
+                }
+            }
+            "get-webview-favicon" => WebviewOrchestrationCommand::GetWebviewFavicon {
+                owner,
+                window_id: window,
+                webview_id: "content".to_string(),
+            },
+            "set-webview-navigation-rules" => {
+                WebviewOrchestrationCommand::SetWebviewNavigationRules {
+                    owner,
+                    window_id: window,
+                    webview_id: "content".to_string(),
+                    rules: vec![WebviewNavigationRule {
+                        pattern: "*://*.tracker.example/*".to_string(),
+                        action: WebviewNavigationRuleAction::Block,
+                    }],
+                }
+            }
             "navigate-webview" => WebviewOrchestrationCommand::NavigateWebview {
                 owner,
                 window_id: window,
@@ -1132,14 +1369,12 @@ mod tests {
                     WebviewEventKind::GeometryChange,
                 ],
             },
-            "unsubscribe-webview-events" => {
-                WebviewOrchestrationCommand::UnsubscribeWebviewEvents {
-                    owner,
-                    window_id: window,
-                    webview_id: "content".to_string(),
-                    kinds: vec![WebviewEventKind::UrlChange, WebviewEventKind::TitleChange],
-                }
-            }
+            "unsubscribe-webview-events" => WebviewOrchestrationCommand::UnsubscribeWebviewEvents {
+                owner,
+                window_id: window,
+                webview_id: "content".to_string(),
+                kinds: vec![WebviewEventKind::UrlChange, WebviewEventKind::TitleChange],
+            },
             _ => return None,
         };
         Some(command)
@@ -1185,6 +1420,24 @@ mod tests {
                     seq: 12,
                 }
             }
+            "get-webview-favicon-result returns value and seq" => {
+                WebviewOrchestrationResult::GetWebviewFaviconResult {
+                    owner,
+                    window_id: window,
+                    webview_id: "content".to_string(),
+                    href: Some("https://example.org/favicon.ico".to_string()),
+                    seq: 71,
+                }
+            }
+            "get-webview-favicon-result unset href" => {
+                WebviewOrchestrationResult::GetWebviewFaviconResult {
+                    owner,
+                    window_id: window,
+                    webview_id: "content".to_string(),
+                    href: None,
+                    seq: 0,
+                }
+            }
             "webview-ack echoes the command" => WebviewOrchestrationResult::WebviewAck {
                 owner,
                 command: "navigate-webview".to_string(),
@@ -1222,7 +1475,9 @@ mod tests {
                     serde_json::from_value::<WebviewOrchestrationResult>(frame.clone())
                         .map(|result| serde_json::to_value(&result).expect("serialize result"))
                 })
-                .unwrap_or_else(|error| panic!("fixture {name} decodes as command or result: {error}"));
+                .unwrap_or_else(|error| {
+                    panic!("fixture {name} decodes as command or result: {error}")
+                });
             assert_eq!(
                 test_support::normalize_numbers(&decoded),
                 test_support::normalize_numbers(&frame),
@@ -1234,7 +1489,7 @@ mod tests {
     #[test]
     fn event_frames_match_shared_fixtures_and_stay_coherent() {
         let entries = fixtures("webview-event-frames.json");
-        assert!(entries.len() >= 7, "expected at least 7 event fixtures");
+        assert!(entries.len() >= 11, "expected at least 11 event fixtures");
         let owner = owner();
         for (name, frame) in entries {
             let built = match name.as_str() {
@@ -1285,7 +1540,13 @@ mod tests {
                     )
                 }
                 "geometryChange null rect means no overlay intersection" => {
-                    WebviewEventFrame::new_geometry_change(owner.clone(), "win-1", "content", 9, None)
+                    WebviewEventFrame::new_geometry_change(
+                        owner.clone(),
+                        "win-1",
+                        "content",
+                        9,
+                        None,
+                    )
                 }
                 "loadState started with progress" => WebviewEventFrame::new_load_state(
                     owner.clone(),
@@ -1347,6 +1608,33 @@ mod tests {
                     Some(-1003),
                     None,
                 ),
+                "navigationAction link user initiated" => WebviewEventFrame::new_navigation_action(
+                    owner.clone(),
+                    "win-1",
+                    "content",
+                    61,
+                    "https://example.org/articles/2",
+                    WebviewNavigationType::Link,
+                    Some(true),
+                ),
+                "navigationAction redirect without user flag" => {
+                    WebviewEventFrame::new_navigation_action(
+                        owner.clone(),
+                        "win-1",
+                        "content",
+                        62,
+                        "https://example.org/login",
+                        WebviewNavigationType::Redirect,
+                        None,
+                    )
+                }
+                "faviconChange settled href" => WebviewEventFrame::new_favicon_change(
+                    owner.clone(),
+                    "win-1",
+                    "content",
+                    71,
+                    "https://example.org/favicon.ico",
+                ),
                 other => panic!("missing Rust builder for fixture {other}"),
             };
             assert!(built.is_coherent(), "fixture {name} must be coherent");
@@ -1357,11 +1645,128 @@ mod tests {
                 "wire shape mismatch for fixture {name}"
             );
             // Decoding the fixture JSON yields an equal frame.
-            let decoded: WebviewEventFrame =
-                serde_json::from_value(frame).unwrap_or_else(|error| panic!("decode {name}: {error}"));
+            let decoded: WebviewEventFrame = serde_json::from_value(frame)
+                .unwrap_or_else(|error| panic!("decode {name}: {error}"));
             assert!(decoded.is_coherent());
             assert_eq!(decoded, built);
         }
+    }
+
+    #[test]
+    fn navigation_pattern_glob_matches_shared_semantics() {
+        // Same table as the TypeScript suite in `packages/spec/src/webview.test.ts`:
+        // `*` crosses separators, everything else is literal, query is sensitive.
+        let cases: &[(&str, &str, bool)] = &[
+            (
+                "*://*.tracker.example/*",
+                "https://cdn.tracker.example/pixel.gif?id=9",
+                true,
+            ),
+            (
+                "*://*.tracker.example/*",
+                "https://tracker.example.evil.net/pixel.gif",
+                false,
+            ),
+            (
+                "https://example.org/exact/path",
+                "https://example.org/exact/path",
+                true,
+            ),
+            (
+                "https://example.org/exact/path",
+                "https://example.org/exact/path?utm=1",
+                false,
+            ),
+            ("*", "https://any.example/deep/path?q=1", true),
+            ("https://example.org/*", "https://example.org/", true),
+            ("https://example.org/*", "https://example.org", false),
+            // The leading dot in `*.tracker.example` is literal: the bare
+            // host needs its own rule (or `*tracker.example`).
+            (
+                "*://*.tracker.example/*",
+                "https://tracker.example/pixel.gif",
+                false,
+            ),
+        ];
+        for (pattern, url, expected) in cases {
+            assert_eq!(
+                matches_webview_navigation_pattern(pattern, url),
+                *expected,
+                "pattern {pattern:?} vs url {url:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn navigation_rules_serialize_and_the_blocked_code_is_frozen() {
+        let rule: WebviewNavigationRule =
+            serde_json::from_str(r#"{"pattern":"*://*.tracker.example/*","action":"block"}"#)
+                .expect("decode rule");
+        assert_eq!(rule.action, WebviewNavigationRuleAction::Block);
+        let value = serde_json::to_value(&rule).expect("encode rule");
+        assert_eq!(
+            value,
+            serde_json::json!({"pattern": "*://*.tracker.example/*", "action": "block"})
+        );
+        // Unknown actions reject instead of coercing.
+        assert!(serde_json::from_str::<WebviewNavigationRule>(
+            r#"{"pattern":"x","action":"allow"}"#
+        )
+        .is_err());
+        assert_eq!(WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE, 4500001);
+    }
+
+    #[test]
+    fn navigation_event_frames_decode_and_reject_empty_fields() {
+        let owner = owner();
+        let frame = WebviewEventFrame::new_navigation_action(
+            owner.clone(),
+            "win-1",
+            "content",
+            61,
+            "https://example.org/a",
+            WebviewNavigationType::Link,
+            Some(true),
+        );
+        assert!(frame.is_coherent());
+        let value = serde_json::to_value(&frame).expect("serialize");
+        assert_eq!(value["payload"]["navigationType"], "link");
+        assert_eq!(value["payload"]["isUserInitiated"], true);
+        // `redirect` frame without the optional flag omits it on the wire.
+        let redirect = WebviewEventFrame::new_navigation_action(
+            owner.clone(),
+            "win-1",
+            "content",
+            62,
+            "https://example.org/login",
+            WebviewNavigationType::Redirect,
+            None,
+        );
+        let value = serde_json::to_value(&redirect).expect("serialize");
+        assert!(value["payload"].get("isUserInitiated").is_none());
+        // Empty url / empty href are incoherent, mirroring the TS guard.
+        let empty_url = WebviewEventFrame::new_navigation_action(
+            owner,
+            "win-1",
+            "content",
+            63,
+            "",
+            WebviewNavigationType::Other,
+            None,
+        );
+        assert!(!empty_url.is_coherent());
+        let empty_href = WebviewEventFrame::new_favicon_change(
+            WebviewOwnerTuple {
+                app_id: "app-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                session_id: "session-1".to_string(),
+            },
+            "win-1",
+            "content",
+            72,
+            "",
+        );
+        assert!(!empty_href.is_coherent());
     }
 
     #[test]
@@ -1375,7 +1780,8 @@ mod tests {
             "seq": 1,
             "payload": { "title": "wrong payload for kind" }
         });
-        let frame: WebviewEventFrame = serde_json::from_value(raw).expect("payload parses untagged");
+        let frame: WebviewEventFrame =
+            serde_json::from_value(raw).expect("payload parses untagged");
         assert!(!frame.is_coherent());
     }
 
@@ -1420,15 +1826,19 @@ mod tests {
             document.layers[1].root,
             WebviewLayoutNode::WebviewView(_)
         ));
-        assert!(matches!(document.layers[2].root, WebviewLayoutNode::BoxView(_)));
+        assert!(matches!(
+            document.layers[2].root,
+            WebviewLayoutNode::BoxView(_)
+        ));
         assert!(matches!(
             document.layers[3].root,
             WebviewLayoutNode::Container(_)
         ));
         assert_eq!(document.layers[0].visible, true);
         // Unknown kinds are rejected instead of guessed.
-        let bad: Result<WebviewLayoutDocument, _> =
-            serde_json::from_value(json!({ "layers": [{ "root": { "kind": "spinner", "id": "x" } }] }));
+        let bad: Result<WebviewLayoutDocument, _> = serde_json::from_value(
+            json!({ "layers": [{ "root": { "kind": "spinner", "id": "x" } }] }),
+        );
         assert!(bad.is_err());
     }
 
@@ -1461,7 +1871,10 @@ mod tests {
         };
 
         // Valid documents pass.
-        assert!(validate_webview_layout(&document(json!({ "id": "content", "flex": 1 })), &known).is_ok());
+        assert!(
+            validate_webview_layout(&document(json!({ "id": "content", "flex": 1 })), &known)
+                .is_ok()
+        );
         assert!(validate_webview_layout(
             &document(json!({ "kind": "box", "id": "ring", "border": { "width": 2.0, "color": "#333333AA" } })),
             &known
@@ -1506,7 +1919,10 @@ mod tests {
                 &known,
             )
             .unwrap_err();
-            assert_eq!(error.error.code, OrchestrationErrorCode::InvalidLayoutMeasure);
+            assert_eq!(
+                error.error.code,
+                OrchestrationErrorCode::InvalidLayoutMeasure
+            );
             let error = validate_webview_layout(
                 &box_document(WebviewBoxStyle {
                     background: None,
@@ -1519,7 +1935,10 @@ mod tests {
                 &known,
             )
             .unwrap_err();
-            assert_eq!(error.error.code, OrchestrationErrorCode::InvalidLayoutMeasure);
+            assert_eq!(
+                error.error.code,
+                OrchestrationErrorCode::InvalidLayoutMeasure
+            );
         }
 
         // Boundary min == max is legal.
@@ -1530,7 +1949,8 @@ mod tests {
         .is_ok());
 
         // The error envelope serializes as the frozen wire shape.
-        let envelope = WebviewErrorEnvelope::new(OrchestrationErrorCode::InvalidLayoutMeasure, "no");
+        let envelope =
+            WebviewErrorEnvelope::new(OrchestrationErrorCode::InvalidLayoutMeasure, "no");
         assert_eq!(
             serde_json::to_value(&envelope).unwrap(),
             json!({ "error": { "code": "invalid_layout_measure", "message": "no" } })
@@ -1556,7 +1976,9 @@ mod tests {
                 "titleChange",
                 "focused",
                 "geometryChange",
-                "loadState"
+                "loadState",
+                "navigationAction",
+                "faviconChange"
             ]
         );
         assert_eq!(
@@ -1613,8 +2035,14 @@ mod tests {
         assert!(navigator_only.has_bridge_surface());
 
         let defaults = WebviewBrowserOptions::default();
-        assert!(!defaults.context_menu(true), "bridged child defaults to no engine menu");
-        assert!(defaults.context_menu(false), "bridgeless child keeps the engine menu");
+        assert!(
+            !defaults.context_menu(true),
+            "bridged child defaults to no engine menu"
+        );
+        assert!(
+            defaults.context_menu(false),
+            "bridgeless child keeps the engine menu"
+        );
 
         assert!(
             WebviewBrowserOptions {

@@ -33,7 +33,7 @@ use objc2_web_kit::{
     WKDownload, WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
     WKNavigationResponse, WKNavigationResponsePolicy, WKWebView,
 };
-use opentray_spec::webview::WebviewLoadPhase;
+use opentray_spec::webview::{WebviewLoadPhase, WebviewNavigationType};
 
 use crate::WebviewRuntimeError;
 use wry::{WebView, WebViewExtMacOS};
@@ -66,6 +66,62 @@ define_class!(
             action: &WKNavigationAction,
             handler: &block2::Block<dyn Fn(WKNavigationActionPolicy)>,
         ) {
+            // add-navigation-favicon-surface: the decision point is both the
+            // `navigationAction` observation and the synchronous rule veto.
+            // A blocked navigation answers Cancel here and never reaches the
+            // wrapped delegate; WebKit does not call didFail* for a
+            // policy-cancelled navigation, so the terminal `loadState failed`
+            // frame (stable `navigation_blocked` code) is emitted right here.
+            let Some(events) = self.ivars().events.upgrade() else {
+                unsafe {
+                    let _: () = msg_send![
+                        &*self.ivars().original,
+                        webView: webview,
+                        decidePolicyForNavigationAction: action,
+                        decisionHandler: handler
+                    ];
+                }
+                return;
+            };
+            let url = unsafe { action.request() }
+                .URL()
+                .and_then(|url| url.absoluteString())
+                .map(|url| url.to_string())
+                .unwrap_or_default();
+            let navigation_type = map_navigation_type(unsafe { action.navigationType() });
+            let (nav_frame, blocked, failed_frame) = {
+                let mut view = events.borrow_mut();
+                let nav_frame = view.note_navigation_action(
+                    &self.ivars().owner,
+                    &self.ivars().owner.window_id,
+                    url.clone(),
+                    navigation_type,
+                    // WKNavigationAction carries no user-initiated
+                    // attribution; the flag stays omitted (platform truth).
+                    None,
+                );
+                let blocked = !url.is_empty() && view.navigation_blocked(&url);
+                let failed_frame = if blocked {
+                    view.note_load_state(
+                        &self.ivars().owner,
+                        &self.ivars().owner.window_id,
+                        WebviewLoadPhase::Failed,
+                        url,
+                        Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
+                        None,
+                    )
+                } else {
+                    None
+                };
+                (nav_frame, blocked, failed_frame)
+            };
+            let outbox = &self.ivars().outbox;
+            super::push_event_frame(outbox, nav_frame);
+            super::push_event_frame(outbox, failed_frame);
+            if blocked {
+                handler.call((WKNavigationActionPolicy::Cancel,));
+                return;
+            }
             unsafe {
                 let _: () = msg_send![
                     &*self.ivars().original,
@@ -221,15 +277,15 @@ impl LoadStateNavigationDelegate {
         owner: WindowOwner,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
-        let delegate = mtm
-            .alloc::<LoadStateNavigationDelegate>()
-            .set_ivars(LoadStateNavigationDelegateIvars {
+        let delegate = mtm.alloc::<LoadStateNavigationDelegate>().set_ivars(
+            LoadStateNavigationDelegateIvars {
                 original,
                 webview,
                 events,
                 outbox,
                 owner,
-            });
+            },
+        );
         unsafe { msg_send![super(delegate), init] }
     }
 
@@ -258,10 +314,9 @@ impl Drop for LoadStateNavigationDelegate {
         // alive here. Ext commands and session teardown run on the main
         // thread, matching the registration thread.
         unsafe {
-            self.ivars().webview.removeObserver_forKeyPath(
-                self,
-                ns_string!("estimatedProgress"),
-            );
+            self.ivars()
+                .webview
+                .removeObserver_forKeyPath(self, ns_string!("estimatedProgress"));
         }
     }
 }
@@ -318,4 +373,18 @@ fn current_webview_url(webview: &WKWebView, events: &Rc<RefCell<ViewEvents>>) ->
         return live;
     }
     events.borrow().url.clone()
+}
+
+/// WebKit navigation-type projection. Server-side redirects surface as
+/// `Other` on this platform (documented platform truth), and form
+/// resubmissions project to the same `form` bucket as submissions.
+fn map_navigation_type(kind: objc2_web_kit::WKNavigationType) -> WebviewNavigationType {
+    match kind {
+        objc2_web_kit::WKNavigationType::LinkActivated => WebviewNavigationType::Link,
+        objc2_web_kit::WKNavigationType::FormSubmitted
+        | objc2_web_kit::WKNavigationType::FormResubmitted => WebviewNavigationType::Form,
+        objc2_web_kit::WKNavigationType::BackForward => WebviewNavigationType::BackForward,
+        objc2_web_kit::WKNavigationType::Reload => WebviewNavigationType::Reload,
+        _ => WebviewNavigationType::Other,
+    }
 }

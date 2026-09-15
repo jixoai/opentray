@@ -9,9 +9,9 @@ mod bootstrap;
 mod channels;
 mod event_port;
 mod layout;
-mod orchestration;
 #[cfg(target_os = "macos")]
 mod macos;
+mod orchestration;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -420,7 +420,9 @@ unsafe fn attach_event_port_to_instance(
 /// every orchestration variant and every channel request frame carries
 /// one; the dispatch layer validates it against the command envelope
 /// scope before any state can exist.
-fn command_owner_tuple(command: &WebviewCommand) -> Option<&opentray_spec::webview::WebviewOwnerTuple> {
+fn command_owner_tuple(
+    command: &WebviewCommand,
+) -> Option<&opentray_spec::webview::WebviewOwnerTuple> {
     match command {
         WebviewCommand::Orchestration(orchestration) => Some(orchestration_owner(orchestration)),
         WebviewCommand::Channel(request) => Some(request.owner()),
@@ -430,7 +432,9 @@ fn command_owner_tuple(command: &WebviewCommand) -> Option<&opentray_spec::webvi
 
 /// Owner tuple of an orchestration command (present on every variant of the
 /// frozen wire enum).
-fn orchestration_owner(command: &WebviewOrchestrationCommand) -> &opentray_spec::webview::WebviewOwnerTuple {
+fn orchestration_owner(
+    command: &WebviewOrchestrationCommand,
+) -> &opentray_spec::webview::WebviewOwnerTuple {
     match command {
         WebviewOrchestrationCommand::CreateWebview { owner, .. }
         | WebviewOrchestrationCommand::DestroyWebview { owner, .. }
@@ -444,7 +448,9 @@ fn orchestration_owner(command: &WebviewOrchestrationCommand) -> &opentray_spec:
         | WebviewOrchestrationCommand::GetWebviewUrl { owner, .. }
         | WebviewOrchestrationCommand::GetWebviewTitle { owner, .. }
         | WebviewOrchestrationCommand::SubscribeWebviewEvents { owner, .. }
-        | WebviewOrchestrationCommand::UnsubscribeWebviewEvents { owner, .. } => owner,
+        | WebviewOrchestrationCommand::UnsubscribeWebviewEvents { owner, .. }
+        | WebviewOrchestrationCommand::GetWebviewFavicon { owner, .. }
+        | WebviewOrchestrationCommand::SetWebviewNavigationRules { owner, .. } => owner,
     }
 }
 
@@ -942,8 +948,7 @@ pub unsafe extern "C" fn opentray_ext_command(
         // Scope validation happens before dispatch so a mismatched owner
         // tuple can never reach window or channel state (zero partial
         // state, D18/D20).
-        if let Some(envelope_error) = session_scope_mismatch(owner, &extension.app_id, tray_id)
-        {
+        if let Some(envelope_error) = session_scope_mismatch(owner, &extension.app_id, tray_id) {
             let Ok(data) = serde_json::to_value(&envelope_error) else {
                 return record_error(
                     EXT_ERR_INTERNAL,
@@ -1175,12 +1180,23 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
         // `WebviewOrchestrationCommand` matches these kebab-case names, so
         // the whole data payload deserializes in one step; unknown tags keep
         // falling through to the generic rejection below.
-        "create-webview" | "destroy-webview" | "list-webviews" | "navigate-webview"
-        | "back-webview" | "forward-webview" | "focus-webview" | "set-webview-layout"
-        | "update-webview-layout" | "get-webview-url" | "get-webview-title"
-        | "subscribe-webview-events" | "unsubscribe-webview-events" => {
-            let command: WebviewOrchestrationCommand =
-                serde_json::from_value(data.clone()).map_err(|error| {
+        "create-webview"
+        | "destroy-webview"
+        | "list-webviews"
+        | "navigate-webview"
+        | "back-webview"
+        | "forward-webview"
+        | "focus-webview"
+        | "set-webview-layout"
+        | "update-webview-layout"
+        | "get-webview-url"
+        | "get-webview-title"
+        | "subscribe-webview-events"
+        | "unsubscribe-webview-events"
+        | "get-webview-favicon"
+        | "set-webview-navigation-rules" => {
+            let command: WebviewOrchestrationCommand = serde_json::from_value(data.clone())
+                .map_err(|error| {
                     WebviewRuntimeError::Rejected(format!(
                         "invalid webview orchestration command: {error}"
                     ))
@@ -1191,15 +1207,22 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
         // `opentray-spec::channel`). The whole frame family parses here;
         // only the five request frames are commands — result and push
         // frames reject with the precise "not commands" message.
-        "channel.create" | "channel.create-result" | "channel.post" | "channel.post-result"
-        | "channel.close" | "channel.close-result" | "channel.destroy"
-        | "channel.destroy-result" | "channel.list" | "channel.list-result"
-        | "channel.error" | "channel.created" | "channel.closed" => {
-            let frame: opentray_spec::channel::ChannelFrame =
-                serde_json::from_value(data.clone()).map_err(|error| {
-                    WebviewRuntimeError::Rejected(format!(
-                        "invalid channel command: {error}"
-                    ))
+        "channel.create"
+        | "channel.create-result"
+        | "channel.post"
+        | "channel.post-result"
+        | "channel.close"
+        | "channel.close-result"
+        | "channel.destroy"
+        | "channel.destroy-result"
+        | "channel.list"
+        | "channel.list-result"
+        | "channel.error"
+        | "channel.created"
+        | "channel.closed" => {
+            let frame: opentray_spec::channel::ChannelFrame = serde_json::from_value(data.clone())
+                .map_err(|error| {
+                    WebviewRuntimeError::Rejected(format!("invalid channel command: {error}"))
                 })?;
             let request = channels::ChannelRequest::from_frame(frame).ok_or_else(|| {
                 WebviewRuntimeError::Rejected(
@@ -2115,7 +2138,8 @@ mod tests {
         };
         assert_eq!(command.command_type(), "create-webview");
         assert_eq!(
-            orchestration_owner(command).tray_id, "tray-1",
+            orchestration_owner(command).tray_id,
+            "tray-1",
             "owner helper reads every variant"
         );
 
@@ -2143,7 +2167,9 @@ mod tests {
             "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" }
         }))
         .expect_err("missing required fields must reject");
-        assert!(error.to_string().contains("invalid webview orchestration command"));
+        assert!(error
+            .to_string()
+            .contains("invalid webview orchestration command"));
     }
 
     #[test]

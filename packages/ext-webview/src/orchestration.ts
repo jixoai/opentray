@@ -14,6 +14,7 @@ import {
   isChannelCloseReason,
   isChannelListEntry,
   isWebviewEventFrame,
+  isWebviewNavigationRule,
   isWebviewOrchestrationErrorCode,
   resolveWebviewBridgePolicy,
   type ChannelCloseReason,
@@ -25,10 +26,13 @@ import {
   type WebviewErrorEnvelope,
   type WebviewEventFrame,
   type WebviewEventKind,
+  type WebviewFaviconQueryResult,
   type WebviewGeometryRect,
   type WebviewId,
   type WebviewLoadPhase,
   type WebviewListEntry,
+  type WebviewNavigationRule,
+  type WebviewNavigationType,
   type WebviewLayoutContainerNode,
   type WebviewLayoutDocument,
   type WebviewLayoutLayer,
@@ -128,6 +132,21 @@ export interface WebviewChildSpec {
      */
     contextMenu?: boolean;
   };
+  /**
+   * Opt in to native favicon observation: `faviconChange` pushes plus the
+   * `getFavicon()` `(value, seq)` query. Works on bridgeless children too
+   * (observe-only bootstrap, no bridge surface). Default `false`.
+   */
+  favicon?: boolean;
+  /**
+   * Declarative navigation rules, evaluated synchronously on the native UI
+   * thread at every navigation decision point. v1 action: `"block"` — a
+   * matching navigation cancels before it starts and reports
+   * `loadState failed` with the stable `navigation_blocked` error code.
+   * Patterns are URL globs: `*` matches any character run (separators
+   * included), everything else is literal.
+   */
+  navigationRules?: readonly { pattern: string; action: "block" }[];
 }
 
 /** Field-level push payloads with frame identity and the per-view `seq`. */
@@ -170,11 +189,32 @@ export interface WebviewLoadStatePush {
   progress?: number;
 }
 
+/** `navigationAction` push: the decision-point observation before any load. */
+export interface WebviewNavigationActionPush {
+  windowId: WindowId;
+  webviewId: WebviewId;
+  seq: number;
+  url: string;
+  navigationType: WebviewNavigationType;
+  /** Omitted when the platform cannot attribute a gesture (macOS). */
+  isUserInitiated?: boolean;
+}
+
+/** `faviconChange` push (Latest class): the settled absolute href. */
+export interface WebviewFaviconChangePush {
+  windowId: WindowId;
+  webviewId: WebviewId;
+  seq: number;
+  href: string;
+}
+
 type UrlChangeHandler = (event: WebviewUrlChangePush) => void;
 type TitleChangeHandler = (event: WebviewTitleChangePush) => void;
 type FocusedHandler = (event: WebviewFocusedPush) => void;
 type GeometryChangeHandler = (event: WebviewGeometryChangePush) => void;
 type LoadStateHandler = (event: WebviewLoadStatePush) => void;
+type NavigationActionHandler = (event: WebviewNavigationActionPush) => void;
+type FaviconChangeHandler = (event: WebviewFaviconChangePush) => void;
 
 /** One child webview inside a window session (frozen wire ids only). */
 export interface WebviewChildHandle {
@@ -194,6 +234,20 @@ export interface WebviewChildHandle {
   onGeometryChange(handler: GeometryChangeHandler): () => void;
   /** Navigation lifecycle pushes (D24): no query pair — edges only. */
   onLoadState(handler: LoadStateHandler): () => void;
+  /**
+   * Navigation decision pushes: one per native decision point, before the
+   * load surfaces as `loadState` phases. Edge class, no query pair.
+   */
+  onNavigationAction(handler: NavigationActionHandler): () => void;
+  /**
+   * Favicon pushes (Latest class): a settled, changed absolute href. Use
+   * `getFavicon()` for the subscribe-then-query current value.
+   */
+  onFaviconChange(handler: FaviconChangeHandler): () => void;
+  /** Current favicon href with its sequence number; `href` unset until observed. */
+  getFavicon(): Promise<WebviewFaviconQueryResult>;
+  /** Replaces the view's declarative navigation rules (create option). */
+  setNavigationRules(rules: readonly { pattern: string; action: "block" }[]): Promise<void>;
   /** Same as the parent window handle's `destroyWebview(id)`. */
   destroy(): Promise<void>;
 }
@@ -512,6 +566,8 @@ export const createWebviewOrchestration = (
   const focusedHandlers = new Map<WebviewId, Set<FocusedHandler>>();
   const geometryChangeHandlers = new Map<WebviewId, Set<GeometryChangeHandler>>();
   const loadStateHandlers = new Map<WebviewId, Set<LoadStateHandler>>();
+  const navigationActionHandlers = new Map<WebviewId, Set<NavigationActionHandler>>();
+  const faviconChangeHandlers = new Map<WebviewId, Set<FaviconChangeHandler>>();
 
   // D19 batch B gap-resync: one per-view sequence counter is shared across
   // all event kinds natively, so the facade observes `seq` for every frame
@@ -578,7 +634,7 @@ export const createWebviewOrchestration = (
    */
   const resyncAfterGap = (
     webviewId: WebviewId,
-    kind: "urlChange" | "titleChange",
+    kind: "urlChange" | "titleChange" | "faviconChange",
     deliveredSeq: number,
   ): void => {
     if (deadError !== undefined) {
@@ -593,15 +649,16 @@ export const createWebviewOrchestration = (
       return;
     }
     resyncInFlight.add(inflightKey);
-    const isUrl = kind === "urlChange";
+    const commandType =
+      kind === "urlChange" ? "get-webview-url" : kind === "titleChange" ? "get-webview-title" : "get-webview-favicon";
     void expectResult(
       {
         owner,
-        type: isUrl ? "get-webview-url" : "get-webview-title",
+        type: commandType,
         windowId,
         webviewId,
       } as WebviewOrchestrationCommandFrame,
-      isUrl ? "get-webview-url-result" : "get-webview-title-result",
+      `${commandType}-result`,
     )
       .then((result) => {
         if (deadError !== undefined) {
@@ -614,7 +671,6 @@ export const createWebviewOrchestration = (
           return;
         }
         const querySeq = Number(result.seq);
-        const kind = isUrl ? "urlChange" : "titleChange";
         const currentKindHighWater = deliveredKindSeq.get(kindSeqKey(webviewId, kind));
         if (
           !Number.isFinite(querySeq) ||
@@ -625,7 +681,7 @@ export const createWebviewOrchestration = (
         }
         observeSeq(webviewId, querySeq);
         observeKindSeq(webviewId, kind, querySeq);
-        if (isUrl) {
+        if (kind === "urlChange") {
           const set = urlChangeHandlers.get(webviewId);
           if (set !== undefined) {
             callHandlers(set, {
@@ -633,6 +689,17 @@ export const createWebviewOrchestration = (
               webviewId,
               seq: querySeq,
               url: String(result.url),
+            });
+          }
+        }
+        if (kind === "faviconChange") {
+          const set = faviconChangeHandlers.get(webviewId);
+          if (set !== undefined && result.href !== undefined && result.href !== null) {
+            callHandlers(set, {
+              windowId,
+              webviewId,
+              seq: querySeq,
+              href: String(result.href),
             });
           }
         } else {
@@ -709,6 +776,8 @@ export const createWebviewOrchestration = (
     focusedHandlers.delete(webviewId);
     geometryChangeHandlers.delete(webviewId);
     loadStateHandlers.delete(webviewId);
+    navigationActionHandlers.delete(webviewId);
+    faviconChangeHandlers.delete(webviewId);
     // A destroyed webview's per-view sequence counter dies with it; a
     // re-created id must not inherit a stale high-water mark (its native
     // ViewEvents restarts at seq 1).
@@ -716,7 +785,7 @@ export const createWebviewOrchestration = (
     // Exact-kind prefix + suffix match is ambiguous when a webview id
     // itself contains the separator; scan with a precise per-kind key set
     // instead (final review P2 opaque-id boundary).
-    for (const kind of ["urlChange", "titleChange"] as const) {
+    for (const kind of ["urlChange", "titleChange", "faviconChange"] as const) {
       deliveredKindSeq.delete(`${kind}:${webviewId}`);
     }
     // D19 final review B6: bump the lifecycle generation so an in-flight
@@ -727,7 +796,7 @@ export const createWebviewOrchestration = (
     // (kind, webview) pair; the `#gen` suffix cannot appear ambiguously in a
     // foreign id's marker because the kind prefix is a fixed enum.
     for (const key of [...resyncInFlight]) {
-      for (const kind of ["urlChange", "titleChange"] as const) {
+      for (const kind of ["urlChange", "titleChange", "faviconChange"] as const) {
         if (key.startsWith(`${kind}:${webviewId}#`)) {
           resyncInFlight.delete(key);
         }
@@ -809,6 +878,29 @@ export const createWebviewOrchestration = (
             ...(errorCode === undefined ? {} : { errorCode }),
             ...(progress === undefined ? {} : { progress }),
           });
+        }
+        return;
+      }
+      case "navigationAction": {
+        const set = navigationActionHandlers.get(frame.webviewId);
+        if (set !== undefined) {
+          const { url, navigationType, isUserInitiated } = frame.payload;
+          callHandlers(set, {
+            ...identity,
+            url,
+            navigationType,
+            ...(isUserInitiated === undefined ? {} : { isUserInitiated }),
+          });
+        }
+        return;
+      }
+      case "faviconChange": {
+        const set = faviconChangeHandlers.get(frame.webviewId);
+        if (set !== undefined) {
+          callHandlers(set, { ...identity, href: frame.payload.href });
+          if (previousSeq !== undefined && frame.seq > previousSeq + 1) {
+            resyncAfterGap(frame.webviewId, "faviconChange", frame.seq);
+          }
         }
         return;
       }
@@ -1049,6 +1141,46 @@ export const createWebviewOrchestration = (
     onLoadState(handler: LoadStateHandler): () => void {
       return addViewListener(loadStateHandlers, webviewId, "loadState", handler);
     },
+    onNavigationAction(handler: NavigationActionHandler): () => void {
+      return addViewListener(navigationActionHandlers, webviewId, "navigationAction", handler);
+    },
+    onFaviconChange(handler: FaviconChangeHandler): () => void {
+      return addViewListener(faviconChangeHandlers, webviewId, "faviconChange", handler);
+    },
+    async getFavicon(): Promise<WebviewFaviconQueryResult> {
+      const result = await expectResult(
+        {
+          owner,
+          type: "get-webview-favicon",
+          windowId,
+          webviewId,
+        } as WebviewOrchestrationCommandFrame,
+        "get-webview-favicon-result",
+      );
+      const seq = Number(result.seq);
+      if (Number.isFinite(seq)) {
+        observeSeq(webviewId, seq);
+        observeKindSeq(webviewId, "faviconChange", seq);
+      }
+      return {
+        ...(result.href === undefined || result.href === null ? {} : { href: String(result.href) }),
+        seq,
+      };
+    },
+    setNavigationRules(rules: readonly { pattern: string; action: "block" }[]): Promise<void> {
+      if (rules.some((rule) => !isWebviewNavigationRule(rule))) {
+        return Promise.reject(
+          new Error("setNavigationRules requires { pattern: non-empty string, action: 'block' } entries"),
+        );
+      }
+      return sendAck({
+        owner,
+        type: "set-webview-navigation-rules",
+        windowId,
+        webviewId,
+        rules,
+      } as WebviewOrchestrationCommandFrame);
+    },
     destroy(): Promise<void> {
       return destroyWebview(webviewId);
     },
@@ -1070,6 +1202,8 @@ export const createWebviewOrchestration = (
       ...(spec.html === undefined ? {} : { html: spec.html }),
       ...(spec.bridge === undefined ? {} : { bridge: resolveWebviewBridgePolicy(spec.bridge) }),
       ...(spec.browser === undefined ? {} : { browser: spec.browser }),
+      ...(spec.favicon === undefined ? {} : { favicon: spec.favicon }),
+      ...(spec.navigationRules === undefined ? {} : { navigationRules: spec.navigationRules }),
     } as WebviewOrchestrationCommandFrame);
     return childHandle(spec.id);
   };

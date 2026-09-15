@@ -257,5 +257,57 @@
       "type": "webview-ack",
       "command": "navigate-webview"
     }
+  },
+  {
+    "name": "get-webview-favicon",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "get-webview-favicon",
+      "windowId": "win-1",
+      "webviewId": "content"
+    }
+  },
+  {
+    "name": "set-webview-navigation-rules",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "set-webview-navigation-rules",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "rules": [{ "pattern": "*://*.tracker.example/*", "action": "block" }]
+    }
+  },
+  {
+    "name": "create-webview with favicon and navigation rules",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "create-webview",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "url": "https://example.org",
+      "favicon": true,
+      "navigationRules": [{ "pattern": "*://*.tracker.example/*", "action": "block" }]
+    }
+  },
+  {
+    "name": "get-webview-favicon-result returns value and seq",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "get-webview-favicon-result",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "href": "https://example.org/favicon.ico",
+      "seq": 71
+    }
+  },
+  {
+    "name": "get-webview-favicon-result unset href",
+    "frame": {
+      "owner": { "appId": "app-1", "trayId": "tray-1", "sessionId": "session-1" },
+      "type": "get-webview-favicon-result",
+      "windowId": "win-1",
+      "webviewId": "content",
+      "seq": 0
+    }
   }
 ]

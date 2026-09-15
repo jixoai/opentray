@@ -76,12 +76,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SWP_NOCOPYBITS, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
     SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WA_INACTIVE, WM_ACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED,
     WM_CLOSE, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
-    WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT, WM_SETICON,
-    WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_APPWINDOW,
-    WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE, WS_MAXIMIZEBOX,
-    WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
-    WS_VISIBLE,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCLBUTTONDOWN, WM_PAINT,
+    WM_SETICON, WM_SETTINGCHANGE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN,
+    WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_MAXIMIZE,
+    WS_MAXIMIZEBOX, WS_MINIMIZE, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU,
+    WS_THICKFRAME, WS_VISIBLE,
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -111,7 +110,7 @@ use crate::bootstrap::navigator_window_bootstrap_script;
 use crate::layout::WindowLayoutState;
 use crate::orchestration::{
     DestroyOutcome, OpenOutcome, StyleFacts, ViewEvents, WindowOwner, WindowRegistry,
-    DEFAULT_WINDOW_ID, DEFAULT_WEBVIEW_ID,
+    DEFAULT_WEBVIEW_ID, DEFAULT_WINDOW_ID,
 };
 use crate::{
     normalize_opacity, parse_background_input, should_auto_hide_on_blur, MetadataSyncSettings,
@@ -978,10 +977,7 @@ impl WindowsWebviewRuntime {
                 // check it before any EventPort submission, so an
                 // unsubscribed event costs no native observation record.
                 let session = self.require_session(tray_id, "subscribeWindowEvents")?;
-                session
-                    .bridge
-                    .borrow_mut()
-                    .subscribe_window_events(&events);
+                session.bridge.borrow_mut().subscribe_window_events(&events);
                 Ok(json!({ "type": "windowEventsSubscribed", "events": events }))
             }
             WebviewCommand::UnsubscribeWindowEvents { events } => {
@@ -1084,9 +1080,7 @@ impl WindowsWebviewRuntime {
     /// Drains every live session's host-bound channel events plus events
     /// staged by sessions destroyed inside the current command (v1 flush
     /// ruling, tasks 3.3b/3.5 — mirrors the macOS runtime).
-    fn flush_channel_events(
-        &mut self,
-    ) -> Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)> {
+    fn flush_channel_events(&mut self) -> Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)> {
         let mut events = std::mem::take(&mut self.pending_channel_events);
         for session in self.sessions.values() {
             let channels = session.bridge.borrow().channels.clone();
@@ -1130,7 +1124,10 @@ impl WindowsWebviewRuntime {
                     owner.app_id, owner.tray_id, owner.session_id, owner.tray_id
                 )
             } else {
-                format!("tray {} has no webview window session to address", owner.tray_id)
+                format!(
+                    "tray {} has no webview window session to address",
+                    owner.tray_id
+                )
             };
             return Ok(self::channels::channel_error_frame(&owner, code, message));
         };
@@ -1164,9 +1161,7 @@ impl WindowsWebviewRuntime {
         command: &str,
     ) -> Result<&WindowSession, WebviewRuntimeError> {
         self.session(tray_id).ok_or_else(|| {
-            WebviewRuntimeError::Rejected(format!(
-                "{command} requires an active WebView window"
-            ))
+            WebviewRuntimeError::Rejected(format!("{command} requires an active WebView window"))
         })
     }
 
@@ -1259,7 +1254,9 @@ impl WindowsWebviewRuntime {
             let width = width.max(240.0).round() as i32;
             let height = height.max(160.0).round() as i32;
             session.window.resize_to(width, height)?;
-            session.window.position_near_tray(width, height, tray_bounds)?;
+            session
+                .window
+                .position_near_tray(width, height, tray_bounds)?;
         }
         session.bridge.borrow_mut().tray_bounds = tray_bounds;
         apply_webview_client_bounds_from_bridge(&session.bridge)?;
@@ -1419,18 +1416,21 @@ impl WindowsWebviewRuntime {
 
         // The primary webview of a legacy `show` (the "default" view): the
         // single-fill default layout until an explicit layout replaces it.
-        let mut primary: Option<(String, Box<WebView>, Rc<RefCell<ViewEvents>>, WebviewBridgePolicy)> =
-            None;
+        let mut primary: Option<(
+            String,
+            Box<WebView>,
+            Rc<RefCell<ViewEvents>>,
+            WebviewBridgePolicy,
+        )> = None;
         if !window_only {
             let webview_id = DEFAULT_WEBVIEW_ID.to_string();
             let policy = primary_bridge_policy(&show_settings);
-            let events = Rc::new(RefCell::new(ViewEvents::new(
-                webview_id.clone(),
-                policy,
-            )));
-            events
-                .borrow_mut()
-                .note_url_change(&owner, &owner.window_id, url.clone().unwrap_or_default());
+            let events = Rc::new(RefCell::new(ViewEvents::new(webview_id.clone(), policy)));
+            events.borrow_mut().note_url_change(
+                &owner,
+                &owner.window_id,
+                url.clone().unwrap_or_default(),
+            );
             let webview_bounds = client_webview_bounds(window.hwnd).unwrap_or(WryRect {
                 position: PhysicalPosition::new(0, 0).into(),
                 size: PhysicalSize::new(
@@ -1482,9 +1482,7 @@ impl WindowsWebviewRuntime {
             };
             session.register_webview(entry, policy);
             let primary_view = session.webviews.last().expect("primary registered");
-            session
-                .window
-                .attach_webview(primary_view.webview.as_ref());
+            session.window.attach_webview(primary_view.webview.as_ref());
             self::orchestration::install_focus_observers(
                 primary_view.webview.as_ref(),
                 &focus_tracker,
@@ -1730,14 +1728,12 @@ fn handle_navigator_window_request(
                             if let Err(error) =
                                 evaluate_bridge_script(bridge, Some(source_webview), script)
                             {
-                                eprintln!(
-                                    "opentray-ext-webview channel reject failed: {error}"
-                                );
+                                eprintln!("opentray-ext-webview channel reject failed: {error}");
                             }
                         }
-                        Err(error) => eprintln!(
-                            "opentray-ext-webview channel reject script failed: {error}"
-                        ),
+                        Err(error) => {
+                            eprintln!("opentray-ext-webview channel reject script failed: {error}")
+                        }
                     }
                     return;
                 }
@@ -2456,13 +2452,10 @@ fn build_webview(
             false,
             false,
             "default",
+            false,
         ))
         .with_ipc_handler(move |request| {
-            handle_navigator_window_request(
-                request.body(),
-                &bridge_for_ipc,
-                &webview_id_for_ipc,
-            );
+            handle_navigator_window_request(request.body(), &bridge_for_ipc, &webview_id_for_ipc);
         })
         .with_document_title_changed_handler(move |title| {
             if let Some(frame) = events_for_title.borrow_mut().note_title_change(
@@ -3405,7 +3398,11 @@ fn rebuild_host_window_for_background_transition(
         (
             state.hwnd,
             state.window,
-            state.views.iter().map(|view| view.webview).collect::<Vec<_>>(),
+            state
+                .views
+                .iter()
+                .map(|view| view.webview)
+                .collect::<Vec<_>>(),
             state.style.clone(),
             state.metadata.title.clone(),
             state.tray_bounds,
@@ -3535,7 +3532,11 @@ fn apply_window_style(
 ) -> Result<(), WebviewRuntimeError> {
     let (hwnd, style, window_controls_overlay) = {
         let state = bridge.borrow();
-        (state.hwnd, state.style.clone(), state.window_controls_overlay)
+        (
+            state.hwnd,
+            state.style.clone(),
+            state.window_controls_overlay,
+        )
     };
     let was_maximized = is_window_maximized(hwnd);
     let native_host_paint = native_host_paint_policy(&style);
@@ -5344,7 +5345,9 @@ fn titlebar_area_rect_payload_for_view(
     let full_rect = self::orchestration::full_client_logical_rect(hwnd);
     let rect = view_rect.unwrap_or(full_rect);
     let safe_area = self::orchestration::window_overlay_safe_area(hwnd);
-    Ok(titlebar_area_rect_payload_from_projection(safe_area, rect, scale))
+    Ok(titlebar_area_rect_payload_from_projection(
+        safe_area, rect, scale,
+    ))
 }
 
 /// Pure per-view payload face (D23): the window-level safe area projected
@@ -5391,8 +5394,12 @@ fn titlebar_area_rect_payload_from_projection(
         y: (rect.y * scale).round().max(0.0) as i32,
         width: (rect.width * scale).max(0.0).round() as u32,
         height: height as u32,
-        client_width: (view_rect.width * scale).round().clamp(0.0, u32::MAX as f64) as u32,
-        client_height: (view_rect.height * scale).round().clamp(0.0, u32::MAX as f64) as u32,
+        client_width: (view_rect.width * scale)
+            .round()
+            .clamp(0.0, u32::MAX as f64) as u32,
+        client_height: (view_rect.height * scale)
+            .round()
+            .clamp(0.0, u32::MAX as f64) as u32,
     }
 }
 
@@ -6137,16 +6144,8 @@ impl NavigatorWindowBridge {
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))
     }
 
-    fn add_listener(
-        &mut self,
-        webview_id: &str,
-        event: String,
-        handler_id: u32,
-    ) -> Option<u32> {
-        let view = self
-            .views
-            .iter_mut()
-            .find(|view| view.id == webview_id)?;
+    fn add_listener(&mut self, webview_id: &str, event: String, handler_id: u32) -> Option<u32> {
+        let view = self.views.iter_mut().find(|view| view.id == webview_id)?;
         let event_id = view.next_event_id;
         view.next_event_id = view.next_event_id.wrapping_add(1);
         view.listeners
@@ -7758,14 +7757,22 @@ mod tests {
 
     /// Pure projection face helpers: a logical window safe area from the
     /// physical AppWindowTitleBar insets, then the per-view payload.
-    fn logical_safe_area(left: f64, right: f64, height: f64, width: f64) -> crate::layout::LogicalRect {
+    fn logical_safe_area(
+        left: f64,
+        right: f64,
+        height: f64,
+        width: f64,
+    ) -> crate::layout::LogicalRect {
         self::orchestration::overlay_safe_area_from_metrics(
             WindowsTitlebarMetrics {
                 left_inset: left,
                 right_inset: right,
                 height,
             },
-            crate::layout::LogicalViewport { width, height: 600.0 },
+            crate::layout::LogicalViewport {
+                width,
+                height: 600.0,
+            },
             1.0,
         )
     }
@@ -7808,7 +7815,10 @@ mod tests {
         let payload = payload_for_view(Some(safe), full);
         assert_eq!(payload.x, 16);
         assert_eq!(payload.width, 0);
-        assert_eq!(payload.height, 1, "degenerate overlay height keeps the legacy >=1 pixel");
+        assert_eq!(
+            payload.height, 1,
+            "degenerate overlay height keeps the legacy >=1 pixel"
+        );
     }
 
     /// D23: a view entirely below the overlay region receives an empty rect
@@ -7822,7 +7832,10 @@ mod tests {
         assert_eq!(payload.x, 0);
         assert_eq!(payload.y, 0);
         assert_eq!(payload.width, 0);
-        assert_eq!(payload.height, 0, "no overlay intersection yields an empty rect");
+        assert_eq!(
+            payload.height, 0,
+            "no overlay intersection yields an empty rect"
+        );
         assert_eq!(payload.client_width, 800);
         assert_eq!(payload.client_height, 556);
 
@@ -7842,7 +7855,10 @@ mod tests {
         let moved = crate::layout::LogicalRect::new(0.0, 20.0, 800.0, 44.0);
         let payload = payload_for_view(Some(safe), moved);
         assert_eq!(payload.y, 0);
-        assert_eq!(payload.height, 24, "only the intersecting 24 logical pixels remain");
+        assert_eq!(
+            payload.height, 24,
+            "only the intersecting 24 logical pixels remain"
+        );
     }
 
     /// No safe-area authority (AppWindow runtime unavailable): the payload
@@ -7956,15 +7972,16 @@ mod tests {
     fn window_level_focus_and_blur_events_push_only_when_subscribed() {
         let port = crate::event_port::test_support::install_fake_port_for_module_tests();
         let hwnd = 0x574E_4556isize as HWND;
-        let bridge = window_event_test_bridge_with_port_state(
-            "tray-1",
-            std::sync::Arc::clone(&port.state),
-        );
+        let bridge =
+            window_event_test_bridge_with_port_state("tray-1", std::sync::Arc::clone(&port.state));
         register_test_window_proc_state(hwnd, &bridge);
 
         // Unsubscribed: no native observation record leaves the producer.
         emit_window_focus_change(hwnd, true);
-        assert!(port.submits().is_empty(), "focus without a listener is free");
+        assert!(
+            port.submits().is_empty(),
+            "focus without a listener is free"
+        );
 
         bridge
             .borrow_mut()
@@ -8006,10 +8023,8 @@ mod tests {
     fn window_interaction_change_pushes_only_when_subscribed() {
         let port = crate::event_port::test_support::install_fake_port_for_module_tests();
         let hwnd = 0x574E_4557isize as HWND;
-        let bridge = window_event_test_bridge_with_port_state(
-            "tray-1",
-            std::sync::Arc::clone(&port.state),
-        );
+        let bridge =
+            window_event_test_bridge_with_port_state("tray-1", std::sync::Arc::clone(&port.state));
         register_test_window_proc_state(hwnd, &bridge);
 
         emit_window_interaction_change(hwnd, true);
@@ -8044,10 +8059,8 @@ mod tests {
     fn window_visible_change_pushes_once_per_operational_edge() {
         let port = crate::event_port::test_support::install_fake_port_for_module_tests();
         let hwnd = 0x574E_4558isize as HWND;
-        let bridge = window_event_test_bridge_with_port_state(
-            "tray-1",
-            std::sync::Arc::clone(&port.state),
-        );
+        let bridge =
+            window_event_test_bridge_with_port_state("tray-1", std::sync::Arc::clone(&port.state));
         // The visibleChange path derives the lookup hwnd from the bridge
         // field (unlike the focus/interaction producers, which receive it).
         bridge.borrow_mut().hwnd = hwnd;
@@ -8094,10 +8107,8 @@ mod tests {
     #[test]
     fn style_change_notification_pushes_the_window_family_record_when_subscribed() {
         let port = crate::event_port::test_support::install_fake_port_for_module_tests();
-        let bridge = window_event_test_bridge_with_port_state(
-            "tray-1",
-            std::sync::Arc::clone(&port.state),
-        );
+        let bridge =
+            window_event_test_bridge_with_port_state("tray-1", std::sync::Arc::clone(&port.state));
 
         // Unsubscribed: no record leaves the producer.
         notify_style_changed(&bridge, &json!({ "frameless": false }))

@@ -13,11 +13,14 @@ import type {
 import {
   DEFAULT_WEBVIEW_BRIDGE_POLICY,
   WEBVIEW_EVENT_KINDS,
+  WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE,
   WEBVIEW_ORCHESTRATION_ERROR_CODES,
   isWebviewBridgePolicy,
   isWebviewEventFrame,
   isWebviewEventKind,
+  isWebviewNavigationRule,
   isWebviewOrchestrationErrorCode,
+  matchesWebviewNavigationPattern,
   resolveWebviewBridgePolicy,
   validateWebviewLayout,
 } from "./webview";
@@ -168,6 +171,28 @@ const commandBuilders: Record<string, () => WebviewOrchestrationCommandFrame> = 
     viewId: "toolbar",
     patch: { height: 48, minHeight: 32, maxHeight: 64 },
   }),
+  "get-webview-favicon": () => ({
+    owner,
+    type: "get-webview-favicon",
+    windowId: "win-1",
+    webviewId: "content",
+  }),
+  "set-webview-navigation-rules": () => ({
+    owner,
+    type: "set-webview-navigation-rules",
+    windowId: "win-1",
+    webviewId: "content",
+    rules: [{ pattern: "*://*.tracker.example/*", action: "block" }],
+  }),
+  "create-webview with favicon and navigation rules": () => ({
+    owner,
+    type: "create-webview",
+    windowId: "win-1",
+    webviewId: "content",
+    url: "https://example.org",
+    favicon: true,
+    navigationRules: [{ pattern: "*://*.tracker.example/*", action: "block" }],
+  }),
   "subscribe-webview-events": () => ({
     owner,
     type: "subscribe-webview-events",
@@ -218,6 +243,21 @@ const resultBuilders: Record<string, () => WebviewOrchestrationResultFrame> = {
     webviewId: "content",
     title: "Example Article",
     seq: 12,
+  }),
+  "get-webview-favicon-result returns value and seq": () => ({
+    owner,
+    type: "get-webview-favicon-result",
+    windowId: "win-1",
+    webviewId: "content",
+    href: "https://example.org/favicon.ico",
+    seq: 71,
+  }),
+  "get-webview-favicon-result unset href": () => ({
+    owner,
+    type: "get-webview-favicon-result",
+    windowId: "win-1",
+    webviewId: "content",
+    seq: 0,
   }),
   "webview-ack echoes the command": () => ({
     owner,
@@ -326,6 +366,33 @@ const eventBuilders: Record<string, () => WebviewEventFrame> = {
     seq: 8,
     payload: { phase: "failed", url: "https://unreachable.example.org", errorCode: -1003 },
   }),
+  "navigationAction link user initiated": () => ({
+    type: "webview-event",
+    owner,
+    windowId: "win-1",
+    webviewId: "content",
+    kind: "navigationAction",
+    seq: 61,
+    payload: { url: "https://example.org/articles/2", navigationType: "link", isUserInitiated: true },
+  }),
+  "navigationAction redirect without user flag": () => ({
+    type: "webview-event",
+    owner,
+    windowId: "win-1",
+    webviewId: "content",
+    kind: "navigationAction",
+    seq: 62,
+    payload: { url: "https://example.org/login", navigationType: "redirect" },
+  }),
+  "faviconChange settled href": () => ({
+    type: "webview-event",
+    owner,
+    windowId: "win-1",
+    webviewId: "content",
+    kind: "faviconChange",
+    seq: 71,
+    payload: { href: "https://example.org/favicon.ico" },
+  }),
 };
 
 /**
@@ -418,6 +485,34 @@ describe("webview event frame guard", () => {
         payload: { url: "https://example.org" },
       }),
     ).toBe(false);
+  });
+});
+
+describe("navigation rules and url-glob semantics", () => {
+  it("matches the shared glob table (same cases as the Rust suite)", () => {
+    const cases: Array<[string, string, boolean]> = [
+      ["*://*.tracker.example/*", "https://cdn.tracker.example/pixel.gif?id=9", true],
+      ["*://*.tracker.example/*", "https://tracker.example.evil.net/pixel.gif", false],
+      // The leading dot in `*.tracker.example` is literal: the bare host needs
+      // its own rule (or `*tracker.example`).
+      ["*://*.tracker.example/*", "https://tracker.example/pixel.gif", false],
+      ["https://example.org/exact/path", "https://example.org/exact/path", true],
+      ["https://example.org/exact/path", "https://example.org/exact/path?utm=1", false],
+      ["*", "https://any.example/deep/path?q=1", true],
+      ["https://example.org/*", "https://example.org/", true],
+      ["https://example.org/*", "https://example.org", false],
+    ];
+    for (const [pattern, url, expected] of cases) {
+      expect(matchesWebviewNavigationPattern(pattern, url), `${pattern} vs ${url}`).toBe(expected);
+    }
+  });
+
+  it("guards rule DTOs and freezes the blocked error code", () => {
+    expect(isWebviewNavigationRule({ pattern: "*://ads.example/*", action: "block" })).toBe(true);
+    expect(isWebviewNavigationRule({ pattern: "", action: "block" })).toBe(false);
+    expect(isWebviewNavigationRule({ pattern: "x", action: "allow" })).toBe(false);
+    expect(isWebviewNavigationRule({ action: "block" })).toBe(false);
+    expect(WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE).toBe(4500001);
   });
 });
 
@@ -556,10 +651,61 @@ describe("registries", () => {
       "focused",
       "geometryChange",
       "loadState",
+      "navigationAction",
+      "faviconChange",
     ]);
     expect(isWebviewEventKind("geometryChange")).toBe(true);
     expect(isWebviewEventKind("loadState")).toBe(true);
+    expect(isWebviewEventKind("navigationAction")).toBe(true);
+    expect(isWebviewEventKind("faviconChange")).toBe(true);
     expect(isWebviewEventKind("zIndexChange")).toBe(false);
+  });
+
+  it("guards navigationAction and faviconChange payload fields", () => {
+    const nav = {
+      type: "webview-event",
+      owner,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "navigationAction",
+      seq: 1,
+    };
+    expect(
+      isWebviewEventFrame({
+        ...nav,
+        payload: { url: "https://example.org", navigationType: "link", isUserInitiated: true },
+      }),
+    ).toBe(true);
+    expect(
+      isWebviewEventFrame({ ...nav, payload: { url: "https://example.org", navigationType: "redirect" } }),
+    ).toBe(true);
+    // Unknown navigation type, missing url, and non-boolean user flag reject.
+    expect(
+      isWebviewEventFrame({ ...nav, payload: { url: "https://x", navigationType: "popup" } }),
+    ).toBe(false);
+    expect(isWebviewEventFrame({ ...nav, payload: { navigationType: "link" } })).toBe(false);
+    expect(
+      isWebviewEventFrame({
+        ...nav,
+        payload: { url: "https://x", navigationType: "link", isUserInitiated: "yes" },
+      }),
+    ).toBe(false);
+
+    const fav = {
+      type: "webview-event",
+      owner,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "faviconChange",
+      seq: 1,
+    };
+    expect(isWebviewEventFrame({ ...fav, payload: { href: "https://example.org/favicon.ico" } })).toBe(
+      true,
+    );
+    expect(isWebviewEventFrame({ ...fav, payload: { href: "" } })).toBe(false);
+    expect(isWebviewEventFrame({ ...fav, payload: { url: "https://example.org/favicon.ico" } })).toBe(
+      false,
+    );
   });
 
   it("guards loadState payload fields (phase, errorCode, progress range)", () => {

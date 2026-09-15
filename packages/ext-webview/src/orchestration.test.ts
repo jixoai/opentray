@@ -97,6 +97,8 @@ const defaultRespond = (data: unknown): unknown => {
       return fixture(commandFixtures, "get-webview-url-result returns value and seq");
     case "get-webview-title":
       return fixture(commandFixtures, "get-webview-title-result returns value and seq");
+    case "get-webview-favicon":
+      return fixture(commandFixtures, "get-webview-favicon-result returns value and seq");
     case "list-webviews":
       return fixture(commandFixtures, "list-webviews-result");
     case "subscribeWindowEvents":
@@ -425,6 +427,20 @@ describe("webview orchestration facade", () => {
     await expect(child.getTitle()).resolves.toEqual({ title: "Example Article", seq: 12 });
     expect(transport.extCommands().at(-1)).toEqual(fixture(commandFixtures, "get-webview-title"));
 
+    await expect(child.getFavicon()).resolves.toEqual({
+      href: "https://example.org/favicon.ico",
+      seq: 71,
+    });
+    expect(transport.extCommands().at(-1)).toEqual(fixture(commandFixtures, "get-webview-favicon"));
+
+    await child.setNavigationRules([{ pattern: "*://*.tracker.example/*", action: "block" }]);
+    expect(transport.extCommands().at(-1)).toEqual(
+      fixture(commandFixtures, "set-webview-navigation-rules"),
+    );
+    await expect(
+      child.setNavigationRules([{ pattern: "", action: "block" }] as never),
+    ).rejects.toThrow(/non-empty/);
+
     await expect(win.listWebviews()).resolves.toEqual(
       fixture(commandFixtures, "list-webviews-result").webviews,
     );
@@ -594,6 +610,81 @@ describe("webview orchestration facade", () => {
       // The `bar` frame is not this window's view; only `content` frames route.
       { windowId: "win-1", webviewId: "content", seq: 9, rect: null },
     ]);
+  });
+
+  it("routes navigationAction and faviconChange pushes and resyncs favicon gaps", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const content = await win.createWebview({
+      id: "content",
+      url: "https://example.org",
+      favicon: true,
+      navigationRules: [{ pattern: "*://*.tracker.example/*", action: "block" }],
+    });
+    expect(transport.extCommands().at(-1)).toEqual(
+      fixture(commandFixtures, "create-webview with favicon and navigation rules"),
+    );
+
+    const navEvents: unknown[] = [];
+    const faviconEvents: unknown[] = [];
+    content.onNavigationAction((event) => navEvents.push(event));
+    content.onFaviconChange((event) => faviconEvents.push(event));
+
+    transport.emit(fixture(eventFixtures, "navigationAction link user initiated"));
+    transport.emit(fixture(eventFixtures, "navigationAction redirect without user flag"));
+    transport.emit(fixture(eventFixtures, "faviconChange settled href"));
+
+    expect(navEvents).toEqual([
+      {
+        windowId: "win-1",
+        webviewId: "content",
+        seq: 61,
+        url: "https://example.org/articles/2",
+        navigationType: "link",
+        isUserInitiated: true,
+      },
+      {
+        windowId: "win-1",
+        webviewId: "content",
+        seq: 62,
+        url: "https://example.org/login",
+        navigationType: "redirect",
+      },
+    ]);
+    expect(faviconEvents).toEqual([
+      {
+        windowId: "win-1",
+        webviewId: "content",
+        seq: 71,
+        href: "https://example.org/favicon.ico",
+      },
+    ]);
+
+    // Latest-class gap repair: a favicon frame that jumps the shared per-view
+    // seq (71 -> 90) triggers the (value, seq) query; the responder's lower
+    // observation is discarded as stale, so the direct delivery stands alone
+    // (same convergence law as the urlChange resync suite below).
+    transport.emit({
+      type: "webview-event",
+      owner: OWNER,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "faviconChange",
+      seq: 90,
+      payload: { href: "https://example.org/favicon-2.ico" },
+    });
+    await flush();
+    expect(transport.extCommands().at(-1)).toEqual(fixture(commandFixtures, "get-webview-favicon"));
+    expect(faviconEvents).toHaveLength(2);
+    expect(faviconEvents.at(-1)).toEqual({
+      windowId: "win-1",
+      webviewId: "content",
+      seq: 90,
+      href: "https://example.org/favicon-2.ico",
+    });
   });
 
   it("resolves the subscription race through (value, seq) queries plus stale-seq discard", async () => {

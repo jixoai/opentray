@@ -42,9 +42,9 @@ fn test_bridge_with_port_state(
         ipc_messages: VecDeque::new(),
         permission_messages: VecDeque::new(),
         window_event_subscriptions: std::collections::HashSet::new(),
-        app_mode_ledger: std::rc::Rc::new(std::cell::RefCell::new(
-            std::collections::HashSet::new(),
-        )),
+        app_mode_ledger: std::rc::Rc::new(
+            std::cell::RefCell::new(std::collections::HashSet::new()),
+        ),
         next_ipc_message_id: 1,
         next_permission_message_id: 1,
         style: WindowStyleState::default(),
@@ -69,14 +69,14 @@ fn test_bridge_with_port_state(
         size_constraints: WindowSizeConstraints::default(),
         layout: crate::layout::WindowLayoutState::default(),
         layout_tracker: std::rc::Weak::new(),
-        channels: std::rc::Rc::new(std::cell::RefCell::new(crate::channels::SessionChannels::new(
-            crate::orchestration::WindowOwner {
+        channels: std::rc::Rc::new(std::cell::RefCell::new(
+            crate::channels::SessionChannels::new(crate::orchestration::WindowOwner {
                 app_id: "app-1".to_string(),
                 tray_id: "tray-1".to_string(),
                 session_id: Some("session-1".to_string()),
                 window_id: "win-1".to_string(),
-            },
-        ))),
+            }),
+        )),
         channel_loaded_views: std::collections::HashSet::new(),
         channel_live_views: std::collections::HashSet::new(),
         pending_channel_pushes: std::collections::HashMap::new(),
@@ -119,6 +119,7 @@ fn bootstrap_script_with_policy(
         false,
         false,
         "default",
+        false,
     )
 }
 
@@ -141,7 +142,38 @@ fn bootstrap_script_with_permission_policy(
         false,
         false,
         "default",
+        false,
     )
+}
+
+#[test]
+fn favicon_observe_only_script_exposes_no_bridge_surface() {
+    let script = crate::bootstrap::favicon_observe_only_script();
+    assert!(script.contains("pageIconChanged"));
+    assert!(script.contains("MutationObserver"));
+    assert!(script.contains("opentray.window.sync"));
+    // No bridge surface: the observe-only injection must not define any
+    // navigator property (the bridgeless default of the per-view policy
+    // survives the favicon opt-in).
+    assert!(!script.contains("opentrayWindow"));
+    assert!(!script.contains("createMessageChannel"));
+}
+
+#[test]
+fn bridged_bootstrap_favicon_flag_gates_the_observer() {
+    let policy = WebviewBridgePolicy {
+        webview_id: true,
+        ..WebviewBridgePolicy::default()
+    };
+    let off = crate::bootstrap::webview_bridge_bootstrap_script(policy, "content", false)
+        .expect("bridged view injects");
+    assert!(off.contains("requestedFaviconObserver = false"));
+    let on = crate::bootstrap::webview_bridge_bootstrap_script(policy, "content", true)
+        .expect("bridged view injects");
+    assert!(on.contains("requestedFaviconObserver = true"));
+    // The iconSync gate stays independent: window-icon metadata sync is
+    // still off by default for orchestration children.
+    assert!(on.contains("requestedIconSyncPageToNative = false"));
 }
 
 #[test]
@@ -1499,7 +1531,9 @@ fn navigator_window_bridge_tracks_listener_ids_per_webview() {
     let toolbar_only = bridge.listeners_for_view("toolbar", "resized");
     assert_eq!(toolbar_only.len(), 1);
     assert!(toolbar_only.iter().all(|(view, _)| view == "toolbar"));
-    assert!(bridge.listeners_for_view("toolbar", "overlay.geometrychange").is_empty());
+    assert!(bridge
+        .listeners_for_view("toolbar", "overlay.geometrychange")
+        .is_empty());
     assert!(bridge.listeners_for_view("missing", "resized").is_empty());
     assert!(bridge.has_listener("resized"));
     assert!(!bridge.has_listener("overlay.geometrychange"));
@@ -1511,7 +1545,10 @@ fn navigator_window_bridge_tracks_listener_ids_per_webview() {
     assert!(!bridge.has_listener("resized"));
 
     // Unknown webviews cannot register listeners.
-    assert_eq!(bridge.add_listener("missing", "resized".to_string(), 44), None);
+    assert_eq!(
+        bridge.add_listener("missing", "resized".to_string(), 44),
+        None
+    );
 
     // Removing a view drops its listeners and transport entry together.
     bridge
@@ -1645,7 +1682,10 @@ fn window_level_focus_and_blur_events_push_only_when_subscribed() {
     )));
 
     queue_window_event(&Rc::downgrade(&bridge), "focus", serde_json::json!({}));
-    assert!(port.submits().is_empty(), "focus without a listener is free");
+    assert!(
+        port.submits().is_empty(),
+        "focus without a listener is free"
+    );
 
     bridge
         .borrow_mut()
@@ -1685,21 +1725,15 @@ fn style_change_notification_pushes_the_window_family_record_when_subscribed() {
     )));
 
     // Unsubscribed: no record leaves the producer.
-    super::bridge::notify_style_changed(
-        &bridge,
-        &serde_json::json!({ "frameless": false }),
-    )
-    .expect("stylechange notification succeeds");
+    super::bridge::notify_style_changed(&bridge, &serde_json::json!({ "frameless": false }))
+        .expect("stylechange notification succeeds");
     assert!(port.submits().is_empty(), "no subscription, no submit");
 
     bridge
         .borrow_mut()
         .subscribe_window_events(&["stylechange".to_string()]);
-    super::bridge::notify_style_changed(
-        &bridge,
-        &serde_json::json!({ "frameless": true }),
-    )
-    .expect("stylechange notification succeeds");
+    super::bridge::notify_style_changed(&bridge, &serde_json::json!({ "frameless": true }))
+        .expect("stylechange notification succeeds");
     let submits = port.submits();
     assert_eq!(submits.len(), 1);
     assert_eq!(submits[0].tray_id, "tray-1");
@@ -1820,7 +1854,7 @@ fn per_webview_bridge_policy_defaults_to_no_bootstrap() {
 
     // A policy-less child (every field false) gets no script at all.
     assert_eq!(
-        webview_bridge_bootstrap_script(WebviewBridgePolicy::default(), "content"),
+        webview_bridge_bootstrap_script(WebviewBridgePolicy::default(), "content", false),
         None
     );
 
@@ -1832,10 +1866,14 @@ fn per_webview_bridge_policy_defaults_to_no_bootstrap() {
             ..WebviewBridgePolicy::default()
         },
         "toolbar",
+        false,
     )
     .expect("toolbar policy injects the bridge");
     assert!(toolbar.contains("navigator, \"window\""));
-    assert!(toolbar.contains("\"toolbar\""), "the webview id rides the script");
+    assert!(
+        toolbar.contains("\"toolbar\""),
+        "the webview id rides the script"
+    );
     assert!(
         toolbar.contains("opentrayWebview"),
         "the message-channel surface is injected"
@@ -1848,6 +1886,7 @@ fn per_webview_bridge_policy_defaults_to_no_bootstrap() {
             ..WebviewBridgePolicy::default()
         },
         "content",
+        false,
     )
     .expect("navigator window policy injects");
     assert!(window_only.contains("navigator, \"window\""));
@@ -1857,6 +1896,7 @@ fn per_webview_bridge_policy_defaults_to_no_bootstrap() {
             ..WebviewBridgePolicy::default()
         },
         "content",
+        false,
     )
     .expect("navigator screen policy injects");
     assert!(screen_only.contains("opentray.screen"));
@@ -1887,17 +1927,28 @@ fn per_view_event_handlers_push_to_outbox_not_the_drain_queue() {
     let bridge = Rc::new(RefCell::new(test_bridge()));
 
     // Drive the exact handler bodies the native observers call.
-    handle_view_url_started(&events, &Rc::downgrade(&outbox), &owner, "https://example.org/a");
+    handle_view_url_started(
+        &events,
+        &Rc::downgrade(&outbox),
+        &owner,
+        "https://example.org/a",
+    );
     handle_view_title_changed(&events, &Rc::downgrade(&outbox), &owner, "Example");
 
     // Frames landed in the push outbox with the frozen schema.
     let frames: Vec<_> = outbox.borrow_mut().outbox.drain(..).collect();
     assert_eq!(frames.len(), 2);
-    assert_eq!(frames[0].kind, opentray_spec::webview::WebviewEventKind::UrlChange);
+    assert_eq!(
+        frames[0].kind,
+        opentray_spec::webview::WebviewEventKind::UrlChange
+    );
     assert_eq!(frames[0].webview_id, "content");
     assert_eq!(frames[0].owner.session_id, "session-1");
     assert!(frames[0].is_coherent());
-    assert_eq!(frames[1].kind, opentray_spec::webview::WebviewEventKind::TitleChange);
+    assert_eq!(
+        frames[1].kind,
+        opentray_spec::webview::WebviewEventKind::TitleChange
+    );
     assert!(frames[1].is_coherent());
 
     // The unified event family never rides a window-level push record:
@@ -2094,12 +2145,18 @@ fn runtime_orchestration_smoke_on_main_thread() {
             html: None,
             bridge: policy,
             browser: None,
+            favicon: false,
+            navigation_rules: None,
         }
     };
     let created = orchestrate(
         &mut runtime,
         "tray-1",
-        create("toolbar", "https://example.org/toolbar", Some(toolbar_policy)),
+        create(
+            "toolbar",
+            "https://example.org/toolbar",
+            Some(toolbar_policy),
+        ),
     );
     assert_eq!(created.result["type"], "webview-ack");
     let created = orchestrate(
@@ -2153,7 +2210,10 @@ fn runtime_orchestration_smoke_on_main_thread() {
         },
     );
     assert!(
-        content_focused.events.iter().any(|frame| frame.webview_id == "content"),
+        content_focused
+            .events
+            .iter()
+            .any(|frame| frame.webview_id == "content"),
         "content gains initial focus"
     );
     let focused = orchestrate(
@@ -2253,9 +2313,7 @@ fn runtime_orchestration_smoke_on_main_thread() {
 #[test]
 fn window_only_reshow_with_title_on_populated_session() {
     use objc2::MainThreadMarker;
-    use opentray_spec::webview::{
-        WebviewBridgePolicy, WebviewOrchestrationCommand,
-    };
+    use opentray_spec::webview::{WebviewBridgePolicy, WebviewOrchestrationCommand};
 
     let Some(mtm) = MainThreadMarker::new() else {
         eprintln!("skipping AppKit windowOnly re-show regression outside the main thread");
@@ -2291,11 +2349,14 @@ fn window_only_reshow_with_title_on_populated_session() {
     // Populate the session with children (toolbar + content), so the bridge
     // view list is non-empty.
     for (webview_id, policy) in [
-        ("toolbar", Some(WebviewBridgePolicy {
-            webview_id: true,
-            message_channels: true,
-            ..WebviewBridgePolicy::default()
-        })),
+        (
+            "toolbar",
+            Some(WebviewBridgePolicy {
+                webview_id: true,
+                message_channels: true,
+                ..WebviewBridgePolicy::default()
+            }),
+        ),
         ("content", None),
     ] {
         runtime
@@ -2310,6 +2371,8 @@ fn window_only_reshow_with_title_on_populated_session() {
                         html: None,
                         bridge: policy,
                         browser: None,
+                        favicon: false,
+                        navigation_rules: None,
                     },
                 )),
             )
@@ -2447,6 +2510,8 @@ fn session_close_seam_protects_a_newer_same_tray_session() {
                             html: None,
                             bridge: policy,
                             browser: None,
+                            favicon: false,
+                            navigation_rules: None,
                         },
                     )),
                 )
@@ -2502,7 +2567,10 @@ fn session_close_seam_protects_a_newer_same_tray_session() {
     // would: the old entry's owner tuple addresses the tray.
     for entry in collected {
         let stale_owner = entry.owner.expect("attributed closing entry");
-        runtime.popups.borrow_mut().close_all_of_session("session-old");
+        runtime
+            .popups
+            .borrow_mut()
+            .close_all_of_session("session-old");
         runtime.destroy_window_session(
             &stale_owner,
             opentray_spec::channel::ChannelCloseReason::SessionClosed,
@@ -2535,7 +2603,10 @@ fn session_close_seam_protects_a_newer_same_tray_session() {
         },
     );
     assert_eq!(listed_channels.result["type"], "channel.list-result");
-    let channels = listed_channels.result["channels"].as_array().unwrap().clone();
+    let channels = listed_channels.result["channels"]
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(channels.len(), 1);
     assert_eq!(channels[0]["channelId"], json!(new_channel_id));
     assert_eq!(channels[0]["state"], "open");
@@ -2574,6 +2645,7 @@ fn channel_bootstrap_script(
         message_channels,
         webview_id_enabled,
         webview_id,
+        false,
     )
 }
 
@@ -2644,7 +2716,10 @@ return {
 "#,
     );
     assert_eq!(probe["id"], Value::String("toolbar".to_string()));
-    assert_eq!(probe["namespace"], Value::String("opentray.webview".to_string()));
+    assert_eq!(
+        probe["namespace"],
+        Value::String("opentray.webview".to_string())
+    );
     assert_eq!(
         probe["createPayload"],
         serde_json::json!({ "target": "sidebar" })
@@ -2703,7 +2778,10 @@ return { createdId, received, closures };
         probe["received"],
         serde_json::json!([{ "type": "navigate" }, "reload"])
     );
-    assert_eq!(probe["closures"], serde_json::json!([{ "reason": "explicit" }]));
+    assert_eq!(
+        probe["closures"],
+        serde_json::json!([{ "reason": "explicit" }])
+    );
 }
 
 /// Port-style buffering (D11 anti-silent-drop): pushes that outrun the
@@ -2938,14 +3016,12 @@ fn page_post_to_host_channel_pushes_through_the_event_port() {
     );
     // The record left the authoritative outbox exactly once — no double
     // delivery through a later command response.
-    assert!(
-        bridge
-            .borrow()
-            .channels
-            .borrow_mut()
-            .drain_host_events()
-            .is_empty()
-    );
+    assert!(bridge
+        .borrow()
+        .channels
+        .borrow_mut()
+        .drain_host_events()
+        .is_empty());
 }
 
 /// The legacy fallback stays intact: with no port attached (H0 host), the
@@ -3016,10 +3092,7 @@ fn page_created_channel_posts_page_to_page_with_pending_delivery() {
     // finished its first page load (never in this fixture).
     let pending = bridge.borrow();
     assert_eq!(
-        pending
-            .pending_channel_pushes
-            .get("sidebar")
-            .map(Vec::len),
+        pending.pending_channel_pushes.get("sidebar").map(Vec::len),
         Some(1),
         "the created push queues for the not-yet-live page"
     );
@@ -3056,8 +3129,8 @@ fn page_created_channel_posts_page_to_page_with_pending_delivery() {
 
     // Page-visible list: the creator sees exactly its participating
     // channel with side labels only.
-    let listed = dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({}))
-        .expect("page list");
+    let listed =
+        dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({})).expect("page list");
     let listed = listed["channels"].as_array().unwrap().clone();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0]["channelId"], json!(channel_id));
@@ -3122,8 +3195,8 @@ fn page_target_endpoint_posts_back_and_closes() {
         json!({ "channelId": channel_id }),
     )
     .expect("close");
-    let listed = dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({}))
-        .expect("list");
+    let listed =
+        dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({})).expect("list");
     assert_eq!(listed["channels"][0]["state"], json!("closed"));
     assert_eq!(listed["channels"][0]["reason"], json!("explicit"));
 
@@ -3145,8 +3218,8 @@ fn page_target_endpoint_posts_back_and_closes() {
         json!({ "channelId": channel_id }),
     )
     .expect("destroy");
-    let listed = dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({}))
-        .expect("list");
+    let listed =
+        dispatch_channel(&bridge, "toolbar", "listMessageChannels", json!({})).expect("list");
     assert_eq!(listed["channels"].as_array().map(Vec::len), Some(0));
     assert_eq!(
         bridge
@@ -3178,27 +3251,20 @@ fn channel_page_load_state_discriminates_document_navigation() {
     // The target's very first Started is the initial load, not a
     // navigation: the channel survives.
     super::bridge::handle_view_channel_navigation_started(&bridge, "sidebar");
-    assert!(
-        bridge
-            .borrow()
-            .channels
-            .borrow()
-            .list_for_host(&owner)
-            .unwrap()
-            .iter()
-            .all(|entry| entry.state == opentray_spec::channel::ChannelState::Open)
-    );
+    assert!(bridge
+        .borrow()
+        .channels
+        .borrow()
+        .list_for_host(&owner)
+        .unwrap()
+        .iter()
+        .all(|entry| entry.state == opentray_spec::channel::ChannelState::Open));
 
     // Finished makes the page live and flushes the pending created push
     // (held, because the fake view would queue evaluation forever off the
     // main run loop — the drain state is what we assert).
     super::bridge::handle_view_channel_page_finished(&bridge, "sidebar");
-    assert!(
-        bridge
-            .borrow()
-            .channel_live_views
-            .contains("sidebar")
-    );
+    assert!(bridge.borrow().channel_live_views.contains("sidebar"));
 
     // A later Started is a document navigation: the channel closes with
     // document_navigated and the creator page observes once.
@@ -3210,7 +3276,10 @@ fn channel_page_load_state_discriminates_document_navigation() {
         .list_for_host(&owner)
         .unwrap();
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].state, opentray_spec::channel::ChannelState::Closed);
+    assert_eq!(
+        listed[0].state,
+        opentray_spec::channel::ChannelState::Closed
+    );
     assert_eq!(
         listed[0].reason,
         Some(opentray_spec::channel::ChannelCloseReason::DocumentNavigated)
@@ -3308,17 +3377,14 @@ fn document_navigation_close_pushes_the_host_observation_through_the_port() {
         opentray_spec::ExtEventClassV1::Edge.as_u32()
     );
     // Nothing waits in the authoritative outbox for a later response.
-    assert!(
-        bridge
-            .borrow()
-            .channels
-            .borrow_mut()
-            .drain_host_events()
-            .is_empty()
-    );
+    assert!(bridge
+        .borrow()
+        .channels
+        .borrow_mut()
+        .drain_host_events()
+        .is_empty());
     let _ = channel_id;
 }
-
 
 /// R6 P1 regression: every exit of close/destroy — including the
 /// parameter-validation typed-fail — must drain and submit pending host
@@ -3464,6 +3530,8 @@ fn runtime_channel_smoke_on_main_thread() {
                         html: None,
                         bridge: policy,
                         browser: None,
+                        favicon: false,
+                        navigation_rules: None,
                     },
                 )),
             )
@@ -3476,10 +3544,7 @@ fn runtime_channel_smoke_on_main_thread() {
         request: ChannelRequest,
     ) -> crate::HandledCommand {
         runtime
-            .handle(
-                "tray-1",
-                crate::WebviewCommand::Channel(Box::new(request)),
-            )
+            .handle("tray-1", crate::WebviewCommand::Channel(Box::new(request)))
             .expect("channel command")
     }
 
@@ -3496,54 +3561,75 @@ fn runtime_channel_smoke_on_main_thread() {
     assert!(!channel_id.is_empty());
 
     // Authority rejections are typed envelopes as Ok-data with zero state.
-    let rejected = channel_command(&mut runtime, ChannelRequest::Create {
-        owner: owner.clone(),
-        target: "content".to_string(),
-    });
+    let rejected = channel_command(
+        &mut runtime,
+        ChannelRequest::Create {
+            owner: owner.clone(),
+            target: "content".to_string(),
+        },
+    );
     assert_eq!(rejected.result["type"], "channel.error");
     assert_eq!(rejected.result["error"]["code"], "bridge_required");
-    let rejected = channel_command(&mut runtime, ChannelRequest::Create {
-        owner: owner.clone(),
-        target: "missing".to_string(),
-    });
+    let rejected = channel_command(
+        &mut runtime,
+        ChannelRequest::Create {
+            owner: owner.clone(),
+            target: "missing".to_string(),
+        },
+    );
     assert_eq!(rejected.result["error"]["code"], "unknown_view");
     // The host cannot be targeted: "host" is not a webview id.
-    let rejected = channel_command(&mut runtime, ChannelRequest::Create {
-        owner: owner.clone(),
-        target: "host".to_string(),
-    });
+    let rejected = channel_command(
+        &mut runtime,
+        ChannelRequest::Create {
+            owner: owner.clone(),
+            target: "host".to_string(),
+        },
+    );
     assert_eq!(rejected.result["error"]["code"], "unknown_view");
     // Cross-session owner tuples reject session_scope.
-    let rejected = channel_command(&mut runtime, ChannelRequest::Create {
-        owner: opentray_spec::webview::WebviewOwnerTuple {
-            app_id: "app-1".to_string(),
-            tray_id: "tray-1".to_string(),
-            session_id: "session-2".to_string(),
+    let rejected = channel_command(
+        &mut runtime,
+        ChannelRequest::Create {
+            owner: opentray_spec::webview::WebviewOwnerTuple {
+                app_id: "app-1".to_string(),
+                tray_id: "tray-1".to_string(),
+                session_id: "session-2".to_string(),
+            },
+            target: "toolbar".to_string(),
         },
-        target: "toolbar".to_string(),
-    });
+    );
     assert_eq!(rejected.result["error"]["code"], "session_scope");
 
     // JSON payloads post without string coercion; posting on an unknown
     // channel is the typed not_open-family rejection (unknown id →
     // unknown_view).
-    let posted = channel_command(&mut runtime, ChannelRequest::Post {
-        owner: owner.clone(),
-        channel_id: channel_id.clone(),
-        payload: json!({ "type": "navigate", "url": "https://example.com" }),
-    });
+    let posted = channel_command(
+        &mut runtime,
+        ChannelRequest::Post {
+            owner: owner.clone(),
+            channel_id: channel_id.clone(),
+            payload: json!({ "type": "navigate", "url": "https://example.com" }),
+        },
+    );
     assert_eq!(posted.result["type"], "channel.post-result");
-    let rejected = channel_command(&mut runtime, ChannelRequest::Post {
-        owner: owner.clone(),
-        channel_id: "ch-nonexistent".to_string(),
-        payload: json!("x"),
-    });
+    let rejected = channel_command(
+        &mut runtime,
+        ChannelRequest::Post {
+            owner: owner.clone(),
+            channel_id: "ch-nonexistent".to_string(),
+            payload: json!("x"),
+        },
+    );
     assert_eq!(rejected.result["error"]["code"], "unknown_view");
 
     // The host list shows the live channel with full endpoint descriptors.
-    let listed = channel_command(&mut runtime, ChannelRequest::List {
-        owner: owner.clone(),
-    });
+    let listed = channel_command(
+        &mut runtime,
+        ChannelRequest::List {
+            owner: owner.clone(),
+        },
+    );
     assert_eq!(listed.result["type"], "channel.list-result");
     let channels = listed.result["channels"].as_array().unwrap().clone();
     assert_eq!(channels.len(), 1);
@@ -3556,10 +3642,13 @@ fn runtime_channel_smoke_on_main_thread() {
 
     // Graceful close: both endpoints observe exactly once — the host
     // observation rides this very response's channel event flush.
-    let closed = channel_command(&mut runtime, ChannelRequest::Close {
-        owner: owner.clone(),
-        channel_id: channel_id.clone(),
-    });
+    let closed = channel_command(
+        &mut runtime,
+        ChannelRequest::Close {
+            owner: owner.clone(),
+            channel_id: channel_id.clone(),
+        },
+    );
     assert_eq!(closed.result["type"], "channel.close-result");
     assert!(
         closed
@@ -3571,31 +3660,43 @@ fn runtime_channel_smoke_on_main_thread() {
         "the host closure observation rides the response flush"
     );
     // The tombstone stays listed with its reason.
-    let listed = channel_command(&mut runtime, ChannelRequest::List {
-        owner: owner.clone(),
-    });
+    let listed = channel_command(
+        &mut runtime,
+        ChannelRequest::List {
+            owner: owner.clone(),
+        },
+    );
     assert_eq!(listed.result["channels"][0]["state"], "closed");
     assert_eq!(listed.result["channels"][0]["reason"], "explicit");
 
     // Destroy reaps the tombstone; repeat destroys are no-op successes.
-    let destroyed = channel_command(&mut runtime, ChannelRequest::Destroy {
-        owner: owner.clone(),
-        channel_id: channel_id.clone(),
-    });
+    let destroyed = channel_command(
+        &mut runtime,
+        ChannelRequest::Destroy {
+            owner: owner.clone(),
+            channel_id: channel_id.clone(),
+        },
+    );
     assert_eq!(destroyed.result["type"], "channel.destroy-result");
     assert!(destroyed.channel_events.is_empty(), "no second observation");
-    let destroyed_again = channel_command(&mut runtime, ChannelRequest::Destroy {
-        owner: owner.clone(),
-        channel_id: channel_id.clone(),
-    });
+    let destroyed_again = channel_command(
+        &mut runtime,
+        ChannelRequest::Destroy {
+            owner: owner.clone(),
+            channel_id: channel_id.clone(),
+        },
+    );
     assert_eq!(destroyed_again.result["type"], "channel.destroy-result");
 
     // Peer teardown: a fresh channel closes with peer_webview_destroyed
     // and the observation rides the destroy-webview response.
-    let created = channel_command(&mut runtime, ChannelRequest::Create {
-        owner: owner.clone(),
-        target: "toolbar".to_string(),
-    });
+    let created = channel_command(
+        &mut runtime,
+        ChannelRequest::Create {
+            owner: owner.clone(),
+            target: "toolbar".to_string(),
+        },
+    );
     let live_id = created.result["channelId"].as_str().unwrap().to_string();
     let destroyed_view = runtime
         .handle(
@@ -3618,11 +3719,14 @@ fn runtime_channel_smoke_on_main_thread() {
                 && value["reason"] == "peer_webview_destroyed"),
         "peer teardown closes channels with reason"
     );
-    let rejected = channel_command(&mut runtime, ChannelRequest::Post {
-        owner: owner.clone(),
-        channel_id: live_id.clone(),
-        payload: json!("x"),
-    });
+    let rejected = channel_command(
+        &mut runtime,
+        ChannelRequest::Post {
+            owner: owner.clone(),
+            channel_id: live_id.clone(),
+            payload: json!("x"),
+        },
+    );
     assert_eq!(
         rejected.result["error"]["code"], "not_open",
         "a later send fails typed instead of dropping silently"
@@ -3630,9 +3734,12 @@ fn runtime_channel_smoke_on_main_thread() {
 
     // Session close removes every channel with the window.
     runtime.session_closed("session-1");
-    let rejected = channel_command(&mut runtime, ChannelRequest::List {
-        owner: owner.clone(),
-    });
+    let rejected = channel_command(
+        &mut runtime,
+        ChannelRequest::List {
+            owner: owner.clone(),
+        },
+    );
     assert_eq!(
         rejected.result["error"]["code"], "unknown_view",
         "the session's window (and channels) are gone"

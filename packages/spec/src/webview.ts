@@ -170,6 +170,10 @@ export type WebviewOrchestrationCommandFrame = { owner: WebviewOwnerTuple } &
       } & WebviewContent & {
         bridge?: WebviewBridgePolicy;
         browser?: WebviewBrowserOptions;
+        /** Opt in to native favicon observation (events + query). */
+        favicon?: boolean;
+        /** Declarative navigation rules, evaluated natively at decision time. */
+        navigationRules?: readonly WebviewNavigationRule[];
       }
     | { type: "destroy-webview"; windowId: WindowId; webviewId: WebviewId }
     | { type: "list-webviews"; windowId: WindowId }
@@ -198,6 +202,13 @@ export type WebviewOrchestrationCommandFrame = { owner: WebviewOwnerTuple } &
         webviewId: WebviewId;
         kinds: readonly WebviewEventKind[];
       }
+    | { type: "get-webview-favicon"; windowId: WindowId; webviewId: WebviewId }
+    | {
+        type: "set-webview-navigation-rules";
+        windowId: WindowId;
+        webviewId: WebviewId;
+        rules: readonly WebviewNavigationRule[];
+      }
   );
 
 /** String tag union of every orchestration command frame. */
@@ -222,6 +233,16 @@ export interface WebviewTitleQueryResult {
   seq: number;
 }
 
+/**
+ * Query result pair `(value, seq)` for `get-webview-favicon`. `href` is
+ * `undefined` until the first settled favicon is observed (and for webviews
+ * created without the `favicon` option).
+ */
+export interface WebviewFaviconQueryResult {
+  href?: string;
+  seq: number;
+}
+
 /** Broker→host result frames for the orchestration commands. */
 export type WebviewOrchestrationResultFrame = { owner: WebviewOwnerTuple } &
   (
@@ -237,6 +258,11 @@ export type WebviewOrchestrationResultFrame = { owner: WebviewOwnerTuple } &
         windowId: WindowId;
         webviewId: WebviewId;
       } & WebviewTitleQueryResult
+    | {
+        type: "get-webview-favicon-result";
+        windowId: WindowId;
+        webviewId: WebviewId;
+      } & WebviewFaviconQueryResult
   );
 
 /**
@@ -249,6 +275,8 @@ export const WEBVIEW_EVENT_KINDS = [
   "focused",
   "geometryChange",
   "loadState",
+  "navigationAction",
+  "faviconChange",
 ] as const;
 
 export type WebviewEventKind = (typeof WEBVIEW_EVENT_KINDS)[number];
@@ -261,6 +289,80 @@ export type WebviewLoadPhase = "started" | "finished" | "failed";
 
 const isWebviewLoadPhase = (value: unknown): value is WebviewLoadPhase =>
   value === "started" || value === "finished" || value === "failed";
+
+/**
+ * Navigation action attribution (add-navigation-favicon-surface). The
+ * platform projection is documented truth, not invention: Windows maps
+ * `IsRedirected` to "redirect" exactly and cannot separate link from form
+ * (user-initiated projects as "link"); macOS maps
+ * `WKNavigationAction.navigationType` and does not distinguish redirect
+ * from "other".
+ */
+export const WEBVIEW_NAVIGATION_TYPES = [
+  "link",
+  "form",
+  "backForward",
+  "reload",
+  "redirect",
+  "other",
+] as const;
+
+export type WebviewNavigationType = (typeof WEBVIEW_NAVIGATION_TYPES)[number];
+
+export const isWebviewNavigationType = (value: unknown): value is WebviewNavigationType =>
+  typeof value === "string" &&
+  (WEBVIEW_NAVIGATION_TYPES as readonly unknown[]).includes(value);
+
+/** Field-frozen `navigationAction` payload: every navigation decision point. */
+export interface WebviewNavigationActionPayload {
+  url: string;
+  navigationType: WebviewNavigationType;
+  /** Omitted when the platform cannot attribute a gesture (macOS). */
+  isUserInitiated?: boolean;
+}
+
+/** Field-frozen `faviconChange` payload: the settled, resolved href. */
+export interface WebviewFaviconPayload {
+  href: string;
+}
+
+/**
+ * Stable numeric `loadState failed` code for a navigation cancelled by a
+ * declarative navigation rule. Outside platform ranges by construction
+ * (WebView2 `WebErrorStatus` and WebKit domain codes are small integers).
+ */
+export const WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE = 4500001;
+
+/** One declarative navigation rule; v1 actions: block only. */
+export interface WebviewNavigationRule {
+  /** Glob over the full URL; `*` matches any character run. */
+  pattern: string;
+  action: "block";
+}
+
+export const isWebviewNavigationRule = (value: unknown): value is WebviewNavigationRule =>
+  isRecord(value) &&
+  typeof value.pattern === "string" &&
+  value.pattern.length > 0 &&
+  value.action === "block";
+
+/**
+ * Shared URL-glob semantics (identical implementation contract on the
+ * TypeScript facade and in the native rule evaluator): the pattern is
+ * matched against the full absolute URL; every character is literal
+ * except `*`, which matches any run of characters including separators.
+ */
+export const matchesWebviewNavigationPattern = (pattern: string, url: string): boolean => {
+  let source = "^";
+  for (const ch of pattern) {
+    if (ch === "*") {
+      source += "[\\s\\S]*";
+    } else {
+      source += ch.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(source + "$").test(url);
+};
 
 /** View-local logical-pixel rectangle; same fields as the page-bridge overlay payload. */
 export interface WebviewGeometryRect {
@@ -300,6 +402,8 @@ export type WebviewEventFrame = { type: "webview-event" } & {
     | { kind: "focused"; payload: { focused: boolean } }
     | { kind: "geometryChange"; payload: { rect: WebviewGeometryRect | null } }
     | { kind: "loadState"; payload: WebviewLoadStatePayload }
+    | { kind: "navigationAction"; payload: WebviewNavigationActionPayload }
+    | { kind: "faviconChange"; payload: WebviewFaviconPayload }
   );
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -360,6 +464,15 @@ export const isWebviewEventFrame = (value: unknown): value is WebviewEventFrame 
             value.payload.progress >= 0 &&
             value.payload.progress <= 1))
       );
+    case "navigationAction":
+      return (
+        typeof value.payload.url === "string" &&
+        isWebviewNavigationType(value.payload.navigationType) &&
+        (value.payload.isUserInitiated === undefined ||
+          typeof value.payload.isUserInitiated === "boolean")
+      );
+    case "faviconChange":
+      return typeof value.payload.href === "string" && value.payload.href.length > 0;
   }
 };
 

@@ -23,8 +23,8 @@ mod layout;
 mod load_state;
 mod metadata;
 mod overlay;
-mod popups;
 mod policy;
+mod popups;
 mod screen;
 mod style;
 mod window_delegate;
@@ -45,12 +45,8 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSResponder, NSScreen,
-    NSView,
-    NSWindow,
-    NSWindowDidBecomeKeyNotification,
-    NSWindowDidDeminiaturizeNotification,
-    NSWindowDidMiniaturizeNotification,
-    NSWindowDidResignKeyNotification,
+    NSView, NSWindow, NSWindowDidBecomeKeyNotification, NSWindowDidDeminiaturizeNotification,
+    NSWindowDidMiniaturizeNotification, NSWindowDidResignKeyNotification,
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSPoint, NSRect, NSSize, NSString};
 use objc2_web_kit::WKWebView;
@@ -68,9 +64,7 @@ use wry::{
 };
 
 use crate::bootstrap::{navigator_window_bootstrap_script, webview_bridge_bootstrap_script};
-use crate::layout::{
-    apply_sizing_patch, validated_solve, LogicalViewport, WindowLayoutState,
-};
+use crate::layout::{apply_sizing_patch, validated_solve, LogicalViewport, WindowLayoutState};
 use crate::orchestration::{
     webview_creation_allowed, DestroyOutcome, OpenOutcome, OrchestrationError, StyleFacts,
     ViewEvents, WindowOwner, WindowRegistry, DEFAULT_WEBVIEW_ID, DEFAULT_WINDOW_ID,
@@ -101,8 +95,8 @@ use self::metadata::{
     DEFAULT_WINDOW_TITLE,
 };
 use self::overlay::emit_overlay_geometry_change_if_enabled;
-use self::popups::{new_window_handler, PopupOpenConfig, SharedPopupLedger};
 use self::policy::{resolve_page_access, update_page_access_for_url};
+use self::popups::{new_window_handler, PopupOpenConfig, SharedPopupLedger};
 use self::screen::screen_details_json;
 use self::style::{
     apply_window_style, framed_window_style_mask, supported_background_effects,
@@ -397,8 +391,7 @@ pub(crate) struct MacosWebviewRuntime {
     popups: SharedPopupLedger,
     /// Host-bound channel events drained from sessions destroyed inside
     /// the current command (their window is gone before the flush runs).
-    pending_channel_events:
-        Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
+    pending_channel_events: Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)>,
     /// Per-instance EventPort state (D19 final review B1): set once at init
     /// from the owning `WebviewExtension`; every window session/bridge this
     /// runtime creates captures a clone, so producers keep addressing the
@@ -432,11 +425,7 @@ type AppModeLedger = Rc<RefCell<HashSet<String>>>;
 /// syncs the process-wide activation policy. Safe from any native main-
 /// thread callback; a no-op for non-app-mode windows whose membership is
 /// already absent.
-fn reconcile_app_mode_membership(
-    ledger: &AppModeLedger,
-    tray_id: &str,
-    is_live_app_mode: bool,
-) {
+fn reconcile_app_mode_membership(ledger: &AppModeLedger, tray_id: &str, is_live_app_mode: bool) {
     if is_live_app_mode {
         ledger.borrow_mut().insert(tray_id.to_string());
     } else {
@@ -753,10 +742,11 @@ impl MacosWebviewRuntime {
             WebviewCommand::Evaluate { js } => {
                 let show_settings = self.active_show_settings(tray_id);
                 let session = self.ensure_script_session(tray_id, show_settings)?;
-                let webview = primary_webview(&session.bridge)
-                    .ok_or_else(|| WebviewRuntimeError::Rejected(
+                let webview = primary_webview(&session.bridge).ok_or_else(|| {
+                    WebviewRuntimeError::Rejected(
                         "evaluate requires an active webview in this window".into(),
-                    ))?;
+                    )
+                })?;
                 unsafe { webview.as_ref() }
                     .evaluate_script(&js)
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
@@ -768,10 +758,11 @@ impl MacosWebviewRuntime {
                 let session = self.ensure_script_session(tray_id, show_settings)?;
                 let payload_json = serde_json::to_string(&payload)
                     .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
-                let webview = primary_webview(&session.bridge)
-                    .ok_or_else(|| WebviewRuntimeError::Rejected(
+                let webview = primary_webview(&session.bridge).ok_or_else(|| {
+                    WebviewRuntimeError::Rejected(
                         "postMessage requires an active webview in this window".into(),
-                    ))?;
+                    )
+                })?;
                 unsafe { webview.as_ref() }
                     .evaluate_script(&format!(
                         "window.dispatchEvent(new MessageEvent('message', {{ data: {payload_json} }}));"
@@ -789,9 +780,7 @@ impl MacosWebviewRuntime {
             }
             WebviewCommand::ResizeTo { width, height } => {
                 let session = self.require_session(tray_id, "resizeTo")?;
-                session
-                    .window
-                    .setContentSize(NSSize::new(width, height));
+                session.window.setContentSize(NSSize::new(width, height));
                 let response = json!({ "width": width, "height": height });
                 emit_window_event(&session.bridge, "resized", response.clone())?;
                 emit_overlay_geometry_change_if_enabled(&session.bridge, &session.window)?;
@@ -811,10 +800,7 @@ impl MacosWebviewRuntime {
                     let was_visible = window_is_visible(&session.window);
                     to_visible(&session.window);
                     emit_window_state_change(&session.bridge, &session.window, was_visible)?;
-                    session
-                        .focus_tracker
-                        .borrow()
-                        .reconcile(&session.window);
+                    session.focus_tracker.borrow().reconcile(&session.window);
                 }
                 self.reconcile_app_mode_window(tray_id);
                 self.focus_window(tray_id)?;
@@ -860,10 +846,7 @@ impl MacosWebviewRuntime {
             }
             WebviewCommand::SubscribeWindowEvents { events } => {
                 let session = self.require_session(tray_id, "subscribeWindowEvents")?;
-                session
-                    .bridge
-                    .borrow_mut()
-                    .subscribe_window_events(&events);
+                session.bridge.borrow_mut().subscribe_window_events(&events);
                 Ok(json!({ "type": "windowEventsSubscribed", "events": events }))
             }
             WebviewCommand::UnsubscribeWindowEvents { events } => {
@@ -938,9 +921,7 @@ impl MacosWebviewRuntime {
             // D26: auxiliary popups owned by the closing session close
             // with it; other owners' popups stay untouched. Dropping the
             // PopupWindow entries closes their carrier windows.
-            self.popups
-                .borrow_mut()
-                .close_all_of_session(session_id);
+            self.popups.borrow_mut().close_all_of_session(session_id);
             // harden-lifecycle-ownership D2: the destroy step revalidates
             // the collected owner tuple against the resident registry
             // state — a same-tray session that registered after this sweep
@@ -972,6 +953,8 @@ impl MacosWebviewRuntime {
                 html,
                 bridge,
                 browser,
+                favicon,
+                navigation_rules,
             } => {
                 let policy = bridge.unwrap_or_default();
                 if self.resolve_window(&owner, &window_id).is_none() {
@@ -996,6 +979,14 @@ impl MacosWebviewRuntime {
                         "create-webview accepts exactly one of url or html".into(),
                     ));
                 }
+                if let Some(rules) = navigation_rules.as_deref() {
+                    if rules.iter().any(|rule| rule.pattern.trim().is_empty()) {
+                        return Ok(typed_rejection(OrchestrationError::new(
+                            opentray_spec::webview::OrchestrationErrorCode::InvalidPayload,
+                            "navigation rules require a non-empty pattern",
+                        )));
+                    }
+                }
                 match self.create_child_webview(
                     &owner,
                     &window_id,
@@ -1004,8 +995,9 @@ impl MacosWebviewRuntime {
                     html,
                     policy,
                     browser,
-                )
-                {
+                    favicon,
+                    navigation_rules.unwrap_or_default(),
+                ) {
                     Ok(()) => {
                         // harden-lifecycle-ownership (user walkthrough finding,
                         // 2026-09-15): re-assert ordering and activation once
@@ -1195,6 +1187,44 @@ impl MacosWebviewRuntime {
                 }
                 None => return Ok(unknown_view_envelope(&owner, &webview_id)),
             },
+            Command::GetWebviewFavicon {
+                owner,
+                window_id,
+                webview_id,
+            } => match self.view_events(&owner, &window_id, &webview_id) {
+                Some(events) => {
+                    let events = events.borrow();
+                    WebviewOrchestrationResult::GetWebviewFaviconResult {
+                        owner,
+                        window_id,
+                        webview_id,
+                        href: events.favicon.clone(),
+                        seq: events.favicon_seq,
+                    }
+                }
+                None => return Ok(unknown_view_envelope(&owner, &webview_id)),
+            },
+            Command::SetWebviewNavigationRules {
+                owner,
+                window_id,
+                webview_id,
+                rules,
+            } => match self.view_events(&owner, &window_id, &webview_id) {
+                Some(events) => {
+                    if rules.iter().any(|rule| rule.pattern.trim().is_empty()) {
+                        return Ok(typed_rejection(OrchestrationError::new(
+                            opentray_spec::webview::OrchestrationErrorCode::InvalidPayload,
+                            "navigation rules require a non-empty pattern",
+                        )));
+                    }
+                    events.borrow_mut().navigation_rules = rules;
+                    WebviewOrchestrationResult::WebviewAck {
+                        owner,
+                        command: "set-webview-navigation-rules".to_string(),
+                    }
+                }
+                None => return Ok(unknown_view_envelope(&owner, &webview_id)),
+            },
             Command::SubscribeWebviewEvents {
                 owner,
                 window_id,
@@ -1264,7 +1294,12 @@ impl MacosWebviewRuntime {
                 let Some(session) = self.resolve_window(&owner, &window_id) else {
                     return Ok(unknown_window_envelope(&owner, &window_id));
                 };
-                let first_view = session.bridge.borrow().views.first().map(|view| view.id.clone());
+                let first_view = session
+                    .bridge
+                    .borrow()
+                    .views
+                    .first()
+                    .map(|view| view.id.clone());
                 // Materialize the effective document (the default layout
                 // becomes explicit on first update), merge the patch, then
                 // re-validate — an inverted patch rejects before any state
@@ -1332,7 +1367,10 @@ impl MacosWebviewRuntime {
                     owner.app_id, owner.tray_id, owner.session_id, owner.tray_id
                 )
             } else {
-                format!("tray {} has no webview window session to address", owner.tray_id)
+                format!(
+                    "tray {} has no webview window session to address",
+                    owner.tray_id
+                )
             };
             return Ok(channel_error_frame(&owner, code, message));
         };
@@ -1379,7 +1417,10 @@ impl MacosWebviewRuntime {
                 ref payload,
                 ..
             } => {
-                let outcome = registry.borrow_mut().post(&owner, sender, channel_id, payload.clone());
+                let outcome =
+                    registry
+                        .borrow_mut()
+                        .post(&owner, sender, channel_id, payload.clone());
                 match outcome {
                     Ok(receipt) => {
                         self::bridge::drain_channel_port_for(
@@ -1466,9 +1507,7 @@ impl MacosWebviewRuntime {
 
     /// Drains every live session's host-bound channel events plus events
     /// staged by sessions destroyed inside the current command.
-    fn flush_channel_events(
-        &mut self,
-    ) -> Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)> {
+    fn flush_channel_events(&mut self) -> Vec<(opentray_spec::webview::WebviewOwnerTuple, Value)> {
         let mut events = std::mem::take(&mut self.pending_channel_events);
         for session in self.sessions.values() {
             let channels = session.bridge.borrow().channels.clone();
@@ -1539,6 +1578,8 @@ impl MacosWebviewRuntime {
         html: Option<String>,
         policy: WebviewBridgePolicy,
         browser: Option<WebviewBrowserOptions>,
+        favicon: bool,
+        navigation_rules: Vec<opentray_spec::webview::WebviewNavigationRule>,
     ) -> Result<(), ChildCreateError> {
         MainThreadMarker::new().ok_or_else(|| {
             ChildCreateError::Runtime(WebviewRuntimeError::Unsupported(
@@ -1554,9 +1595,12 @@ impl MacosWebviewRuntime {
         // Register the view handle before the native build so a duplicate id
         // rejects with zero native state; a build failure rolls it back.
         let events = Rc::new(RefCell::new(ViewEvents::new(webview_id, policy)));
-        events
-            .borrow_mut()
-            .note_url_change(&window_owner, window_id, url.clone().unwrap_or_default());
+        events.borrow_mut().note_url_change(
+            &window_owner,
+            window_id,
+            url.clone().unwrap_or_default(),
+        );
+        events.borrow_mut().navigation_rules = navigation_rules;
         if let Err(error) = self.registry.add_view(&owner.tray_id, Rc::clone(&events)) {
             return Err(ChildCreateError::Typed(error));
         }
@@ -1569,6 +1613,7 @@ impl MacosWebviewRuntime {
             policy,
             browser.unwrap_or_default(),
             Rc::clone(&events),
+            favicon,
         );
         match build {
             Ok(native) => {
@@ -1576,10 +1621,11 @@ impl MacosWebviewRuntime {
                     .sessions
                     .get_mut(&owner.tray_id)
                     .ok_or_else(|| ChildCreateError::Typed(orphan_window_error(owner)))?;
-                session
-                    .focus_tracker
-                    .borrow_mut()
-                    .add_target(webview_id, native.webview.as_ref(), Rc::clone(&events));
+                session.focus_tracker.borrow_mut().add_target(
+                    webview_id,
+                    native.webview.as_ref(),
+                    Rc::clone(&events),
+                );
                 let mut tracker = session.layout_tracker.borrow_mut();
                 tracker.add_webview(webview_id, native.webview.as_ref(), Rc::clone(&events));
                 session.webviews.insert(webview_id.to_string(), native);
@@ -1606,6 +1652,7 @@ impl MacosWebviewRuntime {
         policy: WebviewBridgePolicy,
         browser: WebviewBrowserOptions,
         events: Rc<RefCell<ViewEvents>>,
+        favicon: bool,
     ) -> Result<NativeWebview, WebviewRuntimeError> {
         let session = self
             .sessions
@@ -1618,14 +1665,9 @@ impl MacosWebviewRuntime {
         // wry's child-build `ns_view.window().unwrap()` would abort the
         // broker on the first orchestration child (pre-existing mixed
         // primary+children defect, evidenced by the 8.3 smoke).
-        let host_view = AppKitViewHandle::new(
-            session
-                .window
-                .contentView()
-                .ok_or_else(|| {
-                    WebviewRuntimeError::Internal("webview window has no content view".into())
-                })?,
-        );
+        let host_view = AppKitViewHandle::new(session.window.contentView().ok_or_else(|| {
+            WebviewRuntimeError::Internal("webview window has no content view".into())
+        })?);
         let content_frame = host_view.ns_view.frame();
         let bridge = Rc::clone(&session.bridge);
         let window = session.window.clone();
@@ -1652,11 +1694,21 @@ impl MacosWebviewRuntime {
                 // D19: per-view titleChange pushes straight from the native
                 // observer into the outbox; window title metadata stays the
                 // primary webview's surface.
-                handle_view_title_changed(&events_for_title, &outbox_for_title, &owner_for_title, &title);
+                handle_view_title_changed(
+                    &events_for_title,
+                    &outbox_for_title,
+                    &owner_for_title,
+                    &title,
+                );
             })
             .with_on_page_load_handler(move |event, url| {
                 if matches!(event, PageLoadEvent::Started) {
-                    handle_view_url_started(&events_for_page_load, &outbox_for_page_load, &owner_for_page_load, &url);
+                    handle_view_url_started(
+                        &events_for_page_load,
+                        &outbox_for_page_load,
+                        &owner_for_page_load,
+                        &url,
+                    );
                     // D24: the commit phase starts the per-view load
                     // lifecycle; failures arrive through the loadState
                     // navigation delegate wrapper, intermediate progress
@@ -1736,13 +1788,28 @@ impl MacosWebviewRuntime {
 
         // Per-webview bridge policy (D2): a policy-less child gets no
         // bootstrap script and no ipc surface — the arbitrary-content webview
-        // is bridgeless by default.
-        if let Some(script) = webview_bridge_bootstrap_script(policy, webview_id) {
+        // is bridgeless by default. The `favicon` create option is the one
+        // exception: it injects the observe-only script (no bridge surface)
+        // so a bridgeless view can still report favicon changes.
+        if let Some(script) = webview_bridge_bootstrap_script(policy, webview_id, favicon)
+            .or_else(|| favicon.then(crate::bootstrap::favicon_observe_only_script))
+        {
             let bridge_for_ipc = Rc::clone(&bridge);
             let window_for_ipc = window.clone();
+            let events_for_favicon = Rc::clone(&events);
+            let outbox_for_favicon = Rc::downgrade(&session.event_outbox);
+            let owner_for_favicon = window_owner.clone();
             builder = builder
                 .with_initialization_script(script)
                 .with_ipc_handler(move |request| {
+                    if favicon {
+                        bridge::report_view_favicon(
+                            request.body(),
+                            &events_for_favicon,
+                            &outbox_for_favicon,
+                            &owner_for_favicon,
+                        );
+                    }
                     handle_navigator_window_request(
                         request.body(),
                         &bridge_for_ipc,
@@ -1780,7 +1847,10 @@ impl MacosWebviewRuntime {
         // the native hook stays off until a safe delegate path lands.
         let _ = browser_options.context_menu(policy.has_bridge_surface());
         let download_delegate = if session.show_settings.download.enabled {
-            Some(install_download_navigation_delegate(webview.as_ref(), &bridge)?)
+            Some(install_download_navigation_delegate(
+                webview.as_ref(),
+                &bridge,
+            )?)
         } else {
             None
         };
@@ -1851,7 +1921,10 @@ impl MacosWebviewRuntime {
             }
             // The layout document keeps its declaration; the re-solve simply
             // positions nothing for the destroyed id.
-            session.layout_tracker.borrow_mut().remove_webview(webview_id);
+            session
+                .layout_tracker
+                .borrow_mut()
+                .remove_webview(webview_id);
             session.layout_tracker.borrow_mut().relayout();
         }
         self.registry.remove_view(&expected, webview_id);
@@ -1861,11 +1934,13 @@ impl MacosWebviewRuntime {
         self.sessions.get(tray_id)
     }
 
-    fn require_session(&self, tray_id: &str, command: &str) -> Result<&WindowSession, WebviewRuntimeError> {
+    fn require_session(
+        &self,
+        tray_id: &str,
+        command: &str,
+    ) -> Result<&WindowSession, WebviewRuntimeError> {
         self.session(tray_id).ok_or_else(|| {
-            WebviewRuntimeError::Rejected(format!(
-                "{command} requires an active WebView window"
-            ))
+            WebviewRuntimeError::Rejected(format!("{command} requires an active WebView window"))
         })
     }
 
@@ -2217,12 +2292,16 @@ impl MacosWebviewRuntime {
             let webview = primary.webview;
             let mut download_delegate = primary.download_delegate;
             let load_state_delegate = primary.load_state_delegate;
-            focus_tracker
-                .borrow_mut()
-                .add_target(&primary_id, webview.as_ref(), Rc::clone(&primary.events));
-            layout_tracker
-                .borrow_mut()
-                .add_webview(&primary_id, webview.as_ref(), Rc::clone(&primary.events));
+            focus_tracker.borrow_mut().add_target(
+                &primary_id,
+                webview.as_ref(),
+                Rc::clone(&primary.events),
+            );
+            layout_tracker.borrow_mut().add_webview(
+                &primary_id,
+                webview.as_ref(),
+                Rc::clone(&primary.events),
+            );
             self.registry
                 .add_view(&tray_id, Rc::clone(&primary.events))
                 .map_err(orchestration_error)?;
@@ -2253,19 +2332,13 @@ impl MacosWebviewRuntime {
         url: Option<String>,
         show_settings: &WebviewShowSettings,
     ) -> Result<PrimaryWebview, WebviewRuntimeError> {
-        let host_view = AppKitViewHandle::new(
-            bridge
-                .borrow()
-                .content_view
-                .clone()
-                .ok_or_else(|| WebviewRuntimeError::Internal("webview window has no content view".into()))?,
-        );
+        let host_view =
+            AppKitViewHandle::new(bridge.borrow().content_view.clone().ok_or_else(|| {
+                WebviewRuntimeError::Internal("webview window has no content view".into())
+            })?);
         let webview_id = DEFAULT_WEBVIEW_ID.to_string();
         let policy = primary_bridge_policy(show_settings);
-        let events = Rc::new(RefCell::new(ViewEvents::new(
-            webview_id.clone(),
-            policy,
-        )));
+        let events = Rc::new(RefCell::new(ViewEvents::new(webview_id.clone(), policy)));
         let initial_url = url.clone().unwrap_or_default();
         events
             .borrow_mut()
@@ -2312,6 +2385,7 @@ impl MacosWebviewRuntime {
                 false,
                 false,
                 DEFAULT_WEBVIEW_ID,
+                false,
             ))
             .with_ipc_handler(move |request| {
                 handle_navigator_window_request(
@@ -2324,7 +2398,12 @@ impl MacosWebviewRuntime {
             .with_document_title_changed_handler(move |title| {
                 // D19: per-view titleChange pushes straight from the native
                 // observer; window title sync stays the window-level surface.
-                handle_view_title_changed(&events_for_title, &outbox_for_title, &owner_for_title, &title);
+                handle_view_title_changed(
+                    &events_for_title,
+                    &outbox_for_title,
+                    &owner_for_title,
+                    &title,
+                );
                 handle_document_title_changed(&bridge_for_title, &window_for_title, title);
             })
             .with_on_page_load_handler(move |event, url| {
@@ -2530,7 +2609,10 @@ impl MacosWebviewRuntime {
     /// Per-instance EventPort state (D19 final review B1): set once at
     /// `opentray_ext_init` from the owning extension instance; every session
     /// and bridge this runtime creates captures a clone.
-    pub(crate) fn set_port_state(&mut self, state: std::sync::Arc<crate::event_port::InstancePortState>) {
+    pub(crate) fn set_port_state(
+        &mut self,
+        state: std::sync::Arc<crate::event_port::InstancePortState>,
+    ) {
         self.port_state = state;
     }
 
@@ -2615,7 +2697,8 @@ fn register_bridge_view(
 /// standard Safari tokens appended through the public
 /// `applicationNameForUserAgent` hook (Apple's sanctioned append point — the
 /// engine prefix stays engine-truthful, only the app-name suffix is added).
-fn browserlike_configuration() -> Result<Retained<objc2_web_kit::WKWebViewConfiguration>, WebviewRuntimeError> {
+fn browserlike_configuration(
+) -> Result<Retained<objc2_web_kit::WKWebViewConfiguration>, WebviewRuntimeError> {
     let mtm = MainThreadMarker::new().ok_or_else(|| {
         WebviewRuntimeError::Unsupported("webview runtime requires the main thread".into())
     })?;
@@ -3176,10 +3259,7 @@ impl NavigatorWindowBridge {
     }
 
     fn add_listener(&mut self, webview_id: &str, event: String, handler_id: u32) -> Option<u32> {
-        let view = self
-            .views
-            .iter_mut()
-            .find(|view| view.id == webview_id)?;
+        let view = self.views.iter_mut().find(|view| view.id == webview_id)?;
         let event_id = view.next_event_id;
         view.next_event_id = view.next_event_id.wrapping_add(1);
         view.listeners
@@ -3324,20 +3404,18 @@ fn install_focus_observers(
     // pass through a facade command or the delegate close path.
     let miniaturize_bridge = Rc::downgrade(bridge);
     let miniaturize_window = window.clone();
-    let miniaturize_block =
-        RcBlock::new(move |_notification: NonNull<NSNotification>| {
-            if let Some(bridge) = miniaturize_bridge.upgrade() {
-                bridge.borrow().reconcile_app_mode(&miniaturize_window);
-            }
-        });
+    let miniaturize_block = RcBlock::new(move |_notification: NonNull<NSNotification>| {
+        if let Some(bridge) = miniaturize_bridge.upgrade() {
+            bridge.borrow().reconcile_app_mode(&miniaturize_window);
+        }
+    });
     let deminiaturize_bridge = Rc::downgrade(bridge);
     let deminiaturize_window = window.clone();
-    let deminiaturize_block =
-        RcBlock::new(move |_notification: NonNull<NSNotification>| {
-            if let Some(bridge) = deminiaturize_bridge.upgrade() {
-                bridge.borrow().reconcile_app_mode(&deminiaturize_window);
-            }
-        });
+    let deminiaturize_block = RcBlock::new(move |_notification: NonNull<NSNotification>| {
+        if let Some(bridge) = deminiaturize_bridge.upgrade() {
+            bridge.borrow().reconcile_app_mode(&deminiaturize_window);
+        }
+    });
     unsafe {
         vec![
             center.addObserverForName_object_queue_usingBlock(

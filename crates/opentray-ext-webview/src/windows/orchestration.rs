@@ -40,23 +40,27 @@
 //! `{ error: { code, message } }` envelope as the command response data
 //! (the extension ABI's own error channel is category-level).
 
-use std::cell::RefCell;
-use std::collections::{HashSet, VecDeque};
-use std::path::Path;
-use std::ptr::NonNull;
-use std::rc::{Rc, Weak};
+use std::{
+    cell::RefCell,
+    collections::HashSet,
+    collections::VecDeque,
+    path::Path,
+    ptr::NonNull,
+    rc::{Rc, Weak},
+};
 
 use opentray_spec::webview::{
     WebviewBoxStyle, WebviewBridgePolicy, WebviewEventFrame, WebviewLayoutDocument,
-    WebviewListEntry, WebviewLoadPhase, WebviewOrchestrationCommand, WebviewOrchestrationResult,
+    WebviewListEntry, WebviewLoadPhase, WebviewNavigationType, WebviewOrchestrationCommand,
+    WebviewOrchestrationResult,
 };
 use serde_json::Value;
+use webview2_com::Microsoft::Web::WebView2::Win32::{
+    ICoreWebView2NavigationCompletedEventArgs, ICoreWebView2NavigationStartingEventArgs,
+};
 use webview2_com::{
     take_pwstr, FocusChangedEventHandler, NavigationCompletedEventHandler,
     NavigationStartingEventHandler,
-};
-use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2NavigationCompletedEventArgs, ICoreWebView2NavigationStartingEventArgs,
 };
 use windows_core::{BOOL, PWSTR};
 use windows_sys::Win32::Foundation::HWND;
@@ -70,21 +74,19 @@ use wry::{
 };
 
 use crate::layout::{
-    project_overlay_safe_area, solve_layout, LogicalRect, LogicalViewport, LayoutSolution,
-    LayoutViewKey,
+    project_overlay_safe_area, solve_layout, LayoutSolution, LayoutViewKey, LogicalRect,
+    LogicalViewport,
 };
-use crate::orchestration::{
-    webview_creation_allowed, OrchestrationError, ViewEvents, WindowOwner,
-};
+use crate::orchestration::{webview_creation_allowed, OrchestrationError, ViewEvents, WindowOwner};
 
 use super::box_view::{BoxHostWindow, PhysicalBoxRect};
 use super::{
-    appwindow_titlebar_metrics, client_webview_bounds, handle_navigator_window_request,
-    native_host_paint_policy, backdrop_state_policy, physical_client_size,
-    sync_window_proc_state, webview_parent_hwnd, webview_controller_rect, windows_geometry,
-    emit_window_event_to_view, NavigatorWindowBridge, WebViewBridgeView, WebviewRuntimeError,
-    WebviewShowSettings, WebviewContentDescriptor, Win32HostWindow, WindowsNativeHostPaint,
-    WindowsBackdropStatePolicy, WindowSizeConstraints,
+    appwindow_titlebar_metrics, backdrop_state_policy, client_webview_bounds,
+    emit_window_event_to_view, handle_navigator_window_request, native_host_paint_policy,
+    physical_client_size, sync_window_proc_state, webview_controller_rect, webview_parent_hwnd,
+    windows_geometry, NavigatorWindowBridge, WebViewBridgeView, WebviewContentDescriptor,
+    WebviewRuntimeError, WebviewShowSettings, Win32HostWindow, WindowSizeConstraints,
+    WindowsBackdropStatePolicy, WindowsNativeHostPaint,
 };
 
 /// Owner identity + D19 push-event legacy fallback outbox shared between the
@@ -257,14 +259,20 @@ impl Drop for WindowSession {
 
 impl WindowSession {
     /// Registers a controller into the session + bridge bookkeeping.
-    pub(super) fn register_webview(&mut self, mut entry: SessionWebview, policy: WebviewBridgePolicy) {
+    pub(super) fn register_webview(
+        &mut self,
+        mut entry: SessionWebview,
+        policy: WebviewBridgePolicy,
+    ) {
         let id = entry.id.clone();
         let events = Rc::clone(&entry.events);
         let webview_ptr = NonNull::from(entry.webview.as_mut());
-        self.bridge
-            .borrow_mut()
-            .views
-            .push(WebViewBridgeView::new(&id, policy, webview_ptr, events));
+        self.bridge.borrow_mut().views.push(WebViewBridgeView::new(
+            &id,
+            policy,
+            webview_ptr,
+            events,
+        ));
         self.webviews.push(entry);
         self.sync_proc_webviews();
     }
@@ -315,10 +323,7 @@ impl WindowSession {
 
 /// Styles a controller-creation failure with the resolved profile path —
 /// the Windows WebView2 Profile Law's error-shape contract.
-pub(super) fn controller_creation_error(
-    profile: &Path,
-    cause: wry::Error,
-) -> WebviewRuntimeError {
+pub(super) fn controller_creation_error(profile: &Path, cause: wry::Error) -> WebviewRuntimeError {
     WebviewRuntimeError::Internal(format!(
         "WebView2 creation failed using profile '{}': {cause}",
         profile.display()
@@ -343,14 +348,12 @@ pub(super) fn install_focus_observers(
     unsafe {
         controller
             .add_GotFocus(
-                &FocusChangedEventHandler::create(Box::new(
-                    move |_sender, _args| {
-                        if let Some(tracker) = gained_tracker.upgrade() {
-                            tracker.borrow_mut().view_gained_focus(&gained_id);
-                        }
-                        Ok(())
-                    },
-                )),
+                &FocusChangedEventHandler::create(Box::new(move |_sender, _args| {
+                    if let Some(tracker) = gained_tracker.upgrade() {
+                        tracker.borrow_mut().view_gained_focus(&gained_id);
+                    }
+                    Ok(())
+                })),
                 &mut gained_token,
             )
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
@@ -361,14 +364,12 @@ pub(super) fn install_focus_observers(
     unsafe {
         controller
             .add_LostFocus(
-                &FocusChangedEventHandler::create(Box::new(
-                    move |_sender, _args| {
-                        if let Some(tracker) = lost_tracker.upgrade() {
-                            tracker.borrow_mut().view_lost_focus(&lost_id);
-                        }
-                        Ok(())
-                    },
-                )),
+                &FocusChangedEventHandler::create(Box::new(move |_sender, _args| {
+                    if let Some(tracker) = lost_tracker.upgrade() {
+                        tracker.borrow_mut().view_lost_focus(&lost_id);
+                    }
+                    Ok(())
+                })),
                 &mut lost_token,
             )
             .map_err(|error| WebviewRuntimeError::Internal(error.to_string()))?;
@@ -398,11 +399,18 @@ pub(super) fn install_load_state_observers(
     // records the pending navigation's URL so the completion (or failure)
     // frame reports the navigation it belongs to.
     let pending_url = Rc::new(RefCell::new(String::new()));
+    // add-navigation-favicon-surface: navigation ids cancelled by a
+    // declarative rule. A cancelled WebView2 navigation still fires
+    // NavigationCompleted (IsSuccess = false, OperationCanceled); the
+    // completed handler swaps that platform status for the stable
+    // `navigation_blocked` code exactly once per blocked id.
+    let blocked_ids = Rc::new(RefCell::new(HashSet::<u64>::new()));
 
     let start_events = Rc::clone(events);
     let start_outbox = Weak::clone(outbox);
     let start_owner = owner.clone();
     let start_pending = Rc::clone(&pending_url);
+    let start_blocked = Rc::clone(&blocked_ids);
     let mut start_token = 0i64;
     unsafe {
         core.add_NavigationStarting(
@@ -416,19 +424,65 @@ pub(super) fn install_load_state_observers(
                         args.Uri(&mut pointer)?;
                         take_pwstr(pointer)
                     };
+                    let mut is_user_initiated = BOOL::default();
+                    let _ = args.IsUserInitiated(&mut is_user_initiated);
+                    let mut is_redirected = BOOL::default();
+                    let _ = args.IsRedirected(&mut is_redirected);
+                    let navigation_id = {
+                        let mut id = 0u64;
+                        let _ = args.NavigationId(&mut id);
+                        id
+                    };
+                    // The decision point: `navigationAction` observation
+                    // first (Windows projection truth: IsRedirected maps to
+                    // redirect exactly; an unredirected user-initiated
+                    // navigation maps to link — link/form are not separable;
+                    // everything else is other), then the synchronous rule
+                    // veto. A blocked navigation never reports `started` and
+                    // never seeds the pending url.
+                    let navigation_type = if is_redirected.as_bool() {
+                        WebviewNavigationType::Redirect
+                    } else if is_user_initiated.as_bool() {
+                        WebviewNavigationType::Link
+                    } else {
+                        WebviewNavigationType::Other
+                    };
+                    push_view_event(
+                        &start_events,
+                        &start_outbox,
+                        &start_owner,
+                        |events, owner, window_id| {
+                            events.note_navigation_action(
+                                owner,
+                                window_id,
+                                uri.clone(),
+                                navigation_type,
+                                Some(is_user_initiated.as_bool()),
+                            )
+                        },
+                    );
+                    let blocked = !uri.is_empty() && start_events.borrow().navigation_blocked(&uri);
+                    if blocked {
+                        start_blocked.borrow_mut().insert(navigation_id);
+                        args.SetCancel(true)?;
+                        return Ok(());
+                    }
                     *start_pending.borrow_mut() = uri.clone();
-                    push_view_event(&start_events, &start_outbox, &start_owner, |events,
-                                                                                    owner,
-                                                                                    window_id| {
-                        events.note_load_state(
-                            owner,
-                            window_id,
-                            WebviewLoadPhase::Started,
-                            uri.clone(),
-                            None,
-                            None,
-                        )
-                    });
+                    push_view_event(
+                        &start_events,
+                        &start_outbox,
+                        &start_owner,
+                        |events, owner, window_id| {
+                            events.note_load_state(
+                                owner,
+                                window_id,
+                                WebviewLoadPhase::Started,
+                                uri.clone(),
+                                None,
+                                None,
+                            )
+                        },
+                    );
                     Ok(())
                 },
             )),
@@ -441,6 +495,7 @@ pub(super) fn install_load_state_observers(
     let done_outbox = Weak::clone(outbox);
     let done_owner = owner.clone();
     let done_pending = Rc::clone(&pending_url);
+    let done_blocked = Rc::clone(&blocked_ids);
     let mut done_token = 0i64;
     unsafe {
         core.add_NavigationCompleted(
@@ -452,6 +507,33 @@ pub(super) fn install_load_state_observers(
                     };
                     let mut success = BOOL::default();
                     args.IsSuccess(&mut success)?;
+                    // A rule-blocked navigation completes as cancelled;
+                    // report the stable blocked code instead of the
+                    // platform's OperationCanceled status.
+                    let blocked_navigation_id = {
+                        let mut id = 0u64;
+                        let _ = args.NavigationId(&mut id);
+                        id
+                    };
+                    if done_blocked.borrow_mut().remove(&blocked_navigation_id) {
+                        let url = done_pending.borrow().clone();
+                        push_view_event(
+                            &done_events,
+                            &done_outbox,
+                            &done_owner,
+                            |events, owner, window_id| {
+                                events.note_load_state(
+                                    owner,
+                                    window_id,
+                                    WebviewLoadPhase::Failed,
+                                    url.clone(),
+                                    Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
+                                    None,
+                                )
+                            },
+                        );
+                        return Ok(());
+                    }
                     let url = done_pending.borrow().clone();
                     if success.as_bool() {
                         push_view_event(
@@ -896,12 +978,7 @@ pub(super) fn overlay_safe_area_from_metrics(
     let left = (metrics.left_inset / scale).max(0.0);
     let right = (metrics.right_inset / scale).max(0.0);
     let height = (metrics.height / scale).max(0.0);
-    LogicalRect::new(
-        left,
-        0.0,
-        (viewport.width - left - right).max(0.0),
-        height,
-    )
+    LogicalRect::new(left, 0.0, (viewport.width - left - right).max(0.0), height)
 }
 
 /// Recomputes every view's overlay/titlebar projection and pushes both
@@ -945,8 +1022,8 @@ pub(super) fn refresh_overlay_projection(hwnd: HWND, bridge: &RefCell<NavigatorW
         // The frozen wire/page payload DTO (field-isomorphic with the page
         // bridge's `overlay.geometrychange`); `null` when the view does not
         // intersect the overlay region.
-        let projected = project_overlay_safe_area(safe_area, view_rect)
-            .map(|rect| rect.to_geometry_rect());
+        let projected =
+            project_overlay_safe_area(safe_area, view_rect).map(|rect| rect.to_geometry_rect());
         let previous = events.borrow().overlay_rect;
         let frame = events
             .borrow_mut()
@@ -965,9 +1042,7 @@ pub(super) fn refresh_overlay_projection(hwnd: HWND, bridge: &RefCell<NavigatorW
                 "overlay.geometrychange",
                 serde_json::json!({ "rect": projected }),
             ) {
-                eprintln!(
-                    "opentray-ext-webview failed to emit per-view geometry change: {error}"
-                );
+                eprintln!("opentray-ext-webview failed to emit per-view geometry change: {error}");
             }
         }
     }
@@ -997,6 +1072,8 @@ impl super::WindowsWebviewRuntime {
                 html,
                 bridge,
                 browser,
+                favicon,
+                navigation_rules,
             } => {
                 let policy = bridge.unwrap_or_default();
                 if self.resolve_window(&owner, &window_id).is_none() {
@@ -1021,6 +1098,14 @@ impl super::WindowsWebviewRuntime {
                         "create-webview accepts exactly one of url or html".into(),
                     ));
                 }
+                if let Some(rules) = navigation_rules.as_deref() {
+                    if rules.iter().any(|rule| rule.pattern.trim().is_empty()) {
+                        return Ok(typed_rejection(OrchestrationError::new(
+                            opentray_spec::webview::OrchestrationErrorCode::InvalidPayload,
+                            "navigation rules require a non-empty pattern",
+                        )));
+                    }
+                }
                 match self.create_child_webview(
                     &owner,
                     &window_id,
@@ -1029,8 +1114,9 @@ impl super::WindowsWebviewRuntime {
                     html,
                     policy,
                     browser,
-                )
-                {
+                    favicon,
+                    navigation_rules.unwrap_or_default(),
+                ) {
                     Ok(()) => WebviewOrchestrationResult::WebviewAck {
                         owner,
                         command: "create-webview".to_string(),
@@ -1140,16 +1226,16 @@ impl super::WindowsWebviewRuntime {
                 let Some(session) = self.resolve_window(&owner, &window_id) else {
                     return Ok(unknown_window_envelope(&owner, &window_id));
                 };
-                let Some(native) =
-                    session.webviews.iter().find(|view| view.id == webview_id)
+                let Some(native) = session.webviews.iter().find(|view| view.id == webview_id)
                 else {
                     return Ok(unknown_view_envelope(&owner, &webview_id));
                 };
                 let hwnd = session.window.hwnd;
-                session
-                    .focus_tracker
-                    .borrow_mut()
-                    .focus_view(hwnd, &webview_id, native.webview.as_ref())?;
+                session.focus_tracker.borrow_mut().focus_view(
+                    hwnd,
+                    &webview_id,
+                    native.webview.as_ref(),
+                )?;
                 WebviewOrchestrationResult::WebviewAck {
                     owner,
                     command: "focus-webview".to_string(),
@@ -1185,6 +1271,44 @@ impl super::WindowsWebviewRuntime {
                         webview_id,
                         title: events.title.clone(),
                         seq: events.title_seq,
+                    }
+                }
+                None => return Ok(unknown_view_envelope(&owner, &webview_id)),
+            },
+            Command::GetWebviewFavicon {
+                owner,
+                window_id,
+                webview_id,
+            } => match self.view_events(&owner, &window_id, &webview_id) {
+                Some(events) => {
+                    let events = events.borrow();
+                    WebviewOrchestrationResult::GetWebviewFaviconResult {
+                        owner,
+                        window_id,
+                        webview_id,
+                        href: events.favicon.clone(),
+                        seq: events.favicon_seq,
+                    }
+                }
+                None => return Ok(unknown_view_envelope(&owner, &webview_id)),
+            },
+            Command::SetWebviewNavigationRules {
+                owner,
+                window_id,
+                webview_id,
+                rules,
+            } => match self.view_events(&owner, &window_id, &webview_id) {
+                Some(events) => {
+                    if rules.iter().any(|rule| rule.pattern.trim().is_empty()) {
+                        return Ok(typed_rejection(OrchestrationError::new(
+                            opentray_spec::webview::OrchestrationErrorCode::InvalidPayload,
+                            "navigation rules require a non-empty pattern",
+                        )));
+                    }
+                    events.borrow_mut().navigation_rules = rules;
+                    WebviewOrchestrationResult::WebviewAck {
+                        owner,
+                        command: "set-webview-navigation-rules".to_string(),
                     }
                 }
                 None => return Ok(unknown_view_envelope(&owner, &webview_id)),
@@ -1276,8 +1400,11 @@ impl super::WindowsWebviewRuntime {
                 }
                 let (view_ids, viewport) =
                     session_layout_inputs(&session.bridge, session.window.hwnd);
-                match crate::layout::validated_solve(&document, &|id| view_ids.contains(id), viewport)
-                {
+                match crate::layout::validated_solve(
+                    &document,
+                    &|id| view_ids.contains(id),
+                    viewport,
+                ) {
                     Err(error) => return Ok(typed_rejection(error)),
                     Ok(solution) => {
                         session.bridge.borrow_mut().layout.document = Some(document);
@@ -1357,6 +1484,7 @@ impl super::WindowsWebviewRuntime {
     /// session's shared WebContext, then registration into the session,
     /// focus tracker, bridge, and the layout transaction (the effective
     /// layout decides the child's place immediately).
+    #[allow(clippy::too_many_arguments)]
     fn create_child_webview(
         &mut self,
         owner: &opentray_spec::webview::WebviewOwnerTuple,
@@ -1366,6 +1494,8 @@ impl super::WindowsWebviewRuntime {
         html: Option<String>,
         policy: WebviewBridgePolicy,
         browser: Option<opentray_spec::webview::WebviewBrowserOptions>,
+        favicon: bool,
+        navigation_rules: Vec<opentray_spec::webview::WebviewNavigationRule>,
     ) -> Result<(), ChildCreateError> {
         let window_owner = WindowOwner {
             app_id: owner.app_id.clone(),
@@ -1374,9 +1504,12 @@ impl super::WindowsWebviewRuntime {
             window_id: window_id.to_string(),
         };
         let events = Rc::new(RefCell::new(ViewEvents::new(webview_id, policy)));
-        events
-            .borrow_mut()
-            .note_url_change(&window_owner, window_id, url.clone().unwrap_or_default());
+        events.borrow_mut().note_url_change(
+            &window_owner,
+            window_id,
+            url.clone().unwrap_or_default(),
+        );
+        events.borrow_mut().navigation_rules = navigation_rules;
         if let Err(error) = self.registry.add_view(&owner.tray_id, Rc::clone(&events)) {
             return Err(ChildCreateError::Typed(error));
         }
@@ -1389,6 +1522,7 @@ impl super::WindowsWebviewRuntime {
             policy,
             browser.unwrap_or_default(),
             Rc::clone(&events),
+            favicon,
         );
         match build {
             Ok(entry) => {
@@ -1428,6 +1562,7 @@ impl super::WindowsWebviewRuntime {
         policy: WebviewBridgePolicy,
         browser: opentray_spec::webview::WebviewBrowserOptions,
         events: Rc<RefCell<ViewEvents>>,
+        favicon: bool,
     ) -> Result<SessionWebview, WebviewRuntimeError> {
         // D26 popup capture: taken before the session borrow so the
         // new-window closure holds the tracker weakly (a runtime that is
@@ -1459,10 +1594,7 @@ impl super::WindowsWebviewRuntime {
         // popup configurability (e.g. window.toolbar carrier inheritance)
         // projects through PopupOpenContext, never loose captures here.
         let popup_context = super::popups::PopupOpenContext {
-            session_id: window_owner
-                .session_id
-                .clone()
-                .unwrap_or_default(),
+            session_id: window_owner.session_id.clone().unwrap_or_default(),
             opener_hwnd: host_window.hwnd,
         };
 
@@ -1478,11 +1610,14 @@ impl super::WindowsWebviewRuntime {
                 // D19: per-view titleChange pushes straight from the native
                 // observer; window title metadata stays the primary
                 // webview's surface.
-                push_view_event(&events_for_title, &outbox_for_title, &owner_for_title, |events,
-                                                                                          owner,
-                                                                                          window_id| {
-                    events.note_title_change(owner, window_id, title.clone())
-                });
+                push_view_event(
+                    &events_for_title,
+                    &outbox_for_title,
+                    &owner_for_title,
+                    |events, owner, window_id| {
+                        events.note_title_change(owner, window_id, title.clone())
+                    },
+                );
             })
             .with_on_page_load_handler(move |event, url| {
                 if matches!(event, wry::PageLoadEvent::Started) {
@@ -1543,13 +1678,29 @@ impl super::WindowsWebviewRuntime {
 
         // Per-webview bridge policy (D2): a policy-less child gets no
         // bootstrap script and no ipc surface — the arbitrary-content
-        // webview is bridgeless by default.
-        if let Some(script) = crate::bootstrap::webview_bridge_bootstrap_script(policy, &webview_id) {
+        // webview is bridgeless by default. The `favicon` create option is
+        // the one exception: it injects the observe-only script (no bridge
+        // surface) so a bridgeless view can still report favicon changes.
+        if let Some(script) =
+            crate::bootstrap::webview_bridge_bootstrap_script(policy, &webview_id, favicon)
+                .or_else(|| favicon.then(crate::bootstrap::favicon_observe_only_script))
+        {
             let bridge_for_ipc = Rc::clone(&bridge);
             let webview_id_for_ipc = webview_id.to_string();
+            let events_for_favicon = Rc::clone(&events);
+            let outbox_for_favicon = Rc::downgrade(&session.event_core);
+            let owner_for_favicon = window_owner.clone();
             builder = builder
                 .with_initialization_script(script)
                 .with_ipc_handler(move |request| {
+                    if favicon {
+                        report_view_favicon(
+                            request.body(),
+                            &events_for_favicon,
+                            &outbox_for_favicon,
+                            &owner_for_favicon,
+                        );
+                    }
                     handle_navigator_window_request(
                         request.body(),
                         &bridge_for_ipc,
@@ -1582,7 +1733,9 @@ impl super::WindowsWebviewRuntime {
                 // the bridge surface (any capability ⇒ no menu via
                 // AreDefaultContextMenusEnabled); an explicit contextMenu
                 // value wins either way.
-                .with_default_context_menus(browser_options.context_menu(policy.has_bridge_surface()))
+                .with_default_context_menus(
+                    browser_options.context_menu(policy.has_bridge_surface()),
+                )
                 .build_as_child(host_window)
                 .map_err(|error| controller_creation_error(&profile_path, error))?,
         );
@@ -1677,6 +1830,37 @@ pub(super) fn push_event_frame(
     if matches!(status, crate::event_port::SubmitStatus::LegacyFlush) {
         core.borrow_mut().outbox.push_back(frame);
     }
+}
+
+/// add-navigation-favicon-surface: page-side favicon reports turned into
+/// per-view `faviconChange` frames (Latest class). Shared shape with the
+/// macOS bridge interceptor; the observe-only bootstrap script and the
+/// bridged observer both post `opentray.window.sync::pageIconChanged`.
+fn report_view_favicon(
+    message: &str,
+    events: &Rc<RefCell<ViewEvents>>,
+    outbox: &Weak<RefCell<SessionEventCore>>,
+    owner: &WindowOwner,
+) {
+    let Ok(value) = serde_json::from_str::<Value>(message) else {
+        return;
+    };
+    if value.get("namespace").and_then(Value::as_str) != Some("opentray.window.sync")
+        || value.get("cmd").and_then(Value::as_str) != Some("pageIconChanged")
+    {
+        return;
+    }
+    let Some(href) = value
+        .get("payload")
+        .and_then(|payload| payload.get("href"))
+        .and_then(Value::as_str)
+        .filter(|href| !href.is_empty())
+    else {
+        return;
+    };
+    push_view_event(events, outbox, owner, |events, owner, window_id| {
+        events.note_favicon_change(owner, window_id, href.to_string())
+    });
 }
 
 /// Pushes one D19 event frame from a native observer through the routing
@@ -1776,8 +1960,8 @@ mod tests {
 
     fn solved_column_with_box() -> LayoutSolution {
         // toolbar (44) / content (rest) plus one border box layer.
-        let document: opentray_spec::webview::WebviewLayoutDocument = serde_json::from_value(
-            serde_json::json!({
+        let document: opentray_spec::webview::WebviewLayoutDocument =
+            serde_json::from_value(serde_json::json!({
                 "layers": [
                     { "root": { "dir": "column", "children": [
                         { "id": "toolbar", "height": 44 },
@@ -1785,11 +1969,16 @@ mod tests {
                     ]}},
                     { "root": { "kind": "box", "id": "ring", "width": 120, "height": 40 } }
                 ]
-            }),
+            }))
+            .expect("document");
+        solve_layout(
+            &document,
+            LogicalViewport {
+                width: 800.0,
+                height: 600.0,
+            },
         )
-        .expect("document");
-        solve_layout(&document, LogicalViewport { width: 800.0, height: 600.0 })
-            .expect("solve")
+        .expect("solve")
     }
 
     /// The WM_SIZE ordering-law face: one apply pass covers every controller
@@ -1863,7 +2052,10 @@ mod tests {
             WebviewRuntimeError::Internal(message) => message,
             other => panic!("expected internal error, got {other:?}"),
         };
-        assert!(message.contains(r"webview\1.0.0\caller"), "message: {message}");
+        assert!(
+            message.contains(r"webview\1.0.0\caller"),
+            "message: {message}"
+        );
         assert!(message.starts_with("WebView2 creation failed using profile"));
     }
 
@@ -1965,7 +2157,10 @@ mod tests {
         // Phase 1: the sweep collects the closing session's entries.
         let collected = registry.session_closed("session-old");
         assert_eq!(collected.len(), 1);
-        let stale = collected[0].owner.clone().expect("attributed closing entry");
+        let stale = collected[0]
+            .owner
+            .clone()
+            .expect("attributed closing entry");
 
         // Phase 2: a new same-tray session becomes resident before the
         // destroy step runs.

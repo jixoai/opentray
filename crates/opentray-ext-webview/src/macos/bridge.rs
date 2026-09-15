@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::channels::{ChannelPush, ChannelSender};
-use crate::orchestration::OrchestrationError;
+use crate::orchestration::{OrchestrationError, ViewEvents};
 use crate::{WebviewRuntimeError, WebviewWindowIcon};
 
 use super::{
@@ -98,6 +98,41 @@ struct ExecCommandPayload {
 #[derive(Debug, Deserialize)]
 struct TitlePayload {
     title: String,
+}
+
+/// add-navigation-favicon-surface: page-side favicon reports. The
+/// bootstrap observer (bridged views) and the observe-only script
+/// (bridgeless `favicon` views) both post
+/// `opentray.window.sync::pageIconChanged { href }`; this interceptor turns
+/// the settled absolute href into a per-view `faviconChange` frame (Latest
+/// class) before the request continues into the private-sync dispatcher,
+/// whose window-icon path still applies its own metadata-sync gates.
+pub(super) fn report_view_favicon(
+    message: &str,
+    events: &Rc<RefCell<ViewEvents>>,
+    outbox: &crate::macos::WeakEventOutbox,
+    owner: &crate::orchestration::WindowOwner,
+) {
+    let Ok(value) = serde_json::from_str::<Value>(message) else {
+        return;
+    };
+    if value.get("namespace").and_then(Value::as_str) != Some("opentray.window.sync")
+        || value.get("cmd").and_then(Value::as_str) != Some("pageIconChanged")
+    {
+        return;
+    }
+    let Some(href) = value
+        .get("payload")
+        .and_then(|payload| payload.get("href"))
+        .and_then(Value::as_str)
+        .filter(|href| !href.is_empty())
+    else {
+        return;
+    };
+    let frame = events
+        .borrow_mut()
+        .note_favicon_change(owner, &owner.window_id, href.to_string());
+    super::push_event_frame(outbox, frame);
 }
 
 pub(super) fn handle_navigator_window_request(
@@ -204,14 +239,12 @@ pub(super) fn handle_navigator_window_request(
                             if let Err(error) =
                                 evaluate_bridge_script(bridge, Some(source_webview), script)
                             {
-                                eprintln!(
-                                    "opentray-ext-webview channel reject failed: {error}"
-                                );
+                                eprintln!("opentray-ext-webview channel reject failed: {error}");
                             }
                         }
-                        Err(error) => eprintln!(
-                            "opentray-ext-webview channel reject script failed: {error}"
-                        ),
+                        Err(error) => {
+                            eprintln!("opentray-ext-webview channel reject script failed: {error}")
+                        }
                     }
                     return;
                 }
@@ -227,7 +260,9 @@ pub(super) fn handle_navigator_window_request(
             if request.namespace == PERMISSIONS_NAMESPACE {
                 return;
             }
-            if let Err(error) = resolve_callback(bridge, Some(source_webview), request.callback, response) {
+            if let Err(error) =
+                resolve_callback(bridge, Some(source_webview), request.callback, response)
+            {
                 eprintln!("opentray-ext-webview navigator callback failed: {error}");
             } else if webview_debug_enabled() {
                 eprintln!(
@@ -421,9 +456,10 @@ pub(super) fn dispatch_webview_channel_command(
             if let Some(error) = super::channel_target_error(bridge, &target) {
                 return Err(error);
             }
-            let created = registry
-                .borrow_mut()
-                .create(&owner, ChannelPeer::webview(source_webview), target);
+            let created =
+                registry
+                    .borrow_mut()
+                    .create(&owner, ChannelPeer::webview(source_webview), target);
             match created {
                 Ok((channel_id, push)) => {
                     deliver_channel_pushes(bridge, std::slice::from_ref(&push), None);
@@ -442,7 +478,9 @@ pub(super) fn dispatch_webview_channel_command(
             let outcome = match required_channel_id(&payload) {
                 Ok(channel_id) => {
                     let message = payload.get("payload").cloned().unwrap_or(Value::Null);
-                    let posted = registry.borrow_mut().post(&owner, sender, &channel_id, message);
+                    let posted = registry
+                        .borrow_mut()
+                        .post(&owner, sender, &channel_id, message);
                     posted.map(|receipt| (channel_id, receipt))
                 }
                 Err(error) => Err(crate::channels::ChannelPostError {
@@ -536,8 +574,7 @@ fn channel_created_script(channel_id: &str) -> String {
 }
 
 fn channel_message_script(channel_id: &str, payload: &Value) -> String {
-    let payload_json =
-        serde_json::to_string(payload).unwrap_or_else(|_| "null".to_string());
+    let payload_json = serde_json::to_string(payload).unwrap_or_else(|_| "null".to_string());
     format!(
         "{WINDOW_INTERNALS_GLOBAL}.channelMessage({}, {payload_json});",
         serde_json::to_string(channel_id).unwrap_or_else(|_| "\"\"".to_string())
@@ -568,10 +605,7 @@ pub(super) fn deliver_channel_pushes(
             ChannelPush::Created {
                 target_view,
                 channel_id,
-            } => (
-                target_view.clone(),
-                channel_created_script(channel_id),
-            ),
+            } => (target_view.clone(), channel_created_script(channel_id)),
             ChannelPush::Closed {
                 view,
                 channel_id,
@@ -659,7 +693,10 @@ pub(super) fn submit_host_channel_events(bridge: &Rc<RefCell<NavigatorWindowBrid
         return;
     }
     let state = bridge.borrow_mut();
-    state.channels.borrow_mut().requeue_host_events_front(retained);
+    state
+        .channels
+        .borrow_mut()
+        .requeue_host_events_front(retained);
 }
 
 pub(super) fn drain_channel_port_for(
@@ -739,7 +776,10 @@ pub(super) fn handle_view_channel_page_finished(
         let mut state = bridge.borrow_mut();
         state.channel_loaded_views.insert(view_id.to_string());
         state.channel_live_views.insert(view_id.to_string());
-        state.pending_channel_pushes.remove(view_id).unwrap_or_default()
+        state
+            .pending_channel_pushes
+            .remove(view_id)
+            .unwrap_or_default()
     };
     for script in pending {
         if let Err(error) = evaluate_bridge_script(bridge, Some(view_id), script) {
@@ -772,9 +812,10 @@ fn dispatch_navigator_window_command(
             let payload: ListenPayload = serde_json::from_value(payload).map_err(|error| {
                 WebviewRuntimeError::Rejected(format!("listen requires event and handler: {error}"))
             })?;
-            let event_id = bridge
-                .borrow_mut()
-                .add_listener(source_webview, payload.event, payload.handler);
+            let event_id =
+                bridge
+                    .borrow_mut()
+                    .add_listener(source_webview, payload.event, payload.handler);
             let event_id = event_id.ok_or_else(|| {
                 WebviewRuntimeError::Rejected(
                     "listen is not available for this webview's bridge".into(),
@@ -1105,7 +1146,8 @@ pub(super) fn apply_window_style_patch(
             crate::orchestration::style_change_allowed(facts, bridge_state.views.len())
         {
             return Err(WebviewRuntimeError::Rejected(
-                serde_json::to_string(&error.envelope).unwrap_or_else(|_| error.code().as_str().to_string()),
+                serde_json::to_string(&error.envelope)
+                    .unwrap_or_else(|_| error.code().as_str().to_string()),
             ));
         }
     }

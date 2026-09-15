@@ -86,15 +86,15 @@
 //! callbacks keep the state allocated but can only observe the closed port,
 //! so unloading cleans the mapping without a process-wide registry.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use opentray_spec::webview::{
     WebviewEventFrame, WebviewEventKind, WebviewEventPayload, WebviewLoadPhase,
 };
 use opentray_spec::{
-    EXT_ERR_BACKPRESSURE, EXT_ERR_PORT_CLOSED, EXT_EVENT_PORT_ABI_V1, EXT_OK, ExtBytes,
-    ExtEventClassV1, ExtEventInputV1, ExtEventPortV1, ExtEventRouteV1,
+    ExtBytes, ExtEventClassV1, ExtEventInputV1, ExtEventPortV1, ExtEventRouteV1,
+    EXT_ERR_BACKPRESSURE, EXT_ERR_PORT_CLOSED, EXT_EVENT_PORT_ABI_V1, EXT_OK,
 };
 
 /// Coalesce-key bound shared with the hub (the design reference freezes a
@@ -208,7 +208,12 @@ impl InstancePortState {
             REJECTED_SUBMITS.fetch_add(1, Ordering::Relaxed);
             return SubmitStatus::Rejected;
         };
-        self.submit_record(&port, frame.owner.tray_id.as_str(), data_json, &classify_frame(frame))
+        self.submit_record(
+            &port,
+            frame.owner.tray_id.as_str(),
+            data_json,
+            &classify_frame(frame),
+        )
     }
 
     /// Submits one legacy window-event family record (`{ "type": event, ... }`
@@ -421,7 +426,9 @@ pub(crate) fn classify_frame(frame: &WebviewEventFrame) -> EventPortClass {
     match frame.kind {
         WebviewEventKind::UrlChange => latest_key(&frame.webview_id, b"/url"),
         WebviewEventKind::TitleChange => latest_key(&frame.webview_id, b"/title"),
+        WebviewEventKind::FaviconChange => latest_key(&frame.webview_id, b"/favicon"),
         WebviewEventKind::Focused | WebviewEventKind::GeometryChange => EventPortClass::Edge,
+        WebviewEventKind::NavigationAction => EventPortClass::Edge,
         WebviewEventKind::LoadState => match &frame.payload {
             // One wire kind, two ingress classes: the phase is always an
             // Edge; a progress observation rides the `started` phase with a
@@ -580,7 +587,7 @@ impl EventPortClass {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::tests::{FakePort, reset_diagnostics};
+    use super::tests::{reset_diagnostics, FakePort};
     use super::{InstancePortState, TEST_STATE_GUARD};
 
     /// Installs one fresh instance state with a fake port attached, for
@@ -621,17 +628,16 @@ pub(crate) mod test_support {
             self.fake.submits()
         }
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentray_spec::{EXT_ERR_REJECTED, ExtResultCode};
     use opentray_spec::webview::WebviewOwnerTuple;
+    use opentray_spec::{ExtResultCode, EXT_ERR_REJECTED};
     use std::ffi::c_void;
-    use std::sync::Arc;
     use std::sync::atomic::AtomicI32;
+    use std::sync::Arc;
 
     /// The private helper stays honest: classification round-trips into the
     /// frozen C discriminants the wire carries.
@@ -704,9 +710,7 @@ mod tests {
         }
 
         pub(crate) fn set_result(&self, code: ExtResultCode) {
-            self.inner
-                .default_result
-                .store(code, Ordering::Relaxed);
+            self.inner.default_result.store(code, Ordering::Relaxed);
         }
 
         pub(crate) fn script(&self, codes: impl IntoIterator<Item = ExtResultCode>) {
@@ -965,7 +969,10 @@ mod tests {
         // Wire tags are exactly the drained-event names, so the facade's
         // `data.type === event` listener filter matches unchanged.
         assert_eq!(
-            submits.iter().map(|s| s.payload_tag.as_str()).collect::<Vec<_>>(),
+            submits
+                .iter()
+                .map(|s| s.payload_tag.as_str())
+                .collect::<Vec<_>>(),
             vec!["visibleChange", "focus", "downloadprogress"]
         );
         assert_eq!(submits[0].class, ExtEventClassV1::Edge.as_u32());
@@ -986,7 +993,11 @@ mod tests {
             state.submit_window_event("tray-1", "focus", &serde_json::json!({})),
             SubmitStatus::Backpressured
         );
-        assert_eq!(retry_queue_len(&state), 1, "window-family Edge records retry too");
+        assert_eq!(
+            retry_queue_len(&state),
+            1,
+            "window-family Edge records retry too"
+        );
 
         fake.set_result(EXT_OK);
         assert_eq!(
@@ -1143,7 +1154,10 @@ mod tests {
         );
         assert_eq!(fake_a.submits().len(), 1);
         assert_eq!(fake_a.submits()[0].tray_id, "tray-a");
-        assert!(fake_b.submits().is_empty(), "instance B's source saw nothing");
+        assert!(
+            fake_b.submits().is_empty(),
+            "instance B's source saw nothing"
+        );
 
         assert_eq!(
             state_b.submit_window_event("tray-b", "blur", &serde_json::json!({})),
@@ -1152,7 +1166,11 @@ mod tests {
         let b_submits = fake_b.submits();
         assert_eq!(b_submits.len(), 1);
         assert_eq!(b_submits[0].tray_id, "tray-b");
-        assert_eq!(fake_a.submits().len(), 1, "instance A's source is unchanged");
+        assert_eq!(
+            fake_a.submits().len(),
+            1,
+            "instance A's source is unchanged"
+        );
     }
 
     #[test]
@@ -1232,7 +1250,10 @@ mod tests {
         // Two attempts on A's port: the seeding submit plus the flush replay.
         assert_eq!(a_submits.len(), 2);
         assert!(a_submits.iter().all(|submit| submit.tray_id == "tray-a"));
-        assert!(fake_b.submits().iter().all(|submit| submit.tray_id == "tray-b"));
+        assert!(fake_b
+            .submits()
+            .iter()
+            .all(|submit| submit.tray_id == "tray-b"));
     }
 
     // -- submit routing ----------------------------------------------------------
@@ -1257,7 +1278,10 @@ mod tests {
         let state = attached_state(&fake);
         fake.set_result(EXT_OK);
 
-        assert_eq!(state.submit_frame(&url_frame("content", 1)), SubmitStatus::Direct);
+        assert_eq!(
+            state.submit_frame(&url_frame("content", 1)),
+            SubmitStatus::Direct
+        );
         assert_eq!(
             state.submit_frame(&focused_frame("content", 2)),
             SubmitStatus::Direct
@@ -1471,8 +1495,7 @@ mod tests {
                 for round in 0..4u64 {
                     if worker % 2 == 0 {
                         // Fresh producer record (Edge; flush-first routing).
-                        let frame =
-                            focused_frame("content", 100 + worker * 10 + round);
+                        let frame = focused_frame("content", 100 + worker * 10 + round);
                         let _ = state.submit_frame(&frame);
                     } else {
                         // Post-command flush of the same instance.
@@ -1517,7 +1540,9 @@ mod tests {
             .collect();
         assert!(!fresh_positions.is_empty(), "fresh records were submitted");
         assert!(
-            fresh_positions.iter().all(|position| *position > last_seeded_position),
+            fresh_positions
+                .iter()
+                .all(|position| *position > last_seeded_position),
             "a concurrent fresh record overtook the retry batch: {:?}",
             submits.iter().map(|submit| submit.seq).collect::<Vec<_>>()
         );
