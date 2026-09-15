@@ -1,5 +1,14 @@
 # @create-opentray/core
 
+## 0.1.14
+
+### Patch Changes
+
+- Updated dependencies [456b8e4]
+  - @opentray/packaging@0.27.5
+  - @opentray/icon@0.27.5
+  - @opentray/spec@0.27.5
+
 ## 0.1.13
 
 ### Patch Changes
