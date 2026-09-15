@@ -43,7 +43,8 @@
 
 - [ ] 5.1 changeset（patch：opentray、@opentray/ext-webview、@opentray/packaging、create-opentray）+ 版本纪律检查（0.27.5）。
 - [x] 5.2 `bun run openspec:vision -- commit-check harden-lifecycle-ownership --phase research-plan`（以及后续 phase）通过；OpenSpec 工件先于产品代码提交。
-- [ ] 5.3 用户走查验收（baidu app 全交互：地址栏/前进/后退/刷新/新窗口；kill -9 恢复；app.log 叙事）。
+- [x] 5.3 用户走查验收（baidu app 全交互：地址栏/前进/后退/刷新/新窗口；kill -9 恢复；app.log 叙事）。
+  - 2026-09-15 走查通过（Owner 确认）：D7 修复后前进/后退/回车跳转/刷新全部即按即走（无需 Dock 激活）；toolbar 自身右键 reload 后地址栏恢复当前 URL 且命令继续可用；toolbar 右键菜单除 input 外禁用（Owner 分两步实测均过）。
   - 走查环境注意（2026-09-15 根因轮实证）：`OPENTRAY_EXT_PATH` 对包声明的官方扩展不生效（facade 依赖闭包绝对路径优先），源码构建 dylib 必须显式 `cp` 进 `node_modules/@opentray/ext-webview-darwin-arm64/lib/`；`/tmp/walkthrough/run.sh` 已改为显式部署。此前三轮走查（含 D6 复测）加载的都是 05:14 旧 dylib，证据无效。
   - D7（EventPort channel 推送）无头黑盒已过：零命令零激活下 t=4s 探针消息即时送达（get-url→navigate→done 2ms），`host channel submit -> Pushed`。
   - 走查轮 2（2026-09-15 用户初测通过后两项遗留，均已修复验证）：(a) toolbar 页自身刷新后状态未恢复——document_navigated 关闭同样只靠命令响应搭载；navigation_started 钩子补 EventPort 推送后，无头复验：刷新后地址栏重新播种为刷新前 URL、channel 自愈重建、新文档回车即用（channelCreated 求值 3 次）。(b) toolbar 右键菜单（input 除外）禁用——shell server serve toolbar.html 时注入页面层 contextmenu 守卫（macOS 法则指定路径，native isa-swizzle 保持关闭）。
