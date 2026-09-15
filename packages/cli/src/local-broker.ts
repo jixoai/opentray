@@ -269,7 +269,14 @@ class LocalBrokerConnection implements LocalBrokerClient {
       this.consume(String(chunk));
     });
     socket.on("error", (error) => {
-      this.markDead(error);
+      // Transport errors race the close event per platform (Linux delivers
+      // ECONNRESET before close; macOS close-first). The terminal surface is
+      // the stable classification message — the underlying transport error
+      // stays observable as `cause` for diagnostics, so both orderings
+      // expose identical public behavior.
+      this.markDead(
+        new Error(BROKER_CONNECTION_CLOSED_MESSAGE, { cause: error }),
+      );
     });
     socket.on("close", () => {
       this.markDead(new Error(BROKER_CONNECTION_CLOSED_MESSAGE));
