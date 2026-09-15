@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>harden-lifecycle-ownership 自审证据</title>
+<style>body{font:14px/1.6 -apple-system,sans-serif;max-width:60rem;margin:2rem auto}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d2d2d7;padding:.4rem .6rem;font-size:.92rem}th{background:#f5f5f7}.pass{color:#1a7f37;font-weight:600}</style>
+</head><body>
+<h1>harden-lifecycle-ownership — 自审证据报告</h1>
+<h2>交付全景</h2>
+<table><tr><th>项</th><th>交付</th><th>证据</th></tr>
+<tr><td>D1 锁自愈</td><td>owner-stamped 锁（PID+token/读回校验/hard-link 仲裁）</td><td class="pass">packaging 12 例 + kill -9 矩阵全恢复</td></tr>
+<tr><td>D2 owner 校验</td><td>registry/kernel 双层 owner-tuple destroy</td><td class="pass">seam 测试 + Win 对称位</td></tr>
+<tr><td>D3 连接终态</td><td>markDead 幂等/onConnectionDead/入口非零退出</td><td class="pass">CLI 36 + WebView 78</td></tr>
+<tr><td>D4 端点身份</td><td>appId 即端点，appName 出链</td><td class="pass">caller-label BDD</td></tr>
+<tr><td>D5 可观测性</td><td>双通道日志队列（串行里程碑+有界输出）</td><td class="pass">create-core 225</td></tr>
+<tr><td>D7 channel 推送</td><td>host_outbox 经 EventPort 即时推送 + Retain 回退 + typed-fail 全出口提交</td><td class="pass">mac 177/177 ×2、win 186/186</td></tr></table>
+<h2>走查根因轮（D6 证伪 → D7）</h2>
+<p>症状「toolbar 死到点 Dock」根因：host 消息唯一出口是搭下笔命令响应（v1 flush ruling），d19 退役 16ms drain 后空闲延迟无穷大。D6 App Nap 理论被证伪——走查环境自始加载旧 dylib（OPENTRAY_EXT_PATH 对包声明扩展不生效，facade 绝对路径优先），plan.md 已记录证伪链与新部署纪律。无头黑盒：零命令零激活下 get-url→navigate→done 2ms，channelCreated 3 次（引导+2 次自愈）。</p>
+<h2>Codex 复审链</h2>
+<p>R1 5.5 → R2 6.5 → R3 7.5 → R4 6.5 → R5 9.0（GO）→ R6 7.4（NEEDS-WORK：typed-fail 出口漏提交）→ <b>R7 GO 9.5/10 无阻塞</b>（review/codex-toolbar-r{1..7}-report.md）。</p>
+<h2>平台证据</h2>
+<p>macOS：workspace Rust 370/370、ext-webview 177/177×2、JS 四包全绿、基线 16 tests + schema。Windows 真机 aarch64：186/186（含 R7 双 twin）。Owner 走查（5.3）：跳转/前进/后退/刷新即按即走；右键 reload 后地址栏恢复+自愈；右键菜单除 input 外禁用。</p>
+<h2>遗留（记录不阻塞）</h2>
+<p>release 锁 TOCTOU；多 legacy 并存歧义；输出环按条有界；里程碑链无超时；&gt;64KiB channel 消息保持响应搭载回退。</p>
+</body></html>
