@@ -432,12 +432,26 @@ pub(super) fn dispatch_webview_channel_command(
                 Err(error) => Err(error),
             }
         }
+        // R6 P1 closure: every exit of the three mutating page commands —
+        // success, registry typed-error, and the parameter-validation
+        // typed-fail — drains and submits host events before returning.
+        // A typed-fail that returns early would strand any record the
+        // port previously retained in the outbox until the next command
+        // response (the exact idle-stall defect this producer closes).
         "postMessage" => {
-            let channel_id = required_channel_id(&payload)?;
-            let message = payload.get("payload").cloned().unwrap_or(Value::Null);
-            let outcome = registry.borrow_mut().post(&owner, sender, &channel_id, message);
+            let outcome = match required_channel_id(&payload) {
+                Ok(channel_id) => {
+                    let message = payload.get("payload").cloned().unwrap_or(Value::Null);
+                    let posted = registry.borrow_mut().post(&owner, sender, &channel_id, message);
+                    posted.map(|receipt| (channel_id, receipt))
+                }
+                Err(error) => Err(crate::channels::ChannelPostError {
+                    error,
+                    pushes: Vec::new(),
+                }),
+            };
             match outcome {
-                Ok(receipt) => {
+                Ok((channel_id, receipt)) => {
                     drain_channel_port_for(
                         bridge,
                         &channel_id,
@@ -455,30 +469,36 @@ pub(super) fn dispatch_webview_channel_command(
             }
         }
         "closeMessageChannel" => {
-            let channel_id = required_channel_id(&payload)?;
-            // `let` binding drops the RefMut before the arms run: the match
+            // `and_then` keeps the RefMut inside the statement: the match
             // scrutinee form would keep the registry borrowed across
             // deliver/submit re-entry.
-            let outcome = registry.borrow_mut().close(&owner, sender, &channel_id);
+            let outcome = required_channel_id(&payload)
+                .and_then(|channel_id| registry.borrow_mut().close(&owner, sender, &channel_id));
             match outcome {
                 Ok(pushes) => {
                     deliver_channel_pushes(bridge, &pushes, None);
                     submit_host_channel_events(bridge);
                     Ok(Value::Null)
                 }
-                Err(error) => Err(error),
+                Err(error) => {
+                    submit_host_channel_events(bridge);
+                    Err(error)
+                }
             }
         }
         "destroyMessageChannel" => {
-            let channel_id = required_channel_id(&payload)?;
-            let outcome = registry.borrow_mut().destroy(&owner, sender, &channel_id);
+            let outcome = required_channel_id(&payload)
+                .and_then(|channel_id| registry.borrow_mut().destroy(&owner, sender, &channel_id));
             match outcome {
                 Ok(pushes) => {
                     deliver_channel_pushes(bridge, &pushes, None);
                     submit_host_channel_events(bridge);
                     Ok(Value::Null)
                 }
-                Err(error) => Err(error),
+                Err(error) => {
+                    submit_host_channel_events(bridge);
+                    Err(error)
+                }
             }
         }
         "listMessageChannels" => {

@@ -3319,6 +3319,90 @@ fn document_navigation_close_pushes_the_host_observation_through_the_port() {
     let _ = channel_id;
 }
 
+
+/// R6 P1 regression: every exit of close/destroy — including the
+/// parameter-validation typed-fail — must drain and submit pending host
+/// events before returning. A pre-seeded outbox record (retained by a
+/// rejecting port) must get another submit attempt even when the command
+/// itself fails on a missing channelId.
+#[test]
+fn typed_fail_channel_commands_still_submit_pending_host_events() {
+    use opentray_spec::webview::WebviewBridgePolicy;
+
+    let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+    let bridge = Rc::new(RefCell::new(test_bridge_with_port_state(
+        std::sync::Arc::clone(&port.state),
+    )));
+    bridge.borrow_mut().views.push(WebViewBridge {
+        id: "toolbar".to_string(),
+        policy: WebviewBridgePolicy {
+            webview_id: true,
+            message_channels: true,
+            ..WebviewBridgePolicy::default()
+        },
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
+    let (channel_id, _) = bridge
+        .borrow()
+        .channels
+        .borrow_mut()
+        .create(
+            &channel_owner_tuple(),
+            opentray_spec::channel::ChannelPeer::host(),
+            "toolbar".to_string(),
+        )
+        .expect("host-created channel");
+
+    // Rejected submissions retain the record in the authoritative outbox:
+    // the first post seeds exactly one stranded host event.
+    port.fake.set_result(opentray_spec::EXT_ERR_REJECTED);
+    dispatch_channel(
+        &bridge,
+        "toolbar",
+        "postMessage",
+        json!({ "channelId": channel_id, "payload": { "kind": "url", "url": "https://a.test/1" } }),
+    )
+    .expect("page post");
+    let seeded = bridge.borrow().channels.borrow_mut().drain_host_events();
+    assert_eq!(seeded.len(), 1, "the rejected submit retains the record");
+    bridge
+        .borrow_mut()
+        .channels
+        .borrow_mut()
+        .requeue_host_events_front(seeded.into_iter().map(|(_, v)| v).collect());
+    assert_eq!(port.submits().len(), 1);
+
+    // closeMessageChannel with NO channelId: the parameter typed-fail must
+    // still attempt the pending host-event submit before returning.
+    let error = dispatch_channel(&bridge, "toolbar", "closeMessageChannel", json!({}))
+        .expect_err("missing channelId");
+    assert_eq!(
+        error.code(),
+        opentray_spec::webview::OrchestrationErrorCode::UnknownView
+    );
+    assert_eq!(
+        port.submits().len(),
+        2,
+        "the typed-fail exit submits the stranded host record"
+    );
+
+    // destroyMessageChannel on an unknown channel id: the registry
+    // typed-fail must submit too.
+    let _ = dispatch_channel(
+        &bridge,
+        "toolbar",
+        "destroyMessageChannel",
+        json!({ "channelId": "missing" }),
+    );
+    assert_eq!(
+        port.submits().len(),
+        3,
+        "the registry typed-fail exit submits as well"
+    );
+}
+
 /// Host-side channel command smoke on the main thread (real AppKit
 /// session): the frozen command frames round-trip through the runtime,
 /// authority rejections return typed envelopes as Ok-data, and host

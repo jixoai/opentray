@@ -93,8 +93,8 @@ use opentray_spec::webview::{
     WebviewEventFrame, WebviewEventKind, WebviewEventPayload, WebviewLoadPhase,
 };
 use opentray_spec::{
-    EXT_ERR_BACKPRESSURE, EXT_ERR_PORT_CLOSED, EXT_ERR_REJECTED, EXT_EVENT_PORT_ABI_V1, EXT_OK,
-    ExtBytes, ExtEventClassV1, ExtEventInputV1, ExtEventPortV1, ExtEventRouteV1,
+    EXT_ERR_BACKPRESSURE, EXT_ERR_PORT_CLOSED, EXT_EVENT_PORT_ABI_V1, EXT_OK, ExtBytes,
+    ExtEventClassV1, ExtEventInputV1, ExtEventPortV1, ExtEventRouteV1,
 };
 
 /// Coalesce-key bound shared with the hub (the design reference freezes a
@@ -627,7 +627,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentray_spec::ExtResultCode;
+    use opentray_spec::{EXT_ERR_REJECTED, ExtResultCode};
     use opentray_spec::webview::WebviewOwnerTuple;
     use std::ffi::c_void;
     use std::sync::Arc;

@@ -223,12 +223,26 @@ pub(super) fn dispatch_webview_channel_command(
                 Err(error) => Err(error),
             }
         }
+        // R6 P1 closure: every exit of the three mutating page commands —
+        // success, registry typed-error, and the parameter-validation
+        // typed-fail — drains and submits host events before returning.
+        // A typed-fail that returns early would strand any record the
+        // port previously retained in the outbox until the next command
+        // response (the exact idle-stall defect this producer closes).
         "postMessage" => {
-            let channel_id = required_channel_id(&payload)?;
-            let message = payload.get("payload").cloned().unwrap_or(Value::Null);
-            let outcome = registry.borrow_mut().post(&owner, sender, &channel_id, message);
+            let outcome = match required_channel_id(&payload) {
+                Ok(channel_id) => {
+                    let message = payload.get("payload").cloned().unwrap_or(Value::Null);
+                    let posted = registry.borrow_mut().post(&owner, sender, &channel_id, message);
+                    posted.map(|receipt| (channel_id, receipt))
+                }
+                Err(error) => Err(crate::channels::ChannelPostError {
+                    error,
+                    pushes: Vec::new(),
+                }),
+            };
             match outcome {
-                Ok(receipt) => {
+                Ok((channel_id, receipt)) => {
                     drain_channel_port_for(
                         bridge,
                         &channel_id,
@@ -246,30 +260,36 @@ pub(super) fn dispatch_webview_channel_command(
             }
         }
         "closeMessageChannel" => {
-            let channel_id = required_channel_id(&payload)?;
-            // `let` binding drops the RefMut before the arms run: the match
+            // `and_then` keeps the RefMut inside the statement: the match
             // scrutinee form would keep the registry borrowed across
             // deliver/submit re-entry.
-            let outcome = registry.borrow_mut().close(&owner, sender, &channel_id);
+            let outcome = required_channel_id(&payload)
+                .and_then(|channel_id| registry.borrow_mut().close(&owner, sender, &channel_id));
             match outcome {
                 Ok(pushes) => {
                     deliver_channel_pushes(bridge, &pushes, None);
                     submit_host_channel_events(bridge);
                     Ok(Value::Null)
                 }
-                Err(error) => Err(error),
+                Err(error) => {
+                    submit_host_channel_events(bridge);
+                    Err(error)
+                }
             }
         }
         "destroyMessageChannel" => {
-            let channel_id = required_channel_id(&payload)?;
-            let outcome = registry.borrow_mut().destroy(&owner, sender, &channel_id);
+            let outcome = required_channel_id(&payload)
+                .and_then(|channel_id| registry.borrow_mut().destroy(&owner, sender, &channel_id));
             match outcome {
                 Ok(pushes) => {
                     deliver_channel_pushes(bridge, &pushes, None);
                     submit_host_channel_events(bridge);
                     Ok(Value::Null)
                 }
-                Err(error) => Err(error),
+                Err(error) => {
+                    submit_host_channel_events(bridge);
+                    Err(error)
+                }
             }
         }
         "listMessageChannels" => {
@@ -604,6 +624,16 @@ mod tests {
     /// evaluated (no view is page-live in these tests — pushes queue in
     /// `pending_channel_pushes` instead).
     fn channel_test_bridge() -> Rc<RefCell<NavigatorWindowBridge>> {
+        channel_test_bridge_with_port_state(std::sync::Arc::new(
+            crate::event_port::InstancePortState::new(),
+        ))
+    }
+
+    /// [`channel_test_bridge`] with an explicit per-instance EventPort state
+    /// (the fake port fixture hands one out for direct-push tests).
+    fn channel_test_bridge_with_port_state(
+        port_state: std::sync::Arc<crate::event_port::InstancePortState>,
+    ) -> Rc<RefCell<NavigatorWindowBridge>> {
         let mut bridge = NavigatorWindowBridge {
             hwnd: std::ptr::null_mut(),
             window: None,
@@ -616,7 +646,7 @@ mod tests {
             ipc_messages: VecDeque::new(),
             permission_messages: VecDeque::new(),
             tray_id: "tray-1".to_string(),
-            port_state: std::sync::Arc::new(crate::event_port::InstancePortState::new()),
+            port_state,
             window_event_subscriptions: HashSet::new(),
             next_ipc_message_id: 1,
             next_permission_message_id: 1,
@@ -697,6 +727,111 @@ mod tests {
         payload: Value,
     ) -> Result<Value, OrchestrationError> {
         dispatch_webview_channel_command(bridge, source, cmd, payload)
+    }
+
+
+    /// R6 P1 regression (macOS twin): every exit of close/destroy —
+    /// including the parameter typed-fail — must drain and submit pending
+    /// host events before returning. A stranded outbox record (retained by
+    /// a rejecting port) gets another submit attempt on each typed-fail.
+    #[test]
+    fn typed_fail_channel_commands_still_submit_pending_host_events() {
+        let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+        let bridge = channel_test_bridge_with_port_state(std::sync::Arc::clone(&port.state));
+        let owner = channel_owner_tuple();
+        let (channel_id, _) = bridge
+            .borrow()
+            .channels
+            .borrow_mut()
+            .create(&owner, ChannelPeer::host(), "toolbar".to_string())
+            .expect("host-created channel");
+
+        // Rejected submissions retain the record in the authoritative
+        // outbox: the first post seeds exactly one stranded host event.
+        port.fake.set_result(opentray_spec::EXT_ERR_REJECTED);
+        dispatch_channel(
+            &bridge,
+            "toolbar",
+            "postMessage",
+            json!({ "channelId": channel_id, "payload": { "kind": "url", "url": "https://a.test/1" } }),
+        )
+        .expect("page post");
+        let seeded = bridge.borrow().channels.borrow_mut().drain_host_events();
+        assert_eq!(seeded.len(), 1, "the rejected submit retains the record");
+        bridge
+            .borrow_mut()
+            .channels
+            .borrow_mut()
+            .requeue_host_events_front(seeded.into_iter().map(|(_, v)| v).collect());
+        assert_eq!(port.submits().len(), 1);
+
+        // closeMessageChannel with NO channelId: the parameter typed-fail
+        // still attempts the pending host-event submit before returning.
+        let error = dispatch_channel(&bridge, "toolbar", "closeMessageChannel", json!({}))
+            .expect_err("missing channelId");
+        assert_eq!(error.code(), OrchestrationErrorCode::UnknownView);
+        assert_eq!(
+            port.submits().len(),
+            2,
+            "the typed-fail exit submits the stranded host record"
+        );
+
+        // destroyMessageChannel on an unknown channel id: the registry
+        // typed-fail submits too.
+        let _ = dispatch_channel(
+            &bridge,
+            "toolbar",
+            "destroyMessageChannel",
+            json!({ "channelId": "missing" }),
+        );
+        assert_eq!(
+            port.submits().len(),
+            3,
+            "the registry typed-fail exit submits as well"
+        );
+    }
+
+    /// R6 evidence gap closure (macOS twin): a manual toolbar reload closes
+    /// the channel from the NAVIGATION hook, not from a page command — the
+    /// host close observation must push through the EventPort immediately.
+    #[test]
+    fn document_navigation_close_pushes_the_host_observation_through_the_port() {
+        let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+        let bridge = channel_test_bridge_with_port_state(std::sync::Arc::clone(&port.state));
+        let owner = channel_owner_tuple();
+        let _ = bridge
+            .borrow()
+            .channels
+            .borrow_mut()
+            .create(&owner, ChannelPeer::host(), "toolbar".to_string())
+            .expect("host-created channel");
+
+        // Initial load completes, then a manual reload navigates the
+        // document.
+        handle_view_channel_navigation_started(&bridge, "toolbar");
+        handle_view_channel_page_finished(&bridge, "toolbar");
+        handle_view_channel_navigation_started(&bridge, "toolbar");
+
+        let submits = port.submits();
+        assert_eq!(
+            submits.len(),
+            1,
+            "the document_navigated close observation pushes with zero commands in flight"
+        );
+        assert_eq!(submits[0].tray_id, "tray-1");
+        assert_eq!(submits[0].payload_tag, "channel.closed");
+        assert_eq!(
+            submits[0].class,
+            opentray_spec::ExtEventClassV1::Edge.as_u32()
+        );
+        assert!(
+            bridge
+                .borrow()
+                .channels
+                .borrow_mut()
+                .drain_host_events()
+                .is_empty()
+        );
     }
 
     /// Bridge policy and target authority (mirrors the macOS page-surface
