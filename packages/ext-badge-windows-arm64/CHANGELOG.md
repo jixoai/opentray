@@ -1,5 +1,7 @@
 # @opentray/ext-badge-windows-arm64
 
+## 0.27.7
+
 ## 0.27.6
 
 ## 0.27.5

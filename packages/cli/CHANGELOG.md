@@ -1,5 +1,14 @@
 # opentray
 
+## 0.27.7
+
+### Patch Changes
+
+- e279e5d: Normalize transport-error connection death to the canonical `broker connection closed` terminal message on every platform: Linux delivers socket errors (ECONNRESET) before close while macOS delivers close first, so in-flight requests previously rejected with the raw transport message on Linux; the underlying error is now observable as the terminal error's `cause`.
+  - @opentray/icon@0.27.7
+  - @opentray/spec@0.27.7
+  - @opentray/packaging@0.27.7
+
 ## 0.27.6
 
 ### Patch Changes
