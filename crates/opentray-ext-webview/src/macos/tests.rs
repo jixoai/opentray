@@ -2876,6 +2876,125 @@ fn channel_owner_tuple() -> opentray_spec::webview::WebviewOwnerTuple {
     }
 }
 
+/// harden-lifecycle-ownership (2026-09-15 walkthrough finding): a page post
+/// to a host-created channel must reach the host without any facade command
+/// in flight — before this fix the message rode the NEXT command response,
+/// so an idle session (post-D19, no 16 ms drain) stalled it forever.
+#[test]
+fn page_post_to_host_channel_pushes_through_the_event_port() {
+    use opentray_spec::webview::WebviewBridgePolicy;
+
+    let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+    let bridge = Rc::new(RefCell::new(test_bridge_with_port_state(
+        std::sync::Arc::clone(&port.state),
+    )));
+    bridge.borrow_mut().views.push(WebViewBridge {
+        id: "toolbar".to_string(),
+        policy: WebviewBridgePolicy {
+            webview_id: true,
+            message_channels: true,
+            ..WebviewBridgePolicy::default()
+        },
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
+
+    // The host owns the channel (the toolbar walkthrough shape: the entry
+    // creates it, the page posts commands back).
+    let (channel_id, _) = bridge
+        .borrow()
+        .channels
+        .borrow_mut()
+        .create(
+            &channel_owner_tuple(),
+            opentray_spec::channel::ChannelPeer::host(),
+            "toolbar".to_string(),
+        )
+        .expect("host-created channel");
+
+    dispatch_channel(
+        &bridge,
+        "toolbar",
+        "postMessage",
+        json!({
+            "channelId": channel_id,
+            "payload": { "kind": "url", "url": "https://a.test/2" },
+        }),
+    )
+    .expect("page post with zero commands in flight");
+
+    let submits = port.submits();
+    assert_eq!(
+        submits.len(),
+        1,
+        "the host-bound message pushes through the port immediately"
+    );
+    assert_eq!(submits[0].tray_id, "tray-1");
+    assert_eq!(submits[0].payload_tag, "channel.message");
+    assert_eq!(
+        submits[0].class,
+        opentray_spec::ExtEventClassV1::Edge.as_u32()
+    );
+    // The record left the authoritative outbox exactly once — no double
+    // delivery through a later command response.
+    assert!(
+        bridge
+            .borrow()
+            .channels
+            .borrow_mut()
+            .drain_host_events()
+            .is_empty()
+    );
+}
+
+/// The legacy fallback stays intact: with no port attached (H0 host), the
+/// same post keeps its message in the host outbox for the unchanged
+/// command-response flush.
+#[test]
+fn page_post_to_host_channel_keeps_the_outbox_fallback_without_a_port() {
+    use opentray_spec::webview::WebviewBridgePolicy;
+
+    let bridge = Rc::new(RefCell::new(test_bridge()));
+    bridge.borrow_mut().views.push(WebViewBridge {
+        id: "toolbar".to_string(),
+        policy: WebviewBridgePolicy {
+            webview_id: true,
+            message_channels: true,
+            ..WebviewBridgePolicy::default()
+        },
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
+    let (channel_id, _) = bridge
+        .borrow()
+        .channels
+        .borrow_mut()
+        .create(
+            &channel_owner_tuple(),
+            opentray_spec::channel::ChannelPeer::host(),
+            "toolbar".to_string(),
+        )
+        .expect("host-created channel");
+
+    dispatch_channel(
+        &bridge,
+        "toolbar",
+        "postMessage",
+        json!({
+            "channelId": channel_id,
+            "payload": { "kind": "url", "url": "https://a.test/2" },
+        }),
+    )
+    .expect("page post");
+
+    let outbox = bridge.borrow().channels.borrow_mut().drain_host_events();
+    assert_eq!(outbox.len(), 1, "the message waits for the response flush");
+    assert_eq!(outbox[0].1["type"], "channel.message");
+    assert_eq!(outbox[0].1["channelId"], json!(channel_id));
+}
+
 #[test]
 fn page_created_channel_posts_page_to_page_with_pending_delivery() {
     use opentray_spec::channel::ChannelEndpointSide;

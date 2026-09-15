@@ -578,15 +578,21 @@ mod native_broker {
     }
 
     pub fn run(options: BrokerOptions) -> Result<(), Box<dyn Error>> {
-        // harden-lifecycle-ownership (user walkthrough finding, 2026-09-15):
-        // the broker is a detached, non-LaunchServices process; once idle,
-        // macOS App Naps it and suspends every WKWebView's loads, timers,
-        // and network until a Dock activation revives the app — the exact
-        // "buttons dead until I click the Dock icon" symptom. A tray broker
-        // with live sessions is inherently user-facing, so the process
-        // asserts one activity for its whole lifetime.
-        // UserInitiatedAllowingIdleSystemSleep excludes the broker from App
-        // Nap while keeping display sleep available.
+        // harden-lifecycle-ownership: a tray broker with live sessions is
+        // inherently user-facing, so the process asserts one lifetime activity
+        // (UserInitiatedAllowingIdleSystemSleep) to stay out of App Nap's CPU
+        // and timer throttling while keeping display sleep available.
+        //
+        // Correction (2026-09-15 root-cause round): the walkthrough symptom
+        // ("buttons dead until I click the Dock icon") was NOT App Nap. The
+        // broker answered socket probes instantly while the symptoms were
+        // live, and the first walkthrough run with this assertion still
+        // stalled. The actual defect was host-bound channel events riding
+        // only the next command response (v1 flush ruling) — idle sessions,
+        // post-D19 with no 16 ms drain, never issued that command. The fix
+        // pushes those events through the extension EventPort at the native
+        // ipc handler; this assertion stays as defense-in-depth against CPU
+        // throttling of a live-session broker.
         #[cfg(target_os = "macos")]
         {
             use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};

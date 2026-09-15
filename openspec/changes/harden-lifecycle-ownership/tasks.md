@@ -44,4 +44,6 @@
 - [ ] 5.1 changeset（patch：opentray、@opentray/ext-webview、@opentray/packaging、create-opentray）+ 版本纪律检查（0.27.5）。
 - [x] 5.2 `bun run openspec:vision -- commit-check harden-lifecycle-ownership --phase research-plan`（以及后续 phase）通过；OpenSpec 工件先于产品代码提交。
 - [ ] 5.3 用户走查验收（baidu app 全交互：地址栏/前进/后退/刷新/新窗口；kill -9 恢复；app.log 叙事）。
+  - 走查环境注意（2026-09-15 根因轮实证）：`OPENTRAY_EXT_PATH` 对包声明的官方扩展不生效（facade 依赖闭包绝对路径优先），源码构建 dylib 必须显式 `cp` 进 `node_modules/@opentray/ext-webview-darwin-arm64/lib/`；`/tmp/walkthrough/run.sh` 已改为显式部署。此前三轮走查（含 D6 复测）加载的都是 05:14 旧 dylib，证据无效。
+  - D7（EventPort channel 推送）无头黑盒已过：零命令零激活下 t=4s 探针消息即时送达（get-url→navigate→done 2ms），`host channel submit -> Pushed`。
 - [ ] 5.4 `pnpm run changeset` 后 push；合并 main 后 trusted publishing 发布 0.27.5；`openspec` archive + 清理。

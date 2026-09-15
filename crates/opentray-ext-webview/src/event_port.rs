@@ -27,6 +27,23 @@
 //! | downloadstarted/completed/failed/canceled| Edge       | download lifecycle             |
 //! | downloadprogress                         | BestEffort | observation; terminal edge owns|
 //!
+//! Host-bound channel family (harden-lifecycle-ownership, 2026-09-15; wire
+//! shape `{ "type": "channel.message" | "channel.closed", ... }` — the exact
+//! values the v1 command-response flush ruling delivered):
+//!
+//! | Event             | Class      | Overflow rule                              |
+//! | ----------------- | ---------- | ------------------------------------------ |
+//! | channel.message   | Edge       | retain in host outbox when the port cannot |
+//! | channel.closed    | Edge       | guarantee delivery (never drop user data)  |
+//!
+//! Channel payloads are user data, not observations: unlike the window
+//! families, a record the port cannot guarantee (oversized payload beyond
+//! the hub record cap, retry-queue overflow, revoked or absent port) is
+//! RETURNED to the caller via [`ChannelSubmit::Retain`] and stays in the
+//! authoritative session host outbox for the unchanged command-response
+//! flush path. A record leaves that outbox only when the hub accepted it
+//! or the bounded Edge retry queue owns its redelivery.
+//!
 //! No window-family member is `Latest`: none of them has a `(value, seq)`
 //! query/resync route in this release, and the design law freezes that
 //! state truth without a replay query must be Edge (a coalesced replace
@@ -76,8 +93,8 @@ use opentray_spec::webview::{
     WebviewEventFrame, WebviewEventKind, WebviewEventPayload, WebviewLoadPhase,
 };
 use opentray_spec::{
-    EXT_ERR_BACKPRESSURE, EXT_ERR_PORT_CLOSED, EXT_EVENT_PORT_ABI_V1, EXT_OK, ExtBytes,
-    ExtEventClassV1, ExtEventInputV1, ExtEventPortV1, ExtEventRouteV1,
+    EXT_ERR_BACKPRESSURE, EXT_ERR_PORT_CLOSED, EXT_ERR_REJECTED, EXT_EVENT_PORT_ABI_V1, EXT_OK,
+    ExtBytes, ExtEventClassV1, ExtEventInputV1, ExtEventPortV1, ExtEventRouteV1,
 };
 
 /// Coalesce-key bound shared with the hub (the design reference freezes a
@@ -241,6 +258,44 @@ impl InstancePortState {
         self.flush_edge_retries();
     }
 
+    /// Submits one host-bound channel event (D9 host endpoint) through the
+    /// EventPort. Channel payloads are user data: a record leaves the
+    /// authoritative host outbox only when the hub accepted it
+    /// ([`ChannelSubmit::Pushed`]) or the bounded Edge retry queue owns its
+    /// redelivery. Every other outcome — oversized payload, retry overflow,
+    /// revoked or absent port, rejected submission — returns
+    /// [`ChannelSubmit::Retain`] so the caller keeps the record for the
+    /// unchanged command-response flush path. Never coalesced, never a
+    /// silent drop.
+    pub(crate) fn submit_channel_event(
+        &self,
+        tray_id: &str,
+        payload: &serde_json::Value,
+    ) -> ChannelSubmit {
+        let Some(port) = self.port_snapshot() else {
+            return ChannelSubmit::Retain;
+        };
+        let Ok(data_json) = serde_json::to_vec(payload) else {
+            return ChannelSubmit::Retain;
+        };
+        // Same ordered-retry discipline as submit_record: older backpressured
+        // Edge records ride this wake before the newer channel record.
+        self.flush_edge_retries();
+        match submit_bytes(&port, tray_id, &data_json, &EventPortClass::Edge) {
+            SubmitStatus::Direct => ChannelSubmit::Pushed,
+            SubmitStatus::Backpressured => {
+                if self.enqueue_edge_retry(tray_id.to_string(), data_json) {
+                    ChannelSubmit::Pushed
+                } else {
+                    ChannelSubmit::Retain
+                }
+            }
+            // Rejected (hub record caps among them), PortClosed, and the
+            // unreachable LegacyFlush all retain: user data never drops here.
+            _ => ChannelSubmit::Retain,
+        }
+    }
+
     /// Drains the retry queue in FIFO order. The whole drain holds the retry
     /// lock (B2): `try_submit` is a bounded thread-safe hub ingress, and
     /// holding the per-instance lock across the batch linearizes it — a
@@ -344,6 +399,21 @@ pub(crate) enum SubmitStatus {
     /// No port was ever attached: the caller must keep the declared legacy
     /// response-flush delivery for this frame.
     LegacyFlush,
+}
+
+/// Delivery guarantee for one host-bound channel record
+/// ([`InstancePortState::submit_channel_event`]). User data never drops
+/// silently: every non-guaranteed outcome returns [`ChannelSubmit::Retain`]
+/// and the caller keeps the record in the authoritative host outbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChannelSubmit {
+    /// The hub accepted the record, or the bounded Edge retry queue owns its
+    /// ordered redelivery.
+    Pushed,
+    /// The port cannot guarantee this record right now (oversized payload,
+    /// retry overflow, revoked or absent port, rejected submission). The
+    /// caller retains it for the command-response flush path.
+    Retain,
 }
 
 /// Classifies one frame per the normative table. Pure: no port, no state.
@@ -941,6 +1011,88 @@ mod tests {
         assert_eq!(
             state.submit_window_event("tray-1", "focus", &serde_json::json!({})),
             SubmitStatus::LegacyFlush
+        );
+        assert_eq!(retry_queue_len(&state), 0);
+    }
+
+    // -- host-bound channel family --------------------------------------------
+
+    fn channel_message_event() -> serde_json::Value {
+        serde_json::json!({
+            "type": "channel.message",
+            "owner": owner_tuple(),
+            "channelId": "ch-1",
+            "payload": { "kind": "url", "url": "https://a.test/2" },
+        })
+    }
+
+    #[test]
+    fn channel_event_submits_as_edge_and_pushes_on_direct() {
+        let _state = lock_state();
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+
+        assert_eq!(
+            state.submit_channel_event("tray-1", &channel_message_event()),
+            ChannelSubmit::Pushed
+        );
+        let submits = fake.submits();
+        assert_eq!(submits.len(), 1);
+        assert_eq!(submits[0].tray_id, "tray-1");
+        assert_eq!(submits[0].payload_tag, "channel.message");
+        assert_eq!(submits[0].class, ExtEventClassV1::Edge.as_u32());
+        assert_eq!(retry_queue_len(&state), 0);
+    }
+
+    #[test]
+    fn channel_event_backpressure_pushes_only_while_retry_queue_has_room() {
+        let _state = lock_state();
+        reset_diagnostics();
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_ERR_BACKPRESSURE);
+
+        // While the bounded Edge retry queue has room, the record is owned by
+        // the retry machinery — the caller may drop its authoritative copy.
+        for _ in 0..EDGE_RETRY_MAX_RECORDS {
+            assert_eq!(
+                state.submit_channel_event("tray-1", &channel_message_event()),
+                ChannelSubmit::Pushed
+            );
+        }
+        assert_eq!(retry_queue_len(&state), EDGE_RETRY_MAX_RECORDS);
+
+        // Overflow is the one backpressure outcome the caller must retain:
+        // user data never drops.
+        assert_eq!(
+            state.submit_channel_event("tray-1", &channel_message_event()),
+            ChannelSubmit::Retain
+        );
+        assert_eq!(retry_queue_len(&state), EDGE_RETRY_MAX_RECORDS);
+    }
+
+    #[test]
+    fn channel_event_retains_without_port_and_on_rejection() {
+        let _state = lock_state();
+        reset_diagnostics();
+
+        // No port attached (legacy H0 host): the record stays in the caller's
+        // authoritative host outbox.
+        let detached = InstancePortState::new();
+        assert_eq!(
+            detached.submit_channel_event("tray-1", &channel_message_event()),
+            ChannelSubmit::Retain
+        );
+
+        // Structured rejection at ingress (for example an oversized record):
+        // retained, never dropped.
+        let fake = FakePort::new();
+        let state = attached_state(&fake);
+        fake.set_result(EXT_ERR_REJECTED);
+        assert_eq!(
+            state.submit_channel_event("tray-1", &channel_message_event()),
+            ChannelSubmit::Retain
         );
         assert_eq!(retry_queue_len(&state), 0);
     }

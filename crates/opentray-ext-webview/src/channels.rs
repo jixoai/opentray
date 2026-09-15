@@ -663,6 +663,19 @@ impl SessionChannels {
             .collect()
     }
 
+    /// Returns undeliverable host events to the FRONT of the host outbox,
+    /// oldest first, preserving FIFO for the command-response flush path.
+    /// harden-lifecycle-ownership (2026-09-15): the EventPort push producer
+    /// calls this for records it cannot guarantee (oversized payload, retry
+    /// overflow, revoked/absent port) — the authoritative store stays this
+    /// outbox, so a retained record is delivered by the next command
+    /// response exactly as the v1 flush ruling delivered it.
+    pub(crate) fn requeue_host_events_front(&mut self, events: Vec<Value>) {
+        for value in events.into_iter().rev() {
+            self.host_outbox.push_front(value);
+        }
+    }
+
     /// Test/introspection accessor: pending message count of one port.
     #[cfg(test)]
     pub(crate) fn port_len(
@@ -873,6 +886,37 @@ mod tests {
             .create(&owner(), ChannelPeer::host(), "toolbar".to_string())
             .expect_err("unattributed window must reject");
         assert_eq!(error.code(), OrchestrationErrorCode::SessionScope);
+    }
+
+    #[test]
+    fn requeue_host_events_front_preserves_fifo_for_the_response_flush() {
+        let mut channels = registry();
+        let (channel_id, _) = create_host_channel(&mut channels, "toolbar");
+
+        // Page→host messages land in the host outbox via drain_host_events.
+        for url in ["https://a.test/1", "https://a.test/2", "https://a.test/3"] {
+            channels
+                .post(&owner(), ChannelSender::Page("toolbar"), &channel_id, json!(url))
+                .expect("page post");
+        }
+        let drained = channels.drain_host_events();
+        assert_eq!(drained.len(), 3);
+
+        // The push producer could guarantee only the oldest record: the
+        // retained ones return to the FRONT, oldest first, so the unchanged
+        // command-response flush still delivers them in FIFO order.
+        let retained: Vec<Value> = drained[1..].iter().map(|(_, v)| v.clone()).collect();
+        channels.requeue_host_events_front(retained);
+        let after = channels.drain_host_events();
+        assert_eq!(
+            after
+                .iter()
+                .map(|(_, v)| v["payload"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!("https://a.test/2"), json!("https://a.test/3")],
+            "retained records keep FIFO order at the front of the host outbox"
+        );
+        assert!(channels.drain_host_events().is_empty());
     }
 
     #[test]

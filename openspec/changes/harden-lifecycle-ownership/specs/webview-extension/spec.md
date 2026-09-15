@@ -35,3 +35,28 @@ The session-bootstrap ordering and activation run before any child exists (an em
 - **GIVEN** a windowOnly session whose content webview was just created and laid out
 - **WHEN** the page finishes loading without any Dock interaction
 - **THEN** its scripts run and navigation commands take effect immediately.
+
+### Requirement: Host-bound channel events SHALL deliver through the extension EventPort without a command in flight
+
+The v1 flush ruling delivered host-bound channel events only as passengers on the next facade command response. After the D19 drain retirement an idle session never issues that command, so every page-to-host message stalled indefinitely (the "buttons dead until a Dock activation" walkthrough symptom). Page-originated channel commands SHALL push drained host channel events through the instance's EventPort immediately, in the same `channel.message`/`channel.closed` wire shape the response path produced. The authoritative store remains the session host outbox: a record leaves it only when the hub accepted it or the bounded Edge retry queue owns its redelivery; every other outcome (oversized record, retry overflow, revoked or absent port) SHALL retain the record at the front of the host outbox for the unchanged command-response flush, so user data is never dropped and the legacy fallback stays intact.
+
+#### Scenario: A page command reaches an idle host immediately
+
+- **GIVEN** an open host-created channel and a session with no facade command in flight
+- **WHEN** the page posts a message through the channel bridge
+- **THEN** the host endpoint observes the message without any command response carrying it
+- **AND** the session's host outbox is empty afterward (no double delivery through a later response).
+
+#### Scenario: Retained records keep their fallback order
+
+- **GIVEN** a port that cannot guarantee a record (oversized payload, retry overflow, or no attached port)
+- **WHEN** the push path returns the record
+- **THEN** it is re-queued at the front of the host outbox, oldest first
+- **AND** the next command response flush delivers the retained records in FIFO order.
+
+#### Scenario: Platform twins enforce the same delivery contract
+
+- **GIVEN** the macOS and Windows channel dispatchers
+- **WHEN** a page-originated postMessage/close/destroy command succeeds or typed-fails
+- **THEN** both platforms submit drained host events through the EventPort before returning
+- **AND** neither platform expresses a registry borrow across the deliver/submit re-entry.

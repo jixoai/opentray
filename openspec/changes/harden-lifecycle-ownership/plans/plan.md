@@ -59,6 +59,8 @@
 
 - **D6 挂起双层修复（走查轮，2026-09-15 用户拍板线索「点 Dock 图标后命令立即执行」）**：(a) broker 进程在启动时断言 `NSProcessInfo.beginActivityWithOptions(UserInitiatedAllowingIdleSystemSleep)` 并持有整个生命周期——非 LS 启动的 detached broker 一旦空闲就会被 macOS App Nap 挂起（WKWebView 的加载/定时器/网络全部暂停，直到 Dock 激活）；d19 退役 16ms 轮询后进程完全空闲，使该进程自 0.27.0 起暴露于此（Owner 最初对 EventPort 的症状级怀疑在此成立）。(b) CreateWebview 成功后（子视图+布局就位）重申 makeKeyAndOrderFront/orderFrontRegardless + app activation——会话引导期的排序发生在空 windowOnly 壳上，WebKit 不会对后加入的子视图重估可见性。
 
+> **D6 证伪与 D7 真根因（2026-09-15 根因轮，Owner 复测仍失败后）**：D6 的 App Nap 理论被三层证据证伪——(1) 走查复测仍需 Dock 点击；(2) 挂起期间裸 socket 探针秒回错误帧（broker 主循环活着）；(3) **走查环境自始至终加载的是 node_modules 里的 05:14 旧 dylib（OPENTRAY_EXT_PATH 对「包声明的官方扩展」不生效：facade 从依赖闭包解析绝对路径，broker 无条件信任），D6 根本没进过现场**。真根因（D7）：**host_outbox（页面→宿主 channel 消息）的唯一投递出口是「搭下一笔 facade 命令的响应」（v1 flush ruling，tasks 3.3b/3.5，mac mod.rs:648-651 / win mod.rs:1093 同构）**。16ms drain 时代每 16ms 就有一笔命令顺带冲刷；d19 退役轮询后空闲会话永远没有「下一笔命令」，投递延迟=无穷大。Dock 激活之所以「治好」：激活触发的某笔 ext 命令（如 titleChange re-show）顺带冲刷了积压。证据链：OPENTRAY_WEBVIEW_DEBUG 下 broker.log 有 `opentray.webview::postMessage`+`callback resolved`（native 收到）而 entry app.log 零 `cmd`（宿主没收到）；broker 无任何 drop 日志（消息安静地躺在 outbox）。**D7 修复**：页面侧 channel 命令臂（postMessage/close/destroy）在 native ipc handler 内直接把 drain_host_events 的记录经 EventPort 推送（`submit_channel_event`，Edge 类）；端口不能保证投递的记录（超 hub 单记录上限/重试队列满/端口撤销或未附）**保留在 host_outbox 前部**回退到原响应搭载路径——用户数据零丢失、零回归。事件帧形状与响应搭载路径完全同构（`ServerFrame::ExtEvent` + `channel.message` JSON），facade `routeFrame` 两条来路同构消费。D6 两项保留为防御性加固（防 CPU 节流/可见性重估），但其「修复走查症状」的定性撤销。无头黑盒复验：t=4s 探针消息在零命令、零激活下即时送达（get-url→navigate→done 2ms 内），broker.log `host channel submit -> Pushed`。
+
 ## 6. 验证策略
 
 - 每项 D 的专项测试（上述）；随后按既有基线命令 + 针对性黑盒：kill -9 矩阵（物化中途/运行中/broker-only）、双启动方式端点一致性、重启后应用可启动、app.log 叙事完整性。

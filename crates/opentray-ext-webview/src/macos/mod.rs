@@ -1008,13 +1008,16 @@ impl MacosWebviewRuntime {
                 {
                     Ok(()) => {
                         // harden-lifecycle-ownership (user walkthrough finding,
-                        // 2026-09-15): the session-bootstrap activation and
-                        // ordering ran BEFORE any child existed (an empty
-                        // windowOnly shell); WebKit never re-evaluated the
-                        // children's visibility, so their pages suspend
-                        // (loads/timers deferred) until a Dock activation.
-                        // Re-assert ordering and activation once the child
-                        // and the effective layout are in place.
+                        // 2026-09-15): re-assert ordering and activation once
+                        // the child and the effective layout are in place, so
+                        // WebKit re-evaluates the children's visibility.
+                        // Correction (same root-cause round): this did NOT fix
+                        // the "buttons dead until Dock click" symptom — that
+                        // was host channel events riding only the next command
+                        // response (see macos/bridge.rs
+                        // submit_host_channel_events). It stays as a
+                        // visibility/ordering hardening for freshly composed
+                        // sessions.
                         if let Some(mtm) = MainThreadMarker::new() {
                             if let Some(session) = self.session(&owner.tray_id) {
                                 let app = NSApplication::sharedApplication(mtm);

@@ -235,19 +235,26 @@ pub(super) fn dispatch_webview_channel_command(
                         &receipt.recipient,
                         receipt.endpoint,
                     );
+                    submit_host_channel_events(bridge);
                     Ok(Value::Null)
                 }
                 Err(failure) => {
                     deliver_channel_pushes(bridge, &failure.pushes, None);
+                    submit_host_channel_events(bridge);
                     Err(failure.error)
                 }
             }
         }
         "closeMessageChannel" => {
             let channel_id = required_channel_id(&payload)?;
-            match registry.borrow_mut().close(&owner, sender, &channel_id) {
+            // `let` binding drops the RefMut before the arms run: the match
+            // scrutinee form would keep the registry borrowed across
+            // deliver/submit re-entry.
+            let outcome = registry.borrow_mut().close(&owner, sender, &channel_id);
+            match outcome {
                 Ok(pushes) => {
                     deliver_channel_pushes(bridge, &pushes, None);
+                    submit_host_channel_events(bridge);
                     Ok(Value::Null)
                 }
                 Err(error) => Err(error),
@@ -255,9 +262,11 @@ pub(super) fn dispatch_webview_channel_command(
         }
         "destroyMessageChannel" => {
             let channel_id = required_channel_id(&payload)?;
-            match registry.borrow_mut().destroy(&owner, sender, &channel_id) {
+            let outcome = registry.borrow_mut().destroy(&owner, sender, &channel_id);
+            match outcome {
                 Ok(pushes) => {
                     deliver_channel_pushes(bridge, &pushes, None);
+                    submit_host_channel_events(bridge);
                     Ok(Value::Null)
                 }
                 Err(error) => Err(error),
@@ -414,6 +423,41 @@ fn evaluate_channel_script_for_view(
             .or_default()
             .push(script);
     }
+}
+
+/// harden-lifecycle-ownership (user walkthrough finding, 2026-09-15): the
+/// v1 flush ruling delivered host-bound channel events ONLY as passengers
+/// on the next facade command response, so once D19 retired the 16 ms
+/// drain an idle session never issued that command — every page→host
+/// message stalled until some unrelated command happened to flush the
+/// outbox. Page-originated channel commands now push drained host events
+/// through the instance's EventPort immediately: the same `ExtEvent` frame
+/// shape the response path produced, routed to the owning session without
+/// any command in flight. Records the port cannot guarantee return to the
+/// front of the host outbox for the unchanged response-flush fallback —
+/// user data is never dropped. (macOS twin: macos/bridge.rs.)
+pub(super) fn submit_host_channel_events(bridge: &Rc<RefCell<NavigatorWindowBridge>>) {
+    let (port_state, events) = {
+        let state = bridge.borrow();
+        let events = state.channels.borrow_mut().drain_host_events();
+        (std::sync::Arc::clone(&state.port_state), events)
+    };
+    if events.is_empty() {
+        return;
+    }
+    let mut retained = Vec::new();
+    for (owner, data) in events {
+        if port_state.submit_channel_event(&owner.tray_id, &data)
+            == crate::event_port::ChannelSubmit::Retain
+        {
+            retained.push(data);
+        }
+    }
+    if retained.is_empty() {
+        return;
+    }
+    let state = bridge.borrow_mut();
+    state.channels.borrow_mut().requeue_host_events_front(retained);
 }
 
 /// Drains the receiving port of a just-delivered message straight into the
