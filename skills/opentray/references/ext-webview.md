@@ -203,7 +203,9 @@ contract — sugar builders, bridge policy fields, channel lifecycle and queue
 bounds, and the typed error registry surfaced as `WebviewOrchestrationError` —
 lives in the package README (`@opentray/ext-webview`); the composition pattern
 that exposes backend capabilities to a trusted toolbar page over a channel is
-covered in [`backend-ipc.md`](backend-ipc.md).
+covered in [`backend-ipc.md`](backend-ipc.md); the full composition
+contract — layout document model, event family, channel bounds, and the
+copyable toolbar recipe — is [`multi-webview.md`](multi-webview.md).
 
 Key laws for consumers:
 
