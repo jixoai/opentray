@@ -99,6 +99,19 @@ const CT = {
   ".json": "application/json",
 };
 
+// Toolbar context-menu guard (user walkthrough finding, 2026-09-15): the
+// trusted shell UI never shows the engine's native context menu except on
+// text-entry elements (inputs keep copy/paste/etc). Injected at serve time
+// into toolbar.html because the macOS native suppression hook stays off by
+// law — the isa-swizzle approach crashed the 0.27.3 broker, and the page
+// layer's own preventDefault is the sanctioned suppression point.
+const TOOLBAR_GUARD =
+  '<script>document.addEventListener("contextmenu",function(e){var t=e.target;' +
+  'if(t instanceof HTMLElement&&t.closest("input,textarea,[contenteditable]:not([contenteditable=\\"false\\"])")){return;}' +
+  'e.preventDefault();},true);</script>';
+const injectToolbarGuard = (html) =>
+  html.includes("</head>") ? html.replace("</head>", TOOLBAR_GUARD + "</head>") : TOOLBAR_GUARD + html;
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   if (url.pathname === "/api/events") {
@@ -150,6 +163,12 @@ const server = createServer(async (req, res) => {
     res
       .writeHead(200, { "content-type": CT[".html"], "cache-control": "no-store" })
       .end(index);
+    return;
+  }
+  if (target === join(SHELL_DIR, "toolbar.html")) {
+    res
+      .writeHead(200, { "content-type": CT[".html"], "cache-control": "no-store" })
+      .end(injectToolbarGuard(bytes.toString("utf8")));
     return;
   }
   res

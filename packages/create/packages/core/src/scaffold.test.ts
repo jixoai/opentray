@@ -228,6 +228,17 @@ describe("writeScaffold URL application toolbar mode", () => {
     expect(files).toContain("app-shell-server.mjs");
     const packageJson = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
     expect(packageJson.dependencies["@lydell/node-pty"]).toBeUndefined();
+    // Toolbar context-menu guard (user walkthrough finding, 2026-09-15):
+    // the generated server injects the page-layer suppression only into
+    // toolbar.html responses — input/textarea/contenteditable keep the
+    // native menu, every other trusted-shell surface never shows the
+    // engine context menu.
+    const server = await readFile(join(dir, "app-shell-server.mjs"), "utf8");
+    expect(server).toContain("injectToolbarGuard");
+    expect(server).toContain(
+      't.closest("input,textarea,[contenteditable]:not([contenteditable=\\"false\\"])")',
+    );
+    expect(server).toContain('target === join(SHELL_DIR, "toolbar.html")');
 
     const entry = await readFile(join(dir, "main.mjs"), "utf8");
     // 双 webview：toolbar（shell 资产 URL，显式 bridge 策略）+ content

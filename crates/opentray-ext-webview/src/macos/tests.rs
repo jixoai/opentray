@@ -3252,6 +3252,73 @@ fn channel_page_load_state_discriminates_document_navigation() {
     assert_eq!(error.code(), OrchestrationErrorCode::NotOpen);
 }
 
+/// harden-lifecycle-ownership (walkthrough round 2, 2026-09-15): a manual
+/// toolbar reload closes the channel from the NAVIGATION delegate, not from
+/// a page command — before the D7 producer the host close observation rode
+/// only the next command response, so an idle host never learned its channel
+/// died and never rebuilt it (toolbar state lost until some unrelated
+/// command). The navigation close hook now pushes the host observation
+/// through the EventPort immediately.
+#[test]
+fn document_navigation_close_pushes_the_host_observation_through_the_port() {
+    use opentray_spec::webview::WebviewBridgePolicy;
+
+    let port = crate::event_port::test_support::install_fake_port_for_module_tests();
+    let bridge = Rc::new(RefCell::new(test_bridge_with_port_state(
+        std::sync::Arc::clone(&port.state),
+    )));
+    bridge.borrow_mut().views.push(WebViewBridge {
+        id: "toolbar".to_string(),
+        policy: WebviewBridgePolicy {
+            webview_id: true,
+            message_channels: true,
+            ..WebviewBridgePolicy::default()
+        },
+        webview: test_webview_pointer(),
+        listeners: HashMap::new(),
+        next_event_id: 1,
+    });
+    let owner = channel_owner_tuple();
+    let (channel_id, _) = bridge
+        .borrow()
+        .channels
+        .borrow_mut()
+        .create(
+            &owner,
+            opentray_spec::channel::ChannelPeer::host(),
+            "toolbar".to_string(),
+        )
+        .expect("host-created channel");
+
+    // Initial load completes, then a manual reload navigates the document.
+    super::bridge::handle_view_channel_navigation_started(&bridge, "toolbar");
+    super::bridge::handle_view_channel_page_finished(&bridge, "toolbar");
+    super::bridge::handle_view_channel_navigation_started(&bridge, "toolbar");
+
+    let submits = port.submits();
+    assert_eq!(
+        submits.len(),
+        1,
+        "the document_navigated close observation pushes with zero commands in flight"
+    );
+    assert_eq!(submits[0].tray_id, "tray-1");
+    assert_eq!(submits[0].payload_tag, "channel.closed");
+    assert_eq!(
+        submits[0].class,
+        opentray_spec::ExtEventClassV1::Edge.as_u32()
+    );
+    // Nothing waits in the authoritative outbox for a later response.
+    assert!(
+        bridge
+            .borrow()
+            .channels
+            .borrow_mut()
+            .drain_host_events()
+            .is_empty()
+    );
+    let _ = channel_id;
+}
+
 /// Host-side channel command smoke on the main thread (real AppKit
 /// session): the frozen command frames round-trip through the runtime,
 /// authority rejections return typed envelopes as Ok-data, and host

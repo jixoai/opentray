@@ -60,3 +60,10 @@ The v1 flush ruling delivered host-bound channel events only as passengers on th
 - **WHEN** a page-originated postMessage/close/destroy command succeeds or typed-fails
 - **THEN** both platforms submit drained host events through the EventPort before returning
 - **AND** neither platform expresses a registry borrow across the deliver/submit re-entry.
+
+#### Scenario: A document-navigation close reaches an idle host immediately
+
+- **GIVEN** an open channel whose page endpoint's document reloads (manual reload) with no facade command in flight
+- **WHEN** the native navigation hook closes the channel with `document_navigated`
+- **THEN** the host-endpoint close observation is pushed through the EventPort in the same `channel.closed` wire shape the response path produced
+- **AND** the session's host outbox is empty afterward, so a self-healing host rebuilds its channel without waiting for any command response.

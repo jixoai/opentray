@@ -521,6 +521,12 @@ pub(super) fn handle_view_channel_navigation_started(
             .borrow_mut()
             .close_channels_of_webview(view_id, ChannelCloseReason::DocumentNavigated);
         deliver_channel_pushes(bridge, &pushes, Some(view_id));
+        // The closing document's channel-close observation lands in the host
+        // outbox — without this push the host only learns of the death on the
+        // next command response, so an idle session never rebuilds its
+        // channel after a manual toolbar reload (same flush-riding defect
+        // the D7 walkthrough fix closed for page-originated posts).
+        submit_host_channel_events(bridge);
     }
 }
 
