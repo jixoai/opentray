@@ -184,6 +184,16 @@ Established by `d19-extension-event-port` (2026-09-13); the change retired the
 16 ms window-event drain after migrating its family to subscribed EventPort
 producers on both platforms.
 
+Completion (`harden-lifecycle-ownership`, 2026-09-16): host-bound channel
+events are also EventPort producers. Page-originated channel commands
+(postMessage/close/destroy — every exit, including typed-fails) and the
+document-navigation close hook push drained host events through the port
+immediately; the authoritative host outbox retains any record the port cannot
+guarantee and the command-response flush remains the fallback. Riding host
+events only on command responses is a retired pattern: an idle session must
+deliver page-to-host messages without any command in flight (the retired 16 ms
+drain had been the accidental pump).
+
 ## Multi-Webview Orchestration Law
 
 Established by `add-webview-orchestration` (2026-09-12); living specs:

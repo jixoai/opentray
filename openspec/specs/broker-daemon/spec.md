@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change implement-local-broker-daemon. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: CLI SHALL expose broker daemon lifecycle commands
 
 The `opentray` package SHALL expose explicit lifecycle commands for the local broker daemon. The canonical command group SHALL be `opentray daemon`, with `start`, `stop`, and `restart` subcommands.
@@ -352,3 +354,12 @@ Ready metadata SHALL record the broker executable path, artifact identity, packa
 - **THEN** connection initialization rejects with expected and actual identity
 - **AND** no tray command is sent on that connection.
 
+### Requirement: Broker SHALL exclude itself from App Nap for its whole lifetime
+
+The Darwin broker is a detached, non-LaunchServices process; once idle, macOS App Naps it and suspends every WKWebView's loads, timers, and network until a Dock activation revives the app. The broker SHALL assert one process activity (`NSProcessInfo.beginActivityWithOptions`, `UserInitiatedAllowingIdleSystemSleep`) at startup and hold it for its entire lifetime — a tray broker with live sessions is inherently user-facing. Display sleep stays available.
+
+#### Scenario: Detached broker keeps serving after going idle
+
+- **GIVEN** a broker spawned directly by an SDK entry (never launched through LaunchServices)
+- **WHEN** the process would otherwise go idle and no Dock activation ever happens
+- **THEN** webview pages keep loading, their timers keep firing, and tray commands keep executing without any user interaction.

@@ -10,6 +10,20 @@ The caller label SHALL be derived with exactly this precedence: an explicit inte
 
 For app-style consumers the endpoint SHALL be stable across every launch method of the same app (CLI open, direct `node` invocation, carrier cold start), because the app identity is the routing truth. The endpoint migration caused by this rule for existing installed apps is one-time and self-cleaning: brokers on legacy endpoints exit when their last session closes, and the shared Darwin bundle is not endpoint-scoped.
 
+#### Scenario: Client receives broker-created space identity
+
+- **GIVEN** the daemon is running for the current package version and caller label
+- **WHEN** TypeScript code connects and calls `createTray`
+- **THEN** the client sends a request-correlated protocol command
+- **AND** it resolves with the tray handle returned by the broker (the pre-tray-era scenario name is retained for spec continuity).
+
+#### Scenario: Same version, different labels connect to different brokers
+
+- **GIVEN** two host applications use the same `opentray` version with different caller labels
+- **WHEN** each connects
+- **THEN** each resolves a different daemon endpoint
+- **AND** each session is served by its own broker process.
+
 #### Scenario: Same app reaches the same broker from every launch method
 
 - **GIVEN** a generated app with `appId com.baidu` started via CLI open, via direct `node entry`, and via carrier cold start

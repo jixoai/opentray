@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change implement-kernel-webview-foundation. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Kernel SHALL own App Tray Session laws
 
 The Rust kernel SHALL implement `App`, `Tray`, and `Session` as the public domain law for OpenTray runtime ownership. An `App` SHALL represent one broker-owned desktop status runtime scoped to exactly one caller session and identified by stable app identity plus human-readable app name. A `Tray` SHALL represent one client-owned status contribution mounted onto exactly one app runtime. A `Session` SHALL represent the single accepted caller connection for a broker and SHALL be the only public lifecycle authority that can create, mutate, or destroy trays owned by that connection.
@@ -119,6 +121,8 @@ The broker runtime SHALL treat `init { protocolVersion, clientVersion }` as the 
 
 The broker runtime SHALL translate accepted client command frames into `opentray-core::Kernel` operations. Surface creation, tray creation, tray mutation, tray destruction, lease cleanup, extension commands, and backend-originated events SHALL use kernel ownership checks rather than reimplementing policy in the transport layer.
 
+Extension command dispatch SHALL be scoped to the tray-owning session: the kernel SHALL reject an `ext-command` addressed to a tray owned by a different live session before any extension code runs. Extension event routing law is unchanged — pushed events route by ownership — but a foreign session can neither dispatch nor destroy through another session's tray.
+
 #### Scenario: Create tray dispatches through kernel and backend projection
 
 - **GIVEN** a client session has an accepted lease
@@ -134,6 +138,22 @@ The broker runtime SHALL translate accepted client command frames into `opentray
 - **WHEN** it sends `create-surface`, `create-tray`, `set-tray-menu`, or `ext-command`
 - **THEN** the broker returns a structured protocol error
 - **AND** the kernel is not mutated.
+
+#### Scenario: Extension command from a non-owning session is rejected before dispatch
+
+- **GIVEN** session A owns a tray with a loaded extension
+- **AND** session B owns a different tray
+- **WHEN** session B sends `ext-command` addressing session A's tray
+- **THEN** the kernel rejects the command with a session-mismatch error
+- **AND** no extension code runs and neither session observes events from the dispatch
+- **AND** the owning session's state — including any window session reachable through legacy commands — is untouched.
+
+#### Scenario: Owner dispatch still routes events by ownership
+
+- **GIVEN** session A owns a tray with a loaded push extension
+- **WHEN** session A dispatches an extension command on its own tray
+- **THEN** mirrored command events flow back to the dispatching session
+- **AND** pushed events route to the owning session per the extension event routing law.
 
 ### Requirement: Protocol responses SHALL be request-correlated
 
@@ -228,4 +248,3 @@ The kernel SHALL translate accepted client command frames into `opentray-core::K
 - **WHEN** the kernel evaluates the request
 - **THEN** the lookup is authorized by the same session authority that owns the tray
 - **AND** the kernel does not synthesize a fake shared runtime rect.
-

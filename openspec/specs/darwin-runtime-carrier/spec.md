@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change darwin-runtime-carrier-and-webview-permissions. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Darwin runtime carrier SHALL own macOS app bundle identity
 
 OpenTray SHALL provide an internal shared Darwin runtime carrier for macOS `.app` bundle construction and launch identity. The carrier SHALL own the common app-bundle law for executable placement, `Info.plist` merge, bundle identifier selection, display name selection, activation policy inputs, and privacy usage string generation. Extension atoms SHALL consume the carrier through configuration instead of owning independent `.app` bundle implementations.
@@ -56,3 +58,33 @@ The Darwin runtime carrier SHALL not grant browser permissions by itself. It SHA
 - **AND** the final allow, deny, prompt, or unsupported decision is made by the permission policy
 - **AND** the carrier does not silently grant the permission on its own.
 
+### Requirement: Stable bundle lock SHALL be owner-stamped and self-healing
+
+The single-writer lock guarding stable Darwin bundle materialization (`<App>.app.opentray.lock`) SHALL be acquired through one shared helper co-owned by the bundle path and the launch-descriptor path. The helper SHALL:
+
+- write the owner record (PID plus a unique token) and flush it to disk before the lock is considered held;
+- treat a lock file that is empty, unparseable, or whose recorded PID is dead as reclaimable within a bounded acquire budget;
+- on release, remove the lock file only when its token still matches, so a delayed release cannot delete a replacement owner's lock.
+
+A `kill -9` at any point of materialization SHALL leave a lock that the next start can reclaim; the user SHALL never need to delete a lock file by hand.
+
+#### Scenario: Kill during materialization is recoverable
+
+- **GIVEN** a caller is killed with SIGKILL while holding the bundle lock mid-materialization
+- **WHEN** the same app starts again
+- **THEN** the next acquisition reclaims the stale lock within the bounded budget
+- **AND** materialization proceeds without a manual lock deletion
+- **AND** the acquisition does not fail with `bundle_lock_timeout`.
+
+#### Scenario: Empty lock file is reclaimable
+
+- **GIVEN** a lock file exists with zero bytes and no live holder
+- **WHEN** a caller acquires the lock
+- **THEN** the empty file is treated as an unheld lock and replaced with an owner-stamped record.
+
+#### Scenario: Release respects token ownership
+
+- **GIVEN** lock holder A is delayed during release while holder B has already reclaimed and re-stamped the lock
+- **WHEN** A completes its release
+- **THEN** A does not remove B's lock file
+- **AND** B's ownership survives.
