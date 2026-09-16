@@ -679,6 +679,11 @@ const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
       return frame.requestId;
     case "error":
       return frame.requestId;
+    // Deferred-transaction frames never correlate through requestId here:
+    // acceptance settles nothing and the terminal frame has no requestId
+    // (the local broker connection correlates it through the operation map).
+    case "ext-command-accepted":
+    case "ext-operation-terminal":
     case "ready":
     case "event":
     case "app-event":

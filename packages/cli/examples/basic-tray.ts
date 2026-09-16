@@ -1,6 +1,7 @@
 import {
   createClient,
   createInitFrame,
+  PROTOCOL_VERSION,
   type ClientRequestFrame,
   type OpenTrayTransport,
   type ServerFrame,
@@ -54,7 +55,7 @@ class RecordingTransport implements OpenTrayTransport {
             pid: process.pid,
             endpoint: "recorded",
             packageVersion: "0.1.0",
-            protocolVersion: 1,
+            protocolVersion: PROTOCOL_VERSION,
             appId: "com.example.opentray",
             appName: "OpenTray Example",
             callerLabel: "recorded",

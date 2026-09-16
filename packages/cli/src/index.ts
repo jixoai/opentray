@@ -45,6 +45,10 @@ export {
    * end state (e.g. quit paths racing their own teardown).
    */
   BROKER_CONNECTION_CLOSED_MESSAGE,
+  /** Generic core-client rejection code for pending deferred operations on transport death. */
+  EXTENSION_TRANSPORT_CLOSED_CODE,
+  /** Typed rejection for deferred-operation terminals and transport-close deaths. */
+  ExtensionOperationError,
 } from "./local-broker";
 export type {
   OpenTrayAppBundleOptions,
@@ -74,6 +78,7 @@ export {
   formatUnixSocketPath,
   formatWindowsPipeName,
   isSupportedProtocolVersion,
+  EXTENSION_EVENT_RECORD_MAX_BYTES,
   PROTOCOL_VERSION,
   type AppId,
   type AppEvent,
@@ -89,9 +94,13 @@ export {
   type BrokerEndpointIdentityOptions,
   type ClientFrame,
   type ClientRequestFrame,
+  type CommandScope,
   type DarwinIcon,
   type DarwinIconText,
+  type ExpectedExtensionIdentity,
+  type ExtensionArtifactTarget,
   type ExtensionEnvelope,
+  type ExtOperationPayload,
   type Icon,
   type IconCandidates,
   type IconImage,
@@ -112,5 +121,6 @@ export {
   type TrayOptions,
   type Icon as TrayIcon,
   type Tooltip as TrayTooltip,
+  type TypedExtensionError,
   type Win32Icon,
 } from "@opentray/spec";

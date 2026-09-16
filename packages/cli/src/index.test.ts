@@ -385,7 +385,7 @@ describe("opentray client", () => {
     const identity = createBrokerEndpointIdentity({ packageVersion: "0.1.0" });
 
     expect(formatBrokerEndpointName(identity)).toBe(
-      "opentray-0.1.0-p1-opentray"
+      "opentray-0.1.0-p2-opentray"
     );
   });
 });
