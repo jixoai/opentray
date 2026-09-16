@@ -153,8 +153,10 @@ target** 的 compile/type/test 并以同一完整 fixture 比对两个平台构�
   header 匹配、伪装 MP3、截断 WAV、大小超限、不可读、大小写扩展名）、路径 canonicalize、
   Linux typed unsupported、embedded 描述符解析（复用 dialog 批次 A 测试基建）。
 - **原生验收（双平台真机）**：命令受理与错误分支语义验证（原生返回值/broker.log 取证，
-  可闻性不作为门）；通用名×3 + 双平台各一原生名 + 一个必然 miss 名；**A/B 会话交错与关闭
-  顺序四格**（P0-4：关闭不持有 token 的 session 不得 purge 别人的播放）；backend DTO 上报。
+  可闻性不作为门）；通用名×3 + 双平台各一原生名 + 一个必然 miss 名；**单 session 多
+  mount 一次 close 序列集成验证（最新匹配 owner 至多 purge 一次）+ PlaybackArbiter
+  deterministic 单测（模拟双 CommandScope token 的交错/关闭全序，不命名活的第二
+  caller session）**；backend DTO 上报（getBackend）。
 - **双 target CI 编译门** + exhaustive fixture（P1-3）。
 - **体积与发布证据**：真实 `npm pack --json --pack-destination`（tgz stat/digest、npm 版本、
   packlist、四目标 hash）+ 解包同一 tgz 逐目标 identity check——与 dialog §6.3/§6.4 共用

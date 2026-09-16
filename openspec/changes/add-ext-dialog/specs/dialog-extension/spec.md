@@ -95,7 +95,7 @@ The native extension SHALL embed and report a `DialogBackendCapabilities` DTO (p
 #### Scenario: Runtime truth overrides static expectation
 
 - **GIVEN** a win32 environment where the comctl32 v6 context is unavailable and dialogs fall back to MessageBox
-- **WHEN** the facade reads `backend`
+- **WHEN** the facade awaits `getBackend()`
 - **THEN** `taskDialog` and `commandLinks` SHALL report `false`, and a `commandLink`-styled call SHALL reject with `dialog_capability_unavailable` rather than silently rendering standard buttons
 
 ### Requirement: A modal dialog SHALL NOT stall tray event delivery
@@ -122,7 +122,7 @@ While any dialog is open, the broker SHALL keep dispatching tray events for the 
 
 - **GIVEN** the installed `@opentray/ext-dialog` facade on `darwin-arm64`
 - **WHEN** the SDK resolves the dialog extension artifact
-- **THEN** it SHALL return the real path of `platforms/darwin-arm64/libopentray_ext_dialog.dylib` with expected identity `{ extensionName: "dialog", artifactSetVersion: <facade version>, contractFingerprint: "opentray-ext-dialog-contract-1" }`
+- **THEN** it SHALL return the real path of `platforms/darwin-arm64/libopentray_ext_dialog.dylib` with expected identity `{ extensionName: "dialog", artifactSetVersion: <facade version>, contractFingerprint: "opentray-ext-dialog-contract-1", sha256: <staging-manifest hash for the target>, buildIdentity: <staging-manifest build identity> }`, and the `LoadExt` frame SHALL carry those sha256/buildIdentity fields for broker-side re-hash and post-load manifest verification
 
 #### Scenario: The size gate fails an oversized embedded package
 

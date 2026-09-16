@@ -154,66 +154,83 @@ accessory 见 §4）。**空命名空间保持可表达**（`darwin: {}` 合法�
 ### 5.1 DeferredOperation：完整命令→终帧 ABI 事务（R3 P0-1 冻结）
 
 ```text
-# 协议帧（@opentray/spec + opentray-spec 冻结全量 schema 与 parser 真值）
+# 协议帧（@opentray/spec + opentray-spec 冻结全量 schema 与 parser 真值；version 1→2）
 ServerFrame::ExtCommandAccepted  { requestId, operationId }   # 命令受理（Accepted 语义见 §5.3）
 ServerFrame::ExtOperationTerminal { operationId, payload }   # 唯一终帧
 
-# 命令返回处置（FFI 同步返回时的 tagged disposition）
-CommandDisposition = Immediate(ExtCommandResult) | Deferred(operation_handle)
+# 命令 FFI（改造现有 ExtCommandFn 的 out 约定，repr(C) 冻结）
+#[repr(C)] ExtCommandDispositionV1 =
+  | { tag: 0 /* Immediate */, events: ExtOwnedBytes }          # 现行为：命令内完成
+  | { tag: 1 /* Deferred  */, operation_handle: u64 }          # 挂起：broker 签发 handle
+# opentray_ext_command(instance, context, envelope, out_events, out_disposition) -> ExtResultCode
+# 兼容规则：旧扩展（不导出 disposition 版符号）→ 恒 Immediate（同 EventPort 可选符号模式）
 
-# 终帧载荷（discriminated union，Node 侧 resolve/reject 的唯一依据）
-TerminalPayload = { kind: "result", value: JSON } | { kind: "error", error: TypedExtensionError }
-
-# 原生侧可选版本化符号（opentray-spec 常量，同 EventPort 可选符号家族）
-opentray_ext_attach_deferred_completion_port_v1(port: *const ExtDeferredPortV1)
+# 原生侧可选版本化符号（opentray-spec 常量）
+opentray_ext_attach_deferred_completion_port_v1(instance: *mut c_void, port: *const ExtDeferredPortV1)
+# instance 参数必须携带：多 mount 时 port 归属实例，一 mount 一 port，杜绝跨实例覆盖
 ExtDeferredPortV1 = { abi_version, struct_size, port_data, submit }
-submit(port_data, handle, payload_bytes, payload_len) -> ExtResultCode
+submit(port_data, handle: u64, payload_bytes, payload_len) -> ExtResultCode
 ```
+
+**handle wire 表示**：FFI 侧 `u64`；Node 侧传输帧用十六进制字符串（JSON 安全）；payload
+上限**引用 opentray-spec 的 EventPort 记录字节常量**（同一常量、同一 fixture 数字冻结，
+不另立数值）。
+
+**终帧载荷**：`TerminalPayload = { kind: "result", value: JSON } | { kind: "error", error:
+TypedExtensionError }`——Node 侧 resolve/reject 的唯一依据。
 
 **事务规则（全部冻结）**：
 
 - **handle 签发**：operationId 与 opaque handle 均由 broker 生成，**仅在命令调用期间**经
-  CommandDisposition::Deferred 下发（host→extension 单向，一次有效）；handle 为不透明
-  64-bit nonce，绑定 `(sessionId, instanceGeneration, operationId)`；扩展自造/重放 handle →
+  `ExtCommandDispositionV1::Deferred` 下发（host→extension 单向，一次有效）；handle 为
+  u64 nonce，绑定 `(sessionId, instanceGeneration, operationId)`；扩展自造/重放 handle →
   `EXT_ERR_INVALID_HANDLE`，错 owner → 丢弃 + 诊断（不回帧）。
 - **port 生命周期（EventPort 同款模式）**：immutable host-owned 状态；`version` +
   `struct_size` 校验（不符 → `event_port_abi_incompatible` 同族错误，不静默降级）；
-  submit 为 bounded-copy（payload 上限与 EventPort 记录上限一致，超限 →
-  `EXT_ERR_OVERSIZED`）；返回码 `EXT_OK / EXT_ERR_PORT_CLOSED / EXT_ERR_INVALID_HANDLE /
-  EXT_ERR_OVERSIZED`；**submit 通道在 LoadExt ACK 后才打开**；session/instance 清理前先
-  revoke（此后 submit 恒 `EXT_ERR_PORT_CLOSED`，无队列突变）；broker 不在可能仍有 stale
-  worker submit 的窗口释放 host 内存——port_data 指向 broker 拥有的进程级存活状态。
-- **终帧语义**：`TerminalPayload` 是 success/error 的唯一判别——`result` 分支 resolve，
-  `error` 分支以 TypedExtensionError reject（含 `dialog_dismissal_unavailable` 等）；
-  撤销路径由扩展产出 cancel 分支 result payload（与用户取消同构）；重复终帧/旧
-  generation → owner loop CAS 无状态丢弃 + 诊断。
-- **事件顺序的诚实声明**：dialog 不经 EventPort 发任何事件，故**不承诺任何
-  terminal-before-event barrier**——终帧与其它帧的相对顺序由 transport 写出顺序唯一决定。
+  submit 为 bounded-copy（超限 → `EXT_ERR_OVERSIZED`）；返回码 `EXT_OK /
+  EXT_ERR_PORT_CLOSED / EXT_ERR_INVALID_HANDLE / EXT_ERR_OVERSIZED`；**submit 通道在
+  LoadExt ACK 后才打开**；session/instance 清理前先 revoke（此后 submit 恒
+  `EXT_ERR_PORT_CLOSED`，无队列突变）；broker 不在可能仍有 stale worker submit 的窗口
+  释放 host 内存——port_data 指向 broker 拥有的进程级存活状态。
+- **终帧语义**：`result` 分支 resolve，`error` 分支以 TypedExtensionError reject；撤销
+  路径由扩展产出 cancel 分支 result payload（与用户取消同构）；重复终帧/旧 generation →
+  owner loop CAS 无状态丢弃 + 诊断。
+- **唯一终帧来源（R4 P0-2 裁决）**：**跨线程终帧提交只有 port submit 一条路**；
+  `poll_owner` 只返回 `Pending`——poll 与 port 不允许双通道产出终帧，「实现批二选一」的
+  开口作废。
+- **事件顺序的诚实声明**：dialog 不经 EventPort 发任何事件，**不承诺任何 event
+  barrier**——终帧与其它帧的相对顺序由 transport 写出顺序唯一决定。
 - **断连语义分层**：共享 spec 冻结通用 `extension_transport_closed`（核心 client 对一切
   pending operation 的统一拒绝，无任何扩展名分支）；ext-dialog facade 将其映射为公开的
   `dialog_transport_closed`（facade 层 mapping，core 不认识 dialog）。
-- **protocol version** 提升；exhaustive switch 双侧同步；确定性测试族：ABI layout/未知
-  version、伪造/stale/错 owner handle、success/error 终帧 round-trip（Rust/TS/Node/Bun）、
-  accepted 前后断连、重复终帧、revoke 后 submit、核心 client 无 dialog 分支的编译期证明。
+- **protocol version 1→2**：双侧常量同步提升；旧版本帧/符号的兼容拒绝路径有 exhaustive
+  测试；Node/Bun 双端在同一切换门内。
+- **确定性测试族**：ABI layout/未知 version、伪造/stale/错 owner handle、success/error
+  终帧 round-trip（Rust/TS/Node/Bun）、accepted 前后断连、重复终帧、revoke 后 submit、
+  核心 client 无 dialog 分支的编译期证明、旧扩展（无 disposition 符号）恒 Immediate。
 
 ### 5.2 macOS：broker-owned 调度器（poll_owner + WaitUntil，无自旋无饿死）
 
 `UserEvent` 是 opentray-bin 私有 enum，DLL 不得持有 waker（R2 P0-2）。调度契约冻结：
 
-- **poll 结果类型**：`poll_owner(operation) -> Done(terminal_payload) | Pending { next_deadline, wake_reason }`——Done 携带终帧 payload（经 §5.1 port 或 poll 返回，二选一在实现批冻结，不允许双通道）。
-- **调度器归属 broker**：owner loop 持有**一个合并的 `DialogPollDue(generation)` user
-  event**；`ControlFlow::WaitUntil(min(所有 Pending.next_deadline))` 或平台 timer 驱动；
-  同 generation 的多次 due 合并为一次 poll。
-- **native 回调约束**：AppKit 回调只允许**推进 deadline**（写扩展内部原子状态），
-  不得保留 broker 指针、不得无上限自发 wake——「需要继续步进」只能通过 deadline 到期
-  表达。
+- **poll 结果类型**：`poll_owner(operation) -> Pending { next_deadline, wake_reason }`——
+  终帧只经 §5.1 port submit（唯一通道），poll 不产出终帧。
+- **调度器归属 broker + re-arm 机制（R4 P0-2 冻结）**：owner loop 持有**一个合并的
+  `DialogPollDue(generation)` user event**，`ControlFlow::WaitUntil(min deadline)` 驱动；
+  AppKit 回调只写扩展内部**原子 deadline**——broker 侧一个 per-operation 的 re-arm
+  watcher（owner loop 自有 timer/proxy wake，非 DLL 持有）在 deadline 被提前时重新投递
+  `DialogPollDue` 并让 loop 重算 WaitUntil：**回调改 deadline → broker-owned wake → loop
+  醒来重算**，杜绝「已睡到较晚时刻而 deadline 已提前」的饿死路径。同 generation 多次
+  due 合并为一次 poll。
+- **native 回调约束**：不得保留 broker 指针、不得无上限自发 wake、不得直接调用 winit
+  ——「需要继续步进」只能通过原子 deadline 表达。
 - **撤销**：revoke 先从调度表移除该 generation（stale due 事件经 generation 检查丢弃），
   再 endModalSession。
 - **配额**：每次 owner loop 迭代的 modal poll 工作量有界（冻结：单次迭代 ≤ 4 个 owner、
   每 owner ≤ 1 次 runModalSession 步进），menu/transport 帧不被饿死。
-- **probe 前置**（协议完成后）：无外部事件下终态推进（WaitUntil 到期驱动）、空闲
-  CPU/wake 计数有界、modal 步进之间普通 menu/transport 帧正常完成、exit/revoke 竞态无
-  AppKit 调用且无重复终帧。
+- **probe 前置**（协议完成后）：无外部事件下终态推进（WaitUntil 到期 + re-arm 双路径）、
+  deadline 提前场景、空闲 CPU/wake 计数有界、modal 步进之间普通 menu/transport 帧正常
+  完成、exit/revoke 竞态无 AppKit 调用且无重复终帧。
 
 ### 5.3 win32：per-owner 有界 STA worker 与诚实 Accepted 语义
 
@@ -223,10 +240,17 @@ submit(port_data, handle, payload_bytes, payload_len) -> ExtResultCode
   probe 先行取证）；绝不把排队称为 presentation。
 - **数值冻结**：worker 上限 **8**（per broker）；达到上限 → typed
   `dialog_worker_limit_reached`（区别于同 owner 第二对话框的 `dialog_session_busy`），
-  拒绝发生在 Accepted 之前，绝不静默排队；worker 启动+进入模态调用超时 **3s**（超时 →
-  typed `dialog_presentation_failed` 终帧 error）；join timeout **2s**（超时记诊断并
-  放弃 join，不阻塞 broker 退出）；close dispatcher = `WM_APP+{owner 序号}`，仅 worker
-  线程处理自己的 COM 对象。
+  拒绝发生在 Accepted 之前，绝不静默排队；worker 启动+进入模态调用超时 **3s**；close
+  join 超时 **2s**；close dispatcher = `WM_APP+{owner 序号}`，仅 worker 线程处理自己的
+  COM 对象。
+- **pre-Accept 失败事务（R4 P0-3 冻结）**：3s 进入超时发生在 operationId/Accepted 可被
+  Node 观察之前——该失败必须是**带原 requestId 的同步 typed error 响应**（
+  `dialog_presentation_failed`），不产生 operation、不发 Accepted、不发无关联终帧；
+  已进入模态调用之后的失败才走 Accepted → terminal error。
+- **卸载竞态裁决（R4 P0-3 冻结）**：**worker 未退出不得 deinit/dlclose**——join 超时
+  （2s）只允许两种结局：(a) 保留 library/instance 引用直至 worker 自然退出后再清理
+  （broker 继续退出流程，清理延后）；(b) 放弃本次清理并按致命诊断终止 broker 进程。
+  绝不在 worker 仍可能执行 `opentray_ext_*` 时释放 DLL（use-after-unload 零容忍）。
 - **线程契约**：`ExtDeferredPortV1.submit` 为 host 拥有的线程安全状态（Send+Sync 由
   broker 侧保证）；跨线程移动的只有**可拷贝的请求数据与 port shim**——扩展实例与全部
   COM/AppKit 对象永不移动。opentray-core 的 blanket `ExtensionInstance: Send` 与
@@ -400,9 +424,10 @@ schema；Rust `ExtensionError::Detailed` 与 server error frame、Node typed err
 - **体积与发布证据**：真实 `npm pack --json --pack-destination` 产物（tgz stat/digest/
   npm 版本/packlist/目标 hash）；clean checkout release 预演（真实 pack）+ 解包同一
   tgz 逐目标 identity check（§6.3/§6.4）。
-- **文档一致性 grep 门**（R3 P0-6）：本 change 全部文档禁止
-  `ExtCommandCompleted`、`ExtCommandCancelled`、同步 `backend` 属性、same-broker 跨
-  session 并发表述、dry-run 作为发布证据——评审记录中的历史引用除外。
+- **文档一致性 grep 门**（R3 P0-6，可执行脚本
+  `scripts/openspec/check-ext-dialog-sound-consistency.mjs`）：本 change 全部文档禁止以下
+  负面清单——`ExtCommandCompleted`、`ExtCommandCancelled`、同步 `backend` 属性、
+  same-broker 跨 session 并发表述、dry-run 作为发布证据——评审记录中的历史引用除外。
 
 ## 9. 法条草案（收尾落 AGENTS.md）
 

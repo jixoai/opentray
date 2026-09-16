@@ -1,24 +1,26 @@
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>add-ext-dialog self-review</title></head><body><pre style="font-family:-apple-system,monospace;white-space:pre-wrap">
 # add-ext-dialog — Self-Review（设计阶段）
 
-&gt; 评审人：编排者。对象：R3 修订后的 design-reference / spec delta / tasks（commit 待提交）。
+&gt; 评审人：编排者。对象：R4 修订后的 design-reference / spec delta / tasks。
 &gt; 性质：**research-plan 阶段自评**——实现尚未开始；本档在 apply 各批次完成后更新为实现自评。
 
 ## 总判定
 
-设计经 Codex 三轮对抗评审（4.0 → 5.0 → 5.8）迭代收敛，R3 全部 P0/P1 已吸收。
-当前状态：**设计冻结候选，等待 R4 复核 GO 后进入批次 A 实现**。
+设计经 Codex 四轮对抗评审（4.0 → 5.0 → 5.8 → 6.7）迭代收敛，R4 全部 P0/P1 已吸收
+（ABI C 布局冻结、macOS re-arm 机制、唯一终帧源、win32 pre-Accept 失败事务与卸载竞态
+裁决、可实现身份顺序 SSOT 统一、可执行一致性门、AGENTS.md 预落法则）。
+当前状态：**设计冻结候选，等待 R5 复核 GO 后进入批次 A 实现**。
 
-## 对照 R3 的闭合自查
+## 对照 R4 的闭合自查
 
-| R3 项 | 落点 | 自查结论 |
+| R4 项 | 落点 | 自查结论 |
 |---|---|---|
-| P0-1 ABI 事务 | design §5.1（CommandDisposition/Handle 签发/TerminalPayload union/port 生命周期/EXT_ERR 族/诚实事件顺序声明/通用断连码分层） | 闭合：success/error 判别、伪造 handle、submit 所有权全部冻结 |
-| P0-2 调度器 | design §5.2（Done\|Pending{next_deadline,wake_reason}、DialogPollDue(generation) 合并、WaitUntil、回调只推进 deadline、≤4 owner×1 步进配额、revoke 先移除调度） | 闭合：无自旋（WaitUntil）无饿死（配额）路径成文 |
-| P0-3 STA/线程契约 | design §5.3（Accepted=已进入模态调用的诚实语义、TDN_CREATED 取证、cap 8/3s/2s 数值、WM_APP、Send 移除或证明） | 闭合：数值与失败分类（worker_limit_reached/presentation_failed）冻结 |
-| P0-5 身份校验顺序 | design §6.4（Node 验 manifest+hash→LoadExt 带 sha256/buildIdentity→broker dlopen 前重 hash→native manifest 库开后 init 前校验；TOCTOU 已知边界声明） | 闭合：顺序可实现 |
-| P0-6 SSOT 一致性 | §7/§8/§9 重写 + grep 门（§8 新条目） | 闭合：本轮 grep 三门全净（历史引用除外） |
-| P1-2/3/4/5 | 数值冻结 / dry-run 清理 / getBackend 措辞 / 本档 | 闭合 |
+| P0-1 ABI 事务 | design §5.1（ExtCommandDispositionV1 repr(C)、attach(instance,port)、handle u64/十六进制 wire、payload 上限引用 EventPort 常量、protocol 1→2、旧扩展恒 Immediate） | 闭合 |
+| P0-2 re-arm/唯一终帧源 | design §5.2（回调写原子 deadline → broker-owned wake → 重算 WaitUntil；poll 只返回 Pending；「实现批二选一」作废） | 闭合 |
+| P0-3 失败事务/卸载竞态 | design §5.3（pre-entry 失败 = 原 requestId 同步 typed error；join 超时 = 保留引用至退出或放弃清理，绝不 use-after-unload） | 闭合 |
+| P0-5 身份链 SSOT | plan D-表/design §6.4/tasks 2.3/两 spec 场景统一为可实现序 + sha256/buildIdentity 字段 | 闭合 |
+| P0-6 可信 grep 门 | `scripts/openspec/check-ext-dialog-sound-consistency.mjs`（可执行、allowlist 负面标记、本轮实测 OK）+ 全部规范性残留清理 | 闭合 |
+| P1-1/2/3/4/5 | 场景字段 / getBackend 措辞 / comctl6 工程任务 3.3b / EventPort 常量引用 / AGENTS.md 预落法则 | 闭合 |
 
 ## 已知边界（诚实声明）
 

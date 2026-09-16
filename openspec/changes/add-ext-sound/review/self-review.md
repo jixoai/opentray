@@ -1,14 +1,15 @@
 # add-ext-sound — Self-Review（设计阶段）
 
-> 评审人：编排者。对象：R3 修订后的 design-reference / spec delta / tasks。
+> 评审人：编排者。对象：R4 修订后的 design-reference / spec delta / tasks。
 > 性质：**research-plan 阶段自评**——实现尚未开始（依赖 add-ext-dialog 批次 A 基建先行）；
 > 本档在实现完成后更新为实现自评。
 
 ## 总判定
 
-设计经 Codex 三轮评审（5.5 → 6.2 → 6.6）收敛，R3 指出的 sound 侧问题（虚构多 session
-BDD、RIFF 解析不精确、dry-run 证据矛盾、embedded 身份字段缺失）全部修正。
-当前状态：**设计冻结候选，等待 R4 GO + dialog 批次 A 落地后进入实现**。
+设计经 Codex 四轮评审（5.5 → 6.2 → 6.6 → 7.1）收敛，R3/R4 指出的 sound 侧问题
+（虚构多 session BDD、RIFF 解析不精确、dry-run 证据矛盾、embedded 身份字段缺失、
+设计/规范 A/B 残留冲突）全部修正。
+当前状态：**设计冻结候选，等待 R5 GO + dialog 批次 A 落地后进入实现**。
 
 ## 对照 R3 的闭合自查
 

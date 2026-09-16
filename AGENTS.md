@@ -543,3 +543,38 @@ After merge to `main`, `.github/workflows/release.yml` materializes the versione
 - WebView2 user data must not inherit the broker executable path. Temporary package runners such as 'pnpx' can place 'opentray.exe' deeply enough to make the default WebView2 profile fail during environment creation.
 - The Windows host owns an explicit 'WebContext' profile under '<home>/.opentray/webview/<package-version>/<caller-label>'; 'OPENTRAY_WEBVIEW_DATA_DIR' is the deployment and diagnostic override.
 - 'WebContext' is a retained native resource and must be stored beside 'WebView' so it outlives the child. A WebView2 creation error must include the resolved profile path.
+
+## Dialog And Sound Extension Law (provisional)
+
+Established pre-implementation by `add-ext-dialog`/`add-ext-sound` (2026-09-17, Codex-reviewed
+R1–R4); finalized wording lands with those changes' archive. Design SSOT:
+`openspec/changes/add-ext-dialog/plans/design-reference.md` and
+`openspec/changes/add-ext-sound/plans/design-reference.md`.
+
+- Long-running extension commands complete through the generic DeferredOperation transaction:
+  a broker-issued opaque handle delivered only during command invocation via a versioned
+  `ExtCommandDispositionV1` FFI, exactly one terminal frame whose payload is a frozen
+  result-or-error discriminated union, and an optional versioned DeferredCompletionPort symbol
+  following the EventPort lifetime pattern. Extensions never reuse the scoped `ExtHostContext`
+  and never emit completion through EventPort. Transport death rejects pending operations with
+  the generic `extension_transport_closed`; facades map it, core never branches on extension
+  names.
+- A modal dialog must never run a native modal call on the winit owner-loop thread. macOS drives
+  `runModalSession` stepping through a broker-owned scheduler (poll returns Pending with a
+  deadline; a broker-owned re-arm wake covers deadline advances; a bounded per-loop quota
+  prevents starvation). Win32 runs each active dialog owner on a bounded dedicated COM STA
+  worker (cap 8, honest `Accepted` = worker entered the native modal call, pre-entry failures
+  are synchronous typed errors on the original requestId, and a worker that has not exited
+  never has its library deinit'd/dlclosed).
+- Dialog command scopes are broker-injected `(appId, trayId, sessionId, instanceGeneration)`;
+  extensions never self-report session identity, and this change family does not expand the
+  single-session caller-scoped broker runtime.
+- Sound playback is fire-and-forget; win32 alias playback always uses
+  `SND_ALIAS | SND_ASYNC | SND_NODEFAULT` (no silent default-sound fallback), all win32
+  `PlaySound` paths pass one process-wide PlaybackArbiter that linearizes the native call,
+  return handling, and the `(sessionId, instanceGeneration, sequence)` token under a single
+  mutex, and session close purges only for the still-matching token owner.
+- Embedded multi-platform facade packaging (≤ 3 MB law) ships a root-contained staging manifest
+  (per-target path/SHA-256/buildIdentity) whose expected identity fields flow through
+  `LoadExt`; release evidence is a real packed tarball (stat + unpack + per-target identity),
+  never a `--dry-run`.
