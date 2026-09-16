@@ -1776,15 +1776,31 @@ int32_t opentray_fixture_submit_terminal(const uint8_t *payload, size_t len) {
             deferred_hub: crate::deferred_port::DeferredPortHub,
             registry: std::sync::Arc<opentray_core::operations::DeferredOperationRegistry>,
             library_path: PathBuf,
+            /// Kept for the Drop cleanup below.
+            root: PathBuf,
+        }
+
+        impl Drop for FixtureHarness {
+            fn drop(&mut self) {
+                // Unlinking a dlopen'd image is safe on unix; the test
+                // process owns this directory exclusively.
+                let _ = std::fs::remove_dir_all(&self.root);
+            }
         }
 
         fn harness(label: &str, defines: &[&str]) -> FixtureHarness {
             let registry = operations_registry();
+            let library_path = compile_fixture(label, defines);
+            let root = library_path
+                .parent()
+                .expect("fixture library parent")
+                .to_path_buf();
             FixtureHarness {
                 hub: test_hub(),
                 deferred_hub: test_deferred_hub(&registry),
                 registry,
-                library_path: compile_fixture(label, defines),
+                library_path,
+                root,
             }
         }
 
