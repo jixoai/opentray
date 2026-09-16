@@ -21,7 +21,7 @@ pub const EXT_SYMBOL_INIT: &str = "opentray_ext_init";
 /// also exports [`EXT_SYMBOL_COMMAND_V2`] is dispatched through V2 only; a
 /// library exporting neither command symbol is `abi_incompatible`.
 pub const EXT_SYMBOL_COMMAND: &str = "opentray_ext_command";
-/// DeferredOperation command entry (add-ext-dialog §5.1, R5/R6 frozen). The
+/// DeferredOperation command entry (add-ext-dialog design section 5.1, R5/R6 frozen). The
 /// extension receives the broker-issued operation handle through the
 /// pre-seeded `ExtCommandDispositionV1` and answers with its disposition.
 pub const EXT_SYMBOL_COMMAND_V2: &str = "opentray_ext_command_v2";
@@ -60,7 +60,7 @@ pub struct ExpectedExtensionIdentity {
     pub contract_fingerprint: String,
     pub target: ExtensionArtifactTarget,
     /// Optional embedded-artifact identity-chain inputs (add-ext-dialog
-    /// §6.4): lowercase hex SHA-256 of the resolved library file, verified by
+    /// design section 6.4): lowercase hex SHA-256 of the resolved library file, verified by
     /// the broker before `dlopen`. Absent means the caller supplied no byte
     /// hash (registry-era identity only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -83,14 +83,24 @@ pub struct EmbeddedExtensionManifest {
     pub build_identity: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Structured FFI error detail taken through `opentray_ext_take_error`.
+/// The optional `details` field is a compatible wire extension (absent in
+/// ABI-3 payloads, ignored by old hosts): it carries the discriminated JSON
+/// payload of the typed error envelope so the synchronous error path stays
+/// isomorphic with deferred terminal errors (add-ext-dialog 7.5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionErrorDetail {
     pub category: String,
     pub message: String,
+    /// Optional discriminated JSON payload matching the typed error
+    /// envelope's `details` shape. Absent for codes without structured
+    /// detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 
-/// Typed extension error envelope (add-ext-dialog §7.5): `{ code, message,
+/// Typed extension error envelope (add-ext-dialog design section 7.5): `{ code, message,
 /// details }` with a discriminated `details` JSON shape shared by the Rust
 /// `ExtensionError::Detailed` projection, server error frames, and the Node
 /// typed error factory. Consumers must match on `code`; parsing the human
@@ -263,12 +273,12 @@ pub type ExtAttachEventPortV1Fn =
 pub const EXT_ERR_BACKPRESSURE: ExtResultCode = 4; // frozen (D19 B'')
 /// The port's source is revoked (session close, reload, failed load, or
 /// shutdown), or the hub's owner-loop delivery path is unavailable after a
-/// failed wake — a submit is never accepted without an active delivery
+/// failed wake -- a submit is never accepted without an active delivery
 /// path. No queue mutation and no payload bytes are read.
 pub const EXT_ERR_PORT_CLOSED: ExtResultCode = 5; // frozen (D19 B'')
 
 // ---------------------------------------------------------------------------
-// DeferredOperation ABI (add-ext-dialog §5.1, R3–R6 frozen)
+// DeferredOperation ABI (add-ext-dialog design section 5.1, R3-R6 frozen)
 //
 // Long-running extension commands answer through a tagged disposition
 // instead of blocking the command call: Immediate keeps the exact V1
@@ -314,9 +324,9 @@ pub union ExtCommandDispositionValueV1 {
 }
 
 /// Tagged command disposition (frozen layout). The host pre-seeds the struct
-/// with `{ tag: Deferred, reserved: 0, value: { operation_handle } }` — this
+/// with `{ tag: Deferred, reserved: 0, value: { operation_handle } }` -- this
 /// pre-seeding is the one-way, single-use delivery of the broker-issued
-/// handle — and the extension either leaves it untouched (defer) or rewrites
+/// handle -- and the extension either leaves it untouched (defer) or rewrites
 /// it to `{ tag: Immediate, reserved: 0, value: none }` with results in
 /// `out_events`. Unknown tags and non-zero `reserved` are host-side typed
 /// rejections; the host never guesses semantics.
@@ -331,7 +341,7 @@ pub struct ExtCommandDispositionV1 {
 impl ExtCommandDispositionV1 {
     /// The all-zero Immediate disposition an extension writes when the
     /// command completed inside the call. The union word is zeroed through
-    /// its `u64` arm — assigning the ZST `none` arm writes no bytes.
+    /// its `u64` arm -- assigning the ZST `none` arm writes no bytes.
     pub fn immediate() -> Self {
         Self {
             tag: EXT_COMMAND_DISPOSITION_TAG_IMMEDIATE,
@@ -410,11 +420,11 @@ pub type ExtAttachDeferredPortV1Fn =
 // Frozen DeferredPort result codes extending the ABI-3/EventPort space.
 /// The submitted payload exceeds [`EXTENSION_EVENT_RECORD_MAX_BYTES`]. No
 /// payload bytes were copied and no queue mutated.
-pub const EXT_ERR_OVERSIZED: ExtResultCode = 6; // frozen (add-ext-dialog §5.1)
+pub const EXT_ERR_OVERSIZED: ExtResultCode = 6; // frozen (add-ext-dialog design section 5.1)
 /// The submitted handle was never issued to this port owner (fabricated, or
 /// replayed after its operation retired/was purged), or it belongs to a
 /// foreign owner. No queue mutation and no terminal frame.
-pub const EXT_ERR_INVALID_HANDLE: ExtResultCode = 7; // frozen (add-ext-dialog §5.1)
+pub const EXT_ERR_INVALID_HANDLE: ExtResultCode = 7; // frozen (add-ext-dialog design section 5.1)
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -426,7 +436,7 @@ pub struct ExtensionScope {
     pub ext: String,
 }
 
-/// Broker-injected command ownership (add-ext-dialog §5.5): the host derives
+/// Broker-injected command ownership (add-ext-dialog design section 5.5): the host derives
 /// `{ appId, trayId, sessionId, instanceGeneration }` for every command
 /// dispatch and extensions must never self-report it. All busy/operation
 /// registries key on this scope; the deferred operation binding is
@@ -560,7 +570,7 @@ mod tests {
     }
 
     /// Freezes the DeferredOperation command disposition C layout
-    /// (add-ext-dialog §5.1): tag and reserved as leading u32s, the value
+    /// (add-ext-dialog design section 5.1): tag and reserved as leading u32s, the value
     /// union word-aligned after them. Any drift is an ABI break requiring a
     /// new versioned struct, not a silent edit.
     #[test]
