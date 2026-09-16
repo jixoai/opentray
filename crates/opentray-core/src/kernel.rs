@@ -362,7 +362,7 @@ impl<B: AppBackend> Kernel<B> {
         // isolation law is enforced at the dispatch boundary, not left to
         // per-extension payload identity.
         self.require_owned_tray(session_id, &app_id, &tray_id)?;
-        // add-ext-dialog §5.5: the command scope is broker-injected host
+        // add-ext-dialog design section 5.5: the command scope is broker-injected host
         // truth (session, instance generation included); extensions never
         // self-report it and every busy/operation key derives from it. The
         // generation is 0 for instances without a deferred port (V1-only or
@@ -866,7 +866,7 @@ mod tests {
 
     /// The command path injects the broker-derived `CommandScope` (session,
     /// instance generation included) into the dispatch envelope; extensions
-    /// never self-report ownership (add-ext-dialog §5.5). An Immediate
+    /// never self-report ownership (add-ext-dialog design section 5.5). An Immediate
     /// outcome retires the pre-registered operation again.
     #[test]
     fn ext_command_injects_command_scope_and_retires_immediate_operations() {

@@ -43,8 +43,8 @@ impl ExtensionHostContext for UnsupportedExtensionHostContext {
     }
 }
 
-/// Instance-level answer for one command dispatch (DeferredOperation §5.1):
-/// the disposition the native V2 ABI reports through
+/// Instance-level answer for one command dispatch (DeferredOperation design
+/// section 5.1): the disposition the native V2 ABI reports through
 /// `ExtCommandDispositionV1`, lifted to the trait boundary.
 pub enum ExtensionCommandDisposition {
     /// The command completed inside the call; the envelopes are the result
@@ -88,8 +88,19 @@ pub enum ExtensionError {
     NotFound(String),
     #[error("extension rejected command: {0}")]
     Rejected(String),
+    /// Structured extension rejection. `category` is the typed error code,
+    /// and `details` optionally carries the discriminated JSON payload of
+    /// the typed error envelope (add-ext-dialog design section 7.5) so the
+    /// synchronous error path is isomorphic with deferred terminal errors
+    /// through Rust, the server frame, and the Node typed error factory.
     #[error("extension {category}: {message}")]
-    Detailed { category: String, message: String },
+    Detailed {
+        category: String,
+        message: String,
+        /// Discriminated JSON payload whose shape each error code freezes;
+        /// absent for codes without structured detail.
+        details: Option<Value>,
+    },
     #[error("extension loading is unsupported: {0}")]
     Unsupported(String),
 }
@@ -174,8 +185,9 @@ impl ExtensionRegistry {
             .get_mut(&(scope.app_id.clone(), ext.clone()))
             .ok_or_else(|| ExtensionError::NotFound(ext.clone()))?;
         // Pre-register the operation before the dispatch so a terminal
-        // submitted during the command call already resolves (§5.1 handle
-        // issuance law); Immediate outcomes and failures retire it again.
+        // submitted during the command call already resolves (design
+        // section 5.1 handle issuance law); Immediate outcomes and failures
+        // retire it again.
         let issued = operations.register_pending(scope.clone(), ext.clone());
         let envelope = ExtensionEnvelope {
             scope: ExtensionScope {

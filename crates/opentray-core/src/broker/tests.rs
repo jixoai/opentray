@@ -1199,3 +1199,128 @@ fn version_one_init_is_rejected_as_incompatible() {
             if code == "incompatible-protocol" && message.contains("protocolVersion 1")
     ));
 }
+
+// -- Synchronous typed-error details (add-ext-dialog 7.5) -------------------
+
+#[derive(Clone)]
+struct TypedErrorLoader;
+
+impl ExtensionLoader for TypedErrorLoader {
+    fn load(
+        &self,
+        _request: &ExtensionLoadRequest,
+    ) -> Result<Box<dyn ExtensionInstance>, ExtensionError> {
+        Ok(Box::new(TypedErrorExtension))
+    }
+}
+
+/// Rejects every command with a structured category plus a discriminated
+/// `details` payload, exactly as a native extension would through
+/// `opentray_ext_take_error`.
+struct TypedErrorExtension;
+
+impl ExtensionInstance for TypedErrorExtension {
+    fn name(&self) -> &str {
+        "dialog"
+    }
+
+    fn command(
+        &mut self,
+        _envelope: ExtensionEnvelope,
+        _issued: crate::IssuedOperation,
+        _host: &mut dyn ExtensionHostContext,
+    ) -> Result<crate::ExtensionCommandDisposition, ExtensionError> {
+        Err(ExtensionError::Detailed {
+            category: "dialog_invalid_options".to_string(),
+            message: "buttons must not be empty".to_string(),
+            details: Some(serde_json::json!({ "kind": "options", "field": "buttons" })),
+        })
+    }
+
+    fn session_closed(
+        &mut self,
+        _session_id: &str,
+        _host: &mut dyn ExtensionHostContext,
+    ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
+        Ok(Vec::new())
+    }
+}
+
+/// The synchronous error path is isomorphic with deferred terminal errors:
+/// a `Detailed` rejection with `details` surfaces as a correlated
+/// `ServerFrame::Error` whose wire form carries the same `details` JSON
+/// (add-ext-dialog design section 7.5). The rejected operation also retires,
+/// so no deferred promise stays pending behind a synchronous error.
+#[test]
+fn synchronous_typed_error_carries_details_onto_the_error_frame() {
+    let backend = FakeBackend::new(BackendCapabilities::full());
+    let mut broker = BrokerKernel::with_extension_loader(
+        backend,
+        TypedErrorLoader,
+        test_broker_artifact_identity(),
+    );
+    let mut session = BrokerSession::new();
+    broker.handle_frame(&mut session, init(), "0.1.0");
+    let surface = create_app(&mut broker, &mut session);
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::CreateTray {
+            request_id: "req-tray".to_string(),
+            app: surface.clone(),
+            tray: tray_options("status"),
+        },
+        "0.1.0",
+    );
+    broker.handle_frame(
+        &mut session,
+        ClientFrame::LoadExt {
+            request_id: "req-load".to_string(),
+            app_id: surface.app_id.clone(),
+            name: "dialog".to_string(),
+            path: "opentray://typed-error".to_string(),
+            expected_identity: expected_extension_identity("dialog"),
+            mount_id: None,
+        },
+        "0.1.0",
+    );
+
+    let frames = broker.handle_frame(
+        &mut session,
+        ClientFrame::ExtCommand {
+            request_id: "req-ext".to_string(),
+            app_id: surface.app_id,
+            tray_id: "status".to_string(),
+            ext: "dialog".to_string(),
+            data: serde_json::json!({ "type": "messageDialog" }),
+        },
+        "0.1.0",
+    );
+
+    let details = serde_json::json!({ "kind": "options", "field": "buttons" });
+    let [ServerFrame::Error {
+        request_id,
+        code,
+        message,
+        details: frame_details,
+    }] = frames.as_slice()
+    else {
+        panic!("a typed rejection answers exactly one correlated error: {frames:?}");
+    };
+    assert_eq!(request_id, &Some("req-ext".to_string()));
+    assert_eq!(code, "dialog_invalid_options");
+    assert_eq!(message, "buttons must not be empty");
+    assert_eq!(frame_details.as_ref(), Some(&details));
+
+    // Wire truth: the serialized frame carries the details JSON.
+    let wire = serde_json::to_value(&frames[0]).expect("serialize error frame");
+    assert_eq!(wire["details"], details);
+    assert_eq!(wire["code"], "dialog_invalid_options");
+
+    // The failed dispatch retires its pre-registered operation: no pending
+    // promise survives a synchronous typed error.
+    let operations = broker.operations().clone();
+    assert_eq!(
+        operations.session_operation_count(session.session_id().unwrap()),
+        0
+    );
+}

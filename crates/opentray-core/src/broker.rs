@@ -3,6 +3,7 @@ use opentray_spec::{
     ClientFrame, ExtensionEnvelope, Rect, RequestId, ServerFrame, SessionId, TrayBoundsKind,
     TrayBoundsResult, TrayEvent, PROTOCOL_VERSION,
 };
+use serde_json::Value;
 
 use crate::{
     AppBackend, ExtensionCommandOutcome, ExtensionError, ExtensionHostContext,
@@ -604,9 +605,11 @@ fn kernel_error(request_id: Option<RequestId>, error: KernelError) -> ServerFram
             "session-mismatch",
             format!("session {session_id} does not own tray {tray_id} of app {app_id}"),
         ),
-        KernelError::Extension(ExtensionError::Detailed { category, message }) => {
-            protocol_error(request_id, category, message)
-        }
+        KernelError::Extension(ExtensionError::Detailed {
+            category,
+            message,
+            details,
+        }) => protocol_error_with_details(request_id, category, message, details),
         error => protocol_error(request_id, "kernel-error", error.to_string()),
     }
 }
@@ -616,10 +619,23 @@ fn protocol_error(
     code: impl Into<String>,
     message: impl Into<String>,
 ) -> ServerFrame {
+    protocol_error_with_details(request_id, code, message, None)
+}
+
+/// Synchronous typed errors carry their discriminated `details` payload on
+/// the error frame so the wire path is isomorphic with deferred terminal
+/// errors (add-ext-dialog design section 7.5).
+fn protocol_error_with_details(
+    request_id: Option<RequestId>,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    details: Option<Value>,
+) -> ServerFrame {
     ServerFrame::Error {
         request_id,
         code: code.into(),
         message: message.into(),
+        details,
     }
 }
 

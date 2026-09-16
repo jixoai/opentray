@@ -1,4 +1,22 @@
-//! DeferredOperation registry (add-ext-dialog §5.1/§5.5, batch A).
+//! DeferredOperation registry (add-ext-dialog design sections 5.1/5.5).
+//!
+//! Orthogonal intents (maintained 2026-09-17; original user requests:
+//! long-running extension commands must settle through one broker-owned
+//! deferred transaction with unguessable operation handles and a frozen
+//! 16-hex-digit wire identity):
+//! 1. Issue one independent unpredictable u64 handle per operation; the
+//!    handle crosses the FFI only through the seeded disposition struct.
+//! 2. Project the handle to the frozen lowercase-hex `operationId` wire form
+//!    shared by `ext-command-accepted` and `ext-operation-terminal`.
+//! 3. Settle exactly once through the owner-loop CAS; duplicates, foreign
+//!    owners, and stale generations are stateless diagnostic drops.
+//! 4. Purge closing sessions so their pending operations die with the
+//!    transport and later submits are replayed-handle rejections.
+//!
+//! Compromise: one registry table is shared by the kernel and the
+//! composition's deferred ports; handle issuance, validation, and
+//! settlement cannot be physically separated without duplicating the
+//! ownership table across the FFI boundary.
 //!
 //! One broker-owned table of deferred extension commands. The kernel
 //! pre-registers an operation BEFORE dispatching the command FFI (so a
@@ -15,7 +33,6 @@
 //! outcomes so the composition layer can log diagnostics without framing.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use opentray_spec::{AppId, CommandScope, SessionId};
@@ -75,7 +92,7 @@ pub enum OperationSettlement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubmitValidation {
     /// The handle resolves to a live operation owned by this port. (It may
-    /// already be settled — duplicate detection is the owner loop's CAS,
+    /// already be settled -- duplicate detection is the owner loop's CAS,
     /// not an ingress rejection.)
     Accepted,
     /// Never issued / retired / purged handle.
@@ -100,8 +117,6 @@ struct OperationTable {
 }
 
 struct RegistryInner {
-    nonce_base: u64,
-    next_handle: AtomicU64,
     table: Mutex<OperationTable>,
 }
 
@@ -119,9 +134,13 @@ impl std::fmt::Debug for DeferredOperationRegistry {
     }
 }
 
-/// Unguessable per-process handle base. `RandomState` seeds a hasher from
-/// OS entropy; finishing it before any write exposes only that seed.
-fn random_nonce_base() -> u64 {
+/// One independently unpredictable u64. `RandomState::new()` seeds a SipHash
+/// instance from fresh per-call keys (OS entropy plus a process-local
+/// counter); finishing it before any write exposes only that keyed
+/// permutation of the empty input. Observing any number of issued handles
+/// therefore reveals nothing about the next one, unlike a shared
+/// counter-over-base sequence whose deltas are constant.
+fn unpredictable_handle() -> u64 {
     use std::hash::{BuildHasher, Hasher, RandomState};
     RandomState::new().build_hasher().finish()
 }
@@ -136,8 +155,6 @@ impl DeferredOperationRegistry {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(RegistryInner {
-                nonce_base: random_nonce_base(),
-                next_handle: AtomicU64::new(1),
                 table: Mutex::new(OperationTable::default()),
             }),
         }
@@ -167,19 +184,18 @@ impl DeferredOperationRegistry {
     /// Pre-registers the pending operation for one command dispatch and
     /// issues its handle. Must run BEFORE the command FFI so a terminal
     /// submitted during the call already resolves.
+    ///
+    /// Each handle is an INDEPENDENT unpredictable u64 (one fresh keyed
+    /// draw per operation, never a counter over a base): observing issued
+    /// handles must not let anyone predict or forge the next one. Collisions
+    /// (and the never-issued zero of the Immediate disposition value) are
+    /// resolved by redrawing under the same table lock, so issuance stays
+    /// linearizable with settlement lookups.
     pub fn register_pending(&self, scope: CommandScope, instance: String) -> IssuedOperation {
         let mut table = self.lock_table();
-        // Handle 0 must never be issued: it is indistinguishable from the
-        // all-zero Immediate disposition value.
-        let mut handle = self
-            .inner
-            .nonce_base
-            .wrapping_add(self.inner.next_handle.fetch_add(1, Ordering::Relaxed));
-        while handle == 0 {
-            handle = self
-                .inner
-                .nonce_base
-                .wrapping_add(self.inner.next_handle.fetch_add(1, Ordering::Relaxed));
+        let mut handle = unpredictable_handle();
+        while handle == 0 || table.operations.values().any(|state| state.handle == handle) {
+            handle = unpredictable_handle();
         }
         let operation_id = IssuedOperation::operation_id_for_handle(handle);
         table.operations.insert(
@@ -205,7 +221,7 @@ impl DeferredOperationRegistry {
     }
 
     /// Ingress validation for one deferred-port submit. Duplicate terminals
-    /// of live operations stay `Accepted` — exactly-once is enforced by the
+    /// of live operations stay `Accepted` -- exactly-once is enforced by the
     /// settlement CAS, not by ingress. Generation staleness is likewise a
     /// settlement classification: an unrevoked old-generation port submits
     /// successfully and its record is statelessly dropped by the owner loop.
@@ -241,7 +257,7 @@ impl DeferredOperationRegistry {
             return OperationSettlement::ForeignOwner { operation_id };
         }
         // Generation law: once the instance's current generation moved past
-        // the operation's, no port — old or new — may settle it. This covers
+        // the operation's, no port -- old or new -- may settle it. This covers
         // both an unrevoked old port racing a reload and a new port being
         // fed an overheard old handle.
         let current_generation = table
@@ -276,7 +292,7 @@ impl DeferredOperationRegistry {
         before - table.operations.len()
     }
 
-    /// Live (registered, settled or not) operation count for one session —
+    /// Live (registered, settled or not) operation count for one session --
     /// test/diagnostic accessor.
     pub fn session_operation_count(&self, session_id: &str) -> usize {
         self.lock_table()
@@ -350,6 +366,43 @@ mod tests {
         assert_ne!(first.handle, 0);
         assert_ne!(second.handle, 0);
         assert_eq!(first.operation_id.len(), 16);
+    }
+
+    /// Handle law (review P1-7): every operation draws an INDEPENDENT
+    /// unpredictable u64. Issued handles must not form a deterministic
+    /// arithmetic sequence (constant delta), which would make every later
+    /// handle predictable after observing one. Like the distinctness test
+    /// above, the failure probability of these assertions on a real keyed
+    /// draw is on the order of 2^-53 or smaller (birthday/collision bounds
+    /// over 64 draws); they cannot flake in practice.
+    #[test]
+    fn issued_handles_are_not_a_predictable_arithmetic_sequence() {
+        let registry = DeferredOperationRegistry::new();
+        let handles: Vec<u64> = (0..64)
+            .map(|_| registry.register_pending(scope("session-1", 0), "dialog".to_string()).handle)
+            .collect();
+
+        let distinct = handles.iter().collect::<std::collections::HashSet<_>>();
+        assert_eq!(distinct.len(), handles.len(), "all draws are distinct");
+        assert!(!handles.contains(&0), "zero is never issued");
+
+        // Not a counter: no constant step between consecutive handles.
+        let deltas: std::collections::HashSet<i128> = handles
+            .windows(2)
+            .map(|pair| pair[1] as i128 - pair[0] as i128)
+            .collect();
+        assert!(
+            deltas.len() > 1,
+            "consecutive-handle deltas must vary, got one constant step: {deltas:?}"
+        );
+
+        // Wire projection stays the frozen 16-digit lowercase hex form.
+        for handle in &handles {
+            let operation_id = IssuedOperation::operation_id_for_handle(*handle);
+            assert_eq!(operation_id.len(), 16);
+            assert!(operation_id.bytes().all(|byte| byte.is_ascii_digit()
+                || (b'a'..=b'f').contains(&byte)));
+        }
     }
 
     #[test]
