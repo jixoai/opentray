@@ -1,10 +1,14 @@
-// Orthogonal intents (2026-09-17; original user request: Codex R6 P1-2 — gate self-test, three arms):
+// Orthogonal intents (2026-09-17; original user request: Codex R6 P1-2 - gate self-test, three arms):
 // 1. Legitimate negative/historical references are exempt for name rules.
 // 2. A disguised marker must NOT exempt a semantic contradiction (strict rules).
 // 3. Every ruleId fires on a matching sample and the real repo scan stays clean.
 
 import { describe, expect, test } from "bun:test";
-import { checkDocument } from "./check-ext-dialog-sound-consistency.mjs";
+import {
+  checkDocument,
+  RULES,
+  type ConsistencyRule,
+} from "./check-ext-dialog-sound-consistency.ts";
 
 describe("check-ext-dialog-sound-consistency", () => {
   test("arm 1: marked historical references are exempt for name rules", () => {
@@ -18,10 +22,7 @@ describe("check-ext-dialog-sound-consistency", () => {
     expect(violations.some((v) => v.includes("[poll-terminal-channel]"))).toBe(true);
   });
 
-  test("arm 3: every unique ruleId fires on a matching sample (name + semantic)", async () => {
-    const { RULES } = await import("./check-ext-dialog-sound-consistency.mjs") as {
-      RULES: Array<[string, RegExp, string]>;
-    };
+  test("arm 3: every unique ruleId fires on a matching sample (name + semantic)", () => {
     // One unmarked sample per unique ruleId (name rules need a bare mention; semantic rules
     // are strict). Asserting the fired set equals the unique ruleId set proves full coverage.
     const samples: Record<string, string> = {
@@ -54,11 +55,9 @@ describe("check-ext-dialog-sound-consistency", () => {
   });
 
   test("unknown-tag guard: rule table stays non-empty and structured", () => {
-    const { RULES } = require("./check-ext-dialog-sound-consistency.mjs") as {
-      RULES: Array<[string, RegExp, string]>;
-    };
-    expect(RULES.length).toBeGreaterThan(10);
-    for (const [id, , kind] of RULES) {
+    const rules: readonly ConsistencyRule[] = RULES;
+    expect(rules.length).toBeGreaterThan(10);
+    for (const [id, , kind] of rules) {
       expect(typeof id).toBe("string");
       expect(["name", "semantic"]).toContain(kind);
     }

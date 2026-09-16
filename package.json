@@ -8,7 +8,7 @@
     "openspec:vision2": "bun run scripts/openspec/vision2-driven.ts",
     "test:openspec:vision": "bun test scripts/openspec/vision-driven.test.ts",
     "test:openspec:vision2": "bun test scripts/openspec/vision2-driven.test.ts",
-    "check:pack-size": "node scripts/check-pack-size.mjs",
+    "check:pack-size": "bun run scripts/check-pack-size.ts",
     "packages:list": "pnpm -r list --depth -1",
     "create-opentray": "bun run packages/create/src/bin.ts",
     "create-opentray:dist": "node packages/create/dist/bin.mjs",
@@ -33,7 +33,7 @@
     "verify:packed-consumer": "bun run scripts/binaries/verify-packed-consumer.ts",
     "version-packages": "changeset version",
     "version-packages:alpha": "changeset version --snapshot alpha",
-    "verify:spec-consistency": "node scripts/openspec/check-ext-dialog-sound-consistency.mjs"
+    "verify:spec-consistency": "bun run scripts/openspec/check-ext-dialog-sound-consistency.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

@@ -1,5 +1,5 @@
 // Orthogonal intents (2026-09-17; original user request: pack-size gate must be
-// measured, reproducible, and tested — no assumed "far below 2MB"):
+// measured, reproducible, and tested - no assumed "far below 2MB"):
 // 1. Classification truth at the frozen boundaries (ok / warn >= 2MiB / fail > 3MiB).
 // 2. A REAL npm pack arm against a temp fixture package (stat from the actual .tgz).
 // 3. Deterministic warn/fail arms through an injected pack whose tarball is a
@@ -16,7 +16,7 @@ import {
   evaluateSize,
   formatReceiptLine,
   runCheck,
-} from "./check-pack-size.mjs";
+} from "./check-pack-size.ts";
 
 const MiB = 1024 * 1024;
 
