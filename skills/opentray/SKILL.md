@@ -29,7 +29,7 @@ real behavior, and diagnose the installed runtime graph.
 - Turning an existing start command into an app via the `create-opentray` wizard: read `references/create-app.md`.
 - Version selection, protocol-line tags, and install drift: read `references/versioning.md`.
 - For a progressive path from first tray to extensions and host control, read `references/tutorial.md`.
-- Composing one window from several webviews (layout document, per-view events, message channels, the toolbar recipe): read `references/multi-webview.md`.
+- Composing one window from several webviews (layout document, per-view events, message channels, the toolbar recipe, navigation rules/veto, favicon observation): read `references/multi-webview.md`.
 - Public API patterns and examples: read `references/api-patterns.md`.
 - Scenario decision cards for common app shapes: read `references/scenarios.md`.
 - Ordinary application windows versus tray utilities, warm Dock reopen, cold `appLaunch`, and development supervisors: read `references/app-mode.md`.

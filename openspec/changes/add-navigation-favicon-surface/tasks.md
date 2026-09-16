@@ -29,5 +29,5 @@
 ## 5. Release / Docs
 
 - [ ] 5.1 changeset（minor：opentray 生态 `@opentray/spec`、`@opentray/ext-webview`；patch 透传者）→ push → CI 发布 0.28.0。
-- [ ] 5.2 更新 `skills/opentray/references/multi-webview.md`（事件表 + 新 API + Known limits 收缩）与 SKILL.md 索引；contract.json fingerprint bump 随实现。
-- [ ] 5.3 更新博客 `2026-09-16-opentray-v0-27`（zh+en：导航/favicon 两节 + Known limits 移除）。
+- [x] 5.2 更新 `skills/opentray/references/multi-webview.md`（事件表 + 新 API + Known limits 收缩）与 SKILL.md 索引；contract.json fingerprint bump 随实现。
+- [x] 5.3 更新博客 `2026-09-16-opentray-v0-27`（zh+en：导航/favicon 两节 + Known limits 移除）。

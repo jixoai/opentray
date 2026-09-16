@@ -91,6 +91,8 @@ One push-only family per webview, no replay, no polling:
 | `focused` | `{ focused }` |
 | `geometryChange` | view-local logical-pixel rect |
 | `loadState` | `{ phase: "started" \| "finished" \| "failed", url, errorCode?, progress? }` |
+| `navigationAction` | `{ url, navigationType, isUserInitiated? }` |
+| `faviconChange` | `{ href }` (absolute http/https) |
 
 `loadState` is the navigation lifecycle: `started` when a navigation begins,
 `finished` on success, `failed` with an `errorCode` on failure; `progress`
@@ -105,6 +107,58 @@ whose `seq` is not greater than the queried one.
 ```ts
 content.onUrlChange((event) => { /* address-bar truth */ });
 content.onLoadState((event) => { /* progress bar, error surface */ });
+```
+
+## Navigation observation, rules, and favicons
+
+`navigationAction` fires once per native navigation decision point, before
+the load surfaces as `loadState` phases. The `navigationType` projection
+is platform truth: Windows maps redirects exactly and projects
+unredirected user navigations as `link` (link/form are not separable
+there); macOS maps WKNavigationAction without a redirect distinction and
+omits `isUserInitiated`. There is no replay and no query pair — attach
+the listener, then react to future decisions.
+
+Declarative rules veto navigations synchronously on the native UI thread
+(no IPC round-trip, no race): a matching navigation cancels before it
+starts and reports `loadState failed` with the stable error code
+`4500001` (`WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE`). Patterns are URL
+globs — `*` matches any character run including separators, everything
+else is literal. The dot in `*.example` is literal, so a bare domain
+needs its own rule.
+
+```ts
+const content = await win.createWebview({
+  id: "content",
+  url: "https://example.org",
+  favicon: true,
+  navigationRules: [{ pattern: "*://*.tracker.example/*", action: "block" }],
+});
+
+content.onNavigationAction((event) => { /* every decision point */ });
+// later, replace the whole rule set:
+await content.setNavigationRules([{ pattern: "*doubleclick*", action: "block" }]);
+```
+
+A blocked navigation produces exactly one terminal frame: `navigationAction`
+followed by `failed(4500001)` — never a `started` phase. The stable code
+applies on both platforms; the cancellation itself is invisible to later
+navigation (the blocked page never loads, the next navigation works).
+
+Favicon observation is opt-in per view: `favicon: true` at creation.
+`faviconChange` pushes each settled, changed absolute http(s) href
+(Latest class — same-href repeats are not events), and `getFavicon()`
+returns the `{ value: { href } | null, seq }` query pair with the usual
+subscribe-then-query race rule. The query rejects with `favicon_disabled`
+for views created without the flag. Bridgeless content views keep the
+no-bridge default: the favicon observer injects no bridge surface, so
+arbitrary-content pages grant the host the favicon and the page nothing.
+Dynamic changes (a script swapping `<link rel="icon">`) arrive the same
+as the initial one.
+
+```ts
+content.onFaviconChange((event) => { /* event.href is absolute */ });
+const current = await content.getFavicon(); // { value: { href } | null, seq }
 ```
 
 ## Message channels
@@ -157,12 +211,11 @@ and backgrounds without pages.
 
 ## Known limits (v1)
 
-- No favicon acquisition surface. `iconSync` projects the page favicon to
-  the window icon (and back) on the primary webview, but there is no public
-  API to fetch favicon bytes/URL, and no push event when a site changes its
-  favicon dynamically. A bridgeless content child in a composed window is
-  not a favicon emitter.
-- Navigation granularity is `loadState`'s three phases plus `urlChange`.
-  There is no redirect-level event and no navigation veto hook.
+- Favicon bytes are not delivered: `faviconChange`/`getFavicon()` carry the
+  resolved absolute href only — fetch and cache the image yourself.
+- `navigationAction` has no query pair (Edge class): attach before the
+  decisions you care about; there is no replay.
+- Navigation rules match on the full URL string with `*`-globs only — no
+  regex, no per-field (host/path/query) matchers in v1.
 - `setTitle` on the handle projects through the compatible re-show path;
   there is no host-side `setFavicon`.
