@@ -11,7 +11,14 @@ export * from "./canonical-json";
 export * from "./channel";
 export * from "./webview";
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * Protocol 2 (add-ext-dialog §5.1) adds the DeferredOperation transaction
+ * frames `ext-command-accepted` and `ext-operation-terminal`. The bump is one
+ * matrix: Node client, broker, socket endpoint, and ready metadata all carry 2,
+ * and a version-1 Init is rejected as incompatible (mirrors the Rust
+ * `opentray-spec` PROTOCOL_VERSION truth).
+ */
+export const PROTOCOL_VERSION = 2;
 export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
 export const OPENTRAY_PROTOCOL_LINE_MAJOR = 1;
 export const OPENTRAY_PROTOCOL_LINE_MINOR = 1;
@@ -428,10 +435,62 @@ export interface ExtensionScope {
   ext: string;
 }
 
+/**
+ * Broker-injected command ownership (add-ext-dialog §5.5): the host derives
+ * `{ appId, trayId, sessionId, instanceGeneration }` for every command
+ * dispatch and extensions must never self-report it. All busy/operation
+ * registries key on this scope; the deferred operation binding is
+ * `(sessionId, instanceGeneration, operationId)`.
+ */
+export interface CommandScope {
+  appId: AppId;
+  trayId: TrayId;
+  sessionId: SessionId;
+  instanceGeneration: number;
+}
+
 export interface ExtensionEnvelope<TData = unknown> {
   scope: ExtensionScope;
+  /**
+   * Present only on the command dispatch path: the broker-injected ownership
+   * scope for this invocation. Event envelopes never carry it.
+   */
+  commandScope?: CommandScope;
   data: TData;
 }
+
+/**
+ * Typed extension error envelope (add-ext-dialog §7.5): `{ code, message,
+ * details }` with a discriminated `details` JSON shape shared by the Rust
+ * `ExtensionError::Detailed` projection, server error frames, and the Node
+ * typed error factory. Consumers must match on `code`; parsing the human
+ * `message` is forbidden by contract.
+ */
+export interface TypedExtensionError {
+  code: string;
+  message: string;
+  /** Discriminated JSON payload whose shape each error code freezes. Absent for codes without structured detail. */
+  details?: unknown;
+}
+
+/**
+ * Terminal payload of a deferred operation (add-ext-dialog §5.1 frozen): the
+ * `result` branch resolves the client promise with `value`; the `error`
+ * branch rejects it with a typed extension error. The cancel path is a
+ * `result` payload isomorphic to user cancellation — there is no third
+ * channel.
+ */
+export type ExtOperationPayload =
+  | { kind: "result"; value: unknown }
+  | { kind: "error"; error: TypedExtensionError };
+
+/**
+ * Shared ingress bound for one extension event/terminal record (64 KiB). The
+ * value is the single source of truth for both the EventPort record bound and
+ * the DeferredPort terminal payload bound; the Rust `opentray-spec` crate
+ * exports the same number (Rust/TS fixture parity).
+ */
+export const EXTENSION_EVENT_RECORD_MAX_BYTES = 64 * 1024;
 
 export interface ExtensionArtifactTarget {
   os: string;
@@ -443,6 +502,19 @@ export interface ExpectedExtensionIdentity {
   artifactSetVersion: string;
   contractFingerprint: string;
   target: ExtensionArtifactTarget;
+  /**
+   * Optional embedded-artifact identity-chain inputs (add-ext-dialog §6.4):
+   * lowercase hex SHA-256 of the resolved library file, verified by the broker
+   * before `dlopen`. Absent means the caller supplied no byte hash
+   * (registry-era identity only).
+   */
+  sha256?: string;
+  /**
+   * Optional build identity carried by the embedded staging manifest; the
+   * broker compares it against the native manifest between `Library::new` and
+   * `init` when provided.
+   */
+  buildIdentity?: string;
 }
 
 /** Operating-system and architecture identity for one broker executable. */
@@ -601,6 +673,26 @@ export type ServerFrame =
       events: ExtensionEnvelope[];
     }
   | {
+      /**
+       * DeferredOperation acceptance (§5.3): the command did not complete
+       * inside the dispatch; the client keeps the request pending until the
+       * matching `ext-operation-terminal` (or a transport-close rejection).
+       */
+      type: "ext-command-accepted";
+      requestId: RequestId;
+      operationId: string;
+    }
+  | {
+      /**
+       * The single terminal frame of a deferred operation. Exactly one is
+       * delivered per accepted operation; duplicates are dropped by the
+       * broker's owner loop before any frame is written.
+       */
+      type: "ext-operation-terminal";
+      operationId: string;
+      payload: ExtOperationPayload;
+    }
+  | {
       type: "runtime-host-health";
       requestId: RequestId;
       health: RuntimeHostHealth;
@@ -703,6 +795,14 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
         Array.isArray(value.events) &&
         value.events.every(isExtensionEnvelope)
       );
+    case "ext-command-accepted":
+      return (
+        typeof value.requestId === "string" && typeof value.operationId === "string"
+      );
+    case "ext-operation-terminal":
+      return (
+        typeof value.operationId === "string" && isExtOperationPayload(value.payload)
+      );
     case "runtime-host-health":
       return typeof value.requestId === "string" && isRuntimeHostHealth(value.health);
     case "event":
@@ -740,8 +840,40 @@ const isExtensionEnvelope = (value: unknown): value is ExtensionEnvelope => {
     typeof scope.appId === "string" &&
     (scope.trayId === undefined || typeof scope.trayId === "string") &&
     typeof scope.ext === "string" &&
+    (value.commandScope === undefined || isCommandScope(value.commandScope)) &&
     "data" in value
   );
+};
+
+/** Returns true when an unknown value is a complete broker-injected command scope. */
+export const isCommandScope = (value: unknown): value is CommandScope =>
+  isRecord(value) &&
+  typeof value.appId === "string" &&
+  typeof value.trayId === "string" &&
+  typeof value.sessionId === "string" &&
+  typeof value.instanceGeneration === "number" &&
+  Number.isInteger(value.instanceGeneration) &&
+  value.instanceGeneration >= 0;
+
+/** Returns true when an unknown value is a complete typed extension error envelope. */
+export const isTypedExtensionError = (value: unknown): value is TypedExtensionError =>
+  isRecord(value) &&
+  typeof value.code === "string" &&
+  typeof value.message === "string";
+
+/** Parser truth for the frozen terminal payload discriminant (no third branch is guessed). */
+export const isExtOperationPayload = (value: unknown): value is ExtOperationPayload => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  switch (value.kind) {
+    case "result":
+      return "value" in value;
+    case "error":
+      return isTypedExtensionError(value.error);
+    default:
+      return false;
+  }
 };
 
 const isRuntimeHostHealth = (value: unknown): value is RuntimeHostHealth => {

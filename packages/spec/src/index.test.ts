@@ -3,22 +3,31 @@ import { describe, expect, it } from "vitest";
 import {
   createBrokerEndpointIdentity,
   compareOpenTrayProtocolLine,
+  EXTENSION_EVENT_RECORD_MAX_BYTES,
   formatBrokerEndpointName,
   formatOpenTrayProtocolLine,
   formatProtocolDistTag,
   formatBrokerStateRoot,
   formatUnixSocketPath,
   formatWindowsPipeName,
+  isCommandScope,
+  isExtOperationPayload,
   isOpenTrayProtocolLineCompatible,
   isSupportedProtocolVersion,
+  isTypedExtensionError,
   parseProtocolDistTag,
   OPENTRAY_PROTOCOL_FAMILY,
   OPENTRAY_PROTOCOL_LINE,
   parseServerFrame,
   PROTOCOL_VERSION,
   type ClientFrame,
+  type CommandScope,
+  type ExpectedExtensionIdentity,
+  type ExtOperationPayload,
   type Icon,
   type Menu,
+  type ServerFrame,
+  type TypedExtensionError,
 } from "./index";
 
 describe("@opentray/spec", () => {
@@ -195,15 +204,15 @@ describe("@opentray/spec", () => {
     });
 
     expect(identity.callerLabel).toBe("myapp");
-    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1-myapp");
+    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p2-myapp");
     expect(formatBrokerStateRoot("/Users/example", identity)).toBe(
       "/Users/example/.opentray/0.1.0/myapp"
     );
     expect(formatUnixSocketPath("/Users/example", identity)).toBe(
-      "/Users/example/.opentray/0.1.0/myapp/opentray-p1.sock"
+      "/Users/example/.opentray/0.1.0/myapp/opentray-p2.sock"
     );
     expect(formatWindowsPipeName(identity)).toBe(
-      "\\\\.\\pipe\\opentray-0.1.0-p1-myapp"
+      "\\\\.\\pipe\\opentray-0.1.0-p2-myapp"
     );
   });
 
@@ -304,13 +313,19 @@ describe("@opentray/spec", () => {
   });
 
   it("keeps runtime protocol version separate from install-time protocol tags", () => {
-    expect(PROTOCOL_VERSION).toBe(1);
+    expect(PROTOCOL_VERSION).toBe(2);
     expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-1");
     expect(createBrokerEndpointIdentity({ packageVersion: "0.5.1" })).toEqual({
       packageVersion: "0.5.1",
-      protocolVersion: 1,
+      protocolVersion: 2,
       callerLabel: "opentray",
     });
+  });
+
+  it("retires protocol version 1 exhaustively (v2 matrix, Rust parity)", () => {
+    expect(isSupportedProtocolVersion(PROTOCOL_VERSION)).toBe(true);
+    expect(isSupportedProtocolVersion(1)).toBe(false);
+    expect(isSupportedProtocolVersion(PROTOCOL_VERSION + 1)).toBe(false);
   });
 
   it("rejects ready frames without explicit protocol metadata", () => {
@@ -525,5 +540,246 @@ describe("@opentray/spec", () => {
     );
 
     expect(parsed.ok).toBe(false);
+  });
+});
+
+describe("@opentray/spec DeferredOperation protocol (v2)", () => {
+  const operationId = "000000000000000f";
+
+  it("round-trips the acceptance frame with the 16-hex wire operationId", () => {
+    const accepted: Extract<ServerFrame, { type: "ext-command-accepted" }> = {
+      type: "ext-command-accepted",
+      requestId: "req-1",
+      operationId,
+    };
+    const wire = JSON.stringify(accepted);
+
+    expect(JSON.parse(wire)).toEqual({
+      type: "ext-command-accepted",
+      requestId: "req-1",
+      operationId,
+    });
+    const parsed = parseServerFrame(wire);
+    expect(parsed).toEqual({ ok: true, frame: accepted });
+  });
+
+  it("round-trips terminal frames through both frozen payload branches", () => {
+    const terminalResult: Extract<ServerFrame, { type: "ext-operation-terminal" }> = {
+      type: "ext-operation-terminal",
+      operationId,
+      payload: { kind: "result", value: { response: 0, suppressed: false } },
+    };
+    const terminalError: Extract<ServerFrame, { type: "ext-operation-terminal" }> = {
+      type: "ext-operation-terminal",
+      operationId,
+      payload: {
+        kind: "error",
+        error: {
+          code: "dialog_dismissal_unavailable",
+          message: "platform cannot observe the dismissal reason",
+          details: { kind: "dismissal" },
+        },
+      },
+    };
+
+    const resultWire = JSON.parse(JSON.stringify(terminalResult));
+    expect(resultWire).toEqual({
+      type: "ext-operation-terminal",
+      operationId,
+      payload: { kind: "result", value: { response: 0, suppressed: false } },
+    });
+    const errorWire = JSON.parse(JSON.stringify(terminalError));
+    expect(errorWire).toEqual({
+      type: "ext-operation-terminal",
+      operationId,
+      payload: {
+        kind: "error",
+        error: {
+          code: "dialog_dismissal_unavailable",
+          message: "platform cannot observe the dismissal reason",
+          details: { kind: "dismissal" },
+        },
+      },
+    });
+
+    expect(parseServerFrame(JSON.stringify(terminalResult))).toEqual({
+      ok: true,
+      frame: terminalResult,
+    });
+    expect(parseServerFrame(JSON.stringify(terminalError))).toEqual({
+      ok: true,
+      frame: terminalError,
+    });
+  });
+
+  it("rejects a terminal payload without a known discriminated branch", () => {
+    const cancel = parseServerFrame(
+      JSON.stringify({
+        type: "ext-operation-terminal",
+        operationId,
+        payload: { kind: "cancel" },
+      })
+    );
+    const missingError = parseServerFrame(
+      JSON.stringify({
+        type: "ext-operation-terminal",
+        operationId,
+        payload: { kind: "error" },
+      })
+    );
+    const missingValue = parseServerFrame(
+      JSON.stringify({
+        type: "ext-operation-terminal",
+        operationId,
+        payload: { kind: "result" },
+      })
+    );
+
+    expect(cancel.ok).toBe(false);
+    expect(missingError.ok).toBe(false);
+    expect(missingValue.ok).toBe(false);
+    expect(isExtOperationPayload({ kind: "cancel" })).toBe(false);
+    expect(isExtOperationPayload({ kind: "result", value: null })).toBe(true);
+    expect(isExtOperationPayload({ kind: "error", error: { code: "c", message: "m" } })).toBe(
+      true
+    );
+  });
+
+  it("rejects acceptance and terminal frames with wrong field types", () => {
+    const acceptedBadOperation = parseServerFrame(
+      JSON.stringify({
+        type: "ext-command-accepted",
+        requestId: "req-1",
+        operationId: 15,
+      })
+    );
+    const terminalBadOperation = parseServerFrame(
+      JSON.stringify({
+        type: "ext-operation-terminal",
+        operationId,
+        payload: "result",
+      })
+    );
+
+    expect(acceptedBadOperation.ok).toBe(false);
+    expect(terminalBadOperation.ok).toBe(false);
+  });
+
+  it("freezes the typed extension error wire shape (details optional both ways)", () => {
+    const error: TypedExtensionError = {
+      code: "dialog_session_busy",
+      message: "owner already shows a dialog",
+      details: { kind: "owner", trayId: "tray-1" },
+    };
+    expect(JSON.parse(JSON.stringify(error))).toEqual({
+      code: "dialog_session_busy",
+      message: "owner already shows a dialog",
+      details: { kind: "owner", trayId: "tray-1" },
+    });
+    expect(isTypedExtensionError(error)).toBe(true);
+    expect(isTypedExtensionError({ code: "c", message: "m" })).toBe(true);
+    expect(isTypedExtensionError({ code: "c" })).toBe(false);
+    expect(isTypedExtensionError({ message: "m" })).toBe(false);
+  });
+
+  it("serializes the broker-injected command scope as camelCase", () => {
+    const scope: CommandScope = {
+      appId: "app-1",
+      trayId: "tray-1",
+      sessionId: "session-1",
+      instanceGeneration: 3,
+    };
+    expect(JSON.parse(JSON.stringify(scope))).toEqual({
+      appId: "app-1",
+      trayId: "tray-1",
+      sessionId: "session-1",
+      instanceGeneration: 3,
+    });
+    expect(isCommandScope(scope)).toBe(true);
+    expect(isCommandScope({ ...scope, trayId: undefined })).toBe(false);
+    expect(isCommandScope({ ...scope, instanceGeneration: -1 })).toBe(false);
+    expect(isCommandScope({ ...scope, instanceGeneration: 1.5 })).toBe(false);
+  });
+
+  it("keeps command envelopes optional and legacy envelopes unchanged", () => {
+    const withScope = {
+      type: "ext-command-result",
+      requestId: "req-1",
+      events: [
+        {
+          scope: { appId: "app-1", trayId: "tray-1", ext: "dialog" },
+          commandScope: {
+            appId: "app-1",
+            trayId: "tray-1",
+            sessionId: "session-1",
+            instanceGeneration: 3,
+          },
+          data: { type: "show" },
+        },
+      ],
+    } as const;
+    const legacy = {
+      type: "ext-command-result",
+      requestId: "req-2",
+      events: [{ scope: { appId: "app-1", ext: "dialog" }, data: {} }],
+    } as const;
+
+    expect(parseServerFrame(JSON.stringify(withScope)).ok).toBe(true);
+    expect(parseServerFrame(JSON.stringify(legacy)).ok).toBe(true);
+    const forgedScope = {
+      type: "ext-command-result",
+      requestId: "req-3",
+      events: [
+        {
+          scope: { appId: "app-1", ext: "dialog" },
+          commandScope: { appId: "app-1" },
+          data: {},
+        },
+      ],
+    };
+    expect(parseServerFrame(JSON.stringify(forgedScope)).ok).toBe(false);
+  });
+
+  it("keeps the embedded identity-chain inputs optional both ways", () => {
+    const legacy: ExpectedExtensionIdentity = {
+      extensionName: "dialog",
+      artifactSetVersion: "1.0.0",
+      contractFingerprint: "opentray-ext-dialog-contract-1",
+      target: { os: "darwin", arch: "arm64" },
+    };
+    expect(JSON.parse(JSON.stringify(legacy))).toEqual({
+      extensionName: "dialog",
+      artifactSetVersion: "1.0.0",
+      contractFingerprint: "opentray-ext-dialog-contract-1",
+      target: { os: "darwin", arch: "arm64" },
+    });
+
+    const chained: ExpectedExtensionIdentity = {
+      ...legacy,
+      sha256: "a".repeat(64),
+      buildIdentity: "build-123",
+    };
+    const wire = JSON.parse(JSON.stringify(chained));
+    expect(wire.sha256).toBe("a".repeat(64));
+    expect(wire.buildIdentity).toBe("build-123");
+  });
+
+  it("exports the shared 64 KiB record bound (Rust fixture parity)", () => {
+    expect(EXTENSION_EVENT_RECORD_MAX_BYTES).toBe(65536);
+    expect(EXTENSION_EVENT_RECORD_MAX_BYTES).toBe(64 * 1024);
+  });
+
+  it("keeps the payload discriminated union exhaustive at the type level", () => {
+    const payloads: ExtOperationPayload[] = [
+      { kind: "result", value: null },
+      { kind: "error", error: { code: "c", message: "m" } },
+    ];
+    for (const payload of payloads) {
+      if (payload.kind === "result") {
+        expect(payload.value).toBeDefined();
+      } else {
+        expect(payload.error.code).toBe("c");
+      }
+    }
   });
 });
