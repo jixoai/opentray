@@ -1,20 +1,24 @@
 #!/usr/bin/env node
-// Orthogonal intents (2026-09-17; original user request: Codex R4 P0-6 + R5 P0-5 — the SSOT
-// consistency gate must be executable, semantic, and wired into formal verification):
-// 1. Forbid retired deferred-protocol/frame names in active add-ext-dialog/add-ext-sound artifacts.
-// 2. Forbid semantic contradictions: poll-carried terminals, pre-Accept terminal wording,
-//    the retired event barrier, dry-run-as-release-evidence, and the impossible identity order.
-// 3. Allow negative examples only on lines that explicitly mark them as forbidden/retired/historical.
+// Orthogonal intents (2026-09-17; original user request: Codex R4 P0-6 + R5 P0-5 + R6 P1-2/P1-3 —
+// the SSOT consistency gate must be executable, semantic, structured, cross-platform, and tested):
+// 1. Forbid retired deferred-protocol/frame names in active add-ext-dialog/add-ext-sound artifacts
+//    (allowlist applies ONLY to these historical-name rules).
+// 2. Forbid semantic contradictions strictly (no allowlist): poll-carried terminals, pre-Accept
+//    terminal wording, the retired event barrier as a claim, dry-run-as-release-evidence, the
+//    impossible identity order, and fictional two-session scenarios.
+// 3. Keep the gate runnable via `bun run verify:spec-consistency` and covered by fixture tests.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
-const ROOT = new URL("../../", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const CHANGES = ["openspec/changes/add-ext-dialog", "openspec/changes/add-ext-sound"];
 // Only normative artifacts are scanned; review/ holds review history and is exempt.
 const SCANNED_FILES = new Set(["plan.md", "tasks.md", "spec.md", "design-reference.md"]);
-// A line mentioning a retired term is allowed only when it also marks it as negative/historical.
-const ALLOW_MARKERS = [
+
+// Historical-name rules: a line is exempt when it explicitly marks the term as negative/historical.
+export const ALLOW_MARKERS = [
   "禁止",
   "不得出现",
   "负面",
@@ -28,27 +32,44 @@ const ALLOW_MARKERS = [
   "forbidding",
 ];
 
-/** [ruleId, pattern] — retired protocol names and semantic contradictions. */
-const RULES = [
-  ["retired-frame-completed", /ExtCommandCompleted/],
-  ["retired-frame-cancelled", /ExtCommandCancelled/],
-  ["retired-sync-backend", /readonly backend/],
-  ["retired-sync-backend-dot", /dialog\.backend/],
-  ["retired-sync-backend-dot", /sound\.backend/],
-  ["retired-event-barrier", /terminal-before-event barrier/],
-  ["retired-dry-run-evidence", /release dry-run/],
-  ["impossible-identity-order", /broker 在 `Library::new` 前重验/],
-  ["impossible-identity-order", /before `Library::new`/],
-  ["fictional-two-session", /two sessions stay isolated/],
-  ["fictional-two-session", /A\/B 会话交错/],
+/** [ruleId, pattern, kind] — kind "name" honors the allowlist; kind "semantic" never does. */
+export const RULES = [
+  ["retired-frame-completed", /ExtCommandCompleted/, "name"],
+  ["retired-frame-cancelled", /ExtCommandCancelled/, "name"],
+  ["retired-sync-backend", /readonly backend/, "name"],
+  ["retired-sync-backend-dot", /dialog\.backend/, "name"],
+  ["retired-sync-backend-dot", /sound\.backend/, "name"],
+  ["retired-event-barrier", /terminal-before-event barrier/, "semantic"],
+  ["retired-dry-run-evidence", /release dry-run/, "semantic"],
+  ["impossible-identity-order", /broker 在 `Library::new` 前重验/, "semantic"],
+  ["impossible-identity-order", /before `Library::new`/, "semantic"],
+  ["fictional-two-session", /two sessions stay isolated/, "semantic"],
+  ["fictional-two-session", /A\/B 会话交错/, "semantic"],
   // Semantic contradictions (R5 P0-2/P0-3): poll must never carry terminals;
   // pre-Accept failures are synchronous requestId errors, never terminal frames.
-  ["poll-terminal-channel", /Done\(terminal\)/],
-  ["poll-terminal-channel", /Done \| Pending/],
-  ["preaccept-terminal", /presentation_failed` terminal/],
-  ["preaccept-terminal", /presentation_failed 终帧/],
-  ["preaccept-terminal", /producing a typed `dialog_presentation_failed` terminal/],
+  ["poll-terminal-channel", /Done\(terminal\)/, "semantic"],
+  ["poll-terminal-channel", /Done \| Pending/, "semantic"],
+  ["preaccept-terminal", /presentation_failed` terminal/, "semantic"],
+  ["preaccept-terminal", /presentation_failed 终帧/, "semantic"],
+  ["preaccept-terminal", /producing a typed `dialog_presentation_failed` terminal/, "semantic"],
 ];
+
+/** Check one document; returns violation strings (relative path prefix applied by caller). */
+export const checkDocument = (relativePath, content) => {
+  const violations = [];
+  content.split("\n").forEach((line, i) => {
+    const marked = ALLOW_MARKERS.some((m) => line.includes(m));
+    for (const [ruleId, pattern, kind] of RULES) {
+      if (kind === "name" && marked) continue;
+      if (pattern.test(line)) {
+        violations.push(
+          `${relativePath}:${i + 1} [${ruleId}] ${pattern.source} → ${line.trim()}`
+        );
+      }
+    }
+  });
+  return violations;
+};
 
 const collect = (dir) => {
   const out = [];
@@ -64,30 +85,26 @@ const collect = (dir) => {
   return out;
 };
 
-const violations = [];
-for (const change of CHANGES) {
-  const dir = join(ROOT, change);
-  for (const file of collect(dir)) {
-    const lines = readFileSync(file, "utf8").split("\n");
-    lines.forEach((line, i) => {
-      const allowed = ALLOW_MARKERS.some((m) => line.includes(m));
-      if (allowed) return;
-      for (const [ruleId, pattern] of RULES) {
-        if (pattern.test(line)) {
-          violations.push(
-            `${file.replace(ROOT, "")}:${i + 1} [${ruleId}] ${pattern.source} → ${line.trim()}`
-          );
-        }
-      }
-    });
+const runOnRepo = () => {
+  const violations = [];
+  for (const change of CHANGES) {
+    for (const file of collect(join(ROOT, change))) {
+      violations.push(
+        ...checkDocument(file.slice(ROOT.length), readFileSync(file, "utf8"))
+      );
+    }
   }
-}
+  return violations;
+};
 
-if (violations.length > 0) {
-  console.error(`consistency gate FAILED (${violations.length} violation(s)):`);
-  for (const v of violations) console.error(`  ${v}`);
-  process.exit(1);
+if (import.meta.url === `file://${process.argv[1]}` || process.env.RUN_CONSISTENCY_GATE === "1") {
+  const violations = runOnRepo();
+  if (violations.length > 0) {
+    console.error(`consistency gate FAILED (${violations.length} violation(s)):`);
+    for (const v of violations) console.error(`  ${v}`);
+    process.exit(1);
+  }
+  console.log(
+    "consistency gate OK: no retired protocol text or semantic contradiction in active dialog/sound artifacts"
+  );
 }
-console.log(
-  "consistency gate OK: no retired protocol text or semantic contradiction in active dialog/sound artifacts"
-);

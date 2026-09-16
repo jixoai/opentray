@@ -9,7 +9,7 @@
 > 6. 「后续就和 Codex 去讨论。除非有重大决策项需要我参与就停下来问我，否则以 Codex 的决策为准。如果可以就持续推进，直到全部开发和测试全部完成。」
 >
 > 用户语言系统：**「只做 web 做不到的功能」（2026-09-12 Owner ruling）、「能力原子」、「OS 标准对话框」、「优先保持轻量」**。
-> 评审记录：Codex R1：**4.0/10 NO-GO**；R2：**5.0/10 NO-GO**；R3：**5.8/10 NO-GO**；R4：**6.7/10 NO-GO**；R5（`.agents/review/2026-09-17-ext-dialog-sound-r5.md`）：**7.4/10 NO-GO**——本版为 R5 修订版（P0-1 V2 command 符号 + repr(C) 真布局、P0-2/3 spec/tasks 终帧语义同步 + wire timeline 场景、P0-4 共享 payload 常量 `EXTENSION_EVENT_RECORD_MAX_BYTES`、P0-5 一致性门语义规则化 + 正式接入 verify 聚合器与 verify-native-artifacts CI）。
+> 评审记录：Codex R1：**4.0/10 NO-GO**；R2：**5.0/10 NO-GO**；R3：**5.8/10 NO-GO**；R4：**6.7/10 NO-GO**；R5：**7.4/10 NO-GO**；R6（`.agents/review/2026-09-17-ext-dialog-sound-r6.md`）：**8.2/10 NO-GO**——本版为 R6 修订版（P0-1 port 按值 attach + tag 数值/保留字段拒绝规则、P0-2 disposition 输出矩阵（去 bytes 成员，out_events 唯一事件/结果通道）、P1-1 CI paths 覆盖 openspec/scripts/package.json、P1-2 门 fixture 三臂落地 + 语义规则不受 allowlist 豁免、P1-3 fileURLToPath、P1-4 四格符号矩阵冻结）。
 
 ## 最终可见效果（operator 视角）
 

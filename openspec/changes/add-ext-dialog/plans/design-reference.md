@@ -158,18 +158,32 @@ accessory 见 §4）。**空命名空间保持可表达**（`darwin: {}` 合法�
 ServerFrame::ExtCommandAccepted  { requestId, operationId }   # 命令受理（Accepted 语义见 §5.3）
 ServerFrame::ExtOperationTerminal { operationId, payload }   # 唯一终帧
 
-# 命令 FFI（独立 V2 符号，repr(C) 冻结；R5 P0-1 裁决）
+# 命令 FFI（独立 V2 符号，repr(C) 冻结；R5/R6 P0 裁决）
 EXT_SYMBOL_COMMAND_V2 = "opentray_ext_command_v2"
 opentray_ext_command_v2(instance, context, envelope, out_events, out_disposition) -> ExtResultCode
 #[repr(C)] ExtCommandDispositionV1 = { tag: u32, reserved: u32 (=0),
-  value: union { none: (), operation_handle: u64, events: ExtOwnedBytes } }   // size_of/offset_of 由 fixture 冻结
-# 兼容规则（无 UB）：loader 先探测 V2 符号——缺失则用旧 opentray_ext_command（V1 四参签名，
-# 永不以新签名调用），该扩展恒 Immediate、无 deferred 能力（探测结果入能力诊断）
-# 约束：tag=Deferred 时 out_events 必须为空；ExtOwnedBytes 的释放责任与现状一致（host 经
-# free_string 释放）；tag=Immediate 时 value.events 拥有与旧 out_events 相同语义
+  value: union { none: (), operation_handle: u64 } }   // size_of/offset_of 由 fixture 冻结
+# tag 数值冻结：0 = Immediate（结果已在 out_events），1 = Deferred（value.operation_handle 有效）
+# 未知 tag 或非零 reserved → host 侧 typed 拒绝（abi_incompatible 族），不猜测语义
+#
+# 输出矩阵（R6 P0-2 冻结——out_events 是唯一事件/结果通道，disposition 只编码「是否挂起」）：
+#   Immediate：结果 envelope 写 out_events（与 V1 语义完全一致）；value 必须为 none 全零
+#   Deferred ：out_events 必须为空（非空 = 协议违规，host 记结构化诊断并丢弃，不投递）；
+#              value.operation_handle = broker 签发的 handle
+#   两块缓冲（out_events 与 disposition struct）所有权独立，host 各自经既有规则释放；
+#   不存在第二块 ExtOwnedBytes（disposition 不携带 bytes）——双重释放不可表达
+#
+# 符号矩阵（loader 探测，R6 P1-4 冻结）：
+#   仅 V2：V2 required 符号集成立（旧 EXT_SYMBOL_COMMAND 不再 required），全能力
+#   仅 V1：恒 Immediate（永不以新签名调用，无 UB），能力诊断标记 no-deferred
+#   双符号：用 V2（旧符号忽略），能力诊断标记 v2
+#   双缺失：abi_incompatible（维持现有拒绝路径）
+#   探测结果（四格之一）写入 broker 能力诊断与 load 日志
 
 # 原生侧可选版本化符号（opentray-spec 常量）
-opentray_ext_attach_deferred_completion_port_v1(instance: *mut c_void, port: *const ExtDeferredPortV1)
+opentray_ext_attach_deferred_completion_port_v1(instance: *mut c_void, port: ExtDeferredPortV1)
+# port 按【值】传递（R6 P0-1 裁决，与 EventPort attach 同款）——扩展复制这个小 struct，
+# 只允许保留 port_data 指针；不得保留 struct 指针本身（host 不保证 struct 地址存活）
 # instance 参数必须携带：多 mount 时 port 归属实例，一 mount 一 port，杜绝跨实例覆盖
 #[repr(C)] ExtDeferredPortV1 = { abi_version: u32, struct_size: u32,
   port_data: *mut c_void,                                   // broker 拥有，进程级存活
@@ -191,13 +205,14 @@ TypedExtensionError }`——Node 侧 resolve/reject 的唯一依据。
   `ExtCommandDispositionV1::Deferred` 下发（host→extension 单向，一次有效）；handle 为
   u64 nonce，绑定 `(sessionId, instanceGeneration, operationId)`；扩展自造/重放 handle →
   `EXT_ERR_INVALID_HANDLE`，错 owner → 丢弃 + 诊断（不回帧）。
-- **port 生命周期（EventPort 同款模式）**：immutable host-owned 状态；`abi_version` +
-  `struct_size` 校验（不符 → `event_port_abi_incompatible` 同族错误，不静默降级）；
-  submit 为 bounded-copy（超限 → `EXT_ERR_OVERSIZED`）；返回码 `EXT_OK /
-  EXT_ERR_PORT_CLOSED / EXT_ERR_INVALID_HANDLE / EXT_ERR_OVERSIZED`；**submit 通道在
-  LoadExt ACK 后才打开**；session/instance 清理前先 revoke（此后 submit 恒
-  `EXT_ERR_PORT_CLOSED`，无队列突变）；broker 不在可能仍有 stale worker submit 的窗口
-  释放 host 内存——port_data 指向 broker 拥有的进程级存活状态。
+- **port 生命周期（EventPort 同款模式，按值 attach）**：immutable host-owned 状态；attach
+  按**值**传入 `ExtDeferredPortV1`（扩展复制 struct、只保留 `port_data`；stale struct 指针
+  不可保留——attach-teardown fixture 覆盖）；`abi_version` + `struct_size` 校验（不符 →
+  `event_port_abi_incompatible` 同族错误，不静默降级）；submit 为 bounded-copy（超限 →
+  `EXT_ERR_OVERSIZED`）；返回码 `EXT_OK / EXT_ERR_PORT_CLOSED / EXT_ERR_INVALID_HANDLE /
+  EXT_ERR_OVERSIZED`；**submit 通道在 LoadExt ACK 后才打开**；session/instance 清理前先
+  revoke（此后 submit 恒 `EXT_ERR_PORT_CLOSED`，无队列突变）；broker 不在可能仍有 stale
+  worker submit 的窗口释放 host 内存——port_data 指向 broker 拥有的进程级存活状态。
 - **终帧语义**：`result` 分支 resolve，`error` 分支以 TypedExtensionError reject；撤销
   路径由扩展产出 cancel 分支 result payload（与用户取消同构）；重复终帧/旧 generation →
   owner loop CAS 无状态丢弃 + 诊断。

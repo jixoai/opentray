@@ -11,6 +11,9 @@ on:
       - "scripts/binaries/**"
       - "scripts/ci/**"
       - "scripts/release/**"
+      - "scripts/openspec/**"
+      - "openspec/**"
+      - "package.json"
 
 concurrency:
   group: verify-native-artifacts-${{ github.ref }}
