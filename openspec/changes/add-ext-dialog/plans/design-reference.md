@@ -465,3 +465,34 @@ schema；Rust `ExtensionError::Detailed` 与 server error frame、Node typed err
    /TerminalPayload 事务，不私有造帧；`extension_transport_closed` 是核心 client 的通用
    断连拒绝，扩展 facade 自行映射公开码；sessionId 由 broker 注入命令作用域，扩展不得
    自报。
+
+### 5.7 实现裁决记录（批次 A 波 1/波 2 回写，2026-09-17）
+
+波 1（Rust，ce4d7a98..2e9a9cb0）与波 2（TS，dceacd42..4a1e4f55）实现中裁决如下，均为设计
+未明说处的补充冻结（非语义变更）：
+
+1. **handle 下发通道**：host 调用前将 `{tag=Deferred, reserved=0, value=handle}` 预填充进
+   out_disposition struct——预填充即「命令调用期间下发」；扩展可保留（defer）或改写为
+   Immediate；回显不符 handle → typed abi_incompatible。
+2. **operationId/handle 双表示**：单值双形态——FFI 侧 u64，wire 侧 16 位十六进制字符串；
+   registry 归属仍为 `(sessionId, instanceGeneration, operationId)` 三元组。
+3. **`poll_owner` 符号名冻结（本节补充）**：`opentray_ext_poll_owner_v1(instance,
+   operation_handle: u64) -> ExtPollOutcomeV1`，`#[repr(C)] ExtPollOutcomeV1 { status: u32
+   (=0 Pending), reserved: u32, next_deadline_ms: u64 (u64::MAX=无), wake_flags: u32 }`——
+   poll 永不携带终帧（§5.2 不变）；批次 B macOS 侧实现此符号。
+4. **stale/foreign 分类顺序**：身份不匹配（session/app/instance）→ ForeignOwner；身份匹配
+   但 generation 非当前 → StaleGeneration；ingress 仅查身份（stale 提交仍 EXT_OK，结算时
+   无状态丢弃）。
+5. **非法 payload JSON**：四码清单未覆盖；沿用 ABI-3 通用 `EXT_ERR_REJECTED`（EventPort
+   ingress 惯例）。
+6. **port 队列满**：返回既有 `EXT_ERR_BACKPRESSURE(4)`；每 port 待结算上限 64。
+7. **session-close cancel 终帧编排**：批次 A 通用层在 close 时 revoke port + purge
+   operations（无终帧投递）；dialog 的 cancel-branch payload 编排属批次 B teardown。
+8. **deferred promise resolve 形态（TS）**：terminal 帧无 requestId，transport.request 以
+   关联的 `ext-operation-terminal` 帧本身 resolve（`frame.payload.value` 即结果值）；错误
+   分支 typed reject。
+9. **断连码**：core 通用 `extension_transport_closed`（无扩展名分支）；facade 公开码映射
+   属批次 C。
+10. **绝对路径 libraryPath 先拒**：词法 containment 在 realpath 之前显式拒绝绝对路径
+    （resolve 会吞掉 root 导致穿透，已测试实证）。
+11. **体积门边界语义**：≥2MiB WARN（2MiB 整为 warn）、>3MiB FAIL（3MiB 整为 warn）。
