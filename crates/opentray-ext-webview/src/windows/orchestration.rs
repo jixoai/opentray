@@ -78,7 +78,7 @@ use crate::layout::{
     LogicalViewport,
 };
 use crate::orchestration::{
-    webview_creation_allowed, BlockedNavigationRing, OrchestrationError, ViewEvents, WindowOwner,
+    webview_creation_allowed, CancelLedger, OrchestrationError, ViewEvents, WindowOwner,
 };
 
 use super::box_view::{BoxHostWindow, PhysicalBoxRect};
@@ -411,13 +411,13 @@ pub(super) fn install_load_state_observers(
     // so a concurrent pair could misattribute the failure), and the ring
     // is bounded: entries whose completion never arrives (controller
     // teardown, pathological callbacks) age out instead of growing.
-    let blocked_navigations = Rc::new(RefCell::new(BlockedNavigationRing::new(64)));
+    let cancel_ledger = Rc::new(RefCell::new(CancelLedger::new(64)));
 
     let start_events = Rc::clone(events);
     let start_outbox = Weak::clone(outbox);
     let start_owner = owner.clone();
     let start_pending = Rc::clone(&pending_url);
-    let start_blocked = Rc::clone(&blocked_navigations);
+    let start_ledger = Rc::clone(&cancel_ledger);
     let mut start_token = 0i64;
     unsafe {
         core.add_NavigationStarting(
@@ -467,66 +467,45 @@ pub(super) fn install_load_state_observers(
                     );
                     let blocked = !uri.is_empty() && start_events.borrow().navigation_blocked(&uri);
                     if blocked {
-                        // R3 P2: a blocked navigation never reports `started`
-                        // and never seeds the pending url. The terminal failed
-                        // frame is exactly one: either the ring pairs this
-                        // id with its completion, or (id unreadable) it is
-                        // emitted here — an unreadable id never keys the
-                        // ring, and the matching completion cannot read its
-                        // id either, so it returns through the getter-failure
-                        // path without a second frame. Eviction compensation
-                        // is also emitted now; the evicted id is tombstoned
-                        // so its late completion stays frame-silent.
-                        match (|| -> Result<u64, windows_core::Error> {
+                        // R5: a blocked navigation never reports `started`
+                        // and never seeds the pending url. The terminal
+                        // failed frame emits HERE, at the decision point,
+                        // where the URL is certain — the same instant
+                        // contract as the macOS delegate. The ledger then
+                        // only decides whether this navigation's later
+                        // NavigationCompleted stays frame-silent; it never
+                        // emits and never fabricates attribution.
+                        push_view_event(
+                            &start_events,
+                            &start_outbox,
+                            &start_owner,
+                            |events, owner, window_id| {
+                                events.note_load_state(
+                                    owner,
+                                    window_id,
+                                    WebviewLoadPhase::Failed,
+                                    uri.clone(),
+                                    Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
+                                    None,
+                                )
+                            },
+                        );
+                        // The id is best-effort bookkeeping only: a readable
+                        // id pairs the completion precisely; an unreadable
+                        // one falls back to the outstanding-cancellation
+                        // counter. Neither path can produce a second frame.
+                        let cancelled_id = (|| -> Result<u64, windows_core::Error> {
                             let mut id = 0u64;
                             args.NavigationId(&mut id)?;
                             Ok(id)
-                        })() {
-                            Ok(navigation_id) => {
-                                let evicted = start_blocked
-                                    .borrow_mut()
-                                    .block(navigation_id, uri.clone());
-                                if let Some((_, evicted_url)) = evicted {
-                                    push_view_event(
-                                        &start_events,
-                                        &start_outbox,
-                                        &start_owner,
-                                        |events, owner, window_id| {
-                                            events.note_load_state(
-                                                owner,
-                                                window_id,
-                                                WebviewLoadPhase::Failed,
-                                                evicted_url,
-                                                Some(
-                                                    crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE,
-                                                ),
-                                                None,
-                                            )
-                                        },
-                                    );
-                                }
-                            }
-                            Err(error) => {
-                                eprintln!(
-                                    "opentray-ext-webview NavigationStarting id read failed: {error}"
-                                );
-                                push_view_event(
-                                    &start_events,
-                                    &start_outbox,
-                                    &start_owner,
-                                    |events, owner, window_id| {
-                                        events.note_load_state(
-                                            owner,
-                                            window_id,
-                                            WebviewLoadPhase::Failed,
-                                            uri.clone(),
-                                            Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
-                                            None,
-                                        )
-                                    },
-                                );
-                            }
+                        })()
+                        .ok();
+                        if cancelled_id.is_none() {
+                            eprintln!(
+                                "opentray-ext-webview NavigationStarting id read failed; relying on the outstanding-cancellation counter"
+                            );
                         }
+                        start_ledger.borrow_mut().note_cancel(cancelled_id);
                         args.SetCancel(true)?;
                         return Ok(());
                     }
@@ -558,7 +537,7 @@ pub(super) fn install_load_state_observers(
     let done_outbox = Weak::clone(outbox);
     let done_owner = owner.clone();
     let done_pending = Rc::clone(&pending_url);
-    let done_blocked = Rc::clone(&blocked_navigations);
+    let done_ledger = Rc::clone(&cancel_ledger);
     let mut done_token = 0i64;
     unsafe {
         core.add_NavigationCompleted(
@@ -575,57 +554,20 @@ pub(super) fn install_load_state_observers(
                     // blocked for instead of the platform's
                     // OperationCanceled status (R1 P1: the shared pending
                     // slot is not authoritative for a cancelled pair).
-                    // R4 P2: a failed id read is NOT a silent drop. Blocked
-                    // navigations outstanding on this controller attribute
-                    // the orphan completion FIFO (their terminal frame emits
-                    // here); with none outstanding the completion continues
-                    // down the ordinary path (an allowed navigation's
-                    // finished/failed frames never depended on the id).
-                    let blocked_decision = match (|| -> Result<u64, windows_core::Error> {
+                    // R5: completions consult the ledger only when they
+                    // failed — a cancelled navigation can never complete
+                    // successfully, so success frames never touch it. The
+                    // id is best-effort: readable ids pair tombstones
+                    // precisely; unreadable or evicted ids fall back to the
+                    // outstanding-cancellation counter. Suppression emits
+                    // nothing (the stable terminal was already emitted at
+                    // the decision point).
+                    let completion_id = (|| -> Result<u64, windows_core::Error> {
                         let mut id = 0u64;
                         args.NavigationId(&mut id)?;
                         Ok(id)
-                    })() {
-                        Ok(id) => done_blocked.borrow_mut().complete(id),
-                        Err(error) => {
-                            eprintln!(
-                                "opentray-ext-webview NavigationCompleted id read failed: {error}"
-                            );
-                            match done_blocked.borrow_mut().take_oldest_orphan() {
-                                Some(url) => crate::orchestration::CompletionOutcome::Blocked(url),
-                                None => crate::orchestration::CompletionOutcome::Ordinary,
-                            }
-                        }
-                    };
-                    // Exactly-once terminal rule: a ring hit emits the
-                    // stable blocked frame with the paired URL; a tombstone
-                    // hit (terminal frame already emitted by eviction
-                    // compensation) drops this completion silently; anything
-                    // else is the ordinary platform path.
-                    match blocked_decision {
-                        crate::orchestration::CompletionOutcome::Blocked(url) => {
-                            push_view_event(
-                                &done_events,
-                                &done_outbox,
-                                &done_owner,
-                                |events, owner, window_id| {
-                                    events.note_load_state(
-                                        owner,
-                                        window_id,
-                                        WebviewLoadPhase::Failed,
-                                        url,
-                                        Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
-                                        None,
-                                    )
-                                },
-                            );
-                            return Ok(());
-                        }
-                        crate::orchestration::CompletionOutcome::AlreadyTerminal => {
-                            return Ok(());
-                        }
-                        crate::orchestration::CompletionOutcome::Ordinary => {}
-                    }
+                    })()
+                    .ok();
                     let url = done_pending.borrow().clone();
                     if success.as_bool() {
                         push_view_event(
@@ -648,14 +590,20 @@ pub(super) fn install_load_state_observers(
                             webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_ERROR_STATUS(0);
                         args.WebErrorStatus(&mut status)?;
                         let error_code = status.0;
-                        // R4 P2 exactly-once guard: an OperationCanceled
-                        // completion on a controller that has ever blocked
-                        // cannot be attributed (rule-cancel late completion
-                        // vs user cancel) — the already-emitted stable
-                        // terminal wins; drop with a diagnostic.
-                        if done_blocked.borrow().should_drop_unattributed_cancel(error_code) {
+                        // R5 exactly-once: this failed completion may be the
+                        // late arrival of a rule-cancelled navigation whose
+                        // stable terminal was already emitted at the
+                        // decision point. The ledger decides by precise
+                        // tombstone pairing or the outstanding-cancellation
+                        // counter — every failure code, not just the
+                        // platform's cancel status, and never a fabricated
+                        // URL.
+                        if done_ledger
+                            .borrow_mut()
+                            .suppress_failed_completion(completion_id)
+                        {
                             eprintln!(
-                                "opentray-ext-webview dropped an unattributable OperationCanceled completion (blocked-capable controller)"
+                                "opentray-ext-webview suppressed a failed completion belonging to an already-terminal cancellation"
                             );
                             return Ok(());
                         }

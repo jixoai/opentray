@@ -487,134 +487,84 @@ impl ViewEvents {
     pub(crate) const BLOCKED_ERROR_CODE: i32 = WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE;
 }
 
-/// add-navigation-favicon-surface: the Windows blocked-navigation ledger.
-/// Platform-neutral so the pairing, eviction, idempotence, and
-/// exactly-once-terminal semantics are testable without a WebView2 host
-/// (the Windows observers delegate every ring decision here).
+/// add-navigation-favicon-surface: the navigation-cancel suppression
+/// ledger. Platform-neutral; the Windows observers delegate every decision
+/// here, and the twin tests below pin the semantics.
 ///
-/// Exactly-once terminal rule (R3 P2): every blocked navigation produces
-/// exactly one terminal `failed(navigation_blocked)` frame. In-flight
-/// entries pair their `NavigationCompleted` through [`Self::complete`].
-/// When the ring is full, [`Self::block`] evicts the oldest entry, the
-/// caller emits its terminal frame immediately, and the entry's id moves
-/// to a bounded tombstone set: the late completion consumes the tombstone
-/// ([`CompletionOutcome::AlreadyTerminal`]) instead of emitting a second
-/// platform-coded failure. The tombstone set shares the ring capacity; a
-/// completion arriving after 64 fresher tombstones is the second-order
-/// pathological case and falls back to the ordinary platform path —
-/// recorded here as the only residual duplicate window.
+/// Terminal contract (R5): the stable `failed(navigation_blocked)` frame
+/// for a rule-cancelled navigation is emitted at the DECISION POINT, when
+/// the URL is known for certain (the macOS delegate does exactly this).
+/// This ledger never emits frames and never fabricates attribution — it
+/// only decides whether a later `NavigationCompleted` belongs to an
+/// already-terminal cancellation and must therefore stay frame-silent
+/// (exactly-once), or passes through to the ordinary platform path.
 ///
-/// A `NavigationStarting` whose NavigationId getter failed never keys the
-/// ring: the caller emits the terminal frame at the veto (after the
-/// `navigationAction` push) and cancels; the matching completion cannot
-/// read its id either (same COM property family), so it returns through
-/// the getter-failure path without a frame — the pairing invariant.
+/// State: a bounded tombstone set of cancelled navigation ids (precise
+/// pairing when the completion's id is readable) plus ONE counter of
+/// cancellations whose completion has not been consumed yet (the bound:
+/// the counter is a single usize, the tombstones are capped; both die
+/// with the controller's observer closures). A failed completion first
+/// tries its id against the tombstones; anything else is suppressed only
+/// while un-consumed cancellations remain (`pending > 0`), consuming one.
+/// That window closes as cancellations complete — unlike a lifetime
+/// `ever_blocked` flag it cannot permanently swallow ordinary failures,
+/// and unlike a status-code check it covers every platform failure code.
+/// The accepted approximation: an ordinary failure interleaved while a
+/// cancellation is outstanding may be the one suppressed; exactly-once
+/// for cancelled navigations wins that trade (documented, and pinned by
+/// the twins below). Success completions are never suppressed and never
+/// consume the counter — a cancelled navigation cannot complete
+/// successfully.
 ///
-/// Lifecycle: one ring per controller, owned by the observer closures. A
-/// destroyed controller stops firing events (WebView2 drops its handlers
-/// with the sender), the closures and the ring die with it, and a re-created
-/// view id gets a fresh controller, fresh closures, and a fresh ring — a
-/// late completion can never reach a successor view (the isolation twin
-/// test below pins this at ring level).
-pub(crate) struct BlockedNavigationRing {
-    entries: VecDeque<(u64, String)>,
+/// Lifecycle: one ledger per controller, owned by the observer closures;
+/// it dies with them, and a re-created view id gets a fresh controller,
+/// fresh closures, and a fresh ledger (the isolation twin).
+pub(crate) struct CancelLedger {
     tombstones: VecDeque<u64>,
     capacity: usize,
-    /// Whether this controller ever vetoed a navigation. Gates the
-    /// unattributed-cancel defense below.
-    ever_blocked: bool,
+    pending_cancel_completions: usize,
 }
 
-/// The decision for one `NavigationCompleted`, from the blocked ledger.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CompletionOutcome {
-    /// A blocked navigation still in the ring: emit the terminal failed
-    /// frame with this URL and the stable blocked code.
-    Blocked(String),
-    /// The terminal frame was already emitted (eviction compensation):
-    /// drop this completion without any frame.
-    AlreadyTerminal,
-    /// Not a blocked navigation: the ordinary platform path applies.
-    Ordinary,
-}
-
-impl BlockedNavigationRing {
+impl CancelLedger {
     pub(crate) fn new(capacity: usize) -> Self {
         Self {
-            entries: VecDeque::new(),
             tombstones: VecDeque::new(),
             capacity: capacity.max(1),
-            ever_blocked: false,
+            pending_cancel_completions: 0,
         }
     }
 
-    /// Records one blocked navigation; returns the evicted entry when the
-    /// ring was full (the caller emits its failed frame now — the entry's
-    /// id is tombstoned so its late completion stays frame-silent).
-    pub(crate) fn block(&mut self, id: u64, url: String) -> Option<(u64, String)> {
-        let evicted = if self.entries.len() >= self.capacity {
-            self.entries.pop_front()
-        } else {
-            None
-        };
-        if let Some((evicted_id, _)) = &evicted {
+    /// Records one rule cancellation whose terminal frame was just emitted
+    /// at the decision point. `id` is the NavigationId when readable; the
+    /// counter covers the unreadable case and every evicted tombstone.
+    pub(crate) fn note_cancel(&mut self, id: Option<u64>) {
+        if let Some(id) = id {
             if self.tombstones.len() >= self.capacity {
                 self.tombstones.pop_front();
             }
-            self.tombstones.push_back(*evicted_id);
+            self.tombstones.push_back(id);
         }
-        self.entries.push_back((id, url));
-        self.ever_blocked = true;
-        evicted
+        self.pending_cancel_completions = self.pending_cancel_completions.saturating_add(1);
     }
 
-    /// Decides one completion. Ring hit: the blocked URL (remove-on-read,
-    /// so a duplicate completion misses). Tombstone hit: already terminal,
-    /// consume silently. Otherwise ordinary.
-    pub(crate) fn complete(&mut self, id: u64) -> CompletionOutcome {
-        if let Some(index) = self.entries.iter().position(|(entry, _)| *entry == id) {
-            let (_, url) = self.entries.remove(index).expect("position just found");
-            return CompletionOutcome::Blocked(url);
+    /// Decides one FAILED completion (success completions never consult
+    /// the ledger). `true` = suppressed: this completion belongs to an
+    /// already-terminal cancellation, emit nothing.
+    pub(crate) fn suppress_failed_completion(&mut self, id: Option<u64>) -> bool {
+        if let Some(id) = id {
+            if let Some(index) = self.tombstones.iter().position(|entry| *entry == id) {
+                self.tombstones.remove(index);
+                self.pending_cancel_completions = self.pending_cancel_completions.saturating_sub(1);
+                return true;
+            }
         }
-        if let Some(index) = self.tombstones.iter().position(|entry| *entry == id) {
-            self.tombstones.remove(index);
-            return CompletionOutcome::AlreadyTerminal;
+        if self.pending_cancel_completions > 0 {
+            self.pending_cancel_completions -= 1;
+            return true;
         }
-        CompletionOutcome::Ordinary
-    }
-
-    /// R4 P2: a `NavigationCompleted` whose NavigationId getter failed can
-    /// still be attributed when blocked navigations are outstanding —
-    /// completions follow starts in order, so the orphan consumes the
-    /// oldest outstanding entry (approximate attribution inside a
-    /// pathological COM window; every such entry is a blocked navigation
-    /// carrying the stable code, so the terminal contract holds).
-    pub(crate) fn take_oldest_orphan(&mut self) -> Option<String> {
-        self.entries.pop_front().map(|(_, url)| url)
-    }
-
-    /// R4 P2: the unattributed-cancel defense. A completion that fell
-    /// through to the ordinary path reporting `OperationCanceled` on a
-    /// controller that has ever blocked a navigation cannot be
-    /// distinguished from a rule-cancelled navigation's late completion
-    /// (tombstone aged out, or a getter failure skipped the ledger) — the
-    /// exactly-once stable terminal wins, so the frame is dropped with a
-    /// diagnostic instead. A genuine user cancel (ESC) reports the same
-    /// status and is the accepted collateral: hosts treat it as noise on
-    /// blocked-capable controllers. Successes and platform-coded failures
-    /// other than cancellation always pass through.
-    pub(crate) fn should_drop_unattributed_cancel(&self, web_error_status: i32) -> bool {
-        self.ever_blocked && web_error_status == WEBVIEW2_OPERATION_CANCELED_STATUS
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.entries.len()
+        false
     }
 }
-
-/// `COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED` (14): the only
-/// WebView2 status a rule-cancelled navigation's completion reports.
-pub(crate) const WEBVIEW2_OPERATION_CANCELED_STATUS: i32 = 14;
 
 /// Resolves one page-reported favicon href into the absolute http(s)
 /// address the `faviconChange` frame carries, per the favicon spec: the
@@ -1593,116 +1543,58 @@ mod tests {
     }
 
     #[test]
-    fn blocked_ring_pairs_completions_and_keeps_terminals_exactly_once() {
-        let mut ring = BlockedNavigationRing::new(2);
-        // Interleaved A/B starts, completions in the opposite order: each
-        // completion carries its own blocked URL, once.
-        assert!(ring.block(10, "https://example.org/a".into()).is_none());
-        assert!(ring.block(11, "https://example.org/b".into()).is_none());
-        assert_eq!(
-            ring.complete(11),
-            CompletionOutcome::Blocked("https://example.org/b".into())
-        );
-        assert_eq!(
-            ring.complete(10),
-            CompletionOutcome::Blocked("https://example.org/a".into())
-        );
-        // A duplicate completion of a consumed id is ordinary (the caller's
-        // platform path owns that; the ledger never re-blocks).
-        assert_eq!(ring.complete(11), CompletionOutcome::Ordinary);
+    fn cancel_ledger_suppresses_paired_and_unattributable_failed_completions_once() {
+        let mut ledger = CancelLedger::new(2);
+        // Terminal frames are emitted at the decision point; the ledger
+        // only suppresses their completions.
+        ledger.note_cancel(Some(10));
+        ledger.note_cancel(Some(11));
+        assert!(ledger.suppress_failed_completion(Some(11)));
+        assert!(ledger.suppress_failed_completion(Some(10)));
+        // Consumed ids and unknown ids with an empty counter pass through.
+        assert!(!ledger.suppress_failed_completion(Some(10)));
+        assert!(!ledger.suppress_failed_completion(Some(999)));
 
-        // Capacity eviction: the evicted entry is reported for immediate
-        // compensation, and its late completion is tombstoned — silent, no
-        // second terminal frame.
-        assert!(ring.block(12, "https://example.org/c".into()).is_none());
-        assert!(ring.block(13, "https://example.org/d".into()).is_none());
-        let evicted = ring
-            .block(14, "https://example.org/e".into())
-            .expect("full ring evicts");
-        assert_eq!(evicted, (12, "https://example.org/c".to_string()));
-        assert_eq!(ring.complete(12), CompletionOutcome::AlreadyTerminal);
-        assert_eq!(
-            ring.complete(13),
-            CompletionOutcome::Blocked("https://example.org/d".into())
-        );
-        assert_eq!(
-            ring.complete(14),
-            CompletionOutcome::Blocked("https://example.org/e".into())
-        );
+        // Unreadable completion ids consume the counter (approximate, but
+        // bounded and closing): no frame is fabricated for them.
+        ledger.note_cancel(None);
+        assert!(ledger.suppress_failed_completion(None));
 
-        // Unknown ids are ordinary.
-        assert_eq!(ring.complete(999), CompletionOutcome::Ordinary);
-        assert_eq!(ring.len(), 0);
+        // Once every cancellation's completion is consumed, ordinary
+        // failures pass through again — the window closes; there is no
+        // lifetime suppression.
+        assert!(!ledger.suppress_failed_completion(None));
+        assert!(!ledger.suppress_failed_completion(Some(42)));
     }
 
     #[test]
-    fn blocked_ring_tombstones_are_bounded_and_a_fresh_ring_never_sees_predecessor_ids() {
-        let mut ring = BlockedNavigationRing::new(2);
-        // Fill and overflow twice: tombstone capacity follows the ring's,
-        // the oldest tombstone ages out (the documented second-order
-        // fallback is Ordinary, never a wrong pairing).
+    fn cancel_ledger_tombstone_eviction_falls_back_to_the_counter() {
+        let mut ledger = CancelLedger::new(2);
         for id in 1..=6u64 {
-            let _ = ring.block(id, format!("https://example.org/{id}"));
+            ledger.note_cancel(Some(id));
         }
-        // ids 1..=4 evicted and tombstoned; the two oldest tombstones
-        // (1, 2) aged out when 5, 6 were tombstoned.
-        assert_eq!(ring.complete(1), CompletionOutcome::Ordinary);
-        assert_eq!(ring.complete(2), CompletionOutcome::Ordinary);
-        assert_eq!(ring.complete(3), CompletionOutcome::AlreadyTerminal);
-        assert_eq!(ring.complete(4), CompletionOutcome::AlreadyTerminal);
-        assert_eq!(
-            ring.complete(5),
-            CompletionOutcome::Blocked("https://example.org/5".into())
-        );
-        assert_eq!(
-            ring.complete(6),
-            CompletionOutcome::Blocked("https://example.org/6".into())
-        );
-
-        // Isolation (the P3 teardown contract at ring level): a destroyed
-        // controller's ring dies with it; the successor controller's fresh
-        // ring answers a predecessor id with Ordinary — no cross-view
-        // pairing is expressible.
-        let mut successor = BlockedNavigationRing::new(2);
-        assert_eq!(successor.complete(6), CompletionOutcome::Ordinary);
-
-        // R4 P2: an orphan completion (id getter failure) consumes the
-        // oldest outstanding blocked entry — the terminal still emits,
-        // attributed FIFO inside the pathological window.
-        let mut orphan_ring = BlockedNavigationRing::new(4);
-        orphan_ring.block(20, "https://example.org/first".into());
-        orphan_ring.block(21, "https://example.org/second".into());
-        assert_eq!(
-            orphan_ring.take_oldest_orphan(),
-            Some("https://example.org/first".to_string())
-        );
-        assert_eq!(
-            orphan_ring.complete(21),
-            CompletionOutcome::Blocked("https://example.org/second".into())
-        );
-        assert_eq!(orphan_ring.take_oldest_orphan(), None);
+        // ids 1..=4 evicted; the counter (6 outstanding) still suppresses
+        // their late completions — eviction never re-opens a terminal.
+        assert!(ledger.suppress_failed_completion(Some(1)));
+        assert!(ledger.suppress_failed_completion(Some(2)));
+        assert!(ledger.suppress_failed_completion(Some(3)));
+        assert!(ledger.suppress_failed_completion(Some(4)));
+        // Paired tombstones for the freshest two.
+        assert!(ledger.suppress_failed_completion(Some(5)));
+        assert!(ledger.suppress_failed_completion(Some(6)));
+        // Counter exhausted: ordinary failures pass again.
+        assert!(!ledger.suppress_failed_completion(Some(7)));
     }
 
     #[test]
-    fn unattributed_cancel_defense_drops_operation_canceled_only_after_blocking() {
-        // A controller that never blocked passes every status through.
-        let clean = BlockedNavigationRing::new(2);
-        assert!(!clean.should_drop_unattributed_cancel(14));
-        assert!(!clean.should_drop_unattributed_cancel(3));
-        // Once a navigation was blocked, an OperationCanceled completion
-        // (rule-cancel late arrival with an aged tombstone, or a getter-
-        // failure orphan) drops; other statuses and successes pass.
-        let mut blocked_once = BlockedNavigationRing::new(2);
-        blocked_once.block(30, "https://example.org/x".into());
-        assert_eq!(
-            blocked_once.complete(30),
-            CompletionOutcome::Blocked("https://example.org/x".into())
-        );
-        assert!(blocked_once.should_drop_unattributed_cancel(14));
-        assert!(!blocked_once.should_drop_unattributed_cancel(3));
-        // The aged-tombstone chain: complete() answers Ordinary for the
-        // expired id, and the handler-layer defense above is what keeps
-        // that late completion frame-silent (exactly-once terminal).
+    fn cancel_ledger_isolation_a_fresh_ledger_never_suppresses_predecessor_cancels() {
+        // P3 teardown contract at ledger level: a destroyed controller's
+        // ledger dies with it; the successor's fresh ledger passes every
+        // completion — cross-view suppression is not expressible.
+        let predecessor = CancelLedger::new(2);
+        drop(predecessor);
+        let mut successor = CancelLedger::new(2);
+        assert!(!successor.suppress_failed_completion(Some(6)));
     }
 
     #[test]
