@@ -1,4 +1,21 @@
-//! Broker-owned dialog poll scheduler skeleton (add-ext-dialog §5.2, batch A).
+//! Broker-owned dialog poll scheduler skeleton (add-ext-dialog design
+//! section 5.2).
+//!
+//! Orthogonal intents (maintained 2026-09-17; original user request: a
+//! modal dialog must never block broker event dispatch -- scheduling
+//! authority stays with the broker and the extension holds no waker):
+//! 1. One merged `DialogPollDue(generation)` user event driven by
+//!    `ControlFlow::WaitUntil(min deadline)`; no spin, no starvation.
+//! 2. Native callbacks may only move an atomic deadline; an EARLIER move
+//!    re-delivers the due event so the loop recomputes its sleep.
+//! 3. A bounded per-iteration owner quota keeps menu/transport frames
+//!    ahead of modal stepping.
+//! 4. Revoke clears the schedule and bumps the generation token so stale
+//!    due events from before a revoke never step a modal session.
+//!
+//! Compromise: batch A ships the generic scheduler skeleton; the dialog
+//! extension's `poll_owner` producer wiring is batch B, so no producer
+//! calls `schedule`/`cancel` yet.
 //!
 //! The scheduling contract is frozen: the owner loop holds ONE merged
 //! `DialogPollDue(generation)` user event and sleeps through
@@ -6,7 +23,7 @@
 //! atomic deadline (never a broker pointer, never an unbounded self-wake,
 //! never a winit call), and when a deadline moves EARLIER the broker-side
 //! re-arm watcher re-delivers `DialogPollDue` so the loop recomputes its
-//! sleep — the "slept past an already-earlier deadline" starvation path is
+//! sleep -- the "slept past an already-earlier deadline" starvation path is
 //! unrepresentable. Same-generation due events coalesce into one poll, and
 //! each owner-loop iteration performs at most
 //! [`DIALOG_POLL_MAX_OWNERS_PER_ITERATION`] owner steps (one modal step per
@@ -19,7 +36,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-/// Frozen quota (§5.2): at most four owners step once per owner-loop
+/// Frozen quota (design section 5.2): at most four owners step once per owner-loop
 /// iteration.
 pub(crate) const DIALOG_POLL_MAX_OWNERS_PER_ITERATION: usize = 4;
 
@@ -50,7 +67,7 @@ impl PollScheduler {
     }
 
     /// Schedules (or re-arms) one owner's next deadline. Returns `true` when
-    /// the entry strictly lowered the merged MINIMUM deadline — the signal
+    /// the entry strictly lowered the merged MINIMUM deadline -- the signal
     /// that a fresh `DialogPollDue` must be re-delivered, because the loop
     /// may already be sleeping to a later instant. Raising one owner's
     /// deadline or adding a later owner never fires the signal.
@@ -78,7 +95,7 @@ impl PollScheduler {
         lowered_minimum
     }
 
-    /// Cancels one owner's scheduled poll (the §5.2 revoke order: remove
+    /// Cancels one owner's scheduled poll (the design section 5.2 revoke order: remove
     /// from the schedule first; a stale due event then drops on its
     /// generation/absence check). Batch A: producers arrive in batch B.
     #[allow(dead_code)]
@@ -114,7 +131,7 @@ impl PollScheduler {
 
     /// Drops every scheduled poll and bumps the generation token so stale
     /// `DialogPollDue` events delivered after the revoke drop without any
-    /// poll (§5.2 revoke order; exit/revoke races must not step modal
+    /// poll (design section 5.2 revoke order; exit/revoke races must not step modal
     /// sessions).
     pub(crate) fn revoke_all(&mut self) -> u64 {
         self.deadlines.clear();

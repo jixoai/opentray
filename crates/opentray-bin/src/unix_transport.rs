@@ -178,7 +178,7 @@ where
     let (sender, receiver) = std::sync::mpsc::channel::<BrokerEvent>();
     let event_hub = EventHub::new(Box::new(ChannelWake(sender.clone())));
     // One shared deferred-operation registry connects the kernel with the
-    // deferred ports (add-ext-dialog §5.1).
+    // deferred ports (add-ext-dialog design section 5.1).
     let operations = Arc::new(DeferredOperationRegistry::new());
     let deferred_hub =
         DeferredPortHub::new(Box::new(DeferredChannelWake(sender.clone())), operations.clone());
@@ -213,6 +213,7 @@ where
                         request_id: None,
                         code: "OPENTRAY_BROKER_SINGLE_SESSION".to_string(),
                         message: "broker already serves one caller session".to_string(),
+                        details: None,
                     });
                     continue;
                 }
@@ -284,13 +285,18 @@ where
                 );
                 // Post-response barrier drain for hub-submitted pushes.
                 drain_hub_extension_events(&event_hub, &extension_events, &broker, &mut sessions);
-                drain_hub_deferred_terminals(&deferred_hub, &broker, &mut sessions);
-                if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
-                    if let Some(session_id) = kernel_session_id.as_deref() {
-                        // The closing session's pending operations die with it.
-                        broker.operations().purge_session(session_id);
-                    }
-                }
+                // Close-ordering law (design section 5.7 ruling 7): the
+                // closing session's pending operations are purged BEFORE the
+                // deferred-terminal drain, so a terminal queued before the
+                // Exit settles as a diagnostic drop instead of being written
+                // into the closing socket.
+                let closing_session = if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker)
+                {
+                    kernel_session_id.as_deref()
+                } else {
+                    None
+                };
+                drain_hub_deferred_terminals(&deferred_hub, &broker, closing_session, &mut sessions);
             }
             BrokerEvent::Transport(TransportEvent::Disconnected { id }) => {
                 let mut was_initialized = false;
@@ -323,7 +329,7 @@ where
                         &broker,
                         &mut sessions,
                     );
-                    drain_hub_deferred_terminals(&deferred_hub, &broker, &mut sessions);
+                    drain_hub_deferred_terminals(&deferred_hub, &broker, None, &mut sessions);
                 }
                 if matches!(
                     broker_disconnect_action(was_initialized),
@@ -339,7 +345,7 @@ where
                 drain_hub_extension_events(&event_hub, &extension_events, &broker, &mut sessions);
             }
             BrokerEvent::DeferredTerminalsReady => {
-                drain_hub_deferred_terminals(&deferred_hub, &broker, &mut sessions);
+                drain_hub_deferred_terminals(&deferred_hub, &broker, None, &mut sessions);
             }
         }
     }
@@ -353,16 +359,19 @@ where
 }
 
 /// Deferred-terminal drain with owner-loop settlement and session-writer
-/// routing (see `deferred_port::drain_deferred_terminals`).
+/// routing (see `deferred_port::drain_deferred_terminals`). `closing_session`
+/// routes the Exit path through the purge-before-drain law (design section
+/// 5.7 ruling 7).
 #[cfg(not(target_os = "macos"))]
 fn drain_hub_deferred_terminals<B>(
     deferred_hub: &DeferredPortHub,
     broker: &BrokerKernel<B, DynamicExtensionLoader>,
+    closing_session: Option<&str>,
     sessions: &mut HashMap<u64, TransportSession>,
 ) where
     B: AppBackend,
 {
-    drain_deferred_terminals(deferred_hub, broker, &mut |owner, frame| {
+    drain_deferred_terminals(deferred_hub, broker, closing_session, &mut |owner, frame| {
         let mut delivered = false;
         for session in sessions.values_mut() {
             if session.broker.session_id() == Some(owner) {
@@ -493,6 +502,7 @@ fn spawn_reader(id: u64, stream: UnixStream, writer: Writer, send: EventSender) 
                                 request_id,
                                 code: "invalid-frame".to_string(),
                                 message: error.to_string(),
+                                details: None,
                             },
                         );
                     }

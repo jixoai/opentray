@@ -257,6 +257,7 @@ fn read_available_frames(
                         request_id: None,
                         code: "invalid-frame".to_string(),
                         message: error.to_string(),
+                        details: None,
                     },
                 )?;
                 continue;
@@ -274,6 +275,7 @@ fn read_available_frames(
                         request_id,
                         code: "invalid-frame".to_string(),
                         message: error.to_string(),
+                        details: None,
                     },
                 )?;
             }

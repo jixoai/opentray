@@ -567,9 +567,9 @@ mod native_broker {
         /// Coalesced EventPort drain request from the D19 hub wake adapter.
         ExtensionEventsReady,
         /// Coalesced deferred-terminal drain request from the DeferredPort
-        /// hub wake adapter (add-ext-dialog §5.1).
+        /// hub wake adapter (add-ext-dialog design section 5.1).
         DeferredTerminalsReady,
-        /// Merged dialog poll due (add-ext-dialog §5.2): the generation
+        /// Merged dialog poll due (add-ext-dialog design section 5.2): the generation
         /// token drops stale events delivered after a scheduler revoke.
         /// Batch A note: no producer sends it yet (the dialog extension's
         /// poll path lands in batch B); the loop wiring is in place.
@@ -612,7 +612,7 @@ mod native_broker {
         // broker answered socket probes instantly while the symptoms were
         // live, and the first walkthrough run with this assertion still
         // stalled. The actual defect was host-bound channel events riding
-        // only the next command response (v1 flush ruling) — idle sessions,
+        // only the next command response (v1 flush ruling) -- idle sessions,
         // post-D19 with no 16 ms drain, never issued that command. The fix
         // pushes those events through the extension EventPort at the native
         // ipc handler; this assertion stays as defense-in-depth against CPU
@@ -658,7 +658,7 @@ mod native_broker {
         let event_hub = EventHub::new(Box::new(ProxyWake(event_loop.create_proxy())));
         // One shared deferred-operation registry connects the kernel (which
         // issues operations at dispatch) with the deferred ports (whose
-        // submits settle them) — add-ext-dialog §5.1.
+        // submits settle them) -- add-ext-dialog design section 5.1.
         let operations = Arc::new(DeferredOperationRegistry::new());
         let deferred_hub = DeferredPortHub::new(
             Box::new(DeferredProxyWake(event_loop.create_proxy())),
@@ -710,7 +710,7 @@ mod native_broker {
         extension_events: ExtensionEventRouter,
         event_hub: EventHub,
         deferred_hub: DeferredPortHub,
-        /// Broker-owned dialog poll scheduler skeleton (§5.2): merged
+        /// Broker-owned dialog poll scheduler skeleton (design section 5.2): merged
         /// DialogPollDue event, WaitUntil inputs, re-arm signaling, quota.
         /// No producer feeds it until batch B's dialog extension lands.
         dialog_polls: PollScheduler,
@@ -731,7 +731,7 @@ mod native_broker {
                     self.schedule_idle_if_empty();
                 }
                 // The merged WaitUntil(min deadline) fired: run one bounded
-                // poll quantum (§5.2 skeleton; producers arrive in batch B).
+                // poll quantum (design section 5.2 skeleton; producers arrive in batch B).
                 StartCause::ResumeTimeReached { .. } => self.process_dialog_polls(),
                 _ => {}
             }
@@ -753,7 +753,7 @@ mod native_broker {
                 UserEvent::Menu(event) => self.handle_menu(event),
                 UserEvent::Tray(event) => self.handle_tray(event),
                 UserEvent::ExtensionEventsReady => self.drain_extension_events(),
-                UserEvent::DeferredTerminalsReady => self.drain_deferred_terminals(),
+                UserEvent::DeferredTerminalsReady => self.drain_deferred_terminals(None),
                 UserEvent::DialogPollDue(generation) => {
                     // Stale tokens (pre-revoke events) drop without any poll.
                     if generation == self.dialog_polls.generation() {
@@ -818,6 +818,7 @@ mod native_broker {
                             request_id: None,
                             code: "OPENTRAY_BROKER_SINGLE_SESSION".to_string(),
                             message: "broker already serves one caller session".to_string(),
+                            details: None,
                         });
                         return BrokerDisconnectAction::WaitForIdle;
                     }
@@ -851,7 +852,7 @@ mod native_broker {
                     let exit_action = broker_frame_action(&frame, session_was_initialized);
                     // Lifecycle law: the kernel's Exit dispatch runs session
                     // cleanup inline, so the closing session's EventPort
-                    // sources must be revoked BEFORE dispatch — its cleanup
+                    // sources must be revoked BEFORE dispatch -- its cleanup
                     // pushes then observe PORT_CLOSED instead of queueing
                     // across the close.
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
@@ -904,17 +905,26 @@ mod native_broker {
                     // Post-response barrier: hub records submitted during the
                     // dispatch are delivered only after its response frames.
                     self.drain_extension_events();
-                    self.drain_deferred_terminals();
+                    // Windows named-pipe half-close may defer `Disconnected`
+                    // indefinitely. `Exit` already performed kernel cleanup
+                    // above, so the dedicated broker must leave its GUI event
+                    // loop without waiting for that transport event.
+                    //
+                    // Close-ordering law (design section 5.7 ruling 7): the
+                    // closing session's pending operations are purged BEFORE
+                    // any deferred-terminal drain, so a terminal queued before
+                    // the Exit settles as a diagnostic drop instead of being
+                    // written into the closing socket.
+                    let closing_session = if matches!(
+                        exit_action,
+                        BrokerDisconnectAction::ExitOwnedBroker
+                    ) {
+                        kernel_session_id.as_deref()
+                    } else {
+                        None
+                    };
+                    self.drain_deferred_terminals(closing_session);
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
-                        // Windows named-pipe half-close may defer `Disconnected` indefinitely.
-                        // `Exit` already performed kernel cleanup above, so the dedicated broker
-                        // must leave its GUI event loop without waiting for that transport event.
-                        if let Some(session_id) = kernel_session_id.as_deref() {
-                            // The closing session's pending operations die
-                            // with it; later submits for their handles are
-                            // replayed-handle rejections.
-                            self.broker.operations().purge_session(session_id);
-                        }
                         self.sessions.remove(&id);
                         self.bump_idle_generation();
                         self.schedule_idle_if_empty();
@@ -942,11 +952,14 @@ mod native_broker {
                         );
                         if let Some(session_id) = closing_session_id.as_deref() {
                             self.extension_events.forget_session(session_id);
+                            // Purged before any deferred drain (design
+                            // section 5.7 ruling 7): close delivers no
+                            // terminal frames for the closing session.
                             self.broker.operations().purge_session(session_id);
                         }
                         self.deliver_extension_events(extension_host.take_events());
                         self.drain_extension_events();
-                        self.drain_deferred_terminals();
+                        self.drain_deferred_terminals(None);
                     }
                     self.bump_idle_generation();
                     self.schedule_idle_if_empty();
@@ -1039,15 +1052,17 @@ mod native_broker {
 
         /// Deferred-terminal drain: settles each queued terminal through the
         /// shared registry's one-shot CAS and writes the terminal frame to
-        /// the still-matching session writer (add-ext-dialog §5.1).
-        fn drain_deferred_terminals(&mut self) {
+        /// the still-matching session writer (add-ext-dialog design section
+        /// 5.1). `closing_session` routes the Exit path through the purge-
+        /// before-drain law (design section 5.7 ruling 7).
+        fn drain_deferred_terminals(&mut self, closing_session: Option<&str>) {
             let Self {
                 deferred_hub,
                 broker,
                 sessions,
                 ..
             } = self;
-            drain_deferred_terminals(deferred_hub, broker, &mut |owner, frame| {
+            drain_deferred_terminals(deferred_hub, broker, closing_session, &mut |owner, frame| {
                 let mut delivered = false;
                 for session in sessions.values_mut() {
                     if session.broker.session_id() == Some(owner) {
@@ -1059,7 +1074,7 @@ mod native_broker {
             });
         }
 
-        /// One bounded dialog-poll quantum (§5.2 skeleton): at most four
+        /// One bounded dialog-poll quantum (design section 5.2 skeleton): at most four
         /// owners step once per iteration. Batch A ships the scheduler
         /// mechanics; the dialog extension's `poll_owner` producer wiring is
         /// batch B, so nothing schedules polls yet and this drains empty.
@@ -1079,7 +1094,7 @@ mod native_broker {
 
         /// Projects the merged minimum poll deadline into the loop's control
         /// flow: `WaitUntil(min deadline)` while any poll is scheduled,
-        /// plain `Wait` otherwise (§5.2).
+        /// plain `Wait` otherwise (design section 5.2).
         fn apply_dialog_poll_control_flow(&self, event_loop: &ActiveEventLoop) {
             match self.dialog_polls.min_deadline() {
                 Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),

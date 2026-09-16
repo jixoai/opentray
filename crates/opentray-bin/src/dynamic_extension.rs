@@ -1,3 +1,23 @@
+// Orthogonal intents (maintained 2026-09-17; original user requests:
+// load dynamic extension libraries through a validated identity chain and
+// let long-running commands answer through the frozen DeferredOperation
+// disposition ABI):
+// 1. Verify artifact identity (optional expected sha256 before dlopen, the
+//    native embedded manifest between dlopen and init) before any native
+//    state exists.
+// 2. Resolve the four-cell command-surface matrix by probing both command
+//    symbols; dispatch through V2 whenever it exists, keep V1-only
+//    libraries always-Immediate, and reject a library exporting neither.
+// 3. Seed the broker-issued handle into the disposition struct (one-way,
+//    single-use delivery) and classify the returned disposition without
+//    guessing semantics.
+// 4. Attach the optional EventPort and DeferredPort capabilities by value;
+//    every load failure deinits deterministically and revokes what it
+//    reserved.
+// Compromise: this module is the single dynamic-hosting composition point,
+// so loader probing, identity gating, and disposition dispatch cannot be
+// physically separated without splitting one C ABI consumer across crates.
+
 use std::{
     collections::HashSet,
     env,
@@ -43,7 +63,7 @@ type ExtCommandFn = unsafe extern "C" fn(
     envelope_json: ExtBytes,
     out_events_json: *mut ExtOwnedBytes,
 ) -> ExtResultCode;
-/// DeferredOperation command entry (§5.1 frozen signature): the extension
+/// DeferredOperation command entry (design section 5.1 frozen signature): the extension
 /// reads the broker-issued handle from the pre-seeded disposition and
 /// answers with its own disposition.
 type ExtCommandV2Fn = unsafe extern "C" fn(
@@ -89,7 +109,7 @@ impl PortCapability {
     }
 }
 
-/// The four-cell command-surface matrix (§5.1, R6 P1-4 frozen). The loader
+/// The four-cell command-surface matrix (design section 5.1, R6 P1-4 frozen). The loader
 /// probes both symbols and dispatches through V2 whenever it exists; a
 /// V1-only library is never called with the V2 signature (no UB) and is
 /// permanently Immediate; neither symbol is an `abi_incompatible` load
@@ -124,6 +144,26 @@ fn classify_command_surface(has_v2: bool, has_v1: bool) -> CommandSurfaceCell {
         (false, true) => CommandSurfaceCell::V1Only,
         (false, false) => CommandSurfaceCell::None,
     }
+}
+
+/// Typed capability gate for a Deferred disposition (review P1-3): deferring
+/// is only expressible for instances that attached the deferred completion
+/// port, because the port submit is the one legal terminal channel. A
+/// portless V2 instance that answers Deferred would strand the operation
+/// forever; this rejection surfaces immediately with the frozen
+/// `deferred_port_unsupported` category.
+fn ensure_deferred_channel(has_port: bool, name: &str) -> Result<(), ExtensionError> {
+    if has_port {
+        return Ok(());
+    }
+    Err(ExtensionError::Detailed {
+        category: DEFERRED_PORT_UNSUPPORTED_CATEGORY.to_string(),
+        message: format!(
+            "extension {name} answered Deferred without attaching the deferred completion port: \
+             no terminal channel exists, so the operation cannot be accepted"
+        ),
+        details: None,
+    })
 }
 
 /// The resolved command entry of one loaded library.
@@ -406,7 +446,7 @@ impl DynamicExtensionInstance {
         request: &ExtensionLoadRequest,
         library_path: &Path,
     ) -> Result<Self, ExtensionError> {
-        // Identity chain (design §6.4): when the caller supplied an expected
+        // Identity chain (design design section 6.4): when the caller supplied an expected
         // byte hash, re-hash the resolved file BEFORE dlopen so a swapped
         // artifact cannot load. The recorded TOCTOU window between this hash
         // and the load is a known boundary; CI re-hashes after staging as
@@ -454,6 +494,7 @@ impl DynamicExtensionInstance {
                     "extension {} uses ABI version {actual_abi}; expected {EXT_ABI_VERSION}",
                     request.name
                 ),
+                details: None,
             });
         }
 
@@ -472,6 +513,7 @@ impl DynamicExtensionInstance {
                          {EXT_SYMBOL_COMMAND}",
                         request.name
                     ),
+                    details: None,
                 });
             }
             CommandSurfaceCell::V2Only | CommandSurfaceCell::BothUseV2 => {
@@ -605,7 +647,7 @@ impl ExtensionInstance for DynamicExtensionInstance {
             ))
         })?;
         match self.command {
-            // V1-only surface: always Immediate by construction — the legacy
+            // V1-only surface: always Immediate by construction -- the legacy
             // signature has no disposition parameter and is never called
             // with the V2 shape.
             CommandSurface::V1(command) => {
@@ -650,7 +692,18 @@ impl ExtensionInstance for DynamicExtensionInstance {
                         let events = self.read_events(output, Some(scope))?;
                         Ok(ExtensionCommandDisposition::Immediate(events))
                     }
-                    V2DispatchOutcome::Deferred => Ok(ExtensionCommandDisposition::Deferred),
+                    V2DispatchOutcome::Deferred => {
+                        // Review P1-3 capability law: a Deferred disposition
+                        // promises a later terminal through the deferred
+                        // port. An instance that answered Deferred without
+                        // attaching the port has no legal terminal channel,
+                        // so its operation would pend forever -- reject the
+                        // dispatch with a typed capability error instead
+                        // (the registry retires the pre-registered operation
+                        // on the error path).
+                        ensure_deferred_channel(self.deferred_port.is_some(), &self.name)?;
+                        Ok(ExtensionCommandDisposition::Deferred)
+                    }
                 }
             }
         }
@@ -722,8 +775,8 @@ impl Drop for DynamicExtensionInstance {
 /// and ANY post-init failure (port validation or attach) deterministically
 /// calls the extension's `deinit` and revokes the source before returning.
 /// Without that deinit the initialized C instance would leak, because the
-/// `DynamicExtensionInstance` wrapper — whose `Drop` owns cleanup on the
-/// success path — is never constructed for a failed load.
+/// `DynamicExtensionInstance` wrapper -- whose `Drop` owns cleanup on the
+/// success path -- is never constructed for a failed load.
 unsafe fn init_and_attach(
     hub: &EventHub,
     request: &ExtensionLoadRequest,
@@ -735,7 +788,7 @@ unsafe fn init_and_attach(
     free_string: ExtFreeStringFn,
 ) -> Result<(*mut c_void, SourceHandle, PortCapability), ExtensionError> {
     // Reserve before init: a source-limit rejection means "no instance is
-    // opened" — init never runs.
+    // opened" -- init never runs.
     let source = reserve_port_source(hub, request)?;
 
     let mut instance = ptr::null_mut();
@@ -773,13 +826,14 @@ fn reserve_port_source(
                 request.instance_name(),
                 crate::event_hub::EVENT_HUB_MAX_SOURCES
             ),
+            details: None,
         })
 }
 
 /// Validates and transfers the reserved PENDING source's immutable port
 /// exactly once when the optional attach symbol is present. Absent symbol
 /// means legacy flush; a malformed port or failed attach rejects the load
-/// with a structured category — never a silent downgrade. Every failure
+/// with a structured category -- never a silent downgrade. Every failure
 /// path revokes the source it owns. The source limit is enforced earlier,
 /// before `init` (see `init_and_attach`).
 fn probe_and_attach(
@@ -816,6 +870,7 @@ fn probe_and_attach(
                     }
                 }
             ),
+            details: None,
         });
     }
 
@@ -831,6 +886,7 @@ fn probe_and_attach(
                     request.instance_name(),
                     detail.message
                 ),
+                details: detail.details,
             },
             None if result == EXT_ERR_UNSUPPORTED => ExtensionError::Detailed {
                 category: EVENT_PORT_UNSUPPORTED_CATEGORY.to_string(),
@@ -839,6 +895,7 @@ fn probe_and_attach(
                      legacy fallback",
                     request.instance_name()
                 ),
+                details: None,
             },
             None => ExtensionError::Rejected(format!(
                 "extension {} event port attach returned code {result}",
@@ -885,7 +942,7 @@ fn probe_symbol<T: Copy>(library: &Library, name: &str) -> Option<T> {
 /// Validates and transfers one PENDING deferred port by value through the
 /// optional attach symbol (EventPort attach pattern). Absent symbol means no
 /// terminal channel; a malformed port or failed attach rejects the load with
-/// a structured category — never a silent downgrade. Every failure path
+/// a structured category -- never a silent downgrade. Every failure path
 /// revokes the port it created.
 fn attach_deferred_port(
     hub: &DeferredPortHub,
@@ -916,6 +973,7 @@ fn attach_deferred_port(
                     }
                 }
             ),
+            details: None,
         });
     }
 
@@ -931,6 +989,7 @@ fn attach_deferred_port(
                     request.instance_name(),
                     detail.message
                 ),
+                details: detail.details,
             },
             None if result == EXT_ERR_UNSUPPORTED => ExtensionError::Detailed {
                 category: DEFERRED_PORT_UNSUPPORTED_CATEGORY.to_string(),
@@ -938,6 +997,7 @@ fn attach_deferred_port(
                     "extension {} explicitly does not support the deferred port",
                     request.instance_name()
                 ),
+                details: None,
             },
             None => ExtensionError::Rejected(format!(
                 "extension {} deferred port attach returned code {result}",
@@ -948,7 +1008,7 @@ fn attach_deferred_port(
     Ok(handle)
 }
 
-/// Identity-chain gate (design §6.4): when the LoadExt frame carried an
+/// Identity-chain gate (design design section 6.4): when the LoadExt frame carried an
 /// expected byte hash, re-hash the resolved library file BEFORE `dlopen`.
 /// The comparison is against the lowercase-hex SHA-256 wire form.
 fn verify_library_sha256(
@@ -976,25 +1036,49 @@ fn verify_library_sha256(
             request.name,
             library_path.display()
         ),
+        details: None,
     })
 }
 
+/// Releases one extension-owned buffer through the extension's
+/// `free_string`. Centralized ownership law (review P2 zero-length): a
+/// NON-NULL pointer is freed regardless of its length -- a zero-length
+/// allocation is still an allocation the extension owns, and skipping it
+/// would leak. A null pointer is never passed to `free_string`.
+///
+/// # Safety
+///
+/// `ptr` must be null or point to a buffer allocated by the same extension
+/// that provided `free_string`; the buffer must not be used afterwards.
+unsafe fn free_owned_bytes(output: ExtOwnedBytes, free_string: ExtFreeStringFn) {
+    if !output.ptr.is_null() {
+        unsafe { free_string(output.ptr, output.len) };
+    }
+}
+
 /// Reads (and frees through the extension's `free_string`) one owned events
-/// buffer; an absent buffer is an empty Immediate result. When a scope is
-/// supplied, every parsed envelope is re-bound to the host-derived scope —
-/// extension-claimed scopes are never trusted.
+/// buffer; an absent buffer is an empty Immediate result. A non-null
+/// zero-length buffer is freed exactly like any other owned allocation.
+/// When a scope is supplied, every parsed envelope is re-bound to the
+/// host-derived scope -- extension-claimed scopes are never trusted.
 fn read_owned_events(
     name: &str,
     output: ExtOwnedBytes,
     free_string: ExtFreeStringFn,
     scope: Option<ExtensionScope>,
 ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
-    if output.ptr.is_null() || output.len == 0 {
+    if output.ptr.is_null() {
+        return Ok(Vec::new());
+    }
+    if output.len == 0 {
+        // Zero-length is still an empty Immediate result, but the non-null
+        // allocation is released first (review P2).
+        unsafe { free_owned_bytes(output, free_string) };
         return Ok(Vec::new());
     }
     let bytes =
         unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) }.to_vec();
-    unsafe { free_string(output.ptr, output.len) };
+    unsafe { free_owned_bytes(output, free_string) };
     let mut parsed = serde_json::from_slice::<Vec<ExtensionEnvelope>>(&bytes).map_err(|error| {
         ExtensionError::Rejected(format!(
             "extension {name} returned invalid events JSON: {error}"
@@ -1024,7 +1108,7 @@ enum DispositionViolation {
     UnknownTag(u32),
     Reserved(u32),
     /// Immediate with a non-zero value: dual-output attempt (the "Immediate
-    /// 双输出" negative).
+    /// dual output" negative).
     ImmediateWithValue(u64),
     /// Deferred with a handle other than the one the host seeded.
     DeferredHandleMismatch { echoed: u64, issued: u64 },
@@ -1091,11 +1175,12 @@ fn disposition_violation_error(name: &str, violation: DispositionViolation) -> E
     ExtensionError::Detailed {
         category: ABI_INCOMPATIBLE_CATEGORY.to_string(),
         message: format!("extension {name} violated the command disposition matrix: {detail}"),
+        details: None,
     }
 }
 
 /// Runs one V2 command call: seeds the disposition with the broker-issued
-/// handle (the one-way, single-use handle delivery §5.1 freezes), invokes
+/// handle (the one-way, single-use handle delivery design section 5.1 freezes), invokes
 /// the extension, and classifies the returned disposition. Deferred with a
 /// non-empty `out_events` buffer is a structured protocol violation: the
 /// buffer is freed and its events dropped, never delivered.
@@ -1138,24 +1223,26 @@ fn dispatch_command_v2(
         Ok(None) => Ok(V2DispatchOutcome::Immediate(output)),
         Ok(Some(_handle)) => {
             // Deferred: out_events must be empty. Non-empty is a protocol
-            // violation — record a structured diagnostic, free the buffer,
-            // and deliver nothing (the command still defers).
-            if !output.ptr.is_null() && output.len != 0 {
-                eprintln!(
-                    "opentray extension {name}: deferred command also wrote out_events \
-                     (protocol violation); dropping the buffer without delivery"
-                );
-                unsafe { free_string(output.ptr, output.len) };
+            // violation -- record a structured diagnostic, free the buffer,
+            // and deliver nothing (the command still defers). A non-null
+            // zero-length buffer is freed too: ownership cleanup never
+            // depends on the length (review P2).
+            if !output.ptr.is_null() {
+                if output.len != 0 {
+                    eprintln!(
+                        "opentray extension {name}: deferred command also wrote out_events \
+                         (protocol violation); dropping the buffer without delivery"
+                    );
+                }
+                unsafe { free_owned_bytes(output, free_string) };
             }
             Ok(V2DispatchOutcome::Deferred)
         }
         Err(violation) => {
-            // Neither buffer may leak on a typed rejection: free a non-empty
-            // events buffer (ownership is independent of the disposition
-            // struct, which carries no bytes).
-            if !output.ptr.is_null() && output.len != 0 {
-                unsafe { free_string(output.ptr, output.len) };
-            }
+            // Neither buffer may leak on a typed rejection: free any
+            // non-null events buffer (ownership is independent of the
+            // disposition struct, which carries no bytes).
+            unsafe { free_owned_bytes(output, free_string) };
             Err(disposition_violation_error(name, violation))
         }
     }
@@ -1168,6 +1255,7 @@ unsafe fn get_symbol<T: Copy>(library: &Library, name: &str) -> Result<T, Extens
         .map_err(|error| ExtensionError::Detailed {
             category: ABI_INCOMPATIBLE_CATEGORY.to_string(),
             message: format!("extension missing symbol {name}: {error}"),
+            details: None,
         })
 }
 
@@ -1181,6 +1269,7 @@ fn result_error(
         return ExtensionError::Detailed {
             category: detail.category,
             message: detail.message,
+            details: detail.details,
         };
     }
     match result {
@@ -1217,12 +1306,15 @@ unsafe fn read_owned_json<T: serde::de::DeserializeOwned>(
     label: &str,
 ) -> Result<T, ExtensionError> {
     if output.ptr.is_null() || output.len == 0 {
+        // A non-null zero-length buffer is still released before rejecting:
+        // ownership cleanup never depends on the length (review P2).
+        unsafe { free_owned_bytes(output, free_string) };
         return Err(ExtensionError::Rejected(format!(
             "{label} returned no JSON"
         )));
     }
     let bytes = unsafe { std::slice::from_raw_parts(output.ptr.cast::<u8>(), output.len) }.to_vec();
-    unsafe { free_string(output.ptr, output.len) };
+    unsafe { free_owned_bytes(output, free_string) };
     serde_json::from_slice(&bytes).map_err(|error| {
         ExtensionError::Rejected(format!("{label} returned invalid JSON: {error}"))
     })
@@ -1245,7 +1337,7 @@ fn validate_extension_manifest(
         && actual.contract_fingerprint == expected.contract_fingerprint
         && actual.target == expected.target
         && !actual.build_identity.is_empty();
-    // Identity-chain gate (design §6.4): when the caller supplied an
+    // Identity-chain gate (design design section 6.4): when the caller supplied an
     // expected build identity, the native manifest must match it exactly.
     if let Some(expected_build) = expected.build_identity.as_deref() {
         identity_matches = identity_matches && actual.build_identity == expected_build;
@@ -1260,6 +1352,7 @@ fn validate_extension_manifest(
             serde_json::to_string(expected).unwrap_or_else(|_| "<unserializable>".to_string()),
             serde_json::to_string(actual).unwrap_or_else(|_| "<unserializable>".to_string())
         ),
+        details: None,
     })
 }
 
@@ -1473,6 +1566,498 @@ mod tests {
             },
             sha256: None,
             build_identity: None,
+        }
+    }
+
+    // -- Real shared-library command-surface fixtures (review P1-5) ---------
+    //
+    // The pure-classifier and in-process stub tables above stay, but the
+    // four command-surface cells are ALSO proven against real compiled
+    // shared libraries: symbol spelling, #[repr(C)] layout, calling
+    // convention, and the V1-cell-never-called-through-V2 rule all become
+    // observable facts instead of classifier outputs. Fixtures compile at
+    // test time through the host `cc` (present on every darwin/linux dev
+    // host; Windows real-library coverage remains separate platform
+    // evidence per the repository's platform-evidence law).
+    #[cfg(unix)]
+    mod real_library_fixtures {
+        use super::*;
+        use std::process::Command;
+
+        const FIXTURE_C: &str = r#"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct { char *ptr; size_t len; } owned_bytes;
+typedef struct { const char *ptr; size_t len; } borrowed_bytes;
+typedef struct { uint32_t tag; uint32_t reserved; uint64_t handle; } disposition_v1;
+typedef struct { uint32_t abi_version; uint32_t struct_size; void *port_data;
+                 int32_t (*submit)(void *, uint64_t, const uint8_t *, size_t); } deferred_port_v1;
+
+static uint32_t g_last_symbol = 0; /* 1 = v1 entry, 2 = v2 entry */
+static uint64_t g_last_handle = 0;
+static void *g_port_data = 0;
+static int32_t (*g_submit)(void *, uint64_t, const uint8_t *, size_t) = 0;
+
+uint32_t opentray_fixture_last_symbol(void) { return g_last_symbol; }
+uint64_t opentray_fixture_last_handle(void) { return g_last_handle; }
+
+int32_t opentray_ext_abi_version(void) { return 3; }
+
+static const char *manifest_json(void) {
+    return "{\"extensionName\":\"dialog\",\"abiVersion\":3,"
+           "\"artifactSetVersion\":\"current\","
+           "\"contractFingerprint\":\"current-contract\","
+           "\"target\":{\"os\":\"darwin\",\"arch\":\"arm64\"},"
+           "\"buildIdentity\":\"fixture-build\"}";
+}
+
+int32_t opentray_ext_manifest(owned_bytes *out) {
+    if (!out) return 1;
+    const char *json = manifest_json();
+    size_t len = strlen(json);
+    char *buf = (char *)malloc(len + 1);
+    if (!buf) return 3;
+    memcpy(buf, json, len + 1);
+    out->ptr = buf;
+    out->len = len;
+    return 0;
+}
+
+void opentray_ext_free_string(char *ptr, size_t len) { (void)len; free(ptr); }
+
+int32_t opentray_ext_take_error(owned_bytes *out) {
+    if (out) { out->ptr = 0; out->len = 0; }
+    return 1; /* no structured detail */
+}
+
+int32_t opentray_ext_init(const void *context, void **out_instance) {
+    (void)context;
+    if (!out_instance) return 1;
+    *out_instance = (void *)0x1234;
+    return 0;
+}
+
+void opentray_ext_deinit(void *instance) { (void)instance; }
+
+int32_t opentray_ext_session_closed(void *instance, const void *context,
+                                     borrowed_bytes session_id,
+                                     owned_bytes *out_events) {
+    (void)instance; (void)context; (void)session_id;
+    if (out_events) { out_events->ptr = 0; out_events->len = 0; }
+    return 0;
+}
+
+#ifdef HAS_V1
+int32_t opentray_ext_command(void *instance, const void *context,
+                             borrowed_bytes envelope, owned_bytes *out_events) {
+    (void)instance; (void)context; (void)envelope;
+    g_last_symbol = 1;
+    static const char events[] = "[{\"scope\":{\"appId\":\"app-1\",\"trayId\":\"tray-1\","
+                                 "\"ext\":\"dialog\"},\"data\":{\"type\":\"v1-immediate\"}}]";
+    size_t len = sizeof(events) - 1;
+    char *buf = (char *)malloc(len + 1);
+    if (!buf) return 3;
+    memcpy(buf, events, len + 1);
+    if (out_events) { out_events->ptr = buf; out_events->len = len; }
+    else free(buf);
+    return 0;
+}
+#endif
+
+#ifdef HAS_V2
+int32_t opentray_ext_command_v2(void *instance, const void *context,
+                                borrowed_bytes envelope, owned_bytes *out_events,
+                                disposition_v1 *out_disposition) {
+    (void)instance; (void)context; (void)envelope;
+    g_last_symbol = 2;
+    /* Observe the host-seeded handle delivery, then leave the Deferred
+       disposition untouched: the command defers. */
+    if (out_disposition) { g_last_handle = out_disposition->handle; }
+    if (out_events) { out_events->ptr = 0; out_events->len = 0; }
+    return 0;
+}
+#endif
+
+#ifdef HAS_DEFERRED_PORT
+int32_t opentray_ext_attach_deferred_completion_port_v1(void *instance,
+                                                        deferred_port_v1 port) {
+    (void)instance;
+    /* By-value law: copy only port_data and the submit fn. */
+    g_port_data = port.port_data;
+    g_submit = port.submit;
+    return 0;
+}
+
+int32_t opentray_fixture_submit_terminal(const uint8_t *payload, size_t len) {
+    if (!g_submit || !g_port_data) return 5; /* port closed */
+    return g_submit(g_port_data, g_last_handle, payload, len);
+}
+#endif
+"#;
+
+        /// Compiles the fixture C source into a real shared library with the
+        /// requested preprocessor cells. Returns the absolute library path
+        /// (exact-path loads never fall back to diagnostic candidates).
+        fn compile_fixture(label: &str, defines: &[&str]) -> PathBuf {
+            let root = std::env::temp_dir().join(format!(
+                "opentray-extdlg-fixture-{label}-{}-{}",
+                std::process::id(),
+                label
+            ));
+            std::fs::create_dir_all(&root).expect("fixture dir");
+            let source = root.join("fixture.c");
+            std::fs::write(&source, FIXTURE_C).expect("write fixture source");
+            let library = if cfg!(target_os = "macos") {
+                root.join("libopentray_ext_dialog.dylib")
+            } else {
+                root.join("libopentray_ext_dialog.so")
+            };
+            let output = Command::new("cc")
+                .arg("-shared")
+                .arg("-fPIC")
+                .args(defines.iter().map(|define| format!("-D{define}")))
+                .arg(&source)
+                .arg("-o")
+                .arg(&library)
+                .output()
+                .expect("run cc");
+            assert!(
+                output.status.success(),
+                "fixture {label} failed to compile: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            library
+        }
+
+        /// The fixture's per-image call log, read through a second library
+        /// handle (dlopen of the same path shares statics).
+        struct FixtureProbe {
+            last_symbol: unsafe extern "C" fn() -> u32,
+            last_handle: unsafe extern "C" fn() -> u64,
+            submit_terminal: Option<unsafe extern "C" fn(*const u8, usize) -> i32>,
+            _library: Library,
+        }
+
+        impl FixtureProbe {
+            fn open(path: &std::path::Path) -> Self {
+                let library = unsafe { Library::new(path) }.expect("probe library");
+                let symbol = unsafe {
+                    *library
+                        .get::<unsafe extern "C" fn() -> u32>(b"opentray_fixture_last_symbol\0")
+                        .expect("last symbol getter")
+                };
+                let handle = unsafe {
+                    *library
+                        .get::<unsafe extern "C" fn() -> u64>(b"opentray_fixture_last_handle\0")
+                        .expect("last handle getter")
+                };
+                let submit_terminal = unsafe {
+                    library
+                        .get::<unsafe extern "C" fn(*const u8, usize) -> i32>(
+                            b"opentray_fixture_submit_terminal\0",
+                        )
+                        .ok()
+                        .map(|getter| *getter)
+                };
+                Self {
+                    last_symbol: symbol,
+                    last_handle: handle,
+                    submit_terminal,
+                    _library: library,
+                }
+            }
+        }
+
+        struct FixtureHarness {
+            hub: EventHub,
+            deferred_hub: crate::deferred_port::DeferredPortHub,
+            registry: std::sync::Arc<opentray_core::operations::DeferredOperationRegistry>,
+            library_path: PathBuf,
+        }
+
+        fn harness(label: &str, defines: &[&str]) -> FixtureHarness {
+            let registry = operations_registry();
+            FixtureHarness {
+                hub: test_hub(),
+                deferred_hub: test_deferred_hub(&registry),
+                registry,
+                library_path: compile_fixture(label, defines),
+            }
+        }
+
+        fn load_instance(
+            fixture: &FixtureHarness,
+        ) -> Box<DynamicExtensionInstance> {
+            let request = ExtensionLoadRequest {
+                app_id: "app-1".to_string(),
+                name: "dialog".to_string(),
+                path: fixture.library_path.to_string_lossy().into_owned(),
+                expected_identity: expected_extension_identity("dialog"),
+                mount_id: None,
+            };
+            match unsafe {
+                DynamicExtensionInstance::load(
+                    &fixture.hub,
+                    &fixture.deferred_hub,
+                    &request,
+                    &fixture.library_path,
+                )
+            } {
+                Ok(instance) => Box::new(instance),
+                Err(error) => panic!("real fixture library loads: {error}"),
+            }
+        }
+
+        fn command_envelope() -> ExtensionEnvelope {
+            ExtensionEnvelope {
+                scope: opentray_spec::ExtensionScope {
+                    app_id: "app-1".to_string(),
+                    tray_id: Some("tray-1".to_string()),
+                    ext: "dialog".to_string(),
+                },
+                command_scope: None,
+                data: serde_json::json!({ "type": "messageDialog" }),
+            }
+        }
+
+        fn issued_operation(
+            registry: &opentray_core::operations::DeferredOperationRegistry,
+        ) -> opentray_core::operations::IssuedOperation {
+            registry.register_pending(
+                opentray_spec::CommandScope {
+                    app_id: "app-1".to_string(),
+                    tray_id: "tray-1".to_string(),
+                    session_id: "session-1".to_string(),
+                    instance_generation: registry.current_generation("app-1", "dialog"),
+                },
+                "dialog".to_string(),
+            )
+        }
+
+        /// Dispatches one command and returns the issued operation together
+        /// with the outcome, so tests can compare the fixture-observed
+        /// handle against the exact handle the host seeded.
+        fn dispatch(
+            instance: &mut DynamicExtensionInstance,
+            registry: &opentray_core::operations::DeferredOperationRegistry,
+        ) -> (
+            opentray_core::operations::IssuedOperation,
+            Result<ExtensionCommandDisposition, ExtensionError>,
+        ) {
+            let issued = issued_operation(registry);
+            let mut host = opentray_core::UnsupportedExtensionHostContext;
+            let outcome = instance.command(command_envelope(), issued.clone(), &mut host);
+            (issued, outcome)
+        }
+
+        /// V2-only cell: a real library exporting exactly the V2 command
+        /// symbol loads with full capability; the command call crosses a
+        /// real FFI boundary and observes the seeded handle (one-way
+        /// delivery through the disposition struct). Without the deferred
+        /// port symbol the Deferred answer is the P1-3 typed rejection --
+        /// proven here against the real library, with the fixture's recorded
+        /// handle matching the exact seeded one.
+        #[test]
+        fn v2_only_real_library_sees_the_seeded_handle() {
+            let fixture = harness("v2-only", &["HAS_V2=1"]);
+            let probe = FixtureProbe::open(&fixture.library_path);
+            let mut instance = load_instance(&fixture);
+
+            let (issued, outcome) = dispatch(instance.as_mut(), &fixture.registry);
+            let error = match outcome {
+                Err(error) => error,
+                Ok(_) => panic!("expected typed rejection"),
+            };
+            let ExtensionError::Detailed { category, .. } = &error else {
+                panic!("expected typed rejection, got: {error}");
+            };
+            assert_eq!(category, DEFERRED_PORT_UNSUPPORTED_CATEGORY);
+            assert_eq!(
+                unsafe { (probe.last_symbol)() },
+                2,
+                "the V2 entry ran across the real FFI boundary"
+            );
+            assert_eq!(
+                unsafe { (probe.last_handle)() },
+                issued.handle,
+                "the fixture recorded the exact handle the host seeded"
+            );
+        }
+
+        /// V1-only cell: a real library exporting only the legacy command
+        /// symbol is permanently Immediate. The V1 entry observes the V1
+        /// calling convention (4 arguments, no disposition pointer): if the
+        /// host ever called it through the V2 signature, the argument
+        /// registers would misalign and this marker/events pair could not
+        /// both be correct.
+        #[test]
+        fn v1_only_real_library_is_immediate_and_never_called_with_the_v2_signature() {
+            let fixture = harness("v1-only", &["HAS_V1=1"]);
+            let probe = FixtureProbe::open(&fixture.library_path);
+            let mut instance = load_instance(&fixture);
+
+            let (.., outcome) = dispatch(instance.as_mut(), &fixture.registry);
+            let disposition = outcome.expect("V1-only dispatch is always Immediate");
+            assert_eq!(
+                unsafe { (probe.last_symbol)() },
+                1,
+                "the V1 entry ran with the V1 convention"
+            );
+            let ExtensionCommandDisposition::Immediate(events) = disposition else {
+                panic!("a V1-only library can never defer");
+            };
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].data["type"], "v1-immediate");
+            assert_eq!(unsafe { (probe.last_handle)() }, 0);
+        }
+
+        /// Both-symbols cell: V2 wins; the legacy symbol is ignored.
+        #[test]
+        fn both_symbols_real_library_dispatches_through_v2() {
+            let fixture = harness("both", &["HAS_V1=1", "HAS_V2=1", "HAS_DEFERRED_PORT=1"]);
+            let probe = FixtureProbe::open(&fixture.library_path);
+            let mut instance = load_instance(&fixture);
+
+            let (.., outcome) = dispatch(instance.as_mut(), &fixture.registry);
+            let disposition = outcome.expect("dispatch through V2");
+            assert!(matches!(disposition, ExtensionCommandDisposition::Deferred));
+            assert_eq!(unsafe { (probe.last_symbol)() }, 2);
+        }
+
+        /// Neither-symbol cell: the real library rejects the load with the
+        /// frozen `abi_incompatible` category and no command entry runs.
+        #[test]
+        fn neither_symbol_real_library_rejects_as_abi_incompatible() {
+            let fixture = harness("neither", &[]);
+            let probe = FixtureProbe::open(&fixture.library_path);
+            let request = ExtensionLoadRequest {
+                app_id: "app-1".to_string(),
+                name: "dialog".to_string(),
+                path: fixture.library_path.to_string_lossy().into_owned(),
+                expected_identity: expected_extension_identity("dialog"),
+                mount_id: None,
+            };
+            let error = match unsafe {
+                DynamicExtensionInstance::load(
+                    &fixture.hub,
+                    &fixture.deferred_hub,
+                    &request,
+                    &fixture.library_path,
+                )
+            } {
+                Ok(_) => panic!("neither-symbol library must reject the load"),
+                Err(error) => error,
+            };
+            let ExtensionError::Detailed { category, message, .. } = &error else {
+                panic!("expected typed rejection, got: {error}");
+            };
+            assert_eq!(category, ABI_INCOMPATIBLE_CATEGORY);
+            assert!(message.contains(EXT_SYMBOL_COMMAND_V2), "{message}");
+            assert!(message.contains(EXT_SYMBOL_COMMAND), "{message}");
+            assert_eq!(
+                unsafe { (probe.last_symbol)() },
+                0,
+                "no command entry ran"
+            );
+        }
+
+        /// Review P1-3, explicit real-library arm: a V2 library WITHOUT the
+        /// deferred-port attach symbol answers Deferred, and the host
+        /// rejects the dispatch with the frozen `deferred_port_unsupported`
+        /// category instead of leaving the operation pending forever.
+        #[test]
+        fn portless_v2_deferred_is_a_typed_capability_rejection() {
+            let fixture = harness("v2-no-port", &["HAS_V2=1"]);
+            let mut instance = load_instance(&fixture);
+
+            let (.., outcome) = dispatch(instance.as_mut(), &fixture.registry);
+            let error = match outcome {
+                Err(error) => error,
+                Ok(_) => panic!("expected typed rejection"),
+            };
+            let ExtensionError::Detailed { category, message, .. } = &error else {
+                panic!("expected typed rejection, got: {error}");
+            };
+            assert_eq!(category, DEFERRED_PORT_UNSUPPORTED_CATEGORY);
+            assert!(message.contains("without attaching"), "{message}");
+        }
+
+        /// End-to-end across two real FFI boundaries: the fixture defers,
+        /// then submits its terminal through the by-value port it copied at
+        /// attach (real C -> Rust function-pointer call), and the owner-loop
+        /// drain settles exactly one terminal frame.
+        #[test]
+        fn real_library_deferred_transaction_settles_through_the_port_submit() {
+            let fixture = harness("e2e", &["HAS_V2=1", "HAS_DEFERRED_PORT=1"]);
+            let probe = FixtureProbe::open(&fixture.library_path);
+            let mut instance = load_instance(&fixture);
+
+            // LoadExt ACK opens the submit channel.
+            assert!(fixture
+                .deferred_hub
+                .open_port("app-1", "dialog", "session-1"));
+
+            let issued = issued_operation(&fixture.registry);
+            let mut host = opentray_core::UnsupportedExtensionHostContext;
+            let disposition = instance
+                .command(command_envelope(), issued.clone(), &mut host)
+                .expect("deferred dispatch with a live port");
+            assert!(matches!(disposition, ExtensionCommandDisposition::Deferred));
+            assert_eq!(unsafe { (probe.last_symbol)() }, 2);
+
+            // The extension (real C code) submits the single terminal.
+            let payload = serde_json::to_vec(&opentray_spec::ExtOperationPayload::Result {
+                value: serde_json::json!({ "response": 1 }),
+            })
+            .expect("terminal payload json");
+            let submit_terminal = probe.submit_terminal.expect("fixture submit helper");
+            assert_eq!(
+                unsafe { submit_terminal(payload.as_ptr(), payload.len()) },
+                EXT_OK
+            );
+
+            // Owner-loop settlement writes exactly one terminal frame.
+            let backend = opentray_core::FakeBackend::new(opentray_core::BackendCapabilities::full());
+            let broker = opentray_core::BrokerKernel::with_default_app_options_and_operations(
+                backend,
+                opentray_core::UnsupportedExtensionLoader,
+                opentray_spec::AppOptions {
+                    id: Some("app-1".to_string()),
+                    name: None,
+                    app_icon: None,
+                    default: true,
+                },
+                opentray_spec::BrokerArtifactIdentity {
+                    package_version: "0.1.0".to_string(),
+                    target: opentray_spec::BrokerArtifactTarget {
+                        os: "darwin".to_string(),
+                        arch: "arm64".to_string(),
+                    },
+                    executable_hash: "0".repeat(64),
+                    build_identity: "test-broker".to_string(),
+                },
+                fixture.registry.clone(),
+            );
+            let mut delivered: Vec<(String, opentray_spec::ServerFrame)> = Vec::new();
+            crate::deferred_port::drain_deferred_terminals(
+                &fixture.deferred_hub,
+                &broker,
+                None,
+                &mut |owner, frame| {
+                    delivered.push((owner.to_string(), frame));
+                    true
+                },
+            );
+            assert_eq!(delivered.len(), 1, "exactly one terminal frame");
+            assert_eq!(delivered[0].0, "session-1");
+            assert!(matches!(
+                &delivered[0].1,
+                opentray_spec::ServerFrame::ExtOperationTerminal { operation_id, .. }
+                    if operation_id == &issued.operation_id
+            ));
         }
     }
 
@@ -1748,7 +2333,7 @@ mod tests {
         }
         .unwrap_err();
 
-        let ExtensionError::Detailed { category, message } = &error else {
+        let ExtensionError::Detailed { category, message, .. } = &error else {
             panic!("expected structured rejection, got: {error}");
         };
         assert_eq!(category, EVENT_PORT_SOURCE_LIMIT_CATEGORY);
@@ -1764,7 +2349,7 @@ mod tests {
 
     /// D19 final review leak law: after a successful `init`, any attach
     /// failure must deterministically call the extension's `deinit` exactly
-    /// once — the `DynamicExtensionInstance` wrapper (whose `Drop` owns that
+    /// once -- the `DynamicExtensionInstance` wrapper (whose `Drop` owns that
     /// call on the success path) is never constructed for a failed load.
     #[test]
     fn attach_failure_after_init_deinits_the_instance_exactly_once() {
@@ -1818,7 +2403,7 @@ mod tests {
         assert_eq!(
             DEINIT_CALLS.load(Ordering::SeqCst),
             1,
-            "exactly one deterministic deinit — no native instance leaks"
+            "exactly one deterministic deinit -- no native instance leaks"
         );
         assert!(
             DEINIT_SAW_INSTANCE.load(Ordering::SeqCst),
@@ -2124,6 +2709,98 @@ mod tests {
         assert!(matches!(outcome, V2DispatchOutcome::Deferred));
     }
 
+    // -- Non-null zero-length ownership cleanup (review P2) ------------------
+
+    static NON_NULL_FREES: AtomicUsize = AtomicUsize::new(0);
+
+    /// Counts `free_string` calls for non-null pointers. Every path below
+    /// hands the stub a dangling-but-non-null pointer with length zero: the
+    /// host must free it WITHOUT ever dereferencing it (no read touches a
+    /// zero-length owned buffer), so the stub never reads through the
+    /// pointer and cannot fault.
+    unsafe extern "C" fn counting_free_string(
+        ptr: *mut std::ffi::c_char,
+        _len: usize,
+    ) {
+        if !ptr.is_null() {
+            NON_NULL_FREES.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn zero_length_owned_bytes() -> ExtOwnedBytes {
+        ExtOwnedBytes {
+            ptr: 0x1 as *mut std::ffi::c_char,
+            len: 0,
+        }
+    }
+
+    #[test]
+    fn non_null_zero_length_event_buffers_are_still_freed() {
+        NON_NULL_FREES.store(0, Ordering::SeqCst);
+        let events = read_owned_events(
+            "dialog",
+            zero_length_owned_bytes(),
+            counting_free_string,
+            None,
+        )
+        .expect("zero-length events parse as empty");
+        assert!(events.is_empty());
+        assert_eq!(
+            NON_NULL_FREES.load(Ordering::SeqCst),
+            1,
+            "a non-null zero-length owned allocation is freed, not leaked"
+        );
+    }
+
+    #[test]
+    fn non_null_zero_length_error_buffers_are_freed_before_rejecting() {
+        NON_NULL_FREES.store(0, Ordering::SeqCst);
+        let result: Result<ExtensionErrorDetail, _> = unsafe {
+            read_owned_json(zero_length_owned_bytes(), counting_free_string, "extension error")
+        };
+        assert!(result.is_err(), "no JSON in a zero-length buffer");
+        assert_eq!(
+            NON_NULL_FREES.load(Ordering::SeqCst),
+            1,
+            "the rejection path still releases the owned buffer"
+        );
+    }
+
+    unsafe extern "C" fn deferred_with_zero_length_events(
+        _instance: *mut c_void,
+        _context: *const ExtHostContext,
+        _envelope: ExtBytes,
+        out_events: *mut ExtOwnedBytes,
+        _out_disposition: *mut ExtCommandDispositionV1,
+    ) -> ExtResultCode {
+        // Defers AND leaves a non-null zero-length owned buffer behind: the
+        // host must free it while still deferring.
+        unsafe { *out_events = zero_length_owned_bytes() };
+        EXT_OK
+    }
+
+    #[test]
+    fn deferred_with_non_null_zero_length_out_events_frees_the_buffer() {
+        NON_NULL_FREES.store(0, Ordering::SeqCst);
+        let outcome = dispatch_command_v2(
+            "dialog",
+            deferred_with_zero_length_events,
+            0x1 as *mut c_void,
+            &envelope_json(),
+            0xfeed,
+            &mut v2_host(),
+            stub_take_error,
+            counting_free_string,
+        )
+        .expect("deferred dispatch");
+        assert!(matches!(outcome, V2DispatchOutcome::Deferred));
+        assert_eq!(
+            NON_NULL_FREES.load(Ordering::SeqCst),
+            1,
+            "the non-null zero-length buffer is released on the deferred path"
+        );
+    }
+
     unsafe extern "C" fn deferred_with_events(
         _instance: *mut c_void,
         _context: *const ExtHostContext,
@@ -2191,7 +2868,7 @@ mod tests {
             freeing_stub_free_string,
         )
         .unwrap_err();
-        let ExtensionError::Detailed { category, message } = &error else {
+        let ExtensionError::Detailed { category, message, .. } = &error else {
             panic!("expected typed rejection, got: {error}");
         };
         assert_eq!(category, ABI_INCOMPATIBLE_CATEGORY);
@@ -2222,7 +2899,7 @@ mod tests {
             stub_free_string,
         )
         .unwrap_err();
-        let ExtensionError::Detailed { category, message } = &error else {
+        let ExtensionError::Detailed { category, message, .. } = &error else {
             panic!("expected typed rejection, got: {error}");
         };
         assert_eq!(category, ABI_INCOMPATIBLE_CATEGORY);
@@ -2253,7 +2930,7 @@ mod tests {
             stub_free_string,
         )
         .unwrap_err();
-        let ExtensionError::Detailed { category, message } = &error else {
+        let ExtensionError::Detailed { category, message, .. } = &error else {
             panic!("expected typed rejection, got: {error}");
         };
         assert_eq!(category, ABI_INCOMPATIBLE_CATEGORY);
@@ -2284,7 +2961,7 @@ mod tests {
             stub_free_string,
         )
         .unwrap_err();
-        let ExtensionError::Detailed { category, message } = &error else {
+        let ExtensionError::Detailed { category, message, .. } = &error else {
             panic!("expected typed rejection, got: {error}");
         };
         assert_eq!(category, ABI_INCOMPATIBLE_CATEGORY);
@@ -2337,7 +3014,7 @@ mod tests {
     }
 
     /// Attach-teardown fixture: the port state addressed by the copied
-    /// `port_data` outlives the by-value struct handed into attach — the
+    /// `port_data` outlives the by-value struct handed into attach -- the
     /// extension may never keep the struct pointer, and the host state stays
     /// live after attach returns.
     #[test]
@@ -2395,7 +3072,7 @@ mod tests {
         assert!(!hub.open_port("app-1", "dialog", "session-1"));
     }
 
-    // -- Identity chain (task 2.3, design §6.4) -----------------------------
+    // -- Identity chain (task 2.3, design design section 6.4) -----------------------------
 
     #[test]
     fn expected_sha256_gates_the_library_bytes_before_dlopen() {
@@ -2425,7 +3102,7 @@ mod tests {
         // artifact-identity rejection naming both hashes.
         std::fs::write(&library, b"swapped-bytes").unwrap();
         let error = verify_library_sha256(&library, &request).unwrap_err();
-        let ExtensionError::Detailed { category, message } = &error else {
+        let ExtensionError::Detailed { category, message, .. } = &error else {
             panic!("expected typed rejection, got: {error}");
         };
         assert_eq!(category, ARTIFACT_IDENTITY_MISMATCH_CATEGORY);
@@ -2573,6 +3250,7 @@ mod tests {
                 return Err(ExtensionError::Detailed {
                     category: "artifact_identity_mismatch".to_string(),
                     message: "old candidate".to_string(),
+                    details: None,
                 });
             }
             Ok(Box::new(RecordingExtension::new("webview")) as Box<dyn ExtensionInstance>)
@@ -2592,10 +3270,12 @@ mod tests {
             candidate_error_category(&ExtensionError::Detailed {
                 category: "abi_incompatible".to_string(),
                 message: "extension missing symbol init".to_string(),
+                details: None,
             }),
             candidate_error_category(&ExtensionError::Detailed {
                 category: "artifact_identity_mismatch".to_string(),
                 message: "old".to_string(),
+                details: None,
             }),
             candidate_error_category(&ExtensionError::Unsupported(
                 "extension missing symbol is only text".to_string(),
@@ -2637,6 +3317,7 @@ mod tests {
             Err(ExtensionError::Detailed {
                 category: "artifact_identity_mismatch".to_string(),
                 message: "exact candidate".to_string(),
+                details: None,
             })
         });
         let error = match result {
