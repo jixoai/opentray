@@ -126,6 +126,12 @@ fn random_nonce_base() -> u64 {
     RandomState::new().build_hasher().finish()
 }
 
+impl Default for DeferredOperationRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeferredOperationRegistry {
     pub fn new() -> Self {
         Self {
