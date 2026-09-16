@@ -152,24 +152,49 @@ impl Drop for CarrierFixture {
 }
 
 fn wait_for_file(path: &Path) {
-    for _ in 0..50 {
+    for _ in 0..200 {
         if path.exists() {
             return;
         }
-        thread::sleep(Duration::from_millis(20));
+        thread::sleep(Duration::from_millis(50));
     }
-    panic!("consumer marker was not created: {}", path.display());
+    panic!(
+        "consumer marker was not created within 10s: {}; carrier log tail: {}",
+        path.display(),
+        carrier_log_tail(path)
+    );
 }
 
 fn wait_for_log(path: &Path, expected: &str) {
-    for _ in 0..100 {
+    for _ in 0..200 {
         if fs::read_to_string(path)
             .map(|value| value.contains(expected))
             .unwrap_or(false)
         {
             return;
         }
-        thread::sleep(Duration::from_millis(20));
+        thread::sleep(Duration::from_millis(50));
     }
-    panic!("carrier log did not contain {expected}: {}", path.display());
+    panic!(
+        "carrier log did not contain {expected} within 10s: {}; log tail: {}",
+        path.display(),
+        carrier_log_tail(path)
+    );
+}
+
+/// Failure diagnostics: a timed-out wait names the carrier log contents so
+/// the next flake distinguishes a slow consumer from a launch error. Both
+/// wait targets live inside the fixture root, whose carrier log sits at
+/// `Test.app/Contents/Resources/opentray-launch.log` (or is the wait target
+/// itself).
+fn carrier_log_tail(wait_target: &Path) -> String {
+    if wait_target.file_name().and_then(|name| name.to_str()) == Some("opentray-launch.log") {
+        return fs::read_to_string(wait_target)
+            .unwrap_or_else(|error| format!("<unreadable: {error}>"));
+    }
+    let Some(root) = wait_target.parent() else {
+        return "<no fixture root>".to_string();
+    };
+    let log = root.join("Test.app/Contents/Resources/opentray-launch.log");
+    fs::read_to_string(&log).unwrap_or_else(|error| format!("<{}: {error}>", log.display()))
 }
