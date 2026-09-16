@@ -520,6 +520,9 @@ pub(crate) struct BlockedNavigationRing {
     entries: VecDeque<(u64, String)>,
     tombstones: VecDeque<u64>,
     capacity: usize,
+    /// Whether this controller ever vetoed a navigation. Gates the
+    /// unattributed-cancel defense below.
+    ever_blocked: bool,
 }
 
 /// The decision for one `NavigationCompleted`, from the blocked ledger.
@@ -541,6 +544,7 @@ impl BlockedNavigationRing {
             entries: VecDeque::new(),
             tombstones: VecDeque::new(),
             capacity: capacity.max(1),
+            ever_blocked: false,
         }
     }
 
@@ -560,6 +564,7 @@ impl BlockedNavigationRing {
             self.tombstones.push_back(*evicted_id);
         }
         self.entries.push_back((id, url));
+        self.ever_blocked = true;
         evicted
     }
 
@@ -578,10 +583,38 @@ impl BlockedNavigationRing {
         CompletionOutcome::Ordinary
     }
 
+    /// R4 P2: a `NavigationCompleted` whose NavigationId getter failed can
+    /// still be attributed when blocked navigations are outstanding —
+    /// completions follow starts in order, so the orphan consumes the
+    /// oldest outstanding entry (approximate attribution inside a
+    /// pathological COM window; every such entry is a blocked navigation
+    /// carrying the stable code, so the terminal contract holds).
+    pub(crate) fn take_oldest_orphan(&mut self) -> Option<String> {
+        self.entries.pop_front().map(|(_, url)| url)
+    }
+
+    /// R4 P2: the unattributed-cancel defense. A completion that fell
+    /// through to the ordinary path reporting `OperationCanceled` on a
+    /// controller that has ever blocked a navigation cannot be
+    /// distinguished from a rule-cancelled navigation's late completion
+    /// (tombstone aged out, or a getter failure skipped the ledger) — the
+    /// exactly-once stable terminal wins, so the frame is dropped with a
+    /// diagnostic instead. A genuine user cancel (ESC) reports the same
+    /// status and is the accepted collateral: hosts treat it as noise on
+    /// blocked-capable controllers. Successes and platform-coded failures
+    /// other than cancellation always pass through.
+    pub(crate) fn should_drop_unattributed_cancel(&self, web_error_status: i32) -> bool {
+        self.ever_blocked && web_error_status == WEBVIEW2_OPERATION_CANCELED_STATUS
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
 }
+
+/// `COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED` (14): the only
+/// WebView2 status a rule-cancelled navigation's completion reports.
+pub(crate) const WEBVIEW2_OPERATION_CANCELED_STATUS: i32 = 14;
 
 /// Resolves one page-reported favicon href into the absolute http(s)
 /// address the `faviconChange` frame carries, per the favicon spec: the
@@ -1632,6 +1665,44 @@ mod tests {
         // pairing is expressible.
         let mut successor = BlockedNavigationRing::new(2);
         assert_eq!(successor.complete(6), CompletionOutcome::Ordinary);
+
+        // R4 P2: an orphan completion (id getter failure) consumes the
+        // oldest outstanding blocked entry — the terminal still emits,
+        // attributed FIFO inside the pathological window.
+        let mut orphan_ring = BlockedNavigationRing::new(4);
+        orphan_ring.block(20, "https://example.org/first".into());
+        orphan_ring.block(21, "https://example.org/second".into());
+        assert_eq!(
+            orphan_ring.take_oldest_orphan(),
+            Some("https://example.org/first".to_string())
+        );
+        assert_eq!(
+            orphan_ring.complete(21),
+            CompletionOutcome::Blocked("https://example.org/second".into())
+        );
+        assert_eq!(orphan_ring.take_oldest_orphan(), None);
+    }
+
+    #[test]
+    fn unattributed_cancel_defense_drops_operation_canceled_only_after_blocking() {
+        // A controller that never blocked passes every status through.
+        let clean = BlockedNavigationRing::new(2);
+        assert!(!clean.should_drop_unattributed_cancel(14));
+        assert!(!clean.should_drop_unattributed_cancel(3));
+        // Once a navigation was blocked, an OperationCanceled completion
+        // (rule-cancel late arrival with an aged tombstone, or a getter-
+        // failure orphan) drops; other statuses and successes pass.
+        let mut blocked_once = BlockedNavigationRing::new(2);
+        blocked_once.block(30, "https://example.org/x".into());
+        assert_eq!(
+            blocked_once.complete(30),
+            CompletionOutcome::Blocked("https://example.org/x".into())
+        );
+        assert!(blocked_once.should_drop_unattributed_cancel(14));
+        assert!(!blocked_once.should_drop_unattributed_cancel(3));
+        // The aged-tombstone chain: complete() answers Ordinary for the
+        // expired id, and the handler-layer defense above is what keeps
+        // that late completion frame-silent (exactly-once terminal).
     }
 
     #[test]

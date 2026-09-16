@@ -575,24 +575,26 @@ pub(super) fn install_load_state_observers(
                     // blocked for instead of the platform's
                     // OperationCanceled status (R1 P1: the shared pending
                     // slot is not authoritative for a cancelled pair).
-                    let blocked_navigation_id =
-                        match (|| -> Result<u64, windows_core::Error> {
-                            let mut id = 0u64;
-                            args.NavigationId(&mut id)?;
-                            Ok(id)
-                        })() {
-                        Ok(id) => id,
+                    // R4 P2: a failed id read is NOT a silent drop. Blocked
+                    // navigations outstanding on this controller attribute
+                    // the orphan completion FIFO (their terminal frame emits
+                    // here); with none outstanding the completion continues
+                    // down the ordinary path (an allowed navigation's
+                    // finished/failed frames never depended on the id).
+                    let blocked_decision = match (|| -> Result<u64, windows_core::Error> {
+                        let mut id = 0u64;
+                        args.NavigationId(&mut id)?;
+                        Ok(id)
+                    })() {
+                        Ok(id) => done_blocked.borrow_mut().complete(id),
                         Err(error) => {
-                            // Invariant: a blocked navigation's stable failed
-                            // frame was already emitted — at the veto (ring
-                            // entry or eviction compensation) or at the
-                            // starting-side id failure — so dropping this
-                            // frame cannot lose the blocked code; it can
-                            // only drop an ordinary platform frame.
                             eprintln!(
                                 "opentray-ext-webview NavigationCompleted id read failed: {error}"
                             );
-                            return Ok(());
+                            match done_blocked.borrow_mut().take_oldest_orphan() {
+                                Some(url) => crate::orchestration::CompletionOutcome::Blocked(url),
+                                None => crate::orchestration::CompletionOutcome::Ordinary,
+                            }
                         }
                     };
                     // Exactly-once terminal rule: a ring hit emits the
@@ -600,7 +602,7 @@ pub(super) fn install_load_state_observers(
                     // hit (terminal frame already emitted by eviction
                     // compensation) drops this completion silently; anything
                     // else is the ordinary platform path.
-                    match done_blocked.borrow_mut().complete(blocked_navigation_id) {
+                    match blocked_decision {
                         crate::orchestration::CompletionOutcome::Blocked(url) => {
                             push_view_event(
                                 &done_events,
@@ -646,6 +648,17 @@ pub(super) fn install_load_state_observers(
                             webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_ERROR_STATUS(0);
                         args.WebErrorStatus(&mut status)?;
                         let error_code = status.0;
+                        // R4 P2 exactly-once guard: an OperationCanceled
+                        // completion on a controller that has ever blocked
+                        // cannot be attributed (rule-cancel late completion
+                        // vs user cancel) — the already-emitted stable
+                        // terminal wins; drop with a diagnostic.
+                        if done_blocked.borrow().should_drop_unattributed_cancel(error_code) {
+                            eprintln!(
+                                "opentray-ext-webview dropped an unattributable OperationCanceled completion (blocked-capable controller)"
+                            );
+                            return Ok(());
+                        }
                         push_view_event(
                             &done_events,
                             &done_outbox,
