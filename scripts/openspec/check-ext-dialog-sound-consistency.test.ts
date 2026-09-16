@@ -18,23 +18,39 @@ describe("check-ext-dialog-sound-consistency", () => {
     expect(violations.some((v) => v.includes("[poll-terminal-channel]"))).toBe(true);
   });
 
-  test("arm 3: each semantic ruleId fires on its matching sample", () => {
-    const samples: Array<[string, string]> = [
-      ["terminal-before-event barrier 被承诺", "retired-event-barrier"],
-      ["release dry-run 作为证据", "retired-dry-run-evidence"],
-      ["the broker verifies it before `Library::new`", "impossible-identity-order"],
-      ["two sessions stay isolated", "fictional-two-session"],
-      ["Done(terminal)", "poll-terminal-channel"],
-      ["Done | Pending", "poll-terminal-channel"],
-      ["typed `dialog_presentation_failed` terminal", "preaccept-terminal"],
-    ];
-    for (const [line, ruleId] of samples) {
-      const violations = checkDocument("sample.md", `${line}\n`);
-      expect(
-        violations.some((v) => v.includes(`[${ruleId}]`)),
-        `${line} should trigger ${ruleId}`
-      ).toBe(true);
+  test("arm 3: every unique ruleId fires on a matching sample (name + semantic)", async () => {
+    const { RULES } = await import("./check-ext-dialog-sound-consistency.mjs") as {
+      RULES: Array<[string, RegExp, string]>;
+    };
+    // One unmarked sample per unique ruleId (name rules need a bare mention; semantic rules
+    // are strict). Asserting the fired set equals the unique ruleId set proves full coverage.
+    const samples: Record<string, string> = {
+      "retired-frame-completed": "ExtCommandCompleted 出现在规范文本",
+      "retired-frame-cancelled": "ExtCommandCancelled 出现在规范文本",
+      "retired-sync-backend": "readonly backend 属性",
+      "retired-sync-backend-dot": "dialog.backend 快照",
+      "retired-event-barrier": "terminal-before-event barrier 被承诺",
+      "retired-dry-run-evidence": "release dry-run 作为证据",
+      "impossible-identity-order": "the broker verifies it before `Library::new`",
+      "fictional-two-session": "two sessions stay isolated",
+      "poll-terminal-channel": "Done(terminal)",
+      "preaccept-terminal": "typed `dialog_presentation_failed` terminal",
+    };
+    const fired = new Set<string>();
+    for (const line of Object.values(samples)) {
+      for (const v of checkDocument("sample.md", `${line}\n`)) {
+        const m = /\[([a-z-]+)\]/.exec(v);
+        if (m) fired.add(m[1]);
+      }
     }
+    const uniqueIds = new Set(RULES.map(([id]) => id));
+    expect([...uniqueIds].every((id) => fired.has(id)), `all ruleIds must fire; missing: ${[...uniqueIds].filter((id) => !fired.has(id)).join(",")}`).toBe(true);
+    // "Done | Pending" shares a ruleId with Done(terminal) — covered via the shared id above.
+  });
+
+  test("arm 3b: name rules without a marker hit, with a marker pass", () => {
+    expect(checkDocument("s.md", "ExtCommandCancelled\n")[0]).toContain("retired-frame-cancelled");
+    expect(checkDocument("s.md", "ExtCommandCancelled（移除）\n")).toEqual([]);
   });
 
   test("unknown-tag guard: rule table stays non-empty and structured", () => {

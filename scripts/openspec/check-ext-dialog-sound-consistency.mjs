@@ -9,8 +9,8 @@
 // 3. Keep the gate runnable via `bun run verify:spec-consistency` and covered by fixture tests.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { join, resolve } from "node:path";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const CHANGES = ["openspec/changes/add-ext-dialog", "openspec/changes/add-ext-sound"];
@@ -97,7 +97,7 @@ const runOnRepo = () => {
   return violations;
 };
 
-if (import.meta.url === `file://${process.argv[1]}` || process.env.RUN_CONSISTENCY_GATE === "1") {
+export const main = () => {
   const violations = runOnRepo();
   if (violations.length > 0) {
     console.error(`consistency gate FAILED (${violations.length} violation(s)):`);
@@ -107,4 +107,9 @@ if (import.meta.url === `file://${process.argv[1]}` || process.env.RUN_CONSISTEN
   console.log(
     "consistency gate OK: no retired protocol text or semantic contradiction in active dialog/sound artifacts"
   );
+};
+
+// URL-safe entry detection: comparing raw `file://${argv[1]}` breaks on Windows drive paths.
+if (pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  main();
 }
