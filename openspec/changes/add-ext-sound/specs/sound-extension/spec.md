@@ -10,11 +10,11 @@
 - **WHEN** `playSound(path)` is called
 - **THEN** the promise SHALL resolve once the native playback request is accepted, without waiting for playback to finish and without any completion event surface
 
-#### Scenario: Session close stops session-owned playback
+#### Scenario: Session close stops only playback the session still owns
 
-- **GIVEN** a session that started a long file playback
-- **WHEN** the owning session closes
-- **THEN** extension cleanup SHALL stop that playback natively (darwin `NSSound.stop()`; win32 `PlaySound(NULL, SND_PURGE)`) and SHALL NOT stop playback started by other sessions
+- **GIVEN** session A started a long file playback and session B then started its own (win32 process-wide semantics superseding A's)
+- **WHEN** session A closes
+- **THEN** win32 SHALL NOT issue `PlaySound(NULL, SND_PURGE)` because the playback token belongs to session B, and B's playback SHALL continue; darwin SHALL stop only A's `NSSound` instances from its session-owned set. A closing session that still owns the current playback token SHALL stop it natively
 
 ### Requirement: beep SHALL project the kind table with documented degradation
 
@@ -28,7 +28,7 @@
 
 ### Requirement: playSystemSound SHALL resolve common names first, then platform-native names, and SHALL never fail silently
 
-`playSystemSound(name)` SHALL first match the typed common-name table and play the current platform's projection; on miss it SHALL treat the string as a platform-native sound name (darwin `NSSound(named:)` catalog entry; win32 `PlaySound(SND_ALIAS)` sound-scheme alias) and play it; on a second miss it SHALL reject with typed `sound_not_found` carrying the requested name. A silent no-op SHALL NOT occur on any platform.
+`playSystemSound(name)` SHALL first match the frozen three-entry common-name table (`notification` → Glass/SystemAsterisk, `warning` → Sosumi/SystemExclamation, `error` → Basso/SystemHand) and play the current platform's projection; on miss it SHALL treat the string as a platform-native sound name (darwin `NSSound(named:)` catalog entry; win32 `PlaySound(SND_ALIAS)` sound-scheme alias) and play it; on a second miss it SHALL reject with typed `sound_not_found` whose details carry the requested name, platform, and attempted mode/catalog. Acceptance SHALL be judged from native return values with broker.log diagnostics, not from the absence of an error; a silent no-op SHALL NOT occur on any platform. `default`/`info`/`question` belong to `beep` only and SHALL NOT enter the common catalog.
 
 #### Scenario: Common name projects per platform
 
@@ -44,13 +44,13 @@
 
 ### Requirement: playSound SHALL be a common capability bounded by a documented per-platform format matrix
 
-Both platforms SHALL provide `playSound` at low cost (win32 `PlaySound(SND_FILENAME|SND_ASYNC)`; darwin `NSSound(contentsOfFile:)`), making it a common capability rather than a platform-specific surface. win32 SHALL accept WAV only and SHALL reject other extensions up front with typed `sound_format_unsupported`; darwin SHALL accept the `NSSound` format family. win32 concurrent playback SHALL follow the documented degradation that a later play cancels the earlier one (process-wide PlaySound semantics); darwin SHALL mix instances naturally. `PlaySoundOptions` SHALL be reserved (no fields in this version); unsupported per-platform conveniences SHALL NOT be added as silently-ignored common fields. Paths SHALL resolve relative to cwd with `~` expansion, and unreadable sources SHALL reject with typed `sound_file_unreadable`.
+Both platforms SHALL provide `playSound` at low cost (win32 `PlaySound(SND_FILENAME|SND_ASYNC)`; darwin `NSSound(contentsOfFile:)`), making it a common capability rather than a platform-specific surface. win32 SHALL accept WAV only and SHALL enforce it by content validation before dispatch — path expansion, canonicalization, readability, a bounded size check, and a `RIFF`/`WAVE` header inspection (a case-insensitive extension alone proves nothing) — rejecting mismatches or truncation with typed `sound_format_unsupported` and unreadable sources with typed `sound_file_unreadable`; validation SHALL NOT be deferred to post-`PlaySound` return-value interpretation. darwin SHALL accept the `NSSound` format family with readability/canonical-path checks. win32 concurrent playback SHALL follow the documented degradation that a later play supersedes the earlier one under process-wide `PlaySound` semantics, tracked by an internal playback-ownership token; darwin SHALL mix session-owned instances naturally. `PlaySoundOptions` SHALL be reserved (no fields in this version); unsupported per-platform conveniences SHALL NOT be added as silently-ignored common fields.
 
-#### Scenario: Non-WAV on win32 is rejected before any native call
+#### Scenario: Non-WAV on win32 is rejected by content, before any native call
 
 - **GIVEN** the facade running on win32
-- **WHEN** `playSound('/tmp/clip.mp3')` is called
-- **THEN** the call SHALL reject with typed `sound_format_unsupported` without dispatching a native play command
+- **WHEN** `playSound('/tmp/clip.mp3')` is called, or a file named `clip.wav` whose header is not `RIFF`/`WAVE`
+- **THEN** the call SHALL reject with typed `sound_format_unsupported` after preflight content validation, without dispatching a native play command
 
 #### Scenario: darwin plays the same catalog without format rejection
 

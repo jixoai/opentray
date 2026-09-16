@@ -53,13 +53,18 @@ darwin 无分级 alert 音是**文档化降级**（§4 矩阵），不构成平�
    （"SystemHand"、"SystemExclamation"、"SystemAsterisk"…）；
 3. 仍无法解析 → typed `sound_not_found`（载荷含名字与已尝试的目录），**绝不静默无声**。
 
-通用名表 v1 提案（开放问题，Codex 可增删）：
+通用名表（R1 §4.1 **冻结**，不再开放增删）：
 
 | 通用名 | darwin | win32 |
 |---|---|---|
 | `'notification'` | Glass | SystemAsterisk |
 | `'warning'` | Sosumi | SystemExclamation |
 | `'error'` | Basso | SystemHand |
+
+`default/info/question` 只属于 `beep(BeepKind)`，不进本目录——alert 分级与命名系统音是两层
+语义，不混。**accepted 判定**（P1-5）：以原生返回值为准（win32 PlaySound 布尔返回；
+darwin NSSound 目录命中且 play 受理），非「未报错」；miss 的 typed 错误 details 至少含
+requested name、platform、attempted mode/catalog；broker.log 记录解析诊断。
 
 ### 1.3 `playSound`（Owner 成本规则的裁决落地）
 
@@ -68,7 +73,7 @@ darwin 无分级 alert 音是**文档化降级**（§4 矩阵），不构成平�
 
 | 维度 | darwin | win32 |
 |---|---|---|
-| 格式 | NSSound 全系（wav/aiff/mp3/m4a…） | **仅 WAV**——非 `.wav` typed `sound_format_unsupported` 前置拒绝 |
+| 格式 | NSSound 全系（wav/aiff/mp3/m4a…） | **仅 WAV——内容校验前置拒绝**（R1 §4.3）：路径展开/canonicalize/readability + 大小上限 + `RIFF`/`WAVE` header 检查（扩展名大小写不敏感但不足以证明格式）；header 不匹配或文件截断 → typed `sound_format_unsupported`；不可读 → typed `sound_file_unreadable`。不得把校验推到 PlaySound 之后解释返回值 |
 | 并发 | 多实例自然混音 | PlaySound 进程级单声道：**后播放取消前播放**（文档化降级） |
 | 生命周期 | 实例存活至播放完成（delegate didFinishPlaying 回收；兜底定时探测） | SND_ASYNC 即返，无需持有 |
 
@@ -82,8 +87,15 @@ darwin 无分级 alert 音是**文档化降级**（§4 矩阵），不构成平�
 - **fire-and-forget**：三个方法都在播放**开始**（原生调用受理成功）时 resolve；完成事件
   不存在（EventPort producer 留待需求证实）。
 - 非模态、不阻塞、无 busy 语义；并发调用合法（win32 取消语义见矩阵）。
-- **session close**：扩展 cleanup 停止该 session 启动的播放（darwin `NSSound.stop()` +
-  实例释放；win32 `PlaySound(NULL, 0, SND_PURGE)`）。
+- **session close = PlaybackToken 所有权门控**（R1 §4.2/P0-4）：native 侧维护
+  `PlaybackToken { sessionId, generation, sequence }` 记录当前 win32 播放 owner——每次新
+  播放原子替换 token（按 win32 进程级单声道语义取消旧播放，内部状态记「accepted but
+  prior owner superseded」，不把旧播放伪装存活）；**session close 仅在 token 仍归该
+  session 时执行 `PlaySound(NULL, SND_PURGE)`，token 属其它 session 时 close 不得 purge**。
+  darwin 维护 session-owned `NSSound` 实例集合，close 只 stop 自己的集合。token 是内部
+  所有权机制，不是 Node-facing API，不改变 fire-and-forget 语义。
+- 测试至少覆盖 A/B 会话交错与关闭顺序四格（A播→B播→关A / A播→B播→关B / A播→关A /
+  A播→关B）。
 
 ## 2. `SoundBackendCapabilities` DTO
 
@@ -96,8 +108,10 @@ export interface SoundBackendCapabilities {
 }
 ```
 
-编译门法则同 dialog：新增能力字段必须被每个平台 DTO 与原生构造器序列化（darwin target
-编译过 = win32 序列化齐全）。facade 以 `sound.backend` 暴露只读快照。
+编译门法则（R1 P1-3 同 dialog 修正）：DTO schema 提升到共享 `@opentray/spec` 与
+opentray-spec crate 公共 schema，配 exhaustive serialization fixture；CI 明确执行 darwin 与
+windows 两个 target 的 compile/type/test，单一 target 编译通过不构成门。facade 以
+`sound.backend` 暴露只读快照。
 
 ## 3. 打包（引用 add-ext-dialog §6，不重复）
 
@@ -120,9 +134,11 @@ export interface SoundBackendCapabilities {
 ## 5. 测试策略
 
 - **TS 确定性**（vitest）：beep kind 表投影、playSystemSound 解析顺序（通用名命中/
-  原生名透传/miss typed 错误）、win32 非 WAV 前置拒绝、路径解析与 `sound_file_unreadable`、
-  Linux typed unsupported、embedded 描述符解析（复用 dialog 批次 A 的测试基建）。
-- **原生验收（双平台真机）**：命令受理与错误分支语义验证（可闻性不作为验收门——无人工
-  听觉断言，以原生返回值/broker.log 取证）；session close 停止；backend DTO 上报；
-  playSystemSound 三通用名 + 双平台各一个原生名 + 一个必然 miss 的名字。
-- **体积证据**：`npm pack --dry-run` 归档（预期 << 2MB）。
+  原生名透传/miss typed 错误含 details payload）、**win32 WAV 内容校验**（RIFF/WAVE
+  header 匹配、伪装 MP3、截断 WAV、大小超限、不可读、大小写扩展名）、路径 canonicalize、
+  Linux typed unsupported、embedded 描述符解析（复用 dialog 批次 A 测试基建）。
+- **原生验收（双平台真机）**：命令受理与错误分支语义验证（原生返回值/broker.log 取证，
+  可闻性不作为门）；通用名×3 + 双平台各一原生名 + 一个必然 miss 名；**A/B 会话交错与关闭
+  顺序四格**（P0-4：关闭不持有 token 的 session 不得 purge 别人的播放）；backend DTO 上报。
+- **双 target CI 编译门** + exhaustive fixture（P1-3）。
+- **体积证据**：`npm pack --dry-run` 实测报告（同 dialog §6.3 证据要求）。
