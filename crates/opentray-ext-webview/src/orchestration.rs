@@ -16,7 +16,7 @@
 //! is category-level (`rejected`/`unsupported`/`internal`) and cannot carry
 //! the orchestration error registry.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use opentray_spec::webview::{
     matches_webview_navigation_pattern, OrchestrationErrorCode, WebviewBridgePolicy,
@@ -487,58 +487,93 @@ impl ViewEvents {
     pub(crate) const BLOCKED_ERROR_CODE: i32 = WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE;
 }
 
+/// add-navigation-favicon-surface: the Windows blocked-navigation ledger.
+/// Platform-neutral so the eviction, matching, and idempotence semantics
+/// are testable without a WebView2 host (R2 P2: the Windows observers
+/// delegate every ring decision here; the twin tests below cover the
+/// interleaving/eviction/duplicate/unknown cases Codex asked for).
+///
+/// Eviction is not silent semantic loss: when the ring is full, [`Self::block`]
+/// returns the evicted entry and the caller emits that navigation's terminal
+/// `failed(navigation_blocked)` frame immediately. The evicted navigation's
+/// eventual `NavigationCompleted` no longer matches the ring and reports
+/// through the ordinary platform path — one duplicate OperationCanceled
+/// frame is the documented cost of 64+ concurrently-blocked navigations on
+/// one view. The same immediate-frame rule covers a `NavigationStarting`
+/// whose NavigationId getter failed (the id must never key the ring).
+///
+/// Lifecycle: one ring per controller, owned by the observer closures. A
+/// destroyed controller stops firing events (WebView2 drops its handlers
+/// with the sender), the closures and the ring die with it, and a re-created
+/// view id gets a fresh controller, fresh closures, and a fresh ring — a
+/// late completion can never reach a successor view.
+pub(crate) struct BlockedNavigationRing {
+    entries: VecDeque<(u64, String)>,
+    capacity: usize,
+}
+
+impl BlockedNavigationRing {
+    pub(crate) fn new(capacity: usize) -> Self {
+        Self {
+            entries: VecDeque::new(),
+            capacity: capacity.max(1),
+        }
+    }
+
+    /// Records one blocked navigation; returns the evicted entry when the
+    /// ring was full (the caller emits its failed frame now).
+    pub(crate) fn block(&mut self, id: u64, url: String) -> Option<(u64, String)> {
+        let evicted = if self.entries.len() >= self.capacity {
+            self.entries.pop_front()
+        } else {
+            None
+        };
+        self.entries.push_back((id, url));
+        evicted
+    }
+
+    /// Takes the URL of one completed navigation, if it was blocked.
+    /// Idempotent-by-removal: a second completion of the same id misses.
+    pub(crate) fn take(&mut self, id: u64) -> Option<String> {
+        let index = self.entries.iter().position(|(entry, _)| *entry == id)?;
+        self.entries.remove(index).map(|(_, url)| url)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
+
 /// Resolves one page-reported favicon href into the absolute http(s)
 /// address the `faviconChange` frame carries, per the favicon spec: the
 /// DOM `link.href` property is already absolute (the common path), the
-/// `getAttribute` fallback may be relative, and only http/https survive
-/// (`data:`/`blob:`/`file:` are not favicon wire truth). Naive relative
-/// resolution against the view's tracked URL — enough for the fallback of
-/// a fallback; page-relative `../` walks are not rebased.
+/// `getAttribute` fallback may be relative, and only http/https with a
+/// host survive. R2 P1: resolution is the standard WHATWG join against
+/// the view's tracked URL (`url::Url::parse` + `join`), not hand-rolled
+/// string splicing — query-only (`?v=2`), fragment-only, `../`/`.` walks,
+/// ports and userinfo all follow browser semantics, and non-http(s)
+/// results (`data:`, `blob:`, `file:`, ...) reject.
 pub(crate) fn resolve_webview_favicon_href(base_url: &str, href: &str) -> Option<String> {
     if href.is_empty() {
         return None;
     }
-    let lower = href.to_ascii_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") {
-        return Some(href.to_string());
-    }
-    // Any other explicit scheme (data:, blob:, file:, javascript:, ...) is
-    // rejected: a `:` before the first `/` marks one.
-    let before_slash = href.split('/').next().unwrap_or("");
-    if before_slash.contains(':') {
-        return None;
-    }
-    // Scheme-relative or path-absolute/relative forms resolve against the
-    // base; a non-http(s) base cannot anchor a favicon href.
-    let base_lower = base_url.to_ascii_lowercase();
-    let scheme = if base_lower.starts_with("https://") {
-        "https:"
-    } else if base_lower.starts_with("http://") {
-        "http:"
-    } else {
+    let Ok(base) = url::Url::parse(base_url) else {
         return None;
     };
-    if let Some(rest) = href.strip_prefix("//") {
-        return Some(format!("{scheme}//{rest}"));
-    }
-    let after_scheme = base_url
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or_default();
-    let authority_end = after_scheme.find(['/']).unwrap_or(after_scheme.len());
-    let origin = &after_scheme[..authority_end];
-    if origin.is_empty() {
+    if !http_https_with_host(&base) {
         return None;
     }
-    if let Some(path) = href.strip_prefix('/') {
-        return Some(format!("{scheme}//{origin}/{path}"));
-    }
-    let base_path = &after_scheme[authority_end..];
-    let dir = match base_path.rfind('/') {
-        Some(index) => &base_path[..index + 1],
-        None => "/",
+    let Ok(joined) = base.join(href) else {
+        return None;
     };
-    Some(format!("{scheme}//{origin}{dir}{href}"))
+    if !http_https_with_host(&joined) {
+        return None;
+    }
+    Some(joined.to_string())
+}
+
+fn http_https_with_host(url: &url::Url) -> bool {
+    matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
 }
 
 /// Applies a new focus owner to every view of one window and returns the
@@ -1425,6 +1460,56 @@ mod tests {
             // A non-http(s) base cannot anchor anything.
             ("about:blank", "/favicon.ico", None),
             ("", "/favicon.ico", None),
+            // R2 P1: standard WHATWG join semantics — query-only and
+            // fragment-only keep the document path, `../`/`.` rebase,
+            // ports and userinfo are part of the authority.
+            (
+                "https://example.org/a/b",
+                "?v=2",
+                Some("https://example.org/a/b?v=2"),
+            ),
+            (
+                "https://example.org/a/b",
+                "#icon",
+                Some("https://example.org/a/b#icon"),
+            ),
+            (
+                "https://example.org/a/b",
+                "../icon.ico",
+                Some("https://example.org/icon.ico"),
+            ),
+            (
+                "https://example.org/a/b",
+                "./icon.ico",
+                Some("https://example.org/a/icon.ico"),
+            ),
+            (
+                "https://example.org:8443/a",
+                "icon.ico",
+                Some("https://example.org:8443/icon.ico"),
+            ),
+            (
+                "https://user:pw@example.org/a",
+                "icon.ico",
+                Some("https://user:pw@example.org/icon.ico"),
+            ),
+            // Scheme case-insensitivity and joined results that lose the
+            // host (or change scheme) reject.
+            (
+                "HTTPS://example.org/a",
+                "icon.ico",
+                Some("https://example.org/icon.ico"),
+            ),
+            // Standard-join truth: WHATWG parsing folds the extra slash of
+            // a special scheme, so `https:///x` is host `x` — legal; an
+            // empty host (`//`) and malformed IPv6 reject.
+            (
+                "https://example.org/a",
+                "https:///icon.ico",
+                Some("https://icon.ico/"),
+            ),
+            ("https://example.org/a", "//", None),
+            ("https://example.org/a", "https://[::1", None),
         ];
         for (base, href, expected) in cases {
             assert_eq!(
@@ -1433,6 +1518,38 @@ mod tests {
                 "base {base:?} href {href:?}"
             );
         }
+    }
+
+    #[test]
+    fn blocked_ring_pairs_completions_with_their_blocked_urls_and_evicts_with_notice() {
+        let mut ring = BlockedNavigationRing::new(2);
+        // Interleaved A/B starts, completions arrive in the opposite order:
+        // each completion carries its own blocked URL.
+        assert!(ring.block(10, "https://example.org/a".into()).is_none());
+        assert!(ring.block(11, "https://example.org/b".into()).is_none());
+        assert_eq!(ring.take(11).as_deref(), Some("https://example.org/b"));
+        assert_eq!(ring.take(10).as_deref(), Some("https://example.org/a"));
+
+        // Capacity eviction hands the caller the evicted entry so it can
+        // emit the terminal failed frame immediately (the evicted id's
+        // completion later misses the ring). With capacity 2 already held
+        // by 12/13, blocking 14 evicts 12.
+        assert!(ring.block(12, "https://example.org/c".into()).is_none());
+        assert!(ring.block(13, "https://example.org/d".into()).is_none());
+        let evicted = ring
+            .block(14, "https://example.org/e".into())
+            .expect("full ring evicts");
+        assert_eq!(evicted, (12, "https://example.org/c".to_string()));
+        assert!(ring.take(12).is_none());
+        assert_eq!(ring.take(13).as_deref(), Some("https://example.org/d"));
+        assert_eq!(ring.take(14).as_deref(), Some("https://example.org/e"));
+
+        // Unknown and duplicate ids miss exactly once each.
+        assert!(ring.take(999).is_none());
+        assert!(ring.block(15, "https://example.org/f".into()).is_none());
+        assert_eq!(ring.take(15).as_deref(), Some("https://example.org/f"));
+        assert!(ring.take(15).is_none());
+        assert_eq!(ring.len(), 0);
     }
 
     #[test]

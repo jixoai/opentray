@@ -77,7 +77,9 @@ use crate::layout::{
     project_overlay_safe_area, solve_layout, LayoutSolution, LayoutViewKey, LogicalRect,
     LogicalViewport,
 };
-use crate::orchestration::{webview_creation_allowed, OrchestrationError, ViewEvents, WindowOwner};
+use crate::orchestration::{
+    webview_creation_allowed, BlockedNavigationRing, OrchestrationError, ViewEvents, WindowOwner,
+};
 
 use super::box_view::{BoxHostWindow, PhysicalBoxRect};
 use super::{
@@ -409,8 +411,7 @@ pub(super) fn install_load_state_observers(
     // so a concurrent pair could misattribute the failure), and the ring
     // is bounded: entries whose completion never arrives (controller
     // teardown, pathological callbacks) age out instead of growing.
-    const BLOCKED_RING_CAP: usize = 64;
-    let blocked_navigations = Rc::new(RefCell::new(VecDeque::<(u64, String)>::new()));
+    let blocked_navigations = Rc::new(RefCell::new(BlockedNavigationRing::new(64)));
 
     let start_events = Rc::clone(events);
     let start_outbox = Weak::clone(outbox);
@@ -441,15 +442,36 @@ pub(super) fn install_load_state_observers(
                     })() {
                         Ok(id) => id,
                         Err(error) => {
-                            // COM property failure is pathological; without
-                            // an id the completion cannot be matched, so the
-                            // failure frame is emitted by the completion's
-                            // normal failed path (OperationCanceled) and the
-                            // mismatch cost is one platform-coded frame.
+                            // R2 P2: an unreadable id never keys the ring.
+                            // The blocked failure frame is emitted HERE
+                            // (before the veto return), so the stable code
+                            // cannot be lost; the completion's ordinary
+                            // failed path may add one platform-coded
+                            // OperationCanceled frame — the documented cost.
                             eprintln!(
                                 "opentray-ext-webview NavigationStarting id read failed: {error}"
                             );
-                            0
+                            if !uri.is_empty()
+                                && start_events.borrow().navigation_blocked(&uri)
+                            {
+                                push_view_event(
+                                    &start_events,
+                                    &start_outbox,
+                                    &start_owner,
+                                    |events, owner, window_id| {
+                                        events.note_load_state(
+                                            owner,
+                                            window_id,
+                                            WebviewLoadPhase::Failed,
+                                            uri.clone(),
+                                            Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
+                                            None,
+                                        )
+                                    },
+                                );
+                                args.SetCancel(true)?;
+                            }
+                            return Ok(());
                         }
                     };
                     // The decision point: `navigationAction` observation
@@ -482,12 +504,29 @@ pub(super) fn install_load_state_observers(
                     );
                     let blocked = !uri.is_empty() && start_events.borrow().navigation_blocked(&uri);
                     if blocked {
-                        let mut ring = start_blocked.borrow_mut();
-                        if ring.len() >= BLOCKED_RING_CAP {
-                            ring.pop_front();
+                        // R2 P2: eviction is not silent loss — the evicted
+                        // navigation's terminal failed frame is emitted now
+                        // (its eventual completion misses the ring and runs
+                        // the ordinary platform path).
+                        let evicted =
+                            start_blocked.borrow_mut().block(navigation_id, uri.clone());
+                        if let Some((_, evicted_url)) = evicted {
+                            push_view_event(
+                                &start_events,
+                                &start_outbox,
+                                &start_owner,
+                                |events, owner, window_id| {
+                                    events.note_load_state(
+                                        owner,
+                                        window_id,
+                                        WebviewLoadPhase::Failed,
+                                        evicted_url,
+                                        Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
+                                        None,
+                                    )
+                                },
+                            );
                         }
-                        ring.push_back((navigation_id, uri.clone()));
-                        drop(ring);
                         args.SetCancel(true)?;
                         return Ok(());
                     }
@@ -544,19 +583,19 @@ pub(super) fn install_load_state_observers(
                         })() {
                         Ok(id) => id,
                         Err(error) => {
+                            // Invariant: a blocked navigation's stable failed
+                            // frame was already emitted — at the veto (ring
+                            // entry or eviction compensation) or at the
+                            // starting-side id failure — so dropping this
+                            // frame cannot lose the blocked code; it can
+                            // only drop an ordinary platform frame.
                             eprintln!(
                                 "opentray-ext-webview NavigationCompleted id read failed: {error}"
                             );
                             return Ok(());
                         }
                     };
-                    let blocked_url = {
-                        let mut ring = done_blocked.borrow_mut();
-                        match ring.iter().position(|(id, _)| *id == blocked_navigation_id) {
-                            Some(index) => ring.remove(index).map(|(_, url)| url),
-                            None => None,
-                        }
-                    };
+                    let blocked_url = done_blocked.borrow_mut().take(blocked_navigation_id);
                     if let Some(url) = blocked_url {
                         push_view_event(
                             &done_events,
