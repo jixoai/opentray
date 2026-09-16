@@ -10,11 +10,11 @@
 - **WHEN** `playSound(path)` is called
 - **THEN** the promise SHALL resolve once the native playback request is accepted, without waiting for playback to finish and without any completion event surface
 
-#### Scenario: Session close stops only playback the session still owns
+#### Scenario: Session close purges once for the latest matching owner
 
-- **GIVEN** session A started a long file playback and session B then started its own (win32 process-wide semantics superseding A's)
-- **WHEN** session A closes
-- **THEN** win32 SHALL NOT issue `PlaySound(NULL, SND_PURGE)` because the playback token belongs to session B, and B's playback SHALL continue; darwin SHALL stop only A's `NSSound` instances from its session-owned set. A closing session that still owns the current playback token SHALL stop it natively
+- **GIVEN** the single caller session (current runtime) with multiple loaded sound mounts, where a later play superseded an earlier one under process-wide semantics
+- **WHEN** the session closes
+- **THEN** all loaded mounts SHALL receive the one actual session-close sequence and the arbiter SHALL purge at most once for the latest matching owner token; darwin SHALL stop that session-owned `NSSound` set. Non-owner-close non-purge behavior SHALL be proven by deterministic PlaybackArbiter unit tests with two simulated full `CommandScope` tokens — no live second caller session may be named until a multi-session runtime change lands
 
 ### Requirement: beep SHALL project the kind table with documented degradation
 
@@ -44,7 +44,7 @@
 
 ### Requirement: playSound SHALL be a common capability bounded by a documented per-platform format matrix
 
-Both platforms SHALL provide `playSound` at low cost (win32 `PlaySound(SND_FILENAME|SND_ASYNC)`; darwin `NSSound(contentsOfFile:)`), making it a common capability rather than a platform-specific surface. win32 SHALL accept WAV only and SHALL enforce it by exact content validation before dispatch — path expansion, canonicalization, readability, a maximum of 64 MiB, at least 12 bytes, a little-endian `RIFF` declared length not exceeding the actual file size, and at least one complete `fmt `/`data` chunk boundary (no decoding) — rejecting mismatches, truncation, or declared-size overflow with typed `sound_format_unsupported` and unreadable sources with typed `sound_file_unreadable`; validation SHALL NOT be deferred to post-`PlaySound` return-value interpretation. darwin SHALL accept the finite v1 committed set (wav/aiff/mp3/m4a) with readability/canonical-path checks. All win32 `PlaySound` paths (alias and filename, never `MessageBeep`) SHALL pass through one process-wide PlaybackArbiter that linearizes the native call, its return-value handling, and the `(sessionId, instanceGeneration, sequence)` token swap under a single mutex; session close SHALL compare the complete token under the same lock and purge only on a match, and a later play supersedes the earlier one under process-wide semantics recorded as `accepted but prior owner superseded`. `PlaySoundOptions` SHALL be reserved (no fields in this version); unsupported per-platform conveniences SHALL NOT be added as silently-ignored common fields.
+Both platforms SHALL provide `playSound` at low cost (win32 `PlaySound(SND_FILENAME|SND_ASYNC)`; darwin `NSSound(contentsOfFile:)`), making it a common capability rather than a platform-specific surface. win32 SHALL accept WAV only and SHALL enforce it by an exact RIFF parser before dispatch — path expansion, canonicalization, readability, a maximum of 64 MiB, at least 12 bytes, `declared_size + 8 <= actual_size` (the offset-4 field counts past the 8-byte RIFF header), the presence of BOTH `fmt ` and `data` chunks with each chunk's `offset + 8 + size + odd-padding` inside the declared RIFF region and a `fmt ` payload of at least 16 bytes (no decoding) — rejecting any violation with typed `sound_format_unsupported` and unreadable sources with typed `sound_file_unreadable`, with a PlaySound spy asserting zero native calls on every reject path. darwin SHALL accept the finite v1 committed set (wav/aiff/mp3/m4a) with readability/canonical-path checks. All win32 `PlaySound` paths (alias and filename, never `MessageBeep`) SHALL pass through one process-wide PlaybackArbiter that linearizes the native call, its return-value handling, and the `(sessionId, instanceGeneration, sequence)` token swap under a single mutex; session close SHALL compare the complete token under the same lock and purge only on a match (non-owner-close non-purge is proven by deterministic arbiter tests with simulated tokens), and a later play supersedes the earlier one recorded as `accepted but prior owner superseded`. `PlaySoundOptions` SHALL be reserved (no fields in this version); unsupported per-platform conveniences SHALL NOT be added as silently-ignored common fields.
 
 #### Scenario: Non-WAV on win32 is rejected by content, before any native call
 
@@ -76,4 +76,4 @@ The native extension SHALL embed and report a `SoundBackendCapabilities` DTO (pl
 
 - **GIVEN** the installed `@opentray/ext-sound` facade on `darwin-arm64`
 - **WHEN** the SDK resolves the sound extension artifact
-- **THEN** it SHALL return the real path of `platforms/darwin-arm64/libopentray_ext_sound.dylib` with expected identity `{ extensionName: "sound", artifactSetVersion: <facade version>, contractFingerprint: "opentray-ext-sound-contract-1" }` using the same embedded-artifact resolver introduced for dialogs
+- **THEN** it SHALL return the real path of `platforms/darwin-arm64/libopentray_ext_sound.dylib` with expected identity `{ extensionName: "sound", artifactSetVersion: <facade version>, contractFingerprint: "opentray-ext-sound-contract-1", sha256: <manifest hash for the target>, buildIdentity: <manifest build identity> }` using the same embedded-artifact resolver and `LoadExt` identity fields introduced for dialogs

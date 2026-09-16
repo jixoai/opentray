@@ -33,7 +33,7 @@
 ## 6. Verification
 
 - [ ] 6.1 双平台真机验收：三方法命令受理与错误分支语义验证（原生返回值/broker.log 取证，可闻性不作门）；通用名×3 + 双平台各一原生名 + 必 miss 名（details payload 断言）+ **NODEFAULT 无回退取证**；**PlaybackArbiter 竞态族**（两线程 swap/play 交错、alias-vs-file 交替、native false、close race；spy/wrapper 断言实际 SND_PURGE 与播放次序）；backend DTO 上报（getBackend）。
-- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check；`npm pack --dry-run` 体积证据。
+- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check；**真实 pack 证据**（共享 check-pack-size 脚本：真实 tgz stat/digest + 解包逐目标 identity，含 sha256/buildIdentity 断言）。
 
 ## 7. Release
 

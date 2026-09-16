@@ -9,7 +9,7 @@
 > 6. 「后续就和 Codex 去讨论。除非有重大决策项需要我参与就停下来问我，否则以 Codex 的决策为准。如果可以就持续推进，直到全部开发和测试全部完成。」
 >
 > 用户语言系统：**「只做 web 做不到的功能」（2026-09-12 Owner ruling）、「能力原子」、「OS 标准对话框」、「优先保持轻量」**。
-> 评审记录：Codex R1（2026-09-17，`.agents/review/2026-09-17-ext-dialog-sound-r1.md`）：**4.0/10 NO-GO**；Codex R2（`.agents/review/2026-09-17-ext-dialog-sound-r2.md`）：**5.0/10 NO-GO**——本版为 R2 修订版（P0-1 完成通道 ABI、P0-2 owner-loop poll/per-owner STA、P0-3 单会话运行时裁决、P0-4 alias flags+PlaybackArbiter、P0-5 embedded 身份链、P0-6 真实 pack 证据、P0-7 TypedExtensionError+async getBackend、P1-1/2/4/5/6 全部吸收）。
+> 评审记录：Codex R1：**4.0/10 NO-GO**；R2：**5.0/10 NO-GO**；R3（`.agents/review/2026-09-17-ext-dialog-sound-r3.md`）：**5.8/10 NO-GO**——本版为 R3 修订版（P0-1 完整 ABI 事务、P0-2 调度器 WaitUntil/配额、P0-3 诚实 Accepted + 数值冻结 + Send 裁决、P0-5 身份校验可实现序、P0-6 SSOT 一致性门、P1-2/3/4/5 全部吸收）。
 
 ## 最终可见效果（operator 视角）
 

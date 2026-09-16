@@ -79,7 +79,7 @@ requested name、platform、attempted mode/catalog；broker.log 记录解析诊�
 
 | 维度 | darwin | win32 |
 |---|---|---|
-| 格式 | **v1 承诺集（有限 canonical）**：wav/aiff/mp3/m4a 四项（超出者不承诺，`NSSound` 实际能力可能更宽但不进 contract） | **仅 WAV——精确内容校验前置拒绝**（R2 P1-2 冻结）：路径展开/canonicalize/readability + **最大 64 MiB** + **≥12 字节** + little-endian `RIFF` declared length ≤ 实际文件大小 + 至少一个完整 `fmt `/`data` chunk 边界（不做解码）；header 不匹配/截断/declared 溢出 → typed `sound_format_unsupported`；不可读 → typed `sound_file_unreadable`。不得把校验推到 PlaySound 之后解释返回值 |
+| 格式 | **v1 承诺集（有限 canonical）**：wav/aiff/mp3/m4a 四项（超出者不承诺） | **仅 WAV——精确 RIFF 解析前置拒绝**（R3 P1-1 冻结算术）：路径展开/canonicalize/readability + **最大 64 MiB** + **≥12 字节** + **declared_size + 8 ≤ actual_size**（offset-4 字段计的是 8 字节 RIFF 头之后）+ **fmt 与 data 两个 chunk 都必须存在**（每个 chunk：offset + 8 + size + 奇数补 pad 后必须落在 declared RIFF 区域内；fmt payload ≥16 字节；不做解码）；任何违例 → typed `sound_format_unsupported`；不可读 → typed `sound_file_unreadable`。fixture：仅 12 字节头、u32::MAX declared、declared-8 边界、奇数字节补 pad、仅 fmt、仅 data、chunk 越过 declared 与越过 physical 两分；PlaySound spy 断言拒绝路径零调用 |
 | 并发 | 多实例自然混音 | PlaySound 进程级单声道：**后播放取消前播放**（文档化降级，经 PlaybackArbiter 线性化） |
 | 生命周期 | 实例存活至播放完成（delegate didFinishPlaying 回收；兜底定时探测） | SND_ASYNC 即返，无需持有 |
 
@@ -156,4 +156,6 @@ target** 的 compile/type/test 并以同一完整 fixture 比对两个平台构�
   可闻性不作为门）；通用名×3 + 双平台各一原生名 + 一个必然 miss 名；**A/B 会话交错与关闭
   顺序四格**（P0-4：关闭不持有 token 的 session 不得 purge 别人的播放）；backend DTO 上报。
 - **双 target CI 编译门** + exhaustive fixture（P1-3）。
-- **体积证据**：`npm pack --dry-run` 实测报告（同 dialog §6.3 证据要求）。
+- **体积与发布证据**：真实 `npm pack --json --pack-destination`（tgz stat/digest、npm 版本、
+  packlist、四目标 hash）+ 解包同一 tgz 逐目标 identity check——与 dialog §6.3/§6.4 共用
+  同一脚本与证据格式，receipt 含 tarball 路径与 digest；dry-run 仅开发预警。

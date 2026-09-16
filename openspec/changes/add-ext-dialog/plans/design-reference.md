@@ -151,66 +151,91 @@ accessory 见 §4）。**空命名空间保持可表达**（`darwin: {}` 合法�
 
 ## 5. 原生架构（crates/opentray-ext-dialog；R2 P0-1/2/3 修订版）
 
-### 5.1 DeferredOperation 主模型 + 版本化 DeferredCompletionPort ABI
-
-现有 `ExtCommand` 是同步单响应；扩展命令 ABI 返回后 `ExtHostContext` 即失效（EventPort Law
-禁止驻留）。完成通道设计为**新的可选版本化 ABI 符号**（与 EventPort 可选符号同模式）：
+### 5.1 DeferredOperation：完整命令→终帧 ABI 事务（R3 P0-1 冻结）
 
 ```text
 # 协议帧（@opentray/spec + opentray-spec 冻结全量 schema 与 parser 真值）
-ServerFrame::ExtCommandAccepted  { requestId, operationId }   # 命令受理（对话已呈现/已登记）
-ServerFrame::ExtOperationTerminal { operationId, payload }   # 唯一终帧：payload 恒携带 extension result
+ServerFrame::ExtCommandAccepted  { requestId, operationId }   # 命令受理（Accepted 语义见 §5.3）
+ServerFrame::ExtOperationTerminal { operationId, payload }   # 唯一终帧
 
-# 原生侧可选符号（opentray-spec 常量，同 EventPort 家族）
-opentray_ext_attach_deferred_completion_port_v1(...)   # 一次 attach，immutable port
-port.submit(opaque_operation_handle, bounded_terminal_payload_json)
+# 命令返回处置（FFI 同步返回时的 tagged disposition）
+CommandDisposition = Immediate(ExtCommandResult) | Deferred(operation_handle)
+
+# 终帧载荷（discriminated union，Node 侧 resolve/reject 的唯一依据）
+TerminalPayload = { kind: "result", value: JSON } | { kind: "error", error: TypedExtensionError }
+
+# 原生侧可选版本化符号（opentray-spec 常量，同 EventPort 可选符号家族）
+opentray_ext_attach_deferred_completion_port_v1(port: *const ExtDeferredPortV1)
+ExtDeferredPortV1 = { abi_version, struct_size, port_data, submit }
+submit(port_data, handle, payload_bytes, payload_len) -> ExtResultCode
 ```
 
-- **operation 归属**：operationId 由 broker 生成，绑定不可伪造的
-  `(sessionId, instanceGeneration, operationId)`——扩展只能提交 host 签发的 opaque handle，
-  不能自造。
-- **terminal payload 恒携带结果**：用户取消、四路 dismissal、session close 撤销，一律由
-  扩展产出最终结果（cancelId 分支 / picker null / `dialog_dismissal_unavailable` typed
-  error payload）经同一通道结算——session-close 取消与用户取消同构，**不存在独立
-  `Cancelled` 帧**，杜绝 Node 侧 extension-specific 推导（R2 P0-1 裁决）。
-- **broker 侧**：`NativeBrokerApp` 持通用 operation registry——port completion 到达后由
-  owner loop CAS 结算（重复终帧/错 owner/旧 generation 无状态丢弃 + 诊断），仅向仍匹配的
-  transport session writer 投递终帧；terminal-before-same-operation-event barrier 冻结。
-- **Node 侧**：`PendingRequest` 升级 pending-until-final（Accepted 不结算）；连接 `markDead`
-  时本地全部 pending operation 以 typed `dialog_transport_closed` 拒绝——broker 不向已关闭
-  socket 承诺写终帧。
-- **protocol version** 提升；所有 exhaustive switch 双侧同步；确定性测试族：accepted 后两
-  普通请求、重复终帧、completion/Exit race、disconnect before/after accepted、旧
-  generation、wrong owner。
+**事务规则（全部冻结）**：
 
-### 5.2 macOS：broker-owned owner-loop poll/wake（DLL 不持有任何 waker）
+- **handle 签发**：operationId 与 opaque handle 均由 broker 生成，**仅在命令调用期间**经
+  CommandDisposition::Deferred 下发（host→extension 单向，一次有效）；handle 为不透明
+  64-bit nonce，绑定 `(sessionId, instanceGeneration, operationId)`；扩展自造/重放 handle →
+  `EXT_ERR_INVALID_HANDLE`，错 owner → 丢弃 + 诊断（不回帧）。
+- **port 生命周期（EventPort 同款模式）**：immutable host-owned 状态；`version` +
+  `struct_size` 校验（不符 → `event_port_abi_incompatible` 同族错误，不静默降级）；
+  submit 为 bounded-copy（payload 上限与 EventPort 记录上限一致，超限 →
+  `EXT_ERR_OVERSIZED`）；返回码 `EXT_OK / EXT_ERR_PORT_CLOSED / EXT_ERR_INVALID_HANDLE /
+  EXT_ERR_OVERSIZED`；**submit 通道在 LoadExt ACK 后才打开**；session/instance 清理前先
+  revoke（此后 submit 恒 `EXT_ERR_PORT_CLOSED`，无队列突变）；broker 不在可能仍有 stale
+  worker submit 的窗口释放 host 内存——port_data 指向 broker 拥有的进程级存活状态。
+- **终帧语义**：`TerminalPayload` 是 success/error 的唯一判别——`result` 分支 resolve，
+  `error` 分支以 TypedExtensionError reject（含 `dialog_dismissal_unavailable` 等）；
+  撤销路径由扩展产出 cancel 分支 result payload（与用户取消同构）；重复终帧/旧
+  generation → owner loop CAS 无状态丢弃 + 诊断。
+- **事件顺序的诚实声明**：dialog 不经 EventPort 发任何事件，故**不承诺任何
+  terminal-before-event barrier**——终帧与其它帧的相对顺序由 transport 写出顺序唯一决定。
+- **断连语义分层**：共享 spec 冻结通用 `extension_transport_closed`（核心 client 对一切
+  pending operation 的统一拒绝，无任何扩展名分支）；ext-dialog facade 将其映射为公开的
+  `dialog_transport_closed`（facade 层 mapping，core 不认识 dialog）。
+- **protocol version** 提升；exhaustive switch 双侧同步；确定性测试族：ABI layout/未知
+  version、伪造/stale/错 owner handle、success/error 终帧 round-trip（Rust/TS/Node/Bun）、
+  accepted 前后断连、重复终帧、revoke 后 submit、核心 client 无 dialog 分支的编译期证明。
 
-`UserEvent` 是 opentray-bin 私有 enum，动态 DLL ABI 不暴露 EventLoopProxy（R2 P0-2 证据）。
-调度权反转：
+### 5.2 macOS：broker-owned 调度器（poll_owner + WaitUntil，无自旋无饿死）
 
-- 扩展在 show 命令内只**登记 opaque operation**（构造 NSAlert/NSPanel +
-  `beginModalSession`）并立即返回 Accepted；
-- broker owner loop 通过版本化 FFI **`poll_owner(operation)`** 驱动每次 `runModalSession`
-  步进，并自行合并/投递 wake（包括 AppKit 回调触发的再调度——扩展经 completion port 或
-  poll 返回值告知「需要继续步进」）；
-- 状态机 `Created → Presented → Stepping → Dismissed | Revoked`；一次性 completion CAS；
-  teardown 顺序：CAS `Revoked` → `endModalSession` + panel close → 扩展 cleanup；
-- **probe 前置（协议之后）**：必须覆盖 owner wake 饿死（`ControlFlow::Wait` 无事件时步进
-  不停滞）、exit race（broker 关闭与步进并发）、step 与普通 menu frame 交错次序。
+`UserEvent` 是 opentray-bin 私有 enum，DLL 不得持有 waker（R2 P0-2）。调度契约冻结：
 
-### 5.3 win32：per-owner 有界 STA worker
+- **poll 结果类型**：`poll_owner(operation) -> Done(terminal_payload) | Pending { next_deadline, wake_reason }`——Done 携带终帧 payload（经 §5.1 port 或 poll 返回，二选一在实现批冻结，不允许双通道）。
+- **调度器归属 broker**：owner loop 持有**一个合并的 `DialogPollDue(generation)` user
+  event**；`ControlFlow::WaitUntil(min(所有 Pending.next_deadline))` 或平台 timer 驱动；
+  同 generation 的多次 due 合并为一次 poll。
+- **native 回调约束**：AppKit 回调只允许**推进 deadline**（写扩展内部原子状态），
+  不得保留 broker 指针、不得无上限自发 wake——「需要继续步进」只能通过 deadline 到期
+  表达。
+- **撤销**：revoke 先从调度表移除该 generation（stale due 事件经 generation 检查丢弃），
+  再 endModalSession。
+- **配额**：每次 owner loop 迭代的 modal poll 工作量有界（冻结：单次迭代 ≤ 4 个 owner、
+  每 owner ≤ 1 次 runModalSession 步进），menu/transport 帧不被饿死。
+- **probe 前置**（协议完成后）：无外部事件下终态推进（WaitUntil 到期驱动）、空闲
+  CPU/wake 计数有界、modal 步进之间普通 menu/transport 帧正常完成、exit/revoke 竞态无
+  AppKit 调用且无重复终帧。
 
-单全局 STA 被否决（R2 P0-2：排队违反 Accepted=presented；嵌套无 reentrancy 合同）。改为：
+### 5.3 win32：per-owner 有界 STA worker 与诚实 Accepted 语义
 
-- **每活动 `(appId, trayId, sessionId)` 一个 STA worker**（有界上限，冻结数值；超限 →
-  typed `dialog_busy` 族拒绝）；worker 只拥有自己的 COM dialog/HWND（TaskDialogIndirect /
-  IFileOpenDialog / IFileSaveDialog 在 worker 线程 `CoInitialize` 后运行）；
-- **presentation ACK**：worker 完成呈现后才发 Accepted（对齐「Accepted = 已呈现」）；
-- **close dispatcher**：撤销请求经 `WM_APP` 投递到该 worker 线程处理（COM 接口不跨线程）；
-- **join timeout 与 shutdown 顺序冻结**：broker 退出时按 owner 逆序 close → join（有界
-  超时 + 诊断）→ 扩展 cleanup；
-- tray backend 的 HWND/notify-icon 线程归属不受影响（worker 不触碰 tray HWND）；
-- comctl6：绑定 broker EXE `RT_MANIFEST`（§5.4/§2.2 不变）。
+- **Accepted 的诚实语义（R3 P0-3 裁决）**：win32 `IFileDialog::Show` 是同步调用，无文档
+  化的「已呈现」先验信号——Accepted 在 win32 统一冻结为「**worker 已进入原生模态调用**」
+  （对 TaskDialog 以 `TDN_CREATED` 回调为呈现证据、`IFileDialog::Show` 以进入调用为证据，
+  probe 先行取证）；绝不把排队称为 presentation。
+- **数值冻结**：worker 上限 **8**（per broker）；达到上限 → typed
+  `dialog_worker_limit_reached`（区别于同 owner 第二对话框的 `dialog_session_busy`），
+  拒绝发生在 Accepted 之前，绝不静默排队；worker 启动+进入模态调用超时 **3s**（超时 →
+  typed `dialog_presentation_failed` 终帧 error）；join timeout **2s**（超时记诊断并
+  放弃 join，不阻塞 broker 退出）；close dispatcher = `WM_APP+{owner 序号}`，仅 worker
+  线程处理自己的 COM 对象。
+- **线程契约**：`ExtDeferredPortV1.submit` 为 host 拥有的线程安全状态（Send+Sync 由
+  broker 侧保证）；跨线程移动的只有**可拷贝的请求数据与 port shim**——扩展实例与全部
+  COM/AppKit 对象永不移动。opentray-core 的 blanket `ExtensionInstance: Send` 与
+  dynamic_extension 的 `unsafe impl Send` 对 UI-affine 实例**移除或证明永不移动**（改为
+  owner-thread registry + 线程亲和断言）。
+- **shutdown 顺序**：按 owner 逆序投递 close → join（2s 有界）→ 诊断 → 扩展 cleanup；
+  worker 在 join 超时后不再接收新请求。
+- comctl6：绑定 broker EXE `RT_MANIFEST`；启动能力探测写 DTO；不可用 → MessageBox 兜底
+  + `commandLink`/`expander` typed `dialog_capability_unavailable`。
 
 ### 5.4 busy 与撤销语义
 
@@ -286,7 +311,8 @@ packages/ext-dialog/
 
 ### 6.3 体积门（workspace `scripts/check-pack-size.mjs`）
 
-- 对内嵌平台二进制的包执行 `npm pack --dry-run`，取 **tarball 压缩体积**；
+- 对内嵌平台二进制的包执行**真实 `npm pack --json --pack-destination <temp>`**，从生成
+  `.tgz` 的 `stat` 取压缩体积（`--dry-run` 仅快速开发预警）；
 - `≥ 2MB` → 警告（CI warning + 发布前必须 Owner 决策记录）；
 - `> 3MB` → CI fail（必须拆分为 `@opentray/<name>-<os>-<arch>` 平台包，不再询问）；
 - 已发布平台包形态的既有包（ext-badge/ext-webview/ext-lynx）不受追溯；
@@ -304,17 +330,19 @@ packages/ext-dialog/
 - **facade staging 收齐规则**：四目标（darwin-arm64/x64、windows-arm64/x64）全部匹配当前
   facade version 与 contract fingerprint 才写入 `packages/ext-dialog/platforms/<target>/`
   并生成 manifest；缺目标、过期 target、hash 不匹配必须失败。
-- **embedded staging manifest（身份链闭合）**：staging 生成 root-contained
+- **embedded staging manifest（身份链闭合，R3 P0-5 顺序修正）**：staging 生成 root-contained
   `platforms/manifest.json`——每目标 relative path、SHA-256、buildIdentity、facade
-  version、contract fingerprint，随 pack 发布。resolver 必须 containment 校验该 manifest、
-  计算选中 library 的 hash、把 buildIdentity/hash 纳入 expected load identity；broker 在
-  `Library::new` 前重验 actual embedded manifest 的 build identity 与 expected 一致。
-  **TOCTOU 裁决**：CI closure 以 stage/pack 后重 hash 为 release authority；运行时至少在
-  load 前重 hash 并拒绝不匹配。adversarial 测试必须替换**真实 library bytes**（而非仅改
-  JSON 声称）。
+  version、contract fingerprint，随 pack 发布。**校验顺序（可实现序）**：Node 侧
+  containment 校验 manifest + 计算选中 library hash → 把 expected sha256 与 buildIdentity
+  纳入 `LoadExt`/`ExpectedExtensionIdentity` 传输 → broker 在 dlopen 前对已解析路径重算
+  hash 比对 → **native embedded manifest 只能在 `Library::new` 之后、`init` 之前**校验
+  （manifest 是库内导出符号；诚实声明，不声称 before Library::new）。TOCTOU 残余（hash
+  后 dlopen 的窗口）单独记录为已知边界——hash-then-load 不能消除全部 OS 竞态，CI 以
+  stage/pack 后重 hash 为 release authority。adversarial 测试必须替换**真实 library
+  bytes**（而非仅改 JSON 声称）。
 - 同步改动面：`release-plan.ts`、`verify-native-plan.ts`、`stage-release-artifacts.ts`、
   `.github/workflows/release.yml`、facade `files` 字段及配套测试。
-- 验收：clean checkout 执行 release dry-run（真实 pack）→ 解包 tgz → 逐目标 resolver/
+- 验收：clean checkout 执行 release 预演（真实 pack）→ 解包 tgz → 逐目标 resolver/
   loader identity check 全绿。
 
 ## 7. `DialogBackendCapabilities` DTO
@@ -336,7 +364,7 @@ export interface DialogBackendCapabilities {
 （Rust）的公共 schema，配 **exhaustive serialization fixture**（字段新增时 fixture 编译期
 穷尽检查，漏一个平台即红）；CI 明确执行 darwin 与 windows **两个 target** 的
 compile/type/test——单一 target 编译通过不构成门。
-facade 以 `dialog.backend` 暴露只读快照；命名空间开关的可用性判断以 DTO 为运行时事实源
+facade 以异步 `getBackend(): Promise<DialogBackendCapabilities>` 暴露快照；命名空间开关的可用性判断以 DTO 为运行时事实源
 （例：comctl6 缺失时传 `buttonStyle: 'commandLink'` → typed
 `dialog_capability_unavailable`，不静默降级为标准按钮）。
 
@@ -352,32 +380,42 @@ schema；Rust `ExtensionError::Detailed` 与 server error frame、Node typed err
 
 ## 8. 测试策略（R1 修订）
 
-- **TS 确定性**（vitest，Node 与 Bun 双跑）：deferred envelope 状态机（Accepted 不结算/
-  Completed/Cancelled exactly-once/传输关闭 typed rejection/一个 deferred 命令夹在两个普通
-  命令之间完成且只结算一次）；命名空间校验（mismatch/未知字段/commandLink 前置/空
-  buttons/索引越界）；糖语义；dismissal 映射；picker null/绝对路径 canonicalize；embedded
-  artifact 解析（多目标/缺目标/**路径穿越/symlink 逃逸/字节替换/manifest skew** 四族
-  adversarial）；typed 错误 wire round-trip；pack-size 脚本 fixture 双臂。
-- **原生验收（双平台真机）**：每方法冒烟；**交错时间线取证**——对话框打开期间同 app 另一
-  tray 菜单交互、另一 app session 请求、普通 `set-menu`/`ext-command` 三类真实交错完成
-  （捕获 transport/request 时间线，不只截窗口图）；**四路 dismissal 一致性**（标题栏/
-  ESC/系统关闭/session close → 同一 cancelId 映射）；session close 撤销；`dialog_session_busy`；
-  跨 session 并发；suppression 回传；commandLink/expander 真机截证；macOS modal-step
-  probe 证据（P0-3：step/menu frame/session close/broker exit 交错次序）。
+- **TS 确定性**（vitest，Node 与 Bun 双跑）：deferred 事务（handle 签发/伪造/stale/错
+  owner、Accepted 不结算、TerminalPayload result/error 双分支 round-trip、exactly-once、
+  传输关闭 typed rejection、一个 deferred 命令夹在两个普通命令之间完成且只结算一次、
+  核心 client 无 dialog 分支编译期证明）；命名空间校验（mismatch/未知字段/commandLink
+  前置/空 buttons/索引越界）；糖语义；dismissal 映射；picker null/路径 canonicalize；
+  embedded artifact 解析（多目标/缺目标/**路径穿越/symlink 逃逸/真实字节替换/manifest
+  skew** 四族 adversarial + LoadExt expected sha256/buildIdentity 字段断言）；typed 错误
+  wire round-trip；pack-size 脚本 fixture 双臂（真实 tgz stat）。
+- **原生验收（双平台真机）**：每方法冒烟；**交错时间线取证**——对话框打开期间同 session
+  其它 tray 菜单交互、普通 `set-menu`/`ext-command` 真实交错完成（捕获 transport/request
+  时间线，不只截窗口图）；**四路 dismissal 一致性**（标题栏/
+  ESC/系统关闭/session close → 同一 cancelId 映射）；session close 撤销（cancel 分支
+  payload）；`dialog_session_busy` / `dialog_worker_limit_reached`（cap-1/cap/cap+1）；
+  suppression 回传；commandLink/expander 真机截证；macOS modal-step
+  probe 证据（§5.2：WaitUntil 驱动/空闲 wake 有界/menu 帧不饿死/exit race）。
 - **双 target CI 编译门**：darwin 与 windows 两 target 各自 compile/type/test + DTO
   exhaustive fixture（P1-3）。
-- **体积与发布证据**：`npm pack --dry-run` 实测报告（§6.3）；clean checkout release
-  dry-run + 解包逐目标 identity check（§6.4）。
+- **体积与发布证据**：真实 `npm pack --json --pack-destination` 产物（tgz stat/digest/
+  npm 版本/packlist/目标 hash）；clean checkout release 预演（真实 pack）+ 解包同一
+  tgz 逐目标 identity check（§6.3/§6.4）。
+- **文档一致性 grep 门**（R3 P0-6）：本 change 全部文档禁止
+  `ExtCommandCompleted`、`ExtCommandCancelled`、同步 `backend` 属性、same-broker 跨
+  session 并发表述、dry-run 作为发布证据——评审记录中的历史引用除外。
 
 ## 9. 法条草案（收尾落 AGENTS.md）
 
 1. Monorepo Law += 包体积门（§6.3 全文，标注 Owner ruling 2026-09-16、首例 ext-dialog）。
 2. 新章 **Dialog Extension Law**（从本档提炼）：模态不阻塞 broker 事件派发（macOS
-   modal-session 步进状态机 / win32 对话框专属 STA 线程 + EventLoopProxy 回传；任何
-   owner-loop 线程内模态调用均为违规）；完成走通用 deferred command envelope（exactly-once；
-   不上 EventPort）；每 session 一对话框（busy typed）；session close 先撤销再 cleanup，以
-   cancel 语义结算；平台命名空间严格 typed 校验；prompt 不做、Linux typed unsupported、
-   无 page 桥。
-3. **deferred command envelope 是通用协议能力**：任何扩展的长时间命令（对话框、未来导出
-   等）一律走 Accepted/Completed/Cancelled，不私有造帧；sessionId 由 broker 注入命令作用域，
-   扩展不得自报。
+   broker-owned 调度器 poll_owner + WaitUntil 合并 wake / win32 per-owner 有界 STA
+   worker；任何 owner-loop 线程内模态调用均为违规；**扩展不得持有任何 waker——调度权恒在
+   broker**）；完成走 DeferredOperation 事务（CommandDisposition tagged 返回 + 唯一
+   Terminal 帧 result/error 判别；DeferredCompletionPort 生命周期同 EventPort 模式）；
+   每-owner 一对话框（busy/worker-limit typed 两级）；session close 先撤销再 cleanup，以
+   cancel 分支 result 结算；平台命名空间严格 typed 校验；prompt 不做、Linux typed
+   unsupported、无 page 桥。
+3. **DeferredOperation 是通用协议能力**：任何扩展的长时间命令一律走 CommandDisposition
+   /TerminalPayload 事务，不私有造帧；`extension_transport_closed` 是核心 client 的通用
+   断连拒绝，扩展 facade 自行映射公开码；sessionId 由 broker 注入命令作用域，扩展不得
+   自报。

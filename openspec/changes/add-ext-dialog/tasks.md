@@ -12,7 +12,7 @@
 ## 2. BDD Contract — 批次 A（协议 + 共享基建；独立可审单元）
 
 - [ ] 2.1 `@opentray/spec` + opentray-spec：`ExtCommandAccepted`/`ExtOperationTerminal`（payload 恒带结果）全量 server frame 与 parser 真值；operation 归属 `(sessionId, instanceGeneration, operationId)`；`TypedExtensionError {code, message, details}` discriminated union（ServerFrame error 与 terminal 共用 JSON 形状；每个 dialog 错误码指定 detail variant）；`CommandScope` 注入；Dialog 命令/选项/结果类型 + BackendCapabilities 共享 schema + exhaustive fixture；protocol version 提升；单测（repr/schema 冻结）。
-- [ ] 2.2 可选版本化 ABI 符号：`opentray_ext_attach_deferred_completion_port_v1`（opaque handle + bounded payload；不复用 ExtHostContext）+ `poll_owner(operation)`（owner-loop 步进）；opentray-spec 常量与 stub FFI 决策表测试（同 EventPort 测试形态）。
+- [ ] 2.2 可选版本化 ABI 符号：`opentray_ext_attach_deferred_completion_port_v1`（EventPort 生命周期模式：immutable host 状态/version+struct_size/bounded-copy submit/CLOSED+INVALID_HANDLE+OVERSIZED 返回码/LoadExt ACK 后打开/清理前 revoke）+ **`poll_owner(operation) -> Done | Pending{next_deadline, wake_reason}`**（owner-loop 调度器：合并 DialogPollDue(generation)、WaitUntil(min deadline)、每迭代 ≤4 owner × 1 步进配额）；opentray-spec 常量与 stub FFI 决策表测试（同 EventPort 测试形态）。
 - [ ] 2.3 broker（opentray-bin/core）：operation registry + owner loop CAS 结算（重复/错 owner/旧 generation 无状态丢弃+诊断）+ session writer 路由 + terminal-before-event barrier；CommandScope 注入与 registry 键升级；`Send` 安全裁决（UI-affine 实例 owner-thread registry，不依赖 unsafe Send）；`Library::new` 前 buildIdentity 重验。
 - [ ] 2.4 Node（packages/cli）：pending-until-final 状态机、导出 typed error class（code/details/cause）、markDead 断连 typed `dialog_transport_closed` 拒绝；确定性测试（Node+Bun 双跑）：accepted 后两普通请求/重复终帧/completion-Exit race/disconnect 前后/旧 generation/wrong owner。
 - [ ] 2.5 opentray SDK：`NativeExtensionEmbeddedArtifact`——containment + embedded staging manifest 身份链（hash 计算 + buildIdentity 纳入 expected identity）+ 四类结构化错误 + adversarial 四族（含替换真实 library bytes）。
@@ -22,7 +22,7 @@
 
 - [ ] 3.1 macOS probe（**协议完成后前置**）：owner wake 饿死（Wait 无事件步进不停滞）/ exit race / step 与普通 menu frame 交错次序取证；未取得 probe 证据不得勾选 3.2。
 - [ ] 3.2 macOS：show 登记 opaque operation + `beginModalSession` 立即 Accepted；`poll_owner` 驱动 `runModalSession` 步进状态机（一次性 completion CAS；teardown 先 CAS 再 endModalSession）；NSAlert（suppression/severity/escape→cancelId）/ NSOpenPanel / NSSavePanel；终帧 payload 恒带结果。
-- [ ] 3.3 win32：per-owner 有界 STA worker（冻结上限/presentation ACK/`WM_APP` close dispatcher/join timeout/shutdown 顺序）；TaskDialogIndirect（broker EXE RT_MANIFEST + 启动能力探测 + MessageBox 兜底与 DTO 上报）/ IFileOpenDialog / IFileSaveDialog。
+- [ ] 3.3 win32：per-owner 有界 STA worker（**数值冻结：cap 8 / 启动+进入超时 3s→`dialog_presentation_failed` 终帧 / join 超时 2s / WM_APP close dispatcher**；**Accepted 诚实语义 = worker 已进入原生模态调用**，TaskDialog 以 TDN_CREATED 取证，IFileDialog 无先验呈现信号不谎称）；TaskDialogIndirect（broker EXE RT_MANIFEST + 启动能力探测 + MessageBox 兜底与 DTO 上报）/ IFileOpenDialog / IFileSaveDialog；cap-1/cap/cap+1 测试（满载 typed `dialog_worker_limit_reached` 前置拒绝，绝不静默排队）；线程亲和断言（command/deinit 恒 owner 线程，仅可拷贝数据与 port shim 跨线程；blanket Send 移除或证明永不移动）。
 - [ ] 3.4 busy 原子占用（同 scope 第二个 typed `dialog_session_busy`）；session close 先 CAS Revoked → 撤销 → cancel 分支 payload 终帧 → cleanup；四路 dismissal 一致映射。
 - [ ] 3.5 BackendCapabilities DTO 嵌入上报 + 双 target CI + exhaustive fixture 比对。
 

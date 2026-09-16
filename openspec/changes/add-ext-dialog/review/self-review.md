@@ -1,0 +1,33 @@
+# add-ext-dialog — Self-Review（设计阶段）
+
+> 评审人：编排者。对象：R3 修订后的 design-reference / spec delta / tasks（commit 待提交）。
+> 性质：**research-plan 阶段自评**——实现尚未开始；本档在 apply 各批次完成后更新为实现自评。
+
+## 总判定
+
+设计经 Codex 三轮对抗评审（4.0 → 5.0 → 5.8）迭代收敛，R3 全部 P0/P1 已吸收。
+当前状态：**设计冻结候选，等待 R4 复核 GO 后进入批次 A 实现**。
+
+## 对照 R3 的闭合自查
+
+| R3 项 | 落点 | 自查结论 |
+|---|---|---|
+| P0-1 ABI 事务 | design §5.1（CommandDisposition/Handle 签发/TerminalPayload union/port 生命周期/EXT_ERR 族/诚实事件顺序声明/通用断连码分层） | 闭合：success/error 判别、伪造 handle、submit 所有权全部冻结 |
+| P0-2 调度器 | design §5.2（Done\|Pending{next_deadline,wake_reason}、DialogPollDue(generation) 合并、WaitUntil、回调只推进 deadline、≤4 owner×1 步进配额、revoke 先移除调度） | 闭合：无自旋（WaitUntil）无饿死（配额）路径成文 |
+| P0-3 STA/线程契约 | design §5.3（Accepted=已进入模态调用的诚实语义、TDN_CREATED 取证、cap 8/3s/2s 数值、WM_APP、Send 移除或证明） | 闭合：数值与失败分类（worker_limit_reached/presentation_failed）冻结 |
+| P0-5 身份校验顺序 | design §6.4（Node 验 manifest+hash→LoadExt 带 sha256/buildIdentity→broker dlopen 前重 hash→native manifest 库开后 init 前校验；TOCTOU 已知边界声明） | 闭合：顺序可实现 |
+| P0-6 SSOT 一致性 | §7/§8/§9 重写 + grep 门（§8 新条目） | 闭合：本轮 grep 三门全净（历史引用除外） |
+| P1-2/3/4/5 | 数值冻结 / dry-run 清理 / getBackend 措辞 / 本档 | 闭合 |
+
+## 已知边界（诚实声明）
+
+1.Accepted 语义在两平台不同（mac=已呈现 vs win=已进入模态调用）——以平台注记形式冻结在
+design §5.3，spec 措辞采用 win32 诚实定义。
+2. hash-then-load 的 TOCTOU 残余窗口是已知边界（OS 竞态不可全消），CI 重 hash 为发布权威。
+3. macOS probe / win32 per-API probe 是批次 B 前置任务，其证据将在实现期回填本档。
+
+## Git 证据
+
+- 本阶段 commits：93ce37c5（R1 版）→ 82981086（R2 版）→ 本次（R3 版）。
+- 评审链：.agents/review/2026-09-17-ext-dialog-sound-r{1,2,3}.md。
+- validate：通过（每次修订后重跑）。
