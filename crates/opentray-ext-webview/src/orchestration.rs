@@ -488,55 +488,94 @@ impl ViewEvents {
 }
 
 /// add-navigation-favicon-surface: the Windows blocked-navigation ledger.
-/// Platform-neutral so the eviction, matching, and idempotence semantics
-/// are testable without a WebView2 host (R2 P2: the Windows observers
-/// delegate every ring decision here; the twin tests below cover the
-/// interleaving/eviction/duplicate/unknown cases Codex asked for).
+/// Platform-neutral so the pairing, eviction, idempotence, and
+/// exactly-once-terminal semantics are testable without a WebView2 host
+/// (the Windows observers delegate every ring decision here).
 ///
-/// Eviction is not silent semantic loss: when the ring is full, [`Self::block`]
-/// returns the evicted entry and the caller emits that navigation's terminal
-/// `failed(navigation_blocked)` frame immediately. The evicted navigation's
-/// eventual `NavigationCompleted` no longer matches the ring and reports
-/// through the ordinary platform path — one duplicate OperationCanceled
-/// frame is the documented cost of 64+ concurrently-blocked navigations on
-/// one view. The same immediate-frame rule covers a `NavigationStarting`
-/// whose NavigationId getter failed (the id must never key the ring).
+/// Exactly-once terminal rule (R3 P2): every blocked navigation produces
+/// exactly one terminal `failed(navigation_blocked)` frame. In-flight
+/// entries pair their `NavigationCompleted` through [`Self::complete`].
+/// When the ring is full, [`Self::block`] evicts the oldest entry, the
+/// caller emits its terminal frame immediately, and the entry's id moves
+/// to a bounded tombstone set: the late completion consumes the tombstone
+/// ([`CompletionOutcome::AlreadyTerminal`]) instead of emitting a second
+/// platform-coded failure. The tombstone set shares the ring capacity; a
+/// completion arriving after 64 fresher tombstones is the second-order
+/// pathological case and falls back to the ordinary platform path —
+/// recorded here as the only residual duplicate window.
+///
+/// A `NavigationStarting` whose NavigationId getter failed never keys the
+/// ring: the caller emits the terminal frame at the veto (after the
+/// `navigationAction` push) and cancels; the matching completion cannot
+/// read its id either (same COM property family), so it returns through
+/// the getter-failure path without a frame — the pairing invariant.
 ///
 /// Lifecycle: one ring per controller, owned by the observer closures. A
 /// destroyed controller stops firing events (WebView2 drops its handlers
 /// with the sender), the closures and the ring die with it, and a re-created
 /// view id gets a fresh controller, fresh closures, and a fresh ring — a
-/// late completion can never reach a successor view.
+/// late completion can never reach a successor view (the isolation twin
+/// test below pins this at ring level).
 pub(crate) struct BlockedNavigationRing {
     entries: VecDeque<(u64, String)>,
+    tombstones: VecDeque<u64>,
     capacity: usize,
+}
+
+/// The decision for one `NavigationCompleted`, from the blocked ledger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CompletionOutcome {
+    /// A blocked navigation still in the ring: emit the terminal failed
+    /// frame with this URL and the stable blocked code.
+    Blocked(String),
+    /// The terminal frame was already emitted (eviction compensation):
+    /// drop this completion without any frame.
+    AlreadyTerminal,
+    /// Not a blocked navigation: the ordinary platform path applies.
+    Ordinary,
 }
 
 impl BlockedNavigationRing {
     pub(crate) fn new(capacity: usize) -> Self {
         Self {
             entries: VecDeque::new(),
+            tombstones: VecDeque::new(),
             capacity: capacity.max(1),
         }
     }
 
     /// Records one blocked navigation; returns the evicted entry when the
-    /// ring was full (the caller emits its failed frame now).
+    /// ring was full (the caller emits its failed frame now — the entry's
+    /// id is tombstoned so its late completion stays frame-silent).
     pub(crate) fn block(&mut self, id: u64, url: String) -> Option<(u64, String)> {
         let evicted = if self.entries.len() >= self.capacity {
             self.entries.pop_front()
         } else {
             None
         };
+        if let Some((evicted_id, _)) = &evicted {
+            if self.tombstones.len() >= self.capacity {
+                self.tombstones.pop_front();
+            }
+            self.tombstones.push_back(*evicted_id);
+        }
         self.entries.push_back((id, url));
         evicted
     }
 
-    /// Takes the URL of one completed navigation, if it was blocked.
-    /// Idempotent-by-removal: a second completion of the same id misses.
-    pub(crate) fn take(&mut self, id: u64) -> Option<String> {
-        let index = self.entries.iter().position(|(entry, _)| *entry == id)?;
-        self.entries.remove(index).map(|(_, url)| url)
+    /// Decides one completion. Ring hit: the blocked URL (remove-on-read,
+    /// so a duplicate completion misses). Tombstone hit: already terminal,
+    /// consume silently. Otherwise ordinary.
+    pub(crate) fn complete(&mut self, id: u64) -> CompletionOutcome {
+        if let Some(index) = self.entries.iter().position(|(entry, _)| *entry == id) {
+            let (_, url) = self.entries.remove(index).expect("position just found");
+            return CompletionOutcome::Blocked(url);
+        }
+        if let Some(index) = self.tombstones.iter().position(|entry| *entry == id) {
+            self.tombstones.remove(index);
+            return CompletionOutcome::AlreadyTerminal;
+        }
+        CompletionOutcome::Ordinary
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -1521,35 +1560,78 @@ mod tests {
     }
 
     #[test]
-    fn blocked_ring_pairs_completions_with_their_blocked_urls_and_evicts_with_notice() {
+    fn blocked_ring_pairs_completions_and_keeps_terminals_exactly_once() {
         let mut ring = BlockedNavigationRing::new(2);
-        // Interleaved A/B starts, completions arrive in the opposite order:
-        // each completion carries its own blocked URL.
+        // Interleaved A/B starts, completions in the opposite order: each
+        // completion carries its own blocked URL, once.
         assert!(ring.block(10, "https://example.org/a".into()).is_none());
         assert!(ring.block(11, "https://example.org/b".into()).is_none());
-        assert_eq!(ring.take(11).as_deref(), Some("https://example.org/b"));
-        assert_eq!(ring.take(10).as_deref(), Some("https://example.org/a"));
+        assert_eq!(
+            ring.complete(11),
+            CompletionOutcome::Blocked("https://example.org/b".into())
+        );
+        assert_eq!(
+            ring.complete(10),
+            CompletionOutcome::Blocked("https://example.org/a".into())
+        );
+        // A duplicate completion of a consumed id is ordinary (the caller's
+        // platform path owns that; the ledger never re-blocks).
+        assert_eq!(ring.complete(11), CompletionOutcome::Ordinary);
 
-        // Capacity eviction hands the caller the evicted entry so it can
-        // emit the terminal failed frame immediately (the evicted id's
-        // completion later misses the ring). With capacity 2 already held
-        // by 12/13, blocking 14 evicts 12.
+        // Capacity eviction: the evicted entry is reported for immediate
+        // compensation, and its late completion is tombstoned — silent, no
+        // second terminal frame.
         assert!(ring.block(12, "https://example.org/c".into()).is_none());
         assert!(ring.block(13, "https://example.org/d".into()).is_none());
         let evicted = ring
             .block(14, "https://example.org/e".into())
             .expect("full ring evicts");
         assert_eq!(evicted, (12, "https://example.org/c".to_string()));
-        assert!(ring.take(12).is_none());
-        assert_eq!(ring.take(13).as_deref(), Some("https://example.org/d"));
-        assert_eq!(ring.take(14).as_deref(), Some("https://example.org/e"));
+        assert_eq!(ring.complete(12), CompletionOutcome::AlreadyTerminal);
+        assert_eq!(
+            ring.complete(13),
+            CompletionOutcome::Blocked("https://example.org/d".into())
+        );
+        assert_eq!(
+            ring.complete(14),
+            CompletionOutcome::Blocked("https://example.org/e".into())
+        );
 
-        // Unknown and duplicate ids miss exactly once each.
-        assert!(ring.take(999).is_none());
-        assert!(ring.block(15, "https://example.org/f".into()).is_none());
-        assert_eq!(ring.take(15).as_deref(), Some("https://example.org/f"));
-        assert!(ring.take(15).is_none());
+        // Unknown ids are ordinary.
+        assert_eq!(ring.complete(999), CompletionOutcome::Ordinary);
         assert_eq!(ring.len(), 0);
+    }
+
+    #[test]
+    fn blocked_ring_tombstones_are_bounded_and_a_fresh_ring_never_sees_predecessor_ids() {
+        let mut ring = BlockedNavigationRing::new(2);
+        // Fill and overflow twice: tombstone capacity follows the ring's,
+        // the oldest tombstone ages out (the documented second-order
+        // fallback is Ordinary, never a wrong pairing).
+        for id in 1..=6u64 {
+            let _ = ring.block(id, format!("https://example.org/{id}"));
+        }
+        // ids 1..=4 evicted and tombstoned; the two oldest tombstones
+        // (1, 2) aged out when 5, 6 were tombstoned.
+        assert_eq!(ring.complete(1), CompletionOutcome::Ordinary);
+        assert_eq!(ring.complete(2), CompletionOutcome::Ordinary);
+        assert_eq!(ring.complete(3), CompletionOutcome::AlreadyTerminal);
+        assert_eq!(ring.complete(4), CompletionOutcome::AlreadyTerminal);
+        assert_eq!(
+            ring.complete(5),
+            CompletionOutcome::Blocked("https://example.org/5".into())
+        );
+        assert_eq!(
+            ring.complete(6),
+            CompletionOutcome::Blocked("https://example.org/6".into())
+        );
+
+        // Isolation (the P3 teardown contract at ring level): a destroyed
+        // controller's ring dies with it; the successor controller's fresh
+        // ring answers a predecessor id with Ordinary — no cross-view
+        // pairing is expressible.
+        let mut successor = BlockedNavigationRing::new(2);
+        assert_eq!(successor.complete(6), CompletionOutcome::Ordinary);
     }
 
     #[test]

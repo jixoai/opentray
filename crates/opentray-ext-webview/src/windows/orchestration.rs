@@ -435,52 +435,15 @@ pub(super) fn install_load_state_observers(
                     let _ = args.IsUserInitiated(&mut is_user_initiated);
                     let mut is_redirected = BOOL::default();
                     let _ = args.IsRedirected(&mut is_redirected);
-                    let navigation_id = match (|| -> Result<u64, windows_core::Error> {
-                        let mut id = 0u64;
-                        args.NavigationId(&mut id)?;
-                        Ok(id)
-                    })() {
-                        Ok(id) => id,
-                        Err(error) => {
-                            // R2 P2: an unreadable id never keys the ring.
-                            // The blocked failure frame is emitted HERE
-                            // (before the veto return), so the stable code
-                            // cannot be lost; the completion's ordinary
-                            // failed path may add one platform-coded
-                            // OperationCanceled frame — the documented cost.
-                            eprintln!(
-                                "opentray-ext-webview NavigationStarting id read failed: {error}"
-                            );
-                            if !uri.is_empty()
-                                && start_events.borrow().navigation_blocked(&uri)
-                            {
-                                push_view_event(
-                                    &start_events,
-                                    &start_outbox,
-                                    &start_owner,
-                                    |events, owner, window_id| {
-                                        events.note_load_state(
-                                            owner,
-                                            window_id,
-                                            WebviewLoadPhase::Failed,
-                                            uri.clone(),
-                                            Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
-                                            None,
-                                        )
-                                    },
-                                );
-                                args.SetCancel(true)?;
-                            }
-                            return Ok(());
-                        }
-                    };
-                    // The decision point: `navigationAction` observation
-                    // first (Windows projection truth: IsRedirected maps to
-                    // redirect exactly; an unredirected user-initiated
-                    // navigation maps to link — link/form are not separable;
-                    // everything else is other), then the synchronous rule
-                    // veto. A blocked navigation never reports `started` and
-                    // never seeds the pending url.
+                    // R3 P2: the decision point is action-first — the
+                    // `navigationAction` observation (Windows projection
+                    // truth: IsRedirected maps to redirect exactly; an
+                    // unredirected user-initiated navigation maps to link —
+                    // link/form are not separable; everything else is other)
+                    // and the synchronous rule veto run BEFORE any
+                    // NavigationId read, so a getter failure can never
+                    // swallow the action frame or reorder the blocked chain.
+                    // The id is only needed when the veto fires.
                     let navigation_type = if is_redirected.as_bool() {
                         WebviewNavigationType::Redirect
                     } else if is_user_initiated.as_bool() {
@@ -504,28 +467,65 @@ pub(super) fn install_load_state_observers(
                     );
                     let blocked = !uri.is_empty() && start_events.borrow().navigation_blocked(&uri);
                     if blocked {
-                        // R2 P2: eviction is not silent loss — the evicted
-                        // navigation's terminal failed frame is emitted now
-                        // (its eventual completion misses the ring and runs
-                        // the ordinary platform path).
-                        let evicted =
-                            start_blocked.borrow_mut().block(navigation_id, uri.clone());
-                        if let Some((_, evicted_url)) = evicted {
-                            push_view_event(
-                                &start_events,
-                                &start_outbox,
-                                &start_owner,
-                                |events, owner, window_id| {
-                                    events.note_load_state(
-                                        owner,
-                                        window_id,
-                                        WebviewLoadPhase::Failed,
-                                        evicted_url,
-                                        Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
-                                        None,
-                                    )
-                                },
-                            );
+                        // R3 P2: a blocked navigation never reports `started`
+                        // and never seeds the pending url. The terminal failed
+                        // frame is exactly one: either the ring pairs this
+                        // id with its completion, or (id unreadable) it is
+                        // emitted here — an unreadable id never keys the
+                        // ring, and the matching completion cannot read its
+                        // id either, so it returns through the getter-failure
+                        // path without a second frame. Eviction compensation
+                        // is also emitted now; the evicted id is tombstoned
+                        // so its late completion stays frame-silent.
+                        match (|| -> Result<u64, windows_core::Error> {
+                            let mut id = 0u64;
+                            args.NavigationId(&mut id)?;
+                            Ok(id)
+                        })() {
+                            Ok(navigation_id) => {
+                                let evicted = start_blocked
+                                    .borrow_mut()
+                                    .block(navigation_id, uri.clone());
+                                if let Some((_, evicted_url)) = evicted {
+                                    push_view_event(
+                                        &start_events,
+                                        &start_outbox,
+                                        &start_owner,
+                                        |events, owner, window_id| {
+                                            events.note_load_state(
+                                                owner,
+                                                window_id,
+                                                WebviewLoadPhase::Failed,
+                                                evicted_url,
+                                                Some(
+                                                    crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE,
+                                                ),
+                                                None,
+                                            )
+                                        },
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!(
+                                    "opentray-ext-webview NavigationStarting id read failed: {error}"
+                                );
+                                push_view_event(
+                                    &start_events,
+                                    &start_outbox,
+                                    &start_owner,
+                                    |events, owner, window_id| {
+                                        events.note_load_state(
+                                            owner,
+                                            window_id,
+                                            WebviewLoadPhase::Failed,
+                                            uri.clone(),
+                                            Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
+                                            None,
+                                        )
+                                    },
+                                );
+                            }
                         }
                         args.SetCancel(true)?;
                         return Ok(());
@@ -595,24 +595,34 @@ pub(super) fn install_load_state_observers(
                             return Ok(());
                         }
                     };
-                    let blocked_url = done_blocked.borrow_mut().take(blocked_navigation_id);
-                    if let Some(url) = blocked_url {
-                        push_view_event(
-                            &done_events,
-                            &done_outbox,
-                            &done_owner,
-                            |events, owner, window_id| {
-                                events.note_load_state(
-                                    owner,
-                                    window_id,
-                                    WebviewLoadPhase::Failed,
-                                    url,
-                                    Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
-                                    None,
-                                )
-                            },
-                        );
-                        return Ok(());
+                    // Exactly-once terminal rule: a ring hit emits the
+                    // stable blocked frame with the paired URL; a tombstone
+                    // hit (terminal frame already emitted by eviction
+                    // compensation) drops this completion silently; anything
+                    // else is the ordinary platform path.
+                    match done_blocked.borrow_mut().complete(blocked_navigation_id) {
+                        crate::orchestration::CompletionOutcome::Blocked(url) => {
+                            push_view_event(
+                                &done_events,
+                                &done_outbox,
+                                &done_owner,
+                                |events, owner, window_id| {
+                                    events.note_load_state(
+                                        owner,
+                                        window_id,
+                                        WebviewLoadPhase::Failed,
+                                        url,
+                                        Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
+                                        None,
+                                    )
+                                },
+                            );
+                            return Ok(());
+                        }
+                        crate::orchestration::CompletionOutcome::AlreadyTerminal => {
+                            return Ok(());
+                        }
+                        crate::orchestration::CompletionOutcome::Ordinary => {}
                     }
                     let url = done_pending.borrow().clone();
                     if success.as_bool() {
