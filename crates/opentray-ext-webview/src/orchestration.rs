@@ -503,18 +503,17 @@ impl ViewEvents {
 /// pairing when the completion's id is readable) plus ONE counter of
 /// cancellations whose completion has not been consumed yet (the bound:
 /// the counter is a single usize, the tombstones are capped; both die
-/// with the controller's observer closures). A failed completion first
-/// tries its id against the tombstones; anything else is suppressed only
-/// while un-consumed cancellations remain (`pending > 0`), consuming one.
-/// That window closes as cancellations complete — unlike a lifetime
-/// `ever_blocked` flag it cannot permanently swallow ordinary failures,
-/// and unlike a status-code check it covers every platform failure code.
-/// The accepted approximation: an ordinary failure interleaved while a
-/// cancellation is outstanding may be the one suppressed; exactly-once
-/// for cancelled navigations wins that trade (documented, and pinned by
-/// the twins below). Success completions are never suppressed and never
-/// consume the counter — a cancelled navigation cannot complete
-/// successfully.
+/// with the controller's observer closures). Decisions are
+/// identity-precise first: a readable id answers only against the
+/// tombstones, so an ordinary failure interleaved with an outstanding
+/// cancellation keeps its frame (the R6 interleave twin). The counter
+/// backs off to id-unreadable completions only (no identity exists
+/// there) and closes as those arrive — no lifetime suppression, no
+/// status-code sniffing. The accepted approximation is third-order: an
+/// ordinary failure whose own id is ALSO unreadable, arriving inside
+/// that window, is the one suppressed (a readable id would have passed
+/// it through). Success completions never consult the ledger — a
+/// cancelled navigation cannot complete successfully.
 ///
 /// Lifecycle: one ledger per controller, owned by the observer closures;
 /// it dies with them, and a re-created view id gets a fresh controller,
@@ -551,18 +550,29 @@ impl CancelLedger {
     /// the ledger). `true` = suppressed: this completion belongs to an
     /// already-terminal cancellation, emit nothing.
     pub(crate) fn suppress_failed_completion(&mut self, id: Option<u64>) -> bool {
-        if let Some(id) = id {
-            if let Some(index) = self.tombstones.iter().position(|entry| *entry == id) {
-                self.tombstones.remove(index);
-                self.pending_cancel_completions = self.pending_cancel_completions.saturating_sub(1);
-                return true;
+        // R6: identity-precise first. A readable id answers ONLY against
+        // the tombstones — an ordinary navigation failing while a
+        // cancellation is outstanding keeps its frame. The pending counter
+        // backs off to id-unreadable completions only, where no identity
+        // exists at all.
+        match id {
+            Some(id) => {
+                if let Some(index) = self.tombstones.iter().position(|entry| *entry == id) {
+                    self.tombstones.remove(index);
+                    self.pending_cancel_completions =
+                        self.pending_cancel_completions.saturating_sub(1);
+                    return true;
+                }
+                false
+            }
+            None => {
+                if self.pending_cancel_completions > 0 {
+                    self.pending_cancel_completions -= 1;
+                    return true;
+                }
+                false
             }
         }
-        if self.pending_cancel_completions > 0 {
-            self.pending_cancel_completions -= 1;
-            return true;
-        }
-        false
     }
 }
 
@@ -1568,21 +1578,66 @@ mod tests {
     }
 
     #[test]
-    fn cancel_ledger_tombstone_eviction_falls_back_to_the_counter() {
+    fn cancel_ledger_never_swallows_a_readable_interleaved_ordinary_failure() {
+        // R6 interleave: blocked A (terminal already emitted at its veto)
+        // is outstanding while ordinary navigation B fails. B's completion
+        // carries a readable id that hits no tombstone — its frame MUST
+        // pass through, in any completion order, and repeated B
+        // completions keep passing.
+        let mut ledger = CancelLedger::new(2);
+        ledger.note_cancel(Some(100)); // A
+                                       // B fails first (id readable, unknown to the ledger).
+        assert!(!ledger.suppress_failed_completion(Some(200)));
+        assert!(!ledger.suppress_failed_completion(Some(200)));
+        // A's completion arrives after B (out-of-order pair) and pairs
+        // precisely.
+        assert!(ledger.suppress_failed_completion(Some(100)));
+        // Nothing outstanding anymore: an unreadable failure passes too.
+        assert!(!ledger.suppress_failed_completion(None));
+    }
+
+    #[test]
+    fn cancel_ledger_unreadable_failures_consume_the_window_only() {
+        // The pending window exists only for completions with NO readable
+        // id. A readable failure never consults the counter even while a
+        // cancellation is outstanding.
+        let mut ledger = CancelLedger::new(2);
+        ledger.note_cancel(None); // cancellation with an unreadable id
+        assert!(ledger.suppress_failed_completion(None));
+        assert!(!ledger.suppress_failed_completion(None));
+        ledger.note_cancel(Some(300));
+        assert!(!ledger.suppress_failed_completion(Some(301)));
+        assert!(ledger.suppress_failed_completion(Some(300)));
+    }
+
+    #[test]
+    fn cancel_ledger_tombstone_eviction_lets_late_completions_pass() {
         let mut ledger = CancelLedger::new(2);
         for id in 1..=6u64 {
             ledger.note_cancel(Some(id));
         }
-        // ids 1..=4 evicted; the counter (6 outstanding) still suppresses
-        // their late completions — eviction never re-opens a terminal.
-        assert!(ledger.suppress_failed_completion(Some(1)));
-        assert!(ledger.suppress_failed_completion(Some(2)));
-        assert!(ledger.suppress_failed_completion(Some(3)));
-        assert!(ledger.suppress_failed_completion(Some(4)));
-        // Paired tombstones for the freshest two.
+        // ids 1..=4 evicted. R6 direction: a readable id that hits no
+        // tombstone PASSES — identity-precise means the ledger never
+        // guesses, so an evicted id's late completion runs the ordinary
+        // platform path (a second, platform-coded frame after the stable
+        // terminal already emitted at the veto — the second-order
+        // pathological trade: mis-suppressing an interleaved ordinary
+        // failure is worse than one redundant frame).
+        assert!(!ledger.suppress_failed_completion(Some(1)));
+        assert!(!ledger.suppress_failed_completion(Some(2)));
+        assert!(!ledger.suppress_failed_completion(Some(3)));
+        assert!(!ledger.suppress_failed_completion(Some(4)));
+        // Paired tombstones for the freshest two still suppress precisely.
         assert!(ledger.suppress_failed_completion(Some(5)));
         assert!(ledger.suppress_failed_completion(Some(6)));
-        // Counter exhausted: ordinary failures pass again.
+        // The unreadable window tracks cancellations whose ids were never
+        // recorded (four of the six consumed their tombstones above; the
+        // two evicted ones left the counter at 6 - 2 = 4).
+        assert!(ledger.suppress_failed_completion(None));
+        assert!(ledger.suppress_failed_completion(None));
+        assert!(ledger.suppress_failed_completion(None));
+        assert!(ledger.suppress_failed_completion(None));
+        assert!(!ledger.suppress_failed_completion(None));
         assert!(!ledger.suppress_failed_completion(Some(7)));
     }
 
