@@ -17,9 +17,13 @@ use std::time::Instant;
 
 use opentray_core::BrokerSession;
 #[cfg(not(target_os = "macos"))]
+use opentray_core::operations::DeferredOperationRegistry;
+#[cfg(not(target_os = "macos"))]
 use opentray_core::{AppBackend, BrokerKernel};
 use opentray_spec::{ClientFrame, RuntimeHostHealth, RuntimeHostSessionHealth, ServerFrame};
 
+#[cfg(not(target_os = "macos"))]
+use crate::deferred_port::{drain_deferred_terminals, DeferredPortHub};
 #[cfg(not(target_os = "macos"))]
 use crate::dynamic_extension::DynamicExtensionLoader;
 #[cfg(not(target_os = "macos"))]
@@ -42,15 +46,17 @@ pub enum TransportEvent {
     Disconnected { id: u64 },
 }
 
-/// The Linux broker loop's single wake channel: socket transport events plus
-/// the D19 EventPort drain request share one blocking mpsc receiver (there is
-/// no native GUI loop in this checkout; KSNI is a stub). Wrapping
-/// `TransportEvent` is a host adapter, not a C ABI difference.
+/// The Linux broker loop's single wake channel: socket transport events, the
+/// D19 EventPort drain request, and the deferred-terminal drain request
+/// share one blocking mpsc receiver (there is no native GUI loop in this
+/// checkout; KSNI is a stub). Wrapping `TransportEvent` is a host adapter,
+/// not a C ABI difference.
 #[cfg(not(target_os = "macos"))]
 #[derive(Debug)]
 enum BrokerEvent {
     Transport(TransportEvent),
     ExtensionEventsReady,
+    DeferredTerminalsReady,
 }
 
 /// mpsc wake adapter for the Linux receive loop.
@@ -61,6 +67,17 @@ struct ChannelWake(std::sync::mpsc::Sender<BrokerEvent>);
 impl RuntimeWake for ChannelWake {
     fn wake(&self) -> bool {
         self.0.send(BrokerEvent::ExtensionEventsReady).is_ok()
+    }
+}
+
+/// DeferredPort sibling of [`ChannelWake`].
+#[cfg(not(target_os = "macos"))]
+struct DeferredChannelWake(std::sync::mpsc::Sender<BrokerEvent>);
+
+#[cfg(not(target_os = "macos"))]
+impl RuntimeWake for DeferredChannelWake {
+    fn wake(&self) -> bool {
+        self.0.send(BrokerEvent::DeferredTerminalsReady).is_ok()
     }
 }
 
@@ -160,14 +177,20 @@ where
 {
     let (sender, receiver) = std::sync::mpsc::channel::<BrokerEvent>();
     let event_hub = EventHub::new(Box::new(ChannelWake(sender.clone())));
+    // One shared deferred-operation registry connects the kernel with the
+    // deferred ports (add-ext-dialog §5.1).
+    let operations = Arc::new(DeferredOperationRegistry::new());
+    let deferred_hub =
+        DeferredPortHub::new(Box::new(DeferredChannelWake(sender.clone())), operations.clone());
     let listener = spawn_listener(options.clone(), move |event| {
         let _ = sender.send(BrokerEvent::Transport(event));
     })?;
-    let mut broker = BrokerKernel::with_default_app_options(
+    let mut broker = BrokerKernel::with_default_app_options_and_operations(
         backend,
-        DynamicExtensionLoader::from_env(event_hub.clone())?,
+        DynamicExtensionLoader::from_env(event_hub.clone(), deferred_hub.clone())?,
         options.default_app_options(),
         options.broker_artifact_identity().clone(),
+        operations,
     );
     let mut extension_events = ExtensionEventRouter::new();
     let mut sessions = HashMap::<u64, TransportSession>::new();
@@ -221,6 +244,8 @@ where
                 if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
                     if let Some(session_id) = kernel_session_id.as_deref() {
                         event_hub.revoke_session(session_id);
+                        // Same lifecycle law for deferred terminals.
+                        deferred_hub.revoke_session(session_id);
                     }
                 }
                 let loaded = LoadedExtension::from_frame(&frame);
@@ -239,6 +264,8 @@ where
                         extension_events.note_loaded(loaded.clone(), owner.to_string());
                         // Only a successful LoadExt ACK opens the reserved source.
                         event_hub.note_loaded_and_open(&loaded.app_id, &loaded.instance, owner);
+                        // Same ACK gate for the deferred submit channel.
+                        deferred_hub.open_port(&loaded.app_id, &loaded.instance, owner);
                     }
                 }
                 if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
@@ -257,6 +284,13 @@ where
                 );
                 // Post-response barrier drain for hub-submitted pushes.
                 drain_hub_extension_events(&event_hub, &extension_events, &broker, &mut sessions);
+                drain_hub_deferred_terminals(&deferred_hub, &broker, &mut sessions);
+                if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
+                    if let Some(session_id) = kernel_session_id.as_deref() {
+                        // The closing session's pending operations die with it.
+                        broker.operations().purge_session(session_id);
+                    }
+                }
             }
             BrokerEvent::Transport(TransportEvent::Disconnected { id }) => {
                 let mut was_initialized = false;
@@ -267,6 +301,7 @@ where
                     // closing session's cleanup pushes observe PORT_CLOSED.
                     if let Some(session_id) = closing_session_id.as_deref() {
                         event_hub.revoke_session(session_id);
+                        deferred_hub.revoke_session(session_id);
                     }
                     let mut extension_host = extension_events.host(None, Some(&event_hub));
                     let _ = broker.close_session_with_extension_host(
@@ -275,6 +310,7 @@ where
                     );
                     if let Some(session_id) = closing_session_id.as_deref() {
                         extension_events.forget_session(session_id);
+                        broker.operations().purge_session(session_id);
                     }
                     deliver_extension_events(
                         &extension_events,
@@ -287,6 +323,7 @@ where
                         &broker,
                         &mut sessions,
                     );
+                    drain_hub_deferred_terminals(&deferred_hub, &broker, &mut sessions);
                 }
                 if matches!(
                     broker_disconnect_action(was_initialized),
@@ -301,14 +338,40 @@ where
             BrokerEvent::ExtensionEventsReady => {
                 drain_hub_extension_events(&event_hub, &extension_events, &broker, &mut sessions);
             }
+            BrokerEvent::DeferredTerminalsReady => {
+                drain_hub_deferred_terminals(&deferred_hub, &broker, &mut sessions);
+            }
         }
     }
 
     // Shutdown law: revoke every source; there is no flush promise.
     event_hub.revoke_all();
     event_hub.log_shutdown_diagnostics();
+    deferred_hub.revoke_all();
     listener.shutdown();
     Ok(())
+}
+
+/// Deferred-terminal drain with owner-loop settlement and session-writer
+/// routing (see `deferred_port::drain_deferred_terminals`).
+#[cfg(not(target_os = "macos"))]
+fn drain_hub_deferred_terminals<B>(
+    deferred_hub: &DeferredPortHub,
+    broker: &BrokerKernel<B, DynamicExtensionLoader>,
+    sessions: &mut HashMap<u64, TransportSession>,
+) where
+    B: AppBackend,
+{
+    drain_deferred_terminals(deferred_hub, broker, &mut |owner, frame| {
+        let mut delivered = false;
+        for session in sessions.values_mut() {
+            if session.broker.session_id() == Some(owner) {
+                session.write_frame(frame.clone());
+                delivered = true;
+            }
+        }
+        delivered
+    });
 }
 
 /// Bounded hub drain with source-bound route validation (see

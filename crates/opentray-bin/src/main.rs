@@ -11,6 +11,8 @@
 
 #[cfg(target_os = "macos")]
 mod darwin_reopen;
+mod deferred_port;
+mod dialog_poll;
 mod dynamic_extension;
 mod event_hub;
 mod extension_events;
@@ -526,10 +528,11 @@ pub(crate) fn broker_frame_action(
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod native_broker {
-    use std::{collections::HashMap, error::Error, time::Duration};
+    use std::{collections::HashMap, error::Error, sync::Arc, time::Duration, time::Instant};
 
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
     use opentray_core::{BrokerKernel, BrokerSession};
+    use opentray_core::operations::DeferredOperationRegistry;
     use opentray_spec::{AppEvent, ClientFrame, ExtensionEnvelope, ServerFrame};
     use winit::application::ApplicationHandler;
     use winit::event::StartCause;
@@ -545,6 +548,8 @@ mod native_broker {
     use super::windows_transport as broker_transport;
     use super::{
         broker_disconnect_action, broker_frame_action,
+        deferred_port::{drain_deferred_terminals, DeferredPortHub},
+        dialog_poll::PollScheduler,
         dynamic_extension::DynamicExtensionLoader,
         event_hub::{EventHub, RuntimeWake},
         extension_events::{
@@ -561,6 +566,15 @@ mod native_broker {
         Tray(tray_icon::TrayIconEvent),
         /// Coalesced EventPort drain request from the D19 hub wake adapter.
         ExtensionEventsReady,
+        /// Coalesced deferred-terminal drain request from the DeferredPort
+        /// hub wake adapter (add-ext-dialog §5.1).
+        DeferredTerminalsReady,
+        /// Merged dialog poll due (add-ext-dialog §5.2): the generation
+        /// token drops stale events delivered after a scheduler revoke.
+        /// Batch A note: no producer sends it yet (the dialog extension's
+        /// poll path lands in batch B); the loop wiring is in place.
+        #[allow(dead_code)]
+        DialogPollDue(u64),
         #[cfg(target_os = "macos")]
         AppReopenRequested,
         IdleExpired(u64),
@@ -574,6 +588,16 @@ mod native_broker {
     impl RuntimeWake for ProxyWake {
         fn wake(&self) -> bool {
             self.0.send_event(UserEvent::ExtensionEventsReady).is_ok()
+        }
+    }
+
+    /// DeferredPort sibling of [`ProxyWake`]: terminal settlement requests
+    /// get their own coalesced wake so poll/event drains stay separable.
+    struct DeferredProxyWake(EventLoopProxy<UserEvent>);
+
+    impl RuntimeWake for DeferredProxyWake {
+        fn wake(&self) -> bool {
+            self.0.send_event(UserEvent::DeferredTerminalsReady).is_ok()
         }
     }
 
@@ -632,16 +656,27 @@ mod native_broker {
         }));
 
         let event_hub = EventHub::new(Box::new(ProxyWake(event_loop.create_proxy())));
+        // One shared deferred-operation registry connects the kernel (which
+        // issues operations at dispatch) with the deferred ports (whose
+        // submits settle them) — add-ext-dialog §5.1.
+        let operations = Arc::new(DeferredOperationRegistry::new());
+        let deferred_hub = DeferredPortHub::new(
+            Box::new(DeferredProxyWake(event_loop.create_proxy())),
+            operations.clone(),
+        );
 
         let mut app = NativeBrokerApp {
-            broker: BrokerKernel::with_default_app_options(
+            broker: BrokerKernel::with_default_app_options_and_operations(
                 TrayIconBackend::with_runtime(NativeTrayIconRuntime::new()),
-                DynamicExtensionLoader::from_env(event_hub.clone())?,
+                DynamicExtensionLoader::from_env(event_hub.clone(), deferred_hub.clone())?,
                 options.default_app_options(),
                 options.broker_artifact_identity().clone(),
+                operations,
             ),
             extension_events: ExtensionEventRouter::new(),
             event_hub,
+            deferred_hub,
+            dialog_polls: PollScheduler::new(),
             sessions: HashMap::new(),
             broker_version: options.package_version.clone(),
             idle_timeout: options.idle_timeout,
@@ -674,6 +709,11 @@ mod native_broker {
         broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>, DynamicExtensionLoader>,
         extension_events: ExtensionEventRouter,
         event_hub: EventHub,
+        deferred_hub: DeferredPortHub,
+        /// Broker-owned dialog poll scheduler skeleton (§5.2): merged
+        /// DialogPollDue event, WaitUntil inputs, re-arm signaling, quota.
+        /// No producer feeds it until batch B's dialog extension lands.
+        dialog_polls: PollScheduler,
         sessions: HashMap<u64, broker_transport::TransportSession>,
         broker_version: String,
         idle_timeout: Option<Duration>,
@@ -684,11 +724,18 @@ mod native_broker {
     }
 
     impl ApplicationHandler<UserEvent> for NativeBrokerApp {
-        fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
-            if matches!(cause, StartCause::Init) {
-                println!("opentray broker ready");
-                self.schedule_idle_if_empty();
+        fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+            match cause {
+                StartCause::Init => {
+                    println!("opentray broker ready");
+                    self.schedule_idle_if_empty();
+                }
+                // The merged WaitUntil(min deadline) fired: run one bounded
+                // poll quantum (§5.2 skeleton; producers arrive in batch B).
+                StartCause::ResumeTimeReached { .. } => self.process_dialog_polls(),
+                _ => {}
             }
+            self.apply_dialog_poll_control_flow(event_loop);
         }
 
         fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
@@ -706,6 +753,13 @@ mod native_broker {
                 UserEvent::Menu(event) => self.handle_menu(event),
                 UserEvent::Tray(event) => self.handle_tray(event),
                 UserEvent::ExtensionEventsReady => self.drain_extension_events(),
+                UserEvent::DeferredTerminalsReady => self.drain_deferred_terminals(),
+                UserEvent::DialogPollDue(generation) => {
+                    // Stale tokens (pre-revoke events) drop without any poll.
+                    if generation == self.dialog_polls.generation() {
+                        self.process_dialog_polls();
+                    }
+                }
                 #[cfg(target_os = "macos")]
                 UserEvent::AppReopenRequested => self.dispatch_app_reopen_requested(),
                 UserEvent::IdleExpired(generation) => {
@@ -714,6 +768,7 @@ mod native_broker {
                     }
                 }
             }
+            self.apply_dialog_poll_control_flow(event_loop);
         }
 
         fn window_event(
@@ -729,6 +784,10 @@ mod native_broker {
             // before the loop stops; there is no flush promise to keep.
             self.event_hub.revoke_all();
             self.event_hub.log_shutdown_diagnostics();
+            self.deferred_hub.revoke_all();
+            // Stale DialogPollDue events after this revoke drop on their
+            // generation token.
+            self.dialog_polls.revoke_all();
             if let Some(listener) = self.listener.take() {
                 listener.shutdown();
             }
@@ -798,6 +857,10 @@ mod native_broker {
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
                         if let Some(session_id) = kernel_session_id.as_deref() {
                             self.event_hub.revoke_session(session_id);
+                            // Same lifecycle law for deferred terminals: the
+                            // closing session's port submits observe
+                            // PORT_CLOSED before core cleanup runs.
+                            self.deferred_hub.revoke_session(session_id);
                         }
                     }
                     let loaded = LoadedExtension::from_frame(&frame);
@@ -823,6 +886,9 @@ mod native_broker {
                                 &loaded.instance,
                                 owner,
                             );
+                            // Same ACK gate for the deferred submit channel.
+                            self.deferred_hub
+                                .open_port(&loaded.app_id, &loaded.instance, owner);
                         }
                     }
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
@@ -838,10 +904,17 @@ mod native_broker {
                     // Post-response barrier: hub records submitted during the
                     // dispatch are delivered only after its response frames.
                     self.drain_extension_events();
+                    self.drain_deferred_terminals();
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
                         // Windows named-pipe half-close may defer `Disconnected` indefinitely.
                         // `Exit` already performed kernel cleanup above, so the dedicated broker
                         // must leave its GUI event loop without waiting for that transport event.
+                        if let Some(session_id) = kernel_session_id.as_deref() {
+                            // The closing session's pending operations die
+                            // with it; later submits for their handles are
+                            // replayed-handle rejections.
+                            self.broker.operations().purge_session(session_id);
+                        }
                         self.sessions.remove(&id);
                         self.bump_idle_generation();
                         self.schedule_idle_if_empty();
@@ -859,6 +932,7 @@ mod native_broker {
                         // PORT_CLOSED and never cross the close.
                         if let Some(session_id) = closing_session_id.as_deref() {
                             self.event_hub.revoke_session(session_id);
+                            self.deferred_hub.revoke_session(session_id);
                         }
                         let mut extension_host =
                             self.extension_events.host(None, Some(&self.event_hub));
@@ -868,9 +942,11 @@ mod native_broker {
                         );
                         if let Some(session_id) = closing_session_id.as_deref() {
                             self.extension_events.forget_session(session_id);
+                            self.broker.operations().purge_session(session_id);
                         }
                         self.deliver_extension_events(extension_host.take_events());
                         self.drain_extension_events();
+                        self.drain_deferred_terminals();
                     }
                     self.bump_idle_generation();
                     self.schedule_idle_if_empty();
@@ -959,6 +1035,56 @@ mod native_broker {
                 }
                 delivered
             });
+        }
+
+        /// Deferred-terminal drain: settles each queued terminal through the
+        /// shared registry's one-shot CAS and writes the terminal frame to
+        /// the still-matching session writer (add-ext-dialog §5.1).
+        fn drain_deferred_terminals(&mut self) {
+            let Self {
+                deferred_hub,
+                broker,
+                sessions,
+                ..
+            } = self;
+            drain_deferred_terminals(deferred_hub, broker, &mut |owner, frame| {
+                let mut delivered = false;
+                for session in sessions.values_mut() {
+                    if session.broker.session_id() == Some(owner) {
+                        session.write_frame(frame.clone());
+                        delivered = true;
+                    }
+                }
+                delivered
+            });
+        }
+
+        /// One bounded dialog-poll quantum (§5.2 skeleton): at most four
+        /// owners step once per iteration. Batch A ships the scheduler
+        /// mechanics; the dialog extension's `poll_owner` producer wiring is
+        /// batch B, so nothing schedules polls yet and this drains empty.
+        fn process_dialog_polls(&mut self) {
+            let due = self.dialog_polls.take_due(Instant::now());
+            // Batch B: for each due owner, run one `poll_owner` step and
+            // re-schedule from its reported next_deadline. Terminals only
+            // ever arrive through the deferred port, never here.
+            if !due.is_empty() {
+                eprintln!(
+                    "opentray dialog poll: {} due owners without a registered poll producer \
+                     (dialog extension not loaded)",
+                    due.len()
+                );
+            }
+        }
+
+        /// Projects the merged minimum poll deadline into the loop's control
+        /// flow: `WaitUntil(min deadline)` while any poll is scheduled,
+        /// plain `Wait` otherwise (§5.2).
+        fn apply_dialog_poll_control_flow(&self, event_loop: &ActiveEventLoop) {
+            match self.dialog_polls.min_deadline() {
+                Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+                None => event_loop.set_control_flow(ControlFlow::Wait),
+            }
         }
 
         #[cfg(target_os = "macos")]
@@ -1149,7 +1275,7 @@ mod tests {
             "--package-version",
             "0.1.0",
             "--protocol-version",
-            "1",
+            "2",
             "--broker-executable-path",
             executable_path.to_str().expect("executable path"),
             "--broker-artifact-identity",
