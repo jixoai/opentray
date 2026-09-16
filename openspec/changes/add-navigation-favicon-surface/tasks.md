@@ -24,7 +24,7 @@
 
 - [x] 4.1 全量电池：workspace Rust（mac）+ Windows 真机（ssh）+ JS 包 + 仓基线。
 - [x] 4.2 黑盒（walkthrough 模式）：规则拦截 baidu 跳转→failed(navigation_blocked)；动态换 favicon→faviconChange 到达。
-- [ ] 4.3 Codex 复审一轮（GO 后进发布）。
+- [x] 4.3 Codex 复审一轮（GO 后进发布）。
 
 ## 5. Release / Docs
 

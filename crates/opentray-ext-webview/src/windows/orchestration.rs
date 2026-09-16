@@ -549,19 +549,19 @@ pub(super) fn install_load_state_observers(
                     };
                     let mut success = BOOL::default();
                     args.IsSuccess(&mut success)?;
-                    // A rule-blocked navigation completes as cancelled;
-                    // report the stable blocked code with the URL it was
-                    // blocked for instead of the platform's
-                    // OperationCanceled status (R1 P1: the shared pending
-                    // slot is not authoritative for a cancelled pair).
-                    // R5: completions consult the ledger only when they
-                    // failed — a cancelled navigation can never complete
-                    // successfully, so success frames never touch it. The
-                    // id is best-effort: readable ids pair tombstones
-                    // precisely; unreadable or evicted ids fall back to the
-                    // outstanding-cancellation counter. Suppression emits
-                    // nothing (the stable terminal was already emitted at
-                    // the decision point).
+                    // R5–R7 terminal contract: the stable failed frame of
+                    // a rule-blocked navigation was already emitted at its
+                    // decision point; this handler only decides whether a
+                    // FAILED completion belongs to such an already-terminal
+                    // cancellation and must stay frame-silent. Success
+                    // frames never consult the ledger (a cancelled
+                    // navigation cannot complete successfully). Identity-
+                    // precise: a readable id answers only against the
+                    // ledger's tombstones; an id-unreadable completion
+                    // falls back to the outstanding-cancellation counter;
+                    // an evicted tombstone's very late completion passes
+                    // through to the ordinary platform path (redundant
+                    // frame over mis-suppression — the R6 trade).
                     let completion_id = (|| -> Result<u64, windows_core::Error> {
                         let mut id = 0u64;
                         args.NavigationId(&mut id)?;

@@ -145,4 +145,47 @@ Platform mechanics worth recording:
     compiled locally only through a stale build-cache product; the Windows
     host caught it (`BLOCKED_RING_CAP` unresolved). The amended candidate
     compiles and passes on both platforms.
-- R2: pending (same agent; brief /tmp/navfav-codex-brief-r2.md).
+- **R2: 7.0 NEEDS-WORK** — favicon resolver had to be a standard URL
+  parser, not hand-rolled splicing; the Windows ring's eviction/getter
+  semantics still leaked. Fixed in the R2 round (url crate
+  `Url::parse + join` with a 27-case table; `BlockedNavigationRing`
+  abstraction with eviction compensation).
+- **R3: 7.8 NEEDS-WORK** — the Windows decision chain had to be
+  action-first (the id read preceded the navigationAction push, so a
+  getter failure could swallow it), and eviction compensation needed
+  tombstones for exactly-once terminals. Fixed in the R3 round.
+- **R4: 8.2 NEEDS-WORK** — completed-side getter failures could drop a
+  stable terminal; tombstone expiry could re-open one. Fixed with FIFO
+  orphan attribution + an OperationCanceled defense (both later replaced).
+- **R5: 8.0 NEEDS-WORK** — the heuristics themselves were the problem:
+  FIFO identity fabrication without a WebView2 ordering contract, a
+  lifetime `ever_blocked` flag swallowing legitimate user cancels, a
+  WebView2 status constant inside the platform-neutral layer. Fixed by
+  the unified rewrite: the stable terminal emits at the DECISION POINT on
+  both platforms, and `CancelLedger` (bounded tombstones + one
+  outstanding-cancellation counter) only decides completion suppression —
+  never emits, never fabricates.
+- **R6: 8.6 NEEDS-WORK** — the pending-counter window could still swallow
+  an ordinary failure interleaved with an outstanding cancellation. Fixed
+  by identity-precise suppression: a readable id answers only against the
+  tombstones; the counter backs off to id-unreadable completions only; an
+  evicted tombstone's very late completion passes through (one redundant
+  frame beats mis-suppression — the R6 trade), pinned by interleave
+  twins.
+- **R7: GO 9.2/10** (`review/codex-r7-report.md`) — "identity-precise
+  收紧满足 R6 最小修复要求：可读 completion id 只查 tombstone，未知可读
+  id 不消费 pending；pending 仅处理不可读 id 的 completion。R6 的普通交错
+  失败被吞问题已闭合，R5 的五个 P2 均不再构成代码阻塞。" Independent
+  gates: spec 56/56, ext-webview 34/34, both tsc, OpenSpec strict,
+  diff-check. Verified artifacts: Windows 196/196 + 52/52, black-box
+  11/11 with the instant-terminal chain. Remaining P3s (this round):
+  stale comment synced; fake-COM handler-level fixtures recorded as a
+  follow-up evidence gap (the ledger twins carry the semantics); release
+  tasks executed below.
+
+Score trajectory: 5.5 → 7.0 → 7.8 → 8.2 → 8.0 → 8.6 → **9.2 GO**.
+
+Process note for the bias log: the review loop also caught one locally
+compiling-but-broken intermediate commit (the build cache had run a stale
+product; the Windows host caught `BLOCKED_RING_CAP` unresolved) —
+cross-platform compile evidence is part of every round since.
