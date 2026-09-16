@@ -427,6 +427,13 @@ Windows-visible acceptance must include the overlay and frameless geometry smoke
 - `packages/cli` publishes the final public npm package: `opentray`.
 - Every other direct child of `packages/*` publishes as `@opentray/<directory-name>`.
 - Platform binary packages are distribution atoms only; do not place fake binaries in them.
+- Multi-platform packages bundle every platform-native artifact inside the facade package while
+  the npm-pack compressed size stays at or below 3 MB (Owner ruling, 2026-09-16). Reaching 2 MB
+  raises a size-gate warning that requires an explicit Owner split decision before the next
+  embedded release; exceeding 3 MB must be split into per-platform packages
+  (`@opentray/<name>-<os>-<arch>`) without further debate. The workspace pack-size audit enforces
+  the gate (warn at ≥ 2 MB, fail beyond 3 MB) for every package that embeds platform binaries.
+  Packages already published as per-platform release atoms keep their existing shape.
 - Extension packages are capability atoms; they must depend on public OpenTray contracts, not private package internals.
 - Shared TypeScript protocol types belong in `@opentray/spec`.
 
