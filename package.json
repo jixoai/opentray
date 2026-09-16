@@ -8,6 +8,7 @@
     "openspec:vision2": "bun run scripts/openspec/vision2-driven.ts",
     "test:openspec:vision": "bun test scripts/openspec/vision-driven.test.ts",
     "test:openspec:vision2": "bun test scripts/openspec/vision2-driven.test.ts",
+    "check:pack-size": "node scripts/check-pack-size.mjs",
     "packages:list": "pnpm -r list --depth -1",
     "create-opentray": "bun run packages/create/src/bin.ts",
     "create-opentray:dist": "node packages/create/dist/bin.mjs",
