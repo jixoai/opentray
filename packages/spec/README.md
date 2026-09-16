@@ -17,6 +17,14 @@ This package is platform-neutral and must not import native implementation packa
 
 Use `isBrokerArtifactIdentity()` at untyped storage or transport boundaries and `brokerArtifactIdentityEquals()` when deciding whether a live broker can be reused. PID liveness, endpoint name, and package version alone are not compatibility evidence.
 
+## Deferred Operations (Protocol 2)
+
+Protocol 2 adds the deferred-operation transaction frames `ext-command-accepted` and `ext-operation-terminal`. An accepted command settles through exactly one terminal frame whose `ExtOperationPayload` is either `{ kind: "result", value }` (resolve with the JSON value) or `{ kind: "error", error }` (reject with the typed error envelope); `isExtOperationPayload()` is the parser truth and there is no third branch.
+
+- **Operation ids** — the wire form of an operation id is exactly 16 lowercase hex digits (the u64 handle projection). `isOperationId()` / `OPERATION_ID_PATTERN` are the shared predicate; empty, uppercase, non-hex, or wrong-length ids are structurally invalid frames.
+- **Typed error envelope** — `TypedExtensionError` is `{ code, message, details? }`. The same shape rides deferred terminal `error` payloads and synchronous server `error` frames (where `details`, when present, is a JSON object; the field is absent for codes without structured detail, never `null`). Consumers match on `code`; parsing the human `message` is forbidden by contract.
+- **Record bound** — `EXTENSION_EVENT_RECORD_MAX_BYTES` (64 KiB) is the shared ingress bound for one extension event/terminal record; the Rust `opentray-spec` crate exports the same number and both sides verify fixture parity.
+
 ## Tray Contract
 
 `TrayOptions` uses `id` as the tray atom identity. Visible tray text belongs to the unified `icon` field:

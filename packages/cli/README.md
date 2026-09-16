@@ -31,6 +31,10 @@ Official `TrayExtension` implementations declare a platform-neutral `artifact` d
 
 Low-level custom extensions use an exact-file artifact. `OPENTRAY_EXT_PATH` and source-tree paths are diagnostic inputs; a normal package-manager install must be sufficient for official extensions.
 
+### Embedded platform-binary artifacts
+
+A facade may instead ship its platform libraries inside its own tarball with a `kind: "embedded"` artifact: one `platforms/<target>/` library per target plus the root-contained staging manifest `platforms/manifest.json`. The declared catalog is complete over the frozen staging matrix `NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX` (`darwin-arm64`, `darwin-x64`, `win32-arm64`, `win32-x64`); an incomplete catalog is not representable, and a manifest missing any matrix cell is rejected as `manifest-invalid` before broker dispatch. Resolution validates path containment (traversal, absolute paths, and symlink escapes), cross-checks the manifest's facade version, contract fingerprint, per-target SHA-256, and build identity, hashes the selected library's real bytes, and feeds `sha256`/`buildIdentity` into the `load-ext` expected identity (the broker re-hashes before `dlopen`). Rejections use the typed `NativeExtensionEmbeddedArtifactError` with the structured reasons `target-unsupported`, `path-outside-facade`, `manifest-invalid`, and `library-unreadable`. Facade packages embedding platform binaries are also subject to the workspace pack-size gate (`pnpm run check:pack-size`).
+
 ## Tray-First API
 
 For the first app, call `createTray()` directly. The quickstart stays in one file and does not ask the user to wire a worker or a host loop first:
@@ -124,6 +128,30 @@ completed graceful close), the SDK reaches a terminal connection-dead state:
   to exit or supervised-restart an entry whose backend is gone.
 - `destroy()` treats the sentinel as the requested end state, so a Quit issued
   after broker death still settles.
+
+### Extension commands and deferred operations
+
+`tray.requestExtension(ext, data)` (and the `TrayExtensionContext.request`
+facade hook) settles with one discriminated `ExtensionRequestResult`:
+
+- `{ kind: "immediate", events }` — the command completed inside dispatch and
+  `events` carries the response envelopes (an empty array for plain acks).
+- `{ kind: "terminal", operationId, value }` — the command was accepted as a
+  deferred operation and settled through exactly one terminal frame; `value`
+  is the deferred result payload (the projection of the frozen
+  `ext-operation-terminal` result branch).
+
+A deferred operation that fails rejects with the typed `ExtensionOperationError`
+(`code`, optional structured `details`, `cause`) instead of a result; if the
+transport dies while the operation is pending, it rejects with the generic code
+`extension_transport_closed` exported as `EXTENSION_TRANSPORT_CLOSED_CODE`.
+Extension facades map that shared code onto their public error surface. A
+synchronous broker rejection (including deferred commands that fail before
+acceptance) rejects with `BrokerServerError`, which carries the same
+`{ code, message, details }` contract. Match on `code`; parsing human messages
+is not a contract. During the local handshake, a Ready frame announcing a
+different protocol version rejects with `BrokerProtocolVersionError` before
+the session is accepted.
 
 Endpoint identity is app identity: when `createTray` receives an `appId`, the
 caller label (and therefore the per-caller broker endpoint) is that appId
