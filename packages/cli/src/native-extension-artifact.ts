@@ -2,10 +2,14 @@
 // 1. Describe package-owned and exact-file native extension artifacts without importing binaries.
 // 2. Resolve platform packages from the declaring facade's dependency closure.
 // 3. Reject missing targets, invalid package metadata, and inaccessible native libraries precisely.
+// 4. Resolve embedded per-target libraries through the staging manifest identity chain with
+//    root containment and adversarial rejection (add-ext-dialog §6.1/§6.4).
 
+import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ExpectedExtensionIdentity } from "@opentray/spec";
 
 export type NativeExtensionArch = "arm64" | "x64";
@@ -27,6 +31,23 @@ export interface NativeExtensionPackageArtifact
   targets: Partial<Record<NativeExtensionTarget, NativeExtensionPackageTarget>>;
 }
 
+/** One embedded per-target library, relative to the facade package root (add-ext-dialog §6.1). */
+export interface NativeExtensionEmbeddedTarget {
+  libraryPath: string;
+}
+
+/**
+ * Facade package that ships its platform libraries inside its own tarball via
+ * `platforms/<target>/` plus the root-contained staging manifest
+ * `platforms/manifest.json` (add-ext-dialog §6.4 identity chain). No
+ * optionalDependencies platform packages are involved.
+ */
+export interface NativeExtensionEmbeddedArtifact
+  extends NativeExtensionIdentitySource {
+  kind: "embedded";
+  targets: Partial<Record<NativeExtensionTarget, NativeExtensionEmbeddedTarget>>;
+}
+
 interface NativeExtensionFileArtifactBase {
   kind: "file";
   path: string;
@@ -46,7 +67,8 @@ export type NativeExtensionFileArtifact = NativeExtensionFileArtifactBase &
 
 export type NativeExtensionArtifact =
   | NativeExtensionPackageArtifact
-  | NativeExtensionFileArtifact;
+  | NativeExtensionFileArtifact
+  | NativeExtensionEmbeddedArtifact;
 
 export type NativeExtensionExpectedIdentity = ExpectedExtensionIdentity;
 
@@ -82,6 +104,53 @@ export class NativeExtensionArtifactResolutionError extends Error {
   }
 }
 
+/**
+ * Structured embedded-artifact rejection reasons (add-ext-dialog §6.1): the
+ * four-class replacement of a single resolution-failed error. Consumers match
+ * on `reason`/`code`; the human message is not a contract.
+ */
+export type NativeExtensionEmbeddedErrorReason =
+  | "target-unsupported"
+  | "path-outside-facade"
+  | "manifest-invalid"
+  | "library-unreadable";
+
+/** Stable machine code per embedded rejection reason (same family style as the resolution error). */
+export const NATIVE_EXTENSION_EMBEDDED_ERROR_CODES: Record<
+  NativeExtensionEmbeddedErrorReason,
+  string
+> = {
+  "target-unsupported": "OPENTRAY_NATIVE_EXTENSION_TARGET_UNSUPPORTED",
+  "path-outside-facade": "OPENTRAY_NATIVE_EXTENSION_PATH_OUTSIDE_FACADE",
+  "manifest-invalid": "OPENTRAY_NATIVE_EXTENSION_MANIFEST_INVALID",
+  "library-unreadable": "OPENTRAY_NATIVE_EXTENSION_LIBRARY_UNREADABLE",
+};
+
+export class NativeExtensionEmbeddedArtifactError extends Error {
+  readonly reason: NativeExtensionEmbeddedErrorReason;
+  readonly code: string;
+  readonly target: NativeExtensionTarget;
+  readonly facadePackageJsonUrl?: string;
+
+  constructor(
+    reason: NativeExtensionEmbeddedErrorReason,
+    message: string,
+    options: ErrorOptions & {
+      target: NativeExtensionTarget;
+      facadePackageJsonUrl?: string;
+    }
+  ) {
+    super(message, options);
+    this.name = "NativeExtensionEmbeddedArtifactError";
+    this.reason = reason;
+    this.code = NATIVE_EXTENSION_EMBEDDED_ERROR_CODES[reason];
+    this.target = options.target;
+    if (options.facadePackageJsonUrl !== undefined) {
+      this.facadePackageJsonUrl = options.facadePackageJsonUrl;
+    }
+  }
+}
+
 /** Resolve one exact native library from the dependency closure that owns the facade. */
 export const resolveNativeExtensionArtifact = async (
   artifact: NativeExtensionArtifact,
@@ -97,6 +166,10 @@ export const resolveNativeExtensionArtifact = async (
         (await resolveExpectedIdentity(artifact.identitySource, target)),
       target,
     };
+  }
+
+  if (artifact.kind === "embedded") {
+    return resolveEmbeddedExtensionArtifact(artifact, target);
   }
 
   const packageTarget = artifact.targets[target];
@@ -158,6 +231,269 @@ const resolveExpectedIdentity = async (
     target: { os, arch },
   };
 };
+
+// ---------------------------------------------------------------------------
+// Embedded artifacts (add-ext-dialog §6.1/§6.4): the facade ships its own
+// platform libraries plus a root-contained staging manifest carrying the
+// identity chain (per-target path, SHA-256, buildIdentity, facade version,
+// contract fingerprint). Resolution validates containment on every path,
+// cross-checks the manifest against the facade/contract manifests, hashes the
+// selected library's real bytes, and feeds sha256/buildIdentity into the
+// LoadExt expected identity (the broker re-hashes before dlopen).
+// ---------------------------------------------------------------------------
+
+/** Fixed location of the embedded staging manifest inside the facade package. */
+export const EMBEDDED_STAGING_MANIFEST_PATH = "platforms/manifest.json";
+
+interface EmbeddedStagingManifestTargetEntry {
+  path: string;
+  sha256: string;
+  buildIdentity: string;
+}
+
+interface EmbeddedStagingManifest {
+  facadeVersion: string;
+  contractFingerprint: string;
+  targets: Record<string, EmbeddedStagingManifestTargetEntry>;
+}
+
+const sha256HexPattern = /^[a-f0-9]{64}$/u;
+
+const lexicalContained = (root: string, candidate: string): boolean => {
+  const rel = relative(root, candidate);
+  if (rel.length === 0) {
+    return false;
+  }
+  return !(rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel));
+};
+
+const resolveEmbeddedExtensionArtifact = async (
+  artifact: NativeExtensionEmbeddedArtifact,
+  target: NativeExtensionTarget
+): Promise<ResolvedNativeExtensionArtifact> => {
+  const facadePackageJsonUrl = artifact.packageJsonUrl;
+  const embeddedError = (
+    reason: NativeExtensionEmbeddedErrorReason,
+    message: string,
+    options: { cause?: unknown } = {}
+  ): NativeExtensionEmbeddedArtifactError =>
+    new NativeExtensionEmbeddedArtifactError(reason, message, {
+      target,
+      facadePackageJsonUrl,
+      ...(options.cause === undefined ? {} : { cause: options.cause }),
+    });
+
+  const embeddedTarget = artifact.targets[target];
+  if (embeddedTarget === undefined) {
+    throw embeddedError(
+      "target-unsupported",
+      `embedded native extension does not support target ${target}`
+    );
+  }
+
+  const facadeRoot = dirname(fileURLToPath(new URL(facadePackageJsonUrl)));
+
+  // Lexical containment first: absolute and traversal (`../../outside`)
+  // libraryPath values are rejected before touching the filesystem.
+  if (isAbsolute(embeddedTarget.libraryPath)) {
+    throw embeddedError(
+      "path-outside-facade",
+      `embedded library path must be relative to the facade package root: ${embeddedTarget.libraryPath}`
+    );
+  }
+  const candidatePath = resolve(facadeRoot, embeddedTarget.libraryPath);
+  if (!lexicalContained(facadeRoot, candidatePath)) {
+    throw embeddedError(
+      "path-outside-facade",
+      `embedded library path escapes the facade package root: ${embeddedTarget.libraryPath}`
+    );
+  }
+
+  // Identity-chain inputs: facade package.json and contract.json. Any read or
+  // shape failure here means the staging identity chain cannot be established.
+  const [facadeManifest, contractManifest] = await Promise.all([
+    readEmbeddedJson(facadePackageJsonUrl, embeddedError).then((parsed) => {
+      if (!isFacadePackageManifest(parsed)) {
+        throw embeddedError(
+          "manifest-invalid",
+          `embedded facade package manifest is invalid at ${facadePackageJsonUrl}`
+        );
+      }
+      return parsed;
+    }),
+    readEmbeddedJson(artifact.contractManifestUrl, embeddedError).then((parsed) => {
+      if (!isExtensionContractManifest(parsed)) {
+        throw embeddedError(
+          "manifest-invalid",
+          `embedded extension contract manifest is invalid at ${artifact.contractManifestUrl}`
+        );
+      }
+      return parsed;
+    }),
+  ]);
+
+  const manifestPath = join(facadeRoot, EMBEDDED_STAGING_MANIFEST_PATH);
+  const manifest = await readEmbeddedJson(
+    pathToFileURL(manifestPath).href,
+    embeddedError
+  ).then((parsed) => {
+    if (!isEmbeddedStagingManifest(parsed)) {
+      throw embeddedError(
+        "manifest-invalid",
+        `embedded staging manifest is invalid at ${manifestPath}`
+      );
+    }
+    return parsed;
+  });
+
+  if (manifest.facadeVersion !== facadeManifest.version) {
+    throw embeddedError(
+      "manifest-invalid",
+      `embedded staging manifest facade version ${manifest.facadeVersion} does not match facade package version ${facadeManifest.version}`
+    );
+  }
+  if (manifest.contractFingerprint !== contractManifest.contractFingerprint) {
+    throw embeddedError(
+      "manifest-invalid",
+      `embedded staging manifest contract fingerprint does not match the contract manifest at ${artifact.contractManifestUrl}`
+    );
+  }
+  for (const manifestTarget of Object.keys(manifest.targets)) {
+    if (artifact.targets[manifestTarget as NativeExtensionTarget] === undefined) {
+      throw embeddedError(
+        "manifest-invalid",
+        `embedded staging manifest declares undeclared target ${manifestTarget}`
+      );
+    }
+  }
+  const manifestEntry = manifest.targets[target];
+  if (manifestEntry === undefined) {
+    throw embeddedError(
+      "manifest-invalid",
+      `embedded staging manifest has no entry for target ${target}`
+    );
+  }
+
+  if (isAbsolute(manifestEntry.path)) {
+    throw embeddedError(
+      "path-outside-facade",
+      `embedded staging manifest library path must be relative to the facade package root: ${manifestEntry.path}`
+    );
+  }
+  const manifestLibraryPath = resolve(facadeRoot, manifestEntry.path);
+  if (!lexicalContained(facadeRoot, manifestLibraryPath)) {
+    throw embeddedError(
+      "path-outside-facade",
+      `embedded staging manifest library path escapes the facade package root: ${manifestEntry.path}`
+    );
+  }
+  if (manifestLibraryPath !== candidatePath) {
+    throw embeddedError(
+      "manifest-invalid",
+      `embedded staging manifest path ${manifestEntry.path} does not match the declared library path ${embeddedTarget.libraryPath} for target ${target}`
+    );
+  }
+
+  // Realpath containment catches symlink escapes: a link inside the facade
+  // that resolves outside is rejected even though it is lexically contained.
+  const realRoot = await realpath(facadeRoot).catch(() => facadeRoot);
+  let realCandidate: string;
+  try {
+    realCandidate = await realpath(candidatePath);
+  } catch (cause) {
+    throw embeddedError(
+      "library-unreadable",
+      `embedded native extension library is not accessible at ${candidatePath}`,
+      { cause }
+    );
+  }
+  if (!lexicalContained(realRoot, realCandidate)) {
+    throw embeddedError(
+      "path-outside-facade",
+      `embedded library resolves outside the facade package root: ${embeddedTarget.libraryPath}`
+    );
+  }
+
+  // Hash the real bytes: a replaced library must never pass a manifest claim
+  // (the broker re-checks the same value before dlopen).
+  let libraryBytes: Buffer;
+  try {
+    libraryBytes = await readFile(realCandidate);
+  } catch (cause) {
+    throw embeddedError(
+      "library-unreadable",
+      `embedded native extension library is not readable at ${realCandidate}`,
+      { cause }
+    );
+  }
+  const sha256 = createHash("sha256").update(libraryBytes).digest("hex");
+  if (sha256 !== manifestEntry.sha256) {
+    throw embeddedError(
+      "manifest-invalid",
+      `embedded library bytes do not match the staging manifest SHA-256 for target ${target}`
+    );
+  }
+
+  const [os, arch] = splitTarget(target);
+  const expectedIdentity: NativeExtensionExpectedIdentity = {
+    extensionName: contractManifest.extensionName,
+    artifactSetVersion: facadeManifest.version,
+    contractFingerprint: contractManifest.contractFingerprint,
+    target: { os, arch },
+    sha256,
+    buildIdentity: manifestEntry.buildIdentity,
+  };
+  return { path: realCandidate, expectedIdentity, target };
+};
+
+const readEmbeddedJson = async (
+  url: string,
+  embeddedError: (
+    reason: NativeExtensionEmbeddedErrorReason,
+    message: string,
+    options?: { cause?: unknown }
+  ) => NativeExtensionEmbeddedArtifactError
+): Promise<unknown> => {
+  try {
+    return JSON.parse(await readFile(new URL(url), "utf8"));
+  } catch (cause) {
+    throw embeddedError(
+      "manifest-invalid",
+      `unable to read embedded identity-chain manifest at ${url}`,
+      { cause }
+    );
+  }
+};
+
+const isEmbeddedStagingManifest = (
+  value: unknown
+): value is EmbeddedStagingManifest => {
+  if (!isRecordLike(value) || !isRecordLike(value.targets)) {
+    return false;
+  }
+  if (
+    typeof value.facadeVersion !== "string" ||
+    typeof value.contractFingerprint !== "string"
+  ) {
+    return false;
+  }
+  for (const entry of Object.values(value.targets)) {
+    if (
+      !isRecordLike(entry) ||
+      typeof entry.path !== "string" ||
+      typeof entry.sha256 !== "string" ||
+      !sha256HexPattern.test(entry.sha256) ||
+      typeof entry.buildIdentity !== "string" ||
+      entry.buildIdentity.length === 0
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const isRecordLike = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const nativeExtensionTarget = (
   platform: NodeJS.Platform,

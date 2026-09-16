@@ -19,10 +19,16 @@ export {
   type TrayHandle,
 } from "./client";
 export {
+  EMBEDDED_STAGING_MANIFEST_PATH,
+  NATIVE_EXTENSION_EMBEDDED_ERROR_CODES,
   NativeExtensionArtifactResolutionError,
+  NativeExtensionEmbeddedArtifactError,
   resolveNativeExtensionArtifact,
   type NativeExtensionArch,
   type NativeExtensionArtifact,
+  type NativeExtensionEmbeddedArtifact,
+  type NativeExtensionEmbeddedErrorReason,
+  type NativeExtensionEmbeddedTarget,
   type NativeExtensionFileArtifact,
   type NativeExtensionIdentitySource,
   type NativeExtensionExpectedIdentity,
