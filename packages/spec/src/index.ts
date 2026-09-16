@@ -12,7 +12,7 @@ export * from "./channel";
 export * from "./webview";
 
 /**
- * Protocol 2 (add-ext-dialog §5.1) adds the DeferredOperation transaction
+ * Protocol 2 (add-ext-dialog section 5.1) adds the DeferredOperation transaction
  * frames `ext-command-accepted` and `ext-operation-terminal`. The bump is one
  * matrix: Node client, broker, socket endpoint, and ready metadata all carry 2,
  * and a version-1 Init is rejected as incompatible (mirrors the Rust
@@ -20,6 +20,19 @@ export * from "./webview";
  */
 export const PROTOCOL_VERSION = 2;
 export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
+
+/**
+ * Frozen wire form of a deferred operation id: exactly 16 lowercase hex
+ * digits (the u64 handle's hex projection, add-ext-dialog design reference
+ * section 5.7 ruling #2). Shared parser truth for `ext-command-accepted` and
+ * `ext-operation-terminal`; empty, uppercase, non-hex, or wrong-length ids
+ * are structurally invalid.
+ */
+export const OPERATION_ID_PATTERN = /^[0-9a-f]{16}$/u;
+
+/** Returns true when an unknown value matches the frozen 16-hex operation id form. */
+export const isOperationId = (value: unknown): value is string =>
+  typeof value === "string" && OPERATION_ID_PATTERN.test(value);
 export const OPENTRAY_PROTOCOL_LINE_MAJOR = 1;
 export const OPENTRAY_PROTOCOL_LINE_MINOR = 1;
 
@@ -436,7 +449,7 @@ export interface ExtensionScope {
 }
 
 /**
- * Broker-injected command ownership (add-ext-dialog §5.5): the host derives
+ * Broker-injected command ownership (add-ext-dialog section 5.5): the host derives
  * `{ appId, trayId, sessionId, instanceGeneration }` for every command
  * dispatch and extensions must never self-report it. All busy/operation
  * registries key on this scope; the deferred operation binding is
@@ -460,7 +473,7 @@ export interface ExtensionEnvelope<TData = unknown> {
 }
 
 /**
- * Typed extension error envelope (add-ext-dialog §7.5): `{ code, message,
+ * Typed extension error envelope (add-ext-dialog section 7.5): `{ code, message,
  * details }` with a discriminated `details` JSON shape shared by the Rust
  * `ExtensionError::Detailed` projection, server error frames, and the Node
  * typed error factory. Consumers must match on `code`; parsing the human
@@ -474,7 +487,7 @@ export interface TypedExtensionError {
 }
 
 /**
- * Terminal payload of a deferred operation (add-ext-dialog §5.1 frozen): the
+ * Terminal payload of a deferred operation (add-ext-dialog section 5.1 frozen): the
  * `result` branch resolves the client promise with `value`; the `error`
  * branch rejects it with a typed extension error. The cancel path is a
  * `result` payload isomorphic to user cancellation — there is no third
@@ -503,7 +516,7 @@ export interface ExpectedExtensionIdentity {
   contractFingerprint: string;
   target: ExtensionArtifactTarget;
   /**
-   * Optional embedded-artifact identity-chain inputs (add-ext-dialog §6.4):
+   * Optional embedded-artifact identity-chain inputs (add-ext-dialog section 6.4):
    * lowercase hex SHA-256 of the resolved library file, verified by the broker
    * before `dlopen`. Absent means the caller supplied no byte hash
    * (registry-era identity only).
@@ -674,7 +687,7 @@ export type ServerFrame =
     }
   | {
       /**
-       * DeferredOperation acceptance (§5.3): the command did not complete
+       * DeferredOperation acceptance (section 5.3): the command did not complete
        * inside the dispatch; the client keeps the request pending until the
        * matching `ext-operation-terminal` (or a transport-close rejection).
        */
@@ -706,7 +719,20 @@ export type ServerFrame =
       ext: string;
       data: unknown;
     }
-  | { type: "error"; requestId?: RequestId; code: string; message: string };
+  | {
+      /**
+       * Synchronous broker error frame. Carries the same typed error envelope
+       * as a deferred terminal's `error` branch (add-ext-dialog design
+       * reference section 7.5): when the error code freezes a structured
+       * payload it rides `details` as a JSON object; the field is absent for
+       * codes without structured detail (never `null`).
+       */
+      type: "error";
+      requestId?: RequestId;
+      code: string;
+      message: string;
+      details?: unknown;
+    };
 
 export interface ParseResult<T> {
   ok: boolean;
@@ -797,12 +823,10 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       );
     case "ext-command-accepted":
       return (
-        typeof value.requestId === "string" && typeof value.operationId === "string"
+        typeof value.requestId === "string" && isOperationId(value.operationId)
       );
     case "ext-operation-terminal":
-      return (
-        typeof value.operationId === "string" && isExtOperationPayload(value.payload)
-      );
+      return isOperationId(value.operationId) && isExtOperationPayload(value.payload);
     case "runtime-host-health":
       return typeof value.requestId === "string" && isRuntimeHostHealth(value.health);
     case "event":
@@ -819,7 +843,10 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return (
         (value.requestId === undefined || typeof value.requestId === "string") &&
         typeof value.code === "string" &&
-        typeof value.message === "string"
+        typeof value.message === "string" &&
+        // details is a JSON object when present (absent for codes without
+        // structured detail); nulls and scalars are structurally invalid.
+        (value.details === undefined || isRecord(value.details))
       );
     default:
       return false;

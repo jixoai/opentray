@@ -13,8 +13,10 @@ import {
   isCommandScope,
   isExtOperationPayload,
   isOpenTrayProtocolLineCompatible,
+  isOperationId,
   isSupportedProtocolVersion,
   isTypedExtensionError,
+  OPERATION_ID_PATTERN,
   parseProtocolDistTag,
   OPENTRAY_PROTOCOL_FAMILY,
   OPENTRAY_PROTOCOL_LINE,
@@ -767,6 +769,99 @@ describe("@opentray/spec DeferredOperation protocol (v2)", () => {
   it("exports the shared 64 KiB record bound (Rust fixture parity)", () => {
     expect(EXTENSION_EVENT_RECORD_MAX_BYTES).toBe(65536);
     expect(EXTENSION_EVENT_RECORD_MAX_BYTES).toBe(64 * 1024);
+  });
+
+  it("rejects operation ids outside the frozen 16-lowercase-hex wire form", () => {
+    expect(isOperationId("000000000000000f")).toBe(true);
+    expect(isOperationId("ffffffffffffffff")).toBe(true);
+    // Adversarial forms: empty, uppercase, non-hex, too short, too long.
+    expect(isOperationId("")).toBe(false);
+    expect(isOperationId("000000000000000F")).toBe(false);
+    expect(isOperationId("00000000000000zz")).toBe(false);
+    expect(isOperationId("000000000000000")).toBe(false);
+    expect(isOperationId("000000000000000ff")).toBe(false);
+    expect(isOperationId(15)).toBe(false);
+    expect(OPERATION_ID_PATTERN.test("0".repeat(16))).toBe(true);
+
+    for (const badOperationId of [
+      "",
+      "000000000000000F",
+      "00000000000000zz",
+      "0".repeat(15),
+      "0".repeat(17),
+    ]) {
+      const accepted = parseServerFrame(
+        JSON.stringify({
+          type: "ext-command-accepted",
+          requestId: "req-1",
+          operationId: badOperationId,
+        })
+      );
+      const terminal = parseServerFrame(
+        JSON.stringify({
+          type: "ext-operation-terminal",
+          operationId: badOperationId,
+          payload: { kind: "result", value: null },
+        })
+      );
+      expect(accepted.ok).toBe(false);
+      expect(terminal.ok).toBe(false);
+    }
+  });
+
+  it("carries optional structured details on synchronous error frames", () => {
+    const withDetails = parseServerFrame(
+      JSON.stringify({
+        type: "error",
+        requestId: "req-1",
+        code: "dialog_presentation_failed",
+        message: "worker did not reach the native modal call",
+        details: { worker: "owner-1", phase: "enter-modal" },
+      })
+    );
+    expect(withDetails).toEqual({
+      ok: true,
+      frame: {
+        type: "error",
+        requestId: "req-1",
+        code: "dialog_presentation_failed",
+        message: "worker did not reach the native modal call",
+        details: { worker: "owner-1", phase: "enter-modal" },
+      },
+    });
+
+    const withoutDetails = parseServerFrame(
+      JSON.stringify({
+        type: "error",
+        requestId: "req-2",
+        code: "unsupported",
+        message: "unknown command",
+      })
+    );
+    expect(withoutDetails).toEqual({
+      ok: true,
+      frame: {
+        type: "error",
+        requestId: "req-2",
+        code: "unsupported",
+        message: "unknown command",
+      },
+    });
+    expect("details" in (withoutDetails.frame as { details?: unknown })).toBe(false);
+
+    // Nulls, scalars, and arrays are structurally invalid details payloads.
+    for (const badDetails of [null, "text", 7, ["not", "an", "object"]]) {
+      const bad = parseServerFrame(
+        JSON.stringify({
+          type: "error",
+          requestId: "req-3",
+          code: "c",
+          message: "m",
+          details: badDetails,
+        })
+      );
+      expect(bad.ok).toBe(false);
+    }
   });
 
   it("keeps the payload discriminated union exhaustive at the type level", () => {
