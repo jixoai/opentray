@@ -117,5 +117,32 @@ Platform mechanics worth recording:
 
 ## Codex review
 
-- R1: pending (`herdr` agent `navfav-codex`, workspace `zcode-opentray-navfav`).
-  Result recorded below when the round completes.
+- **R1: NEEDS-WORK 5.5/10** (`review/codex-r1-report.md` mirrors
+  /tmp/navfav-codex-report.md). All three P1s confirmed real and fixed in
+  the R1 round (commit `5118542e`):
+  - Windows blocked-navigation failure URL could be empty or misattributed
+    (the completed handler read the shared pending-url slot). Now each
+    blocked id carries its URL in a bounded (64) ring and the completion
+    reports that URL with the stable code.
+  - `getFavicon()` lacked capability gating and returned a non-spec wire
+    shape. Now `value: { href } | null` (explicit null = not observed) and
+    views created without `favicon: true` reject with the new typed
+    `favicon_disabled` code (registry 10 → 11, frozen on both sides).
+  - The TS glob escape built a broken character class, leaving `.` (and
+    most metacharacters) unescaped — `example.org` matched `exampleXorg`.
+    Rewritten with the standard metacharacter class; adversarial table
+    (12 new cases) mirrored in TS and Rust.
+  - P2 fixes riding the same round: favicon hrefs resolve to absolute
+    http(s) against the view's tracked URL before emission (shared pure
+    resolver, 15-case table; `data:`/`blob:`/`file:` never reach the
+    wire); NavigationId read failures log diagnostics and take documented
+    safe paths; the facade gap-resync delivery is mutually exclusive by
+    kind with a regression test.
+  - P3 fixes: event-family comment lists all seven kinds,
+    `WebviewNavigationRuleAction` carries its contract doc, contract-6
+    `stateResync` text matches the wire shape.
+  - Process finding recorded for the bias log: one intermediate commit
+    compiled locally only through a stale build-cache product; the Windows
+    host caught it (`BLOCKED_RING_CAP` unresolved). The amended candidate
+    compiles and passes on both platforms.
+- R2: pending (same agent; brief /tmp/navfav-codex-brief-r2.md).
