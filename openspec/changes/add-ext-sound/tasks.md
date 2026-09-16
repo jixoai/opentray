@@ -8,7 +8,7 @@
 
 ## 1. Alignment
 
-- [ ] 1.1 plan 索引与 design-reference 一致；validate 通过；add-ext-dialog 批次 A（embedded artifact kind + check-pack-size + deferred envelope）已落地并测试绿为前置。
+- [ ] 1.1 plan 索引与 design-reference 一致；validate 通过；add-ext-dialog 批次 A（embedded artifact kind + check-pack-size + deferred envelope）已落地并测试绿为前置——**CI 硬依赖门（R5 P1-6）**：sound 的 native/facade CI 作业以 dialog 批次 A 产物绿为条件（needs/路径门），不靠文档排序。
 
 ## 2. BDD Contract
 

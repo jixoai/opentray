@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Orthogonal intents (2026-09-17; original user request: Codex R4 P0-6 — the SSOT grep gate must be executable and trustworthy):
+// Orthogonal intents (2026-09-17; original user request: Codex R4 P0-6 + R5 P0-5 — the SSOT
+// consistency gate must be executable, semantic, and wired into formal verification):
 // 1. Forbid retired deferred-protocol/frame names in active add-ext-dialog/add-ext-sound artifacts.
-// 2. Forbid the synchronous backend property, the retired event barrier, and dry-run-as-release-evidence wording.
+// 2. Forbid semantic contradictions: poll-carried terminals, pre-Accept terminal wording,
+//    the retired event barrier, dry-run-as-release-evidence, and the impossible identity order.
 // 3. Allow negative examples only on lines that explicitly mark them as forbidden/retired/historical.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -26,18 +28,26 @@ const ALLOW_MARKERS = [
   "forbidding",
 ];
 
-const FORBIDDEN = [
-  /ExtCommandCompleted/,
-  /ExtCommandCancelled/,
-  /readonly backend/,
-  /dialog\.backend/,
-  /sound\.backend/,
-  /terminal-before-event barrier/,
-  /release dry-run/,
-  /broker 在 `Library::new` 前重验/,
-  /before `Library::new`/,
-  /two sessions stay isolated/,
-  /A\/B 会话交错/,
+/** [ruleId, pattern] — retired protocol names and semantic contradictions. */
+const RULES = [
+  ["retired-frame-completed", /ExtCommandCompleted/],
+  ["retired-frame-cancelled", /ExtCommandCancelled/],
+  ["retired-sync-backend", /readonly backend/],
+  ["retired-sync-backend-dot", /dialog\.backend/],
+  ["retired-sync-backend-dot", /sound\.backend/],
+  ["retired-event-barrier", /terminal-before-event barrier/],
+  ["retired-dry-run-evidence", /release dry-run/],
+  ["impossible-identity-order", /broker 在 `Library::new` 前重验/],
+  ["impossible-identity-order", /before `Library::new`/],
+  ["fictional-two-session", /two sessions stay isolated/],
+  ["fictional-two-session", /A\/B 会话交错/],
+  // Semantic contradictions (R5 P0-2/P0-3): poll must never carry terminals;
+  // pre-Accept failures are synchronous requestId errors, never terminal frames.
+  ["poll-terminal-channel", /Done\(terminal\)/],
+  ["poll-terminal-channel", /Done \| Pending/],
+  ["preaccept-terminal", /presentation_failed` terminal/],
+  ["preaccept-terminal", /presentation_failed 终帧/],
+  ["preaccept-terminal", /producing a typed `dialog_presentation_failed` terminal/],
 ];
 
 const collect = (dir) => {
@@ -62,9 +72,11 @@ for (const change of CHANGES) {
     lines.forEach((line, i) => {
       const allowed = ALLOW_MARKERS.some((m) => line.includes(m));
       if (allowed) return;
-      for (const pattern of FORBIDDEN) {
+      for (const [ruleId, pattern] of RULES) {
         if (pattern.test(line)) {
-          violations.push(`${file.replace(ROOT, "")}:${i + 1}: ${pattern} → ${line.trim()}`);
+          violations.push(
+            `${file.replace(ROOT, "")}:${i + 1} [${ruleId}] ${pattern.source} → ${line.trim()}`
+          );
         }
       }
     });
@@ -76,4 +88,6 @@ if (violations.length > 0) {
   for (const v of violations) console.error(`  ${v}`);
   process.exit(1);
 }
-console.log("consistency gate OK: no retired protocol text in active dialog/sound artifacts");
+console.log(
+  "consistency gate OK: no retired protocol text or semantic contradiction in active dialog/sound artifacts"
+);

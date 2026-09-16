@@ -28,10 +28,11 @@
     "trusted-publish:check": "bun run scripts/npm/configure-trusted-publish.ts --check",
     "trusted-publish:configure": "bun run scripts/npm/configure-trusted-publish.ts",
     "trusted-publish:dry-run": "bun run scripts/npm/configure-trusted-publish.ts --dry-run",
-    "verify": "bun test scripts/openspec/vision-driven.test.ts scripts/openspec/vision2-driven.test.ts scripts/npm && bun test scripts/binaries && openspec schema validate vision-driven && openspec schema validate vision2 && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
+    "verify": "bun run verify:spec-consistency && bun test scripts/openspec/vision-driven.test.ts scripts/openspec/vision2-driven.test.ts scripts/npm && bun test scripts/binaries && openspec schema validate vision-driven && openspec schema validate vision2 && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
     "verify:packed-consumer": "bun run scripts/binaries/verify-packed-consumer.ts",
     "version-packages": "changeset version",
-    "version-packages:alpha": "changeset version --snapshot alpha"
+    "version-packages:alpha": "changeset version --snapshot alpha",
+    "verify:spec-consistency": "node scripts/openspec/check-ext-dialog-sound-consistency.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

@@ -11,8 +11,8 @@
 
 ## 2. BDD Contract — 批次 A（协议 + 共享基建；独立可审单元）
 
-- [ ] 2.1 `@opentray/spec` + opentray-spec：`ExtCommandAccepted`/`ExtOperationTerminal`（payload 恒带结果）全量 server frame 与 parser 真值；operation 归属 `(sessionId, instanceGeneration, operationId)`；`TypedExtensionError {code, message, details}` discriminated union（ServerFrame error 与 terminal 共用 JSON 形状；每个 dialog 错误码指定 detail variant）；`CommandScope` 注入；Dialog 命令/选项/结果类型 + BackendCapabilities 共享 schema + exhaustive fixture；protocol version 提升；单测（repr/schema 冻结）。
-- [ ] 2.2 可选版本化 ABI 符号：`opentray_ext_attach_deferred_completion_port_v1`（EventPort 生命周期模式：immutable host 状态/version+struct_size/bounded-copy submit/CLOSED+INVALID_HANDLE+OVERSIZED 返回码/LoadExt ACK 后打开/清理前 revoke）+ **`poll_owner(operation) -> Done | Pending{next_deadline, wake_reason}`**（owner-loop 调度器：合并 DialogPollDue(generation)、WaitUntil(min deadline)、每迭代 ≤4 owner × 1 步进配额）；opentray-spec 常量与 stub FFI 决策表测试（同 EventPort 测试形态）。
+- [ ] 2.1 `@opentray/spec` + opentray-spec：`ExtCommandAccepted`/`ExtOperationTerminal`（payload 恒带结果）全量 server frame 与 parser 真值；operation 归属 `(sessionId, instanceGeneration, operationId)`；`TypedExtensionError {code, message, details}` discriminated union；`CommandScope` 注入；Dialog 命令/选项/结果类型 + BackendCapabilities 共享 schema + exhaustive fixture；**protocol version 1→2 全矩阵同一提交门**（Node/broker/socket endpoint/ready metadata/旧协议拒绝）；**共享 payload 上限常量 `EXTENSION_EVENT_RECORD_MAX_BYTES`（opentray-spec 与 @opentray/spec 同值导出，event_hub 私有常量迁出为唯一真值）**；单测（repr/schema 冻结）。
+- [ ] 2.2 可选版本化 ABI 符号：**`opentray_ext_command_v2`（独立符号，loader V2→V1 探测；V1 扩展永不以新签名调用——恒 Immediate，无 UB；`ExtCommandDispositionV1`/`ExtDeferredPortV1` repr(C) 布局 + size_of/offset_of fixture + deferred 时 out_events 必空 + ExtOwnedBytes 释放责任）** + `opentray_ext_attach_deferred_completion_port_v1`（EventPort 生命周期模式：immutable host 状态/version+struct_size/bounded-copy submit/CLOSED+INVALID_HANDLE+OVERSIZED 返回码/LoadExt ACK 后打开/清理前 revoke）+ **`poll_owner(operation) -> Pending{next_deadline, wake_reason}`（poll 不携带终帧；唯一终帧源 = port submit）**（owner-loop 调度器：合并 DialogPollDue(generation)、WaitUntil(min deadline)、deadline 提前的 re-arm、每迭代 ≤4 owner × 1 步进配额）；opentray-spec 常量与 stub FFI 决策表测试（同 EventPort 测试形态）。
 - [ ] 2.3 broker（opentray-bin/core）：operation registry + owner loop CAS 结算（重复/错 owner/旧 generation 无状态丢弃+诊断）+ session writer 路由（不承诺 event barrier）；CommandScope 注入与 registry 键升级；`Send` 安全裁决（UI-affine 实例 owner-thread registry，不依赖 unsafe Send）；**LoadExt 携带 expected sha256/buildIdentity，dlopen 前重 hash，native manifest 库开后 init 前校验**（顺序以 design §6.4 为准）。
 - [ ] 2.4 Node（packages/cli）：pending-until-final 状态机、导出 typed error class（code/details/cause）、markDead 断连 typed `dialog_transport_closed` 拒绝；确定性测试（Node+Bun 双跑）：accepted 后两普通请求/重复终帧/completion-Exit race/disconnect 前后/旧 generation/wrong owner。
 - [ ] 2.5 opentray SDK：`NativeExtensionEmbeddedArtifact`——containment + embedded staging manifest 身份链（hash 计算 + buildIdentity 纳入 expected identity）+ 四类结构化错误 + adversarial 四族（含替换真实 library bytes）。
@@ -41,7 +41,8 @@
 ## 6. Verification
 
 - [ ] 6.1 双平台真机验收：每方法冒烟；交错时间线取证（**同 session 多 tray/多 mount** + 跨 app 实例隔离；普通 set-menu/ext-command 交错完成）；四路 dismissal 一致性；断连/重复终帧/错 owner/旧 generation 竞态族；session close 撤销（payload=cancel 分支）；busy typed；suppression 回传；commandLink/expander 真机截证（win）。
-- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI + vision validate + **check 绿（含 self-review 产物）** + **一致性 grep 脚本绿**；clean checkout release 预演（真实 pack+解包）逐目标 identity check。
+- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI + vision validate + **check 绿（含 self-review 产物）** + **一致性门绿（已预接线：package.json `verify:spec-consistency` 挂入 `verify` 聚合器 + verify-native-artifacts CI step；语义冲突 fixture 测试为批次 A 任务 2.6b）**；clean checkout release 预演（真实 pack+解包）逐目标 identity check。
+- [ ] 6.2b 一致性门 fixture 测试：脚本自身三臂（合法负面引用放行 / 伪装 marker 的规范冲突命中 / 语义规则命中），防门假绿。
 - [ ] 6.3 self-review（md+html）+ check ok:true；Codex 复核轮（R3+）至 GO。
 
 ## 7. Release

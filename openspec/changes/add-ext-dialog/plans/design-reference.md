@@ -158,23 +158,29 @@ accessory 见 §4）。**空命名空间保持可表达**（`darwin: {}` 合法�
 ServerFrame::ExtCommandAccepted  { requestId, operationId }   # 命令受理（Accepted 语义见 §5.3）
 ServerFrame::ExtOperationTerminal { operationId, payload }   # 唯一终帧
 
-# 命令 FFI（改造现有 ExtCommandFn 的 out 约定，repr(C) 冻结）
-#[repr(C)] ExtCommandDispositionV1 =
-  | { tag: 0 /* Immediate */, events: ExtOwnedBytes }          # 现行为：命令内完成
-  | { tag: 1 /* Deferred  */, operation_handle: u64 }          # 挂起：broker 签发 handle
-# opentray_ext_command(instance, context, envelope, out_events, out_disposition) -> ExtResultCode
-# 兼容规则：旧扩展（不导出 disposition 版符号）→ 恒 Immediate（同 EventPort 可选符号模式）
+# 命令 FFI（独立 V2 符号，repr(C) 冻结；R5 P0-1 裁决）
+EXT_SYMBOL_COMMAND_V2 = "opentray_ext_command_v2"
+opentray_ext_command_v2(instance, context, envelope, out_events, out_disposition) -> ExtResultCode
+#[repr(C)] ExtCommandDispositionV1 = { tag: u32, reserved: u32 (=0),
+  value: union { none: (), operation_handle: u64, events: ExtOwnedBytes } }   // size_of/offset_of 由 fixture 冻结
+# 兼容规则（无 UB）：loader 先探测 V2 符号——缺失则用旧 opentray_ext_command（V1 四参签名，
+# 永不以新签名调用），该扩展恒 Immediate、无 deferred 能力（探测结果入能力诊断）
+# 约束：tag=Deferred 时 out_events 必须为空；ExtOwnedBytes 的释放责任与现状一致（host 经
+# free_string 释放）；tag=Immediate 时 value.events 拥有与旧 out_events 相同语义
 
 # 原生侧可选版本化符号（opentray-spec 常量）
 opentray_ext_attach_deferred_completion_port_v1(instance: *mut c_void, port: *const ExtDeferredPortV1)
 # instance 参数必须携带：多 mount 时 port 归属实例，一 mount 一 port，杜绝跨实例覆盖
-ExtDeferredPortV1 = { abi_version, struct_size, port_data, submit }
+#[repr(C)] ExtDeferredPortV1 = { abi_version: u32, struct_size: u32,
+  port_data: *mut c_void,                                   // broker 拥有，进程级存活
+  submit: unsafe extern "C" fn(*mut c_void, u64, *const u8, usize) -> i32 }
 submit(port_data, handle: u64, payload_bytes, payload_len) -> ExtResultCode
 ```
 
 **handle wire 表示**：FFI 侧 `u64`；Node 侧传输帧用十六进制字符串（JSON 安全）；payload
-上限**引用 opentray-spec 的 EventPort 记录字节常量**（同一常量、同一 fixture 数字冻结，
-不另立数值）。
+上限 = **共享常量 `EXTENSION_EVENT_RECORD_MAX_BYTES`**——批次 A 在 opentray-spec（Rust）
+与 @opentray/spec（TS，同值导出）定义该公开常量，event_hub 现私有 `EVENT_DATA_MAX_BYTES`
+迁出引用它，deferred port 与 EventPort 对同一数值与 fixture 负责（Rust/TS 双端比对测试）。
 
 **终帧载荷**：`TerminalPayload = { kind: "result", value: JSON } | { kind: "error", error:
 TypedExtensionError }`——Node 侧 resolve/reject 的唯一依据。
@@ -185,7 +191,7 @@ TypedExtensionError }`——Node 侧 resolve/reject 的唯一依据。
   `ExtCommandDispositionV1::Deferred` 下发（host→extension 单向，一次有效）；handle 为
   u64 nonce，绑定 `(sessionId, instanceGeneration, operationId)`；扩展自造/重放 handle →
   `EXT_ERR_INVALID_HANDLE`，错 owner → 丢弃 + 诊断（不回帧）。
-- **port 生命周期（EventPort 同款模式）**：immutable host-owned 状态；`version` +
+- **port 生命周期（EventPort 同款模式）**：immutable host-owned 状态；`abi_version` +
   `struct_size` 校验（不符 → `event_port_abi_incompatible` 同族错误，不静默降级）；
   submit 为 bounded-copy（超限 → `EXT_ERR_OVERSIZED`）；返回码 `EXT_OK /
   EXT_ERR_PORT_CLOSED / EXT_ERR_INVALID_HANDLE / EXT_ERR_OVERSIZED`；**submit 通道在

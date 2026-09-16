@@ -7,9 +7,7 @@
 > 用户语言系统：**「优先保持轻量」「能力原子」「以 Codex 的决策为准」**。
 > 关联 change：`add-ext-dialog`（同波开发；其批次 A 交付的 embedded artifact kind 与
 > pack-size 审计是本 change 直接复用的共享基建；beep 从 dialog 移出的裁决记录在该 change）。
-> 评审记录：Codex R1（2026-09-17）：**5.5/10 NO-GO**；Codex R2：**6.2/10 NO-GO**——本版为
-> R2 修订版（P0-4 alias flags + PlaybackArbiter 线性化、P0-7 async getBackend、P1-2 WAV
-> 精确 preflight 数值、P1-6 DTO 有限集、P1-1 双 target 措辞、P0-3 单会话运行时裁决同步）。
+> 评审记录：Codex R1：**5.5/10 NO-GO**；R2：**6.2/10 NO-GO**；R3：**6.6/10 NO-GO**；R4：**7.1/10 NO-GO**；R5：**8.0/10 NO-GO（依赖 dialog 批次 A）**——R5 确认 sound 自身设计（三名表/arbiter/WAV/单 session）已闭合，剩余阻塞全部在共享基建（dialog 批次 A 的 V2 符号/共享常量/正式门），随 dialog 批次 A 落地解除。
 
 ## 最终可见效果（operator 视角）
 
