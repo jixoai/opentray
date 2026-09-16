@@ -1,13 +1,17 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ext::{ExpectedExtensionIdentity, ExtensionEnvelope};
+use crate::ext::{ExpectedExtensionIdentity, ExtensionEnvelope, TypedExtensionError};
 use crate::model::{
     AppEvent, AppIcon, AppId, AppIdentity, AppOptions, AppRef, Icon, Menu, Rect, SessionId,
     Tooltip, TrayEvent, TrayId, TrayOptions,
 };
 
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Protocol 2 (add-ext-dialog §5.1) adds the DeferredOperation transaction
+/// frames `ext-command-accepted` and `ext-operation-terminal`. The bump is
+/// one matrix: Node client, broker, socket endpoint, and ready metadata all
+/// carry 2, and a version-1 Init is rejected with `incompatible-protocol`.
+pub const PROTOCOL_VERSION: u32 = 2;
 pub type RequestId = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -362,6 +366,23 @@ pub enum ServerFrame {
         request_id: RequestId,
         events: Vec<ExtensionEnvelope>,
     },
+    /// DeferredOperation acceptance (§5.3): the command did not complete
+    /// inside the dispatch; the client keeps the request pending until the
+    /// matching `ext-operation-terminal` (or a transport-close rejection).
+    ExtCommandAccepted {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+    },
+    /// The single terminal frame of a deferred operation. Exactly one is
+    /// delivered per accepted operation; duplicates are dropped by the
+    /// broker's owner loop before any frame is written.
+    ExtOperationTerminal {
+        #[serde(rename = "operationId")]
+        operation_id: String,
+        payload: ExtOperationPayload,
+    },
     RuntimeHostHealth {
         #[serde(rename = "requestId")]
         request_id: RequestId,
@@ -397,6 +418,17 @@ pub enum TrayBoundsKind {
     Unavailable,
 }
 
+/// Terminal payload of a deferred operation (§5.1 frozen): the `result`
+/// branch resolves the client promise with `value`; the `error` branch
+/// rejects it with a typed extension error. The cancel path is a `result`
+/// payload isomorphic to user cancellation — there is no third channel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExtOperationPayload {
+    Result { value: Value },
+    Error { error: TypedExtensionError },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrayBoundsResult {
@@ -414,12 +446,12 @@ mod tests {
         let identity = BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "myapp").unwrap();
 
         assert_eq!(identity.caller_label(), "myapp");
-        assert_eq!(identity.endpoint_name(), "opentray-0.1.0-p1-myapp");
+        assert_eq!(identity.endpoint_name(), "opentray-0.1.0-p2-myapp");
         assert_eq!(identity.state_dir_name(), "0.1.0/myapp");
-        assert_eq!(identity.unix_socket_file_name(), "opentray-p1.sock");
+        assert_eq!(identity.unix_socket_file_name(), "opentray-p2.sock");
         assert_eq!(
             identity.windows_pipe_name(),
-            r"\\.\pipe\opentray-0.1.0-p1-myapp"
+            r"\\.\pipe\opentray-0.1.0-p2-myapp"
         );
         assert_eq!(identity.process_title(), "opentray · myapp");
     }
@@ -473,7 +505,7 @@ mod tests {
             serde_json::to_value(init).unwrap(),
             serde_json::json!({
                 "type": "init",
-                "protocolVersion": 1,
+                "protocolVersion": 2,
                 "clientVersion": "0.1.0"
             })
         );
@@ -481,7 +513,7 @@ mod tests {
             serde_json::to_value(ready).unwrap(),
             serde_json::json!({
                 "type": "ready",
-                "protocolVersion": 1,
+                "protocolVersion": 2,
                 "brokerVersion": "0.1.0",
                 "brokerArtifactIdentity": {
                     "packageVersion": "0.1.0",
@@ -545,6 +577,93 @@ mod tests {
     fn protocol_version_check_rejects_mismatch() {
         assert!(is_supported_protocol_version(PROTOCOL_VERSION));
         assert!(!is_supported_protocol_version(PROTOCOL_VERSION + 1));
+        // The version-2 bump retires version 1 exhaustively: an old client's
+        // Init must be refused instead of half-parsed (§5.1 frozen matrix).
+        assert!(!is_supported_protocol_version(1));
+    }
+
+    #[test]
+    fn deferred_operation_frames_round_trip_both_payload_branches() {
+        let accepted = ServerFrame::ExtCommandAccepted {
+            request_id: "req-1".to_string(),
+            operation_id: "000000000000000f".to_string(),
+        };
+        let terminal_result = ServerFrame::ExtOperationTerminal {
+            operation_id: "000000000000000f".to_string(),
+            payload: ExtOperationPayload::Result {
+                value: serde_json::json!({ "response": 0, "suppressed": false }),
+            },
+        };
+        let terminal_error = ServerFrame::ExtOperationTerminal {
+            operation_id: "000000000000000f".to_string(),
+            payload: ExtOperationPayload::Error {
+                error: TypedExtensionError {
+                    code: "dialog_dismissal_unavailable".to_string(),
+                    message: "platform cannot observe the dismissal reason".to_string(),
+                    details: Some(serde_json::json!({ "kind": "dismissal" })),
+                },
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(&accepted).unwrap(),
+            serde_json::json!({
+                "type": "ext-command-accepted",
+                "requestId": "req-1",
+                "operationId": "000000000000000f"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&terminal_result).unwrap(),
+            serde_json::json!({
+                "type": "ext-operation-terminal",
+                "operationId": "000000000000000f",
+                "payload": {
+                    "kind": "result",
+                    "value": { "response": 0, "suppressed": false }
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&terminal_error).unwrap(),
+            serde_json::json!({
+                "type": "ext-operation-terminal",
+                "operationId": "000000000000000f",
+                "payload": {
+                    "kind": "error",
+                    "error": {
+                        "code": "dialog_dismissal_unavailable",
+                        "message": "platform cannot observe the dismissal reason",
+                        "details": { "kind": "dismissal" }
+                    }
+                }
+            })
+        );
+
+        // Parser truth: both wire forms deserialize into the same frames.
+        assert_eq!(
+            serde_json::from_value::<ServerFrame>(serde_json::to_value(&accepted).unwrap())
+                .unwrap(),
+            accepted
+        );
+        assert_eq!(
+            serde_json::from_value::<ServerFrame>(serde_json::to_value(&terminal_result).unwrap())
+                .unwrap(),
+            terminal_result
+        );
+        assert_eq!(
+            serde_json::from_value::<ServerFrame>(serde_json::to_value(&terminal_error).unwrap())
+                .unwrap(),
+            terminal_error
+        );
+        // A terminal without a known discriminated branch is rejected, not
+        // guessed.
+        assert!(serde_json::from_value::<ServerFrame>(serde_json::json!({
+            "type": "ext-operation-terminal",
+            "operationId": "000000000000000f",
+            "payload": { "kind": "cancel" }
+        }))
+        .is_err());
     }
 
     #[test]
@@ -632,7 +751,7 @@ mod tests {
                 "health": {
                     "pid": 12345,
                     "packageVersion": "0.1.0",
-                    "protocolVersion": 1,
+                    "protocolVersion": 2,
                     "endpoint": "/tmp/opentray.sock",
                     "appId": "com.example.build",
                     "appName": "Build",
