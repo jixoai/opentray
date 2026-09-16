@@ -23,6 +23,7 @@ export {
 export {
   EMBEDDED_STAGING_MANIFEST_PATH,
   NATIVE_EXTENSION_EMBEDDED_ERROR_CODES,
+  NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX,
   NativeExtensionArtifactResolutionError,
   NativeExtensionEmbeddedArtifactError,
   resolveNativeExtensionArtifact,
@@ -30,6 +31,7 @@ export {
   type NativeExtensionArtifact,
   type NativeExtensionEmbeddedArtifact,
   type NativeExtensionEmbeddedErrorReason,
+  type NativeExtensionEmbeddedMatrixTarget,
   type NativeExtensionEmbeddedTarget,
   type NativeExtensionFileArtifact,
   type NativeExtensionIdentitySource,

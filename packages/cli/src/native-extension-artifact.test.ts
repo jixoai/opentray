@@ -4,7 +4,9 @@
 //    (sha256 + buildIdentity flow into the LoadExt expected identity).
 // 2. Reject the four structured classes: target-unsupported,
 //    path-outside-facade (traversal + symlink escape), manifest-invalid
-//    (skew + real byte replacement), library-unreadable.
+//    (skew + real byte replacement + missing matrix cell), library-unreadable.
+// 3. Enforce the frozen four-target staging matrix: the fixture always
+//    stages the complete catalog and every missing cell has its own arm.
 
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -14,10 +16,12 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX,
   NATIVE_EXTENSION_EMBEDDED_ERROR_CODES,
   NativeExtensionEmbeddedArtifactError,
   resolveNativeExtensionArtifact,
   type NativeExtensionEmbeddedArtifact,
+  type NativeExtensionEmbeddedMatrixTarget,
 } from "./native-extension-artifact";
 
 const tempDirs: string[] = [];
@@ -27,8 +31,16 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
 });
 
+const libraryBytesFor = (target: NativeExtensionEmbeddedMatrixTarget): Buffer =>
+  Buffer.from(`dialog-native-dylib-bytes-${target}`, "utf8");
+
+const libraryPathFor = (target: NativeExtensionEmbeddedMatrixTarget): string =>
+  `platforms/${target}/libopentray_ext_dialog.dylib`;
+
 interface EmbeddedFacadeOptions {
+  /** Overrides the darwin-arm64 library bytes (the resolver test target). */
   libraryBytes?: string;
+  /** Omits the darwin-arm64 library file from disk. */
   omitLibrary?: boolean;
   manifestMutator?: (manifest: Record<string, unknown>) => void;
 }
@@ -38,8 +50,6 @@ const buildEmbeddedFacade = async (
 ): Promise<string> => {
   const root = await mkdtemp("/tmp/ot-embedded-");
   tempDirs.push(root);
-  const libraryDir = join(root, "platforms", "darwin-arm64");
-  await mkdir(libraryDir, { recursive: true });
   await writeFile(
     join(root, "package.json"),
     JSON.stringify({ name: "@opentray/ext-dialog", version: "1.2.3" }, null, 2)
@@ -55,23 +65,28 @@ const buildEmbeddedFacade = async (
       2
     )
   );
-  const libraryBytes = Buffer.from(options.libraryBytes ?? "dialog-native-dylib-bytes", "utf8");
-  if (!options.omitLibrary) {
-    await writeFile(
-      join(libraryDir, "libopentray_ext_dialog.dylib"),
-      libraryBytes
-    );
+  // The complete frozen matrix: one platform directory and one manifest entry
+  // per target (section 6.4 staging completeness).
+  const targets: Record<string, unknown> = {};
+  for (const target of NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX) {
+    const bytes =
+      target === "darwin-arm64" && options.libraryBytes !== undefined
+        ? Buffer.from(options.libraryBytes, "utf8")
+        : libraryBytesFor(target);
+    await mkdir(join(root, "platforms", target), { recursive: true });
+    if (!(target === "darwin-arm64" && options.omitLibrary)) {
+      await writeFile(join(root, libraryPathFor(target)), bytes);
+    }
+    targets[target] = {
+      path: libraryPathFor(target),
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      buildIdentity: `sha256:dialog-build-${target}`,
+    };
   }
   const manifest: Record<string, unknown> = {
     facadeVersion: "1.2.3",
     contractFingerprint: "opentray-ext-dialog-contract-1",
-    targets: {
-      "darwin-arm64": {
-        path: "platforms/darwin-arm64/libopentray_ext_dialog.dylib",
-        sha256: createHash("sha256").update(libraryBytes).digest("hex"),
-        buildIdentity: "sha256:dialog-build-1",
-      },
-    },
+    targets,
   };
   options.manifestMutator?.(manifest);
   await writeFile(join(root, "platforms", "manifest.json"), JSON.stringify(manifest, null, 2));
@@ -80,13 +95,16 @@ const buildEmbeddedFacade = async (
 
 const embeddedArtifact = (
   root: string,
-  libraryPath = "platforms/darwin-arm64/libopentray_ext_dialog.dylib"
+  libraryPath = libraryPathFor("darwin-arm64")
 ): NativeExtensionEmbeddedArtifact => ({
   kind: "embedded",
   packageJsonUrl: pathToFileURL(join(root, "package.json")).href,
   contractManifestUrl: pathToFileURL(join(root, "contract.json")).href,
   targets: {
     "darwin-arm64": { libraryPath },
+    "darwin-x64": { libraryPath: libraryPathFor("darwin-x64") },
+    "win32-arm64": { libraryPath: libraryPathFor("win32-arm64") },
+    "win32-x64": { libraryPath: libraryPathFor("win32-x64") },
   },
 });
 
@@ -114,7 +132,7 @@ const expectEmbeddedError = async (
 describe("embedded native extension artifacts", () => {
   it("resolves through the staging manifest identity chain", async () => {
     const root = await buildEmbeddedFacade();
-    const libraryBytes = Buffer.from("dialog-native-dylib-bytes", "utf8");
+    const libraryBytes = libraryBytesFor("darwin-arm64");
     const resolved = await resolveNativeExtensionArtifact(
       embeddedArtifact(root),
       "darwin",
@@ -131,15 +149,37 @@ describe("embedded native extension artifacts", () => {
       contractFingerprint: "opentray-ext-dialog-contract-1",
       target: { os: "darwin", arch: "arm64" },
       sha256: createHash("sha256").update(libraryBytes).digest("hex"),
-      buildIdentity: "sha256:dialog-build-1",
+      buildIdentity: "sha256:dialog-build-darwin-arm64",
     });
     // LoadExt wire shape: the identity-chain fields ride expectedIdentity.
     const wire = JSON.parse(JSON.stringify(resolved.expectedIdentity));
     expect(wire.sha256).toMatch(/^[a-f0-9]{64}$/u);
-    expect(wire.buildIdentity).toBe("sha256:dialog-build-1");
+    expect(wire.buildIdentity).toBe("sha256:dialog-build-darwin-arm64");
   });
 
-  it("rejects a target the descriptor does not declare (target-unsupported)", async () => {
+  it("resolves any matrix cell the descriptor declares (cross-target)", async () => {
+    const root = await buildEmbeddedFacade();
+    const resolved = await resolveNativeExtensionArtifact(
+      embeddedArtifact(root),
+      "darwin",
+      "x64"
+    );
+
+    expect(resolved.target).toBe("darwin-x64");
+    expect(resolved.path).toBe(
+      await realpath(join(root, "platforms", "darwin-x64", "libopentray_ext_dialog.dylib"))
+    );
+    expect(resolved.expectedIdentity).toEqual({
+      extensionName: "dialog",
+      artifactSetVersion: "1.2.3",
+      contractFingerprint: "opentray-ext-dialog-contract-1",
+      target: { os: "darwin", arch: "x64" },
+      sha256: createHash("sha256").update(libraryBytesFor("darwin-x64")).digest("hex"),
+      buildIdentity: "sha256:dialog-build-darwin-x64",
+    });
+  });
+
+  it("rejects a target outside the frozen staging matrix (target-unsupported)", async () => {
     const root = await buildEmbeddedFacade();
     await expectEmbeddedError(
       resolveNativeExtensionArtifact(embeddedArtifact(root), "linux", "x64"),
@@ -147,10 +187,45 @@ describe("embedded native extension artifacts", () => {
       "linux-x64"
     );
     await expectEmbeddedError(
-      resolveNativeExtensionArtifact(embeddedArtifact(root), "darwin", "x64"),
+      resolveNativeExtensionArtifact(embeddedArtifact(root), "linux", "arm64"),
       "target-unsupported",
-      "darwin-x64"
+      "linux-arm64"
     );
+  });
+
+  it("cannot represent an incomplete embedded catalog at the type level", () => {
+    const incomplete: NativeExtensionEmbeddedArtifact = {
+      kind: "embedded",
+      packageJsonUrl: "file:///fixture/package.json",
+      contractManifestUrl: "file:///fixture/contract.json",
+      // @ts-expect-error the declared catalog must be complete over the
+      // frozen matrix; a descriptor with only darwin-arm64 is not representable.
+      targets: {
+        "darwin-arm64": { libraryPath: "platforms/darwin-arm64/libopentray_ext_dialog.dylib" },
+      },
+    };
+    void incomplete;
+    expect(NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX).toEqual([
+      "darwin-arm64",
+      "darwin-x64",
+      "win32-arm64",
+      "win32-x64",
+    ]);
+  });
+
+  it("rejects a staging manifest missing any matrix cell (manifest-invalid, per-cell)", async () => {
+    for (const missing of NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX) {
+      const root = await buildEmbeddedFacade({
+        manifestMutator: (manifest) => {
+          delete (manifest.targets as Record<string, unknown>)[missing];
+        },
+      });
+      const error = await expectEmbeddedError(
+        resolveNativeExtensionArtifact(embeddedArtifact(root), "darwin", "arm64"),
+        "manifest-invalid"
+      );
+      expect(error.message).toContain(missing);
+    }
   });
 
   it("rejects traversal and absolute library paths before touching the filesystem (path-outside-facade)", async () => {
@@ -198,7 +273,8 @@ describe("embedded native extension artifacts", () => {
       const linkPath = join(root, "platforms", "darwin-arm64", "libopentray_ext_dialog.dylib");
       await symlink(outsideLibrary, linkPath);
       // The manifest legitimately describes the outside bytes: containment,
-      // not the hash, must catch the escape.
+      // not the hash, must catch the escape. The manifest stays complete over
+      // the matrix; only the darwin-arm64 entry claims the outside bytes.
       await writeFile(
         join(root, "platforms", "manifest.json"),
         JSON.stringify({
@@ -208,7 +284,22 @@ describe("embedded native extension artifacts", () => {
             "darwin-arm64": {
               path: "platforms/darwin-arm64/libopentray_ext_dialog.dylib",
               sha256: createHash("sha256").update(outsideBytes).digest("hex"),
-              buildIdentity: "sha256:dialog-build-1",
+              buildIdentity: "sha256:dialog-build-darwin-arm64",
+            },
+            "darwin-x64": {
+              path: libraryPathFor("darwin-x64"),
+              sha256: createHash("sha256").update(libraryBytesFor("darwin-x64")).digest("hex"),
+              buildIdentity: "sha256:dialog-build-darwin-x64",
+            },
+            "win32-arm64": {
+              path: libraryPathFor("win32-arm64"),
+              sha256: createHash("sha256").update(libraryBytesFor("win32-arm64")).digest("hex"),
+              buildIdentity: "sha256:dialog-build-win32-arm64",
+            },
+            "win32-x64": {
+              path: libraryPathFor("win32-x64"),
+              sha256: createHash("sha256").update(libraryBytesFor("win32-x64")).digest("hex"),
+              buildIdentity: "sha256:dialog-build-win32-x64",
             },
           },
         })

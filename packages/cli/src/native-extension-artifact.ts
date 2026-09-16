@@ -3,7 +3,7 @@
 // 2. Resolve platform packages from the declaring facade's dependency closure.
 // 3. Reject missing targets, invalid package metadata, and inaccessible native libraries precisely.
 // 4. Resolve embedded per-target libraries through the staging manifest identity chain with
-//    root containment and adversarial rejection (add-ext-dialog §6.1/§6.4).
+//    root containment and adversarial rejection (add-ext-dialog section 6.1/section 6.4).
 
 import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
@@ -31,21 +31,46 @@ export interface NativeExtensionPackageArtifact
   targets: Partial<Record<NativeExtensionTarget, NativeExtensionPackageTarget>>;
 }
 
-/** One embedded per-target library, relative to the facade package root (add-ext-dialog §6.1). */
+/** One embedded per-target library, relative to the facade package root (add-ext-dialog section 6.1). */
 export interface NativeExtensionEmbeddedTarget {
   libraryPath: string;
 }
 
 /**
+ * Frozen embedded staging matrix (add-ext-dialog section 6.4): a facade that
+ * embeds platform binaries stages exactly these four targets. The runtime
+ * resolver requires the staging manifest to be complete over this matrix
+ * (release staging enforces the same set before anything is packed); one
+ * missing cell is a manifest-invalid artifact, never a silently thinner
+ * catalog.
+ */
+export const NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX = [
+  "darwin-arm64",
+  "darwin-x64",
+  "win32-arm64",
+  "win32-x64",
+] as const;
+
+/** One cell of the frozen embedded staging matrix. */
+export type NativeExtensionEmbeddedMatrixTarget =
+  (typeof NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX)[number];
+
+/**
  * Facade package that ships its platform libraries inside its own tarball via
  * `platforms/<target>/` plus the root-contained staging manifest
- * `platforms/manifest.json` (add-ext-dialog §6.4 identity chain). No
- * optionalDependencies platform packages are involved.
+ * `platforms/manifest.json` (add-ext-dialog section 6.4 identity chain). No
+ * optionalDependencies platform packages are involved. The declared catalog
+ * is complete over the frozen matrix: an incomplete embedded catalog is not
+ * representable, and the runtime manifest check carries the same
+ * completeness rule for untyped consumers.
  */
 export interface NativeExtensionEmbeddedArtifact
   extends NativeExtensionIdentitySource {
   kind: "embedded";
-  targets: Partial<Record<NativeExtensionTarget, NativeExtensionEmbeddedTarget>>;
+  targets: Record<
+    NativeExtensionEmbeddedMatrixTarget,
+    NativeExtensionEmbeddedTarget
+  >;
 }
 
 interface NativeExtensionFileArtifactBase {
@@ -105,7 +130,7 @@ export class NativeExtensionArtifactResolutionError extends Error {
 }
 
 /**
- * Structured embedded-artifact rejection reasons (add-ext-dialog §6.1): the
+ * Structured embedded-artifact rejection reasons (add-ext-dialog section 6.1): the
  * four-class replacement of a single resolution-failed error. Consumers match
  * on `reason`/`code`; the human message is not a contract.
  */
@@ -233,7 +258,7 @@ const resolveExpectedIdentity = async (
 };
 
 // ---------------------------------------------------------------------------
-// Embedded artifacts (add-ext-dialog §6.1/§6.4): the facade ships its own
+// Embedded artifacts (add-ext-dialog section 6.1/section 6.4): the facade ships its own
 // platform libraries plus a root-contained staging manifest carrying the
 // identity chain (per-target path, SHA-256, buildIdentity, facade version,
 // contract fingerprint). Resolution validates containment on every path,
@@ -259,6 +284,11 @@ interface EmbeddedStagingManifest {
 
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
 
+const isEmbeddedMatrixTarget = (
+  target: NativeExtensionTarget
+): target is NativeExtensionEmbeddedMatrixTarget =>
+  (NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX as readonly string[]).includes(target);
+
 const lexicalContained = (root: string, candidate: string): boolean => {
   const rel = relative(root, candidate);
   if (rel.length === 0) {
@@ -283,11 +313,21 @@ const resolveEmbeddedExtensionArtifact = async (
       ...(options.cause === undefined ? {} : { cause: options.cause }),
     });
 
-  const embeddedTarget = artifact.targets[target];
-  if (embeddedTarget === undefined) {
+  // Targets outside the frozen matrix are unsupported platforms for the
+  // embedded artifact kind (linux resolves here, for example).
+  if (!isEmbeddedMatrixTarget(target)) {
     throw embeddedError(
       "target-unsupported",
-      `embedded native extension does not support target ${target}`
+      `embedded native extension supports only the frozen staging matrix (${NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX.join(", ")}); ${target} is outside it`
+    );
+  }
+  const embeddedTarget = artifact.targets[target];
+  if (embeddedTarget === undefined) {
+    // Unreachable for typed callers (the descriptor is complete over the
+    // matrix); untyped consumers still get the structured rejection.
+    throw embeddedError(
+      "target-unsupported",
+      `embedded native extension does not declare target ${target}`
     );
   }
 
@@ -358,8 +398,28 @@ const resolveEmbeddedExtensionArtifact = async (
       `embedded staging manifest contract fingerprint does not match the contract manifest at ${artifact.contractManifestUrl}`
     );
   }
+  // Manifest completeness over the frozen matrix (section 6.4): every cell
+  // must be present, and no key outside the matrix may appear. An incomplete
+  // or widened manifest is a staging-chain break, not a thinner catalog.
+  for (const matrixTarget of NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX) {
+    if (manifest.targets[matrixTarget] === undefined) {
+      throw embeddedError(
+        "manifest-invalid",
+        `embedded staging manifest is missing required matrix target ${matrixTarget}`
+      );
+    }
+  }
   for (const manifestTarget of Object.keys(manifest.targets)) {
-    if (artifact.targets[manifestTarget as NativeExtensionTarget] === undefined) {
+    if (!isEmbeddedMatrixTarget(manifestTarget as NativeExtensionTarget)) {
+      throw embeddedError(
+        "manifest-invalid",
+        `embedded staging manifest declares target ${manifestTarget} outside the frozen staging matrix`
+      );
+    }
+    if (
+      artifact.targets[manifestTarget as NativeExtensionEmbeddedMatrixTarget] ===
+      undefined
+    ) {
       throw embeddedError(
         "manifest-invalid",
         `embedded staging manifest declares undeclared target ${manifestTarget}`
