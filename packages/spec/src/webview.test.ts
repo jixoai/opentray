@@ -249,7 +249,7 @@ const resultBuilders: Record<string, () => WebviewOrchestrationResultFrame> = {
     type: "get-webview-favicon-result",
     windowId: "win-1",
     webviewId: "content",
-    href: "https://example.org/favicon.ico",
+    value: { href: "https://example.org/favicon.ico" },
     seq: 71,
   }),
   "get-webview-favicon-result unset href": () => ({
@@ -257,6 +257,7 @@ const resultBuilders: Record<string, () => WebviewOrchestrationResultFrame> = {
     type: "get-webview-favicon-result",
     windowId: "win-1",
     webviewId: "content",
+    value: null,
     seq: 0,
   }),
   "webview-ack echoes the command": () => ({
@@ -501,6 +502,21 @@ describe("navigation rules and url-glob semantics", () => {
       ["*", "https://any.example/deep/path?q=1", true],
       ["https://example.org/*", "https://example.org/", true],
       ["https://example.org/*", "https://example.org", false],
+      // R1 regression: every metacharacter is literal — the first cut left
+      // `.` unescaped and `example.org` matched `exampleXorg`.
+      ["https://example.org/*", "https://exampleXorg/path", false],
+      ["https://example.org/a.b", "https://example.org/aXb", false],
+      ["https://example.org/a+b", "https://example.org/ab", false],
+      ["https://example.org/a?b", "https://example.org/ab", false],
+      ["https://example.org/(x)", "https://example.org/(x)", true],
+      ["https://example.org/(x)", "https://example.org/x", false],
+      ["https://example.org/[x]", "https://example.org/[x]", true],
+      ["https://example.org/[x]", "https://example.org/x", false],
+      ["https://example.org/a{1}", "https://example.org/a{1}", true],
+      ["https://example.org/a|b", "https://example.org/a|b", true],
+      ["https://example.org/a^b", "https://example.org/a^b", true],
+      ["https://example.org/a$b", "https://example.org/a$b", true],
+      ["https://example.org/a\\b", "https://example.org/a\\b", true],
     ];
     for (const [pattern, url, expected] of cases) {
       expect(matchesWebviewNavigationPattern(pattern, url), `${pattern} vs ${url}`).toBe(expected);
@@ -639,6 +655,7 @@ describe("registries", () => {
       "payload_too_large",
       "queue_overflow",
       "invalid_payload",
+      "favicon_disabled",
     ]);
     expect(isWebviewOrchestrationErrorCode("queue_overflow")).toBe(true);
     expect(isWebviewOrchestrationErrorCode("made_up_code")).toBe(false);

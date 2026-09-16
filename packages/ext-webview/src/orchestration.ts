@@ -681,6 +681,10 @@ export const createWebviewOrchestration = (
         }
         observeSeq(webviewId, querySeq);
         observeKindSeq(webviewId, kind, querySeq);
+        // R1 P2 regression: the delivery arm is mutually exclusive by kind.
+        // The first cut chained `if favicon else title`, so a urlChange gap
+        // also ran the title arm and delivered `String(undefined)` to title
+        // listeners.
         if (kind === "urlChange") {
           const set = urlChangeHandlers.get(webviewId);
           if (set !== undefined) {
@@ -691,15 +695,19 @@ export const createWebviewOrchestration = (
               url: String(result.url),
             });
           }
-        }
-        if (kind === "faviconChange") {
+        } else if (kind === "faviconChange") {
           const set = faviconChangeHandlers.get(webviewId);
-          if (set !== undefined && result.href !== undefined && result.href !== null) {
+          const value = result.value;
+          const href =
+            typeof value === "object" && value !== null
+              ? (value as { href?: unknown }).href
+              : undefined;
+          if (set !== undefined && typeof href === "string") {
             callHandlers(set, {
               windowId,
               webviewId,
               seq: querySeq,
-              href: String(result.href),
+              href,
             });
           }
         } else {
@@ -1162,8 +1170,13 @@ export const createWebviewOrchestration = (
         observeSeq(webviewId, seq);
         observeKindSeq(webviewId, "faviconChange", seq);
       }
+      const rawValue = result.value;
+      const href =
+        typeof rawValue === "object" && rawValue !== null
+          ? (rawValue as { href?: unknown }).href
+          : undefined;
       return {
-        ...(result.href === undefined || result.href === null ? {} : { href: String(result.href) }),
+        value: typeof href === "string" ? { href } : null,
         seq,
       };
     },

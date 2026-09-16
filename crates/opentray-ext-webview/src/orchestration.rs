@@ -165,6 +165,10 @@ pub(crate) struct ViewEvents {
     /// native navigation decision point (create option or
     /// `set-webview-navigation-rules`).
     pub navigation_rules: Vec<WebviewNavigationRule>,
+    /// The `favicon` create capability. Gates the `get-webview-favicon`
+    /// query (typed `favicon_disabled` rejection otherwise); the page-side
+    /// observer injection already happened (or not) at bootstrap.
+    pub favicon_enabled: bool,
 }
 
 impl ViewEvents {
@@ -185,6 +189,7 @@ impl ViewEvents {
             favicon: None,
             favicon_seq: 0,
             navigation_rules: Vec::new(),
+            favicon_enabled: false,
         }
     }
 
@@ -480,6 +485,60 @@ impl ViewEvents {
     /// The stable `loadState failed` error code a rule-blocked navigation
     /// reports, exposed for platform delegates building the failed frame.
     pub(crate) const BLOCKED_ERROR_CODE: i32 = WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE;
+}
+
+/// Resolves one page-reported favicon href into the absolute http(s)
+/// address the `faviconChange` frame carries, per the favicon spec: the
+/// DOM `link.href` property is already absolute (the common path), the
+/// `getAttribute` fallback may be relative, and only http/https survive
+/// (`data:`/`blob:`/`file:` are not favicon wire truth). Naive relative
+/// resolution against the view's tracked URL — enough for the fallback of
+/// a fallback; page-relative `../` walks are not rebased.
+pub(crate) fn resolve_webview_favicon_href(base_url: &str, href: &str) -> Option<String> {
+    if href.is_empty() {
+        return None;
+    }
+    let lower = href.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Some(href.to_string());
+    }
+    // Any other explicit scheme (data:, blob:, file:, javascript:, ...) is
+    // rejected: a `:` before the first `/` marks one.
+    let before_slash = href.split('/').next().unwrap_or("");
+    if before_slash.contains(':') {
+        return None;
+    }
+    // Scheme-relative or path-absolute/relative forms resolve against the
+    // base; a non-http(s) base cannot anchor a favicon href.
+    let base_lower = base_url.to_ascii_lowercase();
+    let scheme = if base_lower.starts_with("https://") {
+        "https:"
+    } else if base_lower.starts_with("http://") {
+        "http:"
+    } else {
+        return None;
+    };
+    if let Some(rest) = href.strip_prefix("//") {
+        return Some(format!("{scheme}//{rest}"));
+    }
+    let after_scheme = base_url
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or_default();
+    let authority_end = after_scheme.find(['/']).unwrap_or(after_scheme.len());
+    let origin = &after_scheme[..authority_end];
+    if origin.is_empty() {
+        return None;
+    }
+    if let Some(path) = href.strip_prefix('/') {
+        return Some(format!("{scheme}//{origin}/{path}"));
+    }
+    let base_path = &after_scheme[authority_end..];
+    let dir = match base_path.rfind('/') {
+        Some(index) => &base_path[..index + 1],
+        None => "/",
+    };
+    Some(format!("{scheme}//{origin}{dir}{href}"))
 }
 
 /// Applies a new focus owner to every view of one window and returns the
@@ -1307,24 +1366,129 @@ mod tests {
     }
 
     #[test]
+    fn favicon_href_resolution_follows_the_absolute_https_http_contract() {
+        let cases: &[(&str, &str, Option<&str>)] = &[
+            // The common path: the DOM href property is already absolute.
+            (
+                "https://example.org/page",
+                "https://cdn.example.org/icon.ico",
+                Some("https://cdn.example.org/icon.ico"),
+            ),
+            (
+                "https://example.org/page",
+                "http://other.example/i.png",
+                Some("http://other.example/i.png"),
+            ),
+            // Explicit non-http schemes never reach the wire.
+            ("https://example.org/", "data:image/png;base64,xxx", None),
+            (
+                "https://example.org/",
+                "blob:https://example.org/uuid",
+                None,
+            ),
+            ("https://example.org/", "file:///tmp/icon.ico", None),
+            ("https://example.org/", "javascript:void(0)", None),
+            ("https://example.org/", "", None),
+            // Scheme-relative joins the base scheme.
+            (
+                "https://example.org/page",
+                "//cdn.example.org/i.ico",
+                Some("https://cdn.example.org/i.ico"),
+            ),
+            (
+                "http://example.org/page",
+                "//cdn.example.org/i.ico",
+                Some("http://cdn.example.org/i.ico"),
+            ),
+            // Path-absolute joins the origin.
+            (
+                "https://example.org/a/b",
+                "/favicon.ico",
+                Some("https://example.org/favicon.ico"),
+            ),
+            // Relative joins the base directory (naive, no ../ rebase).
+            (
+                "https://example.org/a/b",
+                "icon.ico",
+                Some("https://example.org/a/icon.ico"),
+            ),
+            (
+                "https://example.org/a/",
+                "icon.ico",
+                Some("https://example.org/a/icon.ico"),
+            ),
+            (
+                "https://example.org",
+                "icon.ico",
+                Some("https://example.org/icon.ico"),
+            ),
+            // A non-http(s) base cannot anchor anything.
+            ("about:blank", "/favicon.ico", None),
+            ("", "/favicon.ico", None),
+        ];
+        for (base, href, expected) in cases {
+            assert_eq!(
+                resolve_webview_favicon_href(base, href),
+                expected.map(str::to_string),
+                "base {base:?} href {href:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn favicon_query_is_capability_gated() {
+        let attributed = owner("tray-1", Some("session-1"));
+        let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
+        assert!(!events.favicon_enabled);
+        events.favicon_enabled = true;
+        assert!(events.favicon_enabled);
+        // The gate is pure state; the typed rejection lives in the command
+        // handlers (both platforms), asserted through the frozen
+        // `favicon_disabled` code below.
+        assert_eq!(
+            serde_json::to_value(opentray_spec::webview::OrchestrationErrorCode::FaviconDisabled)
+                .unwrap(),
+            serde_json::json!("favicon_disabled")
+        );
+        // Silence unused-variable lint for the owner binding shape used by
+        // the sibling tests.
+        let _ = &attributed;
+    }
+
+    #[test]
     fn navigation_action_frames_follow_subscription_and_carry_the_projection() {
         use opentray_spec::webview::WebviewEventPayload;
 
         let attributed = owner("tray-1", Some("session-1"));
         let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
         // Unsubscribed: no frame, no seq burn (Edge class, no query pair).
-        assert!(
-            events
-                .note_navigation_action(&attributed, "win", "https://example.org/a", WebviewNavigationType::Link, Some(true))
-                .is_none()
-        );
+        assert!(events
+            .note_navigation_action(
+                &attributed,
+                "win",
+                "https://example.org/a",
+                WebviewNavigationType::Link,
+                Some(true)
+            )
+            .is_none());
         events.subscribe(&[WebviewEventKind::NavigationAction]);
         let frame = events
-            .note_navigation_action(&attributed, "win", "https://example.org/a", WebviewNavigationType::Link, Some(true))
+            .note_navigation_action(
+                &attributed,
+                "win",
+                "https://example.org/a",
+                WebviewNavigationType::Link,
+                Some(true),
+            )
             .expect("subscribed view emits");
         assert_eq!(frame.seq, 1);
         assert!(frame.is_coherent());
-        let WebviewEventPayload::NavigationAction { url, navigation_type, is_user_initiated } = &frame.payload else {
+        let WebviewEventPayload::NavigationAction {
+            url,
+            navigation_type,
+            is_user_initiated,
+        } = &frame.payload
+        else {
             panic!("payload variant");
         };
         assert_eq!(url, "https://example.org/a");
@@ -1333,17 +1497,32 @@ mod tests {
         // The optional flag serializes away when the platform cannot
         // attribute a gesture (macOS truth).
         let redirect = events
-            .note_navigation_action(&attributed, "win", "https://example.org/login", WebviewNavigationType::Redirect, None)
+            .note_navigation_action(
+                &attributed,
+                "win",
+                "https://example.org/login",
+                WebviewNavigationType::Redirect,
+                None,
+            )
             .expect("subscribed view emits");
         let value = serde_json::to_value(&redirect).expect("serialize");
         assert!(value["payload"].get("isUserInitiated").is_none());
         // Unattributed legacy owner: state-only, no frame.
-        let legacy = WindowOwner { app_id: "app-1".into(), tray_id: "tray-1".into(), session_id: None, window_id: "win".into() };
-        assert!(
-            events
-                .note_navigation_action(&legacy, "win", "https://example.org/b", WebviewNavigationType::Other, None)
-                .is_none()
-        );
+        let legacy = WindowOwner {
+            app_id: "app-1".into(),
+            tray_id: "tray-1".into(),
+            session_id: None,
+            window_id: "win".into(),
+        };
+        assert!(events
+            .note_navigation_action(
+                &legacy,
+                "win",
+                "https://example.org/b",
+                WebviewNavigationType::Other,
+                None
+            )
+            .is_none());
     }
 
     #[test]
@@ -1351,34 +1530,39 @@ mod tests {
         let attributed = owner("tray-1", Some("session-1"));
         let mut events = ViewEvents::new("content", WebviewBridgePolicy::default());
         // Cache refreshes while unsubscribed so the query converges.
-        assert!(
-            events
-                .note_favicon_change(&attributed, "win", "https://example.org/favicon.ico")
-                .is_none()
+        assert!(events
+            .note_favicon_change(&attributed, "win", "https://example.org/favicon.ico")
+            .is_none());
+        assert_eq!(
+            events.favicon.as_deref(),
+            Some("https://example.org/favicon.ico")
         );
-        assert_eq!(events.favicon.as_deref(), Some("https://example.org/favicon.ico"));
         assert_eq!(events.favicon_seq, 1);
         events.subscribe(&[WebviewEventKind::FaviconChange]);
         // A repeated href is not a state change: no seq, no frame.
-        assert!(
-            events
-                .note_favicon_change(&attributed, "win", "https://example.org/favicon.ico")
-                .is_none()
-        );
+        assert!(events
+            .note_favicon_change(&attributed, "win", "https://example.org/favicon.ico")
+            .is_none());
         assert_eq!(events.favicon_seq, 1);
         let frame = events
             .note_favicon_change(&attributed, "win", "https://example.org/favicon-2.ico")
             .expect("changed href emits");
         assert_eq!(frame.seq, 2);
         assert!(frame.is_coherent());
-        assert_eq!(events.favicon.as_deref(), Some("https://example.org/favicon-2.ico"));
+        assert_eq!(
+            events.favicon.as_deref(),
+            Some("https://example.org/favicon-2.ico")
+        );
         assert_eq!(events.favicon_seq, 2);
         // An empty href never reaches the state (the interceptor filters;
         // the core would mark it incoherent anyway).
         let empty = events.note_favicon_change(&attributed, "win", "");
         assert!(empty.is_none());
         assert!(matches!(empty, None));
-        assert_eq!(events.favicon.as_deref(), Some("https://example.org/favicon-2.ico"));
+        assert_eq!(
+            events.favicon.as_deref(),
+            Some("https://example.org/favicon-2.ico")
+        );
     }
 
     #[test]
@@ -1396,11 +1580,24 @@ mod tests {
         // stable code, not a platform status.
         events.subscribe(&[WebviewEventKind::LoadState]);
         let frame = events
-            .note_load_state(&attributed, "win", WebviewLoadPhase::Failed, "https://cdn.tracker.example/pixel.gif".to_string(), Some(ViewEvents::BLOCKED_ERROR_CODE), None)
+            .note_load_state(
+                &attributed,
+                "win",
+                WebviewLoadPhase::Failed,
+                "https://cdn.tracker.example/pixel.gif".to_string(),
+                Some(ViewEvents::BLOCKED_ERROR_CODE),
+                None,
+            )
             .expect("subscribed failed frame");
         let value = serde_json::to_value(&frame).expect("serialize");
-        assert_eq!(value["payload"]["errorCode"], ViewEvents::BLOCKED_ERROR_CODE);
-        assert_eq!(ViewEvents::BLOCKED_ERROR_CODE, WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE);
+        assert_eq!(
+            value["payload"]["errorCode"],
+            ViewEvents::BLOCKED_ERROR_CODE
+        );
+        assert_eq!(
+            ViewEvents::BLOCKED_ERROR_CODE,
+            WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE
+        );
     }
 
     #[test]

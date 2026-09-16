@@ -83,6 +83,7 @@ pub enum OrchestrationErrorCode {
     PayloadTooLarge,
     QueueOverflow,
     InvalidPayload,
+    FaviconDisabled,
 }
 
 pub const ORCHESTRATION_ERROR_CODES: &[&str] = &[
@@ -96,6 +97,7 @@ pub const ORCHESTRATION_ERROR_CODES: &[&str] = &[
     "payload_too_large",
     "queue_overflow",
     "invalid_payload",
+    "favicon_disabled",
 ];
 
 impl OrchestrationErrorCode {
@@ -111,6 +113,7 @@ impl OrchestrationErrorCode {
             Self::PayloadTooLarge => "payload_too_large",
             Self::QueueOverflow => "queue_overflow",
             Self::InvalidPayload => "invalid_payload",
+            Self::FaviconDisabled => "favicon_disabled",
         }
     }
 }
@@ -375,10 +378,10 @@ pub enum WebviewOrchestrationResult {
         owner: WebviewOwnerTuple,
         window_id: WindowId,
         webview_id: WebviewId,
-        /// `None` until the first settled favicon is observed (and for
-        /// webviews created without the `favicon` option).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        href: Option<String>,
+        /// The `(value, seq)` query pair: `null` until the first settled
+        /// favicon observation. Always serialized (explicit null is the
+        /// not-observed state, not an absent field).
+        value: Option<WebviewFaviconValue>,
         seq: u64,
     },
 }
@@ -436,6 +439,15 @@ pub enum WebviewNavigationType {
 /// Stable numeric `loadState failed` code for a navigation cancelled by a
 /// declarative navigation rule. Outside platform ranges by construction
 /// (WebView2 `WebErrorStatus` and WebKit domain codes are small integers).
+/// Query value of the `get-webview-favicon` result frame: `null` until the
+/// first settled favicon observation (and for webviews created without the
+/// `favicon` capability).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebviewFaviconValue {
+    pub href: String,
+}
+
 pub const WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE: i32 = 4500001;
 
 /// One declarative navigation rule; v1 actions: block only.
@@ -448,6 +460,11 @@ pub struct WebviewNavigationRule {
     pub action: WebviewNavigationRuleAction,
 }
 
+/// The action one declarative navigation rule takes when its pattern
+/// matches a navigation decision's full URL. v1 freezes a single action:
+/// the navigation is cancelled synchronously on the platform UI thread and
+/// its terminal `loadState failed` frame carries
+/// [`WEBVIEW_NAVIGATION_BLOCKED_ERROR_CODE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WebviewNavigationRuleAction {
     #[serde(rename = "block")]
@@ -1425,7 +1442,9 @@ mod tests {
                     owner,
                     window_id: window,
                     webview_id: "content".to_string(),
-                    href: Some("https://example.org/favicon.ico".to_string()),
+                    value: Some(WebviewFaviconValue {
+                        href: "https://example.org/favicon.ico".to_string(),
+                    }),
                     seq: 71,
                 }
             }
@@ -1434,7 +1453,7 @@ mod tests {
                     owner,
                     window_id: window,
                     webview_id: "content".to_string(),
-                    href: None,
+                    value: None,
                     seq: 0,
                 }
             }
@@ -1680,6 +1699,22 @@ mod tests {
             ("*", "https://any.example/deep/path?q=1", true),
             ("https://example.org/*", "https://example.org/", true),
             ("https://example.org/*", "https://example.org", false),
+            // R1 regression: every metacharacter is literal on the Rust side
+            // too; the TS twin once left `.` unescaped and matched
+            // `exampleXorg`.
+            ("https://example.org/*", "https://exampleXorg/path", false),
+            ("https://example.org/a.b", "https://example.org/aXb", false),
+            ("https://example.org/a+b", "https://example.org/ab", false),
+            ("https://example.org/a?b", "https://example.org/ab", false),
+            ("https://example.org/(x)", "https://example.org/(x)", true),
+            ("https://example.org/(x)", "https://example.org/x", false),
+            ("https://example.org/[x]", "https://example.org/[x]", true),
+            ("https://example.org/[x]", "https://example.org/x", false),
+            ("https://example.org/a{1}", "https://example.org/a{1}", true),
+            ("https://example.org/a|b", "https://example.org/a|b", true),
+            ("https://example.org/a^b", "https://example.org/a^b", true),
+            ("https://example.org/a$b", "https://example.org/a$b", true),
+            ("https://example.org/a\\b", "https://example.org/a\\b", true),
             // The leading dot in `*.tracker.example` is literal: the bare
             // host needs its own rule (or `*tracker.example`).
             (
@@ -1959,7 +1994,7 @@ mod tests {
 
     #[test]
     fn registries_freeze_their_spellings() {
-        assert_eq!(ORCHESTRATION_ERROR_CODES.len(), 10);
+        assert_eq!(ORCHESTRATION_ERROR_CODES.len(), 11);
         assert!(ORCHESTRATION_ERROR_CODES.contains(&"multiwebview_unsupported_style"));
         assert_eq!(
             serde_json::to_value(OrchestrationErrorCode::MultiwebviewUnsupportedStyle).unwrap(),

@@ -131,6 +131,7 @@ export const WEBVIEW_ORCHESTRATION_ERROR_CODES = [
   "payload_too_large",
   "queue_overflow",
   "invalid_payload",
+  "favicon_disabled",
 ] as const;
 
 export type WebviewOrchestrationErrorCode =
@@ -234,12 +235,13 @@ export interface WebviewTitleQueryResult {
 }
 
 /**
- * Query result pair `(value, seq)` for `get-webview-favicon`. `href` is
- * `undefined` until the first settled favicon is observed (and for webviews
- * created without the `favicon` option).
+ * Query result pair `(value, seq)` for `get-webview-favicon`. `value` is
+ * `null` until the first settled favicon observation; the query rejects
+ * with `favicon_disabled` for webviews created without the `favicon`
+ * capability.
  */
 export interface WebviewFaviconQueryResult {
-  href?: string;
+  value: { href: string } | null;
   seq: number;
 }
 
@@ -266,8 +268,10 @@ export type WebviewOrchestrationResultFrame = { owner: WebviewOwnerTuple } &
   );
 
 /**
- * Unified per-view event family (D19; `loadState` joined with D24):
- * urlChange, titleChange, focused, geometryChange, loadState.
+ * Unified per-view event family (D19; `loadState` joined with D24;
+ * `navigationAction`/`faviconChange` added by
+ * add-navigation-favicon-surface): urlChange, titleChange, focused,
+ * geometryChange, loadState, navigationAction, faviconChange.
  */
 export const WEBVIEW_EVENT_KINDS = [
   "urlChange",
@@ -353,12 +357,18 @@ export const isWebviewNavigationRule = (value: unknown): value is WebviewNavigat
  * except `*`, which matches any run of characters including separators.
  */
 export const matchesWebviewNavigationPattern = (pattern: string, url: string): boolean => {
+  // Standard regex metacharacter escape, applied per character: everything
+  // except `*` is literal, so `.` `[` `]` `+` `?` `(` `)` `{` `}` `^` `$`
+  // `|` `\\` must reach the RegExp source escaped. (R1 regression: the
+  // first cut built a broken character class that matched almost nothing,
+  // leaving `.` unescaped — `example.org` then matched `exampleXorg`.)
+  const metacharacters = /[.*+?^${}()|[\]\\]/g;
   let source = "^";
   for (const ch of pattern) {
     if (ch === "*") {
       source += "[\\s\\S]*";
     } else {
-      source += ch.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+      source += ch.replace(metacharacters, "\\$&");
     }
   }
   return new RegExp(source + "$").test(url);

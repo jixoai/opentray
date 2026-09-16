@@ -1193,12 +1193,21 @@ impl MacosWebviewRuntime {
                 webview_id,
             } => match self.view_events(&owner, &window_id, &webview_id) {
                 Some(events) => {
+                    if !events.borrow().favicon_enabled {
+                        return Ok(typed_rejection(OrchestrationError::new(
+                            opentray_spec::webview::OrchestrationErrorCode::FaviconDisabled,
+                            "get-webview-favicon requires the create option favicon: true",
+                        )));
+                    }
                     let events = events.borrow();
                     WebviewOrchestrationResult::GetWebviewFaviconResult {
                         owner,
                         window_id,
                         webview_id,
-                        href: events.favicon.clone(),
+                        value: events
+                            .favicon
+                            .clone()
+                            .map(|href| opentray_spec::webview::WebviewFaviconValue { href }),
                         seq: events.favicon_seq,
                     }
                 }
@@ -1601,6 +1610,7 @@ impl MacosWebviewRuntime {
             url.clone().unwrap_or_default(),
         );
         events.borrow_mut().navigation_rules = navigation_rules;
+        events.borrow_mut().favicon_enabled = favicon;
         if let Err(error) = self.registry.add_view(&owner.tray_id, Rc::clone(&events)) {
             return Err(ChildCreateError::Typed(error));
         }

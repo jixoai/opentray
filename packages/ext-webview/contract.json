@@ -28,7 +28,7 @@
       "windowEvent.downloadprogress": "best-effort"
     },
     "latestCoalesceKey": "<webviewId>/<field>; faviconChange coalesces on <webviewId>/favicon",
-    "stateResync": "urlChange/titleChange sequence gaps are repaired by the get-webview-url/get-webview-title (value, seq) query pair; faviconChange gaps by get-webview-favicon (href, seq)",
+    "stateResync": "urlChange/titleChange sequence gaps are repaired by the get-webview-url/get-webview-title (value, seq) query pair; faviconChange gaps by get-webview-favicon, whose result frame carries value: { href } | null plus seq (favicon_disabled rejects views created without the favicon capability)",
     "edgeRetry": "extension-owned bounded retry (FIFO, 64 records) flushed on the next producer callback or after the next handled command; never blocks a native callback",
     "legacyFallback": "without an attached port, the five unified families ride the command-response outbox flush (H0 host compatibility); the window-event family has no fallback — its 16 ms drain queue was deleted with the poll (contract-3), so a port-less host drops those records with a diagnostic"
   },

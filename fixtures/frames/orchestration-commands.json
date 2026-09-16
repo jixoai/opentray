@@ -296,7 +296,7 @@
       "type": "get-webview-favicon-result",
       "windowId": "win-1",
       "webviewId": "content",
-      "href": "https://example.org/favicon.ico",
+      "value": { "href": "https://example.org/favicon.ico" },
       "seq": 71
     }
   },
@@ -307,6 +307,7 @@
       "type": "get-webview-favicon-result",
       "windowId": "win-1",
       "webviewId": "content",
+      "value": null,
       "seq": 0
     }
   }

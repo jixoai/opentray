@@ -121,17 +121,24 @@ pub(super) fn report_view_favicon(
     {
         return;
     }
-    let Some(href) = value
+    let Some(reported) = value
         .get("payload")
         .and_then(|payload| payload.get("href"))
         .and_then(Value::as_str)
-        .filter(|href| !href.is_empty())
     else {
+        return;
+    };
+    // Spec: the frame carries an absolute http(s) href resolved against the
+    // document URL. The DOM `link.href` property is already absolute; this
+    // also rejects data:/blob:/file: reports and the rare relative
+    // `getAttribute` fallback.
+    let base = events.borrow().url.clone();
+    let Some(href) = crate::orchestration::resolve_webview_favicon_href(&base, reported) else {
         return;
     };
     let frame = events
         .borrow_mut()
-        .note_favicon_change(owner, &owner.window_id, href.to_string());
+        .note_favicon_change(owner, &owner.window_id, href);
     super::push_event_frame(outbox, frame);
 }
 

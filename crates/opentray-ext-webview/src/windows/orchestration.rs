@@ -400,17 +400,23 @@ pub(super) fn install_load_state_observers(
     // frame reports the navigation it belongs to.
     let pending_url = Rc::new(RefCell::new(String::new()));
     // add-navigation-favicon-surface: navigation ids cancelled by a
-    // declarative rule. A cancelled WebView2 navigation still fires
-    // NavigationCompleted (IsSuccess = false, OperationCanceled); the
-    // completed handler swaps that platform status for the stable
-    // `navigation_blocked` code exactly once per blocked id.
-    let blocked_ids = Rc::new(RefCell::new(HashSet::<u64>::new()));
+    // declarative rule, each carrying the URL it was blocked for. A
+    // cancelled WebView2 navigation still fires NavigationCompleted
+    // (IsSuccess = false, OperationCanceled); the completed handler swaps
+    // that platform status for the stable `navigation_blocked` code with
+    // the blocked URL exactly once per id. R1 P1: the URL rides the entry
+    // (the shared pending-url slot holds whatever navigation started last,
+    // so a concurrent pair could misattribute the failure), and the ring
+    // is bounded: entries whose completion never arrives (controller
+    // teardown, pathological callbacks) age out instead of growing.
+    const BLOCKED_RING_CAP: usize = 64;
+    let blocked_navigations = Rc::new(RefCell::new(VecDeque::<(u64, String)>::new()));
 
     let start_events = Rc::clone(events);
     let start_outbox = Weak::clone(outbox);
     let start_owner = owner.clone();
     let start_pending = Rc::clone(&pending_url);
-    let start_blocked = Rc::clone(&blocked_ids);
+    let start_blocked = Rc::clone(&blocked_navigations);
     let mut start_token = 0i64;
     unsafe {
         core.add_NavigationStarting(
@@ -428,10 +434,23 @@ pub(super) fn install_load_state_observers(
                     let _ = args.IsUserInitiated(&mut is_user_initiated);
                     let mut is_redirected = BOOL::default();
                     let _ = args.IsRedirected(&mut is_redirected);
-                    let navigation_id = {
+                    let navigation_id = match (|| -> Result<u64, windows_core::Error> {
                         let mut id = 0u64;
-                        let _ = args.NavigationId(&mut id);
-                        id
+                        args.NavigationId(&mut id)?;
+                        Ok(id)
+                    })() {
+                        Ok(id) => id,
+                        Err(error) => {
+                            // COM property failure is pathological; without
+                            // an id the completion cannot be matched, so the
+                            // failure frame is emitted by the completion's
+                            // normal failed path (OperationCanceled) and the
+                            // mismatch cost is one platform-coded frame.
+                            eprintln!(
+                                "opentray-ext-webview NavigationStarting id read failed: {error}"
+                            );
+                            0
+                        }
                     };
                     // The decision point: `navigationAction` observation
                     // first (Windows projection truth: IsRedirected maps to
@@ -463,7 +482,12 @@ pub(super) fn install_load_state_observers(
                     );
                     let blocked = !uri.is_empty() && start_events.borrow().navigation_blocked(&uri);
                     if blocked {
-                        start_blocked.borrow_mut().insert(navigation_id);
+                        let mut ring = start_blocked.borrow_mut();
+                        if ring.len() >= BLOCKED_RING_CAP {
+                            ring.pop_front();
+                        }
+                        ring.push_back((navigation_id, uri.clone()));
+                        drop(ring);
                         args.SetCancel(true)?;
                         return Ok(());
                     }
@@ -495,7 +519,7 @@ pub(super) fn install_load_state_observers(
     let done_outbox = Weak::clone(outbox);
     let done_owner = owner.clone();
     let done_pending = Rc::clone(&pending_url);
-    let done_blocked = Rc::clone(&blocked_ids);
+    let done_blocked = Rc::clone(&blocked_navigations);
     let mut done_token = 0i64;
     unsafe {
         core.add_NavigationCompleted(
@@ -508,15 +532,32 @@ pub(super) fn install_load_state_observers(
                     let mut success = BOOL::default();
                     args.IsSuccess(&mut success)?;
                     // A rule-blocked navigation completes as cancelled;
-                    // report the stable blocked code instead of the
-                    // platform's OperationCanceled status.
-                    let blocked_navigation_id = {
-                        let mut id = 0u64;
-                        let _ = args.NavigationId(&mut id);
-                        id
+                    // report the stable blocked code with the URL it was
+                    // blocked for instead of the platform's
+                    // OperationCanceled status (R1 P1: the shared pending
+                    // slot is not authoritative for a cancelled pair).
+                    let blocked_navigation_id =
+                        match (|| -> Result<u64, windows_core::Error> {
+                            let mut id = 0u64;
+                            args.NavigationId(&mut id)?;
+                            Ok(id)
+                        })() {
+                        Ok(id) => id,
+                        Err(error) => {
+                            eprintln!(
+                                "opentray-ext-webview NavigationCompleted id read failed: {error}"
+                            );
+                            return Ok(());
+                        }
                     };
-                    if done_blocked.borrow_mut().remove(&blocked_navigation_id) {
-                        let url = done_pending.borrow().clone();
+                    let blocked_url = {
+                        let mut ring = done_blocked.borrow_mut();
+                        match ring.iter().position(|(id, _)| *id == blocked_navigation_id) {
+                            Some(index) => ring.remove(index).map(|(_, url)| url),
+                            None => None,
+                        }
+                    };
+                    if let Some(url) = blocked_url {
                         push_view_event(
                             &done_events,
                             &done_outbox,
@@ -526,7 +567,7 @@ pub(super) fn install_load_state_observers(
                                     owner,
                                     window_id,
                                     WebviewLoadPhase::Failed,
-                                    url.clone(),
+                                    url,
                                     Some(crate::orchestration::ViewEvents::BLOCKED_ERROR_CODE),
                                     None,
                                 )
@@ -1281,12 +1322,21 @@ impl super::WindowsWebviewRuntime {
                 webview_id,
             } => match self.view_events(&owner, &window_id, &webview_id) {
                 Some(events) => {
+                    if !events.borrow().favicon_enabled {
+                        return Ok(typed_rejection(OrchestrationError::new(
+                            opentray_spec::webview::OrchestrationErrorCode::FaviconDisabled,
+                            "get-webview-favicon requires the create option favicon: true",
+                        )));
+                    }
                     let events = events.borrow();
                     WebviewOrchestrationResult::GetWebviewFaviconResult {
                         owner,
                         window_id,
                         webview_id,
-                        href: events.favicon.clone(),
+                        value: events
+                            .favicon
+                            .clone()
+                            .map(|href| opentray_spec::webview::WebviewFaviconValue { href }),
                         seq: events.favicon_seq,
                     }
                 }
@@ -1510,6 +1560,7 @@ impl super::WindowsWebviewRuntime {
             url.clone().unwrap_or_default(),
         );
         events.borrow_mut().navigation_rules = navigation_rules;
+        events.borrow_mut().favicon_enabled = favicon;
         if let Err(error) = self.registry.add_view(&owner.tray_id, Rc::clone(&events)) {
             return Err(ChildCreateError::Typed(error));
         }
@@ -1850,16 +1901,21 @@ fn report_view_favicon(
     {
         return;
     }
-    let Some(href) = value
+    let Some(reported) = value
         .get("payload")
         .and_then(|payload| payload.get("href"))
         .and_then(Value::as_str)
-        .filter(|href| !href.is_empty())
     else {
         return;
     };
+    // Spec: the frame carries an absolute http(s) href resolved against the
+    // document URL (also rejects data:/blob:/file: reports).
+    let base = events.borrow().url.clone();
+    let Some(href) = crate::orchestration::resolve_webview_favicon_href(&base, reported) else {
+        return;
+    };
     push_view_event(events, outbox, owner, |events, owner, window_id| {
-        events.note_favicon_change(owner, window_id, href.to_string())
+        events.note_favicon_change(owner, window_id, href)
     });
 }
 

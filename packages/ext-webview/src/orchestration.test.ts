@@ -428,7 +428,7 @@ describe("webview orchestration facade", () => {
     expect(transport.extCommands().at(-1)).toEqual(fixture(commandFixtures, "get-webview-title"));
 
     await expect(child.getFavicon()).resolves.toEqual({
-      href: "https://example.org/favicon.ico",
+      value: { href: "https://example.org/favicon.ico" },
       seq: 71,
     });
     expect(transport.extCommands().at(-1)).toEqual(fixture(commandFixtures, "get-webview-favicon"));
@@ -685,6 +685,46 @@ describe("webview orchestration facade", () => {
       seq: 90,
       href: "https://example.org/favicon-2.ico",
     });
+  });
+
+  it("a urlChange gap resync never delivers into title listeners (R1 P2 regression)", async () => {
+    const transport = new OrchestrationTransport();
+    transport.sessionId = "session-1";
+    const webviewTray = createOrchestrationTray(transport);
+    const win = webviewTray.createWebviewWindow({ windowId: "win-1" });
+    await win.show();
+    const content = await win.createWebview({ id: "content", url: "https://example.org" });
+
+    const urlEvents: unknown[] = [];
+    const titleEvents: unknown[] = [];
+    content.onUrlChange((event) => urlEvents.push(event));
+    content.onTitleChange((event) => titleEvents.push(event));
+
+    // First observation seeds the shared counter, then a jump (41 -> 45)
+    // triggers the urlChange gap resync; the responder's query result
+    // (seq 41 shape) must not reach the title handlers.
+    transport.emit({
+      type: "webview-event",
+      owner: OWNER,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "urlChange",
+      seq: 41,
+      payload: { url: "https://example.org/a" },
+    });
+    transport.emit({
+      type: "webview-event",
+      owner: OWNER,
+      windowId: "win-1",
+      webviewId: "content",
+      kind: "urlChange",
+      seq: 45,
+      payload: { url: "https://example.org/b" },
+    });
+    await flush();
+    expect(transport.extCommands().at(-1)).toEqual(fixture(commandFixtures, "get-webview-url"));
+    expect(urlEvents).toHaveLength(2);
+    expect(titleEvents).toEqual([]);
   });
 
   it("resolves the subscription race through (value, seq) queries plus stale-seq discard", async () => {
