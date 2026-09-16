@@ -20,10 +20,12 @@ import {
 import { readDarwinAppLaunchDescriptor } from "@opentray/packaging";
 
 import {
+  BrokerProtocolVersionError,
   EXTENSION_TRANSPORT_CLOSED_CODE,
   ExtensionOperationError,
   connectLocalBroker,
 } from "./local-broker";
+import { BrokerServerError } from "./client";
 import { resolveCallerLabel } from "./daemon/caller-label";
 import type { DaemonDriver } from "./daemon/lifecycle";
 import type { DaemonPaths } from "./daemon/paths";
@@ -250,6 +252,34 @@ describe("local broker client", () => {
     // Runtime-portable form: Node's access resolves undefined and Bun's
     // resolves null; only rejection carries meaning here.
     await access(staleBundle);
+  });
+
+  it("rejects a ready frame with a wrong protocol version before accepting the session", async () => {
+    const homeDir = await makeTempHome();
+    // Structurally valid Ready frame, but the broker announces protocol 1
+    // while the client sent 2: a direct connection has no daemon-readiness
+    // metadata protecting it, so init itself must reject.
+    const driver = createSocketBrokerDriver(undefined, undefined, 1);
+    cleanup.push(driver.close);
+
+    const rejection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    }).then(
+      () => {
+        throw new Error("expected a rejection");
+      },
+      (error: unknown) => error
+    );
+    expect(rejection).toBeInstanceOf(BrokerProtocolVersionError);
+    expect(rejection).toBeInstanceOf(Error);
+    const typed = rejection as BrokerProtocolVersionError;
+    expect(typed.clientProtocolVersion).toBe(2);
+    expect(typed.brokerProtocolVersion).toBe(1);
+    expect(typed.message).toContain("client=2");
+    expect(typed.message).toContain("broker=1");
   });
 
   it("routes tray-bounds responses back to the pending request", async () => {
@@ -512,11 +542,11 @@ describe("local broker client deferred operations (pending-until-final)", () => 
       kind: "result",
       value: { response: 2, suppressed: false },
     });
-    writeTerminal(serverSocket, "00000000000000ff", {
+    writeTerminal(serverSocket, "000000000000000e", {
       kind: "error",
       error: { code: "dialog_session_busy", message: "foreign" },
     });
-    writeAccepted(serverSocket, "request-never-issued", "00000000000000aa");
+    writeAccepted(serverSocket, "request-never-issued", "000000000000000a");
     const after = await connection.request({
       type: "get-tray-bounds",
       requestId: "bounds-after",
@@ -656,6 +686,70 @@ describe("local broker client deferred operations (pending-until-final)", () => 
     await connection.close();
   });
 
+  it("rejects a correlated synchronous server error with the typed error contract", async () => {
+    const homeDir = await makeTempHome();
+    const driver = createSocketBrokerDriver((frame, socket) => {
+      if (frame.type === "ext-command") {
+        writeFrame(socket, {
+          type: "error",
+          requestId: frame.requestId,
+          code: "dialog_presentation_failed",
+          message: "worker did not reach the native modal call",
+          details: { worker: "owner-1", phase: "enter-modal" },
+        });
+        return;
+      }
+      if (frame.type === "get-tray-bounds") {
+        writeFrame(socket, boundsFrame(frame));
+      }
+    });
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+    const error = await connection
+      .request({
+        type: "ext-command",
+        requestId: "ext-sync-error",
+        appId: "app-1",
+        trayId: "tray-1",
+        ext: "dialog",
+        data: { type: "show" },
+      })
+      .then(
+        () => {
+          throw new Error("expected a rejection");
+        },
+        (rejection: unknown) => rejection
+      );
+
+    expect(error).toBeInstanceOf(BrokerServerError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(ExtensionOperationError);
+    const typed = error as BrokerServerError;
+    expect(typed.name).toBe("BrokerServerError");
+    expect(typed.code).toBe("dialog_presentation_failed");
+    expect(typed.message).toBe("worker did not reach the native modal call");
+    expect(typed.details).toEqual({ worker: "owner-1", phase: "enter-modal" });
+
+    // The typed synchronous rejection leaves the connection alive.
+    const after = await connection.request({
+      type: "get-tray-bounds",
+      requestId: "bounds-after-sync-error",
+      appId: "app-1",
+      trayId: "tray-1",
+    });
+    expect(after).toMatchObject({
+      type: "tray-bounds",
+      requestId: "bounds-after-sync-error",
+    });
+    await connection.close();
+  });
+
   it("rejects a not-yet-accepted ext-command like any ordinary pending request on death", async () => {
     const homeDir = await makeTempHome();
     // The server never accepts: the command is an ordinary pending request.
@@ -722,6 +816,7 @@ const prepareLegacyBundle = async (bundlePath: string, appId: string): Promise<v
 const createSocketBrokerDriver = (
   onFrame?: (frame: ClientFrame, socket: Socket) => void,
   readyFrameIdentity?: BrokerArtifactIdentity,
+  readyProtocolVersion?: number
 ): DaemonDriver & {
   readonly spawned: number;
   readonly spawnedPaths: DaemonPaths[];
@@ -762,7 +857,8 @@ const createSocketBrokerDriver = (
         readyFrameIdentity ?? broker.artifactIdentity,
         onFrame,
         sockets,
-        initFrames
+        initFrames,
+        readyProtocolVersion
       );
       await listen(server, paths.endpoint);
       await writeReadyMetadata(paths, pid, broker.artifactIdentity);
@@ -784,7 +880,8 @@ const createReadyServer = (
   brokerArtifactIdentity: BrokerArtifactIdentity,
   onFrame?: (frame: ClientFrame, socket: Socket) => void,
   sockets?: Set<Socket>,
-  initFrames?: ClientFrame[]
+  initFrames?: ClientFrame[],
+  readyProtocolVersion?: number
 ): Server =>
   createServer((socket) => {
     sockets?.add(socket);
@@ -810,7 +907,7 @@ const createReadyServer = (
         if (!initialized) {
           initialized = true;
           initFrames?.push(frame);
-          writeReadyFrame(socket, paths, brokerArtifactIdentity);
+          writeReadyFrame(socket, paths, brokerArtifactIdentity, readyProtocolVersion);
           continue;
         }
         onFrame?.(frame, socket);
@@ -822,11 +919,12 @@ const writeReadyFrame = (
   socket: Socket,
   paths: DaemonPaths,
   brokerArtifactIdentity: BrokerArtifactIdentity,
+  readyProtocolVersion?: number
 ): void => {
   socket.write(
     `${JSON.stringify({
       type: "ready",
-      protocolVersion: PROTOCOL_VERSION,
+      protocolVersion: readyProtocolVersion ?? PROTOCOL_VERSION,
       brokerVersion: paths.packageVersion,
       brokerArtifactIdentity,
       sessionId: "session-test",

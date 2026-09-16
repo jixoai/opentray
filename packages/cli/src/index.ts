@@ -1,4 +1,5 @@
 export {
+  BrokerServerError,
   createClient,
   createInitFrame,
   createTrayHandle,
@@ -7,6 +8,7 @@ export {
   type AppHandle,
   type EventfulTrayHandle,
   type ExtensionLoadOptions,
+  type ExtensionRequestResult,
   type OpenTrayConnection,
   type OpenTrayClient,
   type OpenTrayEventSource,
@@ -55,6 +57,8 @@ export {
   EXTENSION_TRANSPORT_CLOSED_CODE,
   /** Typed rejection for deferred-operation terminals and transport-close deaths. */
   ExtensionOperationError,
+  /** Typed handshake rejection when the broker Ready frame carries a different protocol version. */
+  BrokerProtocolVersionError,
 } from "./local-broker";
 export type {
   OpenTrayAppBundleOptions,

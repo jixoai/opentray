@@ -5,13 +5,16 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  BrokerServerError,
   createBrokerEndpointIdentity,
   createInitFrame,
   createClient,
   createTrayHandle,
+  ExtensionOperationError,
   formatBrokerEndpointName,
   PROTOCOL_VERSION,
   type ClientRequestFrame,
+  type ExtOperationPayload,
   type OpenTrayTransport,
   type OpenTrayConnection,
   type OpenTrayEventFrame,
@@ -52,6 +55,117 @@ describe("opentray client", () => {
         data: { type: "show", width: 320, height: 240 },
       },
     ]);
+  });
+
+  it("settles a deferred request with the terminal result value (public terminal contract)", async () => {
+    const transport = new DeferredTerminalTransport({
+      kind: "result",
+      value: { response: 1, suppressed: false },
+    });
+    const tray = createTrayHandle(transport, "app-1", "tray-1", createTestRequestId);
+
+    const result = await tray.requestExtension("dialog", { type: "show" });
+
+    expect(result).toEqual({
+      kind: "terminal",
+      operationId: "0000000000000001",
+      value: { response: 1, suppressed: false },
+    });
+    if (result.kind !== "terminal") {
+      throw new Error("expected a terminal result");
+    }
+    // Batch C facades consume exactly this field.
+    expect(result.value).toEqual({ response: 1, suppressed: false });
+  });
+
+  it("rejects a deferred request with the typed terminal error", async () => {
+    const transport = new DeferredTerminalTransport({
+      kind: "error",
+      error: {
+        code: "dialog_dismissal_unavailable",
+        message: "platform cannot observe the dismissal reason",
+        details: { kind: "dismissal" },
+      },
+    });
+    const tray = createTrayHandle(transport, "app-1", "tray-1", createTestRequestId);
+
+    const error = await tray.requestExtension("dialog", { type: "show" }).then(
+      () => {
+        throw new Error("expected a rejection");
+      },
+      (rejection: unknown) => rejection
+    );
+    expect(error).toBeInstanceOf(ExtensionOperationError);
+    expect(error).toBeInstanceOf(Error);
+    const typed = error as ExtensionOperationError;
+    expect(typed.code).toBe("dialog_dismissal_unavailable");
+    expect(typed.message).toBe("platform cannot observe the dismissal reason");
+    expect(typed.details).toEqual({ kind: "dismissal" });
+  });
+
+  it("returns immediate envelopes through the public request contract", async () => {
+    const eventsTransport = new ImmediateEventsTransport();
+    const eventsTray = createTrayHandle(
+      eventsTransport,
+      "app-1",
+      "tray-1",
+      createTestRequestId
+    );
+
+    await expect(
+      eventsTray.requestExtension("webview", { type: "list" })
+    ).resolves.toEqual({
+      kind: "immediate",
+      events: [
+        {
+          scope: { appId: "app-1", trayId: "tray-1", ext: "webview" },
+          data: { type: "views", count: 1 },
+        },
+      ],
+    });
+
+    // The plain ack arm settles as an immediate result with no envelopes.
+    const ackTray = createTrayHandle(
+      new RecordingTransport(),
+      "app-1",
+      "tray-1",
+      createTestRequestId
+    );
+    await expect(
+      ackTray.requestExtension("webview", { type: "show" })
+    ).resolves.toEqual({ kind: "immediate", events: [] });
+  });
+
+  it("rejects a synchronous correlated server error with the typed error contract", async () => {
+    const transport = new SyncErrorTransport();
+    const tray = createTrayHandle(transport, "app-1", "tray-1", createTestRequestId);
+
+    const withDetails = await tray.requestExtension("dialog", { type: "show" }).then(
+      () => {
+        throw new Error("expected a rejection");
+      },
+      (rejection: unknown) => rejection
+    );
+    expect(withDetails).toBeInstanceOf(BrokerServerError);
+    expect(withDetails).toBeInstanceOf(Error);
+    const typed = withDetails as BrokerServerError;
+    expect(typed.name).toBe("BrokerServerError");
+    expect(typed.code).toBe("dialog_presentation_failed");
+    expect(typed.message).toBe("worker did not reach the native modal call");
+    expect(typed.details).toEqual({ worker: "owner-1", phase: "enter-modal" });
+
+    // A details-free synchronous error stays typed with `details` absent
+    // (never null): codes without structured detail omit the field.
+    const withoutDetails = await tray.requestExtension("dialog", { type: "show" }).then(
+      () => {
+        throw new Error("expected a rejection");
+      },
+      (rejection: unknown) => rejection
+    );
+    expect(withoutDetails).toBeInstanceOf(BrokerServerError);
+    const bare = withoutDetails as BrokerServerError;
+    expect(bare.code).toBe("dialog_worker_limit_reached");
+    expect(bare.details).toBeUndefined();
   });
 
   it("passes app and tray identity into extension context", () => {
@@ -486,6 +600,78 @@ class EventfulRecordingTransport
     for (const listener of this.listeners) {
       listener(frame);
     }
+  }
+}
+
+/**
+ * Mirrors the local broker connection's deferred settlement: a result
+ * terminal resolves the pending request with the terminal frame itself; an
+ * error terminal rejects with the typed ExtensionOperationError.
+ */
+class DeferredTerminalTransport implements OpenTrayTransport {
+  constructor(private readonly payload: ExtOperationPayload) {}
+
+  async request(frame: ClientRequestFrame): Promise<ServerFrame> {
+    if (frame.type !== "ext-command") {
+      throw new Error(`unexpected frame type: ${frame.type}`);
+    }
+    if (this.payload.kind === "error") {
+      throw new ExtensionOperationError(
+        this.payload.error.code,
+        this.payload.error.message,
+        { details: this.payload.error.details }
+      );
+    }
+    return {
+      type: "ext-operation-terminal",
+      operationId: "0000000000000001",
+      payload: this.payload,
+    };
+  }
+}
+
+/** Immediate legacy extension command answering with response envelopes. */
+class ImmediateEventsTransport implements OpenTrayTransport {
+  async request(frame: ClientRequestFrame): Promise<ServerFrame> {
+    if (frame.type !== "ext-command") {
+      throw new Error(`unexpected frame type: ${frame.type}`);
+    }
+    return {
+      type: "ext-command-result",
+      requestId: frame.requestId,
+      events: [
+        {
+          scope: { appId: frame.appId, trayId: frame.trayId, ext: frame.ext },
+          data: { type: "views", count: 1 },
+        },
+      ],
+    };
+  }
+}
+
+/** Correlated synchronous server error frames, first with details then without. */
+class SyncErrorTransport implements OpenTrayTransport {
+  private replies = 0;
+
+  async request(frame: ClientRequestFrame): Promise<ServerFrame> {
+    if (frame.type !== "ext-command") {
+      throw new Error(`unexpected frame type: ${frame.type}`);
+    }
+    this.replies += 1;
+    return this.replies === 1
+      ? {
+          type: "error",
+          requestId: frame.requestId,
+          code: "dialog_presentation_failed",
+          message: "worker did not reach the native modal call",
+          details: { worker: "owner-1", phase: "enter-modal" },
+        }
+      : {
+          type: "error",
+          requestId: frame.requestId,
+          code: "dialog_worker_limit_reached",
+          message: "worker cap reached",
+        };
   }
 }
 
