@@ -7,9 +7,9 @@
 > 用户语言系统：**「优先保持轻量」「能力原子」「以 Codex 的决策为准」**。
 > 关联 change：`add-ext-dialog`（同波开发；其批次 A 交付的 embedded artifact kind 与
 > pack-size 审计是本 change 直接复用的共享基建；beep 从 dialog 移出的裁决记录在该 change）。
-> 评审记录：Codex R1（2026-09-17）：add-ext-sound **5.5/10 NO-GO**——本版为 R1 修订版
-> （P0-4 播放所有权 token 化、P1-4 WAV 内容校验、P1-5 解析可测性、P1-6 依赖工程化、
-> P1-7 self-review 缺项、§4.1/4.2/4.3 裁决全部吸收）。
+> 评审记录：Codex R1（2026-09-17）：**5.5/10 NO-GO**；Codex R2：**6.2/10 NO-GO**——本版为
+> R2 修订版（P0-4 alias flags + PlaybackArbiter 线性化、P0-7 async getBackend、P1-2 WAV
+> 精确 preflight 数值、P1-6 DTO 有限集、P1-1 双 target 措辞、P0-3 单会话运行时裁决同步）。
 
 ## 最终可见效果（operator 视角）
 
@@ -30,9 +30,9 @@
 | # | 决策 | 依据 |
 |---|------|------|
 | D1 | 包 `@opentray/ext-sound`，crate `crates/opentray-ext-sound`，embedded 单包内嵌四目标（复用 `add-ext-dialog` 批次 A 基建，不重复建设） | Owner 裁决原文；体积规范（2026-09-16）；薄封装预期 << 2MB（实测为证，R1 §4.5） |
-| D2 | 能力面 = `beep(BeepKind)` + `playSystemSound(通用名 \| 平台原生名)` + `playSound(path)`；**playSound 成本结论：双平台低成本 → 通用 API**；win32 WAV-only 以**内容校验**执行（RIFF/WAVE header + 大小上限 + canonicalize/readability 前置，非仅扩展名） | Owner 成本规则两分支裁决；R1 P1-4 |
-| D3 | `playSystemSound` 解析顺序：通用名表（**R1 §4.1 冻结三项：notification/warning/error**）→ 平台原生音名 → miss 则 typed `sound_not_found`（details 含 requested name/platform/attempted mode），绝不静默无声；「accepted」判定以原生返回值为准 + broker.log 诊断 | R1 §4.1 + P1-5 |
-| D4 | 播放语义 = fire-and-forget（resolve 于播放开始）；无完成事件；**session close = PlaybackToken 所有权门控**（R1 §4.2/P0-4）：token `{sessionId, generation, sequence}` 原子替换记录当前 win32 播放 owner，close 仅在 token 仍归该 session 时 `PlaySound(NULL, SND_PURGE)`；darwin 维护 session-owned NSSound 实例集合，close 只 stop 自己的集合 | P0-4：SND_PURGE 进程级误伤；token 非 Node-facing API，不改 fire-and-forget |
+| D2 | 能力面 = `beep(BeepKind)` + `playSystemSound(通用名 \| 平台原生名)` + `playSound(path)`；playSound 双平台低成本 → 通用 API；win32 WAV-only 以**精确内容校验**执行（R2 P1-2 冻结数值：≥12 字节、little-endian RIFF declared length ≤ 实际文件大小、至少一个完整 `fmt `/`data` chunk 边界、最大 64 MiB、不做解码）；DTO `fileFormats` 为 **v1 有限 canonical 集**（darwin 声明 wav/aiff/mp3/m4a 四项为承诺集，非「全系」开放集） | Owner 成本规则；R1 P1-4 + R2 P1-2/6 |
+| D3 | `playSystemSound` 解析顺序：通用名表（冻结三项）→ 平台原生音名 → miss typed `sound_not_found`（details 含 requested/platform/attempted）；win32 alias 调用**固定 `SND_ALIAS \| SND_ASYNC \| SND_NODEFAULT`**（R2 P0-4：缺 NODEFAULT 会静默回退默认系统音，破坏「绝不静默」；缺 ASYNC 会阻塞 owner loop）；false 返回即 typed miss + broker.log 诊断 | R2 P0-4 |
+| D4 | 播放语义 = fire-and-forget；无完成事件；session close = **PlaybackArbiter 所有权门控**（R2 P0-4 升级）：process-wide arbiter 在**同一 mutex/临界区**内线性化「native PlaySound 调用 → 处理返回值 → 提交/清除 `(sessionId, instanceGeneration, sequence)` token」，token 覆盖**所有 PlaySound 路径（alias 与 filename，不含 MessageBeep）**；close 在同一锁内比较完整 token，匹配才 purge——杜绝「A swap→B swap+play→A play」交错导致 token 指向 B 实播 A 的错停。**单会话运行时注记**：现 broker 单 caller session，并发面实际是同 session 多 mount 与未来运行时演进；token 机制按 session 语义设计，不依赖多 session 存在 | R1 P0-4 + R2 P0-4 线性化裁决 |
 | D5 | 流程：单 change，批次 A（spec 类型；embedded 基建依赖 add-ext-dialog 批次 A，**工程化依赖门**：共享基线 commit 落地并验证后本 change 才进入实现，两 change 共享基建与各自验证均完成后一起归档）→ B（crate 双平台）→ C（facade）→ D（staging + 体积门）→ E（验证 + 文档 + changeset） | R1 P1-6 依赖工程化 |
 
 ## 开放问题（R1 已全部裁决，冻结如下）

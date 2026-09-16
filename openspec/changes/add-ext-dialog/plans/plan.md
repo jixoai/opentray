@@ -9,7 +9,7 @@
 > 6. 「后续就和 Codex 去讨论。除非有重大决策项需要我参与就停下来问我，否则以 Codex 的决策为准。如果可以就持续推进，直到全部开发和测试全部完成。」
 >
 > 用户语言系统：**「只做 web 做不到的功能」（2026-09-12 Owner ruling）、「能力原子」、「OS 标准对话框」、「优先保持轻量」**。
-> 评审记录：Codex R1（gpt-5.6-terra/xhigh，2026-09-17，`.agents/review/2026-09-17-ext-dialog-sound-r1.md`）：add-ext-dialog **4.0/10 NO-GO**——本版为 R1 修订版（P0-1/2/3/5/6/7/8/9、P1-1/2/3/8 与 §4 裁决全部吸收）。
+> 评审记录：Codex R1（2026-09-17，`.agents/review/2026-09-17-ext-dialog-sound-r1.md`）：**4.0/10 NO-GO**；Codex R2（`.agents/review/2026-09-17-ext-dialog-sound-r2.md`）：**5.0/10 NO-GO**——本版为 R2 修订版（P0-1 完成通道 ABI、P0-2 owner-loop poll/per-owner STA、P0-3 单会话运行时裁决、P0-4 alias flags+PlaybackArbiter、P0-5 embedded 身份链、P0-6 真实 pack 证据、P0-7 TypedExtensionError+async getBackend、P1-1/2/4/5/6 全部吸收）。
 
 ## 最终可见效果（operator 视角）
 
@@ -40,11 +40,11 @@
 | D1 | 包 `@opentray/ext-dialog`，**单包内嵌四目标二进制**（体积规范首例）：SDK 新增 `kind: "embedded"` artifact，二进制位于 facade 包 `platforms/<target>/`；不建平台子包 | Owner 体积规范（≤3MB 内嵌 / 2MB 警告 / >3MB 拆）；解析器现状两种 kind 均不覆盖 |
 | D2 | 能力面 = `messageDialog`（+alert/confirm 糖）+ `pickFile`/`pickDirectory`/`pickSavePath`；**beep 移交 ext-sound**（`add-ext-sound` change，2026-09-17 Owner ruling）；**prompt 不做**（Win32 无原生输入框，Electron/Tauri 均不做）；Linux typed `dialog_platform_unsupported`；不做 page 桥 | 「只做 web 做不到的功能」；无页面上下文是本包市场；声音是独立能力词 |
 | D3 | 平台特有面 = `options.darwin`/`options.win32` **结构化命名空间**（非当前平台 typed 拒绝）+ `DialogBackendCapabilities` DTO（每平台序列化，编译门）；v1 无独立平台独有方法——独立能力全部 roadmap 门控（darwin previewFile/ sheet 锚定、win32 shield 图标） | 「平台特例不进共享层，暴露能力契约」法则；WebView WindowCapabilities DTO 先例 |
-| D4 | 完成语义 = **通用 deferred command envelope**（R1 P0-1 推荐方案）：`ExtCommandAccepted{requestId, operationId}` + `ExtCommandCompleted{operationId, result}` + `ExtCommandCancelled{operationId, reason}`，@opentray/spec + broker + Node PendingRequest 三层状态机；exactly-once 结算、session close 先撤销再完成、response-before-event barrier、连接关闭 typed rejection；**不上 EventPort**（完成是请求作用域的响应，不是广播事件） | R1 P0-1：现协议一请求一响应，无 deferred 承载；Node 侧无晚到响应状态 |
-| D5 | 模态红线 v2（R1 P0-2/P0-3）：**win32 = 对话框专属 STA UI 线程**（输入经 owner loop 消息代理，结果经 EventLoopProxy 回传；证明 tray HWND/notify-icon 线程约束不破）；**macOS = modal-session 步进状态机** `Created→Presented→Stepping→Dismissed\|Revoked`（`EventLoopProxy<UserEvent::DialogWake/Close>` 唤醒、唯一 UI owner、一次性 completion CAS、teardown 先 endModalSession）；每 (appId,trayId,sessionId) 同时至多一个对话框（busy 原子占用，第二个 typed `dialog_session_busy`） | R1 P0-2：Win32 模态泵不执行 EventLoopProxy user event；P0-3：步进无 wake/affinity/teardown 合同会竞态 |
+| D4 | 完成语义 = **DeferredOperation 主模型 + 版本化 DeferredCompletionPort ABI**（R2 P0-1）：operation 由 broker 生成、携带不可伪造 `(sessionId, instanceGeneration, operationId)` 归属；新可选版本化 FFI 符号（同 EventPort 的可选符号模式）让扩展只提交 host-issued opaque handle + bounded **terminal payload（携带 extension result）**——session-close 取消与用户取消同通道结算（payload 即 cancelId 分支/null），禁止 rejection/resolve 双语义混用；不复用 scoped ExtHostContext、不伪装 EventPort；broker 侧 operation registry + owner loop CAS 结算 + 仅向仍匹配的 session writer 投递 + terminal-before-event barrier；Node `markDead` 以 typed `dialog_transport_closed` 拒绝本地全部 operation。`Cancelled` 独立帧取消——**terminal payload 恒携带结果**，无需 extension-specific 推导 | R2 P0-1：现有同步 FFI 返回后 HostCallContext 失效；ServerFrame 只有 requestId 结算；cancel-as-result 必须由扩展产出 |
+| D5 | 模态调度 v3（R2 P0-2）：**broker-owned owner-loop poll/wake**——扩展只登记 opaque operation，broker 在 owner thread 经版本化 FFI `poll_owner(operation)` 驱动 macOS `runModalSession` 步进并自行合并 wake；**DLL 不得命名/持有 UserEvent/EventLoopProxy**（opentray-bin 私有类型不可进 ABI）。win32 = **每活动 (appId,trayId,sessionId) 一个有界 STA worker**（worker 只拥有自己的 COM dialog/HWND；冻结 worker 上限、presentation ACK、`WM_APP` close dispatcher、join timeout、shutdown 顺序；单全局 STA 被否决——排队违反 Accepted=presented，嵌套无 reentrancy 合同）。UI-affine 实例限 owner-thread registry，**不得以 `unsafe impl Send` 作隐含保证**。macOS probe 移至协议完成之后，且必须覆盖 owner wake 饿死与 exit race | R2 P0-2：UserEvent 为 bin 私有；单 STA 与跨 owner accepted 语义冲突；Send 移动 AppKit 对象无证明 |
 | D6 | 流程：单 change，批次 A（spec 协议三件 + broker deferred/sessionId + SDK embedded resolver + pack-size 审计）→ B（crates/opentray-ext-dialog 双平台原生）→ C（facade）→ D（构建图收齐矩阵 + CI）→ E（验证 + 文档 + changeset） | 与 d19/add-webview-orchestration 同款编排；R1 最小解锁顺序 |
-| D7 | **命令作用域注入 host-owned sessionId**（R1 P0-5）：`ExtensionEnvelope`/`ExtCommand` 传输面增加 broker 从连接注入的 sessionId（扩展不得自报），registry/实例状态键升级为含 sessionId；同 app 多 session 隔离测试 | 现作用域只有 appId/trayId/ext；busy/cleanup 语义无法在 native 表达 |
-| D8 | **typed 错误 envelope** `{code, message, details}`（details 为 discriminated union）全链路冻结：@opentray/spec schema + Rust `ExtensionError::Detailed` + server error frame + Node typed error factory；facade preflight（Linux/路径/命名空间/格式）与 broker/native（busy/capability/native-not-found）职责分界，所有分支在状态变更前失败 | R1 P0-9：现 Node 侧只构造普通 Error("code: message")，消费方无法稳定区分 |
+| D7 | **保留单会话 caller-scoped broker 运行时**（R2 P0-3 裁决选项 a）：不在本 change 扩大运行时——删除「同 tray 双 session 并发」场景，改为**同 session 多 tray / 多 mount 隔离**；命令 ABI 仍升级为 broker 注入 `CommandScope { appId, trayId, sessionId, instanceGeneration }`（单会话下 session 唯一，但归属仍由 host 注入、扩展不得自报）；跨进程不承诺共享 native state。multi-session shared broker 若未来立项走独立 runtime change | R2 P0-3：现 broker `OPENTRAY_BROKER_SINGLE_SESSION` 拒绝第二连接、kernel 锁 (appId,trayId)→session owner，双 session 场景在现行法则下不可表达 |
+| D8 | typed 错误 = **`TypedExtensionError` 共享 schema**（R2 P0-7）：`{code, message, details}` discriminated union 冻结于 @opentray/spec 与 opentray-spec，ServerFrame error 与 deferred terminal 使用同一 JSON 形状；Node 导出含 `code/details/cause` 的 error class；每个错误码指定 detail variant。**`backend` 改为异步 `getBackend(): Promise<...>`**（badge `getCapabilities` 惰性模式：load 后请求 DTO 返回不可变快照；每个方法 dispatch 前 await 同一快照做能力前置）——同步 `readonly backend` 与惰性加载矛盾 | R2 P0-7：ServerFrame::Error 现只有 code/message；attach 同步期 DLL 未加载，不可能既同步又真实 |
 
 ## 开放问题（R1 后仅余实现级）
 
@@ -52,7 +52,9 @@
 |------|----------|
 | comctl6 activation context | **绑定 broker EXE 的 RT_MANIFEST 资源**（不绑 facade DLL）；broker 启动后真实 TaskDialog 能力探测一次并写入 DTO；不可用时 MessageBox 兜底但 `commandLink`/`expander` typed `dialog_capability_unavailable`（不静默降级）；packaged broker 真机取证 |
 | dialog 选项语义冻结 | buttons 非空；`defaultId`/`cancelId` 必须是合法索引（越界 typed 拒绝）；Windows 对所有可关闭对话框默认启用 cancellation，无 cancelId 统一映射 0；平台无法观察关闭原因时返回 typed `dialog_dismissal_unavailable` 而非伪造成功；空 filters=全部文件；`allowsOtherFileTypes` 默认 false（不再实测后议）；save 取消=null；结果绝对路径 canonicalize |
-| 内嵌体积实测基线 | 「远低于 2MB」是假设不是证据：批次 D 必须产出每包真实 `npm pack` 压缩 tarball 字节数报告（含 npm/pnpm 版本、四目标清单与 hash）写入 evidence artifact；2MB 警告需 Owner 拆分决策记录；无实测不给 packaging GO |
+| 内嵌体积实测基线 | 「远低于 2MB」是假设不是证据：批次 D 必须产出**真实 `npm pack --json --pack-destination <temp>`** 证据（R2 P0-6：dry-run 不落 .tgz 不可解包）——stat 压缩字节数、npm/pnpm 版本、packlist、四目标 hash 与 stage manifest，随后解包同一 tgz 在每 target runner 跑 resolver+inspector identity check；`--dry-run` 只作快速开发预警；2MB 警告需 Owner 拆分决策记录；无实测不给 packaging GO |
+| embedded 身份链（R2 P0-5） | staging 生成 root-contained **embedded manifest**（每目标 relative path/SHA-256/buildIdentity/facade version/contract fingerprint）随 pack 发布；resolver containment 校验 manifest + 计算选中 library hash + 把 buildIdentity/hash 纳入 expected load identity；broker 在 `Library::new` 前重验 actual build identity；CI 以 stage/pack 后重 hash 为 release authority，运行时 load 前重 hash；adversarial 测试必须替换真实 library bytes |
+| save 路径 canonicalization（R2 P1-4） | 已存在 selection → realpath；save 的不存在 leaf → canonicalize existing parent 后 lexical join，不声称 full realpath |
 
 ## 拒绝路径
 
@@ -67,10 +69,10 @@
 | 对话框内容超链接（TDF_ENABLE_HYPERLINKS） | 系统外观的钓鱼攻击面，永久拒绝（非 roadmap） |
 | 自定义 accessory view / 自绘输入 UI | prompt 家族已裁决不做；破坏「OS 标准对话框」纯度 |
 
-## 实施计划（specs/tasks 追溯；对齐 R1 最小解锁顺序）
+## 实施计划（specs/tasks 追溯；对齐 R2 最小解锁顺序）
 
-1. 批次 A（共享基建 + 协议）：`@opentray/spec`——deferred command envelope、sessionId 注入、typed 错误 envelope、Dialog 命令/选项/结果类型与 BackendCapabilities DTO；opentray-bin/core——deferred 响应状态机 + sessionId 注入 + registry 键升级；opentray SDK——`NativeExtensionEmbeddedArtifact`（containment + 四类结构化错误）+ `scripts/check-pack-size.mjs`。
-2. 批次 B（crates/opentray-ext-dialog）：macOS modal-session 步进状态机（DialogWake/Close user event、一次性 completion CAS、endModalSession teardown 顺序）；win32 专属 STA UI 线程拓扑（owner loop 消息代理 + EventLoopProxy 回传 + tray 线程约束证明）；busy 原子占用；session close 撤销。
-3. 批次 C（packages/ext-dialog facade）：attachDialog、类型化命名空间校验、typed 错误工厂、embedded 描述符、contract.json。
-4. 批次 D（构建图）：native-build-graph 注册 dialog component 与收齐矩阵（四目标全部匹配 facade version/contract 才写入 `platforms/`，缺目标/过期/hash 不匹配即失败）；release-plan/verify-native-plan/stage-release-artifacts/release.yml 同步；broker EXE RT_MANIFEST；体积实测报告。
-5. 批次 E（验证）：双平台真机——对话框打开期间同 app 另一 tray / 另一 app session / 普通 set-menu 与 ext-command 交错完成的时间线取证；四路 dismissal（标题栏/ESC/系统关闭/session close）一致性；adversarial 路径逃逸/symlink/字节替换/manifest skew；双 target CI 编译门；skills 公共文档 + changeset（minor）。
+1. 批次 A（共享基建 + 协议，**独立可审可落地单元**）：`@opentray/spec`/opentray-spec——DeferredOperation 全量 server frame 与 parser schema（broker 生成 operation、`(sessionId, instanceGeneration, operationId)` 归属、terminal payload 恒带结果）、`TypedExtensionError` details union、`CommandScope` 注入、Dialog 类型与 BackendCapabilities（共享 schema + exhaustive fixture）；可选版本化 **DeferredCompletionPort + `poll_owner` ABI 符号**（同 EventPort 可选符号模式）；opentray-bin/core——operation registry、owner loop CAS 结算、session writer 路由、`Send` 安全裁决（UI-affine 实例限 owner-thread registry）；Node——pending-until-final 状态机、typed error class、断连 typed 拒绝；opentray SDK——`NativeExtensionEmbeddedArtifact`（containment + embedded manifest 身份链 + 四类错误）+ `scripts/check-pack-size.mjs`。
+2. 批次 B（crates/opentray-ext-dialog，**协议落地并先行评审后开工**）：macOS probe（协议之后：owner wake 饿死/exit race/step 与 menu frame 交错）→ modal-session 步进（经 poll_owner 驱动）；win32 **per-owner 有界 STA worker**（worker 上限/presentation ACK/WM_APP dispatcher/join timeout/shutdown 顺序）；busy 原子占用；session close 撤销。
+3. 批次 C（packages/ext-dialog facade）：attachDialog、`getBackend()` 异步快照、类型化命名空间校验、糖类型精确化（`Omit` 排除 message/buttons/default/cancel；pickFile overload `multiple?: false` vs `multiple: true`）、typed 错误工厂、embedded 描述符、contract.json。
+4. 批次 D（构建图）：native-build-graph 注册 + 收齐矩阵；**embedded staging manifest**（path/SHA-256/buildIdentity/version/fingerprint）；release-plan/verify-native-plan/stage-release-artifacts/release.yml 同步；broker EXE RT_MANIFEST；**真实 npm pack + 解包逐 target identity** 证据。
+5. 批次 E（验证）：双平台真机——交错时间线（同 session 多 tray / 另一 app 实例）、四路 dismissal 一致性、断连/重复终帧/错 owner/旧 generation 竞态族、adversarial 四族（含真实字节替换）、双 target CI、self-review + check 绿、skills 公共文档 + changeset。

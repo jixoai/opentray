@@ -2,21 +2,27 @@
 
 ### Requirement: The dialog extension SHALL expose a session-scoped native dialog capability
 
-`@opentray/ext-dialog` SHALL attach through the tray/session contract as `attachDialog(tray, options?)`, returning a capability whose methods dispatch broker commands scoped to `(appId, trayId, sessionId)`. The capability SHALL expose `messageDialog`, the `alert`/`confirm` sugars, `pickFile`, `pickDirectory`, and `pickSavePath`, plus a read-only `backend` capabilities snapshot (sound feedback belongs to `@opentray/ext-sound`, a separate capability atom). Linux targets SHALL be rejected by the facade with a typed `dialog_platform_unsupported` error before any broker connection.
+`@opentray/ext-dialog` SHALL attach through the tray/session contract as `attachDialog(tray, options?)`, returning a capability whose methods dispatch broker commands scoped by a broker-injected `CommandScope { appId, trayId, sessionId, instanceGeneration }`. The capability SHALL expose `messageDialog`, the `alert`/`confirm` sugars, `pickFile`, `pickDirectory`, and `pickSavePath`, plus an asynchronous `getBackend(): Promise<DialogBackendCapabilities>` (the extension loads lazily; a synchronous truth property is not expressible). Linux targets SHALL be rejected by the facade with a typed `dialog_platform_unsupported` error before any broker connection.
 
-Show commands SHALL complete through the generic deferred command envelope: the broker answers `ExtCommandAccepted { requestId, operationId }` when the dialog is presented and delivers exactly one terminal frame — `ExtCommandCompleted { operationId, result }` or `ExtCommandCancelled { operationId, reason }` — when the dialog closes or is revoked. A second terminal frame for the same operationId SHALL be dropped (exactly-once); a transport close SHALL reject every pending operation with a typed error; session close SHALL cancel pending dialogs before extension cleanup runs.
+Show commands SHALL complete through the DeferredOperation model: the broker generates the operation identity bound to `(sessionId, instanceGeneration, operationId)`, answers `ExtCommandAccepted { requestId, operationId }` when the dialog is presented, and delivers exactly one `ExtOperationTerminal { operationId, payload }` frame whose payload ALWAYS carries the extension result — user dismissal, escape, system close, and session-close revocation all settle through the same channel with the cancel-branch result (no separate cancellation frame, no Node-side extension-specific derivation). The native completion channel SHALL be a new optional, versioned DeferredCompletionPort ABI symbol that accepts only host-issued opaque operation handles and bounded terminal payloads; it SHALL NOT reuse the scoped `ExtHostContext` and SHALL NOT masquerade as an EventPort event. The broker SHALL hold a generic operation registry, settle completions on the owner loop with a one-shot CAS (duplicate terminal frames, wrong-owner completions, and stale-generation completions are dropped statelessly with diagnostics), route terminal frames only to the still-matching session writer, and honor a terminal-before-same-operation-event barrier. A transport close SHALL reject every local pending operation with a typed error; the broker does not promise to write terminal frames to a closed socket.
 
 #### Scenario: A deferred dialog completes exactly once, between ordinary commands
 
 - **GIVEN** a shown message dialog and two ordinary commands issued after it
 - **WHEN** the dialog is dismissed while those ordinary commands are in flight or settled
-- **THEN** the completion frame SHALL settle the show promise exactly once, the two ordinary commands SHALL complete normally, and a duplicated terminal frame for the same operationId SHALL be ignored
+- **THEN** the terminal frame SHALL settle the show promise exactly once with the result payload, the two ordinary commands SHALL complete normally, and a duplicated terminal frame for the same operationId SHALL be ignored
 
-#### Scenario: Session close withdraws a pending dialog with cancellation semantics
+#### Scenario: Session-close revocation is indistinguishable from user cancellation
 
 - **GIVEN** a shown dialog whose owning session is still open
 - **WHEN** the session closes while the dialog is pending
-- **THEN** the broker SHALL cancel the operation first (`ExtCommandCancelled`), then withdraw the native dialog and run extension cleanup, and the pending promise SHALL resolve with cancellation semantics (`messageDialog` → the `cancelId` branch, pickers → `null`), indistinguishable from user cancellation
+- **THEN** the extension SHALL submit the cancel-branch result (cancelId branch for message dialogs, `null` for pickers) as the terminal payload after revocation and before extension cleanup, and the pending promise SHALL resolve identically to a user cancellation
+
+#### Scenario: Disconnect rejects pending operations locally
+
+- **GIVEN** a pending dialog operation and a transport that closes after acceptance
+- **WHEN** the connection dies
+- **THEN** the Node pending-until-final state machine SHALL reject the operation with a typed `dialog_transport_closed` error without waiting for a broker frame
 
 #### Scenario: Linux invocation is rejected before broker dispatch
 
@@ -24,15 +30,15 @@ Show commands SHALL complete through the generic deferred command envelope: the 
 - **WHEN** any capability method is called
 - **THEN** the call SHALL reject with typed `dialog_platform_unsupported` without connecting to or dispatching through the broker
 
-### Requirement: Command scopes SHALL carry a broker-injected session identity
+### Requirement: The runtime model SHALL stay single-session; isolation is same-session multi-tray/multi-mount
 
-The extension command transport SHALL carry a host-owned `sessionId` injected by the broker from the connection's session, never self-reported by extension JSON. Extension instance state, busy tracking, and cleanup keys SHALL be scoped by that session identity. Two concurrent caller sessions of the same app and tray SHALL be isolated: one session's dialog, busy state, and cleanup SHALL not affect the other's.
+This change SHALL NOT expand the caller-scoped single-session broker runtime. The broker-injected `CommandScope` keys extension instance state, busy tracking, and deferred operations; isolation acceptance SHALL cover one session's multiple trays and multiple mounts of the same extension, plus separate app instances as independent broker processes. Concurrent same-tray multi-session scenarios SHALL NOT appear in this contract (a shared multi-session broker would be an independent runtime change).
 
-#### Scenario: Same app, same tray, two sessions stay isolated
+#### Scenario: Same session, two trays, one dialog each
 
-- **GIVEN** one app and tray mounted by two caller sessions
-- **WHEN** session A shows a dialog and session B calls `pickFile`
-- **THEN** session B's picker SHALL be accepted (not `dialog_session_busy`), and closing session A SHALL withdraw only A's dialog
+- **GIVEN** one caller session with two trays, both attached to the dialog extension
+- **WHEN** each tray shows a dialog concurrently
+- **THEN** both operations SHALL be accepted and complete independently, and closing one's owning scope SHALL not withdraw the other's dialog
 
 ### Requirement: Message dialogs SHALL resolve force-dismissal through the cancel button
 
@@ -52,7 +58,13 @@ The extension command transport SHALL carry a host-owned `sessionId` injected by
 
 ### Requirement: Pickers SHALL return absolute paths or a typed cancellation
 
-`pickFile`, `pickDirectory`, and `pickSavePath` SHALL resolve `null` on user cancellation and absolute canonical paths (`~` expanded) on confirmation; `pickSavePath` results SHALL NOT be guaranteed to exist. `filters` SHALL be extension-based (dot-free, case-insensitive), mapped to `UTType(filenameExtension:)` on darwin and `COMDLG_FILTERSPEC` on win32; omitted or empty filters SHALL mean all files. `multiple: true` SHALL return at least one path on confirmation.
+`pickFile`, `pickDirectory`, and `pickSavePath` SHALL resolve `null` on user cancellation and absolute paths (`~` expanded) on confirmation. Path canonicalization SHALL be frozen per shape (R2 P1-4): existing selections realpath; a `pickSavePath` leaf that does not exist canonicalizes the existing parent then lexically joins the leaf — full realpath is never claimed for nonexistent targets. `pickSavePath` results SHALL NOT be guaranteed to exist. `filters` SHALL be extension-based (dot-free, case-insensitive), mapped to `UTType(filenameExtension:)` on darwin and `COMDLG_FILTERSPEC` on win32; omitted or empty filters SHALL mean all files. `multiple: true` SHALL return at least one path on confirmation. Platform picker options (darwin `allowsOtherFileTypes: false` default and its filter interaction, win32 `defaultExtension`, win32 `strictFileTypes`, `createDirectories` degradation) SHALL be covered by deterministic scenarios per platform.
+
+#### Scenario: Save path with a nonexistent leaf canonicalizes the parent
+
+- **GIVEN** a save confirmation into `~/Docs/new-name.png` where `new-name.png` does not exist
+- **WHEN** the result is returned
+- **THEN** the parent directory SHALL be realpath-canonicalized and the leaf lexically joined; no existence claim is made about the result
 
 #### Scenario: Cancellation is null, never an empty selection
 
@@ -78,7 +90,7 @@ Platform-specific options SHALL be expressed only through the structured `option
 
 ### Requirement: Every platform build SHALL serialize the DialogBackendCapabilities DTO
 
-The native extension SHALL embed and report a `DialogBackendCapabilities` DTO (platform, taskDialog, commandLinks, expander, suppression, packageSemantics, mixedFileDirectorySelection, addToRecentControl). A capability field added to the TypeScript surface SHALL be serialized by every platform's DTO and constructor; cross-compilation of the darwin target SHALL fail if the win32 projection is missing (the WebView `WindowCapabilities` compile-gate rule applied to dialogs).
+The native extension SHALL embed and report a `DialogBackendCapabilities` DTO (platform, taskDialog, commandLinks, expander, suppression, packageSemantics, mixedFileDirectorySelection, addToRecentControl), exposed through the asynchronous `getBackend()` which loads the extension, requests the DTO, and returns an immutable snapshot. The DTO schema SHALL live in shared `@opentray/spec` and the opentray-spec crate with an exhaustive serialization fixture; CI SHALL explicitly run compile/type/test for BOTH darwin and windows targets and compare the same complete DTO fixture across both platform constructors — a single-target compile proves nothing (no cross-compilation causality is claimed).
 
 #### Scenario: Runtime truth overrides static expectation
 
@@ -88,7 +100,7 @@ The native extension SHALL embed and report a `DialogBackendCapabilities` DTO (p
 
 ### Requirement: A modal dialog SHALL NOT stall tray event delivery
 
-While any dialog is open, the broker SHALL keep dispatching tray events for other trays of the same app and for other apps' sessions, evidenced by transport/request timelines rather than window screenshots. On macOS the dialog SHALL run through a modal-session stepping state machine integrated with the winit event loop (`Created → Presented → Stepping → Dismissed | Revoked`, woken via `EventLoopProxy` user events; a bare `runModal` from command dispatch is prohibited). On win32 the dialog SHALL run on a dedicated COM STA UI thread — never on the winit owner loop thread, whose modal pumps do not execute `EventLoopProxy` user events — with inputs brokered through the owner loop and results returned via `EventLoopProxy`. At most one dialog SHALL be active per `(appId, trayId, sessionId)`; a second concurrent show in the same session SHALL reject with typed `dialog_session_busy` before native presentation. Cross-session concurrency SHALL remain legal.
+While any dialog is open, the broker SHALL keep dispatching tray events for the same session's other trays and mounts, evidenced by transport/request timelines rather than window screenshots. On macOS the dialog SHALL run through a modal-session stepping state machine (`Created → Presented → Stepping → Dismissed | Revoked`) driven by a broker-owned owner-loop poll/wake capability: the extension registers an opaque operation and the broker steps `runModalSession` via a versioned FFI `poll_owner` — the extension SHALL NOT name or hold any winit `UserEvent`/`EventLoopProxy` (private broker types are not ABI), and a bare `runModal` from command dispatch is prohibited. On win32 each active `(appId, trayId, sessionId)` SHALL own a bounded dedicated COM STA worker (frozen worker cap, presentation ACK before `Accepted`, `WM_APP` close dispatcher, join timeout, shutdown ordering) — never the winit owner loop thread — and UI-affine native instances SHALL live in an owner-thread registry without relying on `unsafe impl Send`. At most one dialog SHALL be active per `(appId, trayId, sessionId)`; a second concurrent show for the same scope SHALL reject with typed `dialog_session_busy` before native presentation. The macOS owner-loop probe SHALL precede ordinary dialog implementation and SHALL cover owner wake starvation, exit races, and step/menu-frame interleaving.
 
 #### Scenario: Another tray stays alive while a dialog is open
 
@@ -104,7 +116,7 @@ While any dialog is open, the broker SHALL keep dispatching tray events for othe
 
 ### Requirement: The facade package SHALL embed platform binaries under the pack-size law
 
-`@opentray/ext-dialog` SHALL ship all platform libraries inside the facade package at `platforms/<target>/` through a new SDK `kind: "embedded"` native artifact. The embedded resolver SHALL canonicalize the facade root and the candidate library path and SHALL reject any path escaping the facade package (`path-outside-facade`), missing targets (`target-unsupported`), invalid manifests (`manifest-invalid`), and unreadable libraries (`library-unreadable`) as structured typed errors; traversal strings and symlink escapes SHALL both be unexpressible. Identity SHALL be resolved from the facade version plus `contract.json`, with adversarial coverage for path traversal, symlink escape, replaced bytes, and manifest skew. The release build graph SHALL register the dialog component with a full-matrix staging rule: all four targets must match the current facade version and contract fingerprint before `platforms/` is written, and missing, stale, or hash-mismatched targets SHALL fail the release. The workspace pack-size audit SHALL measure the real npm-pack compressed size of every package embedding platform binaries, warn at ≥ 2 MB (an explicit Owner split decision is required before the next embedded release), and fail beyond 3 MB (the package must be split into `@opentray/<name>-<os>-<arch>` per-platform packages). Already-published per-platform packages are not retroactively affected.
+`@opentray/ext-dialog` SHALL ship all platform libraries inside the facade package at `platforms/<target>/` through a new SDK `kind: "embedded"` native artifact. The embedded resolver SHALL canonicalize the facade root and the candidate library path and SHALL reject any path escaping the facade package (`path-outside-facade`), missing targets (`target-unsupported`), invalid manifests (`manifest-invalid`), and unreadable libraries (`library-unreadable`) as structured typed errors; traversal strings and symlink escapes SHALL both be unexpressible. Identity SHALL be resolved from the facade version plus `contract.json` AND a root-contained embedded staging manifest (`platforms/manifest.json`: per-target relative path, SHA-256, buildIdentity, facade version, contract fingerprint) shipped with the pack — the resolver SHALL verify the manifest's containment, hash the selected library, and include buildIdentity/hash in the expected load identity; the broker SHALL re-verify the actual embedded manifest's build identity before `Library::new`. CI closure SHALL re-hash after staging/packing as the release authority, and adversarial coverage SHALL replace real library bytes, not JSON claims. The release build graph SHALL register the dialog component with a full-matrix staging rule: all four targets must match the current facade version and contract fingerprint before `platforms/` is written, and missing, stale, or hash-mismatched targets SHALL fail the release. The workspace pack-size audit SHALL produce real evidence via `npm pack --json --pack-destination` (stat of the generated `.tgz`, npm/pnpm versions, packlist, per-target hashes, then unpacking that same tarball for per-target resolver/loader identity checks on each target runner; `--dry-run` is a development warning only), warn at ≥ 2 MB (an explicit Owner split decision is required before the next embedded release), and fail beyond 3 MB (the package must be split into `@opentray/<name>-<os>-<arch>` per-platform packages). Already-published per-platform packages are not retroactively affected.
 
 #### Scenario: Embedded artifact resolves one library per target from the facade package
 

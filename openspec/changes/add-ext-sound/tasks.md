@@ -17,13 +17,13 @@
 ## 3. Implementation — 批次 B（crates/opentray-ext-sound）
 
 - [ ] 3.1 darwin：NSBeep、NSSound(named:) 目录解析与播放、NSSound(contentsOfFile:) 文件播放 + delegate didFinishPlaying 实例回收（兜底定时探测）、**session-owned NSSound 实例集合**（close 只 stop 自己的）。
-- [ ] 3.2 win32：MessageBeep 五级、PlaySound(SND_ALIAS) 方案名、PlaySound(SND_FILENAME|SND_ASYNC) WAV 播放、**PlaybackToken {sessionId, generation, sequence} 原子替换所有权**（close 仅在 token 归属本 session 时 `PlaySound(NULL, SND_PURGE)`；「accepted but prior owner superseded」内部状态）。
-- [ ] 3.3 BackendCapabilities DTO 嵌入上报；双 target CI 编译门 + exhaustive fixture。
+- [ ] 3.2 win32：MessageBeep 五级、`PlaySound(SND_ALIAS|SND_ASYNC|SND_NODEFAULT)` 方案名（NODEFAULT 禁回退默认音）、`PlaySound(SND_FILENAME|SND_ASYNC)` WAV 播放、**process-wide PlaybackArbiter**（同一 mutex 线性化 native 调用→返回值处理→token 提交/清除；token 覆盖 alias+filename 全路径不含 MessageBeep；close 同锁比较完整 token 匹配才 `PlaySound(NULL, SND_PURGE)`）。
+- [ ] 3.3 BackendCapabilities DTO 嵌入上报（v1 有限格式集）；双 target CI 编译门 + exhaustive fixture 比对。
 
 ## 4. Implementation — 批次 C（packages/ext-sound facade）
 
-- [ ] 4.1 `attachSound(tray, options?)` → capability（tray.extend 家族同构）；`contract.json`（extensionName "sound"、fingerprint contract-1）；embedded 描述符（复用 SDK 新 kind）。
-- [ ] 4.2 facade preflight：playSystemSound 通用名表解析（命中→平台投影常量；未命中→原样透传）、**win32 WAV 内容校验**（路径展开/canonicalize/readability/大小上限/RIFF+WAVE header；伪装 MP3、截断 WAV、`.wav` 后缀但内容不符全部 typed 拒绝）、Linux typed unsupported。
+- [ ] 4.1 `attachSound(tray, options?)` → capability（tray.extend 家族同构）；**`getBackend(): Promise<...>` 异步快照**（惰性加载后请求 DTO）；`contract.json`（extensionName "sound"、fingerprint contract-1）；embedded 描述符（复用 SDK 新 kind）。
+- [ ] 4.2 facade preflight：playSystemSound 通用名表解析（命中→平台投影常量；未命中→原样透传）、**win32 WAV 精确内容校验**（≥12 字节/RIFF declared length ≤ 实际大小/完整 fmt+data chunk 边界/最大 64 MiB；伪装 MP3、截断 WAV、declared 溢出、`.wav` 后缀内容不符全部 typed 拒绝）、Linux typed unsupported。
 - [ ] 4.3 vitest 确定性套件（Node+Bun）：解析顺序矩阵 / 内容校验矩阵 / 错误码 details payload / 描述符。
 
 ## 5. Packaging — 批次 D
@@ -32,7 +32,7 @@
 
 ## 6. Verification
 
-- [ ] 6.1 双平台真机验收：三方法命令受理与错误分支语义验证（原生返回值/broker.log 取证，可闻性不作门）；通用名×3 + 双平台各一原生名 + 必 miss 名（details payload 断言）；**A/B 会话交错与关闭顺序四格**（不持有 token 的 close 不得 purge 他人播放）；backend DTO 上报。
+- [ ] 6.1 双平台真机验收：三方法命令受理与错误分支语义验证（原生返回值/broker.log 取证，可闻性不作门）；通用名×3 + 双平台各一原生名 + 必 miss 名（details payload 断言）+ **NODEFAULT 无回退取证**；**PlaybackArbiter 竞态族**（两线程 swap/play 交错、alias-vs-file 交替、native false、close race；spy/wrapper 断言实际 SND_PURGE 与播放次序）；backend DTO 上报（getBackend）。
 - [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check；`npm pack --dry-run` 体积证据。
 
 ## 7. Release

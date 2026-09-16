@@ -2,7 +2,7 @@
 
 ### Requirement: The sound extension SHALL expose a session-scoped, non-blocking sound capability
 
-`@opentray/ext-sound` SHALL attach through the tray/session contract as `attachSound(tray, options?)`, returning a capability with `beep`, `playSystemSound`, and `playSound`, plus a read-only `backend` capabilities snapshot. Every method SHALL resolve when the native call is accepted (playback started), SHALL never block native UI or transport I/O, and SHALL NOT offer completion or progress events in this contract version. Linux targets SHALL be rejected by the facade with typed `sound_platform_unsupported` before any broker connection.
+`@opentray/ext-sound` SHALL attach through the tray/session contract as `attachSound(tray, options?)`, returning a capability with `beep`, `playSystemSound`, and `playSound`, plus an asynchronous `getBackend(): Promise<SoundBackendCapabilities>` (lazy-load then query, immutable snapshot; no synchronous truth property). Every method SHALL resolve when the native call is accepted (playback started), SHALL never block native UI or transport I/O, and SHALL NOT offer completion or progress events in this contract version. Linux targets SHALL be rejected by the facade with typed `sound_platform_unsupported` before any broker connection. The runtime model stays single-session (R2 P0-3): playback ownership tracks the broker-injected session identity; concurrent-same-tray-multi-session scenarios SHALL NOT appear.
 
 #### Scenario: Playback start resolves without completion tracking
 
@@ -28,7 +28,7 @@
 
 ### Requirement: playSystemSound SHALL resolve common names first, then platform-native names, and SHALL never fail silently
 
-`playSystemSound(name)` SHALL first match the frozen three-entry common-name table (`notification` → Glass/SystemAsterisk, `warning` → Sosumi/SystemExclamation, `error` → Basso/SystemHand) and play the current platform's projection; on miss it SHALL treat the string as a platform-native sound name (darwin `NSSound(named:)` catalog entry; win32 `PlaySound(SND_ALIAS)` sound-scheme alias) and play it; on a second miss it SHALL reject with typed `sound_not_found` whose details carry the requested name, platform, and attempted mode/catalog. Acceptance SHALL be judged from native return values with broker.log diagnostics, not from the absence of an error; a silent no-op SHALL NOT occur on any platform. `default`/`info`/`question` belong to `beep` only and SHALL NOT enter the common catalog.
+`playSystemSound(name)` SHALL first match the frozen three-entry common-name table (`notification` → Glass/SystemAsterisk, `warning` → Sosumi/SystemExclamation, `error` → Basso/SystemHand) and play the current platform's projection; on miss it SHALL treat the string as a platform-native sound name (darwin `NSSound(named:)` catalog entry; win32 `PlaySound` with exactly `SND_ALIAS | SND_ASYNC | SND_NODEFAULT` — `SND_NODEFAULT` forbids the silent default-sound fallback and `SND_ASYNC` forbids blocking the owner loop) and play it; on a native `false` return or a second miss it SHALL reject with typed `sound_not_found` whose details carry the requested name, platform, and attempted mode/catalog. Acceptance SHALL be judged from native return values with broker.log diagnostics, not from the absence of an error; a silent no-op or wrong-sound fallback SHALL NOT occur on any platform. `default`/`info`/`question` belong to `beep` only and SHALL NOT enter the common catalog.
 
 #### Scenario: Common name projects per platform
 
@@ -44,7 +44,7 @@
 
 ### Requirement: playSound SHALL be a common capability bounded by a documented per-platform format matrix
 
-Both platforms SHALL provide `playSound` at low cost (win32 `PlaySound(SND_FILENAME|SND_ASYNC)`; darwin `NSSound(contentsOfFile:)`), making it a common capability rather than a platform-specific surface. win32 SHALL accept WAV only and SHALL enforce it by content validation before dispatch — path expansion, canonicalization, readability, a bounded size check, and a `RIFF`/`WAVE` header inspection (a case-insensitive extension alone proves nothing) — rejecting mismatches or truncation with typed `sound_format_unsupported` and unreadable sources with typed `sound_file_unreadable`; validation SHALL NOT be deferred to post-`PlaySound` return-value interpretation. darwin SHALL accept the `NSSound` format family with readability/canonical-path checks. win32 concurrent playback SHALL follow the documented degradation that a later play supersedes the earlier one under process-wide `PlaySound` semantics, tracked by an internal playback-ownership token; darwin SHALL mix session-owned instances naturally. `PlaySoundOptions` SHALL be reserved (no fields in this version); unsupported per-platform conveniences SHALL NOT be added as silently-ignored common fields.
+Both platforms SHALL provide `playSound` at low cost (win32 `PlaySound(SND_FILENAME|SND_ASYNC)`; darwin `NSSound(contentsOfFile:)`), making it a common capability rather than a platform-specific surface. win32 SHALL accept WAV only and SHALL enforce it by exact content validation before dispatch — path expansion, canonicalization, readability, a maximum of 64 MiB, at least 12 bytes, a little-endian `RIFF` declared length not exceeding the actual file size, and at least one complete `fmt `/`data` chunk boundary (no decoding) — rejecting mismatches, truncation, or declared-size overflow with typed `sound_format_unsupported` and unreadable sources with typed `sound_file_unreadable`; validation SHALL NOT be deferred to post-`PlaySound` return-value interpretation. darwin SHALL accept the finite v1 committed set (wav/aiff/mp3/m4a) with readability/canonical-path checks. All win32 `PlaySound` paths (alias and filename, never `MessageBeep`) SHALL pass through one process-wide PlaybackArbiter that linearizes the native call, its return-value handling, and the `(sessionId, instanceGeneration, sequence)` token swap under a single mutex; session close SHALL compare the complete token under the same lock and purge only on a match, and a later play supersedes the earlier one under process-wide semantics recorded as `accepted but prior owner superseded`. `PlaySoundOptions` SHALL be reserved (no fields in this version); unsupported per-platform conveniences SHALL NOT be added as silently-ignored common fields.
 
 #### Scenario: Non-WAV on win32 is rejected by content, before any native call
 
@@ -60,13 +60,13 @@ Both platforms SHALL provide `playSound` at low cost (win32 `PlaySound(SND_FILEN
 
 ### Requirement: Every platform build SHALL serialize the SoundBackendCapabilities DTO
 
-The native extension SHALL embed and report a `SoundBackendCapabilities` DTO (platform, systemSoundCatalog, playFile, fileFormats). A field added to the TypeScript surface SHALL be serialized by every platform's DTO and constructor; cross-compilation of the darwin target SHALL fail if the win32 projection is missing (the same compile gate as dialogs and webviews).
+The native extension SHALL embed and report a `SoundBackendCapabilities` DTO (platform, systemSoundCatalog, playFile, fileFormats) exposed via the asynchronous `getBackend()`. The DTO schema SHALL live in shared `@opentray/spec` and the opentray-spec crate with an exhaustive serialization fixture; CI SHALL explicitly run compile/type/test for BOTH darwin and windows targets and compare the same complete fixture across both platform constructors — no single-target cross-compilation causality is claimed. `fileFormats` SHALL report the finite v1 committed set (win32 `['wav']`; darwin `['wav','aiff','mp3','m4a']`), not an open-ended runtime probe.
 
 #### Scenario: The format matrix is runtime truth
 
 - **GIVEN** an attached sound capability on either platform
-- **WHEN** the facade reads `backend.fileFormats`
-- **THEN** it SHALL report exactly that platform's accepted formats (win32 `['wav']`; darwin the NSSound family)
+- **WHEN** the facade awaits `getBackend()`
+- **THEN** the returned snapshot SHALL report exactly that platform's v1 committed formats (win32 `['wav']`; darwin `['wav','aiff','mp3','m4a']`)
 
 ### Requirement: The sound facade package SHALL embed platform binaries under the pack-size law
 

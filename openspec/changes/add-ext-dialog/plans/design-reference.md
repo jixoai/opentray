@@ -32,16 +32,27 @@ export const attachDialog = (
 ): DialogCapability => { /* tray.extend 家族，session-scoped，同构 attachBadge/attachWebview */ }
 
 export interface DialogCapability {
-  alert(message: string, options?: MessageDialogOptions): Promise<void>;
-  confirm(message: string, options?: MessageDialogOptions): Promise<boolean>;
+  alert(message: string, options?: MessageSugarOptions): Promise<void>;
+  confirm(message: string, options?: MessageSugarOptions): Promise<boolean>;
   messageDialog(options: MessageDialogOptions): Promise<MessageDialogResult>;
-  pickFile(options?: FilePickOptions): Promise<string | null>;
+  pickFile(options?: FilePickOptions & { multiple?: false }): Promise<string | null>;
   pickFile(options: FilePickOptions & { multiple: true }): Promise<readonly string[] | null>;
   pickDirectory(options?: DirectoryPickOptions): Promise<string | null>;
   pickSavePath(options?: SavePickOptions): Promise<string | null>;
-  readonly backend: DialogBackendCapabilities;
+  getBackend(): Promise<DialogBackendCapabilities>;
 }
+
+/** 糖函数不可覆盖 message/buttons/defaultId/cancelId（R2 P1-5 精确类型冻结）。 */
+export type MessageSugarOptions = Omit<
+  MessageDialogOptions,
+  "message" | "buttons" | "defaultId" | "cancelId"
+>;
 ```
+
+`getBackend()` 为**异步**（R2 P0-7 裁决）：扩展惰性加载（`ensureLoaded` 模式同 badge
+`getCapabilities`）——attach 同步期 DLL 未加载，不可能既同步又真实；方法内部在 native
+dispatch 前 await 同一快照做能力前置（`commandLink` 可用性等）。不存在同步 `backend`
+属性。
 
 ### 1.1 通用选项（跨平台语义，两平台均能诚实投影）
 
@@ -138,88 +149,99 @@ accessory 见 §4）。**空命名空间保持可表达**（`darwin: {}` 合法�
 
 永久拒绝（非 roadmap）：内容超链接（钓鱼面）、自定义 accessory view / 自绘输入 UI。
 
-## 5. 原生架构（crates/opentray-ext-dialog；R1 P0-1/2/3/5 修订版）
+## 5. 原生架构（crates/opentray-ext-dialog；R2 P0-1/2/3 修订版）
 
-### 5.1 完成协议：通用 deferred command envelope（@opentray/spec + broker + Node 三层）
+### 5.1 DeferredOperation 主模型 + 版本化 DeferredCompletionPort ABI
 
-现有 `ExtCommand`/`ExtCommandResult` 是一请求一响应，无晚到响应承载。本 change 增加通用
-deferred 帧（对一切扩展可用，不私有于 dialog）：
-
-```text
-ExtCommandAccepted  { requestId, operationId }          # 命令已受理，对话框已呈现
-ExtCommandCompleted { operationId, result }             # 对话框关闭，终值回传
-ExtCommandCancelled { operationId, reason }             # 撤销（session close / 连接关闭）
-```
-
-- **状态机**：Node `PendingRequest` 扩展为 `pending-until-final`——收到 `Accepted` 不结算
-  Promise，仅在 `Completed`/`Cancelled` 上结算；同一 operationId 二次终帧必须被丢弃
-  （exactly-once CAS）。
-- **barrier 顺序**：session close 先撤销（`Cancelled`）再执行扩展 cleanup；deferred 终帧
-  遵守现有 response-before-event barrier。
-- **连接关闭**：传输断开时全部 pending operation 以 typed `dialog_transport_closed` 拒绝。
-- **验收门**：一个 deferred 命令在两个后续普通命令之间完成且只结算一次（确定性
-  transport 测试，Node 与 Bun 双跑）。
-- 不上 EventPort：完成是请求作用域的响应；EventPort 仍只服务无请求上下文的事件（d19 边界）。
-
-### 5.2 macOS：modal-session 步进状态机
+现有 `ExtCommand` 是同步单响应；扩展命令 ABI 返回后 `ExtHostContext` 即失效（EventPort Law
+禁止驻留）。完成通道设计为**新的可选版本化 ABI 符号**（与 EventPort 可选符号同模式）：
 
 ```text
-Created → Presented → Stepping ⇄ Stepping … → Dismissed | Revoked
+# 协议帧（@opentray/spec + opentray-spec 冻结全量 schema 与 parser 真值）
+ServerFrame::ExtCommandAccepted  { requestId, operationId }   # 命令受理（对话已呈现/已登记）
+ServerFrame::ExtOperationTerminal { operationId, payload }   # 唯一终帧：payload 恒携带 extension result
+
+# 原生侧可选符号（opentray-spec 常量，同 EventPort 家族）
+opentray_ext_attach_deferred_completion_port_v1(...)   # 一次 attach，immutable port
+port.submit(opaque_operation_handle, bounded_terminal_payload_json)
 ```
 
-- **唯一 UI owner**：主线程（AppKit 约束）。show 命令在 owner loop 派发内只做
-  `NSAlert/NSPanel 构造 + beginModalSession + EventLoopProxy 唤醒注册`，**立即返回
-  Accepted**，绝不在派发内 `runModal`/`runModal` 裸调用（禁令）。
-- **步进驱动**：每次 owner loop wake（`ControlFlow` 回调）步进一次 `runModalSession`；
-  AppKit 回调（按钮点击/面板结束）经 `EventLoopProxy<UserEvent::DialogWake>` 唤醒 owner
-  loop 推进状态——步进不会因 `Wait` 无 wake 而饿死。
-- **一次性 completion CAS**：Dismissed/Revoked 只允许一个胜者；胜者发出 `Completed`
-  （用户关闭）或由撤销路径发出 `Cancelled`（session close）。
-- **teardown 顺序**：broker 退出/session close → `Revoked`（先 CAS 占位）→
-  `endModalSession` + 面板 close → 扩展 cleanup。禁止在未 CAS 时直接操作 panel。
-- **真机 probe 前置**：modal step、普通 tray/menu frame、session close、broker exit 的
-  交错次序必须先以原生 probe 取证，才允许按普通 crate 任务展开（P0-3 验收要求）。
+- **operation 归属**：operationId 由 broker 生成，绑定不可伪造的
+  `(sessionId, instanceGeneration, operationId)`——扩展只能提交 host 签发的 opaque handle，
+  不能自造。
+- **terminal payload 恒携带结果**：用户取消、四路 dismissal、session close 撤销，一律由
+  扩展产出最终结果（cancelId 分支 / picker null / `dialog_dismissal_unavailable` typed
+  error payload）经同一通道结算——session-close 取消与用户取消同构，**不存在独立
+  `Cancelled` 帧**，杜绝 Node 侧 extension-specific 推导（R2 P0-1 裁决）。
+- **broker 侧**：`NativeBrokerApp` 持通用 operation registry——port completion 到达后由
+  owner loop CAS 结算（重复终帧/错 owner/旧 generation 无状态丢弃 + 诊断），仅向仍匹配的
+  transport session writer 投递终帧；terminal-before-same-operation-event barrier 冻结。
+- **Node 侧**：`PendingRequest` 升级 pending-until-final（Accepted 不结算）；连接 `markDead`
+  时本地全部 pending operation 以 typed `dialog_transport_closed` 拒绝——broker 不向已关闭
+  socket 承诺写终帧。
+- **protocol version** 提升；所有 exhaustive switch 双侧同步；确定性测试族：accepted 后两
+  普通请求、重复终帧、completion/Exit race、disconnect before/after accepted、旧
+  generation、wrong owner。
 
-### 5.3 win32：对话框专属 STA UI 线程
+### 5.2 macOS：broker-owned owner-loop poll/wake（DLL 不持有任何 waker）
 
-- **拓扑**：对话框（TaskDialogIndirect / IFileOpenDialog::Show / IFileSaveDialog）运行在
-  **专用 COM STA 线程**（per-broker 单一 dialog 线程，线程内 CoInitialize + 消息循环）；
-  绝不在 winit owner loop 线程内进入任何模态调用——系统模态泵不执行 EventLoopProxy
-  user event，会冻结传输事件派发（R1 P0-2 证据）。
-- **输入代理**：show 命令参数经 owner loop 序列化投递到 dialog 线程；dialog 线程完成时
-  经 `EventLoopProxy` 回传 owner loop，由 owner loop 发出 deferred 终帧。
-- **线程约束证明**：tray backend 的 HWND/notify-icon 所属线程不受影响（dialog 线程不触碰
-  tray HWND）；`WM_TASKBARCREATED` 等仍由 owner loop 处理。验收含 dialog 打开期间 tray
-  菜单交互时间线取证。
-- **comctl6**：Common-Controls v6 manifest 绑定 **broker EXE 的 RT_MANIFEST 资源**（不绑
-  facade DLL，全进程共享 activation context）；broker 启动后执行一次真实 TaskDialog 能力
-  探测并写 DTO；不可用 → MessageBox 兜底 + `commandLink`/`expander` typed
-  `dialog_capability_unavailable`（不静默降级）。
+`UserEvent` 是 opentray-bin 私有 enum，动态 DLL ABI 不暴露 EventLoopProxy（R2 P0-2 证据）。
+调度权反转：
+
+- 扩展在 show 命令内只**登记 opaque operation**（构造 NSAlert/NSPanel +
+  `beginModalSession`）并立即返回 Accepted；
+- broker owner loop 通过版本化 FFI **`poll_owner(operation)`** 驱动每次 `runModalSession`
+  步进，并自行合并/投递 wake（包括 AppKit 回调触发的再调度——扩展经 completion port 或
+  poll 返回值告知「需要继续步进」）；
+- 状态机 `Created → Presented → Stepping → Dismissed | Revoked`；一次性 completion CAS；
+  teardown 顺序：CAS `Revoked` → `endModalSession` + panel close → 扩展 cleanup；
+- **probe 前置（协议之后）**：必须覆盖 owner wake 饿死（`ControlFlow::Wait` 无事件时步进
+  不停滞）、exit race（broker 关闭与步进并发）、step 与普通 menu frame 交错次序。
+
+### 5.3 win32：per-owner 有界 STA worker
+
+单全局 STA 被否决（R2 P0-2：排队违反 Accepted=presented；嵌套无 reentrancy 合同）。改为：
+
+- **每活动 `(appId, trayId, sessionId)` 一个 STA worker**（有界上限，冻结数值；超限 →
+  typed `dialog_busy` 族拒绝）；worker 只拥有自己的 COM dialog/HWND（TaskDialogIndirect /
+  IFileOpenDialog / IFileSaveDialog 在 worker 线程 `CoInitialize` 后运行）；
+- **presentation ACK**：worker 完成呈现后才发 Accepted（对齐「Accepted = 已呈现」）；
+- **close dispatcher**：撤销请求经 `WM_APP` 投递到该 worker 线程处理（COM 接口不跨线程）；
+- **join timeout 与 shutdown 顺序冻结**：broker 退出时按 owner 逆序 close → join（有界
+  超时 + 诊断）→ 扩展 cleanup；
+- tray backend 的 HWND/notify-icon 线程归属不受影响（worker 不触碰 tray HWND）；
+- comctl6：绑定 broker EXE `RT_MANIFEST`（§5.4/§2.2 不变）。
 
 ### 5.4 busy 与撤销语义
 
-- 每 `(appId, trayId, sessionId)` 同时至多一个活动对话框；同 session 第二个 show →
-  typed `dialog_session_busy`（broker 前置原子拒绝）。跨 session 并发合法（会话隔离
-  法则；macOS 多 modal session 共存，win32 dialog 线程内嵌套模态或排队均可表达）。
+- 每 `(appId, trayId, sessionId)` 同时至多一个活动对话框；同 owner 第二个 show → typed
+  `dialog_session_busy`（broker 前置原子拒绝）。**单会话运行时下**（§5.5）并发对话来自同
+  session 的多 tray/多 mount 与不同 app 实例——跨 owner 并发合法。
 - **session close 撤销**：先 CAS `Revoked` → 撤销原生对话框（macOS endModalSession /
-  win32 向 dialog 线程投递 close）→ 发 `ExtCommandCancelled`（cancel 语义：
-  messageDialog → cancelId 分支、picker → null）→ 再扩展 cleanup。与用户取消的不可区分
-  是正确语义。
-- **dismissal 映射**（P0-6 冻结）：标题栏关闭/ESC/系统 dismissal → `cancelId`；未定义
-  cancelId → 按钮 0；平台无法观察关闭原因 → typed `dialog_dismissal_unavailable`。
+  win32 WM_APP dispatcher）→ 扩展以 cancel 分支结果 payload 提交终帧 → 扩展 cleanup。
+- **dismissal 映射**（不变）：标题栏/ESC/系统 dismissal → `cancelId`；无 cancelId → 0；
+  平台无法观察 → typed `dialog_dismissal_unavailable`（作为 terminal payload 的 error 形态）。
 
-### 5.5 命令作用域注入 sessionId（R1 P0-5，broker 侧）
+### 5.5 运行时模型：保留单会话 caller-scoped broker（R2 P0-3 裁决选项 a）
 
-`ExtensionEnvelope`/`ExtCommand` 传输面增加 host-owned `sessionId`（broker 从连接注入，
-扩展不得自报）；`ExtensionInstance::command` 签名、dynamic FFI host context、registry 键
-与 native 状态全部升级为含 sessionId。补同 app 多 session、同 tray cleanup、mount
-generation 复用的隔离测试。
+现 broker 以 `OPENTRAY_BROKER_SINGLE_SESSION` 拒绝第二连接，kernel 锁
+`(appId,trayId) → sessionId` owner——「同 tray 双 caller session 并发」在现行法则下不可
+表达。**本 change 不扩大运行时**：
+
+- 删除双 session 同 tray 场景；隔离验收改为**同 session 多 tray / 多 mount** +
+  跨 app 实例（独立 broker 进程，互不触碰）；
+- 命令 ABI 仍升级为 broker 注入 `CommandScope { appId, trayId, sessionId,
+  instanceGeneration }`（单会话下 session 唯一，但归属由 host 注入、扩展不得自报）；
+  registry/busy/deferred operation 键全部使用 CommandScope；
+- multi-session shared broker 若未来立项，走独立 runtime change（连接准入/tray owner/
+  registry/writer 路由/生命周期法则先行），dialog/sound 届时再适配。
+- `unsafe impl Send` 裁决：UI-affine 原生实例限制在 owner-thread registry，不以隐含 Send
+  保证跨线程移动（R2 P0-2）。
 
 ### 5.6 依赖与权限
 
 macOS 依赖 Darwin carrier/AppKit（ext-badge 同族）；无 TCC 权限需求。win32 新增链接面：
-comctl32（TaskDialog）、shell32（IFileDialog）；无 WinRT。typed 错误 envelope 全链路见
-§7.5。
+comctl32（TaskDialog）、shell32（IFileDialog）；无 WinRT。typed 错误 envelope 见 §7.5。
 
 ## 6. 打包与体积门（Owner ruling 2026-09-16 立法，本 change 首例适用）
 
@@ -268,21 +290,32 @@ packages/ext-dialog/
 - `≥ 2MB` → 警告（CI warning + 发布前必须 Owner 决策记录）；
 - `> 3MB` → CI fail（必须拆分为 `@opentray/<name>-<os>-<arch>` 平台包，不再询问）；
 - 已发布平台包形态的既有包（ext-badge/ext-webview/ext-lynx）不受追溯；
-- **实测即证据**（R1 §4.5）：「远低于 2MB」是假设不是基线——首次 release 必须产出每包
-  真实 `npm pack` 压缩 tarball 字节数报告（npm/pnpm 版本、四目标清单与 hash 一并记录）
-  写入 review/evidence artifact；无实测不给 packaging GO。
+- **实测即证据**（R1 §4.5 + R2 P0-6）：「远低于 2MB」是假设不是基线——发布证据必须是
+  **真实 `npm pack --json --pack-destination <temp>`**：从生成 `.tgz` 的 `stat` 读取压缩
+  字节数，保存 npm/pnpm 版本、packlist、四目标 hash 与 stage manifest；随后**解包同一
+  tgz** 在每 target runner 执行 resolver + native inspector/loader identity check。
+  `--dry-run` 仅作快速开发预警，不得作为发布证据或解包输入。首次 release 报告写入
+  review/evidence artifact；2MB 警告需 Owner 拆分决策记录；无实测不给 packaging GO。
 
-### 6.4 构建图收齐矩阵（R1 P0-8）
+### 6.4 构建图收齐矩阵与 embedded 身份链（R1 P0-8 + R2 P0-5）
 
 - `scripts/binaries/native-build-graph.ts` 注册 `dialog` component 与 target capability
   matrix；每目标产出 native inspector/manifest/SHA-256 证据（同 badge 管线）。
 - **facade staging 收齐规则**：四目标（darwin-arm64/x64、windows-arm64/x64）全部匹配当前
   facade version 与 contract fingerprint 才写入 `packages/ext-dialog/platforms/<target>/`
   并生成 manifest；缺目标、过期 target、hash 不匹配必须失败。
+- **embedded staging manifest（身份链闭合）**：staging 生成 root-contained
+  `platforms/manifest.json`——每目标 relative path、SHA-256、buildIdentity、facade
+  version、contract fingerprint，随 pack 发布。resolver 必须 containment 校验该 manifest、
+  计算选中 library 的 hash、把 buildIdentity/hash 纳入 expected load identity；broker 在
+  `Library::new` 前重验 actual embedded manifest 的 build identity 与 expected 一致。
+  **TOCTOU 裁决**：CI closure 以 stage/pack 后重 hash 为 release authority；运行时至少在
+  load 前重 hash 并拒绝不匹配。adversarial 测试必须替换**真实 library bytes**（而非仅改
+  JSON 声称）。
 - 同步改动面：`release-plan.ts`、`verify-native-plan.ts`、`stage-release-artifacts.ts`、
   `.github/workflows/release.yml`、facade `files` 字段及配套测试。
-- 验收：clean checkout 执行 release dry-run → `npm pack --dry-run` 解包 → 逐目标调用
-  resolver/loader identity check 全绿。
+- 验收：clean checkout 执行 release dry-run（真实 pack）→ 解包 tgz → 逐目标 resolver/
+  loader identity check 全绿。
 
 ## 7. `DialogBackendCapabilities` DTO
 
