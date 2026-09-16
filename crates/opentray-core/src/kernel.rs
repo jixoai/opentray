@@ -1,14 +1,15 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use opentray_spec::{
-    AppIcon, AppId, AppIdentity, AppOptions, AppRef, ExtensionEnvelope, Icon, Menu, Rect,
-    SessionId, Tooltip, TrayEvent, TrayId, TrayOptions, DEFAULT_APP_ICON_VARIANT,
+    AppIcon, AppId, AppIdentity, AppOptions, AppRef, CommandScope, ExtensionEnvelope, Icon, Menu,
+    Rect, SessionId, Tooltip, TrayEvent, TrayId, TrayOptions, DEFAULT_APP_ICON_VARIANT,
 };
 use serde_json::Value;
 
 use crate::{
-    AppBackend, AppProjection, ExtensionError, ExtensionHostContext, ExtensionInstance,
-    ExtensionRegistry, TrayProjection, UnsupportedExtensionHostContext,
+    AppBackend, AppProjection, ExtensionCommandOutcome, ExtensionError, ExtensionHostContext,
+    ExtensionInstance, ExtensionRegistry, TrayProjection, UnsupportedExtensionHostContext,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -60,6 +61,10 @@ struct TrayState {
 pub struct Kernel<B: AppBackend> {
     backend: B,
     extensions: ExtensionRegistry,
+    /// Shared deferred-operation table: the kernel pre-registers command
+    /// operations here, and the broker composition's deferred ports and
+    /// owner loop settle them through the same handle.
+    operations: Arc<crate::operations::DeferredOperationRegistry>,
     apps: HashMap<AppId, AppState>,
     trays: HashMap<(AppId, TrayId), TrayState>,
     next_app: u64,
@@ -67,9 +72,21 @@ pub struct Kernel<B: AppBackend> {
 
 impl<B: AppBackend> Kernel<B> {
     pub fn new(backend: B) -> Self {
+        Self::with_shared_operations(backend, Arc::new(
+            crate::operations::DeferredOperationRegistry::new(),
+        ))
+    }
+
+    /// Builds a kernel around an explicitly shared operation registry so the
+    /// composition layer can hand the same table to its deferred ports.
+    pub fn with_shared_operations(
+        backend: B,
+        operations: Arc<crate::operations::DeferredOperationRegistry>,
+    ) -> Self {
         Self {
             backend,
             extensions: ExtensionRegistry::default(),
+            operations,
             apps: HashMap::new(),
             trays: HashMap::new(),
             next_app: 1,
@@ -82,6 +99,10 @@ impl<B: AppBackend> Kernel<B> {
 
     pub fn extensions_mut(&mut self) -> &mut ExtensionRegistry {
         &mut self.extensions
+    }
+
+    pub fn operations(&self) -> &Arc<crate::operations::DeferredOperationRegistry> {
+        &self.operations
     }
 
     pub fn register_extension(
@@ -321,7 +342,7 @@ impl<B: AppBackend> Kernel<B> {
         tray_id: TrayId,
         ext: String,
         data: Value,
-    ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
+    ) -> Result<ExtensionCommandOutcome, KernelError> {
         let mut host = UnsupportedExtensionHostContext;
         self.ext_command_with_host(session_id, app_id, tray_id, ext, data, &mut host)
     }
@@ -334,14 +355,27 @@ impl<B: AppBackend> Kernel<B> {
         ext: String,
         data: Value,
         host: &mut dyn ExtensionHostContext,
-    ) -> Result<Vec<ExtensionEnvelope>, KernelError> {
+    ) -> Result<ExtensionCommandOutcome, KernelError> {
         // harden-lifecycle-ownership D2: extension commands are scoped to the
         // tray-owning session. A foreign session can neither dispatch nor
         // destroy through another session's tray — the session-scoped
         // isolation law is enforced at the dispatch boundary, not left to
         // per-extension payload identity.
         self.require_owned_tray(session_id, &app_id, &tray_id)?;
-        Ok(self.extensions.command(app_id, tray_id, ext, data, host)?)
+        // add-ext-dialog §5.5: the command scope is broker-injected host
+        // truth (session, instance generation included); extensions never
+        // self-report it and every busy/operation key derives from it. The
+        // generation is 0 for instances without a deferred port (V1-only or
+        // in-process instances, which can never defer).
+        let scope = CommandScope {
+            instance_generation: self.operations.current_generation(&app_id, &ext),
+            app_id,
+            tray_id,
+            session_id: session_id.to_string(),
+        };
+        Ok(self
+            .extensions
+            .command(scope, ext, data, &self.operations, host)?)
     }
 
     pub fn projection(&self, app_id: &str) -> Result<AppProjection, KernelError> {
@@ -823,8 +857,94 @@ mod tests {
             )
             .expect("ext command");
 
+        let ExtensionCommandOutcome::Immediate(events) = events else {
+            panic!("recording extension always completes immediately");
+        };
         assert_eq!(events[0].scope.ext, "webview");
         assert_eq!(events[0].data["type"], "recorded");
+    }
+
+    /// The command path injects the broker-derived `CommandScope` (session,
+    /// instance generation included) into the dispatch envelope; extensions
+    /// never self-report ownership (add-ext-dialog §5.5). An Immediate
+    /// outcome retires the pre-registered operation again.
+    #[test]
+    fn ext_command_injects_command_scope_and_retires_immediate_operations() {
+        use crate::operations::IssuedOperation;
+        use std::sync::Mutex;
+
+        struct ScopeCapture {
+            captured: std::sync::Arc<Mutex<Vec<opentray_spec::ExtensionEnvelope>>>,
+        }
+
+        impl ExtensionInstance for ScopeCapture {
+            fn name(&self) -> &str {
+                "probe"
+            }
+
+            fn command(
+                &mut self,
+                envelope: opentray_spec::ExtensionEnvelope,
+                _issued: IssuedOperation,
+                _host: &mut dyn crate::ExtensionHostContext,
+            ) -> Result<crate::ExtensionCommandDisposition, ExtensionError> {
+                self.captured.lock().unwrap().push(envelope);
+                Ok(crate::ExtensionCommandDisposition::Immediate(Vec::new()))
+            }
+
+            fn session_closed(
+                &mut self,
+                _session_id: &str,
+                _host: &mut dyn crate::ExtensionHostContext,
+            ) -> Result<Vec<opentray_spec::ExtensionEnvelope>, ExtensionError> {
+                Ok(Vec::new())
+            }
+        }
+
+        let backend = FakeBackend::new(BackendCapabilities::full());
+        let mut kernel = Kernel::new(backend);
+        let surface = kernel
+            .create_app(AppOptions {
+                id: Some("host".to_string()),
+                name: None,
+                app_icon: None,
+                default: false,
+            })
+            .expect("surface");
+        kernel
+            .create_tray("session-7".to_string(), &surface, tray_options("tray", "Tray"))
+            .expect("tray");
+        let captured = std::sync::Arc::new(Mutex::new(Vec::new()));
+        kernel.extensions_mut().register(
+            surface.app_id.clone(),
+            Box::new(ScopeCapture {
+                captured: captured.clone(),
+            }),
+        );
+
+        let outcome = kernel
+            .ext_command(
+                "session-7",
+                surface.app_id.clone(),
+                "tray".to_string(),
+                "probe".to_string(),
+                serde_json::json!({ "type": "show" }),
+            )
+            .expect("ext command");
+        assert!(matches!(outcome, ExtensionCommandOutcome::Immediate(_)));
+
+        let captured = captured.lock().unwrap();
+        let scope = captured[0].command_scope.as_ref().expect("injected scope");
+        assert_eq!(scope.app_id, surface.app_id);
+        assert_eq!(scope.tray_id, "tray");
+        assert_eq!(scope.session_id, "session-7");
+        assert_eq!(
+            scope.instance_generation, 0,
+            "an instance without a deferred port carries generation 0"
+        );
+        // The Immediate outcome retired the pre-registered operation: the
+        // session keeps zero live operations.
+        assert_eq!(kernel.operations().session_operation_count("session-7"), 0);
     }
 
     #[test]

@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
 use opentray_spec::{
-    AppId, ExpectedExtensionIdentity, ExtensionEnvelope, ExtensionScope, Rect, TrayId,
+    AppId, CommandScope, ExpectedExtensionIdentity, ExtensionEnvelope, ExtensionScope, Rect,
 };
 use serde_json::Value;
+
+use crate::operations::{DeferredOperationRegistry, IssuedOperation};
 
 pub const RECORDING_EXTENSION_PATH: &str = "opentray://recording-extension";
 
@@ -41,13 +43,38 @@ impl ExtensionHostContext for UnsupportedExtensionHostContext {
     }
 }
 
+/// Instance-level answer for one command dispatch (DeferredOperation §5.1):
+/// the disposition the native V2 ABI reports through
+/// `ExtCommandDispositionV1`, lifted to the trait boundary.
+pub enum ExtensionCommandDisposition {
+    /// The command completed inside the call; the envelopes are the result
+    /// (V1 semantics unchanged).
+    Immediate(Vec<ExtensionEnvelope>),
+    /// The instance defers: it retained the seeded handle and will submit
+    /// the single terminal through the deferred port.
+    Deferred,
+}
+
+/// Registry/kernel-level dispatch result: a deferred answer carries the
+/// broker-issued operation identity the caller needs for
+/// `ext-command-accepted`.
+pub enum ExtensionCommandOutcome {
+    Immediate(Vec<ExtensionEnvelope>),
+    Deferred(IssuedOperation),
+}
+
 pub trait ExtensionInstance: Send {
     fn name(&self) -> &str;
+    /// `issued` carries the broker-issued operation identity for this call.
+    /// Native V2 instances receive `issued.handle` through the seeded
+    /// `ExtCommandDispositionV1`; V1-only and in-process instances ignore it
+    /// and always complete immediately.
     fn command(
         &mut self,
         envelope: ExtensionEnvelope,
+        issued: IssuedOperation,
         host: &mut dyn ExtensionHostContext,
-    ) -> Result<Vec<ExtensionEnvelope>, ExtensionError>;
+    ) -> Result<ExtensionCommandDisposition, ExtensionError>;
     fn session_closed(
         &mut self,
         session_id: &str,
@@ -136,27 +163,42 @@ impl ExtensionRegistry {
 
     pub fn command(
         &mut self,
-        app_id: AppId,
-        tray_id: TrayId,
+        scope: CommandScope,
         ext: String,
         data: Value,
+        operations: &DeferredOperationRegistry,
         host: &mut dyn ExtensionHostContext,
-    ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
+    ) -> Result<ExtensionCommandOutcome, ExtensionError> {
         let instance = self
             .instances
-            .get_mut(&(app_id.clone(), ext.clone()))
+            .get_mut(&(scope.app_id.clone(), ext.clone()))
             .ok_or_else(|| ExtensionError::NotFound(ext.clone()))?;
-        instance.command(
-            ExtensionEnvelope {
-                scope: ExtensionScope {
-                    app_id,
-                    tray_id: Some(tray_id),
-                    ext,
-                },
-                data,
+        // Pre-register the operation before the dispatch so a terminal
+        // submitted during the command call already resolves (§5.1 handle
+        // issuance law); Immediate outcomes and failures retire it again.
+        let issued = operations.register_pending(scope.clone(), ext.clone());
+        let envelope = ExtensionEnvelope {
+            scope: ExtensionScope {
+                app_id: scope.app_id.clone(),
+                tray_id: Some(scope.tray_id.clone()),
+                ext,
             },
-            host,
-        )
+            command_scope: Some(scope),
+            data,
+        };
+        match instance.command(envelope, issued.clone(), host) {
+            Ok(ExtensionCommandDisposition::Deferred) => {
+                Ok(ExtensionCommandOutcome::Deferred(issued))
+            }
+            Ok(ExtensionCommandDisposition::Immediate(events)) => {
+                operations.retire(&issued.operation_id);
+                Ok(ExtensionCommandOutcome::Immediate(events))
+            }
+            Err(error) => {
+                operations.retire(&issued.operation_id);
+                Err(error)
+            }
+        }
     }
 
     pub fn session_closed(
@@ -195,13 +237,17 @@ impl ExtensionInstance for RecordingExtension {
     fn command(
         &mut self,
         envelope: ExtensionEnvelope,
+        _issued: IssuedOperation,
         _host: &mut dyn ExtensionHostContext,
-    ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
+    ) -> Result<ExtensionCommandDisposition, ExtensionError> {
         self.commands.push(envelope.clone());
-        Ok(vec![ExtensionEnvelope {
-            scope: envelope.scope,
-            data: serde_json::json!({ "type": "recorded", "command": envelope.data }),
-        }])
+        Ok(ExtensionCommandDisposition::Immediate(vec![
+            ExtensionEnvelope {
+                scope: envelope.scope,
+                command_scope: None,
+                data: serde_json::json!({ "type": "recorded", "command": envelope.data }),
+            },
+        ]))
     }
 
     fn session_closed(
@@ -215,6 +261,7 @@ impl ExtensionInstance for RecordingExtension {
                 tray_id: None,
                 ext: self.name.clone(),
             },
+            command_scope: None,
             data: serde_json::json!({ "type": "sessionClosed", "sessionId": session_id }),
         }])
     }
