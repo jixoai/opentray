@@ -11,6 +11,11 @@
 //! Run: cargo run -p opentray-ext-sound --example sound_probe [file.wav]
 
 #[cfg(target_os = "macos")]
+const PROBE_NATIVE_NAME: &str = "Basso";
+#[cfg(target_os = "windows")]
+const PROBE_NATIVE_NAME: &str = "SystemHand";
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn main() {
     use opentray_ext_sound::{
         opentray_ext_command_v2, opentray_ext_deinit, opentray_ext_free_string,
@@ -95,8 +100,11 @@ fn main() {
     dispatch("common notification", serde_json::json!({ "type": "playSystemSound", "name": "notification" }));
     dispatch("common warning", serde_json::json!({ "type": "playSystemSound", "name": "warning" }));
     dispatch("common error", serde_json::json!({ "type": "playSystemSound", "name": "error" }));
-    // One platform-native name (darwin catalog).
-    dispatch("native Basso", serde_json::json!({ "type": "playSystemSound", "name": "Basso" }));
+    // One platform-native name (darwin catalog / win32 registry scheme).
+    dispatch(
+        "native name",
+        serde_json::json!({ "type": "playSystemSound", "name": PROBE_NATIVE_NAME }),
+    );
     // One guaranteed miss: typed sound_not_found with the details payload.
     dispatch("guaranteed miss", serde_json::json!({ "type": "playSystemSound", "name": "DefinitelyNotASoundNameXYZ" }));
     // Optional file playback.
@@ -127,11 +135,10 @@ fn main() {
     println!("sound_probe complete");
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn main() {
     eprintln!(
-        "sound_probe: the CLI probe exercises the darwin surface; run it \
-         on macOS (the win32 acceptance drives the same ABI surface on the \
-         Windows host)"
+        "sound_probe: the probe drives the darwin and win32 surfaces; \
+         this platform is typed-unsupported by design"
     );
 }
