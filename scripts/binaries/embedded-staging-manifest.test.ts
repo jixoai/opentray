@@ -29,8 +29,38 @@ import { runCheck } from "../check-pack-size.ts";
 const execFileAsync = promisify(execFile);
 
 const FIXTURE_VERSION = "9.9.9";
-const FIXTURE_FINGERPRINT = "opentray-ext-dialog-contract-1";
 const ABI_VERSION = 3;
+
+/**
+ * Per-kind embedded facade fixture spec: one frozen matrix, two independent
+ * facades (dialog — add-ext-dialog section 6.4; sound — add-ext-sound
+ * design reference section 3 mirrors it).
+ */
+interface EmbeddedFixtureKind {
+  readonly kind: "dialog" | "sound";
+  readonly packageName: string;
+  readonly facadeDir: string;
+  readonly fingerprint: string;
+  readonly libraryFor: (npmTarget: string) => string;
+}
+
+const dialogFixtureKind: EmbeddedFixtureKind = {
+  kind: "dialog",
+  packageName: "@opentray/ext-dialog",
+  facadeDir: "packages/ext-dialog",
+  fingerprint: "opentray-ext-dialog-contract-1",
+  libraryFor: (npmTarget) =>
+    npmTarget.startsWith("win32-") ? "opentray_ext_dialog.dll" : "libopentray_ext_dialog.dylib",
+};
+
+const soundFixtureKind: EmbeddedFixtureKind = {
+  kind: "sound",
+  packageName: "@opentray/ext-sound",
+  facadeDir: "packages/ext-sound",
+  fingerprint: "opentray-ext-sound-contract-1",
+  libraryFor: (npmTarget) =>
+    npmTarget.startsWith("win32-") ? "opentray_ext_sound.dll" : "libopentray_ext_sound.dylib",
+};
 
 /** Build target id (graph naming) -> npm matrix target + library file name. */
 const FIXTURE_TARGETS = [
@@ -40,15 +70,22 @@ const FIXTURE_TARGETS = [
   { buildTarget: "windows-x64", npmTarget: "win32-x64", library: "opentray_ext_dialog.dll", os: "win32" },
 ] as const;
 
+const fixtureTargetsFor = (spec: EmbeddedFixtureKind) =>
+  FIXTURE_TARGETS.map((target) => ({
+    ...target,
+    library: spec.libraryFor(target.npmTarget),
+  }));
+
 const sha256Of = (data: Buffer | string): string =>
   createHash("sha256").update(data).digest("hex");
 
 const syntheticEvidence = (
   npmTarget: string,
   bytes: Buffer,
-  buildIdentity: string
+  buildIdentity: string,
+  spec: EmbeddedFixtureKind = dialogFixtureKind
 ) => ({
-  path: `platforms/${npmTarget}/${npmTarget.startsWith("win32-") ? "opentray_ext_dialog.dll" : "libopentray_ext_dialog.dylib"}`,
+  path: `platforms/${npmTarget}/${spec.libraryFor(npmTarget)}`,
   sha256: sha256Of(bytes),
   buildIdentity,
 });
@@ -65,12 +102,12 @@ describe("Feature: embedded staging manifest generator (pure)", () => {
 
     const manifest = buildEmbeddedStagingManifest({
       facadeVersion: FIXTURE_VERSION,
-      contractFingerprint: FIXTURE_FINGERPRINT,
+      contractFingerprint: dialogFixtureKind.fingerprint,
       targets,
     });
 
     expect(manifest.facadeVersion).toBe(FIXTURE_VERSION);
-    expect(manifest.contractFingerprint).toBe(FIXTURE_FINGERPRINT);
+    expect(manifest.contractFingerprint).toBe(dialogFixtureKind.fingerprint);
     expect(Object.keys(manifest.targets).sort()).toEqual([
       ...EMBEDDED_STAGING_TARGET_MATRIX,
     ].sort());
@@ -91,7 +128,7 @@ describe("Feature: embedded staging manifest generator (pure)", () => {
     expect(() =>
       buildEmbeddedStagingManifest({
         facadeVersion: FIXTURE_VERSION,
-        contractFingerprint: FIXTURE_FINGERPRINT,
+        contractFingerprint: dialogFixtureKind.fingerprint,
         targets,
       })
     ).toThrow(/missing required matrix target win32-x64/);
@@ -110,7 +147,7 @@ describe("Feature: embedded staging manifest generator (pure)", () => {
     expect(() =>
       buildEmbeddedStagingManifest({
         facadeVersion: FIXTURE_VERSION,
-        contractFingerprint: FIXTURE_FINGERPRINT,
+        contractFingerprint: dialogFixtureKind.fingerprint,
         targets,
       })
     ).toThrow(/outside the frozen staging matrix/);
@@ -134,7 +171,7 @@ describe("Feature: embedded staging manifest generator (pure)", () => {
     expect(() =>
       buildEmbeddedStagingManifest({
         facadeVersion: FIXTURE_VERSION,
-        contractFingerprint: FIXTURE_FINGERPRINT,
+        contractFingerprint: dialogFixtureKind.fingerprint,
         targets: badHash,
       })
     ).toThrow(/malformed SHA-256/);
@@ -147,7 +184,7 @@ describe("Feature: embedded staging manifest generator (pure)", () => {
     expect(() =>
       buildEmbeddedStagingManifest({
         facadeVersion: FIXTURE_VERSION,
-        contractFingerprint: FIXTURE_FINGERPRINT,
+        contractFingerprint: dialogFixtureKind.fingerprint,
         targets: badIdentity,
       })
     ).toThrow(/empty build identity/);
@@ -155,15 +192,17 @@ describe("Feature: embedded staging manifest generator (pure)", () => {
 });
 
 /** Synthetic end-to-end fixture workspace: facade package + per-target artifact manifests. */
-const createFixtureWorkspace = async (): Promise<string> => {
+const createFixtureWorkspace = async (
+  spec: EmbeddedFixtureKind = dialogFixtureKind
+): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), "opentray-embedded-staging-"));
-  const facadeDir = join(root, "packages/ext-dialog");
+  const facadeDir = join(root, spec.facadeDir);
   await mkdir(facadeDir, { recursive: true });
   await writeFile(
     join(facadeDir, "package.json"),
     `${JSON.stringify(
       {
-        name: "@opentray/ext-dialog",
+        name: spec.packageName,
         version: FIXTURE_VERSION,
         files: ["contract.json", "platforms", "README.md"],
       },
@@ -175,7 +214,7 @@ const createFixtureWorkspace = async (): Promise<string> => {
   await writeFile(
     join(facadeDir, "contract.json"),
     `${JSON.stringify(
-      { extensionName: "dialog", contractFingerprint: FIXTURE_FINGERPRINT },
+      { extensionName: spec.kind, contractFingerprint: spec.fingerprint },
       null,
       2
     )}\n`
@@ -190,32 +229,33 @@ interface FixtureTargetArtifacts {
 
 const writeFixtureTargetArtifact = async (
   root: string,
-  fixture: (typeof FIXTURE_TARGETS)[number],
+  fixture: { buildTarget: string; npmTarget: string; library: string; os: string },
+  spec: EmbeddedFixtureKind = dialogFixtureKind,
   options: { staleVersion?: boolean } = {}
 ): Promise<FixtureTargetArtifacts> => {
-  const artifactName = `native-${fixture.buildTarget}-dialog`;
+  const artifactName = `native-${fixture.buildTarget}-${spec.kind}`;
   const artifactDirectory = join(root, "native-artifacts", artifactName);
   await mkdir(artifactDirectory, { recursive: true });
   // Distinct bytes per target: the darwin dylib basename is shared by both
   // arches, so per-target bytes prove the (target, kind) destination routing.
-  const bytes = Buffer.from(`synthetic-dialog-library:${fixture.buildTarget}`, "utf8");
+  const bytes = Buffer.from(`synthetic-${spec.kind}-library:${fixture.buildTarget}`, "utf8");
   await writeFile(join(artifactDirectory, fixture.library), bytes);
   const manifest = {
     target: fixture.buildTarget,
-    components: ["dialog"],
-    artifactKinds: ["dialog"],
+    components: [spec.kind],
+    artifactKinds: [spec.kind],
     artifactName,
     files: [fixture.library],
     extensionArtifacts: [
       {
-        kind: "dialog",
+        kind: spec.kind,
         file: fixture.library,
         sha256: sha256Of(bytes),
         manifest: {
-          extensionName: "dialog",
+          extensionName: spec.kind,
           abiVersion: ABI_VERSION,
           artifactSetVersion: options.staleVersion === true ? "0.0.1" : FIXTURE_VERSION,
-          contractFingerprint: FIXTURE_FINGERPRINT,
+          contractFingerprint: spec.fingerprint,
           target: { os: fixture.os, arch: fixture.buildTarget.split("-")[1] },
           buildIdentity: `synthetic:${fixture.buildTarget}`,
         },
@@ -229,12 +269,15 @@ const writeFixtureTargetArtifact = async (
   return { artifactDirectory, bytes };
 };
 
-const stagePlanJson = (targets: readonly string[]): string =>
+const stagePlanJson = (
+  targets: readonly string[],
+  spec: EmbeddedFixtureKind = dialogFixtureKind
+): string =>
   JSON.stringify(
     targets.map((buildTarget) => ({
       target: buildTarget,
-      artifactKinds: ["dialog"],
-      artifactName: `native-${buildTarget}-dialog`,
+      artifactKinds: [spec.kind],
+      artifactName: `native-${buildTarget}-${spec.kind}`,
     }))
   );
 
@@ -285,7 +328,7 @@ describe("Feature: embedded dialog staging chain (synthetic artifacts)", () => {
         await readFile(join(root, "packages/ext-dialog/platforms/manifest.json"), "utf8")
       );
       expect(stagedManifest.facadeVersion).toBe(FIXTURE_VERSION);
-      expect(stagedManifest.contractFingerprint).toBe(FIXTURE_FINGERPRINT);
+      expect(stagedManifest.contractFingerprint).toBe(dialogFixtureKind.fingerprint);
       expect(Object.keys(stagedManifest.targets).sort()).toEqual(
         [...EMBEDDED_STAGING_TARGET_MATRIX].sort()
       );
@@ -333,7 +376,7 @@ describe("Feature: embedded dialog staging chain (synthetic artifacts)", () => {
     const root = await createFixtureWorkspace();
     try {
       for (const fixture of FIXTURE_TARGETS) {
-        await writeFixtureTargetArtifact(root, fixture, { staleVersion: true });
+        await writeFixtureTargetArtifact(root, fixture, dialogFixtureKind, { staleVersion: true });
       }
 
       const result = await runStageScript(root, stagePlanJson(FIXTURE_TARGETS.map((f) => f.buildTarget)));
@@ -393,6 +436,168 @@ describe("Feature: embedded dialog staging chain (synthetic artifacts)", () => {
         { cwd: root, encoding: "utf8" }
       );
       for (const fixture of FIXTURE_TARGETS) {
+        expect(evidence.stdout).toContain(`embedded-pack-identity OK ${fixture.npmTarget}`);
+        expect(evidence.stdout).toContain(`buildIdentity=synthetic:${fixture.buildTarget}`);
+      }
+      expect(evidence.stdout).toContain("mode=real");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 120_000);
+});
+
+describe("Feature: embedded sound staging chain (synthetic artifacts)", () => {
+  test("Scenario: Given four collected sound targets matching the facade identity When staging runs Then the embedded manifest is written under packages/ext-sound", async () => {
+    const root = await createFixtureWorkspace(soundFixtureKind);
+    try {
+      const soundTargets = fixtureTargetsFor(soundFixtureKind);
+      const bytesByTarget = new Map<string, Buffer>();
+      for (const fixture of soundTargets) {
+        const { bytes } = await writeFixtureTargetArtifact(root, fixture, soundFixtureKind);
+        bytesByTarget.set(fixture.npmTarget, bytes);
+      }
+
+      const result = await runStageScript(
+        root,
+        stagePlanJson(
+          soundTargets.map((fixture) => fixture.buildTarget),
+          soundFixtureKind
+        )
+      );
+      expect(result.exitCode).toBe(0);
+
+      const stagedManifest = JSON.parse(
+        await readFile(join(root, "packages/ext-sound/platforms/manifest.json"), "utf8")
+      );
+      expect(stagedManifest.facadeVersion).toBe(FIXTURE_VERSION);
+      expect(stagedManifest.contractFingerprint).toBe(soundFixtureKind.fingerprint);
+      expect(Object.keys(stagedManifest.targets).sort()).toEqual(
+        [...EMBEDDED_STAGING_TARGET_MATRIX].sort()
+      );
+      for (const fixture of soundTargets) {
+        expect(stagedManifest.targets[fixture.npmTarget]).toEqual(
+          syntheticEvidence(
+            fixture.npmTarget,
+            bytesByTarget.get(fixture.npmTarget) as Buffer,
+            `synthetic:${fixture.buildTarget}`,
+            soundFixtureKind
+          )
+        );
+        // The staged library bytes land under the mirrored npm-target layout.
+        const staged = await readFile(
+          join(root, "packages/ext-sound", stagedManifest.targets[fixture.npmTarget].path)
+        );
+        expect(staged.equals(bytesByTarget.get(fixture.npmTarget) as Buffer)).toBe(true);
+      }
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 30_000);
+
+  test("Scenario: Given only three staged sound targets When staging runs Then it fails hard and no manifest is written", async () => {
+    const root = await createFixtureWorkspace(soundFixtureKind);
+    try {
+      const soundTargets = fixtureTargetsFor(soundFixtureKind);
+      for (const fixture of soundTargets.slice(0, 3)) {
+        await writeFixtureTargetArtifact(root, fixture, soundFixtureKind);
+      }
+
+      const result = await runStageScript(
+        root,
+        stagePlanJson(
+          soundTargets.slice(0, 3).map((fixture) => fixture.buildTarget),
+          soundFixtureKind
+        )
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("missing required matrix target win32-x64");
+      await expect(
+        readFile(join(root, "packages/ext-sound/platforms/manifest.json"), "utf8")
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 30_000);
+
+  test("Scenario: Given sound evidence built against a stale facade version When staging runs Then the identity chain rejects it", async () => {
+    const root = await createFixtureWorkspace(soundFixtureKind);
+    try {
+      const soundTargets = fixtureTargetsFor(soundFixtureKind);
+      for (const fixture of soundTargets) {
+        await writeFixtureTargetArtifact(root, fixture, soundFixtureKind, {
+          staleVersion: true,
+        });
+      }
+
+      const result = await runStageScript(
+        root,
+        stagePlanJson(
+          soundTargets.map((fixture) => fixture.buildTarget),
+          soundFixtureKind
+        )
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("identity mismatch");
+      await expect(
+        readFile(join(root, "packages/ext-sound/platforms/manifest.json"), "utf8")
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 30_000);
+
+  test("Scenario: Given a staged four-target sound fixture When the pack gates run Then validate-package-dirs, check-pack-size, and the unpack identity evidence all pass", async () => {
+    const root = await createFixtureWorkspace(soundFixtureKind);
+    try {
+      const soundTargets = fixtureTargetsFor(soundFixtureKind);
+      for (const fixture of soundTargets) {
+        await writeFixtureTargetArtifact(root, fixture, soundFixtureKind);
+      }
+      const stageResult = await runStageScript(
+        root,
+        stagePlanJson(
+          soundTargets.map((fixture) => fixture.buildTarget),
+          soundFixtureKind
+        )
+      );
+      expect(stageResult.exitCode).toBe(0);
+
+      // validate-package-dirs: real pnpm pack, required entries present
+      // (execFileAsync rejects on any non-zero exit).
+      const validateScript = join(import.meta.dir, "validate-package-dirs.ts");
+      await execFileAsync(
+        process.execPath,
+        [validateScript, "--package-dirs-json", JSON.stringify(["packages/ext-sound"])],
+        { cwd: root, encoding: "utf8" }
+      );
+
+      // check-pack-size: real npm pack measured from the actual tgz stat.
+      const { receipts, exitCode } = await runCheck({
+        packageDirs: [join(root, "packages/ext-sound")],
+      });
+      expect(exitCode).toBe(0);
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0].verdict).toBe("ok");
+      expect(receipts[0].packageName).toBe("@opentray/ext-sound");
+      expect(
+        receipts[0].platformFiles.map((line) => line.split(" (")[0])
+      ).toEqual([
+        "platforms/darwin-arm64/libopentray_ext_sound.dylib",
+        "platforms/darwin-x64/libopentray_ext_sound.dylib",
+        "platforms/manifest.json",
+        "platforms/win32-arm64/opentray_ext_sound.dll",
+        "platforms/win32-x64/opentray_ext_sound.dll",
+      ]);
+
+      // embedded pack evidence: real npm pack + in-memory unpack + re-hash
+      // (execFileAsync rejects on any non-zero exit).
+      const evidenceScript = join(import.meta.dir, "verify-embedded-pack-evidence.ts");
+      const evidence = await execFileAsync(
+        process.execPath,
+        [evidenceScript, "--root", root, "--package", "packages/ext-sound"],
+        { cwd: root, encoding: "utf8" }
+      );
+      for (const fixture of soundTargets) {
         expect(evidence.stdout).toContain(`embedded-pack-identity OK ${fixture.npmTarget}`);
         expect(evidence.stdout).toContain(`buildIdentity=synthetic:${fixture.buildTarget}`);
       }

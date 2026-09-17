@@ -197,6 +197,47 @@ describe("Feature: native runtime artifact topology", () => {
     );
   });
 
+  test("Scenario: Given embedded sound staging When the destination is resolved per (target, kind) Then it mirrors the frozen dialog layout", () => {
+    const darwinArm64 = resolveNativePackageTarget("darwin", "arm64");
+    const darwinX64 = resolveNativePackageTarget("darwin", "x64");
+    const winArm64 = resolveNativePackageTarget("windows", "arm64");
+    const winX64 = resolveNativePackageTarget("windows", "x64");
+    const linux = resolveNativePackageTarget("linux", "x64");
+
+    expect(resolveStageDestination(darwinArm64, "sound")).toBe(
+      "packages/ext-sound/platforms/darwin-arm64/libopentray_ext_sound.dylib"
+    );
+    expect(resolveStageDestination(darwinX64, "sound")).toBe(
+      "packages/ext-sound/platforms/darwin-x64/libopentray_ext_sound.dylib"
+    );
+    expect(resolveStageDestination(winArm64, "sound")).toBe(
+      "packages/ext-sound/platforms/win32-arm64/opentray_ext_sound.dll"
+    );
+    expect(resolveStageDestination(winX64, "sound")).toBe(
+      "packages/ext-sound/platforms/win32-x64/opentray_ext_sound.dll"
+    );
+    // The shared darwin basename routes by (target, kind) exactly like dialog.
+    expect(
+      resolveStageDestinationForArtifactFile(
+        darwinArm64,
+        "libopentray_ext_sound.dylib"
+      )
+    ).toBe(
+      "packages/ext-sound/platforms/darwin-arm64/libopentray_ext_sound.dylib"
+    );
+    expect(
+      resolveStageDestinationForArtifactFile(
+        darwinX64,
+        "libopentray_ext_sound.dylib"
+      )
+    ).toBe(
+      "packages/ext-sound/platforms/darwin-x64/libopentray_ext_sound.dylib"
+    );
+    expect(() => resolveStageDestination(linux, "sound")).toThrow(
+      "target linux-x64 does not publish a sound native artifact"
+    );
+  });
+
   test("Scenario: Given runtime builds When manifest dependencies are inspected Then the executable host stays in the broker crate", () => {
     const manifest = readFileSync(
       resolve(repoRoot, "crates/opentray-bin/Cargo.toml"),

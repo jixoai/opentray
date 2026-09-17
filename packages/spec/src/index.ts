@@ -975,3 +975,138 @@ const isTrayEvent = (value: unknown): value is TrayEvent => {
 
 const isMouseButton = (value: unknown): value is MouseButton =>
   value === "left" || value === "right" || value === "middle";
+
+// ---------------------------------------------------------------------------
+// Sound extension shared schema (add-ext-sound design reference sections 1-2,
+// task 2.1): the schema is promoted to this shared spec so `@opentray/ext-sound`
+// and the `opentray-spec` crate project the same DTO truth. The frozen
+// common-name table and the typed error family live here so facade, native,
+// and broker rejections stay code-identical across the wire.
+// ---------------------------------------------------------------------------
+
+/**
+ * Alert-grade beep kinds (`beep` only, add-ext-sound design reference section
+ * 1.1). Alert grading and named system sounds are two separate semantic
+ * layers: `default`/`info`/`question` never enter the common system sound
+ * catalog.
+ */
+export type BeepKind = "default" | "info" | "warning" | "error" | "question";
+
+/**
+ * Common system sound names (add-ext-sound R1 section 4.1, frozen catalog:
+ * no additions or removals in v1).
+ */
+export type CommonSystemSoundName = "notification" | "warning" | "error";
+
+/** Frozen common-name catalog in wire order; the facade consults it before any native passthrough. */
+export const COMMON_SYSTEM_SOUND_NAMES: readonly CommonSystemSoundName[] = [
+  "notification",
+  "warning",
+  "error",
+];
+
+/**
+ * Frozen per-platform native projection of each common name (add-ext-sound
+ * design reference section 1.2): darwin `NSSound` system catalog names and
+ * win32 registry sound-scheme aliases (`SND_ALIAS`). Both records are frozen;
+ * a changed projection is a contract change, not a data edit.
+ */
+export const COMMON_SYSTEM_SOUND_PROJECTIONS: Readonly<
+  Record<CommonSystemSoundName, { readonly darwin: string; readonly win32: string }>
+> = Object.freeze({
+  notification: Object.freeze({ darwin: "Glass", win32: "SystemAsterisk" }),
+  warning: Object.freeze({ darwin: "Sosumi", win32: "SystemExclamation" }),
+  error: Object.freeze({ darwin: "Basso", win32: "SystemHand" }),
+});
+
+/** Returns true when an unknown value is one of the frozen common system sound names. */
+export const isCommonSystemSoundName = (
+  value: string
+): value is CommonSystemSoundName =>
+  (COMMON_SYSTEM_SOUND_NAMES as readonly string[]).includes(value);
+
+/**
+ * A common name (typed union with autocomplete) or any platform-native sound
+ * name (arbitrary string, resolved at runtime against the platform catalog).
+ */
+export type SystemSoundName = CommonSystemSoundName | (string & {});
+
+/**
+ * v1 deliberately carries no options (add-ext-sound design reference section
+ * 1.3 ruling: the rejection path already excluded volume control). Reserved
+ * empty interface — future fields land in platform namespaces first (dialog
+ * law), never as silently ignored values.
+ */
+export interface PlaySoundOptions {
+  // Intentionally empty in v1.
+}
+
+/**
+ * Shared sound backend capabilities DTO (add-ext-sound design reference
+ * section 2). `fileFormats` is the v1 committed set (finite canonical:
+ * darwin `["wav","aiff","mp3","m4a"]`, win32 `["wav"]`), not a runtime-open
+ * catalog of whatever the OS currently accepts.
+ */
+export interface SoundBackendCapabilities {
+  platform: "darwin" | "win32";
+  /** Platform-native sound-name catalog resolvable (`playSystemSound` passthrough). */
+  systemSoundCatalog: boolean;
+  /** File playback available (`playSound`). */
+  playFile: boolean;
+  fileFormats: readonly string[];
+}
+
+/** Returns true when an unknown value is a complete sound backend capabilities DTO. */
+export const isSoundBackendCapabilities = (
+  value: unknown
+): value is SoundBackendCapabilities => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.platform !== "darwin" && record.platform !== "win32") {
+    return false;
+  }
+  return (
+    typeof record.systemSoundCatalog === "boolean" &&
+    typeof record.playFile === "boolean" &&
+    Array.isArray(record.fileFormats) &&
+    record.fileFormats.every((format) => typeof format === "string")
+  );
+};
+
+/** Typed sound error family (add-ext-sound design reference section 3, frozen at four codes). */
+export const SOUND_ERROR_CODES = {
+  platformUnsupported: "sound_platform_unsupported",
+  notFound: "sound_not_found",
+  formatUnsupported: "sound_format_unsupported",
+  fileUnreadable: "sound_file_unreadable",
+} as const;
+
+export type SoundErrorCode = (typeof SOUND_ERROR_CODES)[keyof typeof SOUND_ERROR_CODES];
+
+const SOUND_ERROR_CODE_VALUES = new Set<string>(Object.values(SOUND_ERROR_CODES));
+
+/** Returns true when an unknown value is one of the frozen typed sound error codes. */
+export const isSoundErrorCode = (value: string): value is SoundErrorCode =>
+  SOUND_ERROR_CODE_VALUES.has(value);
+
+/** How a `sound_not_found` miss was searched, in resolution order (common table first). */
+export type SystemSoundAttemptedMode = "common-table" | "platform-catalog";
+
+/**
+ * Discriminated details payloads for the typed sound error family
+ * (add-ext-sound design reference section 1.2: a miss never stays silent and
+ * never falls back — `sound_not_found` details carry at least the requested
+ * name, the platform, and the attempted modes/catalog).
+ */
+export type SoundErrorDetails =
+  | { kind: "platform"; platform: string }
+  | {
+      kind: "not-found";
+      requested: string;
+      platform: "darwin" | "win32";
+      attempted: readonly SystemSoundAttemptedMode[];
+    }
+  | { kind: "format"; path: string; reason: string }
+  | { kind: "unreadable"; path: string };

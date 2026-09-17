@@ -54,10 +54,21 @@ if (values["stage-plan-json"] === undefined || values["stage-plan-json"].trim().
   throw new Error("--stage-plan-json is required");
 }
 
-const embeddedDialogFacadeDir = "packages/ext-dialog";
+/** Frozen per-kind embedded facade directory (shared `packages/ext-<kind>` layout). */
+const embeddedFacadeDirForKind = (kind: ExtensionArtifactKind): string =>
+  `packages/ext-${kind}`;
 
 const stagePlan = parseStagePlan(values["stage-plan-json"]);
-const embeddedDialogTargets = new Map<string, EmbeddedStagingTargetEvidence>();
+/**
+ * Embedded extension staging (dialog, sound; add-ext-dialog section 6.4,
+ * add-ext-sound design reference section 3): one evidence map per embedded
+ * facade kind, keyed by the npm target name. The frozen per-kind facade
+ * directory follows the shared `packages/ext-<kind>` layout.
+ */
+const embeddedStagedTargets = new Map<
+  ExtensionArtifactKind,
+  Map<string, EmbeddedStagingTargetEvidence>
+>();
 for (const entry of stagePlan) {
   const targetName = parseNativeBuildTargetName(entry.target);
   const target = resolveNativeBuildTarget(targetName);
@@ -106,55 +117,65 @@ for (const entry of stagePlan) {
     await stageArtifact(values.root ?? process.cwd(), source, destination);
   }
 
-  // Embedded dialog branch: collect the per-target evidence cell from the
-  // staged bytes (re-hashed here; the hash in the downloaded evidence was
-  // already verified against the source file above).
-  const dialogEvidence = manifest.extensionArtifacts.find(
-    (candidate) => candidate.kind === "dialog",
-  );
-  if (dialogEvidence !== undefined) {
+  // Embedded extension branch: collect the per-kind, per-target evidence cell
+  // from the staged bytes (re-hashed here; the hash in the downloaded
+  // evidence was already verified against the source file above).
+  for (const evidence of manifest.extensionArtifacts) {
+    if (!isEmbeddedExtensionArtifactKind(evidence.kind)) {
+      continue;
+    }
     const npmTarget = `${packageTarget.npmOs}-${packageTarget.arch}`;
-    const destination = resolveStageDestination(packageTarget, "dialog");
+    const destination = resolveStageDestination(packageTarget, evidence.kind);
     const stagedSha256 = await sha256File(join(values.root ?? process.cwd(), destination));
-    if (stagedSha256 !== dialogEvidence.sha256) {
+    if (stagedSha256 !== evidence.sha256) {
       throw new Error(
-        `staged dialog library bytes do not match the recorded evidence: target=${npmTarget} expected=${dialogEvidence.sha256} actual=${stagedSha256}`,
+        `staged ${evidence.kind} library bytes do not match the recorded evidence: target=${npmTarget} expected=${evidence.sha256} actual=${stagedSha256}`,
       );
     }
-    if (embeddedDialogTargets.has(npmTarget)) {
+    let targets = embeddedStagedTargets.get(evidence.kind);
+    if (targets === undefined) {
+      targets = new Map<string, EmbeddedStagingTargetEvidence>();
+      embeddedStagedTargets.set(evidence.kind, targets);
+    }
+    if (targets.has(npmTarget)) {
       throw new Error(
-        `stage plan stages the embedded dialog target ${npmTarget} more than once`,
+        `stage plan stages the embedded ${evidence.kind} target ${npmTarget} more than once`,
       );
     }
-    embeddedDialogTargets.set(npmTarget, {
-      path: embeddedFacadeRelativePath(destination),
+    targets.set(npmTarget, {
+      path: embeddedFacadeRelativePath(evidence.kind, destination),
       sha256: stagedSha256,
-      buildIdentity: dialogEvidence.manifest.buildIdentity,
+      buildIdentity: evidence.manifest.buildIdentity,
     });
   }
 }
 
-// Embedded staging manifest (add-ext-dialog section 6.4): written only after
-// the complete four-target matrix has been collected; any missing cell, hash
-// mismatch, or identity skew above failed the run before reaching this point.
-if (embeddedDialogTargets.size > 0) {
+// Embedded staging manifests (add-ext-dialog section 6.4; add-ext-sound
+// section 3): written only after the complete four-target matrix has been
+// collected per kind; any missing cell, hash mismatch, or identity skew above
+// failed the run before reaching this point.
+if (embeddedStagedTargets.size > 0) {
   const root = values.root ?? process.cwd();
-  const identity = await readEmbeddedDialogFacadeIdentity(root);
-  const stagingManifest = buildEmbeddedStagingManifest({
-    facadeVersion: identity.facadeVersion,
-    contractFingerprint: identity.contractFingerprint,
-    targets: Object.fromEntries(embeddedDialogTargets),
-  });
-  const manifestDestination = join(embeddedDialogFacadeDir, "platforms", "manifest.json");
-  await mkdir(dirname(join(root, manifestDestination)), { recursive: true });
-  await writeFile(
-    join(root, manifestDestination),
-    `${JSON.stringify(stagingManifest, null, 2)}\n`,
-    "utf8",
-  );
-  console.log(
-    `staged embedded manifest: ${manifestDestination} (${embeddedDialogTargets.size} targets, facade ${identity.facadeVersion}, fingerprint ${identity.contractFingerprint})`,
-  );
+  for (const kind of [...embeddedStagedTargets.keys()].sort()) {
+    const targets = embeddedStagedTargets.get(kind) as Map<string, EmbeddedStagingTargetEvidence>;
+    const facadeDir = embeddedFacadeDirForKind(kind);
+    const identity = await readEmbeddedFacadeIdentity(kind, root);
+    const stagingManifest = buildEmbeddedStagingManifest({
+      facadeVersion: identity.facadeVersion,
+      contractFingerprint: identity.contractFingerprint,
+      targets: Object.fromEntries(targets),
+    });
+    const manifestDestination = join(facadeDir, "platforms", "manifest.json");
+    await mkdir(dirname(join(root, manifestDestination)), { recursive: true });
+    await writeFile(
+      join(root, manifestDestination),
+      `${JSON.stringify(stagingManifest, null, 2)}\n`,
+      "utf8",
+    );
+    console.log(
+      `staged embedded manifest: ${manifestDestination} (${targets.size} targets, facade ${identity.facadeVersion}, fingerprint ${identity.contractFingerprint})`,
+    );
+  }
 }
 
 function parseStagePlan(value: string): StagePlanEntry[] {
@@ -258,25 +279,33 @@ function resolveExtensionPlatformPackageDir(
 }
 
 /** Manifest paths are relative to the facade package root (consumer contract). */
-function embeddedFacadeRelativePath(destination: string): string {
-  const prefix = `${embeddedDialogFacadeDir}/`;
+function embeddedFacadeRelativePath(
+  kind: ExtensionArtifactKind,
+  destination: string
+): string {
+  const facadeDir = embeddedFacadeDirForKind(kind);
+  const prefix = `${facadeDir}/`;
   if (!destination.startsWith(prefix)) {
     throw new Error(
-      `embedded dialog staging destination is not inside ${embeddedDialogFacadeDir}: ${destination}`,
+      `embedded ${kind} staging destination is not inside ${facadeDir}: ${destination}`,
     );
   }
   return destination.slice(prefix.length);
 }
 
-async function readEmbeddedDialogFacadeIdentity(root: string): Promise<{
+async function readEmbeddedFacadeIdentity(
+  kind: ExtensionArtifactKind,
+  root: string
+): Promise<{
   facadeVersion: string;
   contractFingerprint: string;
 }> {
+  const facadeDir = embeddedFacadeDirForKind(kind);
   const packageManifest: unknown = JSON.parse(
-    await readFile(join(root, embeddedDialogFacadeDir, "package.json"), "utf8"),
+    await readFile(join(root, facadeDir, "package.json"), "utf8"),
   );
   const contractManifest: unknown = JSON.parse(
-    await readFile(join(root, embeddedDialogFacadeDir, "contract.json"), "utf8"),
+    await readFile(join(root, facadeDir, "contract.json"), "utf8"),
   );
   if (
     !isRecord(packageManifest) ||
@@ -285,7 +314,7 @@ async function readEmbeddedDialogFacadeIdentity(root: string): Promise<{
     typeof contractManifest.contractFingerprint !== "string"
   ) {
     throw new Error(
-      `invalid embedded dialog facade identity under ${embeddedDialogFacadeDir}`,
+      `invalid embedded ${kind} facade identity under ${facadeDir}`,
     );
   }
   return {

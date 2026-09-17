@@ -443,6 +443,24 @@ importers:
         specifier: workspace:*
         version: link:../cli
 
+  packages/ext-sound:
+    devDependencies:
+      '@opentray/spec':
+        specifier: workspace:*
+        version: link:../spec
+      opentray:
+        specifier: workspace:*
+        version: link:../cli
+      tsdown:
+        specifier: ^0.22.1
+        version: 0.22.1(tsx@4.23.12)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@types/node@25.9.1)(jsdom@26.1.0)(vite@8.1.4(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0))
+
   packages/ext-webview:
     devDependencies:
       '@opentray/spec':

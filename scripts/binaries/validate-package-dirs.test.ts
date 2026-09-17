@@ -86,6 +86,31 @@ describe("Feature: native package publish validator", () => {
     ]);
   });
 
+  test("Scenario: Given the embedded sound facade When required entries are resolved Then the mirrored matrix libraries plus the staging manifest are required", () => {
+    expect(resolveRequiredPackageEntries("packages/ext-sound")).toEqual([
+      {
+        path: "platforms/darwin-arm64/libopentray_ext_sound.dylib",
+        executable: false,
+      },
+      {
+        path: "platforms/darwin-x64/libopentray_ext_sound.dylib",
+        executable: false,
+      },
+      {
+        path: "platforms/win32-arm64/opentray_ext_sound.dll",
+        executable: false,
+      },
+      {
+        path: "platforms/win32-x64/opentray_ext_sound.dll",
+        executable: false,
+      },
+      {
+        path: "platforms/manifest.json",
+        executable: false,
+      },
+    ]);
+  });
+
   test("Scenario: Given tar verbose output When entries are parsed Then package prefixes are normalized away", () => {
     expect(
       parsePackedTarEntries(

@@ -8,7 +8,8 @@ export type NativeStageKind =
   | "runtime"
   | "webview"
   | "badge"
-  | "dialog";
+  | "dialog"
+  | "sound";
 // Darwin runtime packages publish only the bundle template. The runtime owns
 // materializing the caller-specific .app directory around the broker.
 export const darwinRuntimeCarrierArtifactName = "Info.plist";
@@ -36,6 +37,12 @@ export interface NativeTarget {
    * `platforms/` tree keyed by the npm target name (win32, not windows).
    */
   dialogArtifact?: string;
+  /**
+   * Embedded sound staging destination (add-ext-sound design reference
+   * section 3): the same frozen embedded layout as dialog, mirrored for the
+   * sound facade (`packages/ext-sound/platforms/<npm-target>/`).
+   */
+  soundArtifact?: string;
 }
 
 const packageTargets = [
@@ -87,6 +94,14 @@ export function createNativeTarget(
       : `packages/ext-dialog/platforms/${npmOs}-${arch}/${
           packageOs === "windows" ? "opentray_ext_dialog.dll" : "libopentray_ext_dialog.dylib"
         }`;
+  // Embedded sound facade mirrors the frozen dialog layout (add-ext-sound
+  // design reference section 3).
+  const soundArtifact =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-sound/platforms/${npmOs}-${arch}/${
+          packageOs === "windows" ? "opentray_ext_sound.dll" : "libopentray_ext_sound.dylib"
+        }`;
   return {
     packageOs,
     npmOs,
@@ -113,6 +128,7 @@ export function createNativeTarget(
     badgeArtifact,
     badgeHelperArtifact,
     dialogArtifact,
+    soundArtifact,
   };
 }
 
@@ -196,6 +212,13 @@ export const resolveStageDestination = (
         );
       }
       return target.dialogArtifact;
+    case "sound":
+      if (target.soundArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish a sound native artifact`
+        );
+      }
+      return target.soundArtifact;
   }
 };
 
@@ -221,15 +244,15 @@ export const resolveStageDestinationForArtifactFile = (
   target: NativeTarget,
   fileName: string
 ): string => {
-  // Embedded dialog staging is resolved per (target, kind): its library
-  // basename is shared by darwin-arm64 and darwin-x64 within their per-target
-  // artifact manifests, so the generic basename candidate list must not own
-  // this destination (add-ext-dialog section 6.2 frozen layout).
-  if (
-    target.dialogArtifact !== undefined &&
-    basename(target.dialogArtifact) === fileName
-  ) {
-    return target.dialogArtifact;
+  // Embedded extension staging (dialog, sound) is resolved per (target,
+  // kind): the library basenames are shared by darwin-arm64 and darwin-x64
+  // within their per-target artifact manifests, so the generic basename
+  // candidate list must not own these destinations (add-ext-dialog section
+  // 6.2 frozen layout, mirrored by add-ext-sound section 3).
+  for (const embeddedArtifact of [target.dialogArtifact, target.soundArtifact]) {
+    if (embeddedArtifact !== undefined && basename(embeddedArtifact) === fileName) {
+      return embeddedArtifact;
+    }
   }
 
   const candidates = [

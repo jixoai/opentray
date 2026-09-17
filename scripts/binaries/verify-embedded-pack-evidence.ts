@@ -134,8 +134,13 @@ const parseJsonBuffer = (data: Buffer, label: string): Record<string, unknown> =
   }
 };
 
-const libraryNameFor = (target: EmbeddedStagingMatrixTarget): string =>
-  target.startsWith("win32-") ? "opentray_ext_dialog.dll" : "libopentray_ext_dialog.dylib";
+const libraryNameFor = (
+  target: EmbeddedStagingMatrixTarget,
+  extensionName: string
+): string =>
+  target.startsWith("win32-")
+    ? `opentray_ext_${extensionName}.dll`
+    : `libopentray_ext_${extensionName}.dylib`;
 
 const packDestination = await mkdtemp(join(tmpdir(), "ot-embedded-pack-"));
 try {
@@ -170,6 +175,14 @@ try {
   if (typeof contractManifest.contractFingerprint !== "string") {
     throw new Error("packed contract.json has no contractFingerprint");
   }
+  if (typeof contractManifest.extensionName !== "string" || contractManifest.extensionName.length === 0) {
+    throw new Error("packed contract.json has no extensionName");
+  }
+  // The frozen embedded layout derives each library basename from the
+  // extension's own identity (opentray_ext_<name>.dll /
+  // libopentray_ext_<name>.dylib), so the gate covers every embedded facade
+  // kind (dialog, sound) without hardcoding extension names.
+  const extensionName = contractManifest.extensionName;
 
   const rawStagingManifest = parseJsonBuffer(
     requireUnpacked(files, "platforms/manifest.json"),
@@ -203,7 +216,7 @@ try {
 
   for (const matrixTarget of EMBEDDED_STAGING_TARGET_MATRIX) {
     const entry = stagingManifest.targets[matrixTarget];
-    const expectedPath = `platforms/${matrixTarget}/${libraryNameFor(matrixTarget)}`;
+    const expectedPath = `platforms/${matrixTarget}/${libraryNameFor(matrixTarget, extensionName)}`;
     if (entry.path !== expectedPath) {
       throw new Error(
         `packed staging manifest path for ${matrixTarget} is ${entry.path}; frozen layout requires ${expectedPath}`

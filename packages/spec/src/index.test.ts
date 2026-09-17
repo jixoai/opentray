@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  COMMON_SYSTEM_SOUND_NAMES,
+  COMMON_SYSTEM_SOUND_PROJECTIONS,
   createBrokerEndpointIdentity,
   compareOpenTrayProtocolLine,
   EXTENSION_EVENT_RECORD_MAX_BYTES,
@@ -11,9 +13,12 @@ import {
   formatUnixSocketPath,
   formatWindowsPipeName,
   isCommandScope,
+  isCommonSystemSoundName,
   isExtOperationPayload,
   isOpenTrayProtocolLineCompatible,
   isOperationId,
+  isSoundBackendCapabilities,
+  isSoundErrorCode,
   isSupportedProtocolVersion,
   isTypedExtensionError,
   OPERATION_ID_PATTERN,
@@ -22,13 +27,19 @@ import {
   OPENTRAY_PROTOCOL_LINE,
   parseServerFrame,
   PROTOCOL_VERSION,
+  SOUND_ERROR_CODES,
+  type BeepKind,
   type ClientFrame,
   type CommandScope,
   type ExpectedExtensionIdentity,
   type ExtOperationPayload,
   type Icon,
   type Menu,
+  type PlaySoundOptions,
   type ServerFrame,
+  type SoundBackendCapabilities,
+  type SoundErrorDetails,
+  type SystemSoundName,
   type TypedExtensionError,
 } from "./index";
 
@@ -898,5 +909,124 @@ describe("@opentray/spec DeferredOperation protocol (v2)", () => {
         expect(payload.error.code).toBe("c");
       }
     }
+  });
+});
+
+describe("@opentray/spec sound schema (add-ext-sound task 2.1)", () => {
+  it("freezes the common system sound table at exactly three names with exact platform projections", () => {
+    expect(COMMON_SYSTEM_SOUND_NAMES).toEqual(["notification", "warning", "error"]);
+    // Exhaustive key parity: every frozen name has a projection, no extras.
+    expect(Object.keys(COMMON_SYSTEM_SOUND_PROJECTIONS).sort()).toEqual(
+      [...COMMON_SYSTEM_SOUND_NAMES].sort()
+    );
+    expect(COMMON_SYSTEM_SOUND_PROJECTIONS.notification).toEqual({
+      darwin: "Glass",
+      win32: "SystemAsterisk",
+    });
+    expect(COMMON_SYSTEM_SOUND_PROJECTIONS.warning).toEqual({
+      darwin: "Sosumi",
+      win32: "SystemExclamation",
+    });
+    expect(COMMON_SYSTEM_SOUND_PROJECTIONS.error).toEqual({
+      darwin: "Basso",
+      win32: "SystemHand",
+    });
+    expect(Object.isFrozen(COMMON_SYSTEM_SOUND_PROJECTIONS)).toBe(true);
+    for (const name of COMMON_SYSTEM_SOUND_NAMES) {
+      expect(Object.isFrozen(COMMON_SYSTEM_SOUND_PROJECTIONS[name])).toBe(true);
+    }
+  });
+
+  it("keeps beep-only kinds out of the common sound catalog (two semantic layers)", () => {
+    for (const beepOnly of ["default", "info", "question"] as const) {
+      expect(isCommonSystemSoundName(beepOnly)).toBe(false);
+      expect(COMMON_SYSTEM_SOUND_NAMES).not.toContain(beepOnly);
+    }
+    const beepKinds: readonly BeepKind[] = [
+      "default",
+      "info",
+      "warning",
+      "error",
+      "question",
+    ];
+    expect(beepKinds).toHaveLength(5);
+    for (const common of COMMON_SYSTEM_SOUND_NAMES) {
+      expect(isCommonSystemSoundName(common)).toBe(true);
+    }
+  });
+
+  it("types system sound names as the frozen union plus arbitrary native strings", () => {
+    const common: SystemSoundName = "notification";
+    const nativeDarwin: SystemSoundName = "Basso";
+    const nativeWin32: SystemSoundName = "SystemDefault";
+    expect([common, nativeDarwin, nativeWin32].every((name) => typeof name === "string")).toBe(
+      true
+    );
+  });
+
+  it("keeps PlaySoundOptions reserved but empty in v1", () => {
+    const options: PlaySoundOptions = {};
+    expect(Object.keys(options)).toEqual([]);
+  });
+
+  it("guards the backend capabilities DTO shape", () => {
+    const darwinBackend: SoundBackendCapabilities = {
+      platform: "darwin",
+      systemSoundCatalog: true,
+      playFile: true,
+      fileFormats: ["wav", "aiff", "mp3", "m4a"],
+    };
+    expect(isSoundBackendCapabilities(darwinBackend)).toBe(true);
+    const win32Backend: SoundBackendCapabilities = {
+      platform: "win32",
+      systemSoundCatalog: true,
+      playFile: true,
+      fileFormats: ["wav"],
+    };
+    expect(isSoundBackendCapabilities(win32Backend)).toBe(true);
+
+    expect(isSoundBackendCapabilities({ ...darwinBackend, platform: "linux" })).toBe(false);
+    expect(isSoundBackendCapabilities({ ...darwinBackend, playFile: "yes" })).toBe(false);
+    expect(isSoundBackendCapabilities({ ...darwinBackend, fileFormats: "wav" })).toBe(false);
+    expect(isSoundBackendCapabilities({ ...darwinBackend, fileFormats: [3] })).toBe(false);
+    expect(isSoundBackendCapabilities(null)).toBe(false);
+    expect(isSoundBackendCapabilities(["not", "a", "record"])).toBe(false);
+  });
+
+  it("freezes the typed sound error family at exactly four codes", () => {
+    expect(SOUND_ERROR_CODES).toEqual({
+      platformUnsupported: "sound_platform_unsupported",
+      notFound: "sound_not_found",
+      formatUnsupported: "sound_format_unsupported",
+      fileUnreadable: "sound_file_unreadable",
+    });
+    expect(isSoundErrorCode("sound_not_found")).toBe(true);
+    expect(isSoundErrorCode("sound_platform_unsupported")).toBe(true);
+    expect(isSoundErrorCode("sound_format_unsupported")).toBe(true);
+    expect(isSoundErrorCode("sound_file_unreadable")).toBe(true);
+    expect(isSoundErrorCode("dialog_platform_unsupported")).toBe(false);
+    expect(isSoundErrorCode("extension_transport_closed")).toBe(false);
+  });
+
+  it("keeps the not-found details payload discriminated with attempted modes", () => {
+    const details: SoundErrorDetails = {
+      kind: "not-found",
+      requested: "Funk",
+      platform: "darwin",
+      attempted: ["common-table", "platform-catalog"],
+    };
+    if (details.kind === "not-found") {
+      expect(details.requested).toBe("Funk");
+      expect(details.platform).toBe("darwin");
+      expect(details.attempted).toEqual(["common-table", "platform-catalog"]);
+    }
+    const platformDetails: SoundErrorDetails = { kind: "platform", platform: "linux" };
+    const formatDetails: SoundErrorDetails = {
+      kind: "format",
+      path: "/tmp/tone.wav",
+      reason: "riff-magic",
+    };
+    const unreadableDetails: SoundErrorDetails = { kind: "unreadable", path: "/tmp/missing.wav" };
+    expect([platformDetails, formatDetails, unreadableDetails]).toHaveLength(3);
   });
 });
