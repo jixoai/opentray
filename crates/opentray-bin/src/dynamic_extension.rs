@@ -14,9 +14,23 @@
 // 4. Attach the optional EventPort and DeferredPort capabilities by value;
 //    every load failure deinits deterministically and revokes what it
 //    reserved.
+// 5. Probe the optional `opentray_ext_poll_owner_v1` producer symbol
+//    (add-ext-dialog design section 5.2): a present symbol makes the
+//    instance a dialog-poll producer whose deferred operations the broker
+//    loop steps through the broker-owned scheduler.
 // Compromise: this module is the single dynamic-hosting composition point,
 // so loader probing, identity gating, and disposition dispatch cannot be
 // physically separated without splitting one C ABI consumer across crates.
+//
+// Send ruling (design section 5.3 thread contract, batch B 2026-09-17): the
+// earlier `unsafe impl Send for DynamicExtensionInstance` existed only to
+// satisfy core's blanket `ExtensionInstance: Send`. Both bounds are removed:
+// the instance holds an owner-thread-affine native pointer, and the
+// compiler now proves the Box never crosses threads. Cross-thread traffic
+// is limited to copyable request data and host-owned thread-safe channels
+// (the deferred port), which is the dialog extension's own worker model;
+// moving an instance would require a fresh explicit proof here, and none is
+// needed.
 
 use std::{
     collections::HashSet,
@@ -36,12 +50,14 @@ use opentray_spec::REQUIRED_EXTENSION_SYMBOLS;
 use opentray_spec::{
     EmbeddedExtensionManifest, ExpectedExtensionIdentity, ExtAttachDeferredPortV1Fn,
     ExtAttachEventPortV1Fn, ExtCommandDispositionV1, ExtBytes, ExtContext, ExtEventPortV1,
-    ExtHostContext, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope, ExtensionErrorDetail,
-    ExtensionScope, Rect, EXT_ABI_VERSION, EXT_API_VERSION, EXT_COMMAND_DISPOSITION_TAG_DEFERRED,
-    EXT_COMMAND_DISPOSITION_TAG_IMMEDIATE, EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED,
-    EXT_EVENT_PORT_ABI_V1, EXT_OK, EXT_SYMBOL_ABI_VERSION, EXT_SYMBOL_ATTACH_DEFERRED_PORT_V1,
-    EXT_SYMBOL_ATTACH_EVENT_PORT_V1, EXT_SYMBOL_COMMAND, EXT_SYMBOL_COMMAND_V2, EXT_SYMBOL_DEINIT,
-    EXT_SYMBOL_FREE_STRING, EXT_SYMBOL_INIT, EXT_SYMBOL_MANIFEST, EXT_SYMBOL_SESSION_CLOSED,
+    ExtHostContext, ExtOwnedBytes, ExtPollOutcomeV1, ExtResultCode, ExtensionEnvelope,
+    ExtensionErrorDetail, ExtensionScope, Rect, EXT_ABI_VERSION, EXT_API_VERSION,
+    EXT_COMMAND_DISPOSITION_TAG_DEFERRED, EXT_COMMAND_DISPOSITION_TAG_IMMEDIATE,
+    EXT_ERR_INTERNAL, EXT_ERR_REJECTED, EXT_ERR_UNSUPPORTED, EXT_EVENT_PORT_ABI_V1, EXT_OK,
+    EXT_POLL_NO_DEADLINE_MS, EXT_POLL_STATUS_PENDING, EXT_SYMBOL_ABI_VERSION,
+    EXT_SYMBOL_ATTACH_DEFERRED_PORT_V1, EXT_SYMBOL_ATTACH_EVENT_PORT_V1, EXT_SYMBOL_COMMAND,
+    EXT_SYMBOL_COMMAND_V2, EXT_SYMBOL_DEINIT, EXT_SYMBOL_FREE_STRING, EXT_SYMBOL_INIT,
+    EXT_SYMBOL_MANIFEST, EXT_SYMBOL_POLL_OWNER_V1, EXT_SYMBOL_SESSION_CLOSED,
     EXT_SYMBOL_TAKE_ERROR,
 };
 use sha2::{Digest, Sha256};
@@ -82,6 +98,12 @@ type ExtSessionClosedFn = unsafe extern "C" fn(
 type ExtDeinitFn = unsafe extern "C" fn(instance: *mut c_void);
 type ExtFreeStringFn = unsafe extern "C" fn(ptr: *mut std::ffi::c_char, len: usize);
 type ExtTakeErrorFn = unsafe extern "C" fn(out_error_json: *mut ExtOwnedBytes) -> ExtResultCode;
+/// Dialog poll-owner producer entry (add-ext-dialog design section 5.2,
+/// frozen section 5.7 ruling 3): steps one deferred operation's native
+/// owner on the calling (owner-loop) thread. Optional symbol; absence means
+/// the instance is never scheduled.
+type ExtPollOwnerV1Fn =
+    unsafe extern "C" fn(instance: *mut c_void, operation_handle: u64) -> ExtPollOutcomeV1;
 
 const ABI_INCOMPATIBLE_CATEGORY: &str = "abi_incompatible";
 const ARTIFACT_IDENTITY_MISMATCH_CATEGORY: &str = "artifact_identity_mismatch";
@@ -430,14 +452,17 @@ struct DynamicExtensionInstance {
     take_error: ExtTakeErrorFn,
     source: Option<SourceHandle>,
     deferred_port: Option<DeferredPortHandle>,
+    /// The probed `opentray_ext_poll_owner_v1` producer (design section
+    /// 5.2): `Some` makes this instance a dialog-poll producer whose
+    /// deferred operations the broker loop steps. Probed with the same
+    /// optional-symbol mechanism as the four-cell command matrix.
+    poll_owner: Option<ExtPollOwnerV1Fn>,
     #[allow(dead_code)] // capability diagnostic is logged at load; batch B probes it
     event_port: PortCapability,
     #[allow(dead_code)] // capability diagnostic is logged at load
     command_surface: CommandSurfaceCell,
     _library: Library,
 }
-
-unsafe impl Send for DynamicExtensionInstance {}
 
 impl DynamicExtensionInstance {
     unsafe fn load(
@@ -589,12 +614,18 @@ impl DynamicExtensionInstance {
             None => None,
         };
 
+        // Optional poll-producer symbol (design section 5.2): probed like
+        // the command-surface cells — absence is a legitimate matrix cell.
+        let poll_owner = probe_symbol::<ExtPollOwnerV1Fn>(&library, EXT_SYMBOL_POLL_OWNER_V1);
+
         eprintln!(
-            "opentray extension {}: event delivery mode: {}; command surface: {}; deferred port: {}",
+            "opentray extension {}: event delivery mode: {}; command surface: {}; deferred port: \
+             {}; poll producer: {}",
             request.instance_name(),
             event_port.diagnostic_label(),
             surface_cell.diagnostic_label(),
             if deferred_port.is_some() { "attached" } else { "absent" },
+            if poll_owner.is_some() { "poll_owner_v1" } else { "absent" },
         );
 
         Ok(Self {
@@ -607,6 +638,7 @@ impl DynamicExtensionInstance {
             take_error,
             source: Some(source),
             deferred_port,
+            poll_owner,
             event_port,
             command_surface: surface_cell,
             _library: library,
@@ -743,6 +775,35 @@ impl ExtensionInstance for DynamicExtensionInstance {
             ));
         }
         self.read_events(output, None)
+    }
+
+    fn poll_operation(&mut self, operation_handle: u64) -> u64 {
+        let Some(poll_owner) = self.poll_owner else {
+            // Not a producer: the broker loop drops the schedule entry
+            // after this single no-deadline answer.
+            return EXT_POLL_NO_DEADLINE_MS;
+        };
+        // SAFETY: `self.instance` is the pointer this wrapper owns on this
+        // (registry owner) thread, and the frozen V1 producer contract
+        // takes exactly the raw instance plus the broker-issued handle.
+        // Terminals never travel through this return value — the deferred
+        // port is the single terminal channel (design section 5.2).
+        let outcome: ExtPollOutcomeV1 = unsafe { poll_owner(self.instance, operation_handle) };
+        if outcome.status != EXT_POLL_STATUS_PENDING {
+            // The frozen ABI defines exactly one status; anything else is a
+            // producer defect. Diagnose and retire the entry instead of
+            // scheduling on garbage.
+            eprintln!(
+                "opentray extension {}: poll_owner reported unknown status {} for handle \
+                 {operation_handle:#018x}; dropping the poll schedule for this operation",
+                self.name, outcome.status
+            );
+            return EXT_POLL_NO_DEADLINE_MS;
+        }
+        // wake_flags (TERMINAL_QUEUED) is a diagnostic hint: the terminal
+        // itself already traveled through the deferred port, whose submit
+        // requested the DeferredTerminalsReady drain.
+        outcome.next_deadline_ms
     }
 }
 
@@ -1695,6 +1756,26 @@ int32_t opentray_fixture_submit_terminal(const uint8_t *payload, size_t len) {
     return g_submit(g_port_data, g_last_handle, payload, len);
 }
 #endif
+
+#ifdef HAS_POLL_OWNER
+static uint64_t g_last_poll_handle = 0;
+uint64_t opentray_fixture_last_poll_handle(void) { return g_last_poll_handle; }
+
+/* Frozen layout (design section 5.7 ruling 3): status + reserved leading
+   u32s, u64 relative deadline, trailing wake_flags word. */
+typedef struct { uint32_t status; uint32_t reserved; uint64_t next_deadline_ms;
+                 uint32_t wake_flags; } poll_outcome_v1;
+poll_outcome_v1 opentray_ext_poll_owner_v1(void *instance, uint64_t operation_handle) {
+    poll_outcome_v1 outcome;
+    outcome.status = 0;            /* EXT_POLL_STATUS_PENDING */
+    outcome.reserved = 0;
+    outcome.next_deadline_ms = 16; /* one UI-frame quantum */
+    outcome.wake_flags = 0;
+    (void)instance;
+    g_last_poll_handle = operation_handle;
+    return outcome;
+}
+#endif
 "#;
 
         /// Compiles the fixture C source into a real shared library with the
@@ -1738,6 +1819,7 @@ int32_t opentray_fixture_submit_terminal(const uint8_t *payload, size_t len) {
             last_symbol: unsafe extern "C" fn() -> u32,
             last_handle: unsafe extern "C" fn() -> u64,
             submit_terminal: Option<unsafe extern "C" fn(*const u8, usize) -> i32>,
+            last_poll_handle: Option<unsafe extern "C" fn() -> u64>,
             _library: Library,
         }
 
@@ -1762,10 +1844,19 @@ int32_t opentray_fixture_submit_terminal(const uint8_t *payload, size_t len) {
                         .ok()
                         .map(|getter| *getter)
                 };
+                let last_poll_handle = unsafe {
+                    library
+                        .get::<unsafe extern "C" fn() -> u64>(
+                            b"opentray_fixture_last_poll_handle\0",
+                        )
+                        .ok()
+                        .map(|getter| *getter)
+                };
                 Self {
                     last_symbol: symbol,
                     last_handle: handle,
                     submit_terminal,
+                    last_poll_handle,
                     _library: library,
                 }
             }
@@ -2074,6 +2165,56 @@ int32_t opentray_fixture_submit_terminal(const uint8_t *payload, size_t len) {
                 opentray_spec::ServerFrame::ExtOperationTerminal { operation_id, .. }
                     if operation_id == &issued.operation_id
             ));
+        }
+
+        /// Poll-producer cell (batch B wiring, design section 5.2): a real
+        /// library exporting the optional `opentray_ext_poll_owner_v1`
+        /// symbol is probed at load, and one broker-owned step crosses the
+        /// real FFI boundary — the fixture records the exact handle, and
+        /// its frozen outcome (struct returned by value) maps to the trait
+        /// answer the scheduler re-arms from.
+        #[test]
+        fn poll_owner_real_library_steps_through_the_producer_symbol() {
+            let fixture = harness(
+                "poll-owner",
+                &["HAS_V2=1", "HAS_DEFERRED_PORT=1", "HAS_POLL_OWNER=1"],
+            );
+            let probe = FixtureProbe::open(&fixture.library_path);
+            let mut instance = load_instance(&fixture);
+            assert!(
+                instance.poll_owner.is_some(),
+                "the producer symbol was probed at load"
+            );
+
+            let (issued, outcome) = dispatch(instance.as_mut(), &fixture.registry);
+            assert!(matches!(
+                outcome.expect("dispatch defers"),
+                ExtensionCommandDisposition::Deferred
+            ));
+
+            assert_eq!(instance.poll_operation(issued.handle), 16);
+            let last_poll_handle = probe
+                .last_poll_handle
+                .expect("the poll fixture exports its handle getter");
+            assert_eq!(
+                unsafe { last_poll_handle() },
+                issued.handle,
+                "the broker-issued handle crossed the real FFI boundary"
+            );
+        }
+
+        /// Absent poll symbol: a legitimate matrix cell. The instance is
+        /// never a producer and `poll_operation` answers no-deadline (the
+        /// broker loop retires the entry after its single discovery step).
+        #[test]
+        fn poll_owner_absent_symbol_answers_no_deadline() {
+            let fixture = harness("no-poll", &["HAS_V2=1", "HAS_DEFERRED_PORT=1"]);
+            let mut instance = load_instance(&fixture);
+            assert!(instance.poll_owner.is_none());
+            assert_eq!(
+                instance.poll_operation(42),
+                opentray_spec::EXT_POLL_NO_DEADLINE_MS
+            );
         }
     }
 

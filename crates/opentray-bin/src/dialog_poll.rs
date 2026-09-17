@@ -13,9 +13,12 @@
 //! 4. Revoke clears the schedule and bumps the generation token so stale
 //!    due events from before a revoke never step a modal session.
 //!
-//! Compromise: batch A ships the generic scheduler skeleton; the dialog
-//! extension's `poll_owner` producer wiring is batch B, so no producer
-//! calls `schedule`/`cancel` yet.
+//! Compromise: entries are registered producer-agnostically (every
+//! accepted deferred operation schedules one first step in the transport
+//! handler); the producer's answer owns continuation — a no-deadline
+//! answer retires the entry, a finite deadline re-arms it. Instances
+//! without a `poll_owner` producer therefore never schedule past their
+//! single discovery step.
 //!
 //! The scheduling contract is frozen: the owner loop holds ONE merged
 //! `DialogPollDue(generation)` user event and sleeps through
@@ -29,9 +32,11 @@
 //! [`DIALOG_POLL_MAX_OWNERS_PER_ITERATION`] owner steps (one modal step per
 //! owner) so menu/transport frames are never starved.
 //!
-//! Batch A ships the generic skeleton (merge, WaitUntil inputs, re-arm
-//! signaling, quota, generation-token staleness); the dialog extension's
-//! `poll_owner` producer wiring is batch B.
+//! Batch A shipped the generic mechanics (merge, WaitUntil inputs, re-arm
+//! signaling, quota, generation-token staleness); batch B wired the
+//! producers: the transport handler schedules the first step of every
+//! accepted deferred operation and `process_dialog_polls` steps due owners
+//! through the extension `poll_owner` symbol, re-arming from each answer.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -71,11 +76,6 @@ impl PollScheduler {
     /// that a fresh `DialogPollDue` must be re-delivered, because the loop
     /// may already be sleeping to a later instant. Raising one owner's
     /// deadline or adding a later owner never fires the signal.
-    ///
-    /// Batch A note: no producer calls this yet (the dialog extension's
-    /// native poll path lands in batch B); the owner-loop wiring consumes
-    /// `min_deadline`/`take_due`/`revoke_all` today.
-    #[allow(dead_code)]
     pub(crate) fn schedule(
         &mut self,
         owner: impl Into<String>,
@@ -97,7 +97,9 @@ impl PollScheduler {
 
     /// Cancels one owner's scheduled poll (the design section 5.2 revoke order: remove
     /// from the schedule first; a stale due event then drops on its
-    /// generation/absence check). Batch A: producers arrive in batch B.
+    /// generation/absence check). Uncalled in production today: entries
+    /// self-retire through the producer's no-deadline answer, and teardown
+    /// paths use `revoke_all`. Kept as the per-operation revoke seam.
     #[allow(dead_code)]
     pub(crate) fn cancel(&mut self, owner: &str) -> bool {
         self.deadlines.remove(owner).is_some()

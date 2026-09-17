@@ -533,7 +533,9 @@ mod native_broker {
     use opentray_backend_tray_icon::{NativeTrayIconRuntime, TrayIconBackend};
     use opentray_core::{BrokerKernel, BrokerSession};
     use opentray_core::operations::DeferredOperationRegistry;
-    use opentray_spec::{AppEvent, ClientFrame, ExtensionEnvelope, ServerFrame};
+    use opentray_spec::{
+        AppEvent, ClientFrame, ExtensionEnvelope, ServerFrame, EXT_POLL_NO_DEADLINE_MS,
+    };
     use winit::application::ApplicationHandler;
     use winit::event::StartCause;
     use winit::event::WindowEvent;
@@ -569,11 +571,11 @@ mod native_broker {
         /// Coalesced deferred-terminal drain request from the DeferredPort
         /// hub wake adapter (add-ext-dialog design section 5.1).
         DeferredTerminalsReady,
-        /// Merged dialog poll due (add-ext-dialog design section 5.2): the generation
-        /// token drops stale events delivered after a scheduler revoke.
-        /// Batch A note: no producer sends it yet (the dialog extension's
-        /// poll path lands in batch B); the loop wiring is in place.
-        #[allow(dead_code)]
+        /// Merged dialog poll due (add-ext-dialog design section 5.2): the
+        /// generation token drops stale events delivered after a scheduler
+        /// revoke. Sent when a poll answer lowers the merged minimum
+        /// deadline (the re-arm law: a loop already sleeping to a later
+        /// instant must recompute its WaitUntil).
         DialogPollDue(u64),
         #[cfg(target_os = "macos")]
         AppReopenRequested,
@@ -710,9 +712,11 @@ mod native_broker {
         extension_events: ExtensionEventRouter,
         event_hub: EventHub,
         deferred_hub: DeferredPortHub,
-        /// Broker-owned dialog poll scheduler skeleton (design section 5.2): merged
+        /// Broker-owned dialog poll scheduler (design section 5.2): merged
         /// DialogPollDue event, WaitUntil inputs, re-arm signaling, quota.
-        /// No producer feeds it until batch B's dialog extension lands.
+        /// Fed by the accepted-deferred-operation registration in the
+        /// transport handler and the per-step re-arm in
+        /// `process_dialog_polls` (batch B producer wiring).
         dialog_polls: PollScheduler,
         sessions: HashMap<u64, broker_transport::TransportSession>,
         broker_version: String,
@@ -731,7 +735,7 @@ mod native_broker {
                     self.schedule_idle_if_empty();
                 }
                 // The merged WaitUntil(min deadline) fired: run one bounded
-                // poll quantum (design section 5.2 skeleton; producers arrive in batch B).
+                // poll quantum (design section 5.2).
                 StartCause::ResumeTimeReached { .. } => self.process_dialog_polls(),
                 _ => {}
             }
@@ -865,6 +869,16 @@ mod native_broker {
                         }
                     }
                     let loaded = LoadedExtension::from_frame(&frame);
+                    // add-ext-dialog design section 5.2 (producer wiring):
+                    // remember which (app, instance) this dispatch targets
+                    // so accepted deferred operations below can register
+                    // their first poll step.
+                    let dispatched_ext = match &frame {
+                        ClientFrame::ExtCommand { app_id, ext, .. } => {
+                            Some((app_id.clone(), ext.clone()))
+                        }
+                        _ => None,
+                    };
                     let mut extension_host = self
                         .extension_events
                         .host(ExtensionDispatch::from_frame(&frame), Some(&self.event_hub));
@@ -875,6 +889,7 @@ mod native_broker {
                         &mut extension_host,
                     );
                     let load_acknowledged = matches!(frames.first(), Some(ServerFrame::Ack { .. }));
+                    Self::register_dialog_polls(&mut self.dialog_polls, &dispatched_ext, &frames);
                     session.write_frames(frames);
                     if let (Some(loaded), Some(owner)) = (loaded, kernel_session_id.as_deref()) {
                         if load_acknowledged {
@@ -1074,21 +1089,94 @@ mod native_broker {
             });
         }
 
-        /// One bounded dialog-poll quantum (design section 5.2 skeleton): at most four
-        /// owners step once per iteration. Batch A ships the scheduler
-        /// mechanics; the dialog extension's `poll_owner` producer wiring is
-        /// batch B, so nothing schedules polls yet and this drains empty.
+        /// Schedules the first poll step for every deferred operation this
+        /// frame batch accepted (add-ext-dialog design section 5.2, batch B
+        /// producer wiring). Registration is producer-agnostic: the first
+        /// step asks the instance, and its answer owns continuation — the
+        /// macOS modal cadence keeps re-arming, a no-deadline answer
+        /// (non-producer instance, or the win32 model whose completion
+        /// lives on bounded STA workers, design section 5.3) retires the
+        /// entry after one step. Deadline `now` = due on the next loop
+        /// iteration; the post-event control-flow projection arms the
+        /// WaitUntil wake.
+        ///
+        /// An associated function taking the scheduler directly: the call
+        /// site sits inside the transport handler's live `session` borrow,
+        /// and disjoint-field access (`dialog_polls` vs `sessions`) keeps
+        /// the borrow checker honest without cloning frames.
+        fn register_dialog_polls(
+            scheduler: &mut PollScheduler,
+            dispatched: &Option<(String, String)>,
+            frames: &[ServerFrame],
+        ) {
+            let Some((app_id, ext)) = dispatched else {
+                return;
+            };
+            for frame in frames {
+                let ServerFrame::ExtCommandAccepted { operation_id, .. } = frame else {
+                    continue;
+                };
+                let owner = dialog_poll_owner_key(app_id, ext, operation_id);
+                scheduler.schedule(owner, Instant::now(), "deferred-accepted");
+            }
+        }
+
+        /// One bounded dialog-poll quantum (design section 5.2): the
+        /// scheduler's frozen quota caps this at four owners stepped once
+        /// per iteration, and each producer's answer re-arms its own entry.
+        /// Terminals never appear here — the deferred port is the single
+        /// terminal channel and its hub wake (`DeferredTerminalsReady`)
+        /// owns the drain after a natural completion.
         fn process_dialog_polls(&mut self) {
             let due = self.dialog_polls.take_due(Instant::now());
-            // Batch B: for each due owner, run one `poll_owner` step and
-            // re-schedule from its reported next_deadline. Terminals only
-            // ever arrive through the deferred port, never here.
-            if !due.is_empty() {
-                eprintln!(
-                    "opentray dialog poll: {} due owners without a registered poll producer \
-                     (dialog extension not loaded)",
-                    due.len()
-                );
+            for (owner, _wake_reason) in due {
+                let Some((app_id, instance, operation_id)) = parse_dialog_poll_owner(&owner)
+                else {
+                    eprintln!("opentray dialog poll: dropping malformed owner key {owner:?}");
+                    continue;
+                };
+                // The wire operation id is the 16-digit hex projection of
+                // the FFI handle (operations registry law).
+                let Ok(handle) = u64::from_str_radix(&operation_id, 16) else {
+                    eprintln!(
+                        "opentray dialog poll: owner {owner:?} carries a non-hex operation id; \
+                         dropping the schedule entry"
+                    );
+                    continue;
+                };
+                // None: no live instance owns this name (unloaded) — the
+                // entry dies here instead of stepping anything.
+                let Some(next_ms) = self
+                    .broker
+                    .extensions_mut()
+                    .poll_operation(&app_id, &instance, handle)
+                else {
+                    continue;
+                };
+                if next_ms == EXT_POLL_NO_DEADLINE_MS {
+                    // The producer finished (or never needed stepping).
+                    continue;
+                }
+                let Some(deadline) = Instant::now().checked_add(Duration::from_millis(next_ms))
+                else {
+                    // A producer answer beyond the Instant range would
+                    // panic on add; treat it as nothing scheduled.
+                    eprintln!(
+                        "opentray dialog poll: owner {owner:?} reported an unrepresentable next \
+                         deadline ({next_ms} ms); dropping the schedule entry"
+                    );
+                    continue;
+                };
+                if self.dialog_polls.schedule(owner, deadline, "modal-step") {
+                    // The answer lowered the merged minimum: re-deliver the
+                    // merged due event so a loop already sleeping to a
+                    // later instant recomputes its WaitUntil (the
+                    // section 5.2 re-arm law).
+                    let generation = self.dialog_polls.generation();
+                    let _ = self
+                        .proxy
+                        .send_event(UserEvent::DialogPollDue(generation));
+                }
             }
         }
 
@@ -1137,6 +1225,75 @@ mod native_broker {
                 std::thread::sleep(timeout);
                 let _ = proxy.send_event(UserEvent::IdleExpired(generation));
             });
+        }
+    }
+
+    /// Owner key of one scheduled dialog poll (design section 5.2): the
+    /// accepted deferred operation's `(appId, instance, operationId)`
+    /// triple in wire form. App ids may contain `/` themselves — the
+    /// decoder splits from the right, so only the operation id and instance
+    /// segments must be slash-free (extension names and the 16-digit hex
+    /// operation ids always are).
+    fn dialog_poll_owner_key(app_id: &str, instance: &str, operation_id: &str) -> String {
+        format!("{app_id}/{instance}/{operation_id}")
+    }
+
+    /// Inverse of [`dialog_poll_owner_key`] (right-split; see its doc for
+    /// the slash assumption).
+    fn parse_dialog_poll_owner(owner: &str) -> Option<(String, String, String)> {
+        let mut split = owner.rsplitn(3, '/');
+        let operation_id = split.next()?;
+        let instance = split.next()?;
+        let app_id = split.next()?;
+        if app_id.is_empty() || instance.is_empty() || operation_id.is_empty() {
+            return None;
+        }
+        Some((
+            app_id.to_string(),
+            instance.to_string(),
+            operation_id.to_string(),
+        ))
+    }
+
+    #[cfg(test)]
+    mod dialog_poll_owner_codec_tests {
+        use super::{dialog_poll_owner_key, parse_dialog_poll_owner};
+
+        #[test]
+        fn owner_key_roundtrips_through_the_right_split() {
+            let owner = dialog_poll_owner_key("app-1", "dialog", "000000000000000f");
+            assert_eq!(owner, "app-1/dialog/000000000000000f");
+            assert_eq!(
+                parse_dialog_poll_owner(&owner),
+                Some((
+                    "app-1".to_string(),
+                    "dialog".to_string(),
+                    "000000000000000f".to_string()
+                ))
+            );
+        }
+
+        #[test]
+        fn app_ids_may_contain_slashes() {
+            let owner = dialog_poll_owner_key("dev/pkg-name", "dialog", "ffffffffffffffff");
+            assert_eq!(
+                parse_dialog_poll_owner(&owner),
+                Some((
+                    "dev/pkg-name".to_string(),
+                    "dialog".to_string(),
+                    "ffffffffffffffff".to_string()
+                ))
+            );
+        }
+
+        #[test]
+        fn malformed_owner_keys_reject_instead_of_panicking() {
+            for malformed in ["", "dialog/000000000000000f", "app-1//000000000000000f", "/"] {
+                assert!(
+                    parse_dialog_poll_owner(malformed).is_none(),
+                    "{malformed:?} must not parse"
+                );
+            }
         }
     }
 
