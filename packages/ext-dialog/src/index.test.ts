@@ -329,7 +329,7 @@ describe("@opentray/ext-dialog", () => {
     // immediate getBackend event is `data: { type: "backend", backend }`
     // (ext-dialog lib.rs); this fixture round-trips that exact JSON so a
     // future native/facade shape drift fails here instead of in production.
-    type BackendEvent = ReturnType<typeof backendEventResult>["events"][number];
+    type BackendEvent = Extract<ServerFrame, { type: "ext-command-result" }>["events"][number];
     const nativeJson = JSON.stringify({
       scope: { appId: "app-1", trayId: "tray-1", ext: MOUNT_ID },
       data: { type: "backend", backend: DARWIN_BACKEND },
@@ -525,7 +525,7 @@ describe("@opentray/ext-dialog", () => {
     // defaultFilterIndex against the empty-array all-files spelling is
     // still a preflight rejection — there is no filter to index into.
     await expect(
-      dialog.pickFile({ filters: [], defaultFilterIndex: 0 })
+      dialog.pickSavePath({ filters: [], defaultFilterIndex: 0 })
     ).rejects.toMatchObject({
       code: DIALOG_ERROR_CODES.invalidOptions,
       details: { kind: "options", field: "defaultFilterIndex" },
