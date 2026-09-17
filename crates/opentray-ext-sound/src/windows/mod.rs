@@ -120,18 +120,52 @@ pub(crate) fn beep_trace(kind: BeepKind) -> Vec<String> {
 }
 
 /// Resolution trace for `playSystemSound` miss details: the common-table
-/// projection stage (when it applied) plus the winmm alias attempt.
+/// projection stage (when it applied), the registry sound-scheme catalog
+/// check, and the winmm alias attempt.
 fn resolution_trace(resolution: &SystemSoundResolution) -> Vec<String> {
     match resolution {
         SystemSoundResolution::Common { requested, projected } => vec![
             format!("common-table:{requested}->{projected}"),
+            format!("registry-scheme:{projected}"),
             format!("winmm-alias:{projected}"),
             "flags:ALIAS|ASYNC|NODEFAULT".to_string(),
         ],
         SystemSoundResolution::Native { name } => vec![
+            format!("registry-scheme:{name}"),
             format!("winmm-alias:{name}"),
             "flags:ALIAS|ASYNC|NODEFAULT".to_string(),
         ],
+    }
+}
+
+/// The registry sound-scheme catalog oracle (design section 1.2 stage 2).
+///
+/// Real-machine evidence (2026-09-17, task 6.1): winmm `PlaySoundW` with
+/// `SND_ALIAS | SND_ASYNC | SND_NODEFAULT` returns nonzero even for an
+/// alias that does not exist — NODEFAULT suppresses the default sound but
+/// the BOOL still reports success, so the native return alone is NOT a
+/// miss oracle for aliases. `PlaySound` resolves aliases against
+/// `HKCU\AppEvents\Schemes\Apps\.Default\<name>`; a missing key is the
+/// authoritative catalog miss and rejects with ZERO native call (the
+/// design's spy-law: the rejection path never touches PlaySound).
+fn registry_scheme_alias_exists(alias: &str) -> bool {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE,
+    };
+    let subkey = format!("AppEvents\\Schemes\\Apps\\.Default\\{alias}");
+    let wide = wide_null_terminated(&subkey);
+    let mut hkey: HKEY = std::ptr::null_mut();
+    // SAFETY: `wide` is null-terminated for the duration of the call and
+    // `hkey` is a valid out-pointer; the handle is closed on success.
+    let status = unsafe {
+        RegOpenKeyExW(HKEY_CURRENT_USER, wide.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey)
+    };
+    if status == 0 {
+        // SAFETY: `hkey` was just opened successfully.
+        unsafe { RegCloseKey(hkey) };
+        true
+    } else {
+        false
     }
 }
 
@@ -145,6 +179,19 @@ pub(crate) fn play_system_sound(
     resolution: &SystemSoundResolution,
 ) -> Result<(), TypedExtensionError> {
     let alias = resolution.native_name().to_string();
+    // Catalog pre-check: the registry sound-scheme is the authoritative
+    // alias oracle (see `registry_scheme_alias_exists`); a missing key is
+    // the typed miss with zero native call — the winmm BOOL is not a
+    // reliable miss oracle for aliases.
+    if !registry_scheme_alias_exists(&alias) {
+        let attempted = resolution_trace(resolution);
+        eprintln!(
+            "opentray-ext-sound playSystemSound miss (registry scheme absent, \
+             zero native call): requested={} alias={alias} attempted={attempted:?}",
+            resolution.requested()
+        );
+        return Err(not_found_error(resolution.requested(), "win32", attempted));
+    }
     let request = PlayRequest {
         mode: PlayMode::Alias,
         sound: alias.clone(),
@@ -252,6 +299,7 @@ mod tests {
             }),
             vec![
                 "common-table:notification->SystemAsterisk",
+                "registry-scheme:SystemAsterisk",
                 "winmm-alias:SystemAsterisk",
                 "flags:ALIAS|ASYNC|NODEFAULT",
             ]
@@ -260,7 +308,11 @@ mod tests {
             resolution_trace(&SystemSoundResolution::Native {
                 name: "SystemHand".to_string()
             }),
-            vec!["winmm-alias:SystemHand", "flags:ALIAS|ASYNC|NODEFAULT"]
+            vec![
+                "registry-scheme:SystemHand",
+                "winmm-alias:SystemHand",
+                "flags:ALIAS|ASYNC|NODEFAULT",
+            ]
         );
     }
 }
