@@ -13,6 +13,7 @@ const verifyNativeComponents: readonly NativeBuildComponent[] = [
   "runtime",
   "webview",
   "badge",
+  "dialog",
 ];
 
 export interface VerifyNativePlan {

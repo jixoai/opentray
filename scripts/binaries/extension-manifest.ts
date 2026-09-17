@@ -2,6 +2,9 @@
 // 1. Read the manifest exported by an actual native extension artifact through a same-target inspector.
 // 2. Derive the expected identity from the facade package and canonical contract files.
 // 3. Reject stale or cross-target artifacts with expected/actual evidence.
+// 4. Cover the embedded dialog kind with the same inspector evidence chain
+//    (add-ext-dialog section 6.4); embedded kinds stage into the facade's own
+//    platforms/ tree instead of split per-platform packages.
 
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -10,7 +13,7 @@ import { basename, join } from "node:path";
 
 export const EXTENSION_ABI_VERSION = 3;
 
-export type ExtensionArtifactKind = "webview" | "badge";
+export type ExtensionArtifactKind = "webview" | "badge" | "dialog";
 
 export interface ExtensionArtifactTarget {
   readonly os: string;
@@ -166,7 +169,17 @@ export const sha256File = async (path: string): Promise<string> =>
     .digest("hex");
 
 export const isExtensionArtifactKind = (value: string): value is ExtensionArtifactKind =>
-  value === "webview" || value === "badge";
+  value === "webview" || value === "badge" || value === "dialog";
+
+/**
+ * Embedded extension kinds (add-ext-dialog section 6.2): the facade ships its
+ * platform libraries under its own `platforms/` tree with no split
+ * per-platform packages, so `verifyExtensionPlatformPackageTarget` (which
+ * reads a per-platform package.json) does not apply to them.
+ */
+export const isEmbeddedExtensionArtifactKind = (
+  kind: ExtensionArtifactKind
+): boolean => kind === "dialog";
 
 const parseEmbeddedExtensionManifest = (value: unknown): EmbeddedExtensionManifest => {
   if (

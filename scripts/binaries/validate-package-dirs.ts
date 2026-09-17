@@ -160,6 +160,23 @@ function parsePackageDirs(value: string): string[] {
 
 function createPackageEntryExpectations(): ReadonlyMap<string, readonly RequiredPackageEntry[]> {
   const expectations = new Map<string, readonly RequiredPackageEntry[]>();
+  // Embedded dialog facade (add-ext-dialog section 6.2): one package directory
+  // carrying the four frozen matrix libraries plus the staging manifest.
+  const embeddedDialogDir = "packages/ext-dialog";
+  expectations.set(embeddedDialogDir, [
+    ...nativeTargets
+      .filter((target) => target.dialogArtifact !== undefined)
+      .map((target) => target.dialogArtifact)
+      .sort()
+      .map((artifact) => ({
+        path: relativeArtifactPath(embeddedDialogDir, artifact as string),
+        executable: false,
+      })),
+    {
+      path: "platforms/manifest.json",
+      executable: false,
+    },
+  ]);
   for (const target of nativeTargets) {
     expectations.set(target.runtimePackageDir, [
       {

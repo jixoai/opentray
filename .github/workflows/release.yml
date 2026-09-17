@@ -59,6 +59,7 @@ jobs:
       packed-consumer-matrix: ${{ steps.plan.outputs.packed-consumer-matrix }}
       stage-plan: ${{ steps.plan.outputs.stage-plan }}
       validate-package-dirs: ${{ steps.plan.outputs.validate-package-dirs }}
+      dialog-staged: ${{ steps.plan.outputs.dialog-staged }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -87,6 +88,14 @@ jobs:
           enabled = "true" if plan.get("enabled") else "false"
           publish_enabled = "true" if plan.get("publishEnabled") else "false"
           matrix = json.dumps({"include": plan.get("jobs", [])})
+          # Packed-consumer coverage is the webview closure fixture
+          # (verify-packed-consumer packs the ext-webview facade plus the
+          # split platform runtime/extension packages). Dialog is an embedded
+          # facade with no split platform packages, so dialog jobs are
+          # intentionally NOT added to this matrix: their packed-consumer
+          # equivalent is the real-pack + unpack identity evidence
+          # (check:pack-size + verify-embedded-pack-evidence.ts), enforced
+          # wherever dialog is staged (add-ext-dialog batch D, tasks 5.1/5.2).
           packed_consumer_jobs = [
               job for job in plan.get("jobs", [])
               if "webview" in str(job.get("componentsCsv", "")).split(",")
@@ -95,6 +104,14 @@ jobs:
           packed_consumer_matrix = json.dumps({"include": packed_consumer_jobs})
           stage_plan = json.dumps(plan.get("stageEntries", []))
           validate_package_dirs = json.dumps(plan.get("validatePackageDirs", []))
+          dialog_staged = (
+              "true"
+              if any(
+                  "dialog" in (entry.get("artifactKinds") or [])
+                  for entry in plan.get("stageEntries", [])
+              )
+              else "false"
+          )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               handle.write(f"enabled={enabled}\n")
@@ -104,6 +121,7 @@ jobs:
               handle.write(f"packed-consumer-matrix={packed_consumer_matrix}\n")
               handle.write(f"stage-plan={stage_plan}\n")
               handle.write(f"validate-package-dirs={validate_package_dirs}\n")
+              handle.write(f"dialog-staged={dialog_staged}\n")
           PY
 
   prepare-release:
@@ -414,6 +432,36 @@ jobs:
           set -euo pipefail
           bun run scripts/binaries/validate-package-dirs.ts \
             --package-dirs-json '${{ needs.plan-native.outputs.validate-package-dirs }}'
+
+      # Real-pack evidence for embedded platform-binary facades (Owner ruling
+      # 2026-09-16; add-ext-dialog section 6.3): dry-run output is NOT release
+      # evidence. Runs as an explicit CI step because the generic `verify`
+      # aggregator executes before native staging populates platforms/.
+      - name: Pack-size gate (real npm pack) for embedded packages
+        if: needs.plan-native.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm run check:pack-size 2>&1 | tee ext-dialog-pack-receipt.txt
+
+      - name: Embedded pack identity evidence (unpack and re-hash per target)
+        if: needs.plan-native.outputs.enabled == 'true' && needs.plan-native.outputs.dialog-staged == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run scripts/binaries/verify-embedded-pack-evidence.ts \
+            --root "$PWD" \
+            --package packages/ext-dialog 2>&1 | tee ext-dialog-pack-identity.txt
+
+      - name: Upload embedded pack evidence
+        if: needs.plan-native.outputs.enabled == 'true' && needs.plan-native.outputs.dialog-staged == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ext-dialog-pack-evidence
+          path: |
+            ext-dialog-pack-receipt.txt
+            ext-dialog-pack-identity.txt
+          if-no-files-found: error
 
       - name: Publish packages
         if: needs.plan-native.outputs.publish-enabled == 'true' && needs.prepare-release.outputs.channel == 'stable'

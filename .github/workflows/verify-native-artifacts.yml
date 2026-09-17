@@ -34,6 +34,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       stage-plan: ${{ steps.plan.outputs.stage-plan }}
       validate-package-dirs: ${{ steps.plan.outputs.validate-package-dirs }}
+      dialog-staged: ${{ steps.plan.outputs.dialog-staged }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -66,11 +67,20 @@ jobs:
           matrix = json.dumps({"include": plan.get("jobs", [])})
           stage_plan = json.dumps(plan.get("stageEntries", []))
           validate_package_dirs = json.dumps(plan.get("validatePackageDirs", []))
+          dialog_staged = (
+              "true"
+              if any(
+                  "dialog" in (entry.get("artifactKinds") or [])
+                  for entry in plan.get("stageEntries", [])
+              )
+              else "false"
+          )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               handle.write(f"matrix={matrix}\n")
               handle.write(f"stage-plan={stage_plan}\n")
               handle.write(f"validate-package-dirs={validate_package_dirs}\n")
+              handle.write(f"dialog-staged={dialog_staged}\n")
           PY
 
   native-artifacts:
@@ -167,3 +177,28 @@ jobs:
           set -euo pipefail
           bun run scripts/binaries/validate-package-dirs.ts \
             --package-dirs-json '${{ needs.plan-native.outputs.validate-package-dirs }}'
+
+      - name: Pack-size gate (real npm pack) for embedded packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm run check:pack-size 2>&1 | tee ext-dialog-pack-receipt.txt
+
+      - name: Embedded pack identity evidence (unpack and re-hash per target)
+        if: needs.plan-native.outputs.dialog-staged == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run scripts/binaries/verify-embedded-pack-evidence.ts \
+            --root "$PWD" \
+            --package packages/ext-dialog 2>&1 | tee ext-dialog-pack-identity.txt
+
+      - name: Upload embedded pack evidence
+        if: needs.plan-native.outputs.dialog-staged == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ext-dialog-pack-evidence
+          path: |
+            ext-dialog-pack-receipt.txt
+            ext-dialog-pack-identity.txt
+          if-no-files-found: error

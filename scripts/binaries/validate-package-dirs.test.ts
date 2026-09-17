@@ -61,6 +61,31 @@ describe("Feature: native package publish validator", () => {
     ]);
   });
 
+  test("Scenario: Given the embedded dialog facade When required entries are resolved Then all four matrix libraries plus the staging manifest are required", () => {
+    expect(resolveRequiredPackageEntries("packages/ext-dialog")).toEqual([
+      {
+        path: "platforms/darwin-arm64/libopentray_ext_dialog.dylib",
+        executable: false,
+      },
+      {
+        path: "platforms/darwin-x64/libopentray_ext_dialog.dylib",
+        executable: false,
+      },
+      {
+        path: "platforms/win32-arm64/opentray_ext_dialog.dll",
+        executable: false,
+      },
+      {
+        path: "platforms/win32-x64/opentray_ext_dialog.dll",
+        executable: false,
+      },
+      {
+        path: "platforms/manifest.json",
+        executable: false,
+      },
+    ]);
+  });
+
   test("Scenario: Given tar verbose output When entries are parsed Then package prefixes are normalized away", () => {
     expect(
       parsePackedTarEntries(

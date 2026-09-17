@@ -51,6 +51,35 @@ describe("Feature: native verification planner", () => {
     expect(plan.validatePackageDirs).toContain("packages/ext-webview-darwin-arm64");
     expect(plan.validatePackageDirs).toContain("packages/ext-badge-darwin-arm64");
   });
+
+  test("Scenario: Given a pending embedded dialog changeset When the plan is resolved Then the four dialog matrix jobs stage into one facade dir", async () => {
+    const root = await createTempWorkspace();
+    await writeFile(
+      join(root, ".changeset", "release.md"),
+      `---
+"@opentray/ext-dialog": patch
+---
+`
+    );
+
+    const plan = await resolveVerifyNativePlan(root);
+
+    expect(plan.components).toEqual(["dialog"]);
+    expect(plan.jobs.map((job) => job.target)).toEqual([
+      "darwin-arm64",
+      "darwin-x64",
+      "windows-arm64",
+      "windows-x64",
+    ]);
+    expect(
+      plan.jobs.every((job) => job.artifactName === `native-${job.target}-dialog`)
+    ).toBe(true);
+    expect(plan.validatePackageDirs).toEqual(["packages/ext-dialog"]);
+    // Embedded pack evidence gate sees dialog in the stage plan.
+    expect(
+      plan.stageEntries.some((entry) => entry.artifactKinds.includes("dialog"))
+    ).toBe(true);
+  });
 });
 
 async function createTempWorkspace(): Promise<string> {

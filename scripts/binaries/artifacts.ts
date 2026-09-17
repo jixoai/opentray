@@ -7,7 +7,8 @@ export type NativeArch = "arm64" | "x64";
 export type NativeStageKind =
   | "runtime"
   | "webview"
-  | "badge";
+  | "badge"
+  | "dialog";
 // Darwin runtime packages publish only the bundle template. The runtime owns
 // materializing the caller-specific .app directory around the broker.
 export const darwinRuntimeCarrierArtifactName = "Info.plist";
@@ -29,6 +30,12 @@ export interface NativeTarget {
   badgePackageDir?: string;
   badgeArtifact?: string;
   badgeHelperArtifact?: string;
+  /**
+   * Embedded dialog staging destination (add-ext-dialog section 6.2 frozen
+   * layout): the facade ships all platform libraries under its own
+   * `platforms/` tree keyed by the npm target name (win32, not windows).
+   */
+  dialogArtifact?: string;
 }
 
 const packageTargets = [
@@ -72,6 +79,14 @@ export function createNativeTarget(
     badgePackageDir === undefined
       ? undefined
       : `@opentray/ext-badge-${packageOs}-${arch}`;
+  // Embedded dialog facade: one package directory for every target, addressed
+  // by the npm target name (win32-x64, not windows-x64) per design section 6.2.
+  const dialogArtifact =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-dialog/platforms/${npmOs}-${arch}/${
+          packageOs === "windows" ? "opentray_ext_dialog.dll" : "libopentray_ext_dialog.dylib"
+        }`;
   return {
     packageOs,
     npmOs,
@@ -97,6 +112,7 @@ export function createNativeTarget(
     badgePackageDir,
     badgeArtifact,
     badgeHelperArtifact,
+    dialogArtifact,
   };
 }
 
@@ -173,6 +189,13 @@ export const resolveStageDestination = (
         );
       }
       return target.badgeArtifact;
+    case "dialog":
+      if (target.dialogArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish a dialog native artifact`
+        );
+      }
+      return target.dialogArtifact;
   }
 };
 
@@ -198,6 +221,17 @@ export const resolveStageDestinationForArtifactFile = (
   target: NativeTarget,
   fileName: string
 ): string => {
+  // Embedded dialog staging is resolved per (target, kind): its library
+  // basename is shared by darwin-arm64 and darwin-x64 within their per-target
+  // artifact manifests, so the generic basename candidate list must not own
+  // this destination (add-ext-dialog section 6.2 frozen layout).
+  if (
+    target.dialogArtifact !== undefined &&
+    basename(target.dialogArtifact) === fileName
+  ) {
+    return target.dialogArtifact;
+  }
+
   const candidates = [
     target.runtimeArtifact,
     target.runtimeCarrierArtifact,
