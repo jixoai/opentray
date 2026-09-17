@@ -987,6 +987,117 @@ mod tests {
         unsafe { opentray_ext_deinit(instance) };
     }
 
+    /// Batch B review supplement (count, not just presence): across a mixed
+    /// session table, close submits terminals ONLY through the port and ONLY
+    /// for records that still own a native half — already-settled
+    /// (native-less) records contribute ZERO submissions, and closing one
+    /// session never touches another session's records. The live-modal half
+    /// of the exactly-one-terminal-per-accepted-operation law runs on the
+    /// real machine through `examples/acceptance_probe.rs` (run-level port
+    /// accounting: submissions == accepted deferred operations).
+    #[test]
+    fn mixed_session_close_counts_zero_terminals_and_spares_other_sessions() {
+        let _slot = lock_error_slot_tests();
+        use opentray_spec::CommandScope;
+
+        static SUBMIT_CALLS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+        unsafe extern "C" fn counting_submit(
+            _port_data: *mut c_void,
+            handle: u64,
+            _payload_ptr: *const u8,
+            _payload_len: usize,
+        ) -> ExtResultCode {
+            SUBMIT_CALLS.lock().unwrap().push(handle);
+            EXT_OK
+        }
+        let instance = init_instance();
+        let port = ExtDeferredPortV1 {
+            abi_version: opentray_spec::EXT_DEFERRED_PORT_ABI_V1,
+            struct_size: std::mem::size_of::<ExtDeferredPortV1>() as u32,
+            port_data: usize::MAX as *mut c_void,
+            submit: counting_submit,
+        };
+        assert_eq!(
+            unsafe { opentray_ext_attach_deferred_completion_port_v1(instance, port) },
+            EXT_OK
+        );
+
+        let session_one = CommandScope {
+            app_id: "app-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            session_id: "session-1".to_string(),
+            instance_generation: 1,
+        };
+        let session_two = CommandScope {
+            session_id: "session-2".to_string(),
+            ..session_one.clone()
+        };
+        let extension = unsafe { &mut *instance.cast::<DialogInstance>() };
+        // A mixed table: two settled records in session-1 (different trays
+        // of the same session stay distinct owners by handle), one in
+        // session-2.
+        state::tests::register_bare(extension, 41, session_one.clone());
+        state::tests::register_bare(extension, 42, session_one.clone());
+        state::tests::register_bare(extension, 43, session_two.clone());
+        assert_eq!(extension.active_count(), 3);
+
+        let close = |session: &str| {
+            let id = CString::new(session).unwrap();
+            let mut events = ExtOwnedBytes {
+                ptr: ptr::null_mut(),
+                len: 0,
+            };
+            let result = unsafe {
+                opentray_ext_session_closed(
+                    instance,
+                    ptr::null(),
+                    ExtBytes {
+                        ptr: id.as_ptr(),
+                        len: id.as_bytes().len(),
+                    },
+                    &mut events,
+                )
+            };
+            assert_eq!(result, EXT_OK);
+            assert!(!events.ptr.is_null());
+            let bytes = unsafe { std::slice::from_raw_parts(events.ptr.cast::<u8>(), events.len) };
+            assert_eq!(bytes, b"[]");
+            unsafe { opentray_ext_free_string(events.ptr, events.len) };
+        };
+
+        close("session-1");
+        let extension = unsafe { &mut *instance.cast::<DialogInstance>() };
+        assert_eq!(
+            extension.active_count(),
+            1,
+            "closing session-1 removed only its own records"
+        );
+        assert_eq!(
+            extension.handles_for_session("session-2"),
+            vec![43],
+            "the other session's record is intact"
+        );
+        assert!(
+            SUBMIT_CALLS.lock().unwrap().is_empty(),
+            "already-settled records submit ZERO terminals across the mixed close"
+        );
+
+        // Closing the same session again is a no-op (exactly-once cleanup).
+        close("session-1");
+        let extension = unsafe { &mut *instance.cast::<DialogInstance>() };
+        assert_eq!(extension.active_count(), 1);
+        assert!(SUBMIT_CALLS.lock().unwrap().is_empty());
+
+        close("session-2");
+        let extension = unsafe { &mut *instance.cast::<DialogInstance>() };
+        assert_eq!(extension.active_count(), 0);
+        assert!(
+            SUBMIT_CALLS.lock().unwrap().is_empty(),
+            "the whole mixed run produced zero port submissions for settled records"
+        );
+        unsafe { opentray_ext_deinit(instance) };
+    }
+
     #[test]
     fn deferred_port_attach_rejects_mismatched_port_identity() {
         let _slot = lock_error_slot_tests();
