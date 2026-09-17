@@ -56,8 +56,10 @@
 
 ## 5. Packaging — 批次 D
 
-- [ ] 5.1 native-build-graph 注册 `dialog` component + 收齐矩阵；**embedded staging manifest**（path/SHA-256/buildIdentity/version/fingerprint，root-contained）；release-plan/verify-native-plan/stage-release-artifacts/release.yml 同步；broker EXE RT_MANIFEST。
-- [ ] 5.2 CI：check-pack-size 真实 pack 证据（tgz stat/版本/packlist/hash + 解包逐 target identity）写入 evidence artifact——无实测不给 packaging GO。
+- [x] 5.1 native-build-graph 注册 `dialog` component + 收齐矩阵；**embedded staging manifest**（path/SHA-256/buildIdentity/version/fingerprint，root-contained）；release-plan/verify-native-plan/stage-release-artifacts/release.yml 同步；broker EXE RT_MANIFEST。
+  - 批次 D 证据（commit 44006a7c + fb99a95e）：dialog 组件四目标矩阵注册（darwin-arm64/x64、windows-arm64/x64；cargoPackages 含 extension-inspector；inferredPackages=[@opentray/ext-dialog]、零 split prefixes）；embedded 按 (target,kind) 落位 `packages/ext-dialog/platforms/<npm-target>/`（win32 命名，`npmOs` 转换；basename 解析歧义以显式 embedded 分支消除）；`embedded-staging-manifest.ts` 纯函数生成器强制四目标完备 + facadeVersion/contractFingerprint 匹配（3 目标缺目标/坏 sha256/空 buildIdentity/矩阵外键/重复 cell 全部硬失败，8/8 测试）；validate-package-dirs 注册 packages/ext-dialog（4 库 + manifest.json）；verify-native-plan 默认组件 + changesets fixed 组 + `packages/*/platforms/` gitignore；broker EXE RT_MANIFEST 已随批次 B（45bd5032）落地。本地 `bun test scripts/binaries/` 68/68（编排方独立复跑确认）；verify:spec-consistency OK。
+- [x] 5.2 CI：check-pack-size 真实 pack 证据（tgz stat/版本/packlist/hash + 解包逐 target identity）写入 evidence artifact——无实测不给 packaging GO。
+  - 批次 D 证据（PR #7，CI run 35225263870，merge sha eaec0f9，2026-09-17）：`pack-size OK @opentray/ext-dialog tarball=opentray-ext-dialog-0.0.0.tgz bytes=1380024（≈1.32 MiB，低于 2 MiB 警戒线，无需 Owner 拆分决策）npm=11.19.0 [real]`，packlist 含 4 库 + platforms/manifest.json（1107B）；解包逐 target 重哈希 4/4 OK（darwin-arm64 903984B sha256=5a8b82ae…、darwin-x64 913136B sha256=3ef13af2…、win32-arm64 669184B sha256=6945ead7…、win32-x64 744448B sha256=805a5846…，统一 buildIdentity=github:eaec0f98…）；回执以 `ext-dialog-pack-evidence` workflow artifact 上传（含 ext-dialog-pack-receipt.txt + identity 行）；`verify-embedded-pack-evidence.ts` 同链消费真实 tgz。四 dialog 矩阵作业 + stage-and-pack 首跑全绿。
 
 ## 6. Verification
 
