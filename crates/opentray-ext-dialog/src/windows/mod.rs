@@ -248,7 +248,7 @@ pub(crate) fn begin(
     };
     let join = std::thread::Builder::new()
         .name(format!("opentray-dialog-worker-{}", shared.ordinal))
-        .spawn(run_worker)
+        .spawn(move || run_worker(request))
         .map_err(|error| {
             // The worker never started: the owner may free the slot
             // (no thread exists to self-release).

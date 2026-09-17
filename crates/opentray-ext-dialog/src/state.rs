@@ -155,6 +155,9 @@ pub(crate) enum NativeState {
 pub(crate) struct ActiveModal {
     pub(crate) handle: u64,
     pub(crate) scope: CommandScope,
+    /// Read on the macOS paths (terminal extraction / cancel payload);
+    /// win32 never registers a record.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) kind: ModalKind,
     pub(crate) native: Option<NativeState>,
 }
@@ -231,6 +234,9 @@ impl DialogInstance {
         self.modals.len()
     }
 
+    /// macOS-only caller surface today (the session-close cancel-branch
+    /// lookup); win32 workers submit their own cancel terminals.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn find_modal(&self, handle: u64) -> Option<&ActiveModal> {
         self.modals.get(&handle)
     }
@@ -379,6 +385,9 @@ pub(crate) fn validate_show_command(command: &DialogCommand) -> Result<(), Typed
 /// the mechanism ESC/title-bar close/system dismissal use internally) maps
 /// to `cancelId`, or button 0 when the caller did not define one. The
 /// mapping is total: every observable code resolves to a caller index.
+/// macOS-only caller surface today (the NSAlert mapping); kept beside its
+/// frozen mapping test, which runs on every platform.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn alert_response_from_modal_code(
     code: isize,
     buttons_len: usize,

@@ -128,8 +128,9 @@ fn show_open_dialog(
     let open: IFileOpenDialog =
         unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }
             .map_err(construction_failure)?;
-    // SAFETY: QueryInterface on a live interface for an ancestor IID.
-    let dialog: IFileDialog = unsafe { open.cast() }.map_err(construction_failure)?;
+    // `Interface::cast` (QueryInterface) is safe in the windows 0.61
+    // binding: it returns a Result and releases on failure.
+    let dialog: IFileDialog = open.cast().map_err(construction_failure)?;
 
     configure(&dialog, surface)?;
 
@@ -176,8 +177,8 @@ fn show_save_dialog(
     let save: IFileSaveDialog =
         unsafe { CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER) }
             .map_err(construction_failure)?;
-    // SAFETY: ancestor QueryInterface.
-    let dialog: IFileDialog = unsafe { save.cast() }.map_err(construction_failure)?;
+    // `Interface::cast` (ancestor QueryInterface), safe in the 0.61 binding.
+    let dialog: IFileDialog = save.cast().map_err(construction_failure)?;
 
     configure(&dialog, surface)?;
     if let Some(extension) = &options.win32.default_extension {
@@ -222,8 +223,8 @@ fn configure(
             .iter()
             .zip(patterns.iter())
             .map(|(name, pattern)| COMDLG_FILTERSPEC {
-                pszname: PCWSTR(name.as_ptr()),
-                pszspec: PCWSTR(pattern.as_ptr()),
+                pszName: PCWSTR(name.as_ptr()),
+                pszSpec: PCWSTR(pattern.as_ptr()),
             })
             .collect();
         // SAFETY: the slice references the `names`/`patterns` buffers above,
@@ -309,8 +310,9 @@ fn run_show_and_extract(
         evidence: "IFileDialog::Show-entry",
     });
 
-    // SAFETY: ancestor QueryInterface for the IModalWindow::Show call.
-    let modal: IModalWindow = unsafe { dialog.cast() }.map_err(post_entry_failure)?;
+    // `Interface::cast` (ancestor QueryInterface) for the IModalWindow::Show
+    // call; safe in the 0.61 binding.
+    let modal: IModalWindow = dialog.cast().map_err(post_entry_failure)?;
     // SAFETY: the modal call runs on the owning STA thread.
     let show = unsafe { modal.Show(None) };
 
@@ -341,7 +343,10 @@ fn run_show_and_extract(
 fn display_path(item: &IShellItem) -> Result<String, opentray_spec::TypedExtensionError> {
     // SAFETY: live item; the returned PWSTR is freed by the helper.
     let raw = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }.map_err(post_entry_failure)?;
-    let path = take_wide_string(raw);
+    // `windows`-core PWSTR (newtype) -> the raw pointer the helper takes.
+    // SAFETY: the PWSTR is CoTaskMem-allocated by the shell and freed by
+    // the helper exactly once.
+    let path = unsafe { take_wide_string(raw.0) };
     if path.is_empty() {
         return Err(typed_error(
             error_code::DISMISSAL_UNAVAILABLE,

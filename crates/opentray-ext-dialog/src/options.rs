@@ -351,6 +351,7 @@ impl DialogBackendCapabilities {
     /// suppression; NSOpenPanel supplies package semantics and mixed
     /// file/directory selection. The win32 fields are honestly false on
     /// darwin.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn darwin() -> Self {
         Self {
             platform: "darwin",

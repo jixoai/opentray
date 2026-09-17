@@ -100,7 +100,9 @@ impl WorkerShared {
     }
 
     /// True once the worker published its dispatcher window: the point from
-    /// which a posted close is deliverable.
+    /// which a posted close is deliverable. Diagnostic surface (asserted by
+    /// the shared-state test).
+    #[allow(dead_code)]
     pub(crate) fn dispatcher_ready(&self) -> bool {
         self.dispatcher_hwnd.load(Ordering::Acquire) != 0
     }
@@ -179,17 +181,17 @@ fn register_dispatcher_class() -> u16 {
         let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
         let class = WNDCLASSW {
             style: 0,
-            lpfnwndproc: Some(dispatcher_proc),
-            cbclsextra: 0,
+            lpfnWndProc: Some(dispatcher_proc),
+            cbClsExtra: 0,
             // One pointer slot for the worker-shared Arc, installed at
             // WM_NCCREATE from the CreateWindowExW lpParam.
-            cbwndextra: 0,
-            hinstance: instance,
-            hicon: std::ptr::null_mut(),
-            hcursor: std::ptr::null_mut(),
-            hbrbackground: std::ptr::null_mut(),
-            lpszmenuname: std::ptr::null(),
-            lpszclassname: class_name.as_ptr(),
+            cbWndExtra: 0,
+            hInstance: instance,
+            hIcon: std::ptr::null_mut(),
+            hCursor: std::ptr::null_mut(),
+            hbrBackground: std::ptr::null_mut(),
+            lpszMenuName: std::ptr::null(),
+            lpszClassName: class_name.as_ptr(),
         };
         // SAFETY: valid WNDCLASSW for the duration of the call.
         unsafe { RegisterClassW(&class) }
@@ -394,8 +396,12 @@ pub(super) unsafe fn destroy_dispatcher_window(shared: &WorkerShared) {
 pub(super) fn initialize_sta() -> Result<StaGuard, String> {
     // SAFETY: CoInitializeEx(null, APARTMENTTHREADED) on the current
     // thread; the guard unbalances with CoUninitialize exactly once.
+    // (COINIT is an i32-typed constant; the windows-sys entry takes u32.)
     let hr = unsafe {
-        windows_sys::Win32::System::Com::CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED)
+        windows_sys::Win32::System::Com::CoInitializeEx(
+            std::ptr::null(),
+            COINIT_APARTMENTTHREADED as u32,
+        )
     };
     // RPC_E_CHANGED_MODE (-2147417850): the thread already hosts an STA —
     // a configuration this extension never creates; treat as failure

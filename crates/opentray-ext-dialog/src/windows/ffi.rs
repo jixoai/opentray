@@ -22,7 +22,7 @@
 use std::ffi::c_void;
 
 use windows_sys::core::{PCWSTR, PWSTR};
-use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, WPARAM};
 
 pub(crate) type HRESULT = i32;
 pub(crate) type BOOL = i32;
@@ -102,9 +102,12 @@ pub(crate) type TaskDialogIndirectFn = unsafe extern "system" fn(
     pfverificationflagchecked: *mut BOOL,
 ) -> HRESULT;
 
-// TASKDIALOG_FLAGS (frozen Win32 values).
+// TASKDIALOG_FLAGS (frozen Win32 values). The full frozen set is kept even
+// where the current recipe uses a subset: completeness is the point of a
+// frozen ABI table.
 pub(crate) const TDF_ALLOW_CANCELLATION: u32 = 0x0000_0008;
 pub(crate) const TDF_USE_COMMAND_LINKS: u32 = 0x0000_0010;
+#[allow(dead_code)] // frozen-table completeness
 pub(crate) const TDF_USE_COMMAND_LINKS_NO_ICON: u32 = 0x0000_0020;
 pub(crate) const TDF_EXPANDED_BY_DEFAULT: u32 = 0x0000_0080;
 pub(crate) const TDF_SIZE_TO_CONTENT: u32 = 0x0100_0000;
@@ -117,10 +120,15 @@ pub(crate) const TD_WARNING_ICON: PCWSTR = (-1isize) as usize as PCWSTR;
 pub(crate) const TD_ERROR_ICON: PCWSTR = (-2isize) as usize as PCWSTR;
 pub(crate) const TD_INFORMATION_ICON: PCWSTR = (-3isize) as usize as PCWSTR;
 
-// Common button return values (shared with MessageBox; frozen Win32).
+// Common button return values (shared with MessageBox; frozen Win32). The
+// full set is the frozen mapping table; the current recipes read IDCANCEL
+// and the custom ids.
+#[allow(dead_code)]
 pub(crate) const IDOK: i32 = 1;
 pub(crate) const IDCANCEL: i32 = 2;
+#[allow(dead_code)]
 pub(crate) const IDYES: i32 = 6;
+#[allow(dead_code)]
 pub(crate) const IDNO: i32 = 7;
 
 /// Custom dialog button ids: `100 + index`. The base stays clear of every
@@ -141,9 +149,6 @@ pub(crate) const DISPATCHER_CLASS_NAME: &str = "OpentrayExtDialogDispatch";
 
 /// `HWND_MESSAGE`: parenting here creates a message-only window.
 pub(crate) const HWND_MESSAGE: HWND = -3isize as usize as HWND;
-
-/// GWLP_USERDATA slot type carrying the boxed worker context.
-pub(crate) type DispatcherContext = *mut c_void;
 
 // ---------------------------------------------------------------------------
 // Small helpers

@@ -61,7 +61,7 @@ impl TaskDialogSurface {
 /// Probes the comctl32 v6 surface once per process.
 pub(crate) fn probe_task_dialog_surface() -> Option<TaskDialogSurface> {
     static SURFACE: OnceLock<Option<TaskDialogSurface>> = OnceLock::new();
-    (*SURFACE.get_or_init(probe_once)).map(|surface| *surface)
+    *SURFACE.get_or_init(probe_once)
 }
 
 fn probe_once() -> Option<TaskDialogSurface> {
@@ -110,7 +110,7 @@ fn probe_once() -> Option<TaskDialogSurface> {
 pub(crate) fn pin_self_module() -> Option<*mut c_void> {
     let mut module: HMODULE = std::ptr::null_mut();
     // Any function address owned by this DLL identifies the module.
-    let address = (probe_task_dialog_surface as usize) as *const u16;
+    let address = (probe_task_dialog_surface as *const ()).cast::<u16>();
     // SAFETY: GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS interprets the name
     // parameter as an address inside the module to resolve; the out
     // pointer is a valid HMODULE slot.

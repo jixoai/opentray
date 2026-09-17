@@ -138,15 +138,26 @@ pub unsafe extern "C" fn opentray_ext_session_closed(
             extension.remove_modal(handle);
             continue;
         };
-        let cancel_payload = extension
-            .find_modal(handle)
-            .map(|modal| state::cancel_payload(&modal.kind));
-        match native {
-            #[cfg(target_os = "macos")]
-            NativeState::Macos(inner) => macos::revoke(inner),
+        // The registered-native teardown is macOS-only today: win32 never
+        // registers (workers self-release), so this arm is unreachable
+        // there and the uninhabited NativeState proves it.
+        #[cfg(target_os = "macos")]
+        {
+            let cancel_payload = extension
+                .find_modal(handle)
+                .map(|modal| state::cancel_payload(&modal.kind));
+            match native {
+                NativeState::Macos(inner) => macos::revoke(inner),
+            }
+            if let Some(payload) = cancel_payload {
+                submit_terminal_ignoring_host_decision(extension, handle, &payload);
+            }
         }
-        if let Some(payload) = cancel_payload {
-            submit_terminal_ignoring_host_decision(extension, handle, &payload);
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Nothing to revoke through the table on this platform; the
+            // win32 revoke path is windows::revoke_session below.
+            let _ = native;
         }
         extension.remove_modal(handle);
     }
@@ -538,6 +549,9 @@ fn backend_capabilities() -> Result<options::DialogBackendCapabilities, TypedExt
 // ---------------------------------------------------------------------------
 
 /// Submits one terminal, logging (never panicking on) the host decision.
+/// macOS-only caller surface today (the win32 worker submits its own
+/// terminals from its own thread).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn submit_terminal_ignoring_host_decision(
     extension: &DialogInstance,
     handle: u64,
