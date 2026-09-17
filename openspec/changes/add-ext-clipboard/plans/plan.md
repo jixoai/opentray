@@ -10,7 +10,9 @@
 > unsupported 等共享基建**直接复用，无依赖门**）；同波 sibling：`add-ext-notification`、
 > `add-ext-opener`。
 > 评审记录：design draft（`plans/design-reference.md` 为规范附录，实现以它为准）；
-> **Codex 评审 pending（确认性流程）**——设计内无开放问题，全部决策预授权冻结（见决策表）。
+> **Codex R1 已完成（确认性流程，2026-09-17/18）**——设计内无开放问题，全部决策预授权冻结；
+> R1 终稿补冻结编码契约（UTF-16 计量 / 1 MiB 上限 / 孤立代理对拒绝 / win32 NULL 区分）、
+> 可执行重试语义与 HGLOBAL 所有权律（commits 5e46ddb7/93380cdc），均已回写 design-reference。
 
 ## 最终可见效果（operator 视角）
 
@@ -27,22 +29,23 @@
 - win32 剪贴板 API 允许任意线程，但按「扩展命令在 GUI owner 线程派发」总律执行；user32 现有零新增依赖。
 - `writeText('')` 与 `clear()` 在 darwin 是两个操作（`setString("")` vs `clearContents()`）——所有权语义差异，不可合并。
 
-## 决策（D1–D6；细节以 design-reference.md 为准）
+## 决策（D1–D7；细节以 design-reference.md 为准）
 
 | # | 决策 | 依据 |
 |---|------|------|
 | D1 | 包 `@opentray/ext-clipboard`，crate `crates/opentray-ext-clipboard`，embedded 单包内嵌四目标（复用 dialog/sound 归档基建，不重复建设，**无依赖门**）；contract fingerprint `opentray-ext-clipboard-contract-1` | 同族框架已归档落地；体积规范（2026-09-16） |
 | D2 | 能力面 = `readText(): Promise<string \| null>` + `writeText(text)` + `clear()` + `getBackend()` 异步冻结快照；v1 仅 UTF-8 文本 | design §1；readText 空态 null 与 picker cancel=null 同律 |
 | D3 | `writeText('')` 合法且不与 `clear()` 合并——写入空文本（darwin `setString("")`）与清空（`clearContents()`/`EmptyClipboard`）是两个操作，所有权语义差异保留 | design §1 冻结 |
-| D4 | win32 锁竞态冻结纪律 = 有界重试：总预算 ≤2s，退避 10ms→20ms→…→200ms 封顶；预算耗尽 → typed `clipboard_locked`（details: attempts/elapsedMs）；`Open→操作→Close` 单命令内闭合，绝不跨命令持有剪贴板句柄 | design §2 竞态行 |
+| D4 | win32 锁竞态冻结纪律（可执行语义）= 命令派发时刻起 monotonic deadline（Instant 基准）总预算 2000ms；仅当 `OpenClipboard` 失败且 `GetLastError()==ERROR_ACCESS_DENIED` 时重试（其他错误即刻 typed `clipboard_unavailable`）；退避 10ms→20ms→40ms→80ms→160ms→200ms 封顶其后恒 200ms；每次 sleep 裁剪至剩余预算（不超时睡眠）；预算耗尽或下次重试已无可执行空间 → typed `clipboard_locked`（details: attempts 含首次尝试、elapsedMs 含原生调用耗时至 typed 错误构建时刻）；`Open→操作→Close` 单命令内闭合，绝不跨命令持有剪贴板句柄 | design §2 竞态行（R1 冻结） |
 | D5 | darwin NSPasteboard owner 线程（MainThreadOnly 家族）；无延迟渲染/所有权供给（v1 写入即交付字节）；原生 API 失败 → typed `clipboard_unavailable`（details 含 OS 错误码） | design §2/§3/§4 |
 | D6 | 流程：单 change，批次 A（spec 类型）→ B（crate 双平台）→ C（facade）→ D（staging + 体积门）→ E（验收 + 文档 + changeset） | sound 同款编排 |
+| D7 | 编码与所有权契约（R1 冻结）= 计量单位 UTF-16 码元（与 `String.length` 一致，win32 CF_UNICODETEXT 同单位）；writeText 容量上限冻结 1 MiB = 1,048,576 码元（preflight 强制，超限 → typed `clipboard_payload_too_large`，details: lengthUtf16, limit），readText 返回值无上限；孤立代理对 → typed `clipboard_payload_invalid`（details: reason:"lone-surrogate", index），不做替换静默写入；win32 NULL 区分（`GetClipboardData==NULL` 且 `ERROR_SUCCESS` → null；其他错误 → typed `clipboard_unavailable`）；HGLOBAL 所有权律（写：`SetClipboardData` 成功后系统接管绝不 `GlobalFree`，失败扩展负责回收含 EmptyClipboard 失败路径；读：板载 HGLOBAL 经 `GlobalLock` 拷贝 + `GlobalUnlock` 后再 Close，绝不 free、Close 后不触碰）；DTO 冻结 schema = platform / textOnly(true) / maxWriteUtf16(1_048_576) / boundedOpenRetry(win32=true) | design §1/§2/§3（R1 冻结） |
 
 ## 开放问题（无——设计预授权冻结）
 
 | 问题 | 状态 |
 |------|------|
-| （无） | 设计无开放问题：全部决策预授权冻结（见决策表与 design-reference）；Codex 评审为确认性流程，非对抗点 |
+| （无） | 设计无开放问题：全部决策预授权冻结（见决策表与 design-reference）；Codex R1 已完成（确认性流程，非对抗点），无新增对抗点 |
 
 ## 拒绝路径
 
@@ -56,8 +59,8 @@
 
 ## 实施计划（specs/tasks 追溯）
 
-1. 批次 A：`@opentray/spec` 剪贴板类型（ClipboardCapability 面、ClipboardBackendCapabilities、typed 错误码三枚 details 判别联合）——embedded artifact kind 与 pack-size 审计**直接复用 dialog/sound 归档基建，无依赖门**。
-2. 批次 B：crates/opentray-ext-clipboard——darwin（NSPasteboard 写/读/清，owner 线程，seam 化）+ win32（CF_UNICODETEXT 编解码、深拷贝即 Close、有界重试纪律）。
+1. 批次 A：`@opentray/spec` 剪贴板类型（ClipboardCapability 面、ClipboardBackendCapabilities 冻结 schema、typed 错误码五枚 details 判别联合：`clipboard_platform_unsupported` / `clipboard_locked` / `clipboard_unavailable` / `clipboard_payload_too_large` / `clipboard_payload_invalid`）——embedded artifact kind 与 pack-size 审计**直接复用 dialog/sound 归档基建，无依赖门**。
+2. 批次 B：crates/opentray-ext-clipboard——darwin（NSPasteboard 写/读/清，owner 线程，seam 化）+ win32（CF_UNICODETEXT 编解码、HGLOBAL 所有权律、深拷贝即 Close、有界重试纪律）。
 3. 批次 C：packages/ext-clipboard facade（attachClipboard、Linux typed 拒零帧、contract.json、embedded 描述符）。
 4. 批次 D：staging 到 `platforms/<target>/` + pack-size 接入 + 真实体积实测。
 5. 批次 E：双平台真机验证（read/write/clear 往返进程外交叉取证 `pbpaste`/PowerShell Get-Clipboard；锁竞态并发压测；null 空态；`writeText('')` ≠ clear）+ skills 公共文档（一等任务，见 tasks 7.2）+ changeset（minor）。
