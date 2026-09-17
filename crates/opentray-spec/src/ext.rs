@@ -85,6 +85,39 @@ pub struct EmbeddedExtensionManifest {
 
 /// Structured FFI error detail taken through `opentray_ext_take_error`.
 /// The optional `details` field is a compatible wire extension (absent in
+/// Deserializes the optional typed-error `details` field while enforcing the
+/// frozen envelope shape: `details` is a JSON object when present. Nulls,
+/// scalars, and arrays fail deserialization so the synchronous error frame
+/// and deferred terminal payloads accept exactly the same language
+/// (add-ext-dialog 7.5; impl review R2).
+fn deserialize_details_object<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Deserialize the raw value (not Option<Value>, which folds an explicit
+    // null into None and would silently accept it); a missing field never
+    // reaches here because `#[serde(default)]` supplies None instead.
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        details @ Value::Object(_) => Ok(Some(details)),
+        other => Err(serde::de::Error::custom(format!(
+            "typed extension error details must be a JSON object when present, got {}",
+            json_kind(&other)
+        ))),
+    }
+}
+
+fn json_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
 /// ABI-3 payloads, ignored by old hosts): it carries the discriminated JSON
 /// payload of the typed error envelope so the synchronous error path stays
 /// isomorphic with deferred terminal errors (add-ext-dialog 7.5).
@@ -96,7 +129,11 @@ pub struct ExtensionErrorDetail {
     /// Optional discriminated JSON payload matching the typed error
     /// envelope's `details` shape. Absent for codes without structured
     /// detail.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_details_object"
+    )]
     pub details: Option<Value>,
 }
 
@@ -112,7 +149,11 @@ pub struct TypedExtensionError {
     pub message: String,
     /// Discriminated JSON payload whose shape each error code freezes in
     /// `@opentray/spec`. Absent for codes without structured detail.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_details_object"
+    )]
     pub details: Option<Value>,
 }
 
@@ -469,6 +510,41 @@ pub struct ExtensionEnvelope {
 mod tests {
     use super::*;
     use std::mem::{offset_of, size_of};
+
+    /// The typed-error `details` field accepts exactly one language on both
+    /// the synchronous error frame and deferred terminal payloads: absent or
+    /// a JSON object (impl review R2 isomorphism gate).
+    #[test]
+    fn typed_error_details_must_be_a_json_object_when_present() {
+        let valid: &[(&str, Option<Value>)] = &[
+            (r#"{"code":"x","message":"m"}"#, None),
+            (
+                r#"{"code":"x","message":"m","details":{"variant":"a"}}"#,
+                Some(serde_json::json!({"variant": "a"})),
+            ),
+        ];
+        for (raw, expected) in valid {
+            let parsed: TypedExtensionError = serde_json::from_str(raw).expect(raw);
+            assert_eq!(parsed.details, *expected, "valid case: {raw}");
+        }
+        let invalid = [
+            r#"{"code":"x","message":"m","details":null}"#,
+            r#"{"code":"x","message":"m","details":1}"#,
+            r#"{"code":"x","message":"m","details":"str"}"#,
+            r#"{"code":"x","message":"m","details":[]}"#,
+            r#"{"code":"x","message":"m","details":true}"#,
+        ];
+        for raw in invalid {
+            assert!(
+                serde_json::from_str::<TypedExtensionError>(raw).is_err(),
+                "must reject non-object details: {raw}"
+            );
+            assert!(
+                serde_json::from_str::<ExtensionErrorDetail>(raw).is_err(),
+                "FFI detail must reject non-object details: {raw}"
+            );
+        }
+    }
 
     /// Freezes the phase-1 EventPort C layout. These structs cross the FFI
     /// boundary by value; any drift is an ABI break that requires a new

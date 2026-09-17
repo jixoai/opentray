@@ -647,6 +647,28 @@ describe("@opentray/spec DeferredOperation protocol (v2)", () => {
     );
   });
 
+  it("enforces one details language on typed errors: absent or JSON object", () => {
+    // The synchronous error frame already rejects null/scalar/array details;
+    // deferred terminal errors accept exactly the same language (impl review R2).
+    const objectDetails = { kind: "error", error: { code: "c", message: "m", details: { v: 1 } } };
+    expect(isExtOperationPayload(objectDetails)).toBe(true);
+    expect(isTypedExtensionError(objectDetails.error)).toBe(true);
+    const malformedDetails = [null, 1, "str", [], true];
+    for (const details of malformedDetails) {
+      const payload = { kind: "error", error: { code: "c", message: "m", details } };
+      expect(isExtOperationPayload(payload), `details=${JSON.stringify(details)}`).toBe(false);
+      expect(isTypedExtensionError(payload.error), `details=${JSON.stringify(details)}`).toBe(
+        false
+      );
+      expect(
+        parseServerFrame(
+          JSON.stringify({ type: "ext-operation-terminal", operationId: "0000000000000001", payload })
+        ).ok,
+        `terminal details=${JSON.stringify(details)}`
+      ).toBe(false);
+    }
+  });
+
   it("rejects acceptance and terminal frames with wrong field types", () => {
     const acceptedBadOperation = parseServerFrame(
       JSON.stringify({

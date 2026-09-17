@@ -886,7 +886,11 @@ export const isCommandScope = (value: unknown): value is CommandScope =>
 export const isTypedExtensionError = (value: unknown): value is TypedExtensionError =>
   isRecord(value) &&
   typeof value.code === "string" &&
-  typeof value.message === "string";
+  typeof value.message === "string" &&
+  // details is a JSON object when present (absent for codes without
+  // structured detail); nulls, scalars, and arrays are structurally invalid
+  // on the synchronous error frame and on deferred terminal errors alike.
+  (value.details === undefined || isRecord(value.details));
 
 /** Parser truth for the frozen terminal payload discriminant (no third branch is guessed). */
 export const isExtOperationPayload = (value: unknown): value is ExtOperationPayload => {

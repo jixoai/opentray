@@ -677,6 +677,56 @@ mod tests {
     }
 
     #[test]
+    fn malformed_details_in_terminal_errors_reject_ingress_without_queue_mutation() {
+        let registry = registry();
+        let hub = hub(&registry);
+        let (_handle, issued) = opened_port(&registry, &hub);
+        let ports = hub.inner.ports.lock().unwrap();
+        let state = ports.slots[0].clone();
+        drop(ports);
+
+        // The synchronous error frame rejects non-object details; the deferred
+        // terminal path must accept exactly the same language (impl review R2).
+        let malformed = [
+            r#"{"kind":"error","error":{"code":"x","message":"m","details":null}}"#,
+            r#"{"kind":"error","error":{"code":"x","message":"m","details":1}}"#,
+            r#"{"kind":"error","error":{"code":"x","message":"m","details":[]}}"#,
+            r#"{"kind":"error","error":{"code":"x","message":"m","details":"str"}}"#,
+        ];
+        for raw in malformed {
+            let bytes = raw.as_bytes();
+            assert_eq!(
+                unsafe {
+                    submit(
+                        Arc::as_ptr(&state) as *mut c_void,
+                        issued.handle,
+                        bytes.as_ptr(),
+                        bytes.len(),
+                    )
+                },
+                EXT_ERR_REJECTED,
+                "must reject non-object terminal details: {raw}"
+            );
+        }
+        // The operation stays pending (no terminal was queued) and the port
+        // still accepts a well-formed payload afterwards.
+        assert_eq!(registry.session_operation_count("session-1"), 1);
+        let good = serde_json::to_vec(&ExtOperationPayload::Error {
+            error: TypedExtensionError {
+                code: "dialog_dismissal_unavailable".to_string(),
+                message: "platform cannot observe dismissal".to_string(),
+                details: Some(serde_json::json!({"variant":"none"})),
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            unsafe { submit(Arc::as_ptr(&state) as *mut c_void, issued.handle, good.as_ptr(), good.len()) },
+            EXT_OK
+        );
+        assert_eq!(registry.session_operation_count("session-1"), 1);
+    }
+
+    #[test]
     fn port_layout_and_validation_mirror_the_event_port_family() {
         let registry = registry();
         let hub = hub(&registry);
