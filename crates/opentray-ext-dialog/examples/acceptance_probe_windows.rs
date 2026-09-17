@@ -1382,7 +1382,7 @@ mod probe {
 
         // Instance A is deinitialized inside sta-worker-lifecycle; the
         // registry-wide accounting reads the completed port A history.
-        let accounting = run_accounting(&harness);
+        let accounting = run_accounting(&harness).finish();
         println!(
             "  {:<34} {:<5}",
             accounting.case, accounting.status
