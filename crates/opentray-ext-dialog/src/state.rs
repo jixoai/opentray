@@ -488,6 +488,63 @@ pub(crate) fn worker_completion_transaction(
 }
 
 // ---------------------------------------------------------------------------
+// win32 picker dismissal core (batch E P0, 2026-09-18): posted WM_CLOSE,
+// never the reentrant IFileDialog::Close. Host-compiled law behind a
+// post-only seam; `windows/worker.rs` wires the real EnumThreadWindows +
+// PostMessageW halves (the same PlaybackArbiter-style seam split as
+// ext-sound).
+// ---------------------------------------------------------------------------
+
+/// The native post-only sink of one picker dismissal (the seam):
+/// production posts `WM_CLOSE` through the worker thread's window
+/// enumeration on Windows; tests inject recording spies.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) trait PickerCloseSink {
+    /// Posts `WM_CLOSE` to one top-level window owned by the picker's
+    /// worker thread.
+    fn post_close(&mut self, window: usize);
+}
+
+/// One picker dismissal settlement: the windows that received `WM_CLOSE`,
+/// in enumeration order — always exactly the non-dispatcher windows.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PickerDismissalReport {
+    pub(crate) posted_close: Vec<usize>,
+}
+
+/// The picker dismissal law (batch E P0): a live `IFileDialog` is
+/// dismissed ONLY by posting `WM_CLOSE` to every non-dispatcher top-level
+/// window of the worker thread; the dialog's own pump then ends `Show`
+/// with `ERROR_CANCELLED`, which the existing cancel branch settles
+/// through the exactly-once terminal transaction. The reentrant
+/// `IFileDialog::Close` from the dispatcher WndProc — a call outside the
+/// documented "from a callback method or function while the dialog is
+/// open" contract that fault-killed the broker with 0xC0000005 — is
+/// deleted from the product surface: this transaction is the entire
+/// dismissal and its only native action is
+/// [`PickerCloseSink::post_close`], so a COM close is not even
+/// expressible on the path.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn picker_dismissal_transaction<S: PickerCloseSink>(
+    thread_windows: &[usize],
+    dispatcher: usize,
+    sink: &mut S,
+) -> PickerDismissalReport {
+    let mut posted_close = Vec::new();
+    for &window in thread_windows {
+        if window == dispatcher {
+            // The hidden dispatcher window is ours but not the dialog: it
+            // must survive so the close channel stays deliverable.
+            continue;
+        }
+        sink.post_close(window);
+        posted_close.push(window);
+    }
+    PickerDismissalReport { posted_close }
+}
+
+// ---------------------------------------------------------------------------
 // win32 unload-race settlement (design section 5.3, R4 P0-3): a worker
 // that has not exited must never have its library deinit'd or dlclose'd.
 // Host-compiled core with an injectable pin seam; windows/ wires the real
@@ -870,6 +927,80 @@ pub(crate) mod tests {
             }
             other => panic!("revocation settles through the cancel branch: {other:?}"),
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // win32 picker dismissal transaction (batch E P0): the darwin host
+    // cannot run the STA worker body, so these drive the platform-neutral
+    // core the windows module wires (the PlaybackArbiter-style seam).
+    // -------------------------------------------------------------------------
+
+    /// The recording spy for the post-only seam. It deliberately models
+    /// ONLY `post_close`: the reentrant IFileDialog COM close was deleted
+    /// from the product surface, so any reintroduction must grow a new
+    /// seam action — and this suite asserts it stays unexpressible.
+    struct SpyCloseSink {
+        posts: Vec<usize>,
+    }
+
+    impl PickerCloseSink for SpyCloseSink {
+        fn post_close(&mut self, window: usize) {
+            self.posts.push(window);
+        }
+    }
+
+    /// The P0 law: the picker close path posts WM_CLOSE to every
+    /// non-dispatcher window of the worker thread (in enumeration order)
+    /// and NEVER to the dispatcher; the sink observes nothing else because
+    /// no other action exists on the dismissal path.
+    #[test]
+    fn picker_dismissal_posts_wm_close_to_every_non_dispatcher_window() {
+        let dispatcher = 0x00DE_0001;
+        let mut spy = SpyCloseSink { posts: Vec::new() };
+        let report = picker_dismissal_transaction(
+            &[
+                dispatcher,
+                0x00AA_0001,
+                0x00AA_0002,
+                dispatcher + 1,
+                0x00AA_0003,
+            ],
+            dispatcher,
+            &mut spy,
+        );
+        assert_eq!(
+            report.posted_close,
+            vec![0x00AA_0001, 0x00AA_0002, dispatcher + 1, 0x00AA_0003]
+        );
+        assert_eq!(spy.posts, report.posted_close, "the spy saw the posts");
+        assert!(
+            !spy.posts.contains(&dispatcher),
+            "the dispatcher window never receives WM_CLOSE (the close channel \
+             must stay deliverable)"
+        );
+    }
+
+    /// Edge: the enumeration saw only the dispatcher (a close racing the
+    /// picker's window creation) — zero posts, no panic; the early-close
+    /// flag already covers that race.
+    #[test]
+    fn picker_dismissal_with_only_the_dispatcher_posts_nothing() {
+        let dispatcher = 0x00DE_0002;
+        let mut spy = SpyCloseSink { posts: Vec::new() };
+        let report = picker_dismissal_transaction(&[dispatcher], dispatcher, &mut spy);
+        assert!(report.posted_close.is_empty());
+        assert!(spy.posts.is_empty());
+    }
+
+    /// Edge: an empty enumeration (no windows at all) stays total — the
+    /// worker's settle path still owns the cancel branch through the
+    /// entry/close flags.
+    #[test]
+    fn picker_dismissal_with_no_windows_is_total() {
+        let mut spy = SpyCloseSink { posts: Vec::new() };
+        let report = picker_dismissal_transaction(&[], 0x00DE_0003, &mut spy);
+        assert!(report.posted_close.is_empty());
+        assert!(spy.posts.is_empty());
     }
 
     // -------------------------------------------------------------------------

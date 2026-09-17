@@ -842,7 +842,8 @@ mod probe {
     }
 
     /// Case W6: pickers driven to cancel through session close
-    /// (IFileDialog::Show dismissed by the worker-thread Close()).
+    /// (IFileDialog::Show dismissed by posted WM_CLOSE through the
+    /// worker-thread window enumeration — batch E P0 fix).
     ///
     /// `OPENTRAY_DIALOG_PROBE_SKIP_PICKERS=1` records the case as SKIPPED —
     /// the crash-isolation run used while diagnosing the real-machine
@@ -903,8 +904,9 @@ mod probe {
         report.extras = serde_json::Value::Object(per_picker);
         report.note(
             "filters:[] behaves as all-files (the native empty-list -> no SetFileTypes \
-             normalization); each picker was dismissed by the WM_APP dispatcher's \
-             worker-thread IFileDialog::Close — the documented programmatic close path",
+             normalization); each picker was dismissed by posted WM_CLOSE to the \
+             worker thread's non-dispatcher windows (batch E P0 fix: the reentrant \
+             IFileDialog::Close is gone from the close path)",
         );
     }
 
@@ -1105,13 +1107,15 @@ mod probe {
         );
     }
 
-    /// Diagnostic case (`OPENTRAY_DIALOG_PROBE_PICKER_DIAG=1`): isolates
-    /// WHERE the real-machine IFileDialog access violation fires. Marker
-    /// lines bracket the two windows: (A) inside `IFileDialog::Show`'s own
-    /// pump with no close in flight, (B) after the session close posts the
-    /// WM_APP dispatcher message that drives the worker-thread
-    /// `IFileDialog::Close`. The process is expected to die inside one of
-    /// them; the surviving markers in the log are the verdict.
+    /// Diagnostic case (`OPENTRAY_DIALOG_PROBE_PICKER_DIAG=1`): the crash
+    /// discriminator that isolated the real-machine IFileDialog access
+    /// violation (batch E P0). Marker lines bracket the two windows:
+    /// (A) inside `IFileDialog::Show`'s own pump with no close in flight,
+    /// (B) after the session close posts the WM_APP dispatcher message
+    /// that projects the worker-thread dismissal (posted WM_CLOSE since
+    /// the P0 fix; historically the reentrant IFileDialog::Close). Both
+    /// windows must survive; a marker followed by process death was the
+    /// verdict naming the faulting half.
     fn case_picker_close_diag(harness: &mut Harness, report: &mut CaseReport) {
         // OPENTRAY_DIALOG_PROBE_PICKER_HOLD_MS lengthens window A (default
         // 700ms): if a late close survives where an immediate one faults,
@@ -1143,7 +1147,7 @@ mod probe {
         println!("picker-close-diag: window A survived");
         println!(
             "picker-close-diag: window B: posting session close (WM_APP dispatcher -> \
-             worker-thread IFileDialog::Close)"
+             posted WM_CLOSE to the thread's non-dispatcher windows)"
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
         close_session(report, harness.instance, "w-picker-diag");

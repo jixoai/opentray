@@ -45,14 +45,17 @@ pub(crate) enum DialogTarget {
     /// this window).
     None,
     TaskDialog { hwnd: HWND },
-    FileDialog { dialog: *mut c_void },
+    /// A live `IFileDialog` modal. The dismissal carries no COM surface:
+    /// it posts `WM_CLOSE` to the thread's windows (batch E P0), so no
+    /// interface pointer is published at all.
+    FileDialog,
     MessageBox,
 }
 
-// The raw IFileDialog pointer crosses no thread: `DialogTarget` lives in
-// `WorkerShared` whose close path only ever executes on the worker thread
-// (dispatcher WndProc / worker body). The Send impl exists solely so the
-// shared state can sit in an Arc; the pointer is never dereferenced
+// The TaskDialog HWND is a raw pointer type in windows-sys: `DialogTarget`
+// lives in `WorkerShared` whose close path only ever executes on the
+// worker thread (dispatcher WndProc / worker body). The Send impl exists
+// solely so the shared state can sit in an Arc; the handle is never used
 // off-thread. The assertion lives in `close_from_worker_thread`.
 unsafe impl Send for DialogTarget {}
 
@@ -287,13 +290,8 @@ fn close_from_worker_thread(shared: &WorkerShared) {
                 PostMessageW(hwnd, WM_CLOSE, 0, 0);
             }
         }
-        DialogTarget::FileDialog { dialog } => {
-            // SAFETY: the interface pointer is owned by this thread (STA);
-            // Close() is the documented cross-modal dismissal and the
-            // vtable call stays on the apartment thread.
-            unsafe {
-                super::file_dialog::close_on_worker_thread(dialog);
-            }
+        DialogTarget::FileDialog => {
+            close_file_dialog_on_worker_thread(shared);
         }
         DialogTarget::MessageBox => {
             close_message_box_on_worker_thread(shared);
@@ -335,6 +333,50 @@ fn close_message_box_on_worker_thread(shared: &WorkerShared) {
     unsafe {
         EnumThreadWindows(thread_id, Some(enum_proc), &mut state as *mut EnumState as LPARAM);
     }
+}
+
+/// Dismisses a live file dialog through posted `WM_CLOSE` (batch E P0):
+/// enumerate the worker thread's top-level windows, skip the hidden
+/// dispatcher, and post `WM_CLOSE` to every other window — the dialog's
+/// own pump then ends `Show` with `ERROR_CANCELLED`, which the existing
+/// cancel branch settles through the exactly-once terminal transaction.
+/// The decision core is the platform-neutral
+/// [`state::picker_dismissal_transaction`]; the reentrant
+/// `IFileDialog::Close` from this dispatcher context (a WndProc reentered
+/// inside `Show`'s pump — outside the documented "from a callback while
+/// the dialog is open" contract) fault-killed the process with
+/// 0xC0000005 and is deleted from the product surface.
+fn close_file_dialog_on_worker_thread(shared: &WorkerShared) {
+    let dispatcher = shared.dispatcher_hwnd.load(Ordering::Acquire) as usize;
+    let thread_id = shared.thread_id.load(Ordering::Relaxed);
+    let mut windows: Vec<usize> = Vec::new();
+    unsafe extern "system" fn collect_proc(hwnd: HWND, lparam: LPARAM) -> i32 {
+        let windows = unsafe { &mut *(lparam as *mut Vec<usize>) };
+        windows.push(hwnd as usize);
+        // Enumerate every window: a Vista common dialog may own more than
+        // one top-level window, and the transaction filters the dispatcher.
+        1
+    }
+    // SAFETY: the callback only pushes through the lparam the caller owns;
+    // the enumeration runs synchronously on this thread.
+    unsafe {
+        EnumThreadWindows(
+            thread_id,
+            Some(collect_proc),
+            &mut windows as *mut Vec<usize> as LPARAM,
+        );
+    }
+    struct PostCloseSink;
+    impl crate::state::PickerCloseSink for PostCloseSink {
+        fn post_close(&mut self, window: usize) {
+            // SAFETY: the window came from this thread's enumeration;
+            // PostMessageW only enqueues — the dialog's own pump delivers.
+            unsafe {
+                PostMessageW(window as HWND, WM_CLOSE, 0, 0);
+            }
+        }
+    }
+    let _ = crate::state::picker_dismissal_transaction(&windows, dispatcher, &mut PostCloseSink);
 }
 
 /// Creates the message-only dispatcher window on the current (worker)

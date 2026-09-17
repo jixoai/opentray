@@ -2,9 +2,13 @@
 //! sections 1.1/2.2/3, task 3.3).
 //!
 //! Every COM object is created, configured, shown, and released on the
-//! owning STA worker thread; the dispatcher close path re-enters through
-//! [`close_on_worker_thread`] which runs on the same thread inside the
-//! modal pump, so no interface pointer ever crosses an apartment.
+//! owning STA worker thread. The dismissal path never touches a COM
+//! surface: the dispatcher close posts `WM_CLOSE` to the thread's
+//! non-dispatcher windows (see `close_file_dialog_on_worker_thread` in
+//! `worker.rs`, batch E P0), the dialog's own pump ends `Show` with
+//! `ERROR_CANCELLED`, and the existing cancel branch below settles the
+//! terminal — so no interface pointer is ever published or reentered
+//! from the modal pump.
 //!
 //! Documented win32 projection degradations (kept visible, never silent):
 //! - `showsHidden` follows the Explorer "hidden items" setting: the Vista+
@@ -18,7 +22,6 @@
 //! the API has no prior presentation signal, and the design freezes that
 //! honesty (never claim presentation before the call).
 
-use std::ffi::c_void;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -296,13 +299,9 @@ fn run_show_and_extract(
     shared: &Arc<WorkerShared>,
     extract: impl FnOnce() -> Result<ExtOperationPayload, opentray_spec::TypedExtensionError>,
 ) -> Result<ExtOperationPayload, opentray_spec::TypedExtensionError> {
-    // The close path re-enters through this borrowed wrapper pointer on the
-    // same thread (the frame below outlives Show).
-    let wrapper: *const IFileDialog = dialog;
-    *shared.target.lock().unwrap_or_else(|error| error.into_inner()) =
-        DialogTarget::FileDialog {
-            dialog: wrapper as *mut c_void,
-        };
+    // The dismissal target: no COM surface is published (batch E P0) —
+    // the close path posts `WM_CLOSE` to the thread's windows instead.
+    *shared.target.lock().unwrap_or_else(|error| error.into_inner()) = DialogTarget::FileDialog;
 
     // The IModalWindow cast precedes entry (design section 5.3: entering
     // the Show call is the evidence): its failure is a PRE-entry failure —
@@ -364,21 +363,6 @@ fn display_path(item: &IShellItem) -> Result<String, opentray_spec::TypedExtensi
         ));
     }
     Ok(canonicalize_existing(&path))
-}
-
-/// The dispatcher close projection for a live file dialog. Runs on the
-/// worker thread (inside the modal pump) only.
-///
-/// # Safety
-///
-/// `raw` must be the `*const IFileDialog` wrapper pointer published by
-/// [`run_show_and_extract`] on this same thread, with the wrapper's frame
-/// still inside `Show`.
-pub(super) unsafe fn close_on_worker_thread(raw: *mut c_void) {
-    let dialog = unsafe { &*(raw as *const IFileDialog) };
-    // S_OK-close asks the dialog to end as "canceled by application".
-    // SAFETY: live interface on the owning apartment thread.
-    let _ = unsafe { dialog.Close(windows::core::HRESULT(0)) };
 }
 
 fn construction_failure(error: windows::core::Error) -> opentray_spec::TypedExtensionError {
