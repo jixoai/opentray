@@ -454,8 +454,13 @@ pub enum ServerFrame {
         /// discriminated JSON payload so the synchronous error frame is
         /// isomorphic with deferred terminal errors. Absent for errors
         /// without structured detail; old peers that never send it
-        /// deserialize unchanged.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// deserialize unchanged. The shared validator keeps one acceptance
+        /// language across sync frames, FFI details, and deferred terminals.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "crate::ext::deserialize_details_object"
+        )]
         details: Option<Value>,
     },
 }
@@ -716,6 +721,36 @@ mod tests {
             "payload": { "kind": "cancel" }
         }))
         .is_err());
+    }
+
+    #[test]
+    fn sync_error_details_share_the_single_object_language() {
+        // The synchronous error frame uses the same validator as FFI details
+        // and deferred terminals: absent or a JSON object, never null,
+        // scalars, or arrays (impl review R3).
+        let valid = serde_json::from_value::<ServerFrame>(serde_json::json!({
+            "type": "error",
+            "requestId": "req-1",
+            "code": "dialog_session_busy",
+            "message": "busy",
+            "details": { "owner": "tray-1" }
+        }))
+        .expect("object details accepted");
+        assert!(matches!(&valid, ServerFrame::Error { details: Some(v), .. } if v.is_object()));
+
+        for details in [serde_json::json!(null), serde_json::json!(1), serde_json::json!("s"), serde_json::json!([])] {
+            assert!(
+                serde_json::from_value::<ServerFrame>(serde_json::json!({
+                    "type": "error",
+                    "requestId": "req-1",
+                    "code": "dialog_session_busy",
+                    "message": "busy",
+                    "details": details
+                }))
+                .is_err(),
+                "sync frame must reject non-object details: {details}"
+            );
+        }
     }
 
     #[test]

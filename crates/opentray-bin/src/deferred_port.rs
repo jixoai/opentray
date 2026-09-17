@@ -708,9 +708,14 @@ mod tests {
                 "must reject non-object terminal details: {raw}"
             );
         }
-        // The operation stays pending (no terminal was queued) and the port
-        // still accepts a well-formed payload afterwards.
+        // The operation stays pending and, decisively, no queue record was
+        // appended for any malformed submit: drain the port and assert it is
+        // empty before the well-formed payload goes through.
         assert_eq!(registry.session_operation_count("session-1"), 1);
+        assert!(
+            hub.drain(64).is_empty(),
+            "malformed details must not enqueue any terminal record"
+        );
         let good = serde_json::to_vec(&ExtOperationPayload::Error {
             error: TypedExtensionError {
                 code: "dialog_dismissal_unavailable".to_string(),
@@ -723,7 +728,9 @@ mod tests {
             unsafe { submit(Arc::as_ptr(&state) as *mut c_void, issued.handle, good.as_ptr(), good.len()) },
             EXT_OK
         );
-        assert_eq!(registry.session_operation_count("session-1"), 1);
+        let drained = hub.drain(64);
+        assert_eq!(drained.len(), 1, "the valid terminal drains exactly once");
+        assert_eq!(drained[0].handle, issued.handle);
     }
 
     #[test]
