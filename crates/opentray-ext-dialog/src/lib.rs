@@ -754,7 +754,19 @@ mod tests {
         let manifest: opentray_spec::EmbeddedExtensionManifest =
             serde_json::from_slice(bytes).expect("manifest JSON");
         assert_eq!(manifest.extension_name, "dialog");
-        assert_eq!(manifest.artifact_set_version, "0.0.0");
+        // The embedded manifest's artifactSetVersion mirrors the npm facade
+        // package.json (the release identity), which the versioned release
+        // source bumps independently of the cargo workspace version —
+        // compare against the same include_str! source instead of a
+        // hard-coded literal (release-run P1: 0.29.0 vs "0.0.0").
+        let facade_version: String = serde_json::from_str::<serde_json::Value>(
+            include_str!("../../../packages/ext-dialog/package.json"),
+        )
+        .expect("facade package.json")["version"]
+            .as_str()
+            .expect("version string")
+            .to_string();
+        assert_eq!(manifest.artifact_set_version, facade_version);
         assert_eq!(
             manifest.contract_fingerprint,
             "opentray-ext-dialog-contract-1"
