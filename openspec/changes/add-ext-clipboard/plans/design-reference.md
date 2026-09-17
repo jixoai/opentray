@@ -56,6 +56,15 @@ darwin clearContents 与 setString("") 是两个操作；不合并）。
 
 **所有权/延迟渲染不做**（v1）：不注册延迟供给回调；写入即交付字节。
 
+**HGLOBAL 所有权律（win32，冻结）**：
+- 写：`GlobalAlloc(GMEM_MOVEABLE)` → 拷贝 UTF-16 零终止字节 → `SetClipboardData`。**成功后
+  系统接管该 HGLOBAL，扩展绝不 GlobalFree**（Double-Free 级错误）；**失败则扩展负责
+  GlobalFree 回收**（含 EmptyClipboard 失败路径）。写路径的 Open→（Empty→Set）→Close 任一
+  步失败：已分配未交接的 HGLOBAL 必须回收后 typed 报错。
+- 读：`GetClipboardData` 返回的 HGLOBAL **归剪贴板所有**——扩展在 CloseClipboard 前经
+  `GlobalLock` 拷贝出完整内容并 `GlobalUnlock`，**绝不 GlobalFree 也不在 Close 后触碰**；
+  深拷贝缓冲区即 readText 的唯一持有物。
+
 ## 3. 打包与错误码
 
 embedded（同族）；`contract.json` =
