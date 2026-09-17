@@ -223,9 +223,13 @@ pub unsafe extern "C" fn opentray_ext_command_v2(
             let event = ExtensionEnvelope {
                 scope: envelope.scope,
                 command_scope: None,
+                // The facade contract (SoundBackendEvent in
+                // @opentray/ext-sound shared.ts) consumes `type: "backend"`.
+                // The previous `type:"result", op:"getBackend"` form made
+                // every real getBackend call fail the facade's contract
+                // check (sound review R1 P1 — mocked transports masked it).
                 data: serde_json::json!({
-                    "type": "result",
-                    "op": "getBackend",
+                    "type": "backend",
                     "backend": backend,
                 }),
             };
@@ -619,7 +623,7 @@ mod tests {
         let parsed: Vec<ExtensionEnvelope> = serde_json::from_slice(bytes).expect("events");
         unsafe { opentray_ext_free_string(events.ptr, events.len) };
         assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0].data["op"], "getBackend");
+        assert_eq!(parsed[0].data["type"], "backend");
         let backend = &parsed[0].data["backend"];
         assert_eq!(backend["platform"], "darwin");
         assert_eq!(backend["systemSoundCatalog"], true);

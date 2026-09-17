@@ -1113,6 +1113,14 @@ mod probe {
     /// `IFileDialog::Close`. The process is expected to die inside one of
     /// them; the surviving markers in the log are the verdict.
     fn case_picker_close_diag(harness: &mut Harness, report: &mut CaseReport) {
+        // OPENTRAY_DIALOG_PROBE_PICKER_HOLD_MS lengthens window A (default
+        // 700ms): if a late close survives where an immediate one faults,
+        // the crash is an initialization race inside the shell's Close,
+        // not an unconditional fault of the close vector.
+        let hold_ms: u64 = std::env::var("OPENTRAY_DIALOG_PROBE_PICKER_HOLD_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(700);
         let handle = 0xE2E1_0000_0000_00D1;
         if !deferred_show(
             harness,
@@ -1128,10 +1136,10 @@ mod probe {
         }
         println!(
             "picker-close-diag: entered IFileDialog::Show (window A: inside Show's own \
-             pump, no close in flight); holding 700ms"
+             pump, no close in flight); holding {hold_ms}ms"
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        std::thread::sleep(Duration::from_millis(700));
+        std::thread::sleep(Duration::from_millis(hold_ms));
         println!("picker-close-diag: window A survived");
         println!(
             "picker-close-diag: window B: posting session close (WM_APP dispatcher -> \

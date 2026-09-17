@@ -295,9 +295,11 @@ pub unsafe extern "C" fn opentray_ext_command_v2(
             let event = ExtensionEnvelope {
                 scope: envelope.scope,
                 command_scope: None,
+                // The facade contract (DialogBackendEvent in
+                // @opentray/ext-dialog shared.ts) consumes `type: "backend"`
+                // (sound review R1 P1 exposed the same-family mismatch here).
                 data: serde_json::json!({
-                    "type": "result",
-                    "op": "getBackend",
+                    "type": "backend",
                     "backend": backend,
                 }),
             };
@@ -806,7 +808,7 @@ mod tests {
         let parsed: Vec<ExtensionEnvelope> = serde_json::from_slice(bytes).expect("events");
         unsafe { opentray_ext_free_string(events.ptr, events.len) };
         assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0].data["op"], "getBackend");
+        assert_eq!(parsed[0].data["type"], "backend");
         let backend = &parsed[0].data["backend"];
         assert_eq!(backend["platform"], "darwin");
         assert_eq!(backend["suppression"], true);

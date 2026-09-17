@@ -8,7 +8,8 @@
 //    ext-command envelope on the V2 immediate path (design reference section
 //    1.4: fire-and-forget, no deferred operations, no operationId handling).
 
-import { access, readFile, realpath, stat } from "node:fs/promises";
+import { access, open, realpath } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize as normalizePath } from "node:path";
 
@@ -239,29 +240,48 @@ function createSoundCapability(
   };
 
   const readWavOrReject = async (path: string): Promise<void> => {
-    let size: number;
+    // Sound review R1 P1: a separate stat() then readFile() is TOCTOU —
+    // the file can grow between the two calls and an unbounded readFile
+    // would slurp past the frozen cap. Open once and read through a
+    // bounded loop: at most WAV_MAX_BYTES + 1 bytes ever enter memory,
+    // and the +1 byte proves the file is larger than the cap without
+    // reading the excess.
+    let handle: FileHandle;
     try {
-      size = (await stat(path)).size;
+      handle = await open(path, "r");
     } catch (error: unknown) {
       throw fileUnreadable(path, error);
     }
-    // The frozen size bounds reject before the bytes are read (a >64 MiB file
-    // is never slurped just to be refused; design reference section 1.3).
-    if (size < WAV_MIN_BYTES) {
-      throw formatUnsupported(path, "too-small");
-    }
-    if (size > WAV_MAX_BYTES) {
-      throw formatUnsupported(path, "size-cap");
-    }
-    let bytes: Buffer;
     try {
-      bytes = await readFile(path);
-    } catch (error: unknown) {
-      throw fileUnreadable(path, error);
-    }
-    const rejection = validateWavBytes(bytes);
-    if (rejection !== null) {
-      throw formatUnsupported(path, rejection);
+      const chunks: Buffer[] = [];
+      let total = 0;
+      const cap = WAV_MAX_BYTES + 1;
+      for (;;) {
+        const { bytesRead, buffer } = await handle.read({
+          buffer: Buffer.alloc(Math.min(64 * 1024, cap - total)),
+          position: total,
+        });
+        if (bytesRead === 0) {
+          break;
+        }
+        chunks.push(buffer.subarray(0, bytesRead));
+        total += bytesRead;
+        if (total >= cap) {
+          // The frozen size bounds reject by streamed length, not by a
+          // pre-read stat (design reference section 1.3).
+          throw formatUnsupported(path, "size-cap");
+        }
+      }
+      if (total < WAV_MIN_BYTES) {
+        throw formatUnsupported(path, "too-small");
+      }
+      const bytes = Buffer.concat(chunks, total);
+      const rejection = validateWavBytes(bytes);
+      if (rejection !== null) {
+        throw formatUnsupported(path, rejection);
+      }
+    } finally {
+      await handle.close();
     }
   };
 
