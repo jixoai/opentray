@@ -84,15 +84,16 @@ New crate test (review supplement, count-not-presence):
 
 ## Findings for the orchestrator (darwin)
 
-- **P2 — keyboard ESC is dead on ABI-built alerts.** `build_alert`
-  (src/macos/mod.rs) assigns `keyEquivalent("")` to every non-default button,
-  which clears AppKit's automatic Escape binding on the cancel-titled button.
+- **P2 — keyboard ESC was dead on ABI-built alerts (FIXED in-batch).** `build_alert`
+  (src/macos/mod.rs) assigned `keyEquivalent("")` to every non-default button,
+  which cleared AppKit's automatic Escape binding on the cancel-titled button.
   Diagnostic matrix (temporary probe, 2026-09-17): a raw NSAlert with the auto
-  binding intact dismisses via a real synthetic ESC keyDown (code
-  1000+cancelIndex, repeatable); the same alert shape with build_alert's
-  explicit assignment does NOT dismiss on ESC. Title-bar close / forced stop
-  still map totally to cancelId (mapping law unaffected). Suggested follow-up:
-  assign `"\u{1b}"` to the `cancelId` button instead of `""`.
+  binding intact dismissed via a real synthetic ESC keyDown (code
+  1000+cancelIndex, repeatable); the build_alert shape did not. Fix (same
+  batch): the `cancelId` button now gets an explicit `"\u{1b}"` binding.
+  Post-fix probe re-run (2026-09-18): `message-escape-cancel PASS steps=48
+  endedBy=esc-key` — the real synthetic ESC keyDown ends the alert through the
+  assigned binding; title-bar close / forced stop keep mapping to cancelId.
 - **Environmental keyboard boundary (not a product defect):** on this
   unattended agent session the app never becomes active
   (`activateIgnoringOtherApps` and the macOS 14+ async `activate()` both

@@ -316,9 +316,20 @@ fn build_alert(options: &MessageDialogOptions, mtm: MainThreadMarker) -> Retaine
     // NSAlert gives Return to the first button by default; reassign it to
     // the caller's defaultId through the documented key-equivalent API so
     // the visible order and the response indexes stay caller-owned.
+    // The cancelId button keeps Escape: AppKit binds ESC to the last-added
+    // button automatically, but an explicit empty keyEquivalent on the
+    // other buttons clears that automatic binding (batch E finding — ESC
+    // was dead on ABI-built alerts), so bind "\u{1b}" explicitly.
     let default_index = options.default_id.unwrap_or(0);
+    let cancel_index = options.cancel_id.unwrap_or(options.buttons.len().saturating_sub(1));
     for (index, button) in alert.buttons().iter().enumerate() {
-        let equivalent = if index == default_index { "\r" } else { "" };
+        let equivalent = if index == default_index {
+            "\r"
+        } else if index == cancel_index {
+            "\u{1b}"
+        } else {
+            ""
+        };
         button.setKeyEquivalent(&NSString::from_str(equivalent));
     }
     if let Some(label) = &options.suppression_label {
