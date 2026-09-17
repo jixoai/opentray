@@ -5,6 +5,7 @@ members = [
   "crates/opentray-bin",
   "crates/opentray-core",
   "crates/opentray-ext-badge",
+  "crates/opentray-ext-dialog",
   "crates/opentray-extension-inspector",
   "crates/opentray-ext-webview",
   "crates/opentray-runtime-node",
