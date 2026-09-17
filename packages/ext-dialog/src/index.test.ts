@@ -509,8 +509,11 @@ describe("@opentray/ext-dialog", () => {
     const dialog = attachTestDialog("darwin", transport);
 
     await expect(dialog.pickFile({ filters: [] })).resolves.toBeNull();
+    // The saved leaf canonicalizes against its EXISTING parent (/tmp may be
+    // a symlink — macOS /private/tmp — or a real directory on linux).
+    const expectedSave = join(await realpath("/tmp"), "out");
     await expect(dialog.pickSavePath({ filters: [], fileNameLabel: "out" })).resolves.toBe(
-      "/private/tmp/out"
+      expectedSave
     );
     expect(transport.frames[1]).toMatchObject({
       type: "ext-command",
