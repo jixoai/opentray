@@ -36,7 +36,7 @@
 | D1 | 包 `@opentray/ext-opener`，crate `crates/opentray-ext-opener`，embedded 单包内嵌四目标（复用 dialog/sound 归档基建，不重复建设，**无依赖门**）；contract fingerprint `opentray-ext-opener-contract-1` | 同族框架已归档落地；体积规范（2026-09-16） |
 | D2 | 能力面 = `open(target)` + `revealInFolder(path)` + `getBackend()` 异步冻结快照；resolve-on-acceptance 同族律 | design §1 |
 | D3 | 目标解析 preflight 冻结 = ① 绝对文件路径（存在性不作受理前提；不可读/不可 stat 的路径参数仍透传原生，原生拒绝 → typed `opener_failed`）→ `NSWorkspace.open(URL(fileURLWithPath:))` / `ShellExecuteW("open", path)`；② URL（`new URL()` 可解析且有协议）→ `NSWorkspace.open(url)` / `ShellExecuteW("open", url)`；③ 其余（相对路径、无协议字符串）→ typed `opener_target_invalid`（details: {reason}） | design §2 冻结 |
-| D4 | scheme 白名单 v1 冻结 = `http/https/file/mailto`（scheme 大小写不敏感，`HTTPS://` 通过）；其余 → typed `opener_scheme_blocked`（details 含 scheme）——最小惊讶面（host 侧无同源约束；自定义处理器注册表滥用向量）；**宽严裁决见开放问题 O1（Codex-pending）** | design §2 安全裁决 |
+| D4 | scheme 白名单 v1 冻结 = `http/https/file/mailto`（scheme 大小写不敏感，`HTTPS://` 通过）；其余 → typed `opener_scheme_blocked`（details 含 scheme）——最小惊讶面（host 侧无同源约束；自定义处理器注册表滥用向量）；**宽严裁决见开放问题 O1（Codex R1 已裁：严格白名单（冻结））** | design §2 安全裁决 |
 | D5 | revealInFolder = 路径必须绝对（相对 → typed `opener_target_invalid`）；darwin `NSWorkspace.activateFileViewerSelecting([url])`；win32 `explorer.exe /select,<path>` 经 `ShellExecuteW("open", "explorer", params)` 引号单参数传递；**路径含引号字符 → typed `opener_target_invalid`（reason: path-quote）——冻结拒绝而非转义**（转义矩阵是持续性攻击面） | design §2/§4 冻结 |
 | D6 | 流程：单 change，批次 A（spec 类型）→ B（crate 双平台）→ C（facade）→ D（staging + 体积门）→ E（验收 + 文档 + changeset） | sound 同款编排 |
 
