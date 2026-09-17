@@ -472,7 +472,32 @@ describe("@opentray/ext-dialog", () => {
       code: DIALOG_ERROR_CODES.invalidOptions,
       details: { kind: "options", field: "defaultFilterIndex" },
     });
+    // Preflight rejections never reach the transport.
     expect(transport.frames).toHaveLength(0);
+  });
+
+  it("treats an explicitly empty filter array as all files and omits it on the wire", async () => {
+    // Design §1.2: 空/缺省 filters = 全部文件 — an empty array is the
+    // caller's "all files" spelling; the facade must not forward it
+    // (darwin allowedContentTypes([]) would mean "nothing selectable").
+    const transport = new ScriptedTransport([
+      () => terminalResult(null),
+      () => terminalResult("/tmp/out"),
+    ]);
+    const dialog = attachTestDialog("darwin", transport);
+
+    await expect(dialog.pickFile({ filters: [] })).resolves.toBeNull();
+    await expect(dialog.pickSavePath({ filters: [], fileNameLabel: "out" })).resolves.toBe(
+      "/private/tmp/out"
+    );
+    expect(transport.frames[1]).toMatchObject({
+      type: "ext-command",
+      data: { type: "pickFile", options: {} },
+    });
+    expect(transport.frames[2]).toMatchObject({
+      type: "ext-command",
+      data: { type: "pickSavePath", options: { fileNameLabel: "out" } },
+    });
   });
 
   it("rejects every method on linux with a typed platform error before load", async () => {

@@ -485,11 +485,13 @@ const validateNamespaceRecord = (
 };
 
 const validateFileFilters = (value: unknown): DialogErrorDescriptor | null => {
-  if (!Array.isArray(value) || value.length === 0) {
-    return invalidOptions(
-      "must be a non-empty array of filters when present (omit filters for all files)",
-      "filters"
-    );
+  if (!Array.isArray(value)) {
+    return invalidOptions("must be an array of filters when present", "filters");
+  }
+  // Design §1.2: 空/缺省 filters = 全部文件 — an explicitly empty array is
+  // the caller's "all files" spelling and behaves like omitting the field.
+  if (value.length === 0) {
+    return null;
   }
   for (const [index, filter] of value.entries()) {
     if (!isRecord(filter)) {
@@ -947,7 +949,12 @@ export const filePickCommandOptions = (
 ): FilePickOptions => {
   const source = options ?? {};
   return {
-    ...(source.filters !== undefined ? { filters: source.filters } : {}),
+    // Design §1.2: 空/缺省 filters = 全部文件 — an explicitly empty array
+    // normalizes to wire omission (darwin setAllowedContentTypes([]) would
+    // mean "nothing selectable"; omission leaves the panel unrestricted).
+    ...(source.filters !== undefined && source.filters.length > 0
+      ? { filters: source.filters }
+      : {}),
     ...(source.defaultPath !== undefined ? { defaultPath: source.defaultPath } : {}),
     ...(source.title !== undefined ? { title: source.title } : {}),
     ...(source.fileNameLabel !== undefined
@@ -979,7 +986,10 @@ export const savePickCommandOptions = (
 ): SavePickOptions => {
   const source = options ?? {};
   return {
-    ...(source.filters !== undefined ? { filters: source.filters } : {}),
+    // Same all-files normalization as filePickCommandOptions.
+    ...(source.filters !== undefined && source.filters.length > 0
+      ? { filters: source.filters }
+      : {}),
     ...(source.defaultPath !== undefined ? { defaultPath: source.defaultPath } : {}),
     ...(source.title !== undefined ? { title: source.title } : {}),
     ...(source.fileNameLabel !== undefined
