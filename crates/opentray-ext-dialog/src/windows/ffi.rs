@@ -193,7 +193,7 @@ mod tests {
     /// machine.
     #[test]
     fn task_dialog_config_layout_is_frozen() {
-        type P = usize; // pointer word
+        const P: usize = size_of::<usize>(); // pointer word
         assert_eq!(
             size_of::<TaskDialogConfig>(),
             4 + 4 /* cbSize + pad */

@@ -712,8 +712,12 @@ mod tests {
         let free_count = lock_registry().iter().flatten().count();
         if free_count == DIALOG_WORKER_CAP {
             // Cap+1: the ninth distinct scope rejects with the typed
-            // worker-limit code (never a queue).
-            let error = reserve_slot(&scope("cap-plus-one"), "pickFile").unwrap_err();
+            // worker-limit code (never a queue). `unwrap_err` is not
+            // usable here: the Ok half (Arc<WorkerShared>) is not Debug.
+            let error = match reserve_slot(&scope("cap-plus-one"), "pickFile") {
+                Err(error) => error,
+                Ok(_) => panic!("the ninth worker must reject instead of queueing"),
+            };
             assert_eq!(error.code, "dialog_worker_limit_reached");
             assert_eq!(
                 error.details.as_ref().unwrap()["limit"],
@@ -721,7 +725,10 @@ mod tests {
             );
             // Busy: a scope with a live slot rejects before consuming
             // anything.
-            let error = reserve_slot(&scope("cap-0"), "messageDialog").unwrap_err();
+            let error = match reserve_slot(&scope("cap-0"), "messageDialog") {
+                Err(error) => error,
+                Ok(_) => panic!("a busy scope must reject before consuming a slot"),
+            };
             assert_eq!(error.code, error_code::SESSION_BUSY);
         }
 
