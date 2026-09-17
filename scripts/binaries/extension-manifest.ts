@@ -14,7 +14,13 @@ import { basename, join } from "node:path";
 
 export const EXTENSION_ABI_VERSION = 3;
 
-export type ExtensionArtifactKind = "webview" | "badge" | "dialog" | "sound";
+export type ExtensionArtifactKind =
+  | "webview"
+  | "badge"
+  | "dialog"
+  | "sound"
+  | "clipboard"
+  | "opener";
 
 export interface ExtensionArtifactTarget {
   readonly os: string;
@@ -170,7 +176,13 @@ export const sha256File = async (path: string): Promise<string> =>
     .digest("hex");
 
 export const isExtensionArtifactKind = (value: string): value is ExtensionArtifactKind =>
-  value === "webview" || value === "badge" || value === "dialog" || value === "sound";
+  value ===
+      "webview" ||
+      value === "badge" ||
+      value === "dialog" ||
+      value === "sound" ||
+      value === "clipboard" ||
+      value === "opener";
 
 /**
  * Embedded extension kinds (add-ext-dialog section 6.2; add-ext-sound section
@@ -181,7 +193,11 @@ export const isExtensionArtifactKind = (value: string): value is ExtensionArtifa
  */
 export const isEmbeddedExtensionArtifactKind = (
   kind: ExtensionArtifactKind
-): boolean => kind === "dialog" || kind === "sound";
+): boolean =>
+  kind === "dialog" ||
+  kind === "sound" ||
+  kind === "clipboard" ||
+  kind === "opener";
 
 const parseEmbeddedExtensionManifest = (value: unknown): EmbeddedExtensionManifest => {
   if (

@@ -9,7 +9,9 @@ export type NativeStageKind =
   | "webview"
   | "badge"
   | "dialog"
-  | "sound";
+  | "sound"
+  | "clipboard"
+  | "opener";
 // Darwin runtime packages publish only the bundle template. The runtime owns
 // materializing the caller-specific .app directory around the broker.
 export const darwinRuntimeCarrierArtifactName = "Info.plist";
@@ -43,6 +45,8 @@ export interface NativeTarget {
    * sound facade (`packages/ext-sound/platforms/<npm-target>/`).
    */
   soundArtifact?: string;
+  clipboardArtifact?: string;
+  openerArtifact?: string;
 }
 
 const packageTargets = [
@@ -102,6 +106,18 @@ export function createNativeTarget(
       : `packages/ext-sound/platforms/${npmOs}-${arch}/${
           packageOs === "windows" ? "opentray_ext_sound.dll" : "libopentray_ext_sound.dylib"
         }`;
+  const clipboardArtifact =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-clipboard/platforms/${npmOs}-${arch}/${
+          packageOs === "windows" ? "opentray_ext_clipboard.dll" : "libopentray_ext_clipboard.dylib"
+        }`;
+  const openerArtifact =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-opener/platforms/${npmOs}-${arch}/${
+          packageOs === "windows" ? "opentray_ext_opener.dll" : "libopentray_ext_opener.dylib"
+        }`;
   return {
     packageOs,
     npmOs,
@@ -129,6 +145,8 @@ export function createNativeTarget(
     badgeHelperArtifact,
     dialogArtifact,
     soundArtifact,
+    clipboardArtifact,
+    openerArtifact,
   };
 }
 
@@ -219,6 +237,20 @@ export const resolveStageDestination = (
         );
       }
       return target.soundArtifact;
+    case "clipboard":
+      if (target.clipboardArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish a clipboard native artifact`
+        );
+      }
+      return target.clipboardArtifact;
+    case "opener":
+      if (target.openerArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish an opener native artifact`
+        );
+      }
+      return target.openerArtifact;
   }
 };
 

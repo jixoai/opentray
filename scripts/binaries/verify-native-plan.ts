@@ -15,6 +15,8 @@ const verifyNativeComponents: readonly NativeBuildComponent[] = [
   "badge",
   "dialog",
   "sound",
+  "clipboard",
+  "opener",
 ];
 
 export interface VerifyNativePlan {

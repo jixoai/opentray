@@ -26,6 +26,8 @@
       "@opentray/ext-badge-windows-x64",
       "@opentray/ext-dialog",
       "@opentray/ext-sound",
+    "@opentray/ext-clipboard",
+    "@opentray/ext-opener",
       "@opentray/ext-island",
       "@opentray/packaging",
       "@opentray/vite-plugin",
